@@ -15,6 +15,17 @@
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
 <!--
   club-directory / reader / index.html
+  v1.5 — (21/08/2026) It opens on YOUR club, and there is an index of all of
+         them. The club code carries the club's key, so the page knows who is
+         reading and can open on their entry — it used to open on Aldershot,
+         because A sorts first, and every club that ever used this had to go
+         and find itself. "All clubs" sits at the top of the picker and at
+         #all: every club in the competition, grouped by division, crest-led,
+         because a crest is how anyone actually recognises a club. Built from
+         the roster rather than the directory, so a club nobody has checked yet
+         is still there and still greyed — the picker's reasoning, applied to
+         the grid. A reader code carries no club and lands on the index, which
+         is right: they are not a club.
   v1.4 — (21/08/2026) A club opens this with the SAME six characters that open
          the Handbook and Programme Packs. One credential, three tools; the
          Directory's own reader codes keep working alongside it, for the people
@@ -125,6 +136,50 @@
     font-weight: 700; font-variation-settings: 'wght' 700; color: var(--primary);
   }
   @media (max-width: 560px) { .cd-search { top: 0; position: static; } }
+
+  /* The all-clubs index. Crest-led, because a crest is how anyone actually
+     recognises a club, and grouped by division because that is the shape the
+     competition already has. Tool-local: a grid of club tiles is not a thing a
+     second tool has asked for yet, and the policy block atop nl-brand.css says
+     the first use stays here. If a second one wants it, promote it. */
+  .rd-div { margin: 0 0 32px; }
+  .rd-div__h {
+    font-size: var(--text-xs); text-transform: uppercase;
+    letter-spacing: var(--tracking-wide); font-weight: 700;
+    font-variation-settings: 'wght' 700;
+    color: var(--text-muted); margin: 0 0 12px;
+    padding-bottom: 8px; border-bottom: 1px solid var(--border);
+  }
+  .rd-grid {
+    list-style: none; margin: 0; padding: 0;
+    display: grid; gap: 10px;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+  .rd-tile { margin: 0; }
+  .rd-tile__go {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    padding: 10px 12px; text-align: left;
+    background: var(--white); color: var(--text);
+    border: 1px solid var(--border); border-radius: var(--radius);
+    font-family: var(--font); font-size: var(--text-sm);
+    font-weight: 600; font-variation-settings: 'wght' 600;
+    cursor: pointer;
+    transition: border-color .12s ease, background .12s ease;
+  }
+  button.rd-tile__go:hover { border-color: var(--primary); background: var(--primary-50); }
+  button.rd-tile__go:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+  .rd-tile__crest { width: 28px; height: 28px; object-fit: contain; flex: none; }
+  .rd-tile__name { min-width: 0; }
+  /* Greyed and unclickable rather than absent: a club missing from this page
+     reads as a club that does not exist. Same reasoning as the picker. */
+  .rd-tile.is-pending .rd-tile__go {
+    cursor: default; color: var(--text-muted); background: var(--navy-50);
+  }
+  .rd-tile.is-pending .rd-tile__crest { opacity: .45; }
+  .rd-tile__note {
+    display: block; font-size: var(--text-xs); font-weight: 500;
+    font-variation-settings: 'wght' 500; color: var(--text-muted);
+  }
 </style>
 </head>
 <body>
@@ -164,6 +219,12 @@
   var $ = function (id) { return document.getElementById(id); };
   var esc = NL.escHtml;
   var ALL = {}, names = [], PENDING = [], PUBLISHED_AT = 0;
+  var ROSTER = [], SESSION = null;
+
+  /* The index is a club-shaped thing in the picker and the URL without being a
+     club, so it needs a value no club can collide with. A leading '#' is
+     already reserved by the hash it lives in. */
+  var INDEX = '#all';
 
   /* Remembered per person, not per club. The alternative is choosing it again
      on every one of 72. */
@@ -232,8 +293,9 @@
     $('signOut').addEventListener('click', function () {
       NL.codeGate.signOut().then(function () { location.reload(); });
     });
+    SESSION = session || null;
     return Promise.all([
-      NL.clubs.load(),
+      NL.clubs.forSeason(),
       /* The published copy, not the directory. This page used to read the
          directory itself and decide in the browser what not to show — which
          meant every record it decided against had already been sent. It now
@@ -243,6 +305,7 @@
       firebase.database().ref(NLGate.ROOT + '/published').once('value')
     ]);
   }).then(function (res) {
+    ROSTER = res[0] || [];
     var pub = res[1].val() || {};
     ALL = pub.clubs || {};
     PENDING = pub.pending || [];
@@ -259,11 +322,13 @@
        club that does not exist. The ones nobody has checked yet are disabled:
        visibly there, greyed, and unselectable — which says "not ready" rather
        than "not a club". */
-    $('pick').innerHTML = names.concat(PENDING).sort().map(function (n) {
-      var ok = ready(n);
-      return '<option value="' + esc(n) + '"' + (ok ? '' : ' disabled') + '>' +
-        esc(n) + (ok ? '' : ' — not yet checked') + '</option>';
-    }).join('');
+    $('pick').innerHTML =
+      '<option value="' + esc(INDEX) + '">All clubs</option>' +
+      names.concat(PENDING).sort().map(function (n) {
+        var ok = ready(n);
+        return '<option value="' + esc(n) + '"' + (ok ? '' : ' disabled') + '>' +
+          esc(n) + (ok ? '' : ' — not yet checked') + '</option>';
+      }).join('');
     $('pick').addEventListener('change', function () { draw(this.value); });
     $('q').addEventListener('input', onSearch);
     wireView(function () {
@@ -271,12 +336,18 @@
       if (q.trim()) { onSearch({ target: { value: q } }); } else { draw($('pick').value); }
     });
     $('app').hidden = false;
-    var first = fromHash() || names.filter(ready)[0];
-    if (!first) {
+    /* Your own club first. The claim says which club is looking, so opening
+       on Aldershot because A sorts first is a choice nobody made — every club
+       that has ever used this page wanted its own entry and had to go and find
+       it. Failing that, the index, which beats the first club alphabetically
+       for someone who is not a club at all. */
+    if (!names.filter(ready).length) {
+      $('pick').value = INDEX;
       $('out').innerHTML = '<p class="cd-empty">No club has been checked yet. ' +
         'They appear here once the National League has been through them.</p>';
       return;
     }
+    var first = fromHash() || ownClub() || INDEX;
     $('pick').value = first;
     draw(first);
     window.addEventListener('hashchange', function () {
@@ -304,11 +375,85 @@
      The gate belongs on the contents, not on the address: the club is
      honoured, and draw() says it is not ready rather than rendering it. */
   function fromHash() {
-    var h = decodeURIComponent((location.hash || '').replace(/^#/, ''));
+    var raw = (location.hash || '').replace(/^#/, '');
+    if (raw === 'all') return INDEX;
+    var h = decodeURIComponent(raw);
     return (names.indexOf(h) > -1 || PENDING.indexOf(h) > -1) ? h : '';
   }
 
+  /* Which club is reading. A club code carries the club's key as its claim and
+     the club's name alongside it, so this is a lookup rather than a guess —
+     but the directory is keyed by NAME and the claim's name comes from the
+     codes config, so match on the name first and fall back to resolving the
+     key through the roster. A Directory reader code carries no club and lands
+     on the index, which is correct: they are not a club. */
+  function ownClub() {
+    if (!SESSION) return '';
+    var known = names.concat(PENDING);
+    var want = String(SESSION.name || '').trim().toLowerCase();
+    var byName = known.filter(function (n) { return n.toLowerCase() === want; })[0];
+    if (byName) return byName;
+
+    var rec = ROSTER.filter(function (c) { return c.code === SESSION.role; })[0];
+    if (!rec) return '';
+    return known.filter(function (n) { return n.toLowerCase() === rec.name.toLowerCase(); })[0] || '';
+  }
+
+  /* The index: all 72, in divisions, by crest. Built from the ROSTER rather
+     than from the directory, so a club nobody has checked yet is still shown
+     and still greyed — a club missing from this page looks like a club that
+     does not exist, which is the same reasoning the picker already follows.
+     Clubs the roster does not carry but the directory does (a name change
+     mid-season) are added at the end rather than dropped. */
+  function drawIndex() {
+    var seen = {}, groups = [], byDiv = {};
+    ROSTER.forEach(function (c) {
+      seen[c.name.toLowerCase()] = true;
+      var d = c.division || 'National League';
+      if (!byDiv[d]) { byDiv[d] = []; groups.push(d); }
+      byDiv[d].push(c.name);
+    });
+    var strays = names.concat(PENDING).filter(function (n) { return !seen[n.toLowerCase()]; });
+    if (strays.length) {
+      var other = 'Also in the directory';
+      byDiv[other] = strays;
+      groups.push(other);
+    }
+
+    $('out').innerHTML = '<div class="rd-index">' + groups.map(function (d) {
+      return '<section class="rd-div">' +
+        '<h2 class="rd-div__h">' + esc(d) + '</h2>' +
+        '<ul class="rd-grid">' + byDiv[d].slice().sort().map(function (n) {
+          var ok = ready(n);
+          var inner =
+            NL.clubs.crestImgHtml(n, 'thumb', { className: 'rd-tile__crest' }) +
+            '<span class="rd-tile__name">' + esc(n) + '</span>' +
+            (ok ? '' : '<span class="rd-tile__note">Not yet checked</span>');
+          return '<li class="rd-tile' + (ok ? '' : ' is-pending') + '">' +
+            (ok ? '<button type="button" class="rd-tile__go" data-club="' + esc(n) + '">' +
+                    inner + '</button>'
+                : '<span class="rd-tile__go" aria-disabled="true">' + inner + '</span>') +
+            '</li>';
+        }).join('') + '</ul></section>';
+    }).join('') + '</div>';
+
+    NL.clubs.wireCrestImgs($('out'));
+    Array.prototype.forEach.call($('out').querySelectorAll('[data-club]'), function (b) {
+      b.addEventListener('click', function () {
+        var n = b.getAttribute('data-club');
+        $('pick').value = n;
+        draw(n);
+        window.scrollTo(0, 0);
+      });
+    });
+  }
+
   function draw(name) {
+    if (name === INDEX) {
+      if (location.hash !== '#all') history.replaceState(null, '', '#all');
+      drawIndex();
+      return;
+    }
     if (location.hash !== '#' + encodeURIComponent(name)) {
       history.replaceState(null, '', '#' + encodeURIComponent(name));
     }
