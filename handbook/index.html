@@ -1,6 +1,31 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27
+  Version: v0.45 (21/08/2026) — one gap, one meaning, and it names the number.
+
+    Richard: "when I'm floating between two clauses within the same
+    subsection, it looks like I'm invited to either add a new clause after the
+    previous one or before the next one. So each gap has two entry points."
+    Correct, and they were the same insertion — same parent, same position,
+    same resulting number — offered as if they were a choice.
+
+    Boundaries canonicalise to "after the one above". "Before" survives only
+    where it is genuinely distinct: a clause with no previous sibling, where
+    the boundary really does host two insertions — one beside the parent, one
+    inside it. That is the case he identified as the one that makes sense, and
+    the two are drawn at different indents.
+
+    The strip now says "Add 1.1.4 here". computeNumbers is pure, so the
+    preview is a walk over a hypothetical tree — built from the SAME spec
+    insertRelative uses, because a preview computed from a second guess at the
+    numbering rules is one that will eventually lie, and a lying preview is
+    worse than none because it is trusted. A light shadow of the tree, not a
+    deep clone: numbering reads five fields, and League Rules is 560 clauses
+    of body text that would be copied for nothing. Recomputed when the
+    boundary changes, never per mouse movement.
+
+    tests/handbook-insert.test.mjs lifts the functions out of this file and
+    pins both promises, including that the preview never touches the real tree.
   Version: v0.44 (21/08/2026) — the insert affordance opens a real gap, and
     the whole strip is the target.
 
@@ -182,6 +207,14 @@
     var NL_TOOL_KEY = 'ops-handbook';
 
     window.NL_CHANGELOG = [
+      {
+        date: '21/08/2026',
+        version: 'v0.45',
+        items: [
+          'Each gap between clauses is one insertion point now, not two, and ' +
+            'the strip tells you the number the new clause will take.'
+        ]
+      },
       {
         date: '21/08/2026',
         version: 'v0.44',
@@ -744,7 +777,9 @@
     flex: none; pointer-events: none;
     font-size: var(--text-xs); font-weight: 600;
     font-variation-settings: 'wght' 600;
-    color: var(--primary); opacity: 0;
+    /* Visible whenever the strip is, not only on hover: the number IS the
+       information — "Add 1.1.4 here" answers the question the gap raises. */
+    color: var(--primary); opacity: .8;
   }
   .hb-ins:hover .hb-ins__hint { opacity: 1; }
 
@@ -1904,7 +1939,9 @@
 
      One element, moved. A drop zone rendered between every pair of clauses
      would be 1,203 of them, which is the per-clause toolbar mistake again. */
-  var INS = { refId: null, where: null, el: null };
+  /* el/side: what the pointer is over, which is what opens the gap.
+     refId/where: where the clause actually goes, after canonicalising. */
+  var INS = { refId: null, where: null, el: null, side: null };
   var GAP = 30;   // must match .hb-gap-before / .hb-gap-after in the CSS
 
   /* Close the gap and put the strip away. */
@@ -1913,7 +1950,7 @@
       INS.el.classList.remove('hb-gap-before', 'hb-gap-after');
       INS.el = null;
     }
-    INS.refId = null; INS.where = null;
+    INS.refId = null; INS.where = null; INS.side = null;
     var el = $('ceIns'); if (el) el.hidden = true;
   }
 
@@ -1941,13 +1978,24 @@
     else if (clientY >= bottom - reach) where = 'after';
     if (!where) { hideInsert(); return; }
 
-    if (INS.el !== clauseEl || INS.where !== where) {
+    if (INS.el !== clauseEl || INS.side !== where) {
       if (INS.el) INS.el.classList.remove('hb-gap-before', 'hb-gap-after');
       clauseEl.classList.add(where === 'before' ? 'hb-gap-before' : 'hb-gap-after');
       INS.el = clauseEl;
+      INS.side = where;
+
+      /* The gap opens on the element under the pointer — that is what keeps
+         the pointer inside it. The TARGET is canonicalised separately, so two
+         hovers on one boundary resolve to one insertion. */
+      var t = canonicalBoundary(clauseEl.dataset.id, where);
+      INS.refId = t.refId;
+      INS.where = t.where;
+
+      var num = previewNumber(INS.refId, INS.where);
+      var hint = el.querySelector('.hb-ins__hint');
+      if (hint) hint.textContent = num ? 'Add ' + num + ' here' : 'Add a clause here';
+      el.setAttribute('aria-label', num ? 'Add clause ' + num + ' here' : 'Add a clause here');
     }
-    INS.refId = clauseEl.dataset.id;
-    INS.where = where;
 
     /* Re-measure: adding the padding has just moved things. */
     var r2 = clauseEl.getBoundingClientRect();
@@ -1956,6 +2004,67 @@
     el.style.width = r2.width + 'px';
     /* Centre of the gap the clause has just opened. */
     el.style.top = (where === 'before' ? r2.top + GAP / 2 : r2.bottom - GAP / 2) + 'px';
+  }
+
+  /* ONE GAP, ONE MEANING.
+     Between two clauses at the same level, "after the one above" and "before
+     the one below" are the same insertion — same parent, same position, same
+     resulting number. Offering both made every gap look like two choices that
+     were somehow different. Canonicalise to "after the one above".
+
+     "Before" survives only where it is genuinely distinct: a clause with no
+     previous sibling, i.e. the first child of its parent. There the boundary
+     really does host two different insertions — one beside the parent, one
+     inside it — which is the case Richard identified as the one that makes
+     sense. They are drawn at different indents, so the strip shows which. */
+  function canonicalBoundary(refId, where) {
+    if (where !== 'before') return { refId: refId, where: where };
+    var t = S.nodes[refId];
+    if (!t) return { refId: refId, where: where };
+    var sibs = childrenOf(S.nodes, t.parentId);
+    var i = sibs.map(function (x) { return x.id; }).indexOf(refId);
+    return i > 0
+      ? { refId: sibs[i - 1].id, where: 'after' }
+      : { refId: refId, where: 'before' };
+  }
+
+  /* The shape a new clause takes at a boundary. Shared by the preview and the
+     insert itself, so the number offered is the number delivered — a preview
+     computed from a second guess at the same rules is a preview that will
+     eventually lie. */
+  function newSpecAt(t, where) {
+    var bullet = t.kind === 'bullet';
+    return {
+      parentId: t.parentId,
+      order: (t.order || 0) + (where === 'before' ? -0.5 : 0.5),
+      kind: bullet ? 'bullet' : 'clause',
+      numStyle: bullet ? 'bullet' : (t.numStyle || 'decimal')
+    };
+  }
+
+  /* What number would it get? computeNumbers is pure, so this is just a walk
+     over a hypothetical tree.
+
+     A LIGHT clone, not JSON.parse(JSON.stringify(S.nodes)): numbering reads
+     only parentId, order, kind, numStyle and numberOverride, and League Rules
+     is 560 clauses of body text that would be copied for nothing. Recomputed
+     on a boundary CHANGE, never per mousemove. */
+  function previewNumber(refId, where) {
+    var t = S.nodes[refId];
+    if (!t) return '';
+    var shadow = {};
+    Object.keys(S.nodes).forEach(function (id) {
+      var n = S.nodes[id];
+      shadow[id] = { id: id, parentId: n.parentId, order: n.order,
+        kind: n.kind, numStyle: n.numStyle, numberOverride: n.numberOverride };
+    });
+    var spec = newSpecAt(t, where);
+    shadow.__preview__ = {
+      id: '__preview__', parentId: spec.parentId, order: spec.order,
+      kind: spec.kind, numStyle: spec.numStyle, numberOverride: null
+    };
+    try { return computeNumbers(shadow).__preview__ || ''; }
+    catch (e) { return ''; }
   }
 
   function takeInsert() {
@@ -2072,10 +2181,10 @@
   function insertRelative(refId, where) {
     var c = clone(), t = c[refId];
     if (!t) return;
-    var n = newNode(t.parentId,
-      t.kind === 'bullet' ? 'bullet' : (t.numStyle || 'decimal'),
-      t.kind === 'bullet' ? 'bullet' : 'clause');
-    n.order = (t.order || 0) + (where === 'before' ? -0.5 : 0.5);
+    /* Same spec the preview used, so the number shown is the number given. */
+    var spec = newSpecAt(t, where);
+    var n = newNode(spec.parentId, spec.numStyle, spec.kind);
+    n.order = spec.order;
     c[n.id] = n;
     reindex(c, t.parentId);
     S.selectedId = n.id; S.focusNew = n.id;
