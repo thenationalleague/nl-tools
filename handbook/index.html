@@ -1,6 +1,25 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27
+  Version: v0.60 (21/08/2026) — the missing middle. Undo was twenty deep,
+    per-area and gone on reload; the only other restore points were
+    publishes. So a bad edit made three weeks ago had exactly one remedy —
+    throw away everything since — and the discard that did it was itself
+    the one irreversible act in the tool.
+
+    Two things close both ends. A RESTORE POINT is written before every
+    discard, and the review offers it back, dated and named, at the top of
+    the screen the discard was pressed on. And every row in the review now
+    carries its own way back, so one bad edit among forty good ones costs
+    one clause rather than all forty. A revert refuses rather than breaks
+    the tree: an added clause with clauses under it, or a removed clause
+    whose article has itself gone, both say why.
+
+    Snapshots live under draft/, which is already "signed in reads, admin
+    writes" — so no rules change ships with this. The index beside them is
+    three fields, because listing restore points must not mean downloading
+    every one of them.
+
   Version: v0.59 (21/08/2026) — a way back. "Discard all changes" sits at the
     foot of the review and puts the whole draft — all five areas — back to
     the published edition, exactly as it stands: typed to confirm, refused
@@ -404,6 +423,16 @@
     var NL_TOOL_KEY = 'ops-handbook';
 
     window.NL_CHANGELOG = [
+      {
+        date: '21/08/2026',
+        version: 'v0.60',
+        items: [
+          'Every change in the review has its own “put this back” button, ' +
+            'so one bad edit no longer costs you all the good ones.',
+          'Discarding now leaves a restore point. The review offers it back, ' +
+            'dated and named, for the next five discards.'
+        ]
+      },
       {
         date: '21/08/2026',
         version: 'v0.59',
@@ -1028,6 +1057,26 @@
   .hb-rev__num { font-variation-settings: 'wght' 800; color: var(--navy); }
   .hb-rev__lbl { color: var(--text); min-width: 0; overflow-wrap: anywhere; }
   .hb-rev__diff, .hb-rev__note { margin: 0; }
+  /* Pushed to the right of its row and quiet until wanted: a revert button
+     shouting on every one of forty rows competes with the change it is
+     offering to undo.
+     A CIRCULAR ARROW, not the back chevron the first cut used — a chevron on
+     the right of a row reads as "previous" or "collapse", and this is the
+     one control here that must not be pressed by accident or missed when
+     wanted.
+     Never dimmed on a touch screen: there is no hover there, so the dim
+     would be permanent and the button would simply look disabled. */
+  .hb-rev__back { margin-left: auto; opacity: 0.55; }
+  .hb-rev__item:hover .hb-rev__back, .hb-rev__back:focus-visible { opacity: 1; }
+  @media (hover: none) { .hb-rev__back { opacity: 1; } }
+  .hb-rev__item--done { opacity: 0.55; }
+  .hb-rev__restore {
+    margin: 0 0 14px; padding: 10px 12px; border-radius: var(--radius-sm);
+    background: var(--amber-light); color: var(--text);
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    font-size: var(--text-xs);
+  }
+  .hb-rev__restore span { flex: 1 1 220px; min-width: 0; }
   .hb-rev__discard {
     margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border);
     display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
@@ -3019,6 +3068,9 @@
      So the bar reads one timestamp, and the review reads the documents. */
 
   var PUB = { checked: false, id: null, publishedAt: 0, label: '', draftAt: 0, count: null };
+  /* Both sides of the last review, per area, so a single row can be put back
+     without going to the database again. Rebuilt on every loadForReview. */
+  var REV = {};
 
   /* Written by commit() — the single write path — so nothing can change the
      draft without moving it. The alternative is reading every clause in all
@@ -3118,10 +3170,78 @@
             pub[nd.id] = normNode(Object.assign({}, nd));
             pubNum[nd.id] = nd.number || '';
           });
+        /* Kept so a single clause can be put back without reading the
+           edition again — the row on screen already knows both versions,
+           and the revert needs the DRAFT side too, to see whether an added
+           clause has children under it. */
+        REV[d.id] = { drf: drf, pub: pub };
         areas[d.id] = HB_DIFF.diffArea(pub, pubNum, drf, computeNumbers(drf));
       });
       return areas;
     });
+  }
+
+  /* ---- Put one clause back -------------------------------------------
+     The review already shows both versions of a clause side by side, so the
+     obvious next gesture is "just this one" — and without it the only
+     remedy for one bad edit among forty good ones is to throw away all
+     forty.
+
+     IT DOES NOT JOIN THE UNDO STACK, deliberately. That stack is per-area
+     and holds snapshots of the OPEN area; the review is cross-area, so half
+     these reverts happen to documents the stack knows nothing about, and
+     the other half would leave it holding a state that no longer exists.
+     Rather than work for some rows and quietly corrupt others, it works the
+     same everywhere and clears the stack when it touches the open area. The
+     safety net is the restore point above, not undo. */
+  function revertOne(docId, kind, entry) {
+    var area = REV[docId];
+    if (!area) return Promise.reject(new Error('that area is no longer loaded'));
+    var updates = {}, id = entry.id;
+
+    if (kind === 'added') {
+      /* A clause added since publish, with clauses of its own added under
+         it: deleting it alone orphans them — they keep a parentId pointing
+         at nothing and vanish from the tree without being deleted. */
+      var kids = Object.keys(area.drf).filter(function (k) {
+        var p = area.drf[k].parentId; return (p === undefined ? null : p) === id;
+      });
+      if (kids.length) {
+        return Promise.reject(new Error(
+          'this clause has ' + kids.length + (kids.length === 1 ? ' clause' : ' clauses') +
+          ' under it — put those back first'));
+      }
+      updates[id] = null;
+    } else {
+      var was = area.pub[id];
+      if (!was) return Promise.reject(new Error('the published version of that clause is missing'));
+      /* A clause whose parent was itself removed since publish has nowhere
+         to go back to; restoring it would hang it off an id that is not
+         there. */
+      var wasParent = was.parentId === undefined ? null : was.parentId;
+      if (wasParent !== null && !area.drf[wasParent]) {
+        return Promise.reject(new Error('the clause this sat under is no longer in the draft — put that back first'));
+      }
+      var v = strip(normNode(Object.assign({}, was)));
+      Object.keys(v).forEach(function (k) { if (v[k] == null) delete v[k]; });
+      updates[id] = v;
+    }
+
+    return NL.ensureAuth()
+      .then(function () { return db.ref(BASE + '/draft/docs/' + docId + '/nodes').update(updates); })
+      .then(function () {
+        /* Keep the cached draft honest, or a second revert in the same
+           sitting reasons about a document that has already moved. */
+        if (kind === 'added') delete area.drf[id];
+        else area.drf[id] = normNode(Object.assign({}, area.pub[id]));
+        NL.writeAudit && NL.writeAudit('revert',
+          'Put ' + docTitle(docId) + ' ' + (entry.number || entry.id) + ' back to the published version');
+        touchDraft();
+        if (docId === S.docId) {
+          S.undo.length = 0; S.redo.length = 0;
+          return load().then(function () { syncUndoBtns(); });
+        }
+      });
   }
 
   /* ---- rendering the review ---------------------------------------- */
@@ -3147,12 +3267,22 @@
     return '<' + cls + '>' + esc(s).replace(/\n/g, '<br>') + '</' + cls + '>';
   }
 
-  function item(kind, what, entry, bodyHtml) {
-    return '<div class="hb-rev__item hb-rev__item--' + kind + '">' +
+  function item(kind, what, entry, bodyHtml, docId) {
+    /* One row, one way out. Without it the only remedy for one bad edit
+       among forty good ones is Discard all changes. */
+    var back = '<button class="btn btn--icon btn--ghost hb-rev__back" type="button"' +
+      ' title="Put this clause back to the published version"' +
+      ' aria-label="Put this clause back to the published version"' +
+      ' data-back-doc="' + esc(docId) + '" data-back-kind="' + esc(kind) + '"' +
+      ' data-back-id="' + esc(entry.id) + '">' +
+      '<svg class="icon" aria-hidden="true"><use href="/assets/icons/sprites.svg#icon-refresh"></use></svg>' +
+      '</button>';
+    return '<div class="hb-rev__item hb-rev__item--' + kind + '" data-row="' + esc(entry.id) + '">' +
       '<p class="hb-rev__head">' +
         '<span class="hb-rev__what">' + esc(what) + '</span>' +
         (entry.number ? '<span class="hb-rev__num">' + esc(entry.number) + '</span>' : '') +
         '<span class="hb-rev__lbl">' + esc(entry.label) + '</span>' +
+        back +
       '</p>' + (bodyHtml || '') + '</div>';
   }
 
@@ -3160,7 +3290,7 @@
      which on a publish review is the one thing it must never do. */
   var REV_MAX = 300;
 
-  function reviewHtml(areas) {
+  function reviewHtml(areas, snap) {
     var n = HB_DIFF.total(areas);
     var renum = DOCS.reduce(function (a, d) { return a + areas[d.id].renumbered; }, 0);
     var when = PUB.publishedAt ? NL.formatDate(PUB.publishedAt) : '';
@@ -3188,6 +3318,21 @@
         (renum === 1 ? ' clause was renumbered' : ' clauses were renumbered') +
         ' as a result. Their wording has not changed, so they are not listed.</p>');
     }
+
+    /* The way back from the way out. A discard that cannot be taken back is
+       the one irreversible act in a tool where everything else can be
+       reconsidered, and a restore point nobody can find is not a restore
+       point — so it says so here, dated, at the top of the screen where the
+       discard was pressed. */
+    if (snap && snap.at) {
+      out.push('<div class="hb-rev__restore"><span>' +
+        (snap.count ? esc(String(snap.count)) + (snap.count === 1 ? ' change was' : ' changes were') : 'Changes were') +
+        ' discarded on ' + esc(NL.formatDateTime(snap.at) || '') +
+        (snap.by ? ' by ' + esc(snap.by) : '') + '.</span>' +
+        '<button class="btn btn--sm btn--ghost" type="button" id="hbRestore" data-snap="' + esc(snap.id) + '">Restore them</button>' +
+      '</div>');
+    }
+
     if (PUB.error || !PUB.id) return out.join('');
 
     var shown = 0;
@@ -3195,8 +3340,8 @@
       var a = areas[d.id], count = HB_DIFF.areaTotal(a);
       if (!count) return;
       var rows = [];
-      a.removed.forEach(function (e) { rows.push(item('removed', 'Removed', e, whole(e.before, 'del'))); });
-      a.added.forEach(function (e) { rows.push(item('added', 'New', e, whole(e.after, 'ins'))); });
+      a.removed.forEach(function (e) { rows.push(item('removed', 'Removed', e, whole(e.before, 'del'), d.id)); });
+      a.added.forEach(function (e) { rows.push(item('added', 'New', e, whole(e.after, 'ins'), d.id)); });
       a.edited.forEach(function (e) {
         var body;
         if (e.styleOnly) body = '<p class="hb-rev__note">Formatting or numbering style only — the wording is unchanged.</p>';
@@ -3206,13 +3351,13 @@
           (e.after.title ? e.after.title + ' ' : '') + (e.after.body || '')) + '</p>';
         if (e.alsoMoved) body += '<p class="hb-rev__note">Also moved' +
           (e.wasNumber && e.wasNumber !== e.number ? ' — was ' + esc(e.wasNumber) : '') + '.</p>';
-        rows.push(item('edited', 'Edited', e, body));
+        rows.push(item('edited', 'Edited', e, body, d.id));
       });
       a.moved.forEach(function (e) {
         rows.push(item('moved', 'Moved', e, '<p class="hb-rev__note">' +
           (e.toParent ? 'Moved to a different article' : 'Moved among its neighbours') +
           (e.wasNumber && e.wasNumber !== e.number ? ' — was ' + esc(e.wasNumber) : '') +
-          '. The wording is unchanged.</p>'));
+          '. The wording is unchanged.</p>', d.id));
       });
       var room = Math.max(0, REV_MAX - shown);
       var cut = rows.length - room;
@@ -3239,6 +3384,98 @@
       '</div>');
     }
     return out.join('');
+  }
+
+  /* ---- Restore points ------------------------------------------------
+     THE MISSING MIDDLE. Undo is twenty deep, per-area and gone on reload;
+     the only other restore points were publishes. So a bad edit made three
+     weeks ago had exactly one remedy — throw away everything since — and
+     the discard below was itself the one irreversible act in the tool.
+
+     A snapshot before every discard closes both. It costs one write of
+     something already in memory, and it turns "gone" into "gone unless you
+     say otherwise".
+
+     TWO NODES, ON PURPOSE. The snapshot itself is the whole handbook, a
+     megabyte or two; the index beside it is three fields. Listing what
+     restore points exist has to read the index, or opening the review
+     downloads every snapshot ever taken to show three dates.
+
+     Under draft/ rather than a node of its own, so no rules change ships
+     with this: draft is already "signed in can read, admin can write",
+     which is exactly what a snapshot of the draft wants. Nothing reads
+     draft wholesale — only draft/docs, draft/locks and draft/lastEditedAt
+     — so the weight sits out of everyone's way. */
+  var SNAP_KEEP = 5;
+
+  function takeSnapshot(reason, count) {
+    return db.ref(BASE + '/draft/docs').once('value').then(function (snap) {
+      var ref = db.ref(BASE + '/draft/snapshots').push();
+      return ref.set({ docs: snap.val() || {} }).then(function () {
+        return db.ref(BASE + '/draft/snapshotIndex/' + ref.key).set({
+          at: Date.now(),
+          by: (S.session && (S.session.name || S.session.email)) || null,
+          reason: reason || 'discard',
+          count: count || 0
+        });
+      }).then(function () { return pruneSnapshots(); });
+    });
+  }
+
+  function pruneSnapshots() {
+    return db.ref(BASE + '/draft/snapshotIndex').once('value').then(function (snap) {
+      var idx = snap.val() || {};
+      var ids = Object.keys(idx).sort(function (a, b) { return (idx[b].at || 0) - (idx[a].at || 0); });
+      var drop = ids.slice(SNAP_KEEP);
+      if (!drop.length) return;
+      var updates = {};
+      drop.forEach(function (id) {
+        updates['snapshots/' + id] = null;
+        updates['snapshotIndex/' + id] = null;
+      });
+      return db.ref(BASE + '/draft').update(updates);
+    })['catch'](function (e) {
+      /* A snapshot that could not be pruned is clutter, not a failure. */
+      console.warn('[handbook] could not prune snapshots', e);
+    });
+  }
+
+  function latestSnapshot() {
+    return db.ref(BASE + '/draft/snapshotIndex').once('value').then(function (snap) {
+      var idx = snap.val() || {};
+      var ids = Object.keys(idx).sort(function (a, b) { return (idx[b].at || 0) - (idx[a].at || 0); });
+      return ids.length ? Object.assign({ id: ids[0] }, idx[ids[0]]) : null;
+    })['catch'](function () { return null; });
+  }
+
+  function restoreSnapshot(id) {
+    return NL.prompt(
+      'This puts the draft back to how it was before those changes were discarded, in every area. ' +
+      'Anything edited since goes.\n\nType RESTORE to confirm.',
+      { title: 'Restore the discarded changes', confirmText: 'Restore' }
+    ).then(function (word) {
+      if ((word || '').trim().toUpperCase() !== 'RESTORE') { NL.toast && NL.toast('Nothing restored', 'info'); return; }
+      return NL.ensureAuth()
+        .then(function () { return db.ref(BASE + '/draft/snapshots/' + id + '/docs').once('value'); })
+        .then(function (snap) {
+          var docs = snap.val();
+          if (!docs) throw new Error('that restore point is no longer there');
+          /* set(), not update(): the snapshot IS the draft as it was, so
+             anything added since has to go rather than survive alongside. */
+          return db.ref(BASE + '/draft/docs').set(docs);
+        })
+        .then(function () {
+          S.undo.length = 0; S.redo.length = 0; S.index = null;
+          touchDraft();
+          NL.writeAudit && NL.writeAudit('restore', 'Restored the draft from a restore point');
+          return load().then(checkPublished).then(function () {
+            PUB.count = null; syncChanges(); syncUndoBtns();
+            NL.toast && NL.toast('The draft is back to before the discard', 'success');
+          });
+        })['catch'](function (e) {
+          NL.toast && NL.toast('Could not restore: ' + ((e && e.message) || e), 'error');
+        });
+    });
   }
 
   /* ---- Discard: put the draft back to the published edition ----------
@@ -3283,6 +3520,13 @@
           NL.toast && NL.toast('Nothing discarded', 'info');
           return null;
         }
+        /* BEFORE anything is written. A discard that fails halfway leaves a
+           snapshot that is merely redundant; a discard that succeeds without
+           one is unrecoverable. */
+        return takeSnapshot('discard', PUB.count || 0).then(function () { return true; });
+      })
+      .then(function (go) {
+        if (!go) return null;
         var reads = [];
         DOCS.forEach(function (d) {
           var base = BASE + '/editions/' + PUB.id + '/docs/' + d.id;
@@ -3372,10 +3616,13 @@
     /* Re-check first. The boot check may have run before the rules were
        deployed, or before a colleague published; a review that reports the
        state of the page load rather than of now is worth nothing. */
-    Promise.resolve(checkPublished()).then(loadForReview).then(function (areas) {
+    Promise.resolve(checkPublished())
+      .then(function () { return Promise.all([loadForReview(), latestSnapshot()]); })
+      .then(function (r) {
+      var areas = r[0], snap = r[1];
       PUB.count = HB_DIFF.total(areas);
       syncChanges();
-      body.innerHTML = reviewHtml(areas);
+      body.innerHTML = reviewHtml(areas, snap);
       var kill = body.querySelector('#hbDiscard');
       if (kill) kill.addEventListener('click', function () {
         /* Close first. The discard reloads the area underneath and its own
@@ -3383,6 +3630,36 @@
            that no longer exist is the worse end state. */
         ctrl.close();
         discardAll();
+      });
+      var back = body.querySelector('#hbRestore');
+      if (back) back.addEventListener('click', function () {
+        ctrl.close();
+        restoreSnapshot(back.getAttribute('data-snap'));
+      });
+      /* One row at a time. The modal stays open — reverting three clauses
+         should not be three trips through the same screen — and each row
+         reports its own outcome in place rather than the list silently
+         re-flowing under the cursor. */
+      [].forEach.call(body.querySelectorAll('.hb-rev__back'), function (b) {
+        b.addEventListener('click', function () {
+          var row = b.closest('.hb-rev__item');
+          b.disabled = true;
+          revertOne(b.getAttribute('data-back-doc'), b.getAttribute('data-back-kind'),
+                    { id: b.getAttribute('data-back-id'),
+                      number: (row.querySelector('.hb-rev__num') || {}).textContent || '' })
+            .then(function () {
+              row.classList.add('hb-rev__item--done');
+              var note = document.createElement('p');
+              note.className = 'hb-rev__note';
+              note.textContent = 'Put back to the published version.';
+              row.appendChild(note);
+              b.remove();
+              if (PUB.count) { PUB.count--; syncChanges(); }
+            })['catch'](function (e) {
+              b.disabled = false;
+              NL.toast && NL.toast('Could not put that back: ' + ((e && e.message) || e), 'error');
+            });
+        });
       });
     })['catch'](function (e) {
       body.innerHTML = '<p class="hb-rev__sum">Could not read the published edition: ' +
