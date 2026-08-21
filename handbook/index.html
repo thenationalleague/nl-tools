@@ -1,6 +1,29 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27
+  Version: v0.46 (21/08/2026) — one editing bar, not two at opposite ends.
+
+    Richard: "why two diff editing areas here?" Because they were built at
+    different times for different jobs — text formatting (B/I/U, lists, clear)
+    in a strip at the TOP of the pane, structure (+ clause, indent, numbering,
+    delete) in the bar at the bottom. A split along a line that means
+    something to the code and nothing to the person using it, with the two
+    halves as far apart as the layout allows.
+
+    One bar now, at the foot: everything that acts on the CLAUSE YOU ARE IN.
+    The top bar keeps what acts on the DOCUMENT — Read/Edit, undo, publish.
+    That is a distinction someone can hold.
+
+    The merge is not just markup. Formatting and structure want opposite
+    things from the same press: formatting needs the caret and selection left
+    alone, so its mousedown is prevented; structure needs the blur to fire,
+    because the blur is what saves what was just typed. The rule is chosen by
+    which kind of button was hit.
+
+    Also, the clause name in the bar is now a button back to it. The bar is
+    pinned to the foot, so the clause it names can be scrolled well off screen
+    — which reads as the tool having lost track of itself rather than the
+    document having moved.
   Version: v0.45 (21/08/2026) — one gap, one meaning, and it names the number.
 
     Richard: "when I'm floating between two clauses within the same
@@ -207,6 +230,16 @@
     var NL_TOOL_KEY = 'ops-handbook';
 
     window.NL_CHANGELOG = [
+      {
+        date: '21/08/2026',
+        version: 'v0.46',
+        items: [
+          'Bold, italic and the lists have moved down to join the other ' +
+            'editing controls. One bar for the clause you are in; the top bar ' +
+            'is for the document.',
+          'The clause name on the bar scrolls you back to it.'
+        ]
+      },
       {
         date: '21/08/2026',
         version: 'v0.45',
@@ -697,18 +730,6 @@
   }
 
   /* ---- Formatting toolbar (edit mode) ---- */
-  .ce-fmt {
-    flex: 0 0 auto; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
-    padding: 6px 28px; border-bottom: 1px solid var(--border); background: var(--off-white);
-  }
-  .ce-fmt[hidden] { display: none; }
-  .ce-fmt button {
-    font-family: var(--font); font-size: var(--text-sm); min-width: 30px; padding: 4px 9px;
-    border: 1px solid var(--border); background: var(--white); color: var(--text); border-radius: 6px; cursor: pointer;
-  }
-  .ce-fmt button:hover { border-color: var(--navy); background: var(--navy-50); }
-  .ce-fmt__sep { width: 1px; align-self: stretch; background: var(--border); margin: 2px 4px; }
-  @media (max-width: 860px) { .ce-fmt { padding: 6px 14px; } }
   /* No in-document selection marker — the breadcrumb + contents highlight say where you are. */
 
   /* The Edit button when someone else is in there. Not disabled — taking over
@@ -801,9 +822,14 @@
   /* Which clause the bar acts on. The bar is not beside the clause any more,
      so it has to say — otherwise "Delete" is a question rather than a button. */
   .hb-bar__num {
-    font-weight: 700; font-variation-settings: 'wght' 700;
+    font-family: var(--font); font-weight: 700;
+    font-variation-settings: 'wght' 700;
     color: var(--primary); font-size: var(--text-sm);
+    background: none; border: 0; padding: 0; cursor: pointer;
+    text-align: left;
   }
+  .hb-bar__num:hover { text-decoration: underline; }
+  .hb-bar__num:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
   .hb-bar__ops { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
   .hb-bar button, .hb-bar select {
     font-family: var(--font); font-size: var(--text-xs);
@@ -873,16 +899,6 @@
         <button class="btn btn--ghost" id="ceReimport" type="button" hidden>Re-import</button>
         <button class="btn btn--primary" id="cePublish" type="button" hidden>Publish edition</button>
       </div>
-      <div class="ce-fmt" id="ceFmt" hidden>
-        <button type="button" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
-        <button type="button" data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></button>
-        <button type="button" data-cmd="underline" title="Underline (Ctrl+U)"><u>U</u></button>
-        <span class="ce-fmt__sep"></span>
-        <button type="button" data-cmd="insertUnorderedList" title="Bullet list">• List</button>
-        <button type="button" data-cmd="insertOrderedList" title="Numbered list">1. List</button>
-        <span class="ce-fmt__sep"></span>
-        <button type="button" data-cmd="removeFormat" title="Clear formatting">Clear</button>
-      </div>
       <div class="nl-crumb" id="ceCrumb" title="Where you are"></div>
       <div id="ceDoc"></div>
 
@@ -898,9 +914,27 @@
       <div class="hb-bar" id="ceActs" hidden>
         <div class="hb-bar__where">
           <span class="hb-bar__lbl">Editing</span>
-          <span class="hb-bar__num" id="ceActsWhere"></span>
+          <!-- The bar is pinned to the foot, so the clause it names can be
+               scrolled well off screen — which reads as the tool having lost
+               track of itself. Press the name to go back to it. -->
+          <button class="hb-bar__num" id="ceActsWhere" type="button"
+                  title="Scroll back to this clause"></button>
         </div>
         <div class="hb-bar__ops">
+          <!-- Text formatting used to live in its own strip at the TOP of the
+               pane while the structural controls sat at the bottom — two
+               editing surfaces at opposite ends of the screen, split along a
+               line that means something to the code and nothing to the person
+               using it. One bar: this is what acts on the clause you are in.
+               The top bar keeps what acts on the DOCUMENT — mode, undo,
+               publish. -->
+          <button type="button" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+          <button type="button" data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></button>
+          <button type="button" data-cmd="underline" title="Underline (Ctrl+U)"><u>U</u></button>
+          <button type="button" data-cmd="insertUnorderedList" title="Bullet list">&bull; List</button>
+          <button type="button" data-cmd="insertOrderedList" title="Numbered list">1. List</button>
+          <button type="button" data-cmd="removeFormat" title="Clear formatting">Clear</button>
+          <span class="sep"></span>
           <button type="button" data-op="addAfter" title="Add a clause after this one">+ clause</button>
           <button type="button" data-op="addSub" title="Add a sub-clause inside this one">+ sub</button>
           <button type="button" data-op="addTable" title="Add a table after this one">+ table</button>
@@ -1482,7 +1516,6 @@
     var IMPORT_ON = /[?&]import=1\b/.test(location.search);
     $('ceReimport').hidden = !(IMPORT_ON && S.docId && canSeed() && SEEDS[S.docId] && Object.keys(S.nodes).length);
     $('ceImportDoc').hidden = !(IMPORT_ON && S.docId && canSeed());
-    $('ceFmt').hidden = !(S.mode === 'edit' && canEdit());
     var note = $('ceModeNote');
     /* Say who is in there BEFORE Edit is pressed, not after. A button that
        looks available and then refuses is worse than one that explains. */
@@ -2444,19 +2477,6 @@
     });
     $('ceSearch').addEventListener('input', doSearch);
 
-    // Formatting toolbar: keep the editable's selection (mousedown preventDefault),
-    // then apply the command to the focused clause body. The edit saves on blur.
-    var fmt = $('ceFmt');
-    fmt.addEventListener('mousedown', function (e) { if (e.target.closest('button')) e.preventDefault(); });
-    fmt.addEventListener('click', function (e) {
-      var b = e.target.closest('button[data-cmd]'); if (!b) return;
-      var ed = document.activeElement;
-      if (!ed || !ed.getAttribute || ed.getAttribute('contenteditable') !== 'true') {
-        NL.toast && NL.toast('Click into a clause first, then format', 'info'); return;
-      }
-      try { document.execCommand('styleWithCSS', false, false); } catch (_) {}
-      document.execCommand(b.dataset.cmd, false, null);
-    });
 
     $('ceToc').addEventListener('click', function (e) {
       var a = e.target.closest('[data-goto]'); if (!a) return;
@@ -2500,7 +2520,26 @@
         fn();
       });
     }
+    /* FORMATTING and STRUCTURE want opposite things from the same press.
+       Formatting needs the caret and the selection left alone, so its
+       mousedown is prevented. Structure needs the blur to fire, because the
+       blur is what saves what was just typed. Same bar, two rules, and the
+       rule is chosen by which kind of button was hit. */
+    bar.addEventListener('mousedown', function (e) {
+      if (e.target.closest('button[data-cmd]')) e.preventDefault();
+    });
     bar.addEventListener('click', function (e) {
+      var cmd = e.target.closest('button[data-cmd]');
+      if (cmd) {
+        var ed = document.activeElement;
+        if (!ed || !ed.getAttribute || ed.getAttribute('contenteditable') !== 'true') {
+          NL.toast && NL.toast('Click into a clause first, then format', 'info');
+          return;
+        }
+        try { document.execCommand('styleWithCSS', false, false); } catch (_) {}
+        document.execCommand(cmd.dataset.cmd, false, null);
+        return;
+      }
       var b = e.target.closest('[data-op]');
       if (!b || b.tagName === 'SELECT') return;
       var id = S.selectedId;
@@ -2550,6 +2589,10 @@
       var to = e.relatedTarget;
       if (to && to.closest && to.closest('#ceDoc')) return;  // back to the document
       hideInsert();
+    });
+
+    $('ceActsWhere').addEventListener('click', function () {
+      if (S.selectedId && S.nodes[S.selectedId]) scrollToNode(S.selectedId);
     });
 
     $('ceUndo').addEventListener('click', function () { afterPendingSave(doUndo); });
