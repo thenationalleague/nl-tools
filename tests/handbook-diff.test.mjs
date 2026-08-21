@@ -423,3 +423,32 @@ test('the review offers the publish it is a review for', () => {
     'see it, then do it — the review is the route to publishing, not a ' +
     'detour from it');
 });
+
+test('a denied read never reports itself as "nothing published"', () => {
+  /* This told the wrong story once, live. Before the rules widened,
+     checkPublished could not read publishedEditionId, PUB.id stayed null,
+     and the review announced "Nothing has been published yet" over a
+     handbook with previous editions behind it. Richard: "why did it say no
+     versions when I have Prev versions?"
+
+     Not knowing and knowing there is nothing are different answers, and the
+     first one has to name its own cause — the rules workflow — because
+     that is the fix. */
+  assert.match(CODE, /PUB\.error\s*\n?\s*\? 'Could not read the published edition/);
+  assert.match(CODE, /Deploy RTDB rules/,
+    'the message names the thing that fixes it');
+  assert.match(CODE, /if \(PUB\.error \|\| !PUB\.id\) return/,
+    'and it does not then list every clause as new');
+});
+
+test('the error state is cleared on each check, not sticky', () => {
+  const fn = CODE.slice(CODE.indexOf('function checkPublished('));
+  assert.match(fn.slice(0, 300), /PUB\.error = false/,
+    'a denial before the rules landed must not outlive the fix');
+});
+
+test('opening the review re-checks rather than trusting page load', () => {
+  assert.match(CODE, /checkPublished\(\)\)\.then\(loadForReview\)/,
+    'the rules may have been deployed, or a colleague may have published, ' +
+    'since this page loaded');
+});

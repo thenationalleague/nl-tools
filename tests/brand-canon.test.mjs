@@ -148,11 +148,36 @@ test('.nl-idbar wraps rather than overflowing when the row runs out', () => {
 });
 
 /* Wrapping only works because one child absorbs the slack. If __id ever loses
-   flex: 1 the actions stop being pushed right and the bar wraps immediately. */
-test('.nl-idbar__id keeps the flex: 1 the layout depends on', () => {
+   flex: 1 the actions stop being pushed right and the bar wraps immediately.
+
+   THE min-width HALF OF THIS TEST WAS WRONG, and it asserted the bug into
+   place: it required `min-width: 0`, on the reasoning that a shrinkable
+   child is what lets the row give way. The opposite is true. A child that
+   can shrink to NOTHING means the row always fits, so flex-wrap never has a
+   reason to fire — and the bar resolves the squeeze by deleting the identity
+   it exists to state. On the handbook reader at 390px, "Handbook" became
+   "H…" and "The National League" wrapped three lines deep across the button
+   beside it. The same bar at 360px was perfect, because there the buttons
+   genuinely did not fit and it wrapped. A floor is what makes every width
+   behave like the one that already worked. */
+test('.nl-idbar__id absorbs the slack, and has a floor under it', () => {
   const body = ruleBody('.nl-idbar__id');
-  assert.match(body, /flex:\s*1/);
-  assert.match(body, /min-width:\s*0/);
+  assert.match(body, /flex:\s*1/, 'it still takes the spare width');
+  assert.ok(!/min-width:\s*0\s*[;}]/.test(body),
+    'min-width: 0 lets the identity vanish, which is how the wrap stops ' +
+    'firing and the bar overflows instead');
+  assert.match(body, /min-width:\s*[\d.]+(rem|em|px|ch)/,
+    'the bar runs out of room while the tool name is still readable');
+});
+
+/* Both lines of the identity truncate. __title has had nowrap and an ellipsis
+   since it entered canon; __sub had neither, so it was the one thing in the
+   bar able to paint outside its own box. */
+test('.nl-idbar__sub truncates like the title above it', () => {
+  const body = ruleBody('.nl-idbar__sub');
+  assert.match(body, /white-space:\s*nowrap/);
+  assert.match(body, /text-overflow:\s*ellipsis/);
+  assert.match(body, /overflow:\s*hidden/);
 });
 
 /* ── Standalone select (v2.39) ─────────────────────────────────────────────
