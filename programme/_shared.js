@@ -1,5 +1,12 @@
 /*
   Programme Packs — shared runtime for the library + admin console
+  Version: v1.5 (21/08/2026) — PP.codesRef / PP.CODES_ROOT. The club codes
+           moved out from under this tool to app-data/club-codes/config: they
+           are one credential now, opening Programme Packs and the Handbook
+           on the same six characters. Only config moved — folders, files,
+           trash, audit and this tool's own authRequests/authGrants all stay
+           under ROOT — so the split is deliberate rather than a second root
+           to keep in step.
   Version: v1.4 (17/08/2026) — video and audio are kinds of their own
            (🎬 / 🎵 tiles), so the library page can hand them to the
            browser's native players instead of filing them under 📎.
@@ -50,12 +57,15 @@
 
   This is the one deliberate difference from /uw-promo/, where passcodes are
   world-readable and compared client-side. Here no client ever reads a passcode:
-  app-data/media-programme/config is closed to everything except a pClub '*'
-  session. Write-own is enforced by the rules, not by this file.
+  app-data/club-codes/config is closed to everything except a portal
+  admin/superadmin or a pClub '*' session. Write-own is enforced by the rules,
+  not by this file.
 
   Exposes window.PP:
     PP.app / PP.db() / PP.storage()   named app + its database/storage
     PP.ref(path)                      ref under app-data/media-programme
+    PP.codesRef(path)                 ref under app-data/club-codes (the SHARED
+                                      codes; console reads/writes only)
     PP.enter(code)                    → Promise<session>  (club/NL passcode)
     PP.enterAsAdmin()                 → Promise<session>  (portal admin → '*')
     PP.enterMaster()                  → Promise<session>  (library ?master=1;
@@ -81,7 +91,8 @@
     PP.previews.*                     thumb/medium generation (pure bits tested;
                                       make/store are browser+Firebase)
 
-  Data lives at RTDB app-data/media-programme/{config,folders,files,trash,audit}
+  Data lives at RTDB app-data/media-programme/{folders,files,trash,audit}, the
+  codes at app-data/club-codes/config (shared with the Handbook),
   and Storage programme/<CODE>/… — shapes documented in /programme/README.md.
   Rules: system/rtdb/rules.snapshot.json + system/storage/rules.snapshot.rules.
 */
@@ -100,6 +111,7 @@
   })();
 
   var ROOT = 'app-data/media-programme';
+  var CODES_ROOT = 'app-data/club-codes';
   var STORAGE_ROOT = 'programme';
   var REMEMBER_KEY = 'nl-programme-access';
   var REMEMBER_DAYS = 30;
@@ -687,6 +699,18 @@
     db: function () { return app.database(); },
     storage: function () { return app.storage(); },
     ref: function (path) { return app.database().ref(ROOT + (path ? '/' + path : '')); },
+    /* The codes moved out from under this tool on 21/08/2026. They are one
+       credential now — the same six characters open Programme Packs and the
+       Handbook, and will open the Club Directory — so they live at
+       app-data/club-codes/config rather than inside any one tool's data.
+
+       Everything ELSE Programme Packs owns (folders, files, trash, audit, and
+       its own authRequests/authGrants) stays under ROOT. Only the config
+       moved, so only the console's config reads and writes come through here. */
+    CODES_ROOT: CODES_ROOT,
+    codesRef: function (path) {
+      return app.database().ref(CODES_ROOT + (path ? '/' + path : ''));
+    },
     storageRef: function (path) { return app.storage().ref(path); },
 
     session: null,

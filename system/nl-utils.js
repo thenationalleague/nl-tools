@@ -1,9 +1,19 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.39 (17/08/2026)
+   Version: v1.40 (21/08/2026)
 
    Changelog
+   v1.40 (21/08/2026)
+     - NL.codeGate says when a slow check is still a working one. The
+       viaFunction handshake is an RTDB round-trip to a trigger and Eventarc
+       delivery costs seconds — 15-20 on a cold start — so "Checking…" sat
+       there long enough to read as a hung page, and the natural response
+       (reload) discards the exchange that was about to land. After three
+       seconds the sub line says so. Programme Packs already had this,
+       hand-rolled, and would have lost it on adopting the canon gate; every
+       other viaFunction caller never had it. Cache-bust ?v=42 -> ?v=43.
+
    v1.39 (17/08/2026)
      - NL.roles.GRANTS + NL.roles.grant(role) — one line on what each role can
        actually do, beside LABELS because it is the same vocabulary. Four bare
@@ -1579,6 +1589,8 @@
   /* Long enough to cover a cold start plus Eventarc delivery, short enough
      that a genuinely dead backend says so rather than spinning forever. */
   var CODEGATE_TIMEOUT_MS = 45000;
+  /* Past this, a check that is still running should say it is still running. */
+  var SLOW_MS = 3000;
 
   function codeGateOpen(opts) {
     opts = opts || {};
@@ -1616,14 +1628,18 @@
       var err = card.querySelector('[data-err]');
       var sub = card.querySelector('[data-sub]');
       var busy = false;
+      var slow = null;
 
       function clean(v) {
         return numeric ? String(v || '').replace(/[^0-9]/g, '').slice(0, len)
                        : String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, len);
       }
 
+      function clearSlow() { if (slow) { clearTimeout(slow); slow = null; } }
+
       function fail(msg) {
         busy = false;
+        clearSlow();
         input.disabled = false;
         sub.textContent = sub0;
         err.textContent = msg;
@@ -1638,6 +1654,13 @@
         err.textContent = '';
         input.disabled = true;
         sub.textContent = 'Checking…';
+        /* viaFunction is an RTDB round-trip to a trigger, and Eventarc
+           delivery is measured in seconds — 15-20 of them on a cold start.
+           Say so, or a working gate reads as a hung one and the person
+           reloads, which throws away the exchange that was about to land. */
+        slow = setTimeout(function () {
+          if (busy) sub.textContent = 'Still checking — this can take a few seconds.';
+        }, SLOW_MS);
         Promise.resolve()
           .then(function () { return verify(code); })
           .then(function (session) {
@@ -1645,6 +1668,7 @@
               fail(opts.rejectMessage || 'Code not recognised.');
               return;
             }
+            clearSlow();
             resolve(session);
           })
           .catch(function (e) { fail((e && e.message) || 'Something went wrong.'); });
