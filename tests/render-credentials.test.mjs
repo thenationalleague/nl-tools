@@ -19,7 +19,16 @@
      refreshToken   (+ error classes, SDK_VERSION)
 
    No auth, no database, no app, no apps. Everything else lives behind a
-   subpath — firebase-admin/app, /auth, /database.
+   subpath — firebase-admin/app, /database.
+
+   The chase ended somewhere better than it started. The third failure was a
+   real permission — iam.serviceAccounts.signBlob — and it stayed denied on a
+   service account that ALREADY held Service Account Token Creator. Rather
+   than a fifth round of console-fiddling on a phone, the custom token was
+   removed altogether: this job already reads the edition with admin access,
+   so it hands the page the DATA instead of a credential to go and fetch the
+   same data a second time. Fewer moving parts, and nothing an IAM policy can
+   take away.
 
    These tests do not need the package installed, which is the point: they run
    in the normal suite, on every PR, and fail the moment the file reaches for
@@ -57,8 +66,10 @@ for (const [name, re] of REMOVED) {
 }
 
 test('the renderer imports the modular subpaths it actually needs', () => {
+  /* Two, not three. /auth went with the custom token — see below. This test
+     asserted it was present and failed the moment the token was removed,
+     which is a guard doing its job on itself. */
   assert.match(CODE, /require\(['"]firebase-admin\/app['"]\)/);
-  assert.match(CODE, /require\(['"]firebase-admin\/auth['"]\)/);
   assert.match(CODE, /require\(['"]firebase-admin\/database['"]\)/);
 });
 
@@ -70,20 +81,32 @@ test('the app is initialised with an explicit credential', () => {
   assert.match(CODE, /applicationDefault\s*\(\s*\)/);
 });
 
-test('the custom token carries the wildcard club claim the rules read', () => {
-  /* `club: '*'` is the same wildcard pClub uses, so a rule written for one
-     reads the other without a second branch. A different spelling here would
-     leave the renderer authenticated and still denied. */
-  assert.match(CODE, /createCustomToken\([^)]*\{\s*club:\s*['"]\*['"]\s*\}/);
+test('the renderer mints no custom token at all', () => {
+  /* Removed 21/08/2026. Minting one needed iam.serviceAccounts.signBlob,
+     which stayed denied on a service account that already held Service
+     Account Token Creator — four rounds of console-fiddling for a permission
+     that was never the problem. The page is handed the edition this job has
+     already read instead, which is fewer moving parts than authenticating a
+     second time to fetch the same thing, and cannot be revoked by an IAM
+     policy. */
+  assert.ok(!/createCustomToken/.test(CODE),
+    'the renderer should hand the page DATA, not a credential');
+  assert.ok(!/firebase-admin\/auth/.test(CODE),
+    'the auth subpath is not needed once no token is minted');
 });
 
-test('the token never reaches a URL', () => {
-  /* It is injected as a page variable. A query parameter would land in the
-     Actions log, in any proxy log in front of it, and in the history of
-     anyone handed the link. */
+test('the edition is handed to the page, before its own scripts run', () => {
   assert.match(CODE, /evaluateOnNewDocument/);
-  assert.ok(!/renderToken[^\n]*(\?|&)[a-z]+=/i.test(CODE),
-    'the render token must not be appended to a URL');
+  assert.match(CODE, /__NL_EDITION/);
+});
+
+test('print.html reads the injected edition and falls back to RTDB', () => {
+  /* Two callers: the renderer is handed the data, a club reads it through the
+     rules like anyone else. Losing the second branch would break Download PDF
+     for every club while the render kept working — invisible from CI. */
+  const PRINT = readFileSync(join(ROOT, 'handbook/print.html'), 'utf8');
+  assert.match(PRINT, /window\.__NL_EDITION/);
+  assert.match(PRINT, /publishedEditionId/);
 });
 
 test('firebase-admin is pinned to a major version in the workflow', () => {

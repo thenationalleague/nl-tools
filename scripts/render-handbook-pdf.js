@@ -256,7 +256,7 @@ function instanceBold(ttfBytes) {
    thing that breaks it. Once a run is seen green WITH a token, the rules can
    move. */
 let adminApp = null;
-let renderToken = null;
+let editionPayload = null;   // handed to the page; see injectEdition below
 
 async function initCredentials() {
   try {
@@ -267,29 +267,22 @@ async function initCredentials() {
          refreshToken   (+ the error classes and SDK_VERSION)
 
        No `auth`, no `database`, no `app`, no `apps`. Two runs were burned
-       finding that out one property at a time — `admin.apps.length` first,
-       then `admin.auth is not a function` — because each fix was written from
-       memory of the v9 namespace API and shipped without checking. The list
-       above was read off the installed package, and tests/render-credentials
-       .test.mjs now fails the build if this file reaches for the old shape
-       again. */
+       finding that out one property at a time. The list above was read off the
+       installed package, and tests/render-credentials.test.mjs fails the build
+       if this file reaches for the old shape again. */
     const { initializeApp, getApps, getApp, applicationDefault } =
       require('firebase-admin/app');
-    const { getAuth } = require('firebase-admin/auth');
 
     adminApp = getApps().length ? getApp() : initializeApp({
       credential: applicationDefault(),   // the ADC file the auth step exported
       databaseURL: RTDB
     });
-    renderToken = await getAuth(adminApp)
-      .createCustomToken('handbook-renderer', { club: '*' });
-    console.log('Credentials: service account, club:"*" claim minted');
+    console.log('Credentials: service account (admin reads)');
   } catch (e) {
     /* Never log the token or the credential — just why we have neither. */
     console.log('Credentials: none (' + (e && e.message ? e.message.slice(0, 120) : 'unknown') +
       ') — continuing unauthenticated, which only works while the rules are open');
     adminApp = null;
-    renderToken = null;
   }
 }
 
@@ -329,6 +322,12 @@ async function main() {
     return;
   }
 
+  /* One read of the whole edition, once past the skip check. It feeds the
+     furniture below AND becomes the payload the page is handed, so the browser
+     never touches RTDB — which is what removed the custom token, and with it
+     the signBlob permission this job spent four attempts failing to get. */
+  editionPayload = await rtdb('/app-data/ops-handbook/editions/' + editionId + '.json');
+
   const label = await rtdb('/app-data/ops-handbook/editions/' + editionId + '/label.json');
   /* Season as a field, with the label parse only for editions published before
      that field existed. Same resolution as reader.html and print.html. */
@@ -366,13 +365,21 @@ async function main() {
     const page = await browser.newPage();
     page.on('pageerror', e => console.error('pageerror:', e.message));
 
-    /* Hand the page its credential BEFORE any of its own script runs, and as a
-       variable rather than a query parameter: a URL ends up in the Actions log,
-       in any server log in front of it, and in the history of anyone handed the
-       link. evaluateOnNewDocument survives every goto below, so this is set
-       once rather than per navigation. */
-    if (renderToken) {
-      await page.evaluateOnNewDocument((t) => { window.__NL_RENDER_TOKEN = t; }, renderToken);
+    /* Hand the page the EDITION, not a credential.
+
+       This job has already read it with admin access on the Node side, so the
+       page has no reason to fetch it again — and fetching it again is what
+       used to require a custom token, which required signBlob, which was
+       denied on a service account that already held Token Creator. Handing
+       over data we hold is fewer moving parts than authenticating twice to
+       fetch it twice, and no IAM policy can take it away.
+
+       evaluateOnNewDocument survives every goto below, so this is set once
+       rather than per navigation. */
+    if (editionPayload) {
+      await page.evaluateOnNewDocument((ed) => { window.__NL_EDITION = ed; }, editionPayload);
+      console.log('Edition handed to the page (' +
+        Object.keys((editionPayload && editionPayload.docs) || {}).length + ' areas)');
     }
 
     // Pass 1 — each area as its own part.
