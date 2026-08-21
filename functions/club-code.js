@@ -101,6 +101,15 @@ function safeEqual(a, b) {
    rotating the code rotated the token in every bookmark alongside it. The
    collision that token guarded is prevented at issue time instead: the console
    refuses to mint a code another club already holds. */
+/* The stored field is `passcode` on the relocated Programme records and `code`
+   on anything minted since. Both are read, because the relocation is a move
+   rather than a rewrite: renaming 72 live secrets in flight is a second thing
+   to go wrong for no benefit, and a record that opens under one name and not
+   the other is the worst possible outcome of tidying. */
+function storedCode(rec) {
+  return normCode((rec && (rec.passcode || rec.code)) || "");
+}
+
 function pickClub(cfg, code) {
   const clubs = (cfg && cfg.clubs) || {};
   const all = Object.keys(clubs).map((k) => ({ key: k, rec: clubs[k] }));
@@ -118,8 +127,8 @@ function pickClub(cfg, code) {
   if (!code) return null;
   return all.find((c) =>
     c.rec && !c.rec.revoked &&
-    normCode(c.rec.code) !== "" &&
-    safeEqual(normCode(c.rec.code), code)) || null;
+    storedCode(c.rec) !== "" &&
+    safeEqual(storedCode(c.rec), code)) || null;
 }
 
 /* ---- Throttle ------------------------------------------------------------
@@ -205,7 +214,7 @@ exports.clubCodeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
       /* Distinct uid per person here, unlike the shared club uids below: a
          named account is signing in, so the audit trail can name them. */
       const customToken = await admin.auth()
-        .createCustomToken("cc-staff-" + uid, { club: "*" });
+        .createCustomToken("cc-staff-" + uid, { club: "*", pClub: "*" });
       logger.info("clubCodeAuth: staff granted", { uid, role });
       return grant({
         ok: true, customToken, isNL: true,
@@ -225,7 +234,14 @@ exports.clubCodeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
     const code = normCode(req.code);
     if (code.length < 4) return grant({ ok: false, error: "Enter your club code." });
 
-    const cfg = (await db.ref(ROOT + "/config").once("value")).val() || {};
+    /* Same node Programme reads, with the same fallback while the relocation
+       is in flight — see the CODES note in functions/programme.js. One
+       credential, one home, two doors onto it. */
+    let cfg = (await db.ref(ROOT + "/config").once("value")).val();
+    if (!cfg || !cfg.clubs) {
+      cfg = (await db.ref("app-data/media-programme/config").once("value")).val() || {};
+      if (cfg.clubs) logger.info("clubCodeAuth: codes read from the OLD location");
+    }
     const hit = pickClub(cfg, code);
 
     if (!hit) {
@@ -243,8 +259,12 @@ exports.clubCodeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
        support — and it keeps the Auth user list at 73 rows rather than one per
        device. Anyone wanting per-person attribution wants an account, which is
        a different door (system/roles-and-access-plan.md). */
+    /* BOTH CLAIMS — see the matching note in programme.js. A club signing in
+       here must keep Programme Packs working, because the two gates otherwise
+       fight: signInWithCustomToken replaces the session, so whichever was
+       opened last would be the only one that worked. */
     const customToken = await admin.auth()
-      .createCustomToken("cc-" + hit.key, { club: hit.key });
+      .createCustomToken("cc-" + hit.key, { club: hit.key, pClub: hit.key });
 
     logger.info("clubCodeAuth: club granted", { club: hit.key });
     /* `role` and `name` at the TOP LEVEL, because that is the shape
