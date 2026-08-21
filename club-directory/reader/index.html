@@ -15,6 +15,17 @@
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
 <!--
   club-directory / reader / index.html
+  v1.4 — (21/08/2026) A club opens this with the SAME six characters that open
+         the Handbook and Programme Packs. One credential, three tools; the
+         Directory's own reader codes keep working alongside it, for the people
+         the League gives one to who are not a club.
+         The gate is canon NL.codeGate rather than the local _gate.js card, and
+         that is the fix as much as the credential is: _gate.js strips
+         everything but digits, so a club code typed here silently lost most of
+         itself and came back "not recognised". The code was right and the lock
+         was wrong. The canon gate also submits on the last character instead of
+         waiting for Enter, and the bar now names the club rather than saying
+         "Signed in by code", which the person signing in already knew.
   v1.3 — (15/08/2026) The bar is white with a red underline, not red. Red is
          reserved for a signed-in NL account and this page is entered with a
          six-digit code — it was wearing the wrong colour, and the editor next
@@ -46,13 +57,25 @@
   The replacement for the printed handbook's club pages. Anyone the League
   gives the code to can read every club; nobody can change anything.
 
+  Which code
+  ----------
+  Either of two, checked by two different triggers, on one card:
+    · a CLUB code — app-data/club-codes, claim `club`, the estate's one club
+      credential. Tried first, because it is the one being issued now.
+    · a DIRECTORY reader code — app-data/ops-club-directory, claim `dir`, for
+      readers who are not a club. Costs a second round trip, which is the right
+      way round.
+  Neither is checked in the browser. The rules on `published` accept a `club`
+  claim, any `dir` claim, or an NL portal role.
+
   Why a code and not auth-guard
   -----------------------------
   The people who need this mostly have no portal account, and issuing 300
   accounts to solve a reading problem is the wrong trade. The code is a real
   boundary, not a screen: it is checked server-side by functions/club-directory
   .js and exchanged for a token the RTDB rules enforce, so this page cannot
-  read a single record until that has happened. See _gate.js.
+  read a single record until that has happened. See functions/club-code.js and
+  functions/club-directory.js; the card itself is canon NL.codeGate.
 
   It is noindex because the directory carries people's work contact details.
   That is a curtain rather than a door, and the code is the door.
@@ -173,14 +196,41 @@
     return o;
   }
 
-  NLGate.ensure({
-    title: 'Club Directory',
-    sub: 'Enter the six-digit code from the National League.',
-    mount: $('gateWrap')
-  }).then(function () {
+  /* Two doors, one card. A club types the SAME six characters that open the
+     Handbook and Programme Packs; anyone else the League has given a
+     Directory reader code to keeps using it. Both are checked server-side by
+     their own trigger, and the gate tries the club code first because that is
+     the one being issued now — a Directory code costs a second round trip,
+     which is the right way round.
+
+     The letters are why this changed. _gate.js strips everything but digits,
+     so a club code typed here silently lost most of itself and came back "not
+     recognised" — the code was right and the lock was wrong. */
+  var clubVerify = NL.codeGate.viaFunction('app-data/club-codes');
+  var dirVerify = NL.codeGate.viaFunction(NLGate.ROOT);
+
+  NL.codeGate.resume('club')
+    .then(function (s) { return s || NLGate.resume(); })
+    .then(function (s) {
+      return s || NL.codeGate.open({
+        mount: $('gateWrap'),
+        title: 'Club Directory',
+        sub: 'Enter your club code.',
+        numeric: false,
+        verify: function (code) {
+          return clubVerify(code)['catch'](function () { return dirVerify(code); });
+        }
+      });
+    }).then(function (session) {
+    /* codeGate does not take its own card down — the caller owns the mount and
+       knows what replaces it. */
     $('gateWrap').hidden = true;
+    if (session && session.name) {
+      var sub = document.querySelector('.nl-idbar__sub');
+      if (sub) sub.textContent = session.name;
+    }
     $('signOut').addEventListener('click', function () {
-      NLGate.signOut().then(function () { location.reload(); });
+      NL.codeGate.signOut().then(function () { location.reload(); });
     });
     return Promise.all([
       NL.clubs.load(),
