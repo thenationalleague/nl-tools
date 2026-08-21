@@ -1,6 +1,23 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27
+  Version: v0.44 (21/08/2026) — the insert affordance opens a real gap, and
+    the whole strip is the target.
+
+    Richard: "this should move the below clause down to make space… whole line
+    needs to be clickable. atm i can't even reach the + without floating off."
+    Both right, and the second was the worse bug: the strip is a fixed overlay
+    and therefore NOT a descendant of #ceDoc, so reaching for the + fired
+    #ceDoc's mouseleave and took the thing away before it could be pressed.
+    Leaving the document INTO the strip now counts as staying.
+
+    The gap is PADDING on the clause, not margin. Margin sits outside the
+    element's box, so the pointer would land on the parent the moment the gap
+    opened — clause un-hovered, gap shut, gap reopened, flicker. Padding keeps
+    the gap inside the clause that owns it. The edge test measures against the
+    CONTENT edges rather than the padded box for the same reason: an open gap
+    moves the bottom edge 30px down, and testing the moved edge would put the
+    pointer outside the band that opened it.
   Version: v0.43 (21/08/2026) — one editor per area at a time.
 
     Two people in the same area is the one situation this tool handled badly
@@ -165,6 +182,15 @@
     var NL_TOOL_KEY = 'ops-handbook';
 
     window.NL_CHANGELOG = [
+      {
+        date: '21/08/2026',
+        version: 'v0.44',
+        items: [
+          'Hovering between clauses now opens a real gap, and the whole strip ' +
+            'is clickable — you no longer have to reach the small + before it ' +
+            'disappears.'
+        ]
+      },
       {
         date: '21/08/2026',
         version: 'v0.43',
@@ -671,25 +697,48 @@
   .ce-undo:hover:not(:disabled) { border-color: var(--navy); background: var(--navy-50); }
   .ce-undo:disabled { opacity: .4; cursor: default; }
 
-  /* The insert line: where a new clause will land, shown before you commit to
-     it. The line itself takes no pointer events — it follows the mouse, so
-     catching them would make it chase itself — only the + is clickable. */
+  /* The insert affordance. Two things it has to do that a line drawn over the
+     text does not: OPEN A GAP, so the space it would occupy is the space you
+     can see, and be clickable along its whole length, so reaching it does not
+     mean travelling to a 22px target and losing the hover on the way.
+
+     The gap is PADDING on the clause, not margin, deliberately. Margin sits
+     outside the element's box, so the pointer would end up over the parent
+     the moment the gap opened, the clause would stop being hovered, the gap
+     would close, and it would reopen — a flicker loop. Padding keeps the gap
+     inside the clause that owns it. */
+  .nl-clause.hb-gap-before, .nl-art.hb-gap-before { padding-top: 30px; }
+  .nl-clause.hb-gap-after,  .nl-art.hb-gap-after  { padding-bottom: 30px; }
+
+  /* Exactly as tall as the gap it sits in, so the whole opened space is the
+     target and the cursor turns to a hand across all of it — a 24px strip in
+     a 30px gap leaves a 3px band either side that still shows a text caret,
+     which reads as "not clickable here" at precisely the moment it is. */
   .hb-ins {
-    position: fixed; z-index: 40; pointer-events: none;
-    display: flex; align-items: center; gap: 6px;
+    position: fixed; z-index: 40; cursor: pointer;
+    display: flex; align-items: center; gap: 8px;
+    height: 30px; margin-top: -15px;   /* GAP, centred on the boundary */
   }
   .hb-ins__line {
-    flex: 1 1 auto; height: 2px; background: var(--primary); border-radius: 2px;
+    flex: 1 1 auto; height: 2px; border-radius: 2px;
+    background: var(--primary); opacity: .55;
   }
+  .hb-ins:hover .hb-ins__line { opacity: 1; }
   .hb-ins__go {
-    pointer-events: auto; flex: none; cursor: pointer;
-    width: 22px; height: 22px; line-height: 1; padding: 0;
+    flex: none; pointer-events: none;   /* the whole strip is the button */
+    width: 22px; height: 22px; line-height: 20px; padding: 0; text-align: center;
     font-family: var(--font); font-size: var(--text-sm); font-weight: 700;
     color: var(--white); background: var(--primary);
-    border: 0; border-radius: 50%;
+    border: 0; border-radius: 50%; opacity: .75;
   }
-  .hb-ins__go:hover { background: var(--primary-700); }
-  .hb-ins__go:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; }
+  .hb-ins:hover .hb-ins__go { opacity: 1; }
+  .hb-ins__hint {
+    flex: none; pointer-events: none;
+    font-size: var(--text-xs); font-weight: 600;
+    font-variation-settings: 'wght' 600;
+    color: var(--primary); opacity: 0;
+  }
+  .hb-ins:hover .hb-ins__hint { opacity: 1; }
 
   /* The action bar. One of these, at the foot of the editing pane.
      It replaced a per-clause toolbar: eleven controls on each of 1,203 nodes,
@@ -830,8 +879,10 @@
          those is the per-clause toolbar mistake again. Fixed positioning off
          getBoundingClientRect, so there is no offset-parent maths and no
          dependence on anything render() rebuilds. -->
-    <div class="hb-ins" id="ceIns" hidden>
-      <button class="hb-ins__go" type="button" id="ceInsGo" title="Add a clause here">+</button>
+    <div class="hb-ins" id="ceIns" hidden role="button" tabindex="-1"
+         aria-label="Add a clause here">
+      <span class="hb-ins__go" aria-hidden="true">+</span>
+      <span class="hb-ins__hint">Add a clause here</span>
       <span class="hb-ins__line"></span>
     </div>
     <div class="ce-scrim" id="ceScrim"></div>
@@ -1108,6 +1159,9 @@
   }
 
   function render() {
+    /* The gap is a class on a clause element that is about to be replaced, and
+       INS.el would be left pointing at a detached node. Clear it first. */
+    hideInsert();
     var host = $('ceDoc');
     if (!S.docId) { S.numMap = {}; renderCover(); $('ceToc').innerHTML = ''; syncBar(); updateCrumb(); return; }
     var ids = Object.keys(S.nodes);
@@ -1842,31 +1896,67 @@
 
      One element, moved. A drop zone rendered between every pair of clauses
      would be 1,203 of them, which is the per-clause toolbar mistake again. */
-  var INS = { refId: null, where: null };
+  var INS = { refId: null, where: null, el: null };
+  var GAP = 30;   // must match .hb-gap-before / .hb-gap-after in the CSS
 
+  /* Close the gap and put the strip away. */
   function hideInsert() {
-    INS.refId = null;
+    if (INS.el) {
+      INS.el.classList.remove('hb-gap-before', 'hb-gap-after');
+      INS.el = null;
+    }
+    INS.refId = null; INS.where = null;
     var el = $('ceIns'); if (el) el.hidden = true;
   }
 
   function showInsertFor(clauseEl, clientY) {
     var el = $('ceIns'); if (!el) return;
     var r = clauseEl.getBoundingClientRect();
+
+    /* Measure against the CONTENT edges, not the padded box. When the gap is
+       already open on this clause its own padding has moved the bottom edge
+       30px further down, and testing against that moved edge would put the
+       pointer outside the band that opened it — the gap would shut, which
+       would move the edge back, which would reopen it. */
+    var openBefore = clauseEl.classList.contains('hb-gap-before');
+    var openAfter = clauseEl.classList.contains('hb-gap-after');
+    var top = r.top + (openBefore ? GAP : 0);
+    var bottom = r.bottom - (openAfter ? GAP : 0);
+
     /* Only near an edge. In the middle of a clause the pointer is over text
-       someone is reading, and a line through it is noise — the gap is the
-       gesture, so it has to be the gap that offers it. */
-    var edge = Math.min(14, r.height / 3);
+       someone is reading, and a line through it is noise — the gap between
+       two clauses is the gesture, so the gap has to be what offers it.
+       Generous once open, so a slow hand does not lose it on the way. */
+    var reach = Math.min(16, Math.max(6, (bottom - top) / 3));
     var where = null;
-    if (clientY <= r.top + edge) where = 'before';
-    else if (clientY >= r.bottom - edge) where = 'after';
+    if (clientY <= top + reach) where = 'before';
+    else if (clientY >= bottom - reach) where = 'after';
     if (!where) { hideInsert(); return; }
 
+    if (INS.el !== clauseEl || INS.where !== where) {
+      if (INS.el) INS.el.classList.remove('hb-gap-before', 'hb-gap-after');
+      clauseEl.classList.add(where === 'before' ? 'hb-gap-before' : 'hb-gap-after');
+      INS.el = clauseEl;
+    }
     INS.refId = clauseEl.dataset.id;
     INS.where = where;
+
+    /* Re-measure: adding the padding has just moved things. */
+    var r2 = clauseEl.getBoundingClientRect();
     el.hidden = false;
-    el.style.left = r.left + 'px';
-    el.style.width = r.width + 'px';
-    el.style.top = ((where === 'before' ? r.top : r.bottom) - 1) + 'px';
+    el.style.left = r2.left + 'px';
+    el.style.width = r2.width + 'px';
+    /* Centre of the gap the clause has just opened. */
+    el.style.top = (where === 'before' ? r2.top + GAP / 2 : r2.bottom - GAP / 2) + 'px';
+  }
+
+  function takeInsert() {
+    var ref = INS.refId, where = INS.where;
+    if (!ref) return;
+    hideInsert();
+    afterPendingSave(function () {
+      if (S.nodes[ref]) OPS[where === 'before' ? 'insertBefore' : 'insertAfter'](ref);
+    });
   }
 
   /* ================= Structural operations ================= */
@@ -2324,16 +2414,25 @@
       if (!cl || !cl.dataset.id) { hideInsert(); return; }
       showInsertFor(cl, e.clientY);
     });
-    doc.addEventListener('mouseleave', hideInsert);
-    /* Scrolling moves the document under a line pinned to the viewport. */
-    doc.addEventListener('scroll', hideInsert);
-    $('ceInsGo').addEventListener('click', function () {
-      var ref = INS.refId, where = INS.where;
-      if (!ref) return;
+    /* Moving onto the strip counts as staying, not leaving. The strip is a
+       fixed overlay and therefore NOT a descendant of #ceDoc, so without this
+       reaching for it fires mouseleave and takes it away — which is exactly
+       what "I can't even reach the + without floating off" was. */
+    doc.addEventListener('mouseleave', function (e) {
+      var to = e.relatedTarget;
+      if (to && to.closest && to.closest('#ceIns')) return;
       hideInsert();
-      afterPendingSave(function () {
-        if (S.nodes[ref]) OPS[where === 'before' ? 'insertBefore' : 'insertAfter'](ref);
-      });
+    });
+    /* Scrolling moves the document under a strip pinned to the viewport. */
+    doc.addEventListener('scroll', hideInsert);
+
+    var ins = $('ceIns');
+    /* The whole strip is the target, not the 22px circle on the end. */
+    ins.addEventListener('click', takeInsert);
+    ins.addEventListener('mouseleave', function (e) {
+      var to = e.relatedTarget;
+      if (to && to.closest && to.closest('#ceDoc')) return;  // back to the document
+      hideInsert();
     });
 
     $('ceUndo').addEventListener('click', function () { afterPendingSave(doUndo); });
