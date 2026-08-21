@@ -1,6 +1,25 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27
+  Version: v0.48 (21/08/2026) — the insert strip actually inserts.
+
+    Richard: "effectively pressing did nothing." Exactly that, and not for the
+    reason v0.47 guessed at.
+
+    afterPendingSave was declared INSIDE wire(); takeInsert, which lives at the
+    top level of the same IIFE, called it. A ReferenceError on every press. The
+    listener threw, the browser swallowed it, and the strip did nothing at all
+    — no toast, no dialog, no sign that anything had happened.
+
+    node --check passed the file every single time, because it PARSES and does
+    not resolve identifiers: a call to a name that cannot possibly be in scope
+    is valid syntax. tests/handbook-scope.test.mjs closes that: nothing
+    declared inside wire() may be called from outside it. Verified by putting
+    the bug back and watching it fail with the line number.
+
+    v0.47's change stands on its own merits — adding a clause should not ask
+    you to confirm a renumber you just chose — but it was not the cause, and
+    the diagnosis was wrong.
   Version: v0.47 (21/08/2026) — adding a clause stops asking twice.
 
     Richard: "it says add three here. I press it, and it just opens where
@@ -250,6 +269,13 @@
     var NL_TOOL_KEY = 'ops-handbook';
 
     window.NL_CHANGELOG = [
+      {
+        date: '21/08/2026',
+        version: 'v0.48',
+        items: [
+          'Fixed: pressing the + between two clauses did nothing at all.'
+        ]
+      },
       {
         date: '21/08/2026',
         version: 'v0.47',
@@ -2042,6 +2068,26 @@
      would be 1,203 of them, which is the per-clause toolbar mistake again. */
   /* el/side: what the pointer is over, which is what opens the gap.
      refId/where: where the clause actually goes, after canonicalising. */
+  /* Pressing a control blurs the clause being typed in, and that blur is what
+     SAVES it. The save is async, so an op that ran immediately would clone a
+     stale S.nodes and commit the text away again. Everything the bar and the
+     insert strip do therefore waits on the save the click itself triggered.
+
+     Not solved by preventing the blur: then the typing is never saved at all,
+     and the op commits a clone that has never seen it. The blur has to happen;
+     the op has to wait.
+
+     TOP LEVEL, not inside wire(). It was declared in there, and takeInsert —
+     which lives out here — called it. Valid syntax, so node --check passed;
+     a ReferenceError at click time, so the insert strip did nothing at all
+     and did it silently. Guarded now in tests/handbook-scope.test.mjs. */
+  function afterPendingSave(fn) {
+    Promise.resolve(S.pendingSave).catch(function () {}).then(function () {
+      S.pendingSave = null;
+      fn();
+    });
+  }
+
   var INS = { refId: null, where: null, el: null, side: null };
   var GAP = 30;   // must match .hb-gap-before / .hb-gap-after in the CSS
 
@@ -2574,20 +2620,6 @@
        and it reads S.selectedId rather than walking up to a [data-id], because
        there is no clause above it in the DOM to walk to. */
     var bar = $('ceActs');
-    /* Pressing a bar button blurs the clause being typed in, and that blur is
-       what SAVES it. The save is async, so an op that ran immediately would
-       clone a stale S.nodes and commit the text away again. Everything the bar
-       does therefore waits on the save the click itself triggered.
-
-       Not solved by preventing the blur: then the typing is never saved at
-       all, and the op commits a clone that has never seen it. The blur has to
-       happen; the op has to wait. */
-    function afterPendingSave(fn) {
-      Promise.resolve(S.pendingSave).catch(function () {}).then(function () {
-        S.pendingSave = null;
-        fn();
-      });
-    }
     /* FORMATTING and STRUCTURE want opposite things from the same press.
        Formatting needs the caret and the selection left alone, so its
        mousedown is prevented. Structure needs the blur to fire, because the
