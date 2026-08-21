@@ -119,24 +119,46 @@ function storedCode(rec) {
 }
 
 function pickClub(cfg, code) {
-  const clubs = (cfg && cfg.clubs) || {};
-  const all = Object.keys(clubs).map((k) => ({ key: k, rec: clubs[k] }));
-  if (cfg && cfg.nl) all.push({ key: "NL", rec: cfg.nl });
-  /* An EMPTY code matches nothing, and an empty STORED code is matched by
-     nothing. Both halves are needed and neither is theoretical: safeEqual('','')
-     is true, so a config record whose `code` field is missing or blank — a
-     half-finished entry, a club added before its code was minted — would open
-     for anybody submitting an empty string. The trigger does reject anything
-     under four characters before it reaches here, but that is one guard, in
-     one caller, in a different function from the door it protects. The door
-     refuses on its own account.
-     (functions/programme.js has the same shape and the same latent hole; it is
-     covered by the same length guard and should get this line too.) */
+  /* An EMPTY typed code matches nothing, and an empty STORED code is matched
+     by nothing. Both halves are needed and neither is theoretical:
+     safeEqual('','') is true, so a record whose code field is missing or blank
+     — a half-finished entry, a club added before its code was minted — would
+     open for anybody submitting an empty string. The trigger does reject
+     anything under four characters before it reaches here, but that is one
+     guard, in one caller, in a different function from the door it protects.
+     The door refuses on its own account. */
   if (!code) return null;
-  return all.find((c) =>
-    c.rec && !c.rec.revoked &&
-    storedCode(c.rec) !== "" &&
-    safeEqual(storedCode(c.rec), code)) || null;
+
+  /* TWO KINDS OF HOLDER, ONE GRANT.
+     A club has a MASTER code — the one the 72 already hold — and may have
+     NAMED people, each with their own. A named code grants exactly what the
+     master grants: same club, same claim, so every rule and permission is
+     identical. What it adds is attribution — `who` reaches the audit trail
+     and the identity bar. It is not a role. Anyone needing different
+     PERMISSIONS needs an account (system/roles-and-access-plan.md).
+
+     Revoking the CLUB revokes its people with it, which is why the club
+     record's flag is checked on every entry and not just its own. */
+  const clubs = (cfg && cfg.clubs) || {};
+  const entries = [];
+  const add = (key, rec, codeRec, who, userId) => {
+    entries.push({ key, rec, codeRec, who: who || "", userId: userId || "" });
+  };
+  Object.keys(clubs).forEach((k) => {
+    const rec = clubs[k];
+    if (!rec) return;
+    add(k, rec, rec, "");
+    const users = rec.users || {};
+    Object.keys(users).forEach((id) => {
+      if (users[id]) add(k, rec, users[id], users[id].name, id);
+    });
+  });
+  if (cfg && cfg.nl) add("NL", cfg.nl, cfg.nl, "");
+
+  return entries.find((e) =>
+    !e.rec.revoked && !e.codeRec.revoked &&
+    storedCode(e.codeRec) !== "" &&
+    safeEqual(storedCode(e.codeRec), code)) || null;
 }
 
 /* ---- Where the codes live ------------------------------------------------
@@ -150,10 +172,10 @@ function pickClub(cfg, code) {
    club in the estate (21/08/2026). Accepting where the data is beats moving
    73 live secrets by hand to suit a level of nesting.
 
-   Two fallbacks, both on their way out, both logged so production says which
-   one answered:
-     · config/          — the wrapper, for anything written under it
-     · media-programme/ — the per-tool node the Programme codes came from
+   One fallback left: the `config/` wrapper, for anything written under it,
+   logged so production says when it answered. The per-tool media-programme
+   node went with the data — Richard deleted it on 21/08/2026, confirmed, so
+   the branch reading it was a place a code could hide and nothing more.
 
    Returns {} rather than throwing when nothing is found: an unreadable config
    must refuse everyone, not 500 on every attempt. */
@@ -172,11 +194,6 @@ async function readCodes(db, who) {
     return wrapped;
   }
 
-  const legacy = (await db.ref("app-data/media-programme/config").once("value")).val();
-  if (legacy && legacy.clubs) {
-    logger.info(who + ": codes read from the OLD location");
-    return legacy;
-  }
   return {};
 }
 
@@ -336,13 +353,26 @@ exports.clubCodeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
        it does not have to. */
     const clubName = hit.rec.name ||
       (hit.key === "NL" ? "National League" : hit.key);
-    const customToken = await admin.auth()
-      .createCustomToken("cc-" + hit.key, {
-        club: hit.key, pClub: hit.key,
-        clubName: clubName, pClubName: clubName,
-      });
 
-    logger.info("clubCodeAuth: club granted", { club: hit.key });
+    /* A NAMED holder gets their own uid, so the audit trail names a person
+       rather than a club. A master-code holder keeps the shared `cc-<key>`,
+       because a shared code cannot honestly support more than club-level
+       attribution and 73 rows in the Auth user list beats one per device.
+       The userId, not the name, keys the uid: two people called Dave at one
+       club must not collapse into one identity, and a rename must not orphan
+       the trail behind it. */
+    const uidFor = hit.userId ? "cc-" + hit.key + "-" + hit.userId : "cc-" + hit.key;
+    const claims = {
+      club: hit.key, pClub: hit.key,
+      clubName: clubName, pClubName: clubName,
+    };
+    if (hit.who) claims.who = hit.who;
+
+    const customToken = await admin.auth().createCustomToken(uidFor, claims);
+
+    /* The person's NAME is not logged — it is theirs, and a club key plus a
+       timestamp already answers every question this log is asked. */
+    logger.info("clubCodeAuth: club granted", { club: hit.key, named: !!hit.userId });
     /* `role` and `name` at the TOP LEVEL, because that is the shape
        NL.codeGate resolves with — codeGateExchange returns { role: g.role,
        name: g.name } and nothing else. The first version returned only the
@@ -354,7 +384,12 @@ exports.clubCodeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
       customToken,
       isNL: hit.key === "NL",
       role: hit.key,
+      /* `name` stays the CLUB, always. Callers match it against a club list —
+         the Directory resolves which club is reading from it — and a person's
+         name there would break that quietly. `who` is the extra, not the
+         replacement; a bar wanting "Ralph · AFC Fylde" composes the two. */
       name: clubName,
+      who: hit.who || "",
       club: { code: hit.key, name: clubName },
     });
   } catch (err) {

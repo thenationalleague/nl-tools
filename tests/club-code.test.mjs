@@ -211,14 +211,18 @@ test('both functions look for the codes in the same places, in the same order', 
     assert.match(body, /\/nl"/, f + ' must read the canonical nl node');
     assert.match(body, /codes read from the wrapped config node/,
       f + ' must fall back to the config wrapper, and say so');
-    assert.match(body, /codes read from the OLD location/,
-      f + ' must keep the per-tool fallback, and say so, until that node is gone');
 
     /* Canonical first. A fallback that wins is not a fallback. */
     assert.ok(body.indexOf('/clubs"') < body.indexOf('wrapped config node'),
-      f + ' must try the canonical path before either fallback');
-    assert.ok(body.indexOf('wrapped config node') < body.indexOf('OLD location'),
-      f + ' must try the wrapper before the per-tool node');
+      f + ' must try the canonical path before the fallback');
+
+    /* The per-tool node is GONE — deleted 21/08/2026, confirmed — so reading
+       it is not a safety net any more, it is a second place a live code could
+       hide from the page that manages them. A fallback whose source no longer
+       exists is drift with a good excuse. */
+    assert.ok(!/media-programme\/config/.test(body),
+      f + ' must not still read the retired per-tool node');
+
     assert.match(body, /return \{\};/,
       f + ' must refuse everyone when nothing is found, not throw');
   }
@@ -273,6 +277,100 @@ test('both doors open the same record — one config cannot mean two things', ()
   assert.equal(cc.storedCode({ passcode: 'ab-12cd' }), pp.storedCode({ passcode: 'ab-12cd' }));
   assert.equal(cc.storedCode({ code: 'ab-12cd' }), pp.storedCode({ code: 'ab-12cd' }));
   assert.equal(cc.storedCode({}), pp.storedCode({}));
+});
+
+// --- named people ------------------------------------------------------------
+
+const withPeople = {
+  clubs: {
+    FYL: {
+      name: 'Test Town', passcode: 'MASTER',
+      users: {
+        u1: { name: 'A Person', code: 'AAA111' },
+        u2: { name: 'B Person', code: 'BBB222' },
+        u3: { name: 'Gone Away', code: 'CCC333', revoked: true },
+      },
+    },
+    OLD: {
+      name: 'Folded FC', passcode: 'DDD444', revoked: true,
+      users: { u4: { name: 'Still Listed', code: 'EEE555' } },
+    },
+  },
+};
+
+test('a named person opens the same door as the club, and is named doing it', () => {
+  /* The whole point: same club, same claim, so every rule and permission is
+     identical — what changes is that the audit trail and the identity bar can
+     say who. A named code that granted anything DIFFERENT would be a role,
+     and roles need accounts. */
+  for (const fn of [cc.pickClub, pp.pickClub]) {
+    const master = fn(withPeople, 'MASTER');
+    const person = fn(withPeople, 'AAA111');
+    assert.equal(master.key, 'FYL');
+    assert.equal(person.key, 'FYL', 'a person resolves to their club');
+    assert.equal(master.who, '', 'the shared code names nobody, honestly');
+    assert.equal(person.who, 'A Person');
+    assert.equal(person.userId, 'u1', 'the uid is keyed on the id, not the name');
+    assert.equal(person.rec.name, 'Test Town', 'the club record is still the club');
+  }
+});
+
+test('two people at one club get their own identities', () => {
+  for (const fn of [cc.pickClub, pp.pickClub]) {
+    assert.equal(fn(withPeople, 'AAA111').userId, 'u1');
+    assert.equal(fn(withPeople, 'BBB222').userId, 'u2');
+    assert.notEqual(fn(withPeople, 'AAA111').userId, fn(withPeople, 'BBB222').userId);
+  }
+});
+
+test('revoking a person closes their door and nobody else\'s', () => {
+  for (const fn of [cc.pickClub, pp.pickClub]) {
+    assert.equal(fn(withPeople, 'CCC333'), null, 'the revoked person is out');
+    assert.equal(fn(withPeople, 'AAA111').who, 'A Person', 'their colleague is not');
+    assert.equal(fn(withPeople, 'MASTER').key, 'FYL', 'the club code is not');
+  }
+});
+
+test('revoking a CLUB revokes its people with it', () => {
+  /* The failure this prevents is silent and total: revoke a club, believe they
+     are out, and every named person there still walks in. The club record's
+     flag has to be checked on the person's entry, not only on its own. */
+  for (const fn of [cc.pickClub, pp.pickClub]) {
+    assert.equal(fn(withPeople, 'DDD444'), null, 'the club is out');
+    assert.equal(fn(withPeople, 'EEE555'), null, 'and so is its named person');
+  }
+});
+
+test('a club with no people behaves exactly as before', () => {
+  /* 72 records have no `users` branch and must not need one. */
+  for (const fn of [cc.pickClub, pp.pickClub]) {
+    assert.equal(fn(cfg, 'BW1234').key, 'boreham-wood');
+    assert.equal(fn(cfg, 'BW1234').who, '');
+  }
+});
+
+test('the person rides in the claims and the grant, and the club name does not move', () => {
+  /* `name` stays the CLUB in the grant, always. Callers match it against a
+     club list — the Directory resolves which club is reading from it — so a
+     person's name there would break that quietly. `who` is the extra. */
+  const src = readFileSync(join(ROOT, 'functions/club-code.js'), 'utf8');
+  assert.match(src, /if \(hit\.who\) claims\.who = hit\.who;/);
+  assert.match(src, /name: clubName,/);
+  assert.match(src, /who: hit\.who \|\| "",/);
+  assert.match(src, /hit\.userId \? "cc-" \+ hit\.key \+ "-" \+ hit\.userId : "cc-" \+ hit\.key/,
+    'a named holder needs their own uid or the audit still says "the club"');
+});
+
+test('a person\'s name is never written to a log line', () => {
+  /* The club key and a timestamp answer everything these logs are asked. A
+     name in Cloud Logging is a name in Cloud Logging. */
+  for (const f of ['functions/club-code.js', 'functions/programme.js']) {
+    const src = readFileSync(join(ROOT, f), 'utf8');
+    for (const call of src.match(/logger\.(info|warn|error)\([^)]*\)/g) || []) {
+      assert.ok(!/hit\.who|\bwho:/.test(call.replace(/who\s*\+/g, '')),
+        f + ' logs a person: ' + call);
+    }
+  }
 });
 
 test('the code is never written to a log line', () => {

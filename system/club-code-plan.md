@@ -300,6 +300,40 @@ example code, never a "test" code, in any file here.
    editors become a level on the club code? The reader is the merge candidate;
    editing is a different act.
 
+## 7a. SHIPPED — 21/08/2026
+
+The plan is now mostly built. What is live, and what the plan got wrong:
+
+| Piece | State |
+|---|---|
+| `functions/club-code.js` — code → `club` claim | live |
+| Handbook reader behind the code | live |
+| Club Directory reader behind the code | live; the Directory's own reader codes still work alongside it |
+| Programme Packs on the same code | live; both doors mint both claims |
+| `/club-codes/` admin page | live, superadmin + admin |
+| Named people per club | live |
+
+**§4 said fresh codes; the ruling was to move the Programme ones.** Reissuing
+72 live codes to gain a cleaner history meant 72 conversations and a long tail
+of people holding a code that no longer worked. The widening is a decision
+taken once, deliberately, rather than an accident — which is what §4 was
+actually guarding against.
+
+**Where they live: `app-data/club-codes/clubs/<KEY>` and `.../nl`.** Not under
+a `config` wrapper. The plan specified one; the 73 live records landed at the
+shorter path when they were moved, both functions read the wrapper, and every
+club in the estate was locked out until someone opened the console and looked.
+Accepting where the data is beat moving 73 live secrets by hand. The wrapper is
+still read as a fallback and should come out once nothing is under it.
+
+**Named people are not a role** (this answers §7.4 halfway). A person's code
+grants exactly what the club's grants — same claim, same rules — and adds
+`who` for attribution. Anyone needing different PERMISSIONS still needs an
+account. The Directory's editor codes therefore stay where they are.
+
+**Still open from §7:** who at each club receives the code, and whether the
+Handbook reader keeps its public URL.
+
 ## 8. Related, read before building
 
 - `functions/programme.js` — the working reference for the whole handshake
