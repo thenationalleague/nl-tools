@@ -1,6 +1,68 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27
+  Version: v0.48 (21/08/2026) — the insert strip actually inserts.
+
+    Richard: "effectively pressing did nothing." Exactly that, and not for the
+    reason v0.47 guessed at.
+
+    afterPendingSave was declared INSIDE wire(); takeInsert, which lives at the
+    top level of the same IIFE, called it. A ReferenceError on every press. The
+    listener threw, the browser swallowed it, and the strip did nothing at all
+    — no toast, no dialog, no sign that anything had happened.
+
+    node --check passed the file every single time, because it PARSES and does
+    not resolve identifiers: a call to a name that cannot possibly be in scope
+    is valid syntax. tests/handbook-scope.test.mjs closes that: nothing
+    declared inside wire() may be called from outside it. Verified by putting
+    the bug back and watching it fail with the line number.
+
+    v0.47's change stands on its own merits — adding a clause should not ask
+    you to confirm a renumber you just chose — but it was not the cause, and
+    the diagnosis was wrong.
+  Version: v0.47 (21/08/2026) — adding a clause stops asking twice.
+
+    Richard: "it says add three here. I press it, and it just opens where
+    three already exists."
+
+    The insert itself is correct — simulated against the shipped functions:
+    the new clause takes 1.3 and the old 1.3 becomes 1.4, exactly as the strip
+    promised. What sat on top of it was previewThenCommit, which opens a
+    "confirm renumber" dialog whenever numbers move. An insert in the middle
+    of a list ALWAYS moves numbers, so it fired every single time — and until
+    Apply was pressed nothing happened and 1.3 was still where 1.3 was.
+
+    A renumber preview earns a dialog when the renumber is a SURPRISE:
+    indenting, moving, changing a numbering style. It does not earn one when
+    the user has just been told the number and pressed a button that said it.
+
+    Adds commit straight through now, and so do deletes, which already have
+    their own confirmation naming the clause. A new clause flashes briefly and
+    a toast names it — "Added 1.3" — because an empty clause arriving in a
+    wall of text is otherwise easy to miss.
+  Version: v0.46 (21/08/2026) — one editing bar, not two at opposite ends.
+
+    Richard: "why two diff editing areas here?" Because they were built at
+    different times for different jobs — text formatting (B/I/U, lists, clear)
+    in a strip at the TOP of the pane, structure (+ clause, indent, numbering,
+    delete) in the bar at the bottom. A split along a line that means
+    something to the code and nothing to the person using it, with the two
+    halves as far apart as the layout allows.
+
+    One bar now, at the foot: everything that acts on the CLAUSE YOU ARE IN.
+    The top bar keeps what acts on the DOCUMENT — Read/Edit, undo, publish.
+    That is a distinction someone can hold.
+
+    The merge is not just markup. Formatting and structure want opposite
+    things from the same press: formatting needs the caret and selection left
+    alone, so its mousedown is prevented; structure needs the blur to fire,
+    because the blur is what saves what was just typed. The rule is chosen by
+    which kind of button was hit.
+
+    Also, the clause name in the bar is now a button back to it. The bar is
+    pinned to the foot, so the clause it names can be scrolled well off screen
+    — which reads as the tool having lost track of itself rather than the
+    document having moved.
   Version: v0.45 (21/08/2026) — one gap, one meaning, and it names the number.
 
     Richard: "when I'm floating between two clauses within the same
@@ -176,7 +238,7 @@
   <title>Handbook 2026-27 — NL Tools</title>
 
   <!-- Brand stylesheet (lint canonical: ?v=45) -->
-  <link rel="stylesheet" href="/system/nl-brand.css?v=48">
+  <link rel="stylesheet" href="/system/nl-brand.css?v=49">
 
   <!-- Firebase 10.12.0 SDK (compat) -->
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -207,6 +269,34 @@
     var NL_TOOL_KEY = 'ops-handbook';
 
     window.NL_CHANGELOG = [
+      {
+        date: '21/08/2026',
+        version: 'v0.48',
+        items: [
+          'Fixed: pressing the + between two clauses did nothing at all.'
+        ]
+      },
+      {
+        date: '21/08/2026',
+        version: 'v0.47',
+        items: [
+          'Adding a clause no longer asks you to confirm a renumber you just ' +
+            'chose. It adds, says “Added 1.3”, and briefly highlights the new ' +
+            'clause.',
+          'Deleting no longer asks twice either — the confirmation already ' +
+            'names the clause.'
+        ]
+      },
+      {
+        date: '21/08/2026',
+        version: 'v0.46',
+        items: [
+          'Bold, italic and the lists have moved down to join the other ' +
+            'editing controls. One bar for the clause you are in; the top bar ' +
+            'is for the document.',
+          'The clause name on the bar scrolls you back to it.'
+        ]
+      },
       {
         date: '21/08/2026',
         version: 'v0.45',
@@ -697,18 +787,6 @@
   }
 
   /* ---- Formatting toolbar (edit mode) ---- */
-  .ce-fmt {
-    flex: 0 0 auto; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
-    padding: 6px 28px; border-bottom: 1px solid var(--border); background: var(--off-white);
-  }
-  .ce-fmt[hidden] { display: none; }
-  .ce-fmt button {
-    font-family: var(--font); font-size: var(--text-sm); min-width: 30px; padding: 4px 9px;
-    border: 1px solid var(--border); background: var(--white); color: var(--text); border-radius: 6px; cursor: pointer;
-  }
-  .ce-fmt button:hover { border-color: var(--navy); background: var(--navy-50); }
-  .ce-fmt__sep { width: 1px; align-self: stretch; background: var(--border); margin: 2px 4px; }
-  @media (max-width: 860px) { .ce-fmt { padding: 6px 14px; } }
   /* No in-document selection marker — the breadcrumb + contents highlight say where you are. */
 
   /* The Edit button when someone else is in there. Not disabled — taking over
@@ -748,6 +826,15 @@
      qualifies it is a page that will disagree with the canon later. The
      selector reads better for losing it, and the class is only ever put on a
      clause or an article by the code below. */
+  /* A clause that has just arrived. Fades on its own — a marker needing
+     dismissal would be a second thing to do after adding a clause. */
+  .hb-new { animation: hb-new-flash 1.4s ease-out; }
+  @keyframes hb-new-flash {
+    0%   { background: var(--amber-light); }
+    100% { background: transparent; }
+  }
+  @media (prefers-reduced-motion: reduce) { .hb-new { animation: none; } }
+
   .hb-gap-before { padding-top: 30px; }
   .hb-gap-after  { padding-bottom: 30px; }
 
@@ -801,9 +888,14 @@
   /* Which clause the bar acts on. The bar is not beside the clause any more,
      so it has to say — otherwise "Delete" is a question rather than a button. */
   .hb-bar__num {
-    font-weight: 700; font-variation-settings: 'wght' 700;
+    font-family: var(--font); font-weight: 700;
+    font-variation-settings: 'wght' 700;
     color: var(--primary); font-size: var(--text-sm);
+    background: none; border: 0; padding: 0; cursor: pointer;
+    text-align: left;
   }
+  .hb-bar__num:hover { text-decoration: underline; }
+  .hb-bar__num:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
   .hb-bar__ops { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
   .hb-bar button, .hb-bar select {
     font-family: var(--font); font-size: var(--text-xs);
@@ -873,16 +965,6 @@
         <button class="btn btn--ghost" id="ceReimport" type="button" hidden>Re-import</button>
         <button class="btn btn--primary" id="cePublish" type="button" hidden>Publish edition</button>
       </div>
-      <div class="ce-fmt" id="ceFmt" hidden>
-        <button type="button" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
-        <button type="button" data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></button>
-        <button type="button" data-cmd="underline" title="Underline (Ctrl+U)"><u>U</u></button>
-        <span class="ce-fmt__sep"></span>
-        <button type="button" data-cmd="insertUnorderedList" title="Bullet list">• List</button>
-        <button type="button" data-cmd="insertOrderedList" title="Numbered list">1. List</button>
-        <span class="ce-fmt__sep"></span>
-        <button type="button" data-cmd="removeFormat" title="Clear formatting">Clear</button>
-      </div>
       <div class="nl-crumb" id="ceCrumb" title="Where you are"></div>
       <div id="ceDoc"></div>
 
@@ -898,9 +980,27 @@
       <div class="hb-bar" id="ceActs" hidden>
         <div class="hb-bar__where">
           <span class="hb-bar__lbl">Editing</span>
-          <span class="hb-bar__num" id="ceActsWhere"></span>
+          <!-- The bar is pinned to the foot, so the clause it names can be
+               scrolled well off screen — which reads as the tool having lost
+               track of itself. Press the name to go back to it. -->
+          <button class="hb-bar__num" id="ceActsWhere" type="button"
+                  title="Scroll back to this clause"></button>
         </div>
         <div class="hb-bar__ops">
+          <!-- Text formatting used to live in its own strip at the TOP of the
+               pane while the structural controls sat at the bottom — two
+               editing surfaces at opposite ends of the screen, split along a
+               line that means something to the code and nothing to the person
+               using it. One bar: this is what acts on the clause you are in.
+               The top bar keeps what acts on the DOCUMENT — mode, undo,
+               publish. -->
+          <button type="button" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+          <button type="button" data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></button>
+          <button type="button" data-cmd="underline" title="Underline (Ctrl+U)"><u>U</u></button>
+          <button type="button" data-cmd="insertUnorderedList" title="Bullet list">&bull; List</button>
+          <button type="button" data-cmd="insertOrderedList" title="Numbered list">1. List</button>
+          <button type="button" data-cmd="removeFormat" title="Clear formatting">Clear</button>
+          <span class="sep"></span>
           <button type="button" data-op="addAfter" title="Add a clause after this one">+ clause</button>
           <button type="button" data-op="addSub" title="Add a sub-clause inside this one">+ sub</button>
           <button type="button" data-op="addTable" title="Add a table after this one">+ table</button>
@@ -1482,7 +1582,6 @@
     var IMPORT_ON = /[?&]import=1\b/.test(location.search);
     $('ceReimport').hidden = !(IMPORT_ON && S.docId && canSeed() && SEEDS[S.docId] && Object.keys(S.nodes).length);
     $('ceImportDoc').hidden = !(IMPORT_ON && S.docId && canSeed());
-    $('ceFmt').hidden = !(S.mode === 'edit' && canEdit());
     var note = $('ceModeNote');
     /* Say who is in there BEFORE Edit is pressed, not after. A button that
        looks available and then refuses is worse than one that explains. */
@@ -1854,7 +1953,18 @@
       NL.writeAudit && NL.writeAudit('edit', label);
       render();
       syncUndoBtns();
-      if (S.focusNew) { focusNode(S.focusNew); S.focusNew = null; }  // drop the cursor into a just-added clause
+      if (S.focusNew) {
+        focusNode(S.focusNew);
+        /* A new clause is empty, so the only marks of its arrival are a number
+           and a grey placeholder in a wall of text. Flash it, briefly, so "did
+           that do anything" is not a question anyone has to ask. */
+        var fresh = $('c-' + S.focusNew);
+        if (fresh) {
+          fresh.classList.add('hb-new');
+          setTimeout(function () { fresh.classList.remove('hb-new'); }, 1400);
+        }
+        S.focusNew = null;
+      }
     }).catch(function (e) {
       NL.toast && NL.toast('Save failed: ' + (e && e.message || e), 'error');
       load();
@@ -1876,6 +1986,23 @@
   function clone() { return JSON.parse(JSON.stringify(S.nodes)); }
   function uid() { return 'n' + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36); }
   function reindex(nodes, pid) { childrenOf(nodes, pid).forEach(function (n, i) { n.order = i; }); }
+
+  /* A renumber preview is worth a dialog when the renumber is a SURPRISE —
+     indenting, moving, changing a numbering style. It is not worth one when
+     the user has just been told the number and pressed a button that said it:
+     "Add 1.3 here" followed by "this will renumber 1.3 to 1.4, apply?" asks
+     someone to confirm the thing they just chose, and a second dialog on a
+     correct action is how a correct action comes to feel broken.
+
+     So adds and deletes commit straight through — the insert strip announced
+     the number, and delete has its own confirmation naming the clause. Only
+     the surprising renumbers keep the preview. */
+  function commitAdd(c, label, newId) {
+    var done = commit(c, label);
+    var num = newId ? computeNumbers(c)[newId] : '';
+    NL.toast && NL.toast(num ? 'Added ' + num : 'Added', 'success');
+    return done;
+  }
 
   // Show a renumber preview when a structural change moves numbers, then commit.
   function previewThenCommit(c, label) {
@@ -1941,6 +2068,26 @@
      would be 1,203 of them, which is the per-clause toolbar mistake again. */
   /* el/side: what the pointer is over, which is what opens the gap.
      refId/where: where the clause actually goes, after canonicalising. */
+  /* Pressing a control blurs the clause being typed in, and that blur is what
+     SAVES it. The save is async, so an op that ran immediately would clone a
+     stale S.nodes and commit the text away again. Everything the bar and the
+     insert strip do therefore waits on the save the click itself triggered.
+
+     Not solved by preventing the blur: then the typing is never saved at all,
+     and the op commits a clone that has never seen it. The blur has to happen;
+     the op has to wait.
+
+     TOP LEVEL, not inside wire(). It was declared in there, and takeInsert —
+     which lives out here — called it. Valid syntax, so node --check passed;
+     a ReferenceError at click time, so the insert strip did nothing at all
+     and did it silently. Guarded now in tests/handbook-scope.test.mjs. */
+  function afterPendingSave(fn) {
+    Promise.resolve(S.pendingSave).catch(function () {}).then(function () {
+      S.pendingSave = null;
+      fn();
+    });
+  }
+
   var INS = { refId: null, where: null, el: null, side: null };
   var GAP = 30;   // must match .hb-gap-before / .hb-gap-after in the CSS
 
@@ -2089,7 +2236,7 @@
       n.order = (t.order || 0) + 0.5; c[n.id] = n;
       reindex(c, t.parentId);
       S.selectedId = n.id; S.focusNew = n.id;
-      previewThenCommit(c, 'Add clause after ' + id);
+      commitAdd(c, 'Add clause after ' + id, n.id);
     },
     /* Insert at a boundary the user pointed at, at that clause's own depth —
        so the line they saw is where it goes. addAfter is the same thing with
@@ -2105,7 +2252,7 @@
       };
       c[n.id] = n; reindex(c, t.parentId);
       S.selectedId = n.id;
-      previewThenCommit(c, 'Add table after ' + id);
+      commitAdd(c, 'Add table after ' + id, n.id);
     },
     addSub: function (id) {
       var c = clone(), t = c[id];
@@ -2116,7 +2263,7 @@
       n.order = 1e6; c[n.id] = n;
       reindex(c, id);
       S.selectedId = n.id; S.focusNew = n.id;
-      previewThenCommit(c, 'Add sub-clause under ' + id);
+      commitAdd(c, 'Add sub-clause under ' + id, n.id);
     },
     indent: function (id) {
       var c = clone(), t = c[id];
@@ -2174,7 +2321,7 @@
           (function rm(x) { childrenOf(c, x).forEach(function (k) { rm(k.id); }); delete c[x]; })(id);
           reindex(c, n.parentId);
           if (S.selectedId === id) S.selectedId = null;
-          previewThenCommit(c, 'Delete ' + id);
+          commit(c, 'Delete ' + id);
         });
     }
   };
@@ -2188,7 +2335,7 @@
     c[n.id] = n;
     reindex(c, t.parentId);
     S.selectedId = n.id; S.focusNew = n.id;
-    previewThenCommit(c, 'Add clause ' + where + ' ' + refId);
+    commitAdd(c, 'Add clause ' + where + ' ' + refId, n.id);
   }
 
   function move(id, dir) {
@@ -2444,19 +2591,6 @@
     });
     $('ceSearch').addEventListener('input', doSearch);
 
-    // Formatting toolbar: keep the editable's selection (mousedown preventDefault),
-    // then apply the command to the focused clause body. The edit saves on blur.
-    var fmt = $('ceFmt');
-    fmt.addEventListener('mousedown', function (e) { if (e.target.closest('button')) e.preventDefault(); });
-    fmt.addEventListener('click', function (e) {
-      var b = e.target.closest('button[data-cmd]'); if (!b) return;
-      var ed = document.activeElement;
-      if (!ed || !ed.getAttribute || ed.getAttribute('contenteditable') !== 'true') {
-        NL.toast && NL.toast('Click into a clause first, then format', 'info'); return;
-      }
-      try { document.execCommand('styleWithCSS', false, false); } catch (_) {}
-      document.execCommand(b.dataset.cmd, false, null);
-    });
 
     $('ceToc').addEventListener('click', function (e) {
       var a = e.target.closest('[data-goto]'); if (!a) return;
@@ -2486,21 +2620,26 @@
        and it reads S.selectedId rather than walking up to a [data-id], because
        there is no clause above it in the DOM to walk to. */
     var bar = $('ceActs');
-    /* Pressing a bar button blurs the clause being typed in, and that blur is
-       what SAVES it. The save is async, so an op that ran immediately would
-       clone a stale S.nodes and commit the text away again. Everything the bar
-       does therefore waits on the save the click itself triggered.
-
-       Not solved by preventing the blur: then the typing is never saved at
-       all, and the op commits a clone that has never seen it. The blur has to
-       happen; the op has to wait. */
-    function afterPendingSave(fn) {
-      Promise.resolve(S.pendingSave).catch(function () {}).then(function () {
-        S.pendingSave = null;
-        fn();
-      });
-    }
+    /* FORMATTING and STRUCTURE want opposite things from the same press.
+       Formatting needs the caret and the selection left alone, so its
+       mousedown is prevented. Structure needs the blur to fire, because the
+       blur is what saves what was just typed. Same bar, two rules, and the
+       rule is chosen by which kind of button was hit. */
+    bar.addEventListener('mousedown', function (e) {
+      if (e.target.closest('button[data-cmd]')) e.preventDefault();
+    });
     bar.addEventListener('click', function (e) {
+      var cmd = e.target.closest('button[data-cmd]');
+      if (cmd) {
+        var ed = document.activeElement;
+        if (!ed || !ed.getAttribute || ed.getAttribute('contenteditable') !== 'true') {
+          NL.toast && NL.toast('Click into a clause first, then format', 'info');
+          return;
+        }
+        try { document.execCommand('styleWithCSS', false, false); } catch (_) {}
+        document.execCommand(cmd.dataset.cmd, false, null);
+        return;
+      }
       var b = e.target.closest('[data-op]');
       if (!b || b.tagName === 'SELECT') return;
       var id = S.selectedId;
@@ -2550,6 +2689,10 @@
       var to = e.relatedTarget;
       if (to && to.closest && to.closest('#ceDoc')) return;  // back to the document
       hideInsert();
+    });
+
+    $('ceActsWhere').addEventListener('click', function () {
+      if (S.selectedId && S.nodes[S.selectedId]) scrollToNode(S.selectedId);
     });
 
     $('ceUndo').addEventListener('click', function () { afterPendingSave(doUndo); });

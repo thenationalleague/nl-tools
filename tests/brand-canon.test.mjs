@@ -488,6 +488,30 @@ test('no component in canon sets a font-size below the 12px floor', () => {
     `below the 12px floor, and not a documented exception:\n  ${offenders.join('\n  ')}`);
 });
 
+test('.nl-doc is a sheet, and its shadow comes off the ladder', () => {
+  /* The reading surface is a white page, not the app's ground. Two things
+     worth pinning rather than the whole rule: that it HAS a ground at all,
+     and that the shadow is a solid ladder colour. The brand carries no
+     rgba-overlay tokens on purpose, and a shadow is the single most likely
+     place for someone to reach for one. */
+  const rule = css.slice(css.indexOf('\n.nl-doc {'), css.indexOf('.nl-doc__head'));
+  assert.match(rule, /background:\s*var\(--white\)/,
+    '.nl-doc must draw its own page, or the document reads as UI');
+  assert.match(rule, /box-shadow:[^;]*var\(--navy-\d+\)/,
+    'shadow from the navy ladder — the brand has no rgba overlay tokens');
+  assert.ok(!/box-shadow:[^;]*rgba\(/.test(rule), 'no hand-mixed rgba in the sheet shadow');
+});
+
+test('the PDF renderer turns the sheet off', () => {
+  /* A PDF page is already paper. Left on, the sheet draws a bordered box
+     around all 152 pages — and nothing in CI renders a PDF to notice. */
+  const print = readFileSync(join(REPO, 'handbook/print.html'), 'utf8');
+  const flow = print.slice(print.indexOf('.flow .nl-doc'), print.indexOf('.flow .nl-doc__head'));
+  assert.match(flow, /background:\s*none/);
+  assert.match(flow, /box-shadow:\s*none/);
+  assert.match(flow, /border:\s*0/);
+});
+
 test('the type scale floors have not been lowered', () => {
   /* "Do not lower a floor back below 12px to make something fit; the fix for
      a cramped layout is the layout." — the file's own words. */
