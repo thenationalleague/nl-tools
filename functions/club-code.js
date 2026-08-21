@@ -209,6 +209,7 @@ exports.clubCodeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
       logger.info("clubCodeAuth: staff granted", { uid, role });
       return grant({
         ok: true, customToken, isNL: true,
+        role: "*", name: "National League",
         club: { code: "*", name: "National League" },
       });
     }
@@ -246,14 +247,21 @@ exports.clubCodeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
       .createCustomToken("cc-" + hit.key, { club: hit.key });
 
     logger.info("clubCodeAuth: club granted", { club: hit.key });
+    /* `role` and `name` at the TOP LEVEL, because that is the shape
+       NL.codeGate resolves with — codeGateExchange returns { role: g.role,
+       name: g.name } and nothing else. The first version returned only the
+       nested `club` object, so the reader's identity bar had nothing to read
+       and fell back to "The National League" on a club's own sign-in. The
+       nested object stays for callers that want the pair together. */
+    const clubName = hit.rec.name ||
+      (hit.key === "NL" ? "National League" : hit.key);
     return grant({
       ok: true,
       customToken,
       isNL: hit.key === "NL",
-      club: {
-        code: hit.key,
-        name: hit.rec.name || (hit.key === "NL" ? "National League" : hit.key),
-      },
+      role: hit.key,
+      name: clubName,
+      club: { code: hit.key, name: clubName },
     });
   } catch (err) {
     logger.error("clubCodeAuth failed", { uid, message: err && err.message });
