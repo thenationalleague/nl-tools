@@ -1,6 +1,9 @@
 /* Line breaks typed into the handbook, and where they used to go.
 
-   Reported by a colleague of Richard's, editing the referee fee tariff:
+   Reported by a colleague of Richard's, editing the referee fee tariff. The
+   report called them carriage returns; quoted as sent, but the thing Enter
+   inserts is a LINE BREAK, and that is the word used everywhere below.
+
    "Is there also a way to get carriage returns saved — I keep trying it in
    the fee tariff (referee fees, 14.7) but any time I go out of edit it takes
    the carriage returns away."

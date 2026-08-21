@@ -507,13 +507,40 @@ test('only self-describing numbers hang; letters and romans keep their indent', 
      indent repeats it and can go. "(a)" restarts under every parent and means
      nothing without position, so its indent is load-bearing. A rule that
      hung everything would flatten the document into ambiguity. */
-  const hang = css.slice(css.indexOf('.nl-clause[data-depth="2"][data-num="decimal"]'));
+  const hang = css.slice(css.indexOf('.nl-clause:not(.nl-clause--nonum)'));
   const block = hang.slice(0, hang.indexOf('}') + 1);
   assert.match(block, /data-num="decimal"/);
   assert.ok(!/data-num="lower-alpha"|data-num="lower-roman"|data-num="bullet"/.test(block),
     'letters, romans and bullets must NOT hang — their indent carries meaning');
   assert.match(block, /margin-left:\s*-58px/,
     'exactly one gutter: 46px min-width + the 12px flex gap');
+});
+
+test('a clause only hangs where its parent has a gutter to give back', () => {
+  /* The hang gives back one gutter. Keyed on depth — as it was until v2.58 —
+     it gave back a gutter the parent might never have had:
+
+       · .nl-clause--nonum sets display:none on the number, which takes the
+         flex gap with it, so an unnumbered parent's body starts at its own
+         left edge. Its decimal child hung 58px past the text column, through
+         the sheet's 34px padding, and printed its number outside the paper.
+         That is Appendix Q's ANNEX 1, whose parents are headings.
+       · a bullet parent's gutter is 20px + 12px, so -58px overshoots by 26.
+
+     Both are invisible in League Rules, where every parent is numbered —
+     which is exactly why a depth-keyed rule survived a version. */
+  const hang = css.slice(css.indexOf('.nl-clause:not(.nl-clause--nonum)'));
+  const block = hang.slice(0, hang.indexOf('}') + 1);
+  assert.match(block, /:not\(\.nl-clause--nonum\)/,
+    'an unnumbered parent has no gutter to give back');
+  assert.match(block, /:not\(\.nl-clause--bullet\)/,
+    "a bullet parent's gutter is 32px, not 58px");
+  assert.match(block, />\s*\.nl-clause__body\s*>\s*\.nl-clause/,
+    'the relationship is parent-to-child, not a depth number');
+
+  assert.ok(!/\.nl-clause\[data-depth="[2-9]"\]\[data-num="decimal"\]/.test(css),
+    'the depth enumeration is gone — it could not express "my parent has a ' +
+    'gutter", and it stopped at 5 besides');
 });
 
 test('the clause markup carries the numbering style the hanging rule reads', () => {
