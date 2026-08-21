@@ -1,8 +1,11 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27 (public reader)
-  Version: v0.11 (19/08/2026)
+  Version: v0.12 (19/08/2026)
   File: /handbook/reader.html
+
+  v0.12 — The club-code gate. See the block below the changelog for the
+    mechanism and, more importantly, for what it does and does not promise.
 
   v0.11 — Canon chrome, and a cover that stops lying about which handbook it is.
 
@@ -41,12 +44,25 @@
   v0.10 (22/07/2026) — Download PDF serves the pre-rendered static
   handbook.pdf when current (instant file download); print view is the fallback
 
-  Public, no-login reader of the PUBLISHED handbook edition. Reads
-  app-data/ops-handbook/publishedEditionId -> editions/<id> (both world-readable
-  per the rules snapshot) and renders the frozen, baked document. Standalone page;
-  also fine to iframe-embed on the public site.
+  CLUB-CODE GATED reader of the PUBLISHED handbook edition. Reads
+  app-data/ops-handbook/publishedEditionId -> editions/<id> and renders the
+  frozen, baked document. Standalone page — NOT iframe-embeddable any more:
+  the gate needs its own top-level context to sign in.
 
-  It deliberately does NOT use auth-guard (public) and never reads the draft.
+  THE GATE. One club code covers every club-facing gated tool
+  (system/club-code-plan.md). NL.codeGate.viaFunction posts the typed code to
+  a trigger under app-data/club-codes, which validates it SERVER-SIDE and
+  mints a token carrying `club: '<key>'`; the rules on editions/ read that
+  claim. The gate is the screen, the rules are the boundary — and a verify
+  that compared the code in this file would be neither.
+
+  WHAT THE GATE DOES NOT DO is make the handbook confidential. The seed JSON
+  in this repo carries the same text and the repo is public (plan §1.0, route
+  three, a recorded choice). A front door on a building with an open side
+  gate. Never tell a club otherwise.
+
+  It deliberately does NOT use auth-guard — that is for NL accounts, and this
+  page is entered by code — and never reads the draft.
   Presentation comes from the .nl-doc / .nl-cover / .nl-crumb canon in
   nl-brand.css (promoted v2.25); helpers come from nl-utils.js.
 -->
@@ -65,6 +81,7 @@
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
   <link rel="stylesheet" href="/system/nl-brand.css?v=48">
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
   <script>
     firebase.initializeApp({
@@ -77,7 +94,9 @@
       appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
     });
   </script>
-  <!-- Canon helpers (escHtml, formatDate, copy, toast). No auth-guard — this page is public. -->
+  <!-- Canon helpers: escHtml, formatDate, and NL.codeGate — the gate screen
+       and its server-side verify. No auth-guard: that gates NL accounts, and
+       this page is entered by club code. -->
   <script src="/system/nl-utils.js?v=42"></script>
   <style>
     * { box-sizing: border-box; }
@@ -182,7 +201,9 @@
     </div>
   </header>
 
-  <div class="rd-shell">
+  <div class="gate" id="rdGate"></div>
+
+  <div class="rd-shell" id="rdShell" hidden>
     <aside class="rd-side" id="rdSide">
       <div class="rd-side__head">
         <input class="rd-search" id="rdSearch" type="search" placeholder="Search the handbook…" aria-label="Search the handbook">
@@ -228,7 +249,55 @@
     $('rdDoc').innerHTML = '<div class="rd-state"><h1>' + esc(title) + '</h1><p>' + esc(msg) + '</p></div>';
   }
 
+  /* ---------- the gate ----------
+     One club code, covering every club-facing gated tool — see
+     system/club-code-plan.md. The code is checked SERVER-SIDE and nowhere
+     else: NL.codeGate.viaFunction posts it to a trigger under
+     app-data/club-codes, which mints a token carrying `club: '<key>'`, and
+     the RTDB rules on editions/ read that claim. The gate below is the screen;
+     the rules are the boundary. A verify that compared the code in this file
+     would be neither, and the retired Cup Footage tool is the scar that proves
+     it — its answer key shipped in the page with the question.
+
+     What this gate does NOT do is make the handbook confidential. The seed
+     JSON in the repo carries the same text and the repo is public (plan §1.0,
+     route 3). This is a front door on a building with an open side gate, and
+     that is a deliberate, recorded choice — never tell clubs otherwise. */
+  function clubLabel(session) {
+    if (!session) return '';
+    if (session.role === '*') return 'National League';
+    if (session.name) return session.name;
+    /* Resume path: the token carries the club KEY, not its name — display data
+       does not belong in a claim, or renaming a club would mean re-issuing 72
+       tokens. Resolve it from clubs-meta instead, which is the source of truth
+       for club names anyway.
+       CANON CANDIDATE: NL.clubs has byName and byOpta but no byCode, and this
+       is not the only place that wants one — the Programme admin console maps
+       the same keys to the same names. Promote on the next use. */
+    var all = (window.NL && NL.clubs && NL.clubs.all && NL.clubs.all()) || [];
+    var hit = all.filter(function (c) { return c.code === session.role; })[0];
+    return (hit && hit.name) || session.role;
+  }
+
+  NL.codeGate.ensure({
+    mount: document.getElementById('rdGate'),
+    title: 'The National League Handbook',
+    sub: 'Enter your club code.',
+    numeric: false,
+    verify: NL.codeGate.viaFunction('app-data/club-codes'),
+    claim: 'club'
+  }).then(function (session) {
+    /* The bar states who the page thinks you are — the whole point of the
+       white .nl-idbar. Until this resolves it says nothing at all rather than
+       guessing. */
+    var sub = document.querySelector('.nl-idbar__sub');
+    if (sub) sub.textContent = clubLabel(session) || 'The National League';
+    document.getElementById('rdShell').hidden = false;
+    load();
+  });
+
   /* ---------- load ---------- */
+  function load() {
   db.ref(BASE + '/publishedEditionId').once('value').then(function (snap) {
     var id = snap.val();
     if (!id) { state('Not published yet', 'The handbook has not been published. Please check back soon.'); return null; }
@@ -242,8 +311,15 @@
     if (t && docOf(t.area)) { showArea(t.area, t.nodeId); }
     else { showCover(); }
   }).catch(function (e) {
-    state('Unavailable', 'Sorry — the handbook could not be loaded. ' + (e && e.message || ''));
+    /* PERMISSION_DENIED here means the token has no `club` claim — an expired
+       session, or the rules deployed before this page did. Say which, because
+       "could not be loaded" sends someone to the wrong place entirely. */
+    var denied = /permission[_ ]denied/i.test(String((e && e.message) || ''));
+    state(denied ? 'Session expired' : 'Unavailable',
+      denied ? 'Reload the page and enter your club code again.'
+             : 'Sorry — the handbook could not be loaded. ' + (e && e.message || ''));
   });
+  }
 
   // Download PDF: serve the pre-rendered static file when it matches the live
   // edition (instant, CDN-style); otherwise fall back to the print view — e.g.
