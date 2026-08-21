@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Club Codes
+  Version: v0.1 (21/08/2026)
+  File: /club-codes/index.html
+
+  Issue, reveal and reset the one code each club uses for every club-facing
+  tool: Programme Packs, the Handbook, the Club Directory.
+
+  ONE CREDENTIAL, TWO KINDS OF HOLDER
+  -----------------------------------
+  Each club has a MASTER code — the one the 72 already hold, issued for
+  Programme Packs and relocated on 21/08/2026 when it became the estate's
+  single club credential. It is shared, it is in the wild, and resetting it
+  means telling a whole club.
+
+  Alongside it, a club can have NAMED people, each with their own code. A
+  named code grants exactly what the master grants — the claim carries the
+  same club, so every rule and every permission is identical. What it adds is
+  attribution: the audit trail names a person rather than a club, and the
+  identity bar can say who is looking. Resetting one person's code costs one
+  conversation instead of seventy-two.
+
+  Both live on the same record. A named code is not a lesser code and not a
+  role; if someone needs different PERMISSIONS they need an account, which is
+  a different door (system/roles-and-access-plan.md).
+
+  REVEALED, NOT SHOWN ONCE
+  ------------------------
+  The codes are readable here whenever an admin looks. A show-once flow would
+  be security theatre over a credential that is emailed to clubs and printed
+  on sheets, and it would mean reissuing a code every time someone mislaid the
+  email — which is the reissue this page exists to make rare.
+
+  RESETTING IS NOT INSTANT. A custom claim lives in the holder's token until
+  it refreshes, up to an hour. A reset stops the NEXT sign-in, not the session
+  already open. The confirmation says so.
+
+  Storage (RTDB) — NOT under this tool's own key:
+    app-data/club-codes/clubs/<KEY>          { name, passcode|code, users? }
+    app-data/club-codes/clubs/<KEY>/users/*  { name, code, addedAt }
+    app-data/club-codes/nl                   the shared National League code
+    tools/ops-club-codes                     tool registration
+
+  The codes are shared property, not this tool's data, which is why they do
+  not sit under app-data/ops-club-codes. This page is one of three writers —
+  the Programme Packs console writes here too, and functions/club-code.js and
+  functions/programme.js read it. Rules: a portal admin/superadmin, or a
+  pClub '*' session. No client outside that can read a single code.
+
+  Access (RTDB tools/ops-club-codes defaults):
+    superadmin + admin → admin. Everyone else → off.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Club Codes — NL Tools</title>
+  <!-- Favicons. Static, not injected: nl-topbar.js adds these too, but a
+       standalone page never loads it, and an icon that arrives with the JS
+       leaves the tab blank until it does. /favicon.ico at the root is the
+       backstop every browser asks for without being told. -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+
+  <!-- Brand stylesheet (lint canonical: ?v=45) -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=48">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'Club Codes',
+      toolKey: 'ops-club-codes'
+    };
+    var NL_TOOL_KEY = 'ops-club-codes';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '21/08/2026',
+        version: 'v0.1',
+        items: [
+          'Initial build.'
+        ]
+      }
+    ];
+
+    /* auth-guard fires this once the session is verified + pageWrap is
+       revealed. Boot the main app from here so RTDB reads happen with a
+       live auth token. Do NOT read RTDB before this fires. */
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts (lint canonical: ?v=39 / ?v=9 / ?v=12) -->
+  <script src="/system/nl-utils.js?v=43"></script>
+  <script src="/system/nl-topbar.js?v=10"></script>
+  <script src="/system/auth-guard.js?v=16"></script>
+
+<style>
+  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
+     style.display = 'block'. Don't clear with '' — would re-trigger the
+     brand rule and re-hide the page. */
+
+  /* Tool-local. A code list with people nested under clubs is not a shape a
+     second tool has asked for, so the first use stays here — see the policy
+     block atop nl-brand.css. Brand tokens throughout. */
+  .cc-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .cc-find {
+    font-family: var(--font); font-size: var(--text-sm);
+    padding: 8px 12px; min-width: 240px;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--white); color: var(--text);
+  }
+  .cc-find:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+
+  .cc-note { color: var(--text-muted); font-size: var(--text-sm); }
+  .cc-note--bad { color: var(--red); }
+
+  .cc-club {
+    border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--white); margin: 0 0 10px; overflow: hidden;
+  }
+  .cc-club.is-missing { border-style: dashed; background: var(--navy-50); }
+  .cc-club__top {
+    display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+    flex-wrap: wrap;
+  }
+  .cc-crest { width: 30px; height: 30px; object-fit: contain; flex: none; }
+  .cc-club__id { flex: 1 1 200px; min-width: 0; }
+  .cc-club__name {
+    font-weight: 700; font-variation-settings: 'wght' 700;
+    font-size: var(--text-base); color: var(--text);
+  }
+  .cc-club__div { font-size: var(--text-xs); color: var(--text-muted); }
+  .cc-lbl {
+    font-size: var(--text-xs); text-transform: uppercase;
+    letter-spacing: var(--tracking-wide); color: var(--text-muted);
+    font-weight: 700; font-variation-settings: 'wght' 700; margin-bottom: 2px;
+  }
+  .cc-club__acts { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  /* The code is a button because its first job is to be copied — reading it
+     off the screen and retyping it into an email is how a digit gets dropped
+     and a club is told their correct code is wrong. */
+  .cc-code {
+    /* CANON CANDIDATE 21/08/2026 — there is no mono token. The same stack is
+       hand-written in programme/_shared.css (.code-mono) and nls-monitor, and
+       this is the third. A --font-mono token belongs in nl-brand.css; kept
+       local pending that promotion rather than adding a fourth private name. */
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: var(--text-sm); letter-spacing: 0.08em; font-weight: 700;
+    padding: 5px 10px; cursor: pointer;
+    background: var(--navy-50); color: var(--navy);
+    border: 1px solid var(--navy-100); border-radius: var(--radius-sm);
+  }
+  .cc-code:hover { border-color: var(--navy-300); background: var(--navy-100); }
+  .cc-code:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+  .cc-none { font-size: var(--text-sm); color: var(--text-muted); font-style: italic; }
+
+  .cc-mini {
+    font-family: var(--font); font-size: var(--text-xs);
+    font-weight: 600; font-variation-settings: 'wght' 600;
+    padding: 5px 10px; cursor: pointer;
+    background: var(--white); color: var(--text);
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+  }
+  .cc-mini:hover { border-color: var(--primary); color: var(--primary); }
+  .cc-mini--bad:hover { border-color: var(--red); color: var(--red); }
+  .cc-mini:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+  /* Named people sit UNDER their club, indented and on a tint, so the shape
+     of the page says what the model is: one club, one shared code, and the
+     people who have their own. */
+  .cc-users {
+    list-style: none; margin: 0; padding: 4px 14px 12px 56px;
+    border-top: 1px solid var(--border); background: var(--navy-50);
+  }
+  .cc-user {
+    display: flex; align-items: center; gap: 12px;
+    padding: 6px 0; flex-wrap: wrap;
+  }
+  .cc-user__name { flex: 1 1 160px; font-size: var(--text-sm); min-width: 0; }
+  .cc-user__acts { display: flex; gap: 6px; }
+
+  @media (max-width: 560px) {
+    .cc-users { padding-left: 14px; }
+    .cc-club__acts, .cc-club__code { width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Topbar — auto-rendered by /system/nl-topbar.js from window.NL_TOOL -->
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="page">
+
+    <div class="section-head">
+      <h2>Club codes</h2>
+      <div class="cc-actions">
+        <input class="cc-find" id="find" type="search" placeholder="Find a club or a person" aria-label="Find a club or a person">
+        <button class="btn btn--secondary" id="issueAll" type="button">Issue any missing</button>
+      </div>
+    </div>
+
+    <div id="out" class="cc-out"><p class="cc-note">Reading club codes…</p></div>
+
+  </div>
+</div>
+
+<!-- Main app -->
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return NL.escHtml(s); };
+
+  /* The codes are shared property, not this tool's own data — see the header.
+     Written by this page and by the Programme Packs console; read by
+     functions/club-code.js and functions/programme.js. */
+  var ROOT = 'app-data/club-codes';
+
+  /* Same alphabet the Programme console has always minted from: no O/0, no
+     I/1/L, because these get read off a printed sheet and dictated down a
+     phone. Changing it would make new codes look unlike the 72 in the wild. */
+  var ALPHA = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+  var LEN = 6;
+
+  var CLUBS = {}, NLREC = null, ROSTER = [], seen = { clubs: false, nl: false };
+  var FIND = '';
+
+  /* The stored field is `passcode` on everything the Programme console has
+     ever written and `code` on anything minted since. Both functions read
+     both; so does this page, and it writes whichever the record already uses
+     so a club's record does not change shape under it. */
+  function codeOf(rec) { return (rec && (rec.passcode || rec.code)) || ''; }
+  function codeField(rec) { return (rec && rec.code && !rec.passcode) ? 'code' : 'passcode'; }
+
+  function norm(s) {
+    return String(s == null ? '' : s).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  }
+
+  /* Every code in use, master and named alike. pickClub returns the FIRST
+     match, so a collision would silently hand one club another's session —
+     the console has refused to mint a duplicate since 04/08/2026 and this
+     keeps that promise across the new named codes too. */
+  function taken() {
+    var out = {};
+    Object.keys(CLUBS).forEach(function (k) {
+      var rec = CLUBS[k] || {};
+      if (codeOf(rec)) out[norm(codeOf(rec))] = true;
+      var users = rec.users || {};
+      Object.keys(users).forEach(function (id) {
+        var c = codeOf(users[id]);
+        if (c) out[norm(c)] = true;
+      });
+    });
+    if (NLREC && codeOf(NLREC)) out[norm(codeOf(NLREC))] = true;
+    return out;
+  }
+
+  function mint() {
+    var used = taken();
+    for (var i = 0; i < 200; i++) {
+      var out = '';
+      var buf = new Uint32Array(LEN);
+      crypto.getRandomValues(buf);
+      for (var j = 0; j < LEN; j++) { out += ALPHA[buf[j] % ALPHA.length]; }
+      if (!used[out]) return out;
+    }
+    /* 31^6 is 887 million and there are fewer than a thousand codes in play,
+       so two hundred consecutive collisions is not this world — but returning
+       a known duplicate would be worse than throwing. */
+    throw new Error('Could not find an unused code');
+  }
+
+  /* ── Reading ─────────────────────────────────────────────────────────── */
+
+  function ref(path) { return firebase.database().ref(ROOT + (path ? '/' + path : '')); }
+
+  function watch() {
+    /* Per key, not on the parent: app-data/club-codes also holds the
+       authRequests and authGrants every client writes during a sign-in, and a
+       read on the parent would sweep those up. The rules are on each key by
+       name for the same reason. */
+    ref('clubs').on('value', function (snap) {
+      CLUBS = snap.val() || {};
+      seen.clubs = true;
+      render();
+    }, function (err) { fail('reading the club codes', err); });
+
+    ref('nl').on('value', function (snap) {
+      NLREC = snap.val() || null;
+      seen.nl = true;
+      render();
+    }, function (err) { fail('reading the National League code', err); });
+  }
+
+  function fail(what, err) {
+    console.error('[club-codes] ' + what, err);
+    $('out').innerHTML = '<p class="cc-note cc-note--bad">Could not read the codes (' +
+      esc((err && err.message) || what) + '). This page needs a National League ' +
+      'admin account, and the RTDB rules for app-data/club-codes must be deployed.</p>';
+  }
+
+  /* ── Rendering ───────────────────────────────────────────────────────── */
+
+  function rows() {
+    var out = [];
+    if (NLREC) {
+      out.push({ key: 'NL', name: NLREC.name || 'National League',
+                 division: 'National League', rec: NLREC, isNL: true });
+    }
+    ROSTER.forEach(function (c) {
+      out.push({ key: c.code, name: c.name, division: c.division || '',
+                 rec: CLUBS[c.code] || null, isNL: false });
+    });
+    /* A record whose club is not on this season's roster still belongs on the
+       page — a relegated club with a live code is exactly the row someone
+       needs to find in order to revoke it. */
+    var onRoster = {};
+    ROSTER.forEach(function (c) { onRoster[c.code] = true; });
+    Object.keys(CLUBS).forEach(function (k) {
+      if (onRoster[k]) return;
+      out.push({ key: k, name: (CLUBS[k] || {}).name || k,
+                 division: 'Not on this season’s roster', rec: CLUBS[k], isNL: false });
+    });
+    return out;
+  }
+
+  function matches(row) {
+    if (!FIND) return true;
+    var hay = [row.name, row.key];
+    var users = (row.rec && row.rec.users) || {};
+    Object.keys(users).forEach(function (id) { hay.push((users[id] || {}).name || ''); });
+    return hay.join(' ').toLowerCase().indexOf(FIND) > -1;
+  }
+
+  function codeCell(code, label) {
+    if (!code) return '<span class="cc-none">No code</span>';
+    return '<button class="cc-code" type="button" data-copy="' + esc(code) + '" ' +
+      'title="Copy ' + esc(label) + '">' + esc(code) + '</button>';
+  }
+
+  function userRow(clubKey, id, u) {
+    return '<li class="cc-user">' +
+      '<span class="cc-user__name">' + esc(u.name || 'Unnamed') + '</span>' +
+      '<span class="cc-user__code">' + codeCell(codeOf(u), u.name || 'this code') + '</span>' +
+      '<span class="cc-user__acts">' +
+        '<button class="cc-mini" type="button" data-reset-user="' + esc(clubKey) + '" data-id="' + esc(id) + '">Reset</button>' +
+        '<button class="cc-mini cc-mini--bad" type="button" data-drop-user="' + esc(clubKey) + '" data-id="' + esc(id) + '">Remove</button>' +
+      '</span>' +
+    '</li>';
+  }
+
+  function clubCard(row) {
+    var rec = row.rec, code = codeOf(rec);
+    var users = (rec && rec.users) || {};
+    var ids = Object.keys(users).sort(function (a, b) {
+      return String((users[a] || {}).name || '').localeCompare(String((users[b] || {}).name || ''));
+    });
+
+    var crest = row.isNL
+      ? '<img class="cc-crest" src="/assets/crests/National%20League%20rose.png" alt="">'
+      : NL.clubs.crestImgHtml(row.name, 'thumb', { className: 'cc-crest' });
+
+    return '<section class="cc-club' + (rec ? '' : ' is-missing') + '">' +
+      '<header class="cc-club__top">' +
+        crest +
+        '<div class="cc-club__id">' +
+          '<div class="cc-club__name">' + esc(row.name) + '</div>' +
+          '<div class="cc-club__div">' + esc(row.division) + '</div>' +
+        '</div>' +
+        '<div class="cc-club__code">' +
+          '<div class="cc-lbl">Club code</div>' +
+          codeCell(code, row.name + '’s club code') +
+        '</div>' +
+        '<div class="cc-club__acts">' +
+          (rec
+            ? '<button class="cc-mini" type="button" data-reset="' + esc(row.key) + '">Reset</button>' +
+              '<button class="cc-mini" type="button" data-add="' + esc(row.key) + '">Add a person</button>'
+            : '<button class="btn btn--secondary btn--sm" type="button" data-issue="' + esc(row.key) + '">Issue a code</button>') +
+        '</div>' +
+      '</header>' +
+      (ids.length
+        ? '<ul class="cc-users">' + ids.map(function (id) {
+            return userRow(row.key, id, users[id] || {});
+          }).join('') + '</ul>'
+        : '') +
+    '</section>';
+  }
+
+  function render() {
+    if (!seen.clubs || !seen.nl || !ROSTER.length) return;
+    var list = rows().filter(matches);
+    if (!list.length) {
+      $('out').innerHTML = '<p class="cc-note">Nothing matched that.</p>';
+      return;
+    }
+    $('out').innerHTML = list.map(clubCard).join('');
+    NL.clubs.wireCrestImgs($('out'));
+    wireRows();
+  }
+
+  /* ── Writing ─────────────────────────────────────────────────────────── */
+
+  /* Every reset says the same two things, because both are surprising: the
+     old code stops working for everyone holding it, and it does NOT stop
+     working immediately. A claim lives in a token until it refreshes. */
+  var LAG = 'A session already open keeps working for up to an hour — the ' +
+    'reset applies to the next sign-in.';
+
+  function issue(key, name) {
+    var code = mint();
+    var path = key === 'NL' ? 'nl' : 'clubs/' + key;
+    var payload = { name: name, passcode: code, addedAt: firebase.database.ServerValue.TIMESTAMP };
+    return ref(path).update(payload).then(function () {
+      NL.writeAudit('club-code-issue', { club: key, clubName: name });
+      NL.toast('Code issued for ' + name, 'success');
+    });
+  }
+
+  function resetClub(key) {
+    var rec = key === 'NL' ? NLREC : CLUBS[key];
+    if (!rec) return;
+    var name = rec.name || key;
+    NL.confirm('Reset <strong>' + esc(name) + '</strong>’s club code?<br><br>' +
+      'Everyone at the club is using this one — Programme Packs, the Handbook and ' +
+      'the Club Directory all open on it, so you will need to send the new code out. ' +
+      LAG + '<br><br>Any named people at the club keep their own codes.',
+      { title: 'Reset club code', html: true, confirmText: 'Reset', variant: 'danger' })
+      .then(function (ok) {
+        if (!ok) return;
+        var path = key === 'NL' ? 'nl' : 'clubs/' + key;
+        var patch = {};
+        patch[codeField(rec)] = mint();
+        patch.rotatedAt = firebase.database.ServerValue.TIMESTAMP;
+        return ref(path).update(patch).then(function () {
+          NL.writeAudit('club-code-reset', { club: key, clubName: name });
+          NL.toast('New code issued for ' + name, 'success');
+        });
+      })['catch'](function (e) { NL.toast('Could not reset: ' + e.message, 'error'); });
+  }
+
+  function addUser(key) {
+    var rec = key === 'NL' ? NLREC : CLUBS[key];
+    if (!rec) return;
+    NL.prompt('Their name, as it should appear in the audit trail and on their screen.',
+      { title: 'Add a person at ' + (rec.name || key), confirmText: 'Add', placeholder: 'Name' })
+      .then(function (name) {
+        name = String(name || '').trim();
+        if (!name) return;
+        var path = (key === 'NL' ? 'nl' : 'clubs/' + key) + '/users';
+        return ref(path).push({
+          name: name, code: mint(),
+          addedAt: firebase.database.ServerValue.TIMESTAMP
+        }).then(function () {
+          NL.writeAudit('club-code-add-person', { club: key, clubName: rec.name || key, person: name });
+          NL.toast(name + ' added', 'success');
+        });
+      })['catch'](function (e) { NL.toast('Could not add: ' + e.message, 'error'); });
+  }
+
+  function userAt(key, id) {
+    var rec = key === 'NL' ? NLREC : CLUBS[key];
+    return ((rec && rec.users) || {})[id] || null;
+  }
+
+  function resetUser(key, id) {
+    var u = userAt(key, id);
+    if (!u) return;
+    NL.confirm('Reset the code for <strong>' + esc(u.name || 'this person') + '</strong>?<br><br>' +
+      LAG + '<br><br>Nobody else is affected — the club code and everyone else’s stay as they are.',
+      { title: 'Reset code', html: true, confirmText: 'Reset', variant: 'danger' })
+      .then(function (ok) {
+        if (!ok) return;
+        var path = (key === 'NL' ? 'nl' : 'clubs/' + key) + '/users/' + id;
+        var patch = {};
+        patch[codeField(u)] = mint();
+        patch.rotatedAt = firebase.database.ServerValue.TIMESTAMP;
+        return ref(path).update(patch).then(function () {
+          NL.writeAudit('club-code-reset-person', { club: key, person: u.name || id });
+          NL.toast('New code issued for ' + (u.name || 'them'), 'success');
+        });
+      })['catch'](function (e) { NL.toast('Could not reset: ' + e.message, 'error'); });
+  }
+
+  function dropUser(key, id) {
+    var u = userAt(key, id);
+    if (!u) return;
+    NL.confirm('Remove <strong>' + esc(u.name || 'this person') + '</strong>?<br><br>' +
+      'Their code stops opening anything. ' + LAG,
+      { title: 'Remove person', html: true, confirmText: 'Remove', variant: 'danger' })
+      .then(function (ok) {
+        if (!ok) return;
+        var path = (key === 'NL' ? 'nl' : 'clubs/' + key) + '/users/' + id;
+        return ref(path).remove().then(function () {
+          NL.writeAudit('club-code-remove-person', { club: key, person: u.name || id });
+          NL.toast('Removed', 'success');
+        });
+      })['catch'](function (e) { NL.toast('Could not remove: ' + e.message, 'error'); });
+  }
+
+  function issueMissing() {
+    var missing = rows().filter(function (r) { return !r.rec; });
+    if (!missing.length) { NL.toast('Every club already has a code', 'info'); return; }
+    NL.confirm('Issue a code to ' + missing.length + ' club' + (missing.length === 1 ? '' : 's') +
+      ' that do not have one?<br><br>Nothing already issued is touched.',
+      { title: 'Issue missing codes', html: true, confirmText: 'Issue' })
+      .then(function (ok) {
+        if (!ok) return;
+        /* One at a time, because each mint has to see the codes the previous
+           one just used — minting them all against the same snapshot is how
+           two clubs end up sharing a code. */
+        return missing.reduce(function (chain, r) {
+          return chain.then(function () { return issue(r.key, r.name); });
+        }, Promise.resolve());
+      })['catch'](function (e) { NL.toast('Could not issue: ' + e.message, 'error'); });
+  }
+
+  /* ── Wiring ──────────────────────────────────────────────────────────── */
+
+  function wireRows() {
+    var root = $('out');
+    root.querySelectorAll('[data-copy]').forEach(function (b) {
+      b.addEventListener('click', function () { NL.copy(b.getAttribute('data-copy')); });
+    });
+    root.querySelectorAll('[data-reset]').forEach(function (b) {
+      b.addEventListener('click', function () { resetClub(b.getAttribute('data-reset')); });
+    });
+    root.querySelectorAll('[data-add]').forEach(function (b) {
+      b.addEventListener('click', function () { addUser(b.getAttribute('data-add')); });
+    });
+    root.querySelectorAll('[data-issue]').forEach(function (b) {
+      var k = b.getAttribute('data-issue');
+      b.addEventListener('click', function () {
+        var r = rows().filter(function (x) { return x.key === k; })[0];
+        if (r) issue(k, r.name)['catch'](function (e) { NL.toast('Could not issue: ' + e.message, 'error'); });
+      });
+    });
+    root.querySelectorAll('[data-reset-user]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        resetUser(b.getAttribute('data-reset-user'), b.getAttribute('data-id'));
+      });
+    });
+    root.querySelectorAll('[data-drop-user]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        dropUser(b.getAttribute('data-drop-user'), b.getAttribute('data-id'));
+      });
+    });
+  }
+
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function () {
+    $('find').addEventListener('input', function () {
+      FIND = this.value.trim().toLowerCase();
+      render();
+    });
+    $('issueAll').addEventListener('click', issueMissing);
+
+    NL.ensureAuth().then(function () {
+      return NL.clubs.forSeason();
+    }).then(function (clubs) {
+      ROSTER = clubs || [];
+      render();
+      watch();
+    })['catch'](function (e) { fail('starting up', e); });
+  };
+
+  if (window._toolDeferredSession) {
+    window.TOOL.boot(window._toolDeferredSession);
+    delete window._toolDeferredSession;
+  }
+})();
+</script>
+
+</body>
+</html>

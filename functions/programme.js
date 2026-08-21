@@ -132,27 +132,53 @@ function storedCode(rec) {
 }
 
 function pickClub(cfg, code) {
-  const clubs = (cfg && cfg.clubs) || {};
-  const all = Object.keys(clubs).map((k) => ({ key: k, rec: clubs[k] }));
-  if (cfg && cfg.nl) all.push({ key: "NL", rec: cfg.nl });
-  /* An empty typed code matches nothing, and an empty STORED code is matched by
-     nothing. safeEqual('','') is true, so a half-finished record — a club added
-     before its code was minted — would otherwise open for anyone submitting a
-     blank. The caller's four-character floor covers it today, but that is one
-     guard in one caller; the door refuses on its own account. Same shape as
-     club-code.js, which got this line first. */
+  /* An EMPTY typed code matches nothing, and an empty STORED code is matched
+     by nothing. Both halves are needed and neither is theoretical:
+     safeEqual('','') is true, so a record whose code field is missing or blank
+     — a half-finished entry, a club added before its code was minted — would
+     open for anybody submitting an empty string. The trigger does reject
+     anything under four characters before it reaches here, but that is one
+     guard, in one caller, in a different function from the door it protects.
+     The door refuses on its own account. */
   if (!code) return null;
-  return all.find((c) =>
-    c.rec && !c.rec.revoked &&
-    storedCode(c.rec) !== "" &&
-    safeEqual(storedCode(c.rec), code)) || null;
+
+  /* TWO KINDS OF HOLDER, ONE GRANT.
+     A club has a MASTER code — the one the 72 already hold — and may have
+     NAMED people, each with their own. A named code grants exactly what the
+     master grants: same club, same claim, so every rule and permission is
+     identical. What it adds is attribution — `who` reaches the audit trail
+     and the identity bar. It is not a role. Anyone needing different
+     PERMISSIONS needs an account (system/roles-and-access-plan.md).
+
+     Revoking the CLUB revokes its people with it, which is why the club
+     record's flag is checked on every entry and not just its own. */
+  const clubs = (cfg && cfg.clubs) || {};
+  const entries = [];
+  const add = (key, rec, codeRec, who, userId) => {
+    entries.push({ key, rec, codeRec, who: who || "", userId: userId || "" });
+  };
+  Object.keys(clubs).forEach((k) => {
+    const rec = clubs[k];
+    if (!rec) return;
+    add(k, rec, rec, "");
+    const users = rec.users || {};
+    Object.keys(users).forEach((id) => {
+      if (users[id]) add(k, rec, users[id], users[id].name, id);
+    });
+  });
+  if (cfg && cfg.nl) add("NL", cfg.nl, cfg.nl, "");
+
+  return entries.find((e) =>
+    !e.rec.revoked && !e.codeRec.revoked &&
+    storedCode(e.codeRec) !== "" &&
+    safeEqual(storedCode(e.codeRec), code)) || null;
 }
 
 /* Resolve the codes. Character-for-character the same as club-code.js's copy,
    deliberately: two doors onto one credential must never disagree about where
-   it lives, and the shared test asserts they do not. Two fallbacks, both on
-   their way out, both logged so production says which one answered — the
-   `config` wrapper, and the per-tool node these came from.
+   it lives, and the shared test asserts they do not. One fallback left — the
+   `config` wrapper — logged so production says when it answered. The per-tool
+   node went with the data on 21/08/2026.
 
    Returns {} rather than throwing when nothing is found: an unreadable config
    must refuse everyone, not 500 on every attempt. */
@@ -171,11 +197,6 @@ async function readCodes(db, who) {
     return wrapped;
   }
 
-  const legacy = (await db.ref(ROOT + "/config").once("value")).val();
-  if (legacy && legacy.clubs) {
-    logger.info(who + ": codes read from the OLD location");
-    return legacy;
-  }
   return {};
 }
 
@@ -301,13 +322,27 @@ exports.programmeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
          one would make the two gates fight: signInWithCustomToken REPLACES the
          session, so whichever tool you opened last would be the only one that
          worked. Additive — nothing reads `club` here yet. */
-      .createCustomToken("pp-" + hit.key, { pClub: hit.key, club: hit.key });
+      .createCustomToken(
+        /* A named holder gets their own uid so the audit names a person; a
+           master-code holder keeps the shared one. Keyed on the userId rather
+           than the name: two people called Dave at one club must not collapse
+           into one identity, and a rename must not orphan the trail. */
+        hit.userId ? "pp-" + hit.key + "-" + hit.userId : "pp-" + hit.key,
+        (() => {
+          const c = { pClub: hit.key, club: hit.key };
+          if (hit.who) c.who = hit.who;
+          return c;
+        })()
+      );
 
-    logger.info("programmeAuth: club granted", { club: hit.key });
+    /* The person's name is not logged — the club key and a timestamp answer
+       everything this log is asked. */
+    logger.info("programmeAuth: club granted", { club: hit.key, named: !!hit.userId });
     return grant({
       ok: true,
       customToken,
       isNL: hit.key === "NL",
+      who: hit.who || "",
       club: {
         code: hit.key,
         name: hit.rec.name || (hit.key === "NL" ? "National League" : hit.key),
