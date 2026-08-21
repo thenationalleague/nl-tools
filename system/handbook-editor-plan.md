@@ -1,7 +1,9 @@
 # Handbook editor — making it usable
 
-**Status: plan, not built. Drafted 21/08/2026** after Richard: *"the editor is
-a mess. it is way too tricky. this is unusable really."*
+**Status: §3.1–3.4 BUILT 21/08/2026 (handbook v0.40). §3.5 parked.**
+
+Drafted and built 21/08/2026, after Richard: *"the editor is a mess. it is way
+too tricky. this is unusable really."*
 
 He is right, and it is measurable rather than a matter of taste.
 
@@ -137,14 +139,39 @@ of this pass. Recorded so the next person does not re-derive it.
 
 ---
 
-## 5. Suggested order
+## 4a. What shipped (handbook v0.40, 21/08/2026)
 
-1. **3.2** (an hour, halves the noise, zero risk) — ship on its own so the
-   improvement is visible immediately.
-2. **3.1** (the real fix).
-3. **3.4** with 3.1, since the toolbar is being rewritten anyway.
-4. **3.3** after, once the floating toolbar is proven.
+§3.1, §3.2, §3.3 and §3.4 all landed together rather than in the staged order
+below — the toolbar rewrite touched the same code as the renames and the
+keyboard bindings, so splitting them would have meant editing the same twenty
+lines three times.
+
+Two things the plan did not anticipate, both found while building:
+
+**A bar press blurs the clause you are typing in, and that blur is what saves
+it.** The save is async, so an op firing immediately would clone a stale
+`S.nodes` and commit the typing away again. Preventing the blur is not the fix
+— then the typing is never saved at all. The blur has to happen and the op has
+to wait, so the pending save is held on `S.pendingSave` and every bar action
+awaits it.
+
+**Clicking a clause has to select it even where nothing focusable is under the
+pointer** — the number, the padding, a table cell. `focusin` alone follows the
+caret, and a table has no caret of its own, so the bar would go stale on
+exactly the content most likely to need reordering.
+
+§3.5 (per-level numbering) remains parked and remains the right diagnosis.
+
+## 5. The order this was planned in (kept for the record)
+
+1. **3.2** — an hour, halves the noise, zero risk.
+2. **3.1** — the real fix.
+3. **3.4** with 3.1, since the toolbar was being rewritten anyway.
+4. **3.3** after, once the floating toolbar was proven.
 5. **3.5** never, until someone asks.
+
+In the event 1–4 shipped together; see §4a. Only 5 is still open, and it is
+still a no.
 
 ---
 
