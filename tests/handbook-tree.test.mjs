@@ -300,9 +300,19 @@ test('the clause name is the clause, not another button', () => {
   assert.match(PAGE, /\.hb-bar button\.hb-bar__num \{/);
 });
 
-test('the mode note lost the half that repeated the Edit button', () => {
+test('the mode note says nothing while you are editing', () => {
+  /* It said "Editing the draft · numbers recalculate live", then — once the
+     half repeating the lit Edit button was cut — "Numbers recalculate as you
+     edit". Both were waffle: a clause number is not editable text, so nobody
+     types one and gets corrected, and the first clause anyone moves renumbers
+     the document in front of them. Richard: "surely dewaffle? why is this
+     worthy of full time place."
+
+     The two states left each answer a question the screen raises. */
   assert.ok(!/Editing the draft/.test(CODE));
-  assert.match(CODE, /'Numbers recalculate as you edit'/);
+  assert.ok(!/recalculate/.test(CODE), 'nothing explains the numbering in the bar');
+  assert.match(CODE, /'Read-only access'/, 'why there is no Edit button');
+  assert.match(CODE, /' is editing this area'/, 'why pressing it takes an area off someone');
   /* And it shrinks before the buttons wrap — a run of unbreakable text in the
      middle of the bar is what pushed Publish onto a third row. */
   const note = /\.ce-mode-note \{([^}]*)\}/.exec(PAGE);
