@@ -140,7 +140,7 @@ test('the tool name is cleaned before it is stored', () => {
 test('both club-facing doors say which tool they are', () => {
   /* Without this the log records that someone signed in and not what they
      opened, which is half the question that was asked. */
-  const hb = readFileSync(join(REPO, 'handbook/reader.html'), 'utf8');
+  const hb = readFileSync(join(REPO, 'handbook/reader/index.html'), 'utf8');
   const dir = readFileSync(join(REPO, 'club-directory/reader/index.html'), 'utf8');
   assert.match(hb, /viaFunction\('app-data\/club-codes', \{ tool: 'handbook' \}\)/);
   assert.match(dir, /viaFunction\('app-data\/club-codes', \{ tool: 'directory' \}\)/);
