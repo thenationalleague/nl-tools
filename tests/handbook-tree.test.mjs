@@ -226,6 +226,90 @@ test('localStorage being unavailable does not take the review down', () => {
   assert.match(fn.slice(0, 400), /catch \(e\) \{ return false; \}/);
 });
 
+/* ------------------------------------------------------------ the toolbars
+
+   Reported with a screenshot, a yellow ring drawn round the fold levels:
+   "unformatted in yellow here. and generally very confusing toolbar i think.
+   plus alignment of top buttons etc. needs to be neat, aligned, graceful,
+   userfriendly, clear."
+
+   The ring was literal — those four were raw browser buttons. The wider
+   complaint was four button idioms in one row. */
+
+test('every control in either bar is one height', () => {
+  /* Including canon .btn, which is a CTA size: left alone it is the tallest
+     thing in the row and the bar reads as a pile rather than a line. */
+  assert.match(PAGE, /\.ce-bar, \.hb-bar \{ --tool-h:/);
+  const shared = /\.ce-tool, \.hb-bar button, \.hb-bar select \{([^}]*)\}/.exec(PAGE);
+  assert.ok(shared, 'the two bars share one control rule');
+  assert.match(shared[1], /height: var\(--tool-h\)/);
+  assert.match(PAGE, /\.ce-bar \.btn \{ height: var\(--tool-h\)/);
+  assert.match(PAGE, /\.ce-seg \{[\s\S]{0,120}height: var\(--tool-h\)/);
+});
+
+test('the fold levels are styled at all', () => {
+  /* .ce-fold button set a padding and nothing else. It was written expecting
+     to inherit .hb-bar button; it lives in .ce-bar. */
+  assert.ok(!/\.ce-fold\b/.test(CODE), 'the orphan rule is gone');
+  assert.match(PAGE, /<span class="ce-seg" id="ceFoldSeg">/,
+    'they use the segmented control the mode switch already uses');
+});
+
+test('fold-to says which level it folded to', () => {
+  /* It could say what it would do and never what it had done — so "am I
+     looking at the whole area or at three levels of it" was a question the
+     bar could have answered and didn't. */
+  assert.match(CODE, /function syncFoldSeg/);
+  assert.match(CODE, /S\.foldLevel = lvl;/);
+  assert.match(CODE, /=== S\.foldLevel/);
+});
+
+test('a hand-made fold clears the claim', () => {
+  /* After one twisty the document is not at a level any more, and a lit 2
+     would be the bar stating something untrue. */
+  const tw = CODE.slice(CODE.indexOf("var tw = e.target.closest('[data-fold-id]')"));
+  assert.match(tw.slice(0, 400), /S\.foldLevel = null; syncFoldSeg\(\);/);
+  assert.match(CODE, /S\.collapsed = \{\}; S\.foldLevel = null;/,
+    'and changing area clears it too');
+});
+
+test('groups are separated by space, not by a drawn line', () => {
+  /* A divider on a group's ::before is right until the bar wraps, and then it
+     opens a row: a vertical line in the margin with nothing to its left. The
+     clause bar's .sep elements did both ends of that — one stranded at the
+     end of a row, another leading the next. */
+  assert.ok(!/\.ce-grp::before/.test(PAGE), 'no ruled divider on the top bar');
+  assert.ok(!/class="sep"/.test(PAGE), 'and none in the clause bar');
+  assert.match(PAGE, /\.hb-bar__ops \{[^}]*gap: 4px 16px/, 'tight inside a group, loose between');
+  assert.match(PAGE, /\.hb-grp \{/);
+});
+
+test('the two area actions wrap together, and inside themselves', () => {
+  /* Review changes then publish is a sequence; one dropping to a row alone
+     breaks it. And side by side they are wider than a 390px screen. */
+  assert.match(PAGE, /<div class="ce-acts">/);
+  const rule = /\.ce-acts \{([^}]*)\}/.exec(PAGE);
+  assert.match(rule[1], /margin-left: auto/);
+  assert.match(rule[1], /flex-wrap: wrap/);
+});
+
+test('the clause name is the clause, not another button', () => {
+  /* .hb-bar__num asked for red borderless text and lost every declaration to
+     .hb-bar button — same specificity, plus an element. The bar drew a
+     grey-bordered box in body colour and the stylesheet said otherwise. */
+  assert.match(PAGE, /\.hb-bar button\.hb-bar__num \{/);
+});
+
+test('the mode note lost the half that repeated the Edit button', () => {
+  assert.ok(!/Editing the draft/.test(CODE));
+  assert.match(CODE, /'Numbers recalculate as you edit'/);
+  /* And it shrinks before the buttons wrap — a run of unbreakable text in the
+     middle of the bar is what pushed Publish onto a third row. */
+  const note = /\.ce-mode-note \{([^}]*)\}/.exec(PAGE);
+  assert.match(note[1], /text-overflow: ellipsis/);
+  assert.match(note[1], /min-width: 0/);
+});
+
 test('the offer says what putting them back would do', () => {
   /* "Restore them" is two words for replacing every clause in five areas. */
   assert.match(CODE, /replaces the whole draft/);
