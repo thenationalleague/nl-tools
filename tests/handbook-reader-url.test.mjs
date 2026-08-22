@@ -75,11 +75,29 @@ test('the stub is a signpost, not a second reader', () => {
 /* ----------------------------------------------------------------- the 404 */
 
 test('a wrong address gets an NL page, not GitHub’s', () => {
-  assert.match(NOTFOUND, /class="nl-idbar nl-idbar--open"/,
-    'the navy bar: by canon it means nobody was asked who you are, which is a 404');
   assert.match(NOTFOUND, /Page not found/);
-  assert.match(NOTFOUND, /href="\/"/, 'a door for staff');
-  assert.match(NOTFOUND, /href="\/handbook\/reader\/"/, 'and one for clubs');
+  assert.match(NOTFOUND, /nl-brand\.css/, 'on brand');
+  assert.match(NOTFOUND, /National%20League%20rose\.png"\s+alt=/, 'and says whose site it is');
+});
+
+test('the 404 has no bar and goes nowhere', () => {
+  /* Both were the page pretending to know things it does not. A bar is
+     chrome that belongs to a page, and there is no page here — it is the
+     absence of one. The two doors it offered, the portal and the handbook,
+     were a guess at who had arrived; this file is served to anyone, at any
+     path, before any gate. Richard: "404 SHOULDNt hav ehte topbar nor link
+     to anywhere."
+
+     What is left is whose site this is, that the page is not here, and the
+     address that failed. Back is the browser's job. */
+  /* Comments stripped: the page explains at length what it used to carry,
+     and a guard that fires on its own rationale is one somebody switches
+     off. */
+  const code = NOTFOUND.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  const body = code.slice(code.indexOf('<body'));
+  assert.ok(!/nl-idbar|nlTopbar|nl-topbar/.test(code), 'no bar');
+  assert.ok(!/<a\b/.test(body), 'and nothing to click');
+  assert.ok(!/<button\b/.test(body));
 });
 
 test('every reference on the 404 is absolute', () => {
@@ -87,7 +105,7 @@ test('every reference on the 404 is absolute', () => {
      relative reference would resolve against whatever path the visitor got
      wrong — the stylesheet would 404 on the 404. */
   const refs = [...NOTFOUND.matchAll(/(?:src|href)="([^"]+)"/g)].map((m) => m[1]);
-  assert.ok(refs.length >= 4, 'there are references to check');
+  assert.ok(refs.length >= 3, 'there are references to check');
   for (const r of refs) {
     assert.ok(/^(\/|https?:|data:|#)/.test(r), `${r} is not absolute`);
   }
