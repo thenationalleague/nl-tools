@@ -869,7 +869,11 @@ test('the icon buttons set neither fill nor stroke', () => {
   assert.ok(rule, '.hb-op is styled');
   assert.doesNotMatch(rule[1], /(^|[;{\s])fill\s*:/);
   assert.doesNotMatch(rule[1], /(^|[;{\s])stroke\s*:/);
-  assert.match(rule[1], /width:\s*28px/, 'square, so the glyph is centred rather than on a baseline');
+  /* Square, so the glyph is centred rather than sitting on a text baseline.
+     The side is --tool-h, the one height every control in either handbook bar
+     is set to — a literal here would drift the moment that changes, which is
+     what it did. */
+  assert.match(rule[1], /width:\s*var\(--tool-h\)/);
 });
 
 test('the Style Guide shows the new pair', () => {
