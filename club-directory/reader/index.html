@@ -15,6 +15,15 @@
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
 <!--
   club-directory / reader / index.html
+  v1.8 — (21/08/2026) The club grid holds a column count that divides 24.
+         Every division has 24 clubs, so a count that divides it fills its
+         last row and one that does not leaves an orphan row of stragglers
+         under a full grid. auto-fill was picking whatever fitted — five on a
+         laptop, which is 24 = four rows and four — and five is the one count
+         in range that never comes out even. 6 / 4 / 3 / 2 now.
+         The List/Cards switcher has gone from the top of the page; it is
+         drawn above a club's people by renderClub, so the index no longer
+         carries a control that does nothing there.
   v1.7 — (21/08/2026) It lands on the INDEX, with your club at the top of it,
          and the crests stop being a tax. Three things:
          · The landing page is the directory, not one entry. Opening straight
@@ -122,14 +131,14 @@
   Not lint-covered: no auth-guard, by design.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=59">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=31">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=32">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/system/nl-utils.js?v=44"></script>
 <script src="/club-directory/_gate.js?v=30"></script>
-<script src="/club-directory/_directory.js?v=31"></script>
+<script src="/club-directory/_directory.js?v=32"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -178,11 +187,23 @@
     color: var(--text-muted); margin: 0 0 12px;
     padding-bottom: 8px; border-bottom: 1px solid var(--border);
   }
+  /* FIXED COUNTS, AND ALL OF THEM DIVIDE 24. Every division has 24 clubs, so
+     a column count that divides 24 fills its last row; one that does not
+     leaves an orphan row of stragglers under a full grid. auto-fill was
+     picking whatever fitted — five on a laptop, which is 24 = 4 rows + 4 —
+     and five is the one count in range that never comes out even.
+
+     6 / 4 / 3 / 2. The same lesson is already written above .cd-facts in
+     _directory.css, one file over, where auto-fit had made the same mistake
+     for the same reason. */
   .rd-grid {
     list-style: none; margin: 0; padding: 0;
     display: grid; gap: 10px;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  @media (min-width: 560px)  { .rd-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  @media (min-width: 800px)  { .rd-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+  @media (min-width: 1180px) { .rd-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
   .rd-tile { margin: 0; }
   .rd-tile__go {
     display: flex; align-items: center; gap: 10px; width: 100%;
@@ -264,10 +285,6 @@
       <input class="cd-search__in" id="q" placeholder="Search clubs, people and job titles"
         aria-label="Search">
     </div></div>
-    <div class="cd-vw" id="view" role="group" aria-label="How to show people">
-      <button type="button" data-v="list">List</button>
-      <button type="button" data-v="cards">Cards</button>
-    </div>
     <div id="out"></div>
   </div>
 </div>
@@ -290,31 +307,26 @@
   var VIEW = 'list';
   try { VIEW = localStorage.getItem('nlcd-view') || 'list'; } catch (e) {}
 
+  /* The switcher is drawn by renderClub, above the people it applies to, and
+     is rebuilt on every draw — so this listens on the container rather than on
+     buttons that will not exist yet. */
   function wireView(redraw) {
-    var box = $('view');
-    if (!box) { return; }
-    var paint = function () {
-      box.querySelectorAll('button').forEach(function (b) {
-        var on = b.dataset.v === VIEW;
-        b.classList.toggle('is-on', on);
-        b.setAttribute('aria-pressed', on ? 'true' : 'false');
-      });
-    };
-    box.querySelectorAll('button').forEach(function (b) {
-      b.addEventListener('click', function () {
-        VIEW = b.dataset.v;
-        try { localStorage.setItem('nlcd-view', VIEW); } catch (e) {}
-        paint(); redraw();
-      });
+    var host = $('out');
+    if (!host) { return; }
+    host.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-view-switch] button');
+      if (!b) { return; }
+      VIEW = b.dataset.v;
+      try { localStorage.setItem('nlcd-view', VIEW); } catch (e2) {}
+      redraw();
     });
-    paint();
   }
 
   /* `club` is the club being RENDERED, not the club reading. showQuiet is
      loud only where those are the same: "Not published" and "None held" are a
      to-do list on your own entry and a column of noise on the other 71. */
   function viewOpts(extra) {
-    var o = { cards: VIEW === 'cards', capsSurname: true };
+    var o = { cards: VIEW === 'cards', viewSwitch: true };
     for (var k in (extra || {})) { o[k] = extra[k]; }
     if (o.club != null) { o.showQuiet = isOwn(o.club); delete o.club; }
     else { o.showQuiet = false; }

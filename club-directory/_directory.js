@@ -1,7 +1,19 @@
 /* =========================================================================
    NL Tools — Club Directory presentation
    File: /club-directory/_directory.js
-   Version: v1.7 (21/08/2026)
+   Version: v1.8 (22/08/2026)
+
+   v1.8 — viewSwitch(), and names set as their owners write them.
+   · The List/Cards switcher is built here, above the people it acts on,
+     instead of by each page above everything. Built by the page it also
+     appeared on the club INDEX, offering to show 72 crests as "list" or
+     "cards" when it does neither; drawIndex() does not call renderClub, so
+     building it here removes it from the index by construction. Exported,
+     because the editor's search results build their own list.
+   · displayName no longer capitalises the surname. The cue was real — it
+     says which word the list is sorted on — but the clubs fill this in
+     themselves and a screen full of SMITH teaches them to type SMITH, which
+     _tidy.js already has a rule to catch from the other end.
 
    v1.7 — the banner crest carries canon .nl-crest, so it is drawn in a square
    box rather than sized by the shape of the badge. decoding="async" with it.
@@ -254,19 +266,15 @@
     return bits.length > 1 ? bits[bits.length - 1] : whole;
   }
 
-  /* SMITH, not Smith. The handbook has always set surnames this way and the
-     reason survives the move to a screen: at a glance it tells you which word
-     the list is sorted on, which for a Welsh or Irish name — Owen Rhys Jones,
-     Sean Michael O'Brien — is otherwise a guess. */
-  function displayName(p, opts) {
-    var whole = fullName(p);
-    if (!(opts && opts.capsSurname) || !whole) { return esc(whole || 'Name not given'); }
-    var last = surnameOf(p);
-    var at = whole.toLowerCase().lastIndexOf(last.toLowerCase());
-    if (!last || at < 0) { return esc(whole); }
-    return esc(whole.slice(0, at)) +
-      '<span class="cd-sur">' + esc(whole.slice(at, at + last.length)) + '</span>' +
-      esc(whole.slice(at + last.length));
+  /* A name, as its owner writes it. The surname used to be set in capitals
+     here — the handbook does it, and it says which word the list is sorted
+     on — but a directory that DISPLAYS names in caps teaches the people
+     filling it in to TYPE them in caps, and _tidy.js already carries a rule
+     to catch names that arrive shouted. A display convention that has to be
+     defended against downstream is not worth the cue. Richard, 21/08/2026:
+     "think it'll confuse people who'll enter as caps." */
+  function displayName(p) {
+    return esc(fullName(p) || 'Name not given');
   }
 
   function bySurname(a, b) {
@@ -393,7 +401,7 @@
     return '<li class="cd-row' + (unlisted ? ' cd-row--unlisted' : '') + '"' +
       (p.id ? ' data-pid="' + esc(p.id) + '"' : '') +
       (ridx != null ? ' data-ridx="' + ridx + '"' : '') + '>' +
-      '<div class="cd-row__name">' + displayName(p, opts) + '</div>' +
+      '<div class="cd-row__name">' + displayName(p) + '</div>' +
       '<div class="cd-row__role">' +
         /* Escape each title, then join with the entity. Escaping the joined
            string turns the separator's own ampersand into &amp;middot; and
@@ -501,7 +509,7 @@
     return '<li class="cd-pc' + (unlisted ? ' cd-pc--unlisted' : '') + '"' +
       (p.id ? ' data-pid="' + esc(p.id) + '"' : '') + '>' +
       '<div class="cd-pc__top"><div class="cd-pc__id">' +
-        '<div class="cd-pc__name">' + displayName(p, opts) + '</div>' +
+        '<div class="cd-pc__name">' + displayName(p) + '</div>' +
       '</div></div>' +
       (jobs ? '<ul class="cd-pc__jobs">' + jobs + '</ul>' : '') +
       '<div class="cd-pc__lines">' + (lines || (!loud ? '' :
@@ -521,6 +529,20 @@
   }
 
   /* ---------------------------------------------------------------- render */
+  /* One definition, two callers: renderClub puts it above a club's people,
+     and the editor's search results build their own list without going
+     through renderClub. Two copies of a control is how the two drift. */
+  function viewSwitch(cards) {
+    return '<div class="cd-vw" data-view-switch role="group" aria-label="How to show people">' +
+      ['list', 'cards'].map(function (v) {
+        var on = (v === 'cards') === !!cards;
+        return '<button type="button" data-v="' + v + '"' +
+          (on ? ' class="is-on"' : '') +
+          ' aria-pressed="' + (on ? 'true' : 'false') + '">' +
+          (v === 'list' ? 'List' : 'Cards') + '</button>';
+      }).join('') + '</div>';
+  }
+
   function renderClub(rec, opts) {
     opts = opts || {};
     var info = rec.info || {};
@@ -541,6 +563,18 @@
         '<span class="cd-social__url">' + esc(u.replace(/^https?:\/\//i, '')) + '</span></a>';
     }).filter(Boolean).join('');
 
+    /* THE SWITCHER BELONGS TO THE PEOPLE, so it is built here rather than by
+       the page. It sat at the top of the reader and the editor alike, above
+       everything, which put it on the club INDEX too — a control offering to
+       show 72 crests as "list" or "cards" when it does neither. Richard:
+       "should be above people, not the whole thing. and not on the directory
+       page."
+
+       Built by renderClub, it appears exactly where it applies and nowhere
+       else: drawIndex() does not call this function, so the index loses it
+       without anyone having to remember to hide it. */
+    var switcher = (opts && opts.viewSwitch) ? viewSwitch(!!(opts && opts.cards)) : '';
+
     /* Cards are ungrouped by design — see personCard. One flat set of people,
        by surname, each carrying their own departments. */
     var depts = (opts && opts.cards)
@@ -555,6 +589,7 @@
             who.map(function (p) { return personRow(p, s, opts); }).join('') +
             '</ul></div>';
         }).filter(Boolean).join('');
+    if (depts) { depts = switcher + depts; }
 
     var pal = bannerColours(rec.club);
 
@@ -674,6 +709,7 @@
     arr: arr,
     rolesOf: rolesOf,
     renderClub: renderClub,
+    viewSwitch: viewSwitch,
     personRow: personRow,
     personCard: personCard,
     allPeople: allPeople,

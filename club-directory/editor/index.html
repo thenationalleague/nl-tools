@@ -592,7 +592,7 @@
   Not lint-covered: no auth-guard, by design.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=59">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=31">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=32">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
@@ -600,7 +600,7 @@
 <script src="/system/nl-utils.js?v=44"></script>
 <script src="/club-directory/_tidy.js?v=30"></script>
 <script src="/club-directory/_gate.js?v=30"></script>
-<script src="/club-directory/_directory.js?v=31"></script>
+<script src="/club-directory/_directory.js?v=32"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -1058,10 +1058,6 @@
       <input class="cd-search__in" id="q" placeholder="Search clubs, people and job titles"
         aria-label="Search">
     </div></div>
-    <div class="cd-vw" id="view" role="group" aria-label="How to show people">
-      <button type="button" data-v="list">List</button>
-      <button type="button" data-v="cards">Cards</button>
-    </div>
     <div id="out"></div>
     <div id="extra"></div>
   </div>
@@ -1084,32 +1080,27 @@
 
   function viewOpts(extra) {
     var o = { showHidden: true, showGaps: true,
-              cards: VIEW === 'cards', capsSurname: true };
+              cards: VIEW === 'cards', viewSwitch: true };
     for (var k in (extra || {})) { o[k] = extra[k]; }
     return o;
   }
 
+  /* Drawn by renderClub above the people it applies to, and rebuilt on every
+     draw — so this listens on the container rather than on buttons that do
+     not exist yet. Search results build their own list without renderClub, so
+     they get their own switcher below. */
   function wireView() {
-    var box = $('view');
-    if (!box) { return; }
-    var paint = function () {
-      box.querySelectorAll('button').forEach(function (b) {
-        var on = b.dataset.v === VIEW;
-        b.classList.toggle('is-on', on);
-        b.setAttribute('aria-pressed', on ? 'true' : 'false');
-      });
-    };
-    box.querySelectorAll('button').forEach(function (b) {
-      b.addEventListener('click', function () {
-        VIEW = b.dataset.v;
-        try { localStorage.setItem('nlcd-view', VIEW); } catch (e) {}
-        paint();
-        var q = $('q').value;
-        if (q.trim()) { onSearch({ target: { value: q } }); }
-        else if (current) { draw(current); }
-      });
+    var host = $('out');
+    if (!host) { return; }
+    host.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-view-switch] button');
+      if (!b) { return; }
+      VIEW = b.dataset.v;
+      try { localStorage.setItem('nlcd-view', VIEW); } catch (e2) {}
+      var q = $('q').value;
+      if (q.trim()) { onSearch({ target: { value: q } }); }
+      else if (current) { draw(current); }
     });
-    paint();
   }
   var PUBLISHED_AT = 0;
 
@@ -4614,8 +4605,9 @@
     if (!hits.length) { $('out').innerHTML = '<p class="cd-empty">Nothing matched that.</p>'; return; }
     var byClub = {};
     hits.forEach(function (h) { (byClub[h.club] = byClub[h.club] || []).push(h.person); });
-    $('out').innerHTML = Object.keys(byClub).sort().map(function (c) {
-      var cards = VIEW === 'cards';
+    var cards = VIEW === 'cards';
+    $('out').innerHTML = NLDirectory.viewSwitch(cards) +
+      Object.keys(byClub).sort().map(function (c) {
       return '<div class="cd-dept"><h3 class="cd-dept__h">' + esc(c) + '</h3>' +
         '<ul class="' + (cards ? 'cd-cards' : 'cd-rows') + '">' +
         byClub[c].sort(NLDirectory.bySurname).map(function (p) {
