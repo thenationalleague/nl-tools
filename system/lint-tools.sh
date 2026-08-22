@@ -67,7 +67,18 @@ fi
 # Narrower than SKIP — the tool stays checked for everything else. Exists so
 # --strict can gate on NEW drift while a tracked backlog is worked through.
 # A waiver is a promise to come back, not a fix; keep the reason honest.
-declare -a WAIVE_SLUG WAIVE_MATCH
+# =() not `declare -a`, and the difference is the whole bug. `declare -a X`
+# sets the ARRAY ATTRIBUTE and creates nothing, so under `set -u` the very
+# guard below — `${#WAIVE_SLUG[@]} == 0`, written to handle an empty waiver
+# list — was itself an unbound-variable error.
+#
+# It had never fired because is_waived() is only called when a page drifts,
+# and nothing had drifted since the check was written. The first drift found
+# it: lint stopped after three tools and STILL EXITED 0, so --strict would
+# have waved real drift through CI while reporting "clean". Found 22/08/2026
+# by moving four admin consoles into directories, which brought them under
+# the lint for the first time and turned up four stale auth-guard pins.
+WAIVE_SLUG=(); WAIVE_MATCH=()
 if [[ -f "$WAIVER_FILE" ]]; then
   while IFS= read -r line; do
     line="${line%%#*}"
