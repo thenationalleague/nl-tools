@@ -213,6 +213,90 @@ test('overdueOpen lists exactly the past-due unrecorded periods', () => {
   assert.deepEqual([...open].map((p) => p.key), ['2026-07', '2026-09']);
 });
 
+/* ── v2.0: requirement kinds ──────────────────────────────────────────── */
+
+test('quota: q-slots, every one due at season end', () => {
+  const p = CC.periodsFor({ kind: 'quota', quotaTarget: 4 }, '2026');
+  assert.equal(p.length, 4);
+  assert.equal(p[0].key, 'q1');
+  assert.equal(p[3].key, 'q4');
+  assert.equal(p[0].label, '1st of 4');
+  assert.equal(p[2].label, '3rd of 4');
+  for (const slot of p) assert.equal(CC.ymd(slot.due), '2027-06-30');
+});
+
+test('quota: slotDates give a slot its own deadline; undated slots stay season end', () => {
+  const q = { kind: 'quota', quotaTarget: 3, slotDates: { q1: '2026-09-15' } };
+  const p = CC.periodsFor(q, '2026');
+  assert.equal(CC.ymd(p[0].due), '2026-09-15');
+  assert.equal(p[0].planned, true);
+  assert.equal(CC.ymd(p[1].due), '2027-06-30');
+  assert.equal(p[1].planned, false);
+  /* a dated, undelivered slot escalates once its date passes */
+  const oct = new Date(2026, 9, 1);
+  assert.equal(CC.clubRollup(p, {}, oct).state, 'overdue');
+  assert.equal(CC.clubRollup(p, { q1: { state: 'compliant' } }, oct).state, 'clear');
+});
+
+test('dating a quota slot is scheduling, not a material edit', () => {
+  const q = { ...BASE, kind: 'quota', quotaTarget: 4 };
+  assert.equal(CC.isMaterialEdit(q, { ...q, slotDates: { q1: '2026-09-15' } }), false);
+});
+
+test('quota: missing/zero target clamps to 1', () => {
+  assert.equal(CC.periodsFor({ kind: 'quota' }, '2026').length, 1);
+  assert.equal(CC.periodsFor({ kind: 'quota', quotaTarget: 0 }, '2026').length, 1);
+});
+
+test('standing: verified by monthly spot-checks', () => {
+  const p = CC.periodsFor({ kind: 'standing' }, '2026');
+  assert.equal(p.length, 12);
+  assert.equal(p[0].key, '2026-07');
+  assert.equal(p[11].key, '2027-06');
+});
+
+test('quota rollup: nothing overdue until the season closes short', () => {
+  const q = { kind: 'quota', quotaTarget: 4 };
+  const periods = CC.periodsFor(q, '2026');
+  const midSeason = new Date(2026, 11, 1);
+  assert.equal(CC.clubRollup(periods, {}, midSeason).state, 'none');
+  assert.equal(CC.clubRollup(periods, { q1: { state: 'compliant' } }, midSeason).state, 'clear');
+  const afterEnd = new Date(2027, 6, 5);
+  const r = CC.clubRollup(periods, { q1: { state: 'compliant' } }, afterEnd);
+  assert.equal(r.state, 'overdue');
+  assert.equal(r.open, 3);
+});
+
+/* ── v2.0: per-club opt-in scope ──────────────────────────────────────── */
+
+test('appliesTo: clubScope narrows to opted-in clubs, divisions still gate', () => {
+  const o = { divisions: { National: true }, clubScope: { FYL: true, ALT: true } };
+  assert.equal(CC.appliesTo(o, 'National', 'FYL'), true);
+  assert.equal(CC.appliesTo(o, 'National', 'BOR'), false);
+  assert.equal(CC.appliesTo(o, 'North', 'FYL'), false);
+  /* division-level callers (no club) get false when a scope exists */
+  assert.equal(CC.appliesTo(o, 'National'), false);
+});
+
+test('appliesTo: empty or all-false clubScope means every club', () => {
+  const base = { divisions: { National: true } };
+  assert.equal(CC.appliesTo(base, 'National', 'FYL'), true);
+  assert.equal(CC.appliesTo({ ...base, clubScope: {} }, 'National', 'FYL'), true);
+  assert.equal(CC.appliesTo({ ...base, clubScope: { FYL: false } }, 'National', 'BOR'), true);
+});
+
+/* ── v2.0: material fields ────────────────────────────────────────────── */
+
+test('kind, quota, scope and clubScope changes are material; assetId is not', () => {
+  assert.equal(CC.isMaterialEdit(BASE, { ...BASE, kind: 'quota' }), true);
+  assert.equal(CC.isMaterialEdit({ ...BASE, kind: 'quota', quotaTarget: 4 }, { ...BASE, kind: 'quota', quotaTarget: 6 }), true);
+  assert.equal(CC.isMaterialEdit(BASE, { ...BASE, scope: 'central' }), true);
+  assert.equal(CC.isMaterialEdit(BASE, { ...BASE, clubScope: { FYL: true } }), true);
+  assert.equal(CC.isMaterialEdit(BASE, { ...BASE, assetId: 'a-different-asset' }), false);
+  /* defaults normalise: absent kind == 'recurring', absent scope == 'clubs' */
+  assert.equal(CC.isMaterialEdit(BASE, { ...BASE, kind: 'recurring', scope: 'clubs' }), false);
+});
+
 /* ── states ───────────────────────────────────────────────────────────── */
 
 test('nextState cycles outstanding → compliant → non-compliant', () => {
