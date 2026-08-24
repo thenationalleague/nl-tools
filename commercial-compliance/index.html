@@ -1,0 +1,983 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Commercial Compliance
+  Version: v1.0 (24/08/2026)
+  File: /commercial-compliance/index.html
+
+  Partner obligation matrix, per-club compliance tick-sheet and 72-club status
+  dashboard for commercial proof-of-delivery.
+
+  v1 is the commercial-team side only (settled 24/08/2026): commercial defines
+  obligations (asset × partner × cadence × divisions × acceptance criteria),
+  records each club's compliance directly, and reads a 72-club dashboard plus
+  an escalation list of everything past deadline. Clubs see nothing yet — a
+  club-facing door on the club code is a later phase, and the review
+  (approve/reject) machinery arrives with it, not before.
+
+  Model:
+  - An obligation spawns deadline-bearing PERIODS from its cadence
+    (season | monthly | weekly) — logic in _shared.js (CC.*), tested in
+    tests/commercial-compliance.test.mjs.
+  - Status attaches to a period per club. Absent = outstanding; recorded
+    states are compliant | non-compliant, with optional evidence link + note.
+  - Material edits (partners, cadence, due rule, divisions, criteria) bump
+    the obligation version after a confirm; recorded statuses keep the
+    version they satisfied. Title/notes edits are cosmetic.
+  - Delete is retire (history kept). Hard delete only with zero recorded
+    statuses.
+
+  Storage (RTDB):
+    app-data/ops-commercial-compliance/partners/<pid>            partner registry
+    app-data/ops-commercial-compliance/obligations/<oid>         obligation + versions/<v> history
+    app-data/ops-commercial-compliance/status/<oid>/<period>/<clubCode>
+                                                                 per-club period status
+    tools/ops-commercial-compliance                              tool registration
+
+  Access (auth-guard registry):
+    access → read-only dashboard; admin → record + edit; defaults keep staff
+    off — grants are per-user (commercial team + superadmin).
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Commercial Compliance — NL Tools</title>
+  <!-- Favicons. Static, not injected: nl-topbar.js adds these too, but a
+       standalone page never loads it, and an icon that arrives with the JS
+       leaves the tab blank until it does. /favicon.ico at the root is the
+       backstop every browser asks for without being told. -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+
+  <!-- Brand stylesheet (lint canonical: ?v=45) -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=59">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'Commercial Compliance',
+      toolKey: 'ops-commercial-compliance'
+    };
+    var NL_TOOL_KEY = 'ops-commercial-compliance';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '24/08/2026',
+        version: 'v1.0',
+        items: [
+          'Obligation editor: asset × partners × cadence × divisions × acceptance criteria.',
+          'Material edits version the obligation; statuses keep the version they satisfied.',
+          'Per-period tick-sheet per club: compliant / non-compliant / outstanding + evidence link.',
+          '72-club dashboard with division filter and CSV export.',
+          'Escalation list of proofs past deadline, with templated chase emails.'
+        ]
+      }
+    ];
+
+    /* auth-guard fires this once the session is verified + pageWrap is
+       revealed. Boot the main app from here so RTDB reads happen with a
+       live auth token. Do NOT read RTDB before this fires. */
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts (lint canonical: ?v=39 / ?v=9 / ?v=12) -->
+  <script src="/system/nl-utils.js?v=44"></script>
+  <script src="/system/nl-topbar.js?v=10"></script>
+  <script src="/system/auth-guard.js?v=16"></script>
+
+  <!-- Tool-local pure logic (periods, versioning, rollups) — tested in node -->
+  <script src="/commercial-compliance/_shared.js?v=1"></script>
+
+<style>
+  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
+     style.display = 'block'. Don't clear with '' — would re-trigger the
+     brand rule and re-hide the page. */
+
+  .cc-crest { width: 20px; height: 20px; object-fit: contain; vertical-align: -4px; margin-right: 8px; }
+
+  /* Dashboard grid: sticky club column so 12+ obligation columns can scroll
+     under it. Backgrounds restated because sticky cells otherwise show the
+     rows sliding beneath them. */
+  #dashTable th:first-child, #dashTable td:first-child {
+    position: sticky; left: 0; z-index: 1;
+    background: var(--white) !important;
+  }
+  #dashTable th:first-child { background: var(--navy) !important; z-index: 2; }
+  #dashTable tr:hover td:first-child { background: var(--off-white) !important; }
+
+  /* Rollup cells */
+  .cc-cell { cursor: pointer; text-align: center; white-space: nowrap; font-variation-settings: 'wght' 800; }
+  .cc-cell small { font-variation-settings: 'wght' 600; color: var(--text-muted); margin-left: 4px; }
+  .cc-st--clear   { color: var(--green); }
+  .cc-st--overdue { color: var(--amber); }
+  .cc-st--failed  { color: var(--red); }
+  .cc-st--none    { color: var(--text-muted); }
+  .cc-st--na      { color: var(--border); cursor: default; }
+
+  /* Period rows inside the club × obligation modal */
+  .cc-period { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .cc-period:last-child { border-bottom: none; }
+  .cc-period__when { flex: 1 1 160px; min-width: 140px; }
+  .cc-period__due { font-size: var(--text-xs); color: var(--text-muted); }
+  .cc-period__due.is-overdue { color: var(--amber-deep, var(--amber)); font-variation-settings: 'wght' 700; }
+  .cc-stateseg { display: flex; gap: 2px; background: var(--off-white); border-radius: var(--radius); padding: 3px; }
+  /* State-coloured takes on the canon segmented chip: own modifier names,
+     same specificity as .chip.active, later in the cascade so they win. */
+  .cc-stateseg .active--clear  { background: var(--green); color: var(--white); }
+  .cc-stateseg .active--fail   { background: var(--red); color: var(--white); }
+  .cc-stateseg .active--out    { background: var(--navy); color: var(--white); }
+  .cc-evidence { font-size: var(--text-xs); color: var(--text-muted); flex-basis: 100%; overflow-wrap: anywhere; }
+  .cc-evidence a { color: var(--navy); }
+
+  /* Escalation list */
+  .cc-esc-items { margin: 0; padding-left: 18px; }
+  .cc-esc-items li { margin: 2px 0; }
+
+  .cc-partner-tag { display: inline-block; background: var(--off-white); border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; font-size: var(--text-xs); margin: 1px 4px 1px 0; white-space: nowrap; }
+  .cc-version { font-size: var(--text-xs); color: var(--text-muted); }
+  .cc-criteria { font-size: var(--text-xs); color: var(--text-muted); max-width: 320px; }
+  .cc-actions { white-space: nowrap; }
+  .cc-actions > * + * { margin-left: 6px; }
+</style>
+</head>
+<body>
+
+<!-- Topbar — auto-rendered by /system/nl-topbar.js from window.NL_TOOL -->
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="page">
+
+    <div class="banner banner--info" id="roBanner" style="display:none">
+      Read-only view — recording and editing need admin access on this tool.
+    </div>
+
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-tab="dashboard" role="tab">Dashboard</button>
+      <button class="tab" data-tab="obligations" role="tab">Obligations</button>
+      <button class="tab" data-tab="escalation" role="tab">Escalation</button>
+    </div>
+
+    <!-- ── Dashboard ─────────────────────────────────────────────────── -->
+    <section id="viewDashboard">
+      <div class="stats">
+        <div class="stat"><div class="stat__num" id="stClear" style="color:var(--green)">–</div><div class="stat__label">Clubs clear</div></div>
+        <div class="stat"><div class="stat__num" id="stBehind" style="color:var(--amber)">–</div><div class="stat__label">Clubs behind</div></div>
+        <div class="stat"><div class="stat__num" id="stOverdue" style="color:var(--red)">–</div><div class="stat__label">Proofs past deadline</div></div>
+        <div class="stat"><div class="stat__num" id="stObs">–</div><div class="stat__label">Active obligations</div></div>
+      </div>
+
+      <div class="filter-bar">
+        <div class="chip-group" id="divChips">
+          <button class="chip active" data-div="all">All divisions</button>
+          <button class="chip" data-div="National">National</button>
+          <button class="chip" data-div="North">North</button>
+          <button class="chip" data-div="South">South</button>
+        </div>
+        <select class="nl-select" id="obFilter"><option value="all">All obligations</option></select>
+        <span style="flex:1"></span>
+        <button class="btn btn--ghost btn--sm" id="btnExport">Export CSV</button>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table table--compact" id="dashTable">
+          <thead><tr><th>Club</th></tr></thead>
+          <tbody><tr class="loading-row"><td>Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ── Obligations ───────────────────────────────────────────────── -->
+    <section id="viewObligations" style="display:none">
+      <div class="section-head">
+        <h2>Obligations — <span id="obSeason"></span></h2>
+        <button class="btn btn--primary btn--sm" id="btnNewOb" style="display:none">New obligation</button>
+      </div>
+      <div class="table-wrap">
+        <table class="table" id="obTable">
+          <thead><tr><th>Asset</th><th>Partners</th><th>Cadence</th><th>Due</th><th>Divisions</th><th class="ta-center">Version</th><th class="ta-center">Status</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="section-head" style="margin-top:32px">
+        <h2>Partners</h2>
+        <button class="btn btn--ghost btn--sm" id="btnNewPartner" style="display:none">Add partner</button>
+      </div>
+      <div class="table-wrap">
+        <table class="table table--compact" id="ptTable" style="max-width:520px">
+          <thead><tr><th>Name</th><th class="ta-center">Obligations</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ── Escalation ────────────────────────────────────────────────── -->
+    <section id="viewEscalation" style="display:none">
+      <div class="section-head">
+        <h2>Past deadline, nothing recorded</h2>
+        <button class="btn btn--ghost btn--sm" id="btnCopyAll">Copy full list</button>
+      </div>
+      <div class="table-wrap">
+        <table class="table" id="escTable">
+          <thead><tr><th>Club</th><th>Outstanding</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<!-- Main app -->
+<script>
+(function () {
+  'use strict';
+
+  var TOOL_PATH = 'app-data/ops-commercial-compliance/';
+  var CADENCE_LABELS = { season: 'Once a season', monthly: 'Monthly', weekly: 'Weekly' };
+  var DIVISIONS = ['National', 'North', 'South'];
+
+  var STATE = {
+    session: null, canEdit: false,
+    seasonKey: null, seasonLabel: '',
+    clubs: [],
+    partners: {}, obligations: {}, status: {},
+    tab: 'dashboard', fDivision: 'all', fObligation: 'all',
+    loaded: { partners: false, obligations: false, status: false }
+  };
+
+  function esc(s) { return NL.escHtml(s); }
+  function dataRef(path) { return db.ref(TOOL_PATH + path); }
+  function stamp() {
+    return {
+      by: (STATE.session && (STATE.session.name || STATE.session.email)) || 'unknown',
+      at: firebase.database.ServerValue.TIMESTAMP
+    };
+  }
+  function today() { return new Date(); }
+
+  /* ── data views ─────────────────────────────────────────────────────── */
+
+  function activeObligations() {
+    return Object.keys(STATE.obligations)
+      .map(function (id) { var o = STATE.obligations[id]; o.id = id; return o; })
+      .filter(function (o) { return o.state !== 'retired' && (!o.season || o.season === STATE.seasonKey); })
+      .sort(function (a, b) { return String(a.title).localeCompare(String(b.title)); });
+  }
+  function allObligations() {
+    return Object.keys(STATE.obligations)
+      .map(function (id) { var o = STATE.obligations[id]; o.id = id; return o; })
+      .sort(function (a, b) { return String(a.title).localeCompare(String(b.title)); });
+  }
+  function partnerNames(o) {
+    return Object.keys(o.partnerIds || {}).filter(function (k) { return o.partnerIds[k]; })
+      .map(function (pid) { return (STATE.partners[pid] && STATE.partners[pid].name) || '?'; })
+      .sort();
+  }
+  function statusMapFor(oid, clubCode) {
+    var byPeriod = STATE.status[oid] || {};
+    var out = {};
+    Object.keys(byPeriod).forEach(function (pk) {
+      var rec = byPeriod[pk] && byPeriod[pk][clubCode];
+      if (rec) out[pk] = rec;
+    });
+    return out;
+  }
+  function obligationHasStatuses(oid) {
+    var byPeriod = STATE.status[oid] || {};
+    return Object.keys(byPeriod).some(function (pk) {
+      return Object.keys(byPeriod[pk] || {}).length > 0;
+    });
+  }
+  function filteredClubs() {
+    return STATE.clubs.filter(function (c) {
+      return STATE.fDivision === 'all' || c.division === STATE.fDivision;
+    });
+  }
+  function dueLabel(o) {
+    if (o.cadence === 'monthly') return o.dueDay >= 1 ? 'Day ' + o.dueDay : 'Month end';
+    if (o.cadence === 'weekly') return 'Sundays';
+    return o.dueDate ? NL.formatDateShort(o.dueDate) : 'Season end';
+  }
+
+  /* ── render ─────────────────────────────────────────────────────────── */
+
+  var renderQueued = false;
+  function scheduleRender() {
+    if (renderQueued) return;
+    renderQueued = true;
+    requestAnimationFrame(function () { renderQueued = false; renderAll(); });
+  }
+  function renderAll() {
+    if (!STATE.seasonKey) return;
+    renderDashboard();
+    renderObligations();
+    renderEscalation();
+  }
+
+  function rollupCellHtml(o, club) {
+    if (!CC.appliesTo(o, club.division)) {
+      return '<td class="cc-cell cc-st--na" title="Not applicable — ' + esc(club.division) + '">·</td>';
+    }
+    var periods = CC.periodsFor(o, STATE.seasonKey);
+    var r = CC.clubRollup(periods, statusMapFor(o.id, club.code), today());
+    var sym = { clear: '✓', overdue: '!', failed: '✕', none: '–' }[r.state];
+    var count = periods.length > 1 ? '<small>' + r.met + '/' + Math.max(r.due, 1) + '</small>' : '';
+    var tip = { clear: 'All due proofs met', overdue: r.open + ' past deadline, nothing recorded', failed: 'Recorded non-compliant', none: 'Nothing due yet' }[r.state];
+    return '<td class="cc-cell cc-st--' + r.state + '" data-ob="' + esc(o.id) + '" data-club="' + esc(club.code) + '" title="' + esc(o.title + ' — ' + tip) + '">' + sym + count + '</td>';
+  }
+
+  function renderDashboard() {
+    var obs = activeObligations().filter(function (o) {
+      return STATE.fObligation === 'all' || o.id === STATE.fObligation;
+    });
+    var clubs = filteredClubs();
+    var t = today();
+
+    /* stats — across ALL active obligations, unfiltered */
+    var allObs = activeObligations();
+    var clear = 0, behind = 0, overdueTotal = 0;
+    STATE.clubs.forEach(function (club) {
+      var anyBad = false, anyDone = false;
+      allObs.forEach(function (o) {
+        if (!CC.appliesTo(o, club.division)) return;
+        var r = CC.clubRollup(CC.periodsFor(o, STATE.seasonKey), statusMapFor(o.id, club.code), t);
+        overdueTotal += r.open;
+        if (r.state === 'overdue' || r.state === 'failed') anyBad = true;
+        if (r.state === 'clear') anyDone = true;
+      });
+      if (anyBad) behind++;
+      else if (anyDone) clear++;
+    });
+    document.getElementById('stClear').textContent = clear;
+    document.getElementById('stBehind').textContent = behind;
+    document.getElementById('stOverdue').textContent = overdueTotal;
+    document.getElementById('stObs').textContent = allObs.length;
+
+    /* obligation filter options (preserve selection) */
+    var sel = document.getElementById('obFilter');
+    var cur = sel.value;
+    sel.innerHTML = '<option value="all">All obligations</option>' + activeObligations().map(function (o) {
+      return '<option value="' + esc(o.id) + '">' + esc(o.title) + '</option>';
+    }).join('');
+    sel.value = STATE.obligations[cur] ? cur : 'all';
+    STATE.fObligation = sel.value;
+
+    /* grid */
+    var thead = '<tr><th>Club</th>' + obs.map(function (o) {
+      var short = o.title.length > 18 ? o.title.slice(0, 17) + '…' : o.title;
+      return '<th class="ta-center" title="' + esc(o.title) + '">' + esc(short) + '</th>';
+    }).join('') + '</tr>';
+
+    var rows;
+    if (!STATE.loaded.obligations) {
+      rows = '<tr class="loading-row"><td colspan="' + (obs.length + 1) + '">Loading…</td></tr>';
+    } else if (!obs.length) {
+      rows = '<tr class="empty-row"><td colspan="1">No obligations yet — define them on the Obligations tab</td></tr>';
+    } else {
+      rows = clubs.map(function (club) {
+        return '<tr><td>' + NL.clubs.crestImgHtml(club.name, 'thumb', { className: 'cc-crest' }) + esc(club.name) + '</td>' +
+          obs.map(function (o) { return rollupCellHtml(o, club); }).join('') + '</tr>';
+      }).join('');
+    }
+    var table = document.getElementById('dashTable');
+    table.querySelector('thead').innerHTML = thead;
+    table.querySelector('tbody').innerHTML = rows;
+    NL.clubs.wireCrestImgs(table);
+  }
+
+  function renderObligations() {
+    document.getElementById('obSeason').textContent = STATE.seasonLabel;
+    var obs = allObligations().filter(function (o) { return !o.season || o.season === STATE.seasonKey; });
+    var tbody = document.getElementById('obTable').querySelector('tbody');
+    if (!STATE.loaded.obligations) {
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="8">Loading…</td></tr>';
+    } else if (!obs.length) {
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="8">Nothing defined for ' + esc(STATE.seasonLabel) + ' yet</td></tr>';
+    } else {
+      tbody.innerHTML = obs.map(function (o) {
+        var retired = o.state === 'retired';
+        var partners = partnerNames(o).map(function (n) { return '<span class="cc-partner-tag">' + esc(n) + '</span>'; }).join('') || '<span class="cc-version">none</span>';
+        var divs = DIVISIONS.filter(function (d) { return CC.appliesTo(o, d); }).join(', ') || '—';
+        var actions = '';
+        if (STATE.canEdit && !retired) {
+          actions = '<button class="btn btn--ghost btn--sm" data-act="edit" data-id="' + esc(o.id) + '">Edit</button>';
+          actions += obligationHasStatuses(o.id)
+            ? '<button class="btn btn--ghost btn--sm" data-act="retire" data-id="' + esc(o.id) + '">Retire</button>'
+            : '<button class="btn btn--danger btn--sm" data-act="delete" data-id="' + esc(o.id) + '">Delete</button>';
+        }
+        return '<tr' + (retired ? ' style="opacity:.55"' : '') + '>' +
+          '<td><strong>' + esc(o.title) + '</strong>' + (o.criteria ? '<div class="cc-criteria">' + esc(o.criteria) + '</div>' : '') + '</td>' +
+          '<td>' + partners + '</td>' +
+          '<td>' + esc(CADENCE_LABELS[o.cadence] || o.cadence) + '</td>' +
+          '<td>' + esc(dueLabel(o)) + '</td>' +
+          '<td>' + esc(divs) + '</td>' +
+          '<td class="ta-center cc-version">v' + (o.version || 1) + '</td>' +
+          '<td class="ta-center">' + (retired ? '<span class="pill pill--expired">Retired</span>' : '<span class="pill pill--live">Active</span>') + '</td>' +
+          '<td class="ta-right cc-actions">' + actions + '</td></tr>';
+      }).join('');
+    }
+
+    var pt = document.getElementById('ptTable').querySelector('tbody');
+    var pids = Object.keys(STATE.partners).sort(function (a, b) {
+      return STATE.partners[a].name.localeCompare(STATE.partners[b].name);
+    });
+    if (!STATE.loaded.partners) {
+      pt.innerHTML = '<tr class="loading-row"><td colspan="3">Loading…</td></tr>';
+    } else if (!pids.length) {
+      pt.innerHTML = '<tr class="empty-row"><td colspan="3">No partners yet</td></tr>';
+    } else {
+      pt.innerHTML = pids.map(function (pid) {
+        var used = allObligations().filter(function (o) { return o.partnerIds && o.partnerIds[pid]; }).length;
+        var actions = '';
+        if (STATE.canEdit) {
+          actions = '<button class="btn btn--ghost btn--sm" data-pact="rename" data-id="' + esc(pid) + '">Rename</button>';
+          if (!used) actions += '<button class="btn btn--danger btn--sm" data-pact="delete" data-id="' + esc(pid) + '">Delete</button>';
+        }
+        return '<tr><td>' + esc(STATE.partners[pid].name) + '</td><td class="ta-center">' + used + '</td>' +
+          '<td class="ta-right cc-actions">' + actions + '</td></tr>';
+      }).join('');
+    }
+  }
+
+  /* Escalation raw material: [{club, items:[{oblig, period}]}]. Always the
+     full 72 — the division chips live on the dashboard tab and must not
+     silently thin a list read on another tab. */
+  function escalationRows() {
+    var t = today();
+    var rows = [];
+    STATE.clubs.forEach(function (club) {
+      var items = [];
+      activeObligations().forEach(function (o) {
+        if (!CC.appliesTo(o, club.division)) return;
+        CC.overdueOpen(CC.periodsFor(o, STATE.seasonKey), statusMapFor(o.id, club.code), t).forEach(function (p) {
+          items.push({ oblig: o, period: p });
+        });
+      });
+      if (items.length) rows.push({ club: club, items: items });
+    });
+    return rows;
+  }
+
+  function chaseText(row) {
+    var lines = row.items.map(function (it) {
+      var partners = partnerNames(it.oblig).join(', ');
+      return '- ' + it.oblig.title + (partners ? ' (' + partners + ')' : '') +
+        ' — ' + it.period.label + ', due ' + NL.formatDateShort(CC.ymd(it.period.due));
+    });
+    return 'Hi,\n\nThese ' + STATE.seasonLabel + ' commercial proofs are outstanding past their deadline:\n\n' +
+      lines.join('\n') + '\n\nPlease send them over.\n\nThanks';
+  }
+
+  function renderEscalation() {
+    var tbody = document.getElementById('escTable').querySelector('tbody');
+    if (!STATE.loaded.obligations || !STATE.loaded.status) {
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="3">Loading…</td></tr>';
+      return;
+    }
+    var rows = escalationRows();
+    if (!rows.length) {
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="3">Nothing past deadline 🎉</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(function (row, i) {
+      var items = row.items.map(function (it) {
+        return '<li>' + esc(it.oblig.title) + ' — ' + esc(it.period.label) +
+          ' <span class="cc-version">(due ' + esc(NL.formatDateShort(CC.ymd(it.period.due))) + ')</span></li>';
+      }).join('');
+      var mail = 'mailto:?subject=' + encodeURIComponent('Commercial compliance — outstanding proofs (' + row.club.name + ')') +
+        '&body=' + encodeURIComponent(chaseText(row));
+      return '<tr><td>' + NL.clubs.crestImgHtml(row.club.name, 'thumb', { className: 'cc-crest' }) + esc(row.club.name) +
+        '<div class="cc-version">' + row.items.length + ' outstanding</div></td>' +
+        '<td><ul class="cc-esc-items">' + items + '</ul></td>' +
+        '<td class="ta-right cc-actions"><a class="btn btn--navy btn--sm" href="' + mail + '">Chase</a>' +
+        '<button class="btn btn--ghost btn--sm" data-esc-copy="' + i + '">Copy</button></td></tr>';
+    }).join('');
+    NL.clubs.wireCrestImgs(tbody);
+  }
+
+  /* ── CSV export ─────────────────────────────────────────────────────── */
+
+  function exportCsv() {
+    var t = today();
+    var rows = [['Club', 'Division', 'Obligation', 'Partners', 'Period', 'Due', 'State', 'Overdue', 'Version satisfied', 'Evidence', 'Note', 'Recorded by']];
+    activeObligations().forEach(function (o) {
+      var periods = CC.periodsFor(o, STATE.seasonKey);
+      var partners = partnerNames(o).join('; ');
+      STATE.clubs.forEach(function (club) {
+        if (!CC.appliesTo(o, club.division)) return;
+        var map = statusMapFor(o.id, club.code);
+        periods.forEach(function (p) {
+          var rec = map[p.key];
+          var state = (rec && rec.state) || 'outstanding';
+          if (!rec && !CC.isOverdue(p, t)) return; /* future + untouched = noise */
+          rows.push([club.name, club.division, o.title, partners, p.label, CC.ymd(p.due),
+            state, CC.isOverdue(p, t) && state === 'outstanding' ? 'yes' : '',
+            rec && rec.version || '', rec && rec.evidence || '', rec && rec.note || '', rec && rec.by || '']);
+        });
+      });
+    });
+    NL.download('commercial-compliance-' + STATE.seasonLabel + '.csv', NL.csv(rows, { bom: true }), 'text/csv;charset=utf-8');
+  }
+
+  /* ── obligation editor ──────────────────────────────────────────────── */
+
+  function obligationForm(o) {
+    o = o || {};
+    var pids = Object.keys(STATE.partners).sort(function (a, b) {
+      return STATE.partners[a].name.localeCompare(STATE.partners[b].name);
+    });
+    var partnerBoxes = pids.map(function (pid) {
+      var on = o.partnerIds && o.partnerIds[pid];
+      return '<label style="display:flex;gap:8px;align-items:center;font-size:var(--text-sm);text-transform:none;letter-spacing:0;font-variation-settings:\'wght\' 500;color:var(--text)">' +
+        '<input type="checkbox" data-partner="' + esc(pid) + '"' + (on ? ' checked' : '') + '>' + esc(STATE.partners[pid].name) + '</label>';
+    }).join('') || '<span class="form-hint">No partners defined yet — add them under Obligations → Partners.</span>';
+    var divBoxes = DIVISIONS.map(function (d) {
+      var on = o.divisions ? o.divisions[d] : true;
+      return '<label style="display:flex;gap:8px;align-items:center;font-size:var(--text-sm);text-transform:none;letter-spacing:0;font-variation-settings:\'wght\' 500;color:var(--text)">' +
+        '<input type="checkbox" data-division="' + esc(d) + '"' + (on ? ' checked' : '') + '>' + d + '</label>';
+    }).join('');
+    return '<div class="form-grid">' +
+      '<div class="form-group span2"><label>Asset<span class="req">*</span></label>' +
+      '<input id="obfTitle" maxlength="80" placeholder="e.g. Perimeter advertising boards" value="' + esc(o.title || '') + '"></div>' +
+      '<div class="form-group span2"><label>Partners</label><div style="display:flex;gap:16px;flex-wrap:wrap">' + partnerBoxes + '</div></div>' +
+      '<div class="form-group"><label>Cadence</label><select id="obfCadence">' +
+        ['season', 'monthly', 'weekly'].map(function (c) {
+          return '<option value="' + c + '"' + ((o.cadence || 'season') === c ? ' selected' : '') + '>' + CADENCE_LABELS[c] + '</option>';
+        }).join('') + '</select></div>' +
+      '<div class="form-group" id="obfDueDateWrap"><label>Deadline</label><input type="date" id="obfDueDate" value="' + esc(o.dueDate || '') + '">' +
+        '<div class="form-hint">Blank = season end (30 Jun)</div></div>' +
+      '<div class="form-group" id="obfDueDayWrap" style="display:none"><label>Due day of month</label><input type="number" id="obfDueDay" min="1" max="31" value="' + esc(o.dueDay || '') + '">' +
+        '<div class="form-hint">Blank = month end</div></div>' +
+      '<div class="form-group span2"><label>Divisions</label><div style="display:flex;gap:16px;flex-wrap:wrap">' + divBoxes + '</div></div>' +
+      '<div class="form-group span2"><label>Acceptance criteria</label><textarea id="obfCriteria" placeholder="What makes a submission acceptable — e.g. wide shot showing placement, fixture date visible">' + esc(o.criteria || '') + '</textarea></div>' +
+      '<div class="form-group span2"><label>Notes</label><input id="obfNotes" maxlength="200" value="' + esc(o.notes || '') + '"></div>' +
+      '</div>';
+  }
+
+  function readObligationForm(modalBody) {
+    var partnerIds = {};
+    modalBody.querySelectorAll('[data-partner]:checked').forEach(function (cb) { partnerIds[cb.getAttribute('data-partner')] = true; });
+    var divisions = {};
+    modalBody.querySelectorAll('[data-division]:checked').forEach(function (cb) { divisions[cb.getAttribute('data-division')] = true; });
+    var cadence = modalBody.querySelector('#obfCadence').value;
+    var dueDayRaw = modalBody.querySelector('#obfDueDay').value;
+    return {
+      title: modalBody.querySelector('#obfTitle').value.trim(),
+      partnerIds: partnerIds,
+      cadence: cadence,
+      dueDate: cadence === 'season' ? modalBody.querySelector('#obfDueDate').value : null,
+      dueDay: cadence === 'monthly' && dueDayRaw ? Math.max(1, Math.min(31, parseInt(dueDayRaw, 10) || 0)) || null : null,
+      divisions: divisions,
+      criteria: modalBody.querySelector('#obfCriteria').value.trim(),
+      notes: modalBody.querySelector('#obfNotes').value.trim()
+    };
+  }
+
+  function openObligationModal(oid) {
+    var existing = oid ? STATE.obligations[oid] : null;
+    var ctrl = NL.modal({
+      title: existing ? 'Edit obligation' : 'New obligation',
+      width: 'wide',
+      body: obligationForm(existing),
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: existing ? 'Save' : 'Create', className: 'btn--primary', onClick: function (c) { save(c); } }
+      ]
+    });
+    function syncDueFields() {
+      var cad = ctrl.body.querySelector('#obfCadence').value;
+      ctrl.body.querySelector('#obfDueDateWrap').style.display = cad === 'season' ? '' : 'none';
+      ctrl.body.querySelector('#obfDueDayWrap').style.display = cad === 'monthly' ? '' : 'none';
+    }
+    ctrl.body.querySelector('#obfCadence').addEventListener('change', syncDueFields);
+    syncDueFields();
+
+    function save(c) {
+      var data = readObligationForm(ctrl.body);
+      if (!data.title) { NL.toast('Asset name is required', 'error'); return; }
+      if (!Object.keys(data.divisions).length) { NL.toast('Pick at least one division', 'error'); return; }
+
+      if (!existing) {
+        var ref = dataRef('obligations').push();
+        var s = stamp();
+        var rec = {
+          title: data.title, partnerIds: data.partnerIds, cadence: data.cadence,
+          dueDate: data.dueDate || null, dueDay: data.dueDay || null,
+          divisions: data.divisions, criteria: data.criteria, notes: data.notes,
+          season: STATE.seasonKey, version: 1, state: 'active',
+          createdAt: s.at, createdBy: s.by, updatedAt: s.at, updatedBy: s.by
+        };
+        rec.versions = { 1: versionSnapshot(data, s) };
+        ref.set(rec).then(function () { NL.toast('Obligation created', 'success'); c.close(); })
+          .catch(function (e) { NL.toast('Save failed: ' + e.message, 'error'); });
+        return;
+      }
+
+      var material = CC.isMaterialEdit(existing, data);
+      var finish = function (bumpVersion) {
+        var s = stamp();
+        var upd = {
+          title: data.title, partnerIds: data.partnerIds, cadence: data.cadence,
+          dueDate: data.dueDate || null, dueDay: data.dueDay || null,
+          divisions: data.divisions, criteria: data.criteria, notes: data.notes,
+          updatedAt: s.at, updatedBy: s.by
+        };
+        if (bumpVersion) {
+          var v = (existing.version || 1) + 1;
+          upd.version = v;
+          upd['versions/' + v] = versionSnapshot(data, s);
+        }
+        dataRef('obligations/' + oid).update(upd)
+          .then(function () { NL.toast(bumpVersion ? 'Saved — now v' + upd.version : 'Saved', 'success'); c.close(); })
+          .catch(function (e) { NL.toast('Save failed: ' + e.message, 'error'); });
+      };
+      if (material) {
+        NL.confirm(
+          'This changes what clubs owe (partners, cadence, deadline, divisions or criteria), so the obligation becomes v' + ((existing.version || 1) + 1) + '.',
+          { title: 'Material change', detail: 'Recorded statuses keep the version they satisfied.', confirmText: 'Save as v' + ((existing.version || 1) + 1) }
+        ).then(function (ok) { if (ok) finish(true); });
+      } else {
+        finish(false);
+      }
+    }
+  }
+
+  function versionSnapshot(data, s) {
+    return {
+      title: data.title, partnerIds: data.partnerIds, cadence: data.cadence,
+      dueDate: data.dueDate || null, dueDay: data.dueDay || null,
+      divisions: data.divisions, criteria: data.criteria,
+      savedAt: s.at, savedBy: s.by
+    };
+  }
+
+  function retireObligation(oid) {
+    var o = STATE.obligations[oid];
+    NL.confirm('Retire "' + o.title + '"? It disappears from the dashboard and owed lists; recorded history is kept.',
+      { title: 'Retire obligation', variant: 'danger', confirmText: 'Retire' })
+      .then(function (ok) {
+        if (!ok) return;
+        var s = stamp();
+        dataRef('obligations/' + oid).update({ state: 'retired', retiredAt: s.at, retiredBy: s.by })
+          .then(function () { NL.toast('Retired', 'success'); })
+          .catch(function (e) { NL.toast('Failed: ' + e.message, 'error'); });
+      });
+  }
+
+  function deleteObligation(oid) {
+    if (obligationHasStatuses(oid)) {
+      NL.alert('This obligation has recorded statuses, so it can be retired but not deleted.');
+      return;
+    }
+    var o = STATE.obligations[oid];
+    NL.confirm('Delete "' + o.title + '" permanently? Nothing has been recorded against it.',
+      { title: 'Delete obligation', variant: 'danger', confirmText: 'Delete' })
+      .then(function (ok) {
+        if (!ok) return;
+        dataRef('obligations/' + oid).remove()
+          .then(function () { NL.toast('Deleted', 'success'); })
+          .catch(function (e) { NL.toast('Failed: ' + e.message, 'error'); });
+      });
+  }
+
+  /* ── partners ───────────────────────────────────────────────────────── */
+
+  function addPartner() {
+    NL.prompt('Partner name', { title: 'Add partner', placeholder: 'e.g. Enterprise' }).then(function (name) {
+      if (!name || !name.trim()) return;
+      var s = stamp();
+      dataRef('partners').push({ name: name.trim(), createdAt: s.at, createdBy: s.by })
+        .then(function () { NL.toast('Partner added', 'success'); })
+        .catch(function (e) { NL.toast('Failed: ' + e.message, 'error'); });
+    });
+  }
+  function renamePartner(pid) {
+    NL.prompt('Partner name', { title: 'Rename partner', default: STATE.partners[pid].name }).then(function (name) {
+      if (!name || !name.trim()) return;
+      dataRef('partners/' + pid).update({ name: name.trim() })
+        .then(function () { NL.toast('Renamed', 'success'); })
+        .catch(function (e) { NL.toast('Failed: ' + e.message, 'error'); });
+    });
+  }
+  function deletePartner(pid) {
+    NL.confirm('Delete "' + STATE.partners[pid].name + '"? No obligations name it.',
+      { title: 'Delete partner', variant: 'danger', confirmText: 'Delete' })
+      .then(function (ok) {
+        if (!ok) return;
+        dataRef('partners/' + pid).remove().catch(function (e) { NL.toast('Failed: ' + e.message, 'error'); });
+      });
+  }
+
+  /* ── tick-sheet modal (club × obligation) ───────────────────────────── */
+
+  function openDetailModal(oid, clubCode) {
+    var o = STATE.obligations[oid];
+    var club = null;
+    STATE.clubs.forEach(function (c) { if (c.code === clubCode) club = c; });
+    if (!o || !club) return;
+
+    var body = document.createElement('div');
+    var ctrl = NL.modal({ title: club.name + ' — ' + o.title, width: 'wide', body: body });
+
+    function draw() {
+      var t = today();
+      var map = statusMapFor(oid, clubCode);
+      var periods = CC.periodsFor(o, STATE.seasonKey);
+      var head = o.criteria ? '<p class="confirm-job" style="margin-bottom:10px">' + esc(o.criteria) + '</p>' : '';
+      body.innerHTML = head + periods.map(function (p) {
+        var rec = map[p.key];
+        var state = (rec && rec.state) || 'outstanding';
+        var overdue = CC.isOverdue(p, t) && state === 'outstanding';
+        var seg = '';
+        if (STATE.canEdit) {
+          seg = '<div class="cc-stateseg">' +
+            '<button class="chip' + (state === 'outstanding' ? ' active--out active' : '') + '" data-set="outstanding" data-period="' + esc(p.key) + '">Outstanding</button>' +
+            '<button class="chip' + (state === 'compliant' ? ' active--clear active' : '') + '" data-set="compliant" data-period="' + esc(p.key) + '">Compliant</button>' +
+            '<button class="chip' + (state === 'non-compliant' ? ' active--fail active' : '') + '" data-set="non-compliant" data-period="' + esc(p.key) + '">Non-compliant</button>' +
+            '</div>' +
+            '<button class="btn btn--ghost btn--sm" data-evidence="' + esc(p.key) + '">Evidence</button>';
+        } else {
+          var pill = state === 'compliant' ? 'pill--approved' : state === 'non-compliant' ? 'pill--rejected' : 'pill--pending';
+          seg = '<span class="pill ' + pill + '">' + esc(state) + '</span>';
+        }
+        var evid = '';
+        if (rec && (rec.evidence || rec.note)) {
+          evid = '<div class="cc-evidence">' +
+            (rec.evidence ? '<a href="' + esc(rec.evidence) + '" target="_blank" rel="noopener">' + esc(rec.evidence) + '</a> ' : '') +
+            (rec.note ? esc(rec.note) : '') +
+            (rec.by ? ' <span>— ' + esc(rec.by) + (rec.at ? ', ' + esc(NL.formatDateTime(rec.at)) : '') + '</span>' : '') +
+            '</div>';
+        }
+        return '<div class="cc-period"><div class="cc-period__when"><strong>' + esc(p.label) + '</strong>' +
+          '<div class="cc-period__due' + (overdue ? ' is-overdue' : '') + '">due ' + esc(NL.formatDateShort(CC.ymd(p.due))) + (overdue ? ' — past deadline' : '') + '</div></div>' +
+          seg + evid + '</div>';
+      }).join('');
+    }
+    draw();
+
+    body.addEventListener('click', function (e) {
+      var setBtn = e.target.closest('[data-set]');
+      if (setBtn) {
+        setPeriodState(oid, setBtn.getAttribute('data-period'), clubCode, setBtn.getAttribute('data-set'), draw);
+        return;
+      }
+      var evBtn = e.target.closest('[data-evidence]');
+      if (evBtn) openEvidenceModal(oid, evBtn.getAttribute('data-evidence'), clubCode, draw);
+    });
+  }
+
+  function setPeriodState(oid, periodKey, clubCode, newState, done) {
+    var path = 'status/' + oid + '/' + periodKey + '/' + clubCode;
+    var existing = (STATE.status[oid] && STATE.status[oid][periodKey] && STATE.status[oid][periodKey][clubCode]) || null;
+    if (newState === 'outstanding') {
+      if (!existing) return;
+      var proceed = function () {
+        dataRef(path).remove().then(function () { touchLocal(oid, periodKey, clubCode, null); done(); })
+          .catch(function (e) { NL.toast('Failed: ' + e.message, 'error'); });
+      };
+      if (existing.evidence || existing.note) {
+        NL.confirm('Back to outstanding? The evidence link and note on this period are removed with it.',
+          { title: 'Clear recorded status', variant: 'danger', confirmText: 'Clear' })
+          .then(function (ok) { if (ok) proceed(); });
+      } else { proceed(); }
+      return;
+    }
+    var s = stamp();
+    var rec = {
+      state: newState,
+      version: (STATE.obligations[oid] && STATE.obligations[oid].version) || 1,
+      evidence: (existing && existing.evidence) || null,
+      note: (existing && existing.note) || null,
+      by: s.by, at: s.at
+    };
+    dataRef(path).set(rec).then(function () { touchLocal(oid, periodKey, clubCode, rec); done(); })
+      .catch(function (e) { NL.toast('Failed: ' + e.message, 'error'); });
+  }
+
+  /* Optimistic local write so the open modal redraws instantly; the RTDB
+     listener converges it moments later. */
+  function touchLocal(oid, periodKey, clubCode, rec) {
+    var s = STATE.status;
+    if (rec) {
+      s[oid] = s[oid] || {}; s[oid][periodKey] = s[oid][periodKey] || {};
+      s[oid][periodKey][clubCode] = rec;
+    } else if (s[oid] && s[oid][periodKey]) {
+      delete s[oid][periodKey][clubCode];
+    }
+    scheduleRender();
+  }
+
+  function openEvidenceModal(oid, periodKey, clubCode, done) {
+    var existing = (STATE.status[oid] && STATE.status[oid][periodKey] && STATE.status[oid][periodKey][clubCode]) || {};
+    var wrap = document.createElement('div');
+    wrap.innerHTML = '<div class="form-group"><label>Evidence link</label>' +
+      '<input id="evUrl" placeholder="https://… (photo, email, drive folder)" value="' + esc(existing.evidence || '') + '"></div>' +
+      '<div class="form-group" style="margin-top:12px"><label>Note</label>' +
+      '<textarea id="evNote" style="min-height:70px">' + esc(existing.note || '') + '</textarea></div>';
+    NL.modal({
+      title: 'Evidence',
+      size: 'sm',
+      body: wrap,
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Save', className: 'btn--primary', onClick: function (c) {
+            var url = wrap.querySelector('#evUrl').value.trim();
+            if (url && !/^https?:\/\//i.test(url)) { NL.toast('Evidence link must start http(s)://', 'error'); return; }
+            var note = wrap.querySelector('#evNote').value.trim();
+            /* Nothing to keep and no state to carry → remove rather than
+               writing a phantom record that reads as outstanding clutter. */
+            if (!url && !note && !existing.state) {
+              if (existing.by) {
+                dataRef('status/' + oid + '/' + periodKey + '/' + clubCode).remove()
+                  .then(function () { touchLocal(oid, periodKey, clubCode, null); done(); c.close(); })
+                  .catch(function (e) { NL.toast('Failed: ' + e.message, 'error'); });
+              } else { c.close(); }
+              return;
+            }
+            var s = stamp();
+            var rec = {
+              state: existing.state || null,
+              version: existing.version || ((STATE.obligations[oid] && STATE.obligations[oid].version) || 1),
+              evidence: url || null, note: note || null, by: s.by, at: s.at
+            };
+            dataRef('status/' + oid + '/' + periodKey + '/' + clubCode).set(rec)
+              .then(function () { touchLocal(oid, periodKey, clubCode, rec); done(); c.close(); })
+              .catch(function (e) { NL.toast('Failed: ' + e.message, 'error'); });
+          } }
+      ]
+    });
+  }
+
+  /* ── wiring ─────────────────────────────────────────────────────────── */
+
+  function switchTab(name) {
+    STATE.tab = name;
+    document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.getAttribute('data-tab') === name); });
+    document.getElementById('viewDashboard').style.display = name === 'dashboard' ? '' : 'none';
+    document.getElementById('viewObligations').style.display = name === 'obligations' ? '' : 'none';
+    document.getElementById('viewEscalation').style.display = name === 'escalation' ? '' : 'none';
+  }
+
+  function wireStatic() {
+    document.querySelectorAll('.tab').forEach(function (t) {
+      t.addEventListener('click', function () { switchTab(t.getAttribute('data-tab')); });
+    });
+    document.getElementById('divChips').addEventListener('click', function (e) {
+      var chip = e.target.closest('.chip'); if (!chip) return;
+      STATE.fDivision = chip.getAttribute('data-div');
+      document.querySelectorAll('#divChips .chip').forEach(function (c) { c.classList.toggle('active', c === chip); });
+      scheduleRender();
+    });
+    document.getElementById('obFilter').addEventListener('change', function (e) {
+      STATE.fObligation = e.target.value; scheduleRender();
+    });
+    document.getElementById('btnExport').addEventListener('click', exportCsv);
+    document.getElementById('btnNewOb').addEventListener('click', function () { openObligationModal(null); });
+    document.getElementById('btnNewPartner').addEventListener('click', addPartner);
+    document.getElementById('btnCopyAll').addEventListener('click', function () {
+      var rows = escalationRows();
+      if (!rows.length) { NL.toast('Nothing past deadline', 'success'); return; }
+      NL.copy(rows.map(function (r) { return r.club.name + '\n' + chaseText(r); }).join('\n\n———\n\n'));
+    });
+    document.getElementById('dashTable').addEventListener('click', function (e) {
+      var cell = e.target.closest('.cc-cell[data-ob]'); if (!cell) return;
+      openDetailModal(cell.getAttribute('data-ob'), cell.getAttribute('data-club'));
+    });
+    document.getElementById('obTable').addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-act]'); if (!btn) return;
+      var id = btn.getAttribute('data-id'), act = btn.getAttribute('data-act');
+      if (act === 'edit') openObligationModal(id);
+      else if (act === 'retire') retireObligation(id);
+      else if (act === 'delete') deleteObligation(id);
+    });
+    document.getElementById('ptTable').addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-pact]'); if (!btn) return;
+      var id = btn.getAttribute('data-id'), act = btn.getAttribute('data-pact');
+      if (act === 'rename') renamePartner(id);
+      else if (act === 'delete') deletePartner(id);
+    });
+    if (STATE.canEdit) {
+      document.getElementById('btnNewOb').style.display = '';
+      document.getElementById('btnNewPartner').style.display = '';
+    } else {
+      document.getElementById('roBanner').style.display = '';
+    }
+  }
+
+  function attachListeners() {
+    dataRef('partners').on('value', function (snap) {
+      STATE.partners = snap.val() || {}; STATE.loaded.partners = true; scheduleRender();
+    });
+    dataRef('obligations').on('value', function (snap) {
+      STATE.obligations = snap.val() || {}; STATE.loaded.obligations = true; scheduleRender();
+    });
+    dataRef('status').on('value', function (snap) {
+      STATE.status = snap.val() || {}; STATE.loaded.status = true; scheduleRender();
+    });
+  }
+
+  /* Public boot entry point — called by nlAuthReady once the session is
+     verified. Don't read RTDB before this fires. */
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function (session) {
+    STATE.session = session;
+    STATE.canEdit = session && session.toolLevel === 'admin';
+    NL.ensureAuth()
+      .then(function () { return NL.clubs.load(); })
+      .then(function (meta) {
+        STATE.seasonKey = NL.season.current(meta) || String(NL.season.fromDate());
+        STATE.seasonLabel = NL.season.label(meta, STATE.seasonKey);
+        return NL.clubs.forSeason();
+      })
+      .then(function (clubs) {
+        STATE.clubs = clubs;
+        wireStatic();
+        attachListeners();
+      })
+      .catch(function (e) {
+        NL.toast('Failed to load: ' + (e && e.message || e), 'error');
+      });
+  };
+
+  /* If auth-guard fired before this script loaded, replay the session. */
+  if (window._toolDeferredSession) {
+    window.TOOL.boot(window._toolDeferredSession);
+    delete window._toolDeferredSession;
+  }
+})();
+</script>
+
+</body>
+</html>
