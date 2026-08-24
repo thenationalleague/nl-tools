@@ -1,8 +1,10 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Commercial Compliance
-  Version: v1.0 (24/08/2026)
+  Version: v1.1 (24/08/2026)
   File: /commercial-compliance/index.html
+  v1.1 (24/08/2026): RTDB listeners gain a denied callback — no rules/access
+    now shows an error banner instead of "Loading…" forever.
 
   Partner obligation matrix, per-club compliance tick-sheet and 72-club status
   dashboard for commercial proof-of-delivery.
@@ -83,6 +85,13 @@
     var NL_TOOL_KEY = 'ops-commercial-compliance';
 
     window.NL_CHANGELOG = [
+      {
+        date: '24/08/2026',
+        version: 'v1.1',
+        items: [
+          'Denied RTDB reads show an error banner instead of loading forever.'
+        ]
+      },
       {
         date: '24/08/2026',
         version: 'v1.0',
@@ -181,6 +190,7 @@
     <div class="banner banner--info" id="roBanner" style="display:none">
       Read-only view — recording and editing need admin access on this tool.
     </div>
+    <div class="banner banner--error" id="errBanner" style="display:none"></div>
 
     <div class="tabs" role="tablist">
       <button class="tab active" data-tab="dashboard" role="tab">Dashboard</button>
@@ -937,15 +947,30 @@
   }
 
   function attachListeners() {
+    /* A denied read fires the cancel callback, not the value one — without
+       this, no rules (or no access) leaves the page on "Loading…" forever,
+       which is exactly how v1.0 shipped. Say what is actually wrong. */
+    var deniedShown = false;
+    function onDenied(err) {
+      if (!deniedShown) {
+        deniedShown = true;
+        var b = document.getElementById('errBanner');
+        b.textContent = 'No data access (' + ((err && (err.code || err.message)) || err) +
+          '). If this tool is newly added, the RTDB rules publish has not run yet.';
+        b.style.display = '';
+      }
+      STATE.loaded.partners = STATE.loaded.obligations = STATE.loaded.status = true;
+      scheduleRender();
+    }
     dataRef('partners').on('value', function (snap) {
       STATE.partners = snap.val() || {}; STATE.loaded.partners = true; scheduleRender();
-    });
+    }, onDenied);
     dataRef('obligations').on('value', function (snap) {
       STATE.obligations = snap.val() || {}; STATE.loaded.obligations = true; scheduleRender();
-    });
+    }, onDenied);
     dataRef('status').on('value', function (snap) {
       STATE.status = snap.val() || {}; STATE.loaded.status = true; scheduleRender();
-    });
+    }, onDenied);
   }
 
   /* Public boot entry point — called by nlAuthReady once the session is
