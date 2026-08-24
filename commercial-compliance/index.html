@@ -1,8 +1,14 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Commercial Compliance
-  Version: v2.0 (24/08/2026)
+  Version: v2.1 (24/08/2026)
   File: /commercial-compliance/index.html
+  v2.1 (24/08/2026): dashboard defaults to a "needs attention" triage — an
+    asset strip (per-asset behind-count, tap to focus) over a worst-first
+    table of only the clubs with something outstanding, state chips per
+    asset clicking through to the tick-sheet, all-clear clubs as one line.
+    The full 72×asset matrix stays behind the Full grid chip. Partners move
+    to their own tab.
   v2.0 (24/08/2026): the matrix gets its real shape. ASSETS become the spine
     (obligations group under them; dashboard shows one column per asset with
     worst-state rollup; the click-through modal breaks it back down per
@@ -108,6 +114,15 @@
     var NL_TOOL_KEY = 'ops-commercial-compliance';
 
     window.NL_CHANGELOG = [
+      {
+        date: '24/08/2026',
+        version: 'v2.1',
+        items: [
+          'Dashboard defaults to a needs-attention triage: asset strip, worst-first club table, per-asset chips into the tick-sheet.',
+          'The full 72×asset grid moves behind a view chip.',
+          'Partners get their own tab.'
+        ]
+      },
       {
         date: '24/08/2026',
         version: 'v2.0',
@@ -251,6 +266,18 @@
   .cc-modal-summary { font-size: var(--text-xs); color: var(--text-muted); margin-bottom: 8px; }
   .cc-version { font-size: var(--text-xs); color: var(--text-muted); }
 
+  /* Needs-attention view */
+  .cc-asset-strip { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  .cc-asset-tile { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 12px 16px; cursor: pointer; min-width: 150px; }
+  .cc-asset-tile:hover { border-color: var(--navy-300); }
+  .cc-asset-tile.active { border-color: var(--navy); box-shadow: 0 0 0 1px var(--navy); }
+  .cc-asset-tile__name { font-size: var(--text-sm); font-variation-settings: 'wght' 800; color: var(--navy); margin-bottom: 4px; }
+  .cc-asset-tile__stat { font-size: var(--text-xs); color: var(--text-muted); }
+  .cc-asset-tile__stat b { color: var(--amber-deep, var(--amber)); }
+  .cc-att-chip { display: inline-block; background: var(--amber-light); color: var(--amber-deep, var(--amber)); border-radius: 4px; padding: 3px 9px; font-size: var(--text-xs); font-variation-settings: 'wght' 700; margin: 2px 6px 2px 0; white-space: nowrap; cursor: pointer; }
+  .cc-att-chip--failed { background: var(--red-light); color: var(--red); }
+  .cc-allclear { margin-top: 12px; font-size: var(--text-sm); color: var(--text-muted); }
+
   /* Asset spine */
   .cc-asset-row td { background: var(--navy-50) !important; border-top: 2px solid var(--navy-100) !important; }
   .cc-asset-name { font-size: var(--text-md); font-variation-settings: 'wght' 800; color: var(--navy); margin-right: 8px; }
@@ -284,6 +311,7 @@
     <div class="tabs" role="tablist">
       <button class="tab active" data-tab="dashboard" role="tab">Dashboard</button>
       <button class="tab" data-tab="obligations" role="tab">Obligations</button>
+      <button class="tab" data-tab="partners" role="tab">Partners</button>
       <button class="tab" data-tab="central" role="tab">NL Central</button>
       <button class="tab" data-tab="escalation" role="tab">Escalation</button>
     </div>
@@ -298,18 +326,33 @@
       </div>
 
       <div class="filter-bar">
+        <div class="chip-group" id="dashViewChips">
+          <button class="chip active" data-view="attention">Needs attention</button>
+          <button class="chip" data-view="grid">Full grid</button>
+        </div>
         <div class="chip-group" id="divChips">
           <button class="chip active" data-div="all">All divisions</button>
           <button class="chip" data-div="National">National</button>
           <button class="chip" data-div="North">North</button>
           <button class="chip" data-div="South">South</button>
         </div>
-        <select class="nl-select" id="obFilter"><option value="all">All obligations</option></select>
+        <select class="nl-select" id="obFilter"><option value="all">All assets</option></select>
         <span style="flex:1"></span>
         <button class="btn btn--ghost btn--sm" id="btnExport">Export CSV</button>
       </div>
 
-      <div class="table-wrap">
+      <div id="dashAttention">
+        <div class="cc-asset-strip" id="assetStrip"></div>
+        <div class="table-wrap">
+          <table class="table" id="attTable">
+            <thead><tr><th>Club</th><th class="ta-center">Outstanding</th><th>Where</th></tr></thead>
+            <tbody><tr class="loading-row"><td colspan="3">Loading…</td></tr></tbody>
+          </table>
+        </div>
+        <div class="cc-allclear" id="attAllClear"></div>
+      </div>
+
+      <div class="table-wrap" id="dashGridWrap" style="display:none">
         <table class="table table--compact" id="dashTable">
           <thead><tr><th>Club</th></tr></thead>
           <tbody><tr class="loading-row"><td>Loading…</td></tr></tbody>
@@ -333,7 +376,11 @@
         </table>
       </div>
 
-      <div class="section-head" style="margin-top:32px">
+    </section>
+
+    <!-- ── Partners ──────────────────────────────────────────────────── -->
+    <section id="viewPartners" style="display:none">
+      <div class="section-head">
         <h2>Partners</h2>
         <button class="btn btn--primary btn--sm" id="btnNewPartner" style="display:none">Add partner</button>
       </div>
@@ -397,7 +444,7 @@
     seasonKey: null, seasonLabel: '',
     clubs: [],
     assets: {}, partners: {}, obligations: {}, status: {},
-    tab: 'dashboard', fDivision: 'all', fAsset: 'all', fEscDiv: 'all',
+    tab: 'dashboard', dashView: 'attention', fDivision: 'all', fAsset: 'all', fEscDiv: 'all',
     loaded: { assets: false, partners: false, obligations: false, status: false }
   };
 
@@ -531,6 +578,7 @@
     if (!STATE.seasonKey) return;
     renderDashboard();
     renderObligations();
+    renderPartners();
     renderCentral();
     renderEscalation();
   }
@@ -614,43 +662,128 @@
     return '<td class="cc-cell cc-st--' + worst + '" data-asset="' + esc(aid) + '" data-club="' + esc(club.code) + '" title="' + esc(tip) + '">' + sym + count + '</td>';
   }
 
+  /* Every club × asset rolled up once per render; both dashboard views and
+     the stat cards read from this. */
+  function clubAssetRollups(clubs, byAid, aids, t) {
+    return clubs.map(function (club) {
+      var perAsset = {}, open = 0, failedAssets = 0, anyDone = false;
+      aids.forEach(function (aid) {
+        var worst = null, aOpen = 0, aApp = 0;
+        byAid[aid].forEach(function (o) {
+          if (!CC.appliesTo(o, club.division, club.code)) return;
+          aApp++;
+          var r = CC.clubRollup(CC.periodsFor(o, STATE.seasonKey), statusMapFor(o.id, club.code), t);
+          aOpen += r.open;
+          if (worst === null || STATE_RANK[r.state] > STATE_RANK[worst]) worst = r.state;
+        });
+        if (!aApp) return;
+        perAsset[aid] = { worst: worst, open: aOpen };
+        open += aOpen;
+        if (worst === 'failed') failedAssets++;
+        if (worst === 'clear') anyDone = true;
+      });
+      return { club: club, perAsset: perAsset, open: open, failedAssets: failedAssets, anyDone: anyDone };
+    });
+  }
+
   function renderDashboard() {
     var live = liveObligations('clubs');
-    var clubs = filteredClubs();
     var t = today();
+    var byAid = {};
+    live.forEach(function (o) { var k = o.assetId || ''; (byAid[k] = byAid[k] || []).push(o); });
+    var aids = assetIdsInUse(live).filter(function (aid) { return byAid[aid]; });
 
-    /* stats — across ALL live club requirements, unfiltered */
+    var allRoll = clubAssetRollups(STATE.clubs, byAid, aids, t);
+
+    /* stats — always the full 72, unfiltered */
     var clear = 0, behind = 0, overdueTotal = 0;
-    STATE.clubs.forEach(function (club) {
-      var anyBad = false, anyDone = false;
-      live.forEach(function (o) {
-        if (!CC.appliesTo(o, club.division, club.code)) return;
-        var r = CC.clubRollup(CC.periodsFor(o, STATE.seasonKey), statusMapFor(o.id, club.code), t);
-        overdueTotal += r.open;
-        if (r.state === 'overdue' || r.state === 'failed') anyBad = true;
-        if (r.state === 'clear') anyDone = true;
-      });
-      if (anyBad) behind++;
-      else if (anyDone) clear++;
+    allRoll.forEach(function (r) {
+      overdueTotal += r.open;
+      if (r.open > 0 || r.failedAssets > 0) behind++;
+      else if (r.anyDone) clear++;
     });
     document.getElementById('stClear').textContent = clear;
     document.getElementById('stBehind').textContent = behind;
     document.getElementById('stOverdue').textContent = overdueTotal;
     document.getElementById('stObs').textContent = live.length;
 
-    /* one column per asset that has at least one live club requirement */
-    var byAid = {};
-    live.forEach(function (o) { var k = o.assetId || ''; (byAid[k] = byAid[k] || []).push(o); });
-    var aids = assetIdsInUse(live).filter(function (aid) { return byAid[aid]; });
-
-    /* asset filter (preserve selection) */
+    /* asset filter select (strip tiles set STATE.fAsset too — keep in sync) */
     var sel = document.getElementById('obFilter');
-    var cur = sel.value;
     sel.innerHTML = '<option value="all">All assets</option>' + aids.map(function (aid) {
       return '<option value="' + esc(aid) + '">' + esc(assetName(aid)) + '</option>';
     }).join('');
-    sel.value = aids.indexOf(cur) >= 0 ? cur : 'all';
+    sel.value = aids.indexOf(STATE.fAsset) >= 0 ? STATE.fAsset : 'all';
     STATE.fAsset = sel.value;
+
+    document.getElementById('dashAttention').style.display = STATE.dashView === 'attention' ? '' : 'none';
+    document.getElementById('dashGridWrap').style.display = STATE.dashView === 'grid' ? '' : 'none';
+    var fRoll = allRoll.filter(function (r) {
+      return STATE.fDivision === 'all' || r.club.division === STATE.fDivision;
+    });
+    if (STATE.dashView === 'grid') renderDashGrid(byAid, aids, live);
+    else renderAttention(fRoll, aids);
+  }
+
+  /* Default view: only the clubs that need something, worst first. The full
+     72×asset matrix stays available behind the Full grid chip — with weekly
+     cadences in play it is a wall of amber, not a working view. */
+  function renderAttention(fRoll, aids) {
+    var strip = document.getElementById('assetStrip');
+    strip.innerHTML = aids.map(function (aid) {
+      var app = 0, behind = 0;
+      fRoll.forEach(function (r) {
+        var pa = r.perAsset[aid]; if (!pa) return;
+        app++;
+        if (pa.open || pa.worst === 'failed') behind++;
+      });
+      return '<div class="cc-asset-tile' + (STATE.fAsset === aid ? ' active' : '') + '" data-strip="' + esc(aid) + '">' +
+        '<div class="cc-asset-tile__name">' + esc(assetName(aid)) + '</div>' +
+        '<div class="cc-asset-tile__stat">' + (behind ? '<b>' + behind + ' behind</b> of ' + app : 'all clear · ' + app + ' clubs') + '</div></div>';
+    }).join('');
+
+    var tbody = document.getElementById('attTable').querySelector('tbody');
+    var allClear = document.getElementById('attAllClear');
+    if (!STATE.loaded.obligations || !STATE.loaded.status) {
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="3">Loading…</td></tr>';
+      allClear.textContent = '';
+      return;
+    }
+    var needy = fRoll.filter(function (r) {
+      if (STATE.fAsset !== 'all') {
+        var pa = r.perAsset[STATE.fAsset];
+        return pa && (pa.open || pa.worst === 'failed');
+      }
+      return r.open > 0 || r.failedAssets > 0;
+    }).sort(function (a, b) { return b.open - a.open || a.club.name.localeCompare(b.club.name); });
+
+    if (!needy.length) {
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="3">Nothing needs attention 🎉</td></tr>';
+    } else {
+      tbody.innerHTML = needy.map(function (r) {
+        var chips = aids.filter(function (aid) {
+          if (STATE.fAsset !== 'all' && aid !== STATE.fAsset) return false;
+          var pa = r.perAsset[aid];
+          return pa && (pa.open || pa.worst === 'failed');
+        }).map(function (aid) {
+          var pa = r.perAsset[aid];
+          var name = assetName(aid);
+          var short = name.length > 15 ? name.slice(0, 14) + '…' : name;
+          return '<span class="cc-att-chip' + (pa.worst === 'failed' ? ' cc-att-chip--failed' : '') + '"' +
+            ' data-att="' + esc(aid) + '" data-club="' + esc(r.club.code) + '"' +
+            ' title="' + esc(name + (pa.open ? ' — ' + pa.open + ' outstanding' : ' — non-compliant')) + '">' +
+            esc(short) + (pa.open ? ' !' + pa.open : ' ✕') + '</span>';
+        }).join('');
+        return '<tr><td>' + NL.clubs.crestImgHtml(r.club.name, 'thumb', { className: 'cc-crest' }) + esc(r.club.name) + '</td>' +
+          '<td class="ta-center cc-esc-total">' + r.open + '</td>' +
+          '<td>' + chips + '</td></tr>';
+      }).join('');
+    }
+    allClear.textContent = (fRoll.length - needy.length) + ' of ' + fRoll.length + ' clubs with nothing outstanding';
+    NL.clubs.wireCrestImgs(tbody);
+  }
+
+  function renderDashGrid(byAid, aids, live) {
+    var clubs = filteredClubs();
     var shownAids = aids.filter(function (aid) { return STATE.fAsset === 'all' || aid === STATE.fAsset; });
 
     var thead = '<tr><th>Club</th>' + shownAids.map(function (aid) {
@@ -736,7 +869,9 @@
       }).join('');
       wirePartnerLogos(tbody);
     }
+  }
 
+  function renderPartners() {
     var grid = document.getElementById('ptGrid');
     var pids = Object.keys(STATE.partners).sort(function (a, b) {
       return STATE.partners[a].name.localeCompare(STATE.partners[b].name);
@@ -1467,6 +1602,7 @@
     document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.getAttribute('data-tab') === name); });
     document.getElementById('viewDashboard').style.display = name === 'dashboard' ? '' : 'none';
     document.getElementById('viewObligations').style.display = name === 'obligations' ? '' : 'none';
+    document.getElementById('viewPartners').style.display = name === 'partners' ? '' : 'none';
     document.getElementById('viewCentral').style.display = name === 'central' ? '' : 'none';
     document.getElementById('viewEscalation').style.display = name === 'escalation' ? '' : 'none';
   }
@@ -1480,6 +1616,22 @@
       STATE.fDivision = chip.getAttribute('data-div');
       document.querySelectorAll('#divChips .chip').forEach(function (c) { c.classList.toggle('active', c === chip); });
       scheduleRender();
+    });
+    document.getElementById('dashViewChips').addEventListener('click', function (e) {
+      var chip = e.target.closest('.chip'); if (!chip) return;
+      STATE.dashView = chip.getAttribute('data-view');
+      document.querySelectorAll('#dashViewChips .chip').forEach(function (c) { c.classList.toggle('active', c === chip); });
+      scheduleRender();
+    });
+    document.getElementById('assetStrip').addEventListener('click', function (e) {
+      var tile = e.target.closest('[data-strip]'); if (!tile) return;
+      var aid = tile.getAttribute('data-strip');
+      STATE.fAsset = STATE.fAsset === aid ? 'all' : aid;
+      scheduleRender();
+    });
+    document.getElementById('attTable').addEventListener('click', function (e) {
+      var chip = e.target.closest('[data-att]'); if (!chip) return;
+      openAssetModal(chip.getAttribute('data-att'), chip.getAttribute('data-club'));
     });
     document.getElementById('obFilter').addEventListener('change', function (e) {
       STATE.fAsset = e.target.value; scheduleRender();
