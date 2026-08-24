@@ -99,10 +99,17 @@
     var bounds = CC.seasonBounds(seasonKey);
 
     if (oblig && oblig.kind === 'quota') {
+      /* A quota starts as undated slots all due at season end; as the plan
+         firms up each slot can be given a specific date (slotDates.qN), and
+         a dated slot then goes overdue like any deadline. Dating a slot is
+         scheduling, not a change to what is owed — deliberately NOT a
+         material edit. Slot keys stay q1..qN regardless of dates: they are
+         the status paths. */
       var target = Math.max(1, (oblig.quotaTarget | 0) || 1);
       var out = [];
       for (var q = 1; q <= target; q++) {
-        out.push({ key: 'q' + q, label: ordinal(q) + ' of ' + target, due: bounds.end });
+        var planned = CC.parseYmd(oblig.slotDates && oblig.slotDates['q' + q]);
+        out.push({ key: 'q' + q, label: ordinal(q) + ' of ' + target, due: planned || bounds.end, planned: !!planned });
       }
       return out;
     }

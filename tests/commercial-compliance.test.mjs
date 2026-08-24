@@ -225,6 +225,24 @@ test('quota: q-slots, every one due at season end', () => {
   for (const slot of p) assert.equal(CC.ymd(slot.due), '2027-06-30');
 });
 
+test('quota: slotDates give a slot its own deadline; undated slots stay season end', () => {
+  const q = { kind: 'quota', quotaTarget: 3, slotDates: { q1: '2026-09-15' } };
+  const p = CC.periodsFor(q, '2026');
+  assert.equal(CC.ymd(p[0].due), '2026-09-15');
+  assert.equal(p[0].planned, true);
+  assert.equal(CC.ymd(p[1].due), '2027-06-30');
+  assert.equal(p[1].planned, false);
+  /* a dated, undelivered slot escalates once its date passes */
+  const oct = new Date(2026, 9, 1);
+  assert.equal(CC.clubRollup(p, {}, oct).state, 'overdue');
+  assert.equal(CC.clubRollup(p, { q1: { state: 'compliant' } }, oct).state, 'clear');
+});
+
+test('dating a quota slot is scheduling, not a material edit', () => {
+  const q = { ...BASE, kind: 'quota', quotaTarget: 4 };
+  assert.equal(CC.isMaterialEdit(q, { ...q, slotDates: { q1: '2026-09-15' } }), false);
+});
+
 test('quota: missing/zero target clamps to 1', () => {
   assert.equal(CC.periodsFor({ kind: 'quota' }, '2026').length, 1);
   assert.equal(CC.periodsFor({ kind: 'quota', quotaTarget: 0 }, '2026').length, 1);

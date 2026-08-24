@@ -7,7 +7,9 @@
     (obligations group under them; dashboard shows one column per asset with
     worst-state rollup; the click-through modal breaks it back down per
     requirement). Requirement KINDS: recurring (as before), quota (xN per
-    season, progress not deadlines), standing (spot-checked monthly). TBC
+    season, progress not deadlines — slots take planned dates as the schedule
+    firms up, and a dated slot can then go overdue), standing (spot-checked
+    monthly). TBC
     DRAFT state for requirements that exist but aren't enforceable yet
     (pending renewal etc.) — on the board, out of the maths. NL CENTRAL tab:
     the League's own deliverables to partners (debtor 'NL'), quota progress
@@ -112,6 +114,7 @@
         items: [
           'Assets become the spine: grouped obligations, one dashboard column per asset, per-requirement drill-down.',
           'Requirement kinds: recurring, quota (xN per season, progress), standing (spot-checked monthly).',
+          'Quota slots take planned dates as the schedule firms up — a dated slot can go overdue; dating is not a version bump.',
           'TBC draft state: on the board, out of the maths, names what is unresolved.',
           'NL Central tab: League-owed deliverables with quota progress and Record.',
           'Partner logos uploadable to Storage as well as pasted as URLs.'
@@ -1316,8 +1319,15 @@
             (rec.by ? ' <span>— ' + esc(rec.by) + (rec.at ? ', ' + esc(NL.formatDateTime(rec.at)) : '') + '</span>' : '') +
             '</div>';
         }
+        var slotInput = '';
+        if (o.kind === 'quota' && STATE.canEdit) {
+          slotInput = '<input type="date" data-slotdate="' + esc(p.key) + '" data-oid="' + esc(o.id) + '"' +
+            ' value="' + esc((o.slotDates && o.slotDates[p.key]) || '') + '" title="Planned date"' +
+            ' style="font-size:var(--text-xs);padding:3px 6px;border:1px solid var(--border);border-radius:var(--radius);margin-top:4px">';
+        }
         return '<div class="cc-period"><div class="cc-period__when"><strong>' + esc(p.label) + '</strong>' +
-          '<div class="cc-period__due' + (overdue ? ' is-overdue' : '') + '">due ' + esc(NL.formatDateShort(CC.ymd(p.due))) + (overdue ? ' — past deadline' : '') + '</div></div>' +
+          '<div class="cc-period__due' + (overdue ? ' is-overdue' : '') + '">' + (p.planned ? 'planned ' : 'due ') + esc(NL.formatDateShort(CC.ymd(p.due))) + (overdue ? ' — past deadline' : '') + '</div>' +
+          slotInput + '</div>' +
           seg + evid + '</div>';
       }).join('');
     }
@@ -1335,6 +1345,25 @@
       wirePartnerLogos(body);
     }
     draw();
+
+    /* Quota slot planned-date edits — scheduling, so written straight to the
+       obligation without a version bump (see _shared.js). */
+    body.addEventListener('change', function (e) {
+      var inp = e.target.closest('[data-slotdate]');
+      if (!inp) return;
+      var soid = inp.getAttribute('data-oid'), slot = inp.getAttribute('data-slotdate');
+      var val = inp.value || null;
+      dataRef('obligations/' + soid + '/slotDates/' + slot).set(val)
+        .then(function () {
+          var ob = STATE.obligations[soid];
+          if (ob) {
+            ob.slotDates = ob.slotDates || {};
+            if (val) ob.slotDates[slot] = val; else delete ob.slotDates[slot];
+          }
+          draw();
+        })
+        .catch(function (e2) { NL.toast('Failed: ' + e2.message, 'error'); });
+    });
 
     body.addEventListener('click', function (e) {
       var tog = e.target.closest('[data-toggle-all]');
