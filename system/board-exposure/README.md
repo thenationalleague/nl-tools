@@ -108,6 +108,37 @@ concluded it was absent from the ground. Five frames of not-looking-hard-enough
 produced a confident wrong answer about a league partner's delivery. That is the
 false-negative trap this tool exists to avoid, and it caught its own author.
 
+## First full clip — Sutton United v Crystal Palace highlights
+
+`scripts/board-exposure-run.py` over a real 3m28s LIGR highlights package
+(1920×1080, 50fps), sampling twice a second, matching the two National League
+partners straight from `assets/partners/`:
+
+| | Enterprise | TIC Health |
+|---|---|---|
+| Samples with a detection | 74 of 415 | 0 |
+| Seconds on screen | 38.6 of 207.9 (19%) | — |
+| Separate runs | 7 | — |
+| Exposure index | 22.0 | — |
+| Mean clarity | 0.571 | — |
+| Mean board size | 0.462% of frame | — |
+| Most boards at once | 2 | — |
+
+Runtime was 216s for 208s of video on four cores — roughly real time, so a
+90-minute match is about 90 minutes single-threaded, and it parallelises across
+cores and jobs.
+
+**Read TIC Health's zero as unverified, not as absence.** It is exactly the
+shape of answer this tool must never be trusted on without a hand-count, and
+the paragraph above records this session getting that call wrong once already.
+The clip is goal-focused highlights, so a board on the far side may genuinely
+never appear — or the detector may be missing it. Nothing distinguishes those
+two from the output alone.
+
+The clarity weights were recalibrated here: real boards run 0.1–0.6% of frame,
+so the size term now saturates at 0.6% rather than the 2% the synthetic clip
+suggested. Still a stated choice, still uncalibrated against a hand-count.
+
 ## What the weights are, and what they are not
 
 `clarity_score()` combines size, focus, contrast and skew at 40/25/20/15. Those
