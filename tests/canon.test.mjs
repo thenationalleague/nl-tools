@@ -164,12 +164,12 @@ test('clubs.crestImgHtml emits an escaped, data-crest-carrying <img> per tier', 
   const html = NL.clubs.crestImgHtml('AFC Fylde', 'thumb');
   assert.ok(html.startsWith('<img '), 'an <img> tag');
   assert.ok(html.includes('data-crest="AFC Fylde"'), 'carries data-crest for the wiring sweep');
-  assert.ok(html.includes('src="/assets/crests/thumbs/AFC%20Fylde.png"'), 'thumb tier URL');
+  assert.ok(html.includes('data-crest-src="/assets/crests/thumbs/AFC%20Fylde.png"'), 'thumb tier URL, deferred');
   assert.ok(html.includes('alt=""'), 'decorative alt by default');
   assert.ok(!html.includes('onerror'), 'no inline fallback — wiring stays a post-insertion pass');
 
-  assert.ok(NL.clubs.crestImgHtml('AFC Fylde', 'medium').includes('src="/assets/crests/medium/AFC%20Fylde.png"'), 'medium tier URL');
-  assert.ok(NL.clubs.crestImgHtml('AFC Fylde').includes('src="/assets/crests/AFC%20Fylde.png"'), 'no size arg → full-res');
+  assert.ok(NL.clubs.crestImgHtml('AFC Fylde', 'medium').includes('data-crest-src="/assets/crests/medium/AFC%20Fylde.png"'), 'medium tier URL');
+  assert.ok(NL.clubs.crestImgHtml('AFC Fylde').includes('data-crest-src="/assets/crests/AFC%20Fylde.png"'), 'no size arg → full-res');
 
   const opts = NL.clubs.crestImgHtml('Barrow', 'thumb', { className: 'ps-crest', alt: 'Barrow crest' });
   assert.ok(opts.includes('class="ps-crest"'), 'opts.className');
@@ -178,22 +178,44 @@ test('clubs.crestImgHtml emits an escaped, data-crest-carrying <img> per tier', 
 });
 
 test('clubs.crestImgHtml defers the image unless told not to', () => {
-  /* This helper exists for LISTS of clubs, and a list of clubs is 72 of them.
-     The club directory index requested 72 crests and decoded 72 PNGs on first
-     paint for the dozen actually on screen — while the estate hand-rolled
-     loading="lazy" in 140 other places and the one helper that emits crest
-     images had none of it. Lazy is therefore the DEFAULT here, not an option
-     each caller has to remember. */
+  /* THE FIRST ATTEMPT AT THIS SHIPPED loading="lazy" AND DEFERRED NOTHING.
+     The browser loads anything within roughly 1250px of the viewport, and the
+     club directory's wall is about 1870px tall — so "lazy" covered
+     essentially all of it. Measured in Chromium on 26/08/2026: 72 crests
+     fetched before a single scroll, 82 requests for one page view, which is
+     what tripped GitHub Pages' per-IP throttle.
+
+     So the URL is withheld from src entirely and an IntersectionObserver
+     puts it there 200px before the crest is needed. On a 1440x900 laptop the
+     wall now costs 46 requests instead of 82; on a phone, 22. */
   const html = NL.clubs.crestImgHtml('AFC Fylde', 'thumb');
-  assert.ok(html.includes('loading="lazy"'), 'a crest in a list waits its turn');
+  assert.ok(html.includes('data-crest-src='), 'the URL waits off to one side');
+  assert.ok(!/[^-]src=/.test(html), 'and there is no src for the browser to act on');
+  assert.ok(!html.includes('loading="lazy"'),
+    'an attribute that looks like the mechanism while something else does the work is worse than none');
   assert.ok(html.includes('decoding="async"'), 'and never decodes on the main thread');
 
   /* The exception, and it has to be an opt-OUT: a crest that is the subject
      of the page — a banner, a hero — is the thing being looked at, and
      deferring it is the wrong way round. */
   const hero = NL.clubs.crestImgHtml('AFC Fylde', 'medium', { eager: true });
-  assert.ok(!hero.includes('loading="lazy"'), 'opts.eager opts out');
-  assert.ok(hero.includes('decoding="async"'), 'async decode still applies');
+  assert.ok(hero.includes('src="/assets/crests/medium/AFC%20Fylde.png"'), 'opts.eager loads at once');
+  assert.ok(!hero.includes('data-crest-src'), 'and nothing is left for the observer');
+});
+
+test('the deferral belongs to the helper, not to the caller', () => {
+  /* Sixteen of the eighteen callers sweep with wireCrestImgs and two do not —
+     fan-widgets and the directory reader's own search results. An <img> whose
+     src only arrives if somebody remembered to sweep is a crest that silently
+     does not draw, so nl-utils claims them itself with a MutationObserver as
+     they enter the document. Both kinds of caller work; the forgetful one
+     simply also gets the deferral. */
+  const src = readFileSync(join(REPO, 'system/nl-utils.js'), 'utf8');
+  assert.match(src, /new MutationObserver\(/, 'the helper watches for its own images');
+  assert.match(src, /\{ childList: true, subtree: true \}/);
+  assert.match(src, /rootMargin: '200px 0px'/, '200px of runway');
+  /* No observer at all — a very old browser — must load, not blank. */
+  assert.match(src, /if \(_crestIO\) _crestIO\.observe\(list\[i\]\); else _crestLoad\(list\[i\]\);/);
 });
 
 test('clubs.crestImgHtml escapes a hostile club name everywhere it appears', () => {

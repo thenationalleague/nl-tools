@@ -1,7 +1,16 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.42 (26/08/2026)
+   Version: v1.43 (26/08/2026)
+
+   v1.43 — crest deferral that actually defers. crestImgHtml carried
+   loading="lazy" and the directory index still fetched all 72 crests before
+   a single scroll — the browser loads anything within ~1250px of the
+   viewport and the wall is ~1870px tall. 82 requests a page view is what
+   tripped GitHub Pages' per-IP throttle. The URL now rides in
+   data-crest-src and an IntersectionObserver swaps it in 200px ahead; a
+   MutationObserver claims every deferred crest as it enters the document,
+   so the two callers that never swept still draw.
 
    v1.42 — NL.clubs.bandsHtml: the club's colours as the canon .nl-club-bands
    trim (nl-brand v2.63). Promoted with the component on its third use; the
@@ -1957,6 +1966,77 @@
   var MEDIUM_BASE   = CREST_BASE + 'medium/';
   var CLUB_ROSE     = CREST_BASE + 'National%20League%20rose.png';
 
+  /* ---- Crest deferral ------------------------------------------------
+     A list of clubs is 72 of them, and 72 image requests on first paint is
+     what tripped GitHub Pages' per-IP request throttle on 26/08/2026: the
+     directory index costs 82 requests, 72 of them crests.
+
+     loading="lazy" WAS ALREADY ON THEM AND DID NOTHING USEFUL. The browser
+     loads anything within roughly 1250px of the viewport, and the whole wall
+     is about 1870px tall — so "lazy" covered essentially all of it. Measured
+     in Chromium: 72 crests fetched before a single scroll.
+
+     So the deferral is real now: the markup carries data-crest-src and NO
+     src, and an IntersectionObserver swaps it in 200px before the crest
+     reaches the viewport. The wall drops from 72 crests on load to whatever
+     is actually on screen.
+
+     THE HELPER OWNS THIS, NOT THE CALLER. Sixteen of the eighteen callers
+     sweep with wireCrestImgs and two do not, and an <img> whose src only
+     arrives if somebody remembers to sweep is a crest that silently does not
+     draw. A MutationObserver claims every deferred crest as it enters the
+     document, so a caller that sweeps and a caller that forgets both work —
+     the forgetful one simply also gets the deferral. Installed once, on the
+     first deferred crest, and never on a page that has none.
+
+     No IntersectionObserver (very old browser) → load immediately. Slower,
+     never blank. */
+  var _crestIO = null, _crestMO = null;
+
+  function _crestLoad(img) {
+    var src = img.getAttribute('data-crest-src');
+    if (!src) return;                       /* already claimed */
+    img.removeAttribute('data-crest-src');
+    img.src = src;
+  }
+
+  function _crestClaim(node) {
+    if (!node || node.nodeType !== 1) return;
+    if (node.hasAttribute && node.hasAttribute('data-crest-src')) {
+      if (_crestIO) _crestIO.observe(node); else _crestLoad(node);
+    }
+    if (!node.querySelectorAll) return;
+    var list = node.querySelectorAll('img[data-crest-src]');
+    for (var i = 0; i < list.length; i++) {
+      if (_crestIO) _crestIO.observe(list[i]); else _crestLoad(list[i]);
+    }
+  }
+
+  function _crestDeferInit() {
+    if (_crestMO || typeof document === 'undefined' || !document.documentElement) return;
+    if (typeof IntersectionObserver === 'function') {
+      _crestIO = new IntersectionObserver(function (entries) {
+        for (var i = 0; i < entries.length; i++) {
+          if (!entries[i].isIntersecting) continue;
+          _crestIO.unobserve(entries[i].target);
+          _crestLoad(entries[i].target);
+        }
+      /* 200px of runway: far enough that a crest is there by the time it is
+         scrolled to, near enough that the wall does not fetch all 72. */
+      }, { rootMargin: '200px 0px' });
+    }
+    if (typeof MutationObserver !== 'function') { _crestMO = true; return; }
+    _crestMO = new MutationObserver(function (muts) {
+      for (var i = 0; i < muts.length; i++) {
+        var added = muts[i].addedNodes;
+        for (var j = 0; j < added.length; j++) _crestClaim(added[j]);
+      }
+    });
+    _crestMO.observe(document.documentElement, { childList: true, subtree: true });
+    /* Anything already inserted before the first call. */
+    _crestClaim(document.documentElement);
+  }
+
   window.NL.clubs = {
     ROSE: CLUB_ROSE,
     /* Absolute crest URL for a club name.
@@ -2002,17 +2082,21 @@
     crestImgHtml: function(name, size, opts) {
       opts = opts || {};
       var esc = window.NL.escHtml;
-      /* LAZY BY DEFAULT. This helper's whole reason to exist is lists of
-         clubs, and a list of clubs is 72 of them: the directory index fired
-         72 eager requests and decoded 72 PNGs on first paint for the dozen
-         actually on screen. The estate already uses loading="lazy" in 140
-         places by hand; the one helper that emits crest images did not.
+      /* DEFERRED BY DEFAULT, and properly this time — see the deferral note
+         above. The URL rides in data-crest-src and an IntersectionObserver
+         turns it into src 200px before the crest is needed. loading="lazy"
+         is gone with it: it promised this and did not deliver, and an
+         attribute that looks like the mechanism while something else does
+         the work is worse than no attribute.
+
          opts.eager for a crest that IS the thing being looked at — a hero or
          a banner — where deferring it is the wrong way round. */
+      var url = esc(this.crestUrl(name, size));
+      if (!opts.eager) _crestDeferInit();
       return '<img data-crest="' + esc(name || '') + '"' +
         (opts.className ? ' class="' + esc(opts.className) + '"' : '') +
-        ' src="' + esc(this.crestUrl(name, size)) + '"' +
-        (opts.eager ? '' : ' loading="lazy"') + ' decoding="async"' +
+        (opts.eager ? ' src="' + url + '"' : ' data-crest-src="' + url + '"') +
+        ' decoding="async"' +
         ' alt="' + esc(opts.alt || '') + '">';
     },
     /* Wire every img[data-crest] under `root` (an element or document) via
