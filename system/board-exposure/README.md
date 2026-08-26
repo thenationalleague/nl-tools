@@ -108,6 +108,28 @@ concluded it was absent from the ground. Five frames of not-looking-hard-enough
 produced a confident wrong answer about a league partner's delivery. That is the
 false-negative trap this tool exists to avoid, and it caught its own author.
 
+## The ident trap — a false positive worth knowing about
+
+A highlights package opens with a sponsor ident card: the Enterprise mark and
+the National League roundel, held full-screen on black. The detector matched it
+happily, and counted it as perimeter exposure. It is not — it is a different
+piece of inventory, priced differently, and the first thing a partner would
+challenge.
+
+`on_the_perimeter()` in `board-exposure-run.py` rejects it on context rather
+than appearance: a hoarding stands on the touchline, so there is always pitch
+below it. Sample the strip under the detected quad and require it to be mostly
+grass by hue and saturation. An ident on black fails; a real board passes.
+
+The correction is large enough to be the point. On the Harrogate clip it took
+Enterprise from 74 detections to 36, and from a reported 38.6 seconds to 16.5 —
+over half the original figure was the ident card. On Sutton it took 67.2s to
+60.2s and halved the mean board size, because the ident is far larger than any
+hoarding and was dragging the average up.
+
+Anything reporting exposure from a highlights package needs this check or an
+equivalent. Without it the number is inflated in a way that looks plausible.
+
 ## First full clip — Sutton United v Crystal Palace highlights
 
 `scripts/board-exposure-run.py` over a real 3m28s LIGR highlights package

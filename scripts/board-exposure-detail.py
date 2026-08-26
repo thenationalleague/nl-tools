@@ -83,7 +83,7 @@ def main():
                             if Hm is None or mask is None or int(mask.sum()) < R.MIN_INLIERS:
                                 break
                             quad = cv2.perspectiveTransform(corners, Hm).reshape(4, 2)
-                            if R.geometry_ok(quad, shape):
+                            if R.geometry_ok(quad, shape) and R.on_the_perimeter(frame, quad):
                                 sh, ct = R.quality(gray, quad, ref_wh)
                                 a = 100.0 * abs(cv2.contourArea(
                                     quad.astype(np.float32))) / (H * W)

@@ -62,6 +62,32 @@ def geometry_ok(q, shape):
     return min(top, bot) / max(top, bot) >= 0.45
 
 
+def on_the_perimeter(frame_bgr, quad):
+    """
+    A hoarding stands on the touchline, so there is always pitch below it. A
+    sponsor ident card in the broadcast graphics does not have that, and without
+    this check it is counted as board exposure — different inventory, wrongly
+    priced, and the first thing a partner would catch.
+    """
+    pts = quad.astype(np.float32)
+    H, W = frame_bgr.shape[:2]
+    bottom = float(pts[:, 1].max())
+    height = max(6.0, float(pts[:, 1].max() - pts[:, 1].min()))
+    y0 = int(min(H - 1, bottom + height * 0.15))
+    y1 = int(min(H, bottom + height * 1.30))
+    x0 = int(max(0, pts[:, 0].min()))
+    x1 = int(min(W, pts[:, 0].max()))
+    if y1 - y0 < 3 or x1 - x0 < 3:
+        return False
+    strip = frame_bgr[y0:y1, x0:x1]
+    if strip.size == 0:
+        return False
+    hsv = cv2.cvtColor(strip, cv2.COLOR_BGR2HSV)
+    h, s, v = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
+    grass = ((h >= 30) & (h <= 90) & (s >= 40) & (v >= 40))
+    return float(grass.mean()) >= 0.45
+
+
 def quality(gray, quad, ref_wh):
     w, h = max(int(ref_wh[0]), 32), max(int(ref_wh[1]), 32)
     dst = np.float32([[0, 0], [w, 0], [w, h], [0, h]]).reshape(-1, 1, 2)
@@ -146,7 +172,7 @@ def main():
                             if Hm is None or mask is None or int(mask.sum()) < MIN_INLIERS:
                                 break
                             quad = cv2.perspectiveTransform(corners, Hm).reshape(4, 2)
-                            if geometry_ok(quad, shape):
+                            if geometry_ok(quad, shape) and on_the_perimeter(frame, quad):
                                 sh, ct = quality(gray, quad, ref_wh)
                                 a = 100.0 * abs(cv2.contourArea(
                                     quad.astype(np.float32))) / (H * W)
