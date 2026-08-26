@@ -227,7 +227,15 @@ exports.clubDirectoryAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
     }
 
     const code = normCode(req.code);
-    if (code.length !== 6) return grant({ ok: false, error: "Enter your six-digit code." });
+    /* NOT "Enter your six-digit code." — this door is reached as a FALLBACK
+       from the Club Directory reader, whose codes are alphanumeric, and
+       normCode above keeps only the digits. A perfectly good access code
+       arrives here as two or three digits and lands on this branch, so a
+       message about digits was being shown to people who had entered a
+       six-character code correctly. What is true from here is only that the
+       code is not one of this door's. It short-circuits ahead of
+       noteFailure deliberately: a malformed length is not a guess. */
+    if (code.length !== 6) return grant({ ok: false, error: "Code not recognised." });
 
     const cfg = (await db.ref(ROOT + "/config").once("value")).val() || {};
     const hit = pickHolder(cfg, code);

@@ -400,7 +400,12 @@ exports.clubCodeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
     }
 
     const code = normCode(req.code);
-    if (code.length < 4) return grant({ ok: false, error: "Enter your club code." });
+    /* ACCESS CODE, not club code: the same six characters are held by the 72
+       clubs AND by named people at the League, and the League is not a club.
+       The cards were corrected on 22/08/2026 and this string was missed —
+       the server writes the message on every failed attempt, so the old
+       wording survived where it is most visible. */
+    if (code.length < 4) return grant({ ok: false, error: "Enter your access code." });
 
     /* Same records Programme reads — one credential, one home, two doors. */
     const cfg = await readCodes(db, "clubCodeAuth");
