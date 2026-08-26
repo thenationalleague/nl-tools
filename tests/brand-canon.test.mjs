@@ -599,6 +599,32 @@ test('.nl-crest is square, and stays square', () => {
     'height:auto is the exact bug this component was promoted to end');
 });
 
+test('the cover is a sheet, like every page behind it', () => {
+  /* It had no background at all, so the handbook's title page floated on the
+     off-white while every page after it sat on white — the one page in the
+     document that did not look like part of the document. Richard: "why is
+     this see through and doesn't have white backing as per the rest of the
+     doc?"
+
+     THE WIDTH IS THE OTHER HALF. A cover narrower than the pages behind it
+     makes the sheet change size the moment you leave the cover, which reads
+     as two documents rather than the front of one. */
+  const cover = /\.nl-cover \{([^}]*)\}/.exec(css);
+  const doc = /\.nl-doc \{([^}]*)\}/.exec(css);
+  assert.ok(cover && doc, 'both blocks exist');
+  assert.match(cover[1], /background: var\(--white\)/);
+  assert.match(cover[1], /border: 1px solid var\(--border\)/);
+  assert.match(cover[1], /box-shadow: 0 1px 3px var\(--navy-100\)/);
+
+  const width = (b) => /max-width:\s*(\d+)px/.exec(b)[1];
+  assert.equal(width(cover[1]), width(doc[1]),
+    'the sheet must not change width between the cover and the pages');
+
+  /* And edge to edge on a phone, for the same reason .nl-doc is: a 12px
+     margin either side of a sheet is a stripe, not a margin. */
+  assert.match(css, /@media \(max-width: 860px\) \{\s*\.nl-cover \{[^}]*border-radius: 0/);
+});
+
 test('.is-sel is actually drawn', () => {
   /* The bug this was written for is the quietest kind. handbook/index.html
      and handbook/_reader.js (shared by the gated reader and handbook/public)
