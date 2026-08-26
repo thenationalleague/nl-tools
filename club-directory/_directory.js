@@ -727,6 +727,10 @@
     rolesOf: rolesOf,
     renderClub: renderClub,
     viewSwitch: viewSwitch,
+    /* EXPORTED so the index wall and the club banner ask one function for a
+       club's two colours. Two copies of this is how Carlisle ends up
+       readable in one place and 1.17:1 in the other. */
+    clubColours: bannerColours,
     personRow: personRow,
     personCard: personCard,
     allPeople: allPeople,
