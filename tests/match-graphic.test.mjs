@@ -180,11 +180,26 @@ test('Chorley rejects its secondary — red on black is a both-dark pair', () =>
   assert.equal(r.text.toUpperCase(), '#FFFFFF');
 });
 
-test("Scunthorpe keeps its maroon secondary at the 2.5 floor", () => {
-  /* 2.85:1 — admitted deliberately; it matches the original hand-made graphic. */
+test('Scunthorpe is maroon with pale blue on it, at the 2.5 floor', () => {
+  /* 2.85:1 — admitted deliberately, and this pair is unchanged. What changed
+     is which way round it sits.
+
+     SCUNTHORPE'S PRIMARY AND SECONDARY WERE INVERTED in clubs-meta on
+     26/08/2026 at the brand owner's instruction: they play in claret, and the
+     record had the pale blue as the primary. This test read
+     text === '#8B2942' — the maroon as INK on a pale blue panel — which was
+     the original hand-made graphic. The panel is the maroon now and the pale
+     blue is the ink.
+
+     Left as a change of intent rather than quietly re-pointed: the header of
+     this file says a broken named case is exactly that, and the data move is
+     the decision. If the graphic should now take the white tertiary instead,
+     that is a separate ruling about the tool's own rule, which still asks for
+     secondary first. */
   const r = MG.resolveColours(colours('Scunthorpe United'));
+  assert.equal(r.panel.toUpperCase(), '#8B2942', 'the claret is the panel');
   assert.equal(r.textBasis, 'secondary');
-  assert.equal(r.text.toUpperCase(), '#8B2942');
+  assert.equal(r.text.toUpperCase(), '#759BB3');
 });
 
 test('Aldershot rejects navy-on-red and falls back', () => {
