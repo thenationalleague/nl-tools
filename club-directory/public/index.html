@@ -204,7 +204,19 @@
     $('searchWrap').hidden = true;
     if (CACHE[name]) { paint(name, CACHE[name]); return; }
     $('out').innerHTML = '<p class="cd-empty">Loading…</p>';
-    db().ref(ROOT + '/published/clubs/' + encodeURIComponent(name)).once('value')
+    /* .child() WITH THE RAW NAME. This was
+       ref('.../clubs/' + encodeURIComponent(name)) and it broke 49 of the 72:
+       Firebase's Path constructor splits the string on '/' and decodes
+       NOTHING, so "Aldershot%20Town" is looked up as a key spelled exactly
+       that way, which does not exist. The 23 that worked were the ones whose
+       names survive encodeURIComponent unchanged — every single-word club,
+       Altrincham through Worthing. Encoding a URL segment and addressing a
+       database key look identical and are not the same job.
+
+       No club name contains any of . $ # [ ] / — the characters RTDB forbids
+       in a key — so the raw name is already a legal key and needs nothing
+       done to it. tests/public-pages.test.mjs holds that. */
+    db().ref(ROOT + '/published/clubs').child(name).once('value')
       .then(function (snap) {
         CACHE[name] = snap.val() || null;
         paint(name, CACHE[name]);

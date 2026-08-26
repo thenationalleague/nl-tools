@@ -601,7 +601,8 @@ test('.nl-crest is square, and stays square', () => {
 
 test('.is-sel is actually drawn', () => {
   /* The bug this was written for is the quietest kind. handbook/index.html
-     and handbook/reader/index.html both add and remove .is-sel faithfully — on the
+     and handbook/_reader.js (shared by the gated reader and handbook/public)
+     both add and remove .is-sel faithfully — on the
      selected clause and on a deep-link target — and until v2.56 no stylesheet
      anywhere defined it. Every line of that bookkeeping ran correctly and
      painted nothing, in both pages, for months.
@@ -628,7 +629,7 @@ test('.is-sel is actually drawn', () => {
   assert.ok(!/box-shadow/.test(block),
     '.is-sel must not rely on a shadow — it has to hold its shape at zero height');
 
-  for (const page of ['handbook/index.html', 'handbook/reader/index.html']) {
+  for (const page of ['handbook/index.html', 'handbook/_reader.js']) {
     assert.match(readFileSync(join(REPO, page), 'utf8'), /is-sel/,
       page + ' sets .is-sel, which is why it is worth pinning here');
   }

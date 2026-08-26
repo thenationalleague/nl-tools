@@ -123,8 +123,10 @@ test('an outage at the first door reports the outage', async () => {
 /* ----------------------------------------------------- what the cards say */
 
 test('every card that takes an alphanumeric code avoids "digit"', () => {
+  /* The handbook's gate moved to handbook/_reader.js on 26/08/2026, shared
+     with handbook/public. */
   for (const f of ['club-directory/reader/index.html',
-                   'handbook/reader/index.html',
+                   'handbook/_reader.js',
                    'style-guide/index.html']) {
     const subs = [...strip(read(f)).matchAll(/(?:sub:\s*'([^']+)'|class="gate__sub"[^>]*>([^<]+)<)/g)]
       .map((m) => m[1] || m[2]);
@@ -139,7 +141,7 @@ test('every codeGate caller passes its own sub', () => {
      It is not safe to inherit ACCIDENTALLY: a gate that means to be
      alphanumeric and forgets `numeric: false` inherits a demand for digits
      along with it, which is this bug with a different author. */
-  const callers = ['club-directory/reader/index.html', 'handbook/reader/index.html'];
+  const callers = ['club-directory/reader/index.html', 'handbook/_reader.js'];
   for (const f of callers) {
     const src = read(f);
     assert.match(src, /NL\.codeGate\.(open|ensure)\(\{[\s\S]{0,1200}?sub: '/,
