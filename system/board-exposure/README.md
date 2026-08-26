@@ -39,36 +39,49 @@ finds awkward. That is a software problem invoiced as a delivery problem. So
 `exposure_index` is built from clarity alone; confidence is reported next to it
 and decides only whether a detection counts at all.
 
-## Tested on real footage, 26/08/2026 — and it did not hold up
+## Tested on real footage, 26/08/2026
 
-Eight frames from a full Sutton United match (LIGR, 2:00:50), matching the
-Enterprise board two ways:
+Eight frames from a full Sutton United match (LIGR, 2:00:50), hunting the
+Enterprise board. An earlier version of this section reported 0 of 8 using the
+brand asset and concluded that neither brand assets nor feature matching work at
+National League camera distances. **Both conclusions were wrong**, and the
+correction matters more than the original claim, so it is recorded here rather
+than quietly edited away.
 
-| Reference | Frames with a detection |
-|---|---|
-| Cropped from the footage itself | 2 of 8 — and one is the frame it was cut from |
-| `assets/partners/Enterprise.png` | 0 of 8 |
+The test matched reference descriptors against the *entire* 1913×1115 frame. A
+football frame carries tens of thousands of SIFT keypoints — crowd, grass,
+trees, houses behind the stand — so for almost every reference descriptor there
+is a spurious near-neighbour somewhere in shot, and Lowe's ratio test throws the
+true correspondence away with the false one. The boards were findable the whole
+time. The search was pointed at the wrong thing.
 
-Stable across four combinations of ratio test, inlier floor and frame upscaling,
-so this is the method reaching its limit, not a tuning miss.
+`scripts/board-exposure-sizetest.py` isolates the variables, and two results are
+solid:
 
-Two conclusions, both of which cost money:
+| Rendition of the same logo at 129×44 — the real board size | SIFT features | Matched? |
+|---|---|---|
+| Pristine | 83 | 27 inliers |
+| JPEG q=45 | 78 | 27 inliers |
+| JPEG q=25 | 99 | — |
+| Softened (camera/encode blur) | 106 | 24 inliers |
+| **The genuine board, cropped from the match** | **112** | **19 inliers** |
 
-**A brand's own logo file is useless as a reference.** A print-quality asset and
-a photograph of a weathered vinyl board share almost no scale-invariant
-features. So a reference library cannot be seeded from the files sponsors
-already own — every board has to be cropped from footage, at every ground.
+**Footage quality is not the constraint.** Compressing to JPEG q=25 barely moved
+the feature count, and a deliberately softened render still matched with 24
+inliers. Low bitrate is a red herring here.
 
-**Feature matching does not work at National League camera distances.** The
-boards run 0.19–0.27% of frame, around 130×44 pixels, frequently behind netting
-or a goalpost, and the camera zooms across a wide range within one match. There
-is not enough texture at that size to establish keypoint correspondence, however
-the thresholds are set.
+**Board size is not the constraint either.** At the real 129×44 — 0.27% of a
+1080p frame — the brand asset matched with 27 inliers, and matched the actual
+photographed board with 19. So `assets/partners/*.png` *are* usable references,
+and a library need not be hand-cropped at 72 grounds.
 
-What this needs is a trained detector — learn "advertising board" as a region,
-then classify what is inside it — which is the labelled-data road this spike was
-written to avoid. Treat everything below as the design that was tested and
-found wanting, not as a working approach.
+What remains genuinely open is recall on whole frames. Restricting the search to
+a sliding horizontal band lifts inlier counts on all eight frames, but low counts
+in the 5–15 range cannot be told apart from RANSAC coincidence without geometric
+validation of each quad and a hand-checked list of which frames actually contain
+the board. **Until that exists there is no accuracy claim here, in either
+direction** — only a demonstration that the obvious objections (too small, too
+compressed) are not what stands in the way.
 
 ## What the weights are, and what they are not
 
