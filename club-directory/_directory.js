@@ -745,26 +745,13 @@
      fetches a club at a time — passes a function that says yes and handles
      the empty answer when it arrives. */
 
-  /* The two colours, as inline custom properties the CSS reads. */
-  function tileStyle(name) {
-    var pal = bannerColours(name);
-    if (!pal) { return ''; }
-    return ' style="--tile-bg:' + esc(pal.bg) + ';--tile-fg:' + esc(pal.fg) + '"';
-  }
-
-  /* Is the ground WHITE — not merely light. Harrogate's #FFF700 is lighter
-     than most of the palette and yellow is what Harrogate are; only a white
-     band on a white tile needs the hairline that makes it read as a band. */
-  function isWhiteGround(name) {
-    var pal = bannerColours(name);
-    var h = String((pal && pal.bg) || '').replace('#', '');
-    if (h.length === 3) { h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2]; }
-    if (!/^[0-9a-f]{6}$/i.test(h)) { return false; }
-    var ch = [0, 2, 4].map(function (i) { return parseInt(h.substr(i, 2), 16); });
-    var lo = Math.min.apply(null, ch), hi = Math.max.apply(null, ch);
-    return lo > 218 && (hi - lo) < 26;
-  }
-
+  /* THE TRIM, NOT THE TILE. Canon NL.clubs.bandsHtml writes the club's
+     primary and secondary as .nl-club-bands along the base of the card
+     (nl-brand v2.63, nl-utils v1.42) — the treatment Programme Packs has
+     been running for weeks. It replaced painting the whole name band in the
+     club's own colours, which read as 72 blocks of colour rather than as a
+     directory, and it puts the name back on white where no club is bound by
+     a contrast floor. */
   /* opts: { roster, extra, isReady, own, ownNote }
        roster   [{ name, division }] — clubs-meta for the season.
        extra    names in the directory that are not in the roster.
@@ -799,9 +786,8 @@
       ? '<section class="rd-mine">' +
           '<h2 class="rd-div__h">Your club</h2>' +
           (ownOk
-            ? '<button type="button" class="rd-mine__go"' + tileStyle(own) +
-              ' data-club="' + esc(own) + '">'
-            : '<span class="rd-mine__go" aria-disabled="true"' + tileStyle(own) + '>') +
+            ? '<button type="button" class="rd-mine__go" data-club="' + esc(own) + '">'
+            : '<span class="rd-mine__go" aria-disabled="true">') +
             window.NL.clubs.crestImgHtml(own, 'medium',
               { className: 'nl-crest rd-mine__crest', eager: true }) +
             '<span class="rd-mine__text">' +
@@ -810,6 +796,10 @@
                 esc(ownOk ? (opts.ownNote || 'View your entry') : 'Not yet checked') +
               '</span>' +
             '</span>' +
+            /* The heavier trim, like programme's own-club row: this is the
+               card you act on, and the weight is what says so now that it is
+               not the only one wearing colour. */
+            window.NL.clubs.bandsHtml(own, { lg: true }) +
           (ownOk ? '</button>' : '</span>') +
         '</section>'
       : '';
@@ -823,12 +813,12 @@
             '<span class="rd-tile__top">' +
               window.NL.clubs.crestImgHtml(n, 'thumb', { className: 'nl-crest rd-tile__crest' }) +
             '</span>' +
-            '<span class="rd-tile__band">' + esc(n) + '</span>';
+            '<span class="rd-tile__name">' + esc(n) + '</span>' +
+            window.NL.clubs.bandsHtml(n);
           /* The state rides in the title, not in a third line. A line of text
              saying so is what made the old rows different heights. */
           var not = ok ? '' : ' title="Not yet checked"';
-          return '<li class="rd-tile' + (ok ? '' : ' is-pending') +
-              (isWhiteGround(n) ? ' is-white' : '') + '"' + tileStyle(n) + '>' +
+          return '<li class="rd-tile' + (ok ? '' : ' is-pending') + '">' +
             (ok ? '<button type="button" class="rd-tile__go" data-club="' + esc(n) + '">' +
                     inner + '</button>'
                 : '<span class="rd-tile__go" aria-disabled="true"' + not + '>' + inner + '</span>') +
@@ -852,8 +842,6 @@
     rolesOf: rolesOf,
     renderIndex: renderIndex,
     wireIndex: wireIndex,
-    tileStyle: tileStyle,
-    isWhiteGround: isWhiteGround,
     renderClub: renderClub,
     viewSwitch: viewSwitch,
     /* EXPORTED so the index wall and the club banner ask one function for a
