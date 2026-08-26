@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Same reasoning as club-directory/public: a meta noindex, not a robots.txt
+     Disallow. Disallowing the path stops the crawler reading the noindex, and
+     a disallowed URL can still be listed as a bare link. _headers carries an
+     X-Robots-Tag for /handbook/* as well, which is the only way to mark the
+     PDF itself — a file with no <head> to put a tag in. -->
+<meta name="robots" content="noindex, nofollow">
+<title>Handbook — The National League</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+<!--
+  handbook / public / index.html
+  v1.0 — (26/08/2026) The published handbook, with no door on it.
+
+  WHAT IT IS, AND WHY IT IS THIS SMALL
+  ------------------------------------
+  When the handbook was last published, and the PDF. That is the whole page.
+
+  It reads NOTHING from the database — not the draft, not the editions, not
+  publishedEditionId — and it loads no Firebase at all. Everything it shows
+  comes from /handbook/pdf-meta.json, a file already served publicly beside
+  the PDF it describes, which .github/workflows/render-handbook-pdf.yml
+  rewrites every time it renders. So this page opened up no data: the file it
+  offers has been world-readable at /handbook/handbook.pdf for as long as it
+  has existed, because the repository serving it is public.
+
+  THE STAMP DESCRIBES THE FILE, NOT THE DATABASE
+  ----------------------------------------------
+  pdf-meta.json is written by the render, so its publishedAt is the edition
+  the PDF in front of you was made from. Between a publish and the render
+  catching up — within the hour, and usually within a minute, since
+  functions/handbook-pdf.js fires the workflow on publish — this page names
+  the older edition. That is correct rather than stale: it is describing the
+  document it is handing over. handbook/reader can say otherwise because it
+  has the live pointer to compare against; this page does not, and guessing
+  would be worse than being a minute behind.
+
+  Not lint-covered: no auth-guard, by design.
+-->
+<link rel="stylesheet" href="/system/nl-brand.css?v=59">
+<style>
+  /* NOTHING UNDER THE TITLE. The gated reader's bar carries "The National
+     League" beneath "Handbook"; here that line would be the page repeating
+     its own crest at somebody. */
+  .hp-wrap { max-width: 640px; margin: 0 auto; padding: 40px 20px 60px; }
+  .hp-card {
+    background: var(--white); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 28px;
+  }
+  .hp-ed {
+    font-size: var(--text-2xl); font-weight: 900;
+    font-variation-settings: 'wght' 900; color: var(--navy);
+    margin: 0 0 6px; line-height: 1.15;
+  }
+  .hp-when { margin: 0 0 24px; color: var(--text-muted); font-size: var(--text-sm); }
+  .hp-get { display: inline-flex; align-items: center; gap: 9px; }
+  .hp-get svg { width: 17px; height: 17px; }
+  /* Pages and megabytes, because both change what somebody does next: this is
+     a 150-page document and a phone on mobile data is a real audience for it. */
+  .hp-size { margin: 14px 0 0; font-size: var(--text-xs); color: var(--text-muted); }
+  .hp-fail { margin: 0; color: var(--text-muted); }
+</style>
+</head>
+<body>
+
+<header class="nl-idbar">
+  <img class="nl-idbar__crest" src="/assets/crests/National%20League%20rose.png"
+       alt="" width="42" height="42">
+  <div class="nl-idbar__id">
+    <div class="nl-idbar__title">Handbook</div>
+  </div>
+</header>
+
+<div class="hp-wrap">
+  <div class="hp-card" id="card">
+    <p class="hp-fail">Loading…</p>
+  </div>
+</div>
+
+<script src="/system/nl-utils.js?v=44"></script>
+<script>
+(function () {
+  'use strict';
+  var esc = NL.escHtml;
+
+  /* no-store, because the whole point of this file is that it changes when
+     the handbook does, and a cached copy would offer last month's edition
+     under this month's date. */
+  fetch('/handbook/pdf-meta.json', { cache: 'no-store' })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (meta) {
+      if (!meta || !meta.editionId) { throw new Error('no meta'); }
+      draw(meta);
+    })
+    ['catch'](function () {
+      /* The PDF is a static file and is almost certainly still there, so the
+         honest failure is to offer it without the detail rather than to say
+         nothing works. */
+      document.getElementById('card').innerHTML =
+        link('/handbook/handbook.pdf', 'The National League Handbook.pdf') +
+        '<p class="hp-size">The edition details could not be read.</p>';
+    });
+
+  function draw(meta) {
+    var season = meta.season || meta.label || '';
+    /* Season plus the date it was published, on the FILE — two downloads a
+       month apart are then telling apart in a downloads folder, which
+       "…Handbook 2026-27.pdf" twice is not. Same rule as the reader's. */
+    var when = meta.publishedAt ? NL.formatDate(meta.publishedAt) : '';
+    var file = 'The National League Handbook' +
+      (season ? ' ' + season : '') + (when ? ' (' + when + ')' : '') + '.pdf';
+
+    document.getElementById('card').innerHTML =
+      '<h1 class="hp-ed">' + esc(season || 'The National League Handbook') + '</h1>' +
+      (when ? '<p class="hp-when">Published ' + esc(when) + '</p>' : '') +
+      link('/handbook/handbook.pdf?e=' + encodeURIComponent(meta.editionId), file) +
+      (meta.pages ? '<p class="hp-size">' + esc(String(meta.pages)) + ' pages</p>' : '');
+  }
+
+  function link(href, filename) {
+    return '<a class="btn btn--primary hp-get" href="' + esc(href) + '" download="' +
+      esc(filename) + '">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" ' +
+        'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+        '<path d="M12 3v12"/><path d="M7 12l5 5 5-5"/><path d="M4 20h16"/></svg>' +
+      'Download PDF</a>';
+  }
+}());
+</script>
+</body>
+</html>
