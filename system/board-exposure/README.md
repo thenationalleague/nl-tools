@@ -130,35 +130,41 @@ hoarding and was dragging the average up.
 Anything reporting exposure from a highlights package needs this check or an
 equivalent. Without it the number is inflated in a way that looks plausible.
 
-## First full clip — Sutton United v Crystal Palace highlights
+## Two clips, after the ident filter
 
-`scripts/board-exposure-run.py` over a real 3m28s LIGR highlights package
-(1920×1080, 50fps), sampling twice a second, matching the two National League
-partners straight from `assets/partners/`:
+`scripts/board-exposure-run.py` over two real LIGR highlights packages, both
+1920×1080 at 50fps, sampled twice a second, matched against `assets/partners/`
+with nothing cropped from either ground:
 
-| | Enterprise | TIC Health |
+| | Harrogate v Barnet (3m28s) | Sutton v Hartlepool (2m49s) |
 |---|---|---|
-| Samples with a detection | 74 of 415 | 0 |
-| Seconds on screen | 38.6 of 207.9 (19%) | — |
-| Separate runs | 7 | — |
-| Exposure index | 22.0 | — |
-| Mean clarity | 0.571 | — |
-| Mean board size | 0.462% of frame | — |
-| Most boards at once | 2 | — |
+| **Enterprise** — seconds | 16.5 (8%) | 60.2 (36%) |
+| Separate runs | 2 | 9 |
+| Exposure index | 10.4 | 24.0 |
+| Mean clarity | 0.63 | 0.40 |
+| Mean board size | 0.56% of frame | 0.15% of frame |
+| **TIC Health** — seconds | not detected | 29.6 (17%) |
+| Separate runs | — | 5 |
+| Exposure index | — | 16.6 |
+| Mean clarity | — | 0.57 |
 
-Runtime was 216s for 208s of video on four cores — roughly real time, so a
-90-minute match is about 90 minutes single-threaded, and it parallelises across
-cores and jobs.
+Runtime is roughly real time on four cores, so a 90-minute match is about 90
+minutes single-threaded, and it parallelises across cores and jobs.
 
-**Read TIC Health's zero as unverified, not as absence.** It is exactly the
-shape of answer this tool must never be trusted on without a hand-count, and
-the paragraph above records this session getting that call wrong once already.
-The clip is goal-focused highlights, so a board on the far side may genuinely
-never appear — or the detector may be missing it. Nothing distinguishes those
-two from the output alone.
+The two clips differ in a way worth reading: Sutton is shot on a wide static
+gantry that holds most of the perimeter, so Enterprise is on screen for over a
+third of the package but small and soft (0.15% of frame, clarity 0.40).
+Harrogate cuts tighter and closer, so the board appears far less but reads much
+better when it does (0.56%, clarity 0.63). Seconds alone would rank these two
+grounds wrongly — which is the entire argument for weighting by clarity.
 
-The clarity weights were recalibrated here: real boards run 0.1–0.6% of frame,
-so the size term now saturates at 0.6% rather than the 2% the synthetic clip
+**TIC Health appears at Sutton and not at Harrogate.** That is the answer the
+first clip could not give, and it is why its zero was recorded as unverified
+rather than absent. A zero from one package still means only that: not found in
+this edit, not proof it was not there.
+
+The clarity weights were recalibrated for real footage: boards run 0.1–0.6% of
+frame, so the size term saturates at 0.6% rather than the 2% the synthetic clip
 suggested. Still a stated choice, still uncalibrated against a hand-count.
 
 ## What the weights are, and what they are not
