@@ -39,6 +39,37 @@ finds awkward. That is a software problem invoiced as a delivery problem. So
 `exposure_index` is built from clarity alone; confidence is reported next to it
 and decides only whether a detection counts at all.
 
+## Tested on real footage, 26/08/2026 — and it did not hold up
+
+Eight frames from a full Sutton United match (LIGR, 2:00:50), matching the
+Enterprise board two ways:
+
+| Reference | Frames with a detection |
+|---|---|
+| Cropped from the footage itself | 2 of 8 — and one is the frame it was cut from |
+| `assets/partners/Enterprise.png` | 0 of 8 |
+
+Stable across four combinations of ratio test, inlier floor and frame upscaling,
+so this is the method reaching its limit, not a tuning miss.
+
+Two conclusions, both of which cost money:
+
+**A brand's own logo file is useless as a reference.** A print-quality asset and
+a photograph of a weathered vinyl board share almost no scale-invariant
+features. So a reference library cannot be seeded from the files sponsors
+already own — every board has to be cropped from footage, at every ground.
+
+**Feature matching does not work at National League camera distances.** The
+boards run 0.19–0.27% of frame, around 130×44 pixels, frequently behind netting
+or a goalpost, and the camera zooms across a wide range within one match. There
+is not enough texture at that size to establish keypoint correspondence, however
+the thresholds are set.
+
+What this needs is a trained detector — learn "advertising board" as a region,
+then classify what is inside it — which is the labelled-data road this spike was
+written to avoid. Treat everything below as the design that was tested and
+found wanting, not as a working approach.
+
 ## What the weights are, and what they are not
 
 `clarity_score()` combines size, focus, contrast and skew at 40/25/20/15. Those
