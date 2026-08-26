@@ -180,15 +180,14 @@ test('the wall is written once, and both pages ask for it', () => {
   const css = read('club-directory/_directory.css');
   assert.match(js, /renderIndex: renderIndex,/);
   assert.match(js, /wireIndex: wireIndex,/);
-  assert.match(css, /\.rd-tile__band \{/, 'the wall styles moved with it');
+  assert.match(css, /\.rd-tile__name \{/, 'the wall styles moved with it');
   for (const p of ['club-directory/reader/index.html', 'club-directory/public/index.html']) {
     assert.match(read(p), /NLDirectory\.renderIndex\(/, `${p} draws its own wall`);
   }
   /* The reader's inline copy is gone, not shadowing the shared one. */
   const rd = read('club-directory/reader/index.html');
-  assert.ok(!/\.rd-tile__band \{/.test(rd), 'the reader still has its own band CSS');
-  assert.ok(!/function tileStyle/.test(rd), 'the reader still has its own tileStyle');
-  assert.ok(!/function isWhiteGround/.test(rd), 'the reader still has its own isWhiteGround');
+  assert.ok(!/\.rd-tile__name \{/.test(rd), 'the reader still has its own tile CSS');
+  assert.ok(!/function drawIndex\(\) \{\s*var seen/.test(rd), 'the reader still builds its own wall');
 });
 
 test('every consumer of _directory.* moved to the same version', () => {

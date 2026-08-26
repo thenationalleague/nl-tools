@@ -1,7 +1,12 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.41 (21/08/2026)
+   Version: v1.42 (26/08/2026)
+
+   v1.42 — NL.clubs.bandsHtml: the club's colours as the canon .nl-club-bands
+   trim (nl-brand v2.63). Promoted with the component on its third use; the
+   hex validation lifted from programme/index.html, which was the only caller
+   doing it.
 
    Changelog
    v1.41 (21/08/2026)
@@ -2020,6 +2025,31 @@
       Array.prototype.forEach.call(root.querySelectorAll('img[data-crest]'), function(img) {
         self.wireCrestImg(img, img.getAttribute('data-crest'), hideOnFail);
       });
+    },
+    /* The club's colours as the canon .nl-club-bands trim (nl-brand v2.63):
+       primary thick, secondary thin, along the base of a card.
+
+       THE HEX IS VALIDATED BEFORE IT GOES INLINE. The data is ours, but a
+       colour field is one bad edit away from being an attribute escape, and
+       the cost of checking is nil. Anything that is not a hex literal falls
+       back to a brand token, so a half-filled club record draws a card rather
+       than a broken one. Lifted from programme/index.html, which had this
+       right and was the only caller that did.
+
+         bandsHtml('Aldershot Town')            -> the trim
+         bandsHtml('Aldershot Town', { lg: 1 }) -> the heavier one
+
+       Pass `club` as a name or as a clubs-meta record. Requires clubs-meta to
+       be loaded for a name; a record needs nothing. */
+    bandsHtml: function(club, opts) {
+      var rec = (club && typeof club === 'object') ? club : this.byName(club);
+      var c = (rec && rec.colors) || {};
+      var hex = function(v, fallback) {
+        return /^#[0-9a-fA-F]{3,8}$/.test(String(v || '')) ? v : fallback;
+      };
+      return '<span class="nl-club-bands' + (opts && opts.lg ? ' nl-club-bands--lg' : '') + '">' +
+        '<i style="background:' + hex(c.primary, 'var(--navy)') + '"></i>' +
+        '<i style="background:' + hex(c.secondary, 'var(--primary)') + '"></i></span>';
     },
     /* Load + memoise clubs-meta. One network hit per session. */
     load: function() {
