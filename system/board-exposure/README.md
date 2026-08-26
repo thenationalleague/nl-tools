@@ -75,13 +75,38 @@ inliers. Low bitrate is a red herring here.
 photographed board with 19. So `assets/partners/*.png` *are* usable references,
 and a library need not be hand-cropped at 72 grounds.
 
-What remains genuinely open is recall on whole frames. Restricting the search to
-a sliding horizontal band lifts inlier counts on all eight frames, but low counts
-in the 5–15 range cannot be told apart from RANSAC coincidence without geometric
-validation of each quad and a hand-checked list of which frames actually contain
-the board. **Until that exists there is no accuracy claim here, in either
-direction** — only a demonstration that the obvious objections (too small, too
-compressed) are not what stands in the way.
+## Recall, measured by eye — 2 of 3, no false positives
+
+`scripts/board-exposure-annotate.py` closes the loop: search a sliding
+horizontal band instead of the whole frame, require every match to pass a
+geometry check (roughly 3:1, near level, plausible area, convex, opposite sides
+in proportion), then draw the survivors so a person can judge them rather than
+trust an inlier count.
+
+Scored against the eight frames by looking at every one:
+
+| | |
+|---|---|
+| Frames with a visible Enterprise board | 3 |
+| Found, boxes sitting exactly on the board | 2 |
+| Missed | 1 — clipped by the right frame edge |
+| False positives across all 8 frames | 0 |
+
+The second hit is the one that matters: a different camera position, a different
+zoom, lighting an hour apart, and `assets/partners/Enterprise.png` — a file
+nobody cropped from this match — landed on the board with 19 inliers. Brand
+assets work as references. The geometry check is doing real work, rejecting
+matches sprawled across rooftops and pitch that inlier counts alone had waved
+through.
+
+Three of eight frames, one sponsor, one match, one ground. That is a signal, not
+an accuracy figure, and nothing here should reach a partner as evidence.
+
+A caution recorded because this session walked into it: TIC Health is plainly
+visible on two of these frames, and an earlier pass through five of them
+concluded it was absent from the ground. Five frames of not-looking-hard-enough
+produced a confident wrong answer about a league partner's delivery. That is the
+false-negative trap this tool exists to avoid, and it caught its own author.
 
 ## What the weights are, and what they are not
 
