@@ -28,7 +28,7 @@ const rule = (sel) =>
 test('every tile is the same height, and so is every band', () => {
   /* The original complaint, in two numbers. Without both, a two-line name
      grows its own tile and the row breaks. */
-  assert.match(rule('.rd-tile__go')[1], /min-height: 126px/);
+  assert.match(rule('.rd-tile__go')[1], /min-height: 140px/);
   assert.match(rule('.rd-tile__band')[1], /height: 50px/);
 });
 
@@ -38,19 +38,27 @@ test('the crest is a fixed square in both directions', () => {
      square shape so that the area of the crest is identical each time".
      Contained by max-width alone, a tall shield comes out narrow and a wide
      one short, and no two badges occupy the same area. */
-  assert.match(rule('.rd-tile__crest')[1], /--crest-size: 46px/);
+  assert.match(rule('.rd-tile__crest')[1], /--crest-size: 56px/);
   assert.match(CODE, /className: 'nl-crest rd-tile__crest'/);
 });
 
-test('the columns all divide 24', () => {
+test('the columns all divide 24, and stop at six', () => {
   /* Every division has 24 clubs, so a count that divides 24 fills its last
-     row. Five is the one count in range that never comes out even. */
+     row. Five is the one count in range that never comes out even.
+
+     AND SIX IS THE CEILING. Eight also divides 24, and eight was tried: it
+     gave each tile about 165px on a 1440 screen, which is not enough for a
+     club name at a size anyone can read. Hampton & Richmond Borough and
+     Hemel Hempstead Town both ran to three lines and were clipped by the
+     fixed band. Richard: "these are 8 abreast. surely way too small." */
   const counts = [...PAGE.matchAll(/\.rd-grid \{[^}]*repeat\((\d+), minmax/g)]
     .map((m) => +m[1])
     .concat([...PAGE.matchAll(/\.rd-grid \{ grid-template-columns: repeat\((\d+),/g)].map((m) => +m[1]));
   assert.ok(counts.length >= 4, 'a count at each width');
   for (const c of counts) assert.equal(24 % c, 0, `${c} columns leaves an orphan row`);
   assert.ok(!counts.includes(5), 'five is the one to avoid');
+  assert.equal(Math.max.apply(null, counts), 6,
+    'six across is the widest a club name survives at 14px');
 });
 
 /* ------------------------------------------------------------- the colours */
