@@ -172,22 +172,33 @@ function pickClub(cfg, code) {
      PERMISSIONS needs an account (system/roles-and-access-plan.md).
 
      Revoking the CLUB revokes its people with it, which is why the club
-     record's flag is checked on every entry and not just its own. */
-  const clubs = (cfg && cfg.clubs) || {};
+     record's flag is checked on every entry and not just its own.
+
+     THE NL RECORD IS A HOLDER LIKE ANY OTHER, and until 22/08/2026 it was
+     not. The club loop walked `rec.users`; the NL record was added by a
+     separate one-line branch that added the master code and stopped, so a
+     named person created under National League matched nothing and was
+     rejected as an unrecognised code. Found at the Directory's door and fixed
+     at both, because one credential that opens one gate and not the other is
+     worse than one that opens neither.
+
+     The walk is a function called twice rather than a loop plus a special
+     case. The special case is what drifted. */
   const entries = [];
   const add = (key, rec, codeRec, who, userId) => {
     entries.push({ key, rec, codeRec, who: who || "", userId: userId || "" });
   };
-  Object.keys(clubs).forEach((k) => {
-    const rec = clubs[k];
+  const addHolder = (key, rec) => {
     if (!rec) return;
-    add(k, rec, rec, "");
+    add(key, rec, rec, "");
     const users = rec.users || {};
     Object.keys(users).forEach((id) => {
-      if (users[id]) add(k, rec, users[id], users[id].name, id);
+      if (users[id]) add(key, rec, users[id], users[id].name, id);
     });
-  });
-  if (cfg && cfg.nl) add("NL", cfg.nl, cfg.nl, "");
+  };
+  const clubs = (cfg && cfg.clubs) || {};
+  Object.keys(clubs).forEach((k) => addHolder(k, clubs[k]));
+  addHolder("NL", cfg && cfg.nl);
 
   return entries.find((e) =>
     !e.rec.revoked && !e.codeRec.revoked &&
