@@ -1,7 +1,14 @@
 /* =========================================================================
    NL Tools — Club Directory presentation
    File: /club-directory/_directory.js
-   Version: v1.9 (26/08/2026)
+   Version: v1.10 (26/08/2026)
+
+   v1.10 — the all-clubs WALL moves here: renderIndex(), wireIndex(),
+   tileStyle() and isWhiteGround(). It was written inline in the reader,
+   carrying a note that said to promote it on the second use — and
+   club-directory/public is the second use. Two copies would have agreed on
+   the day and disagreed about a club's colours by Christmas, which is the
+   one thing this file exists to answer once.
 
    v1.9 — the club banner is the club's PRIMARY and its TERTIARY, with no
    substitution. It read primary + secondary and threw the club's own type
@@ -722,9 +729,131 @@
     return out;
   }
 
+  /* ---------------------------------------------------------- the wall
+     Every club in the competition as a crest and a name, grouped by division.
+     Promoted here 26/08/2026 on its second use: the reader drew it inline,
+     and club-directory/public draws the same wall for anyone without a code.
+
+     TWO COPIES WOULD HAVE AGREED TODAY AND DRIFTED BY CHRISTMAS, and the
+     thing they would have disagreed about is a club's colours — which is the
+     one thing this file exists to answer once. bannerColours is already
+     shared with the club banner for exactly that reason.
+
+     It is built from the ROSTER (clubs-meta) rather than from the directory,
+     so a club nobody has checked yet is still on the wall. `isReady` decides
+     which tiles open; a page that cannot know until it asks — the public one
+     fetches a club at a time — passes a function that says yes and handles
+     the empty answer when it arrives. */
+
+  /* The two colours, as inline custom properties the CSS reads. */
+  function tileStyle(name) {
+    var pal = bannerColours(name);
+    if (!pal) { return ''; }
+    return ' style="--tile-bg:' + esc(pal.bg) + ';--tile-fg:' + esc(pal.fg) + '"';
+  }
+
+  /* Is the ground WHITE — not merely light. Harrogate's #FFF700 is lighter
+     than most of the palette and yellow is what Harrogate are; only a white
+     band on a white tile needs the hairline that makes it read as a band. */
+  function isWhiteGround(name) {
+    var pal = bannerColours(name);
+    var h = String((pal && pal.bg) || '').replace('#', '');
+    if (h.length === 3) { h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2]; }
+    if (!/^[0-9a-f]{6}$/i.test(h)) { return false; }
+    var ch = [0, 2, 4].map(function (i) { return parseInt(h.substr(i, 2), 16); });
+    var lo = Math.min.apply(null, ch), hi = Math.max.apply(null, ch);
+    return lo > 218 && (hi - lo) < 26;
+  }
+
+  /* opts: { roster, extra, isReady, own, ownNote }
+       roster   [{ name, division }] — clubs-meta for the season.
+       extra    names in the directory that are not in the roster.
+       isReady  fn(name) -> can this tile be opened. Default: all of them.
+       own      the reading club's name, drawn as a wide row on top. Omitted
+                by any page that does not know who is reading. */
+  function renderIndex(opts) {
+    opts = opts || {};
+    var roster = arr(opts.roster);
+    var ready = typeof opts.isReady === 'function' ? opts.isReady : function () { return true; };
+    var seen = {}, groups = [], byDiv = {};
+    roster.forEach(function (c) {
+      if (!c || !c.name) { return; }
+      seen[c.name.toLowerCase()] = true;
+      var d = c.division || 'National League';
+      if (!byDiv[d]) { byDiv[d] = []; groups.push(d); }
+      byDiv[d].push(c.name);
+    });
+    var strays = arr(opts.extra).filter(function (n) { return !seen[n.toLowerCase()]; });
+    if (strays.length) {
+      var other = 'Also in the directory';
+      byDiv[other] = strays;
+      groups.push(other);
+    }
+
+    /* A club whose own entry is not published yet still gets its row, greyed
+       — the same reasoning as the tiles. Losing it would tell a club that its
+       own club is not in the competition. */
+    var own = opts.own;
+    var ownOk = own && ready(own);
+    var mine = own
+      ? '<section class="rd-mine">' +
+          '<h2 class="rd-div__h">Your club</h2>' +
+          (ownOk
+            ? '<button type="button" class="rd-mine__go"' + tileStyle(own) +
+              ' data-club="' + esc(own) + '">'
+            : '<span class="rd-mine__go" aria-disabled="true"' + tileStyle(own) + '>') +
+            window.NL.clubs.crestImgHtml(own, 'medium',
+              { className: 'nl-crest rd-mine__crest', eager: true }) +
+            '<span class="rd-mine__text">' +
+              '<span class="rd-mine__name">' + esc(own) + '</span>' +
+              '<span class="rd-mine__note">' +
+                esc(ownOk ? (opts.ownNote || 'View your entry') : 'Not yet checked') +
+              '</span>' +
+            '</span>' +
+          (ownOk ? '</button>' : '</span>') +
+        '</section>'
+      : '';
+
+    return '<div class="rd-index">' + mine + groups.map(function (d) {
+      return '<section class="rd-div">' +
+        '<h2 class="rd-div__h">' + esc(d) + '</h2>' +
+        '<ul class="rd-grid">' + byDiv[d].slice().sort().map(function (n) {
+          var ok = ready(n);
+          var inner =
+            '<span class="rd-tile__top">' +
+              window.NL.clubs.crestImgHtml(n, 'thumb', { className: 'nl-crest rd-tile__crest' }) +
+            '</span>' +
+            '<span class="rd-tile__band">' + esc(n) + '</span>';
+          /* The state rides in the title, not in a third line. A line of text
+             saying so is what made the old rows different heights. */
+          var not = ok ? '' : ' title="Not yet checked"';
+          return '<li class="rd-tile' + (ok ? '' : ' is-pending') +
+              (isWhiteGround(n) ? ' is-white' : '') + '"' + tileStyle(n) + '>' +
+            (ok ? '<button type="button" class="rd-tile__go" data-club="' + esc(n) + '">' +
+                    inner + '</button>'
+                : '<span class="rd-tile__go" aria-disabled="true"' + not + '>' + inner + '</span>') +
+            '</li>';
+        }).join('') + '</ul></section>';
+    }).join('') + '</div>';
+  }
+
+  /* Crests deferred by NL.clubs.crestImgHtml need wiring after insertion, and
+     every tile needs its click. One call so a caller cannot do half of it. */
+  function wireIndex(host, onPick) {
+    if (!host) { return; }
+    window.NL.clubs.wireCrestImgs(host);
+    Array.prototype.forEach.call(host.querySelectorAll('[data-club]'), function (b) {
+      b.addEventListener('click', function () { onPick(b.getAttribute('data-club')); });
+    });
+  }
+
   window.NLDirectory = {
     arr: arr,
     rolesOf: rolesOf,
+    renderIndex: renderIndex,
+    wireIndex: wireIndex,
+    tileStyle: tileStyle,
+    isWhiteGround: isWhiteGround,
     renderClub: renderClub,
     viewSwitch: viewSwitch,
     /* EXPORTED so the index wall and the club banner ask one function for a

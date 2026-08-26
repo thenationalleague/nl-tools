@@ -14,11 +14,15 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { REPO } from './load-canon.mjs';
 
-const PAGE = readFileSync(join(REPO, 'club-directory/reader/index.html'), 'utf8');
+/* THE WALL MOVED on 26/08/2026, on its second use: club-directory/public
+   draws the same one, so it lives in _directory.css and _directory.js and
+   both pages ask for it. These rules were written against the reader's inline
+   copy and now guard the shared one — which is the point of moving it. */
+const PAGE = readFileSync(join(REPO, 'club-directory/_directory.css'), 'utf8');
 const DIR = readFileSync(join(REPO, 'club-directory/_directory.js'), 'utf8');
 /* Both files explain at length what they replaced; a guard that fires on its
    own rationale is a guard somebody switches off. */
-const CODE = PAGE.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+const CODE = DIR.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
 
 const rule = (sel) =>
   new RegExp(sel.replace(/[.#]/g, (c) => '\\' + c) + ' \\{([^}]*)\\}').exec(PAGE);
@@ -67,7 +71,9 @@ test('the band is the club’s own two colours, from one shared function', () =>
   /* Two copies of the colour rule is how a club comes out readable on the
      wall and 1.17:1 on the entry the wall opens. */
   assert.match(DIR, /clubColours: bannerColours,/, 'the banner exports its pair');
-  assert.match(CODE, /NLDirectory\.clubColours\(name\)/);
+  /* renderIndex calls bannerColours directly now — it lives in the same file,
+     so there is no NLDirectory to go through and nothing to drift from. */
+  assert.match(CODE, /function tileStyle\(name\) \{\s*var pal = bannerColours\(name\);/);
   assert.match(CODE, /--tile-bg:/);
   assert.match(CODE, /--tile-fg:/);
 });
@@ -100,7 +106,7 @@ test('your club wears its own colours too', () => {
   const mine = rule('.rd-mine__go')[1];
   assert.match(mine, /background: var\(--tile-bg/);
   assert.match(mine, /color: var\(--tile-fg/);
-  assert.match(CODE, /class="rd-mine__go"' \+ tileStyle\(OWN\)/);
+  assert.match(CODE, /class="rd-mine__go"' \+ tileStyle\(own\)/);
 });
 
 test('not-yet-signed-off fades, and does not desaturate', () => {

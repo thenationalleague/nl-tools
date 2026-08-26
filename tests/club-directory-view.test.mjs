@@ -47,8 +47,11 @@ test('the club grid counts in something that divides 24', () => {
   /* Every division has 24 clubs. A count that divides 24 fills its last row;
      one that does not leaves an orphan row under a full grid — and five, which
      auto-fill was picking on a laptop, is the one count in range that never
-     comes out even. */
-  const grid = READER.slice(READER.indexOf('.rd-grid {'));
+     comes out even.
+
+     The wall moved to _directory.css on 26/08/2026, on its second use —
+     club-directory/public draws the same one. */
+  const grid = CSS.slice(CSS.indexOf('.rd-grid {'));
   assert.ok(!/auto-fill|auto-fit/.test(grid.slice(0, 900)),
     'the count is chosen, not guessed');
   const counts = [...grid.slice(0, 1200).matchAll(/repeat\((\d+), minmax/g)].map((m) => +m[1]);
