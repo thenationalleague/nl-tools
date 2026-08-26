@@ -90,9 +90,13 @@ test('neither page loads Firebase Auth', () => {
   for (const [name, src] of [['club-directory/public', DIRCODE], ['handbook/public', HBCODE]]) {
     assert.ok(!/firebase-auth-compat/.test(src), `${name} pulls in the auth SDK`);
   }
-  /* The handbook one reads nothing from the database at all: the PDF and the
-     meta beside it are static files already served publicly. */
-  assert.ok(!/firebase/i.test(HBCODE), 'handbook/public touches no Firebase');
+  /* Both DO load app + database — handbook/public reads the published
+     edition now that it is the reader rather than a link to a PDF. Auth is
+     the one that must stay out: it is the difference between a page with no
+     account and a page that quietly makes one per visitor. */
+  for (const [name, src] of [['club-directory/public', DIRCODE], ['handbook/public', HBCODE]]) {
+    assert.match(src, /firebase-database-compat/, `${name} needs the database SDK`);
+  }
 });
 
 test('the public directory shows the same view a club gets of another club', () => {
@@ -101,14 +105,43 @@ test('the public directory shows the same view a club gets of another club', () 
 });
 
 test('the public directory never asks for more than one club', () => {
-  assert.match(DIRCODE, /published\/clubs\/' \+ encodeURIComponent\(name\)/);
+  assert.match(DIRCODE, /ref\(ROOT \+ '\/published\/clubs'\)\.child\(name\)/);
   /* A people search would mean holding the whole directory, which is the one
      thing this page is built not to do. The box filters club names, from
      clubs-meta, with no database behind it. */
   assert.ok(!/NLDirectory\.search\(/.test(DIRCODE), 'no people search on the public page');
   const refs = [...DIRCODE.matchAll(/ref\(ROOT \+ '([^']+)'/g)].map((m) => m[1]);
-  assert.deepEqual(refs.sort(), ['/published/at', '/published/clubs/'],
-    'the stamp and one named club — anything else is a wider read');
+  assert.deepEqual(refs.sort(), ['/published/at', '/published/clubs'],
+    'the stamp and the clubs node — anything else is a wider read');
+});
+
+test('a club is addressed by its raw name, never a URL-encoded one', () => {
+  /* THIS BROKE 49 OF THE 72 ON THE LIVE PAGE. The lookup was
+     ref('.../clubs/' + encodeURIComponent(name)), and Firebase's Path
+     constructor splits on '/' and decodes NOTHING — so "Aldershot%20Town"
+     was looked up as a key spelled exactly that way. The 23 that worked were
+     the ones encodeURIComponent leaves alone: every single-word club.
+
+     Encoding a URL segment and addressing a database key look identical and
+     are different jobs. The hash IS a URL and is still encoded; the ref is
+     not. */
+  const refLine = DIRCODE.slice(DIRCODE.indexOf('function drawClub'));
+  const body = refLine.slice(0, refLine.indexOf('\n  }'));
+  assert.ok(!/encodeURIComponent/.test(body),
+    'encodeURIComponent must not reach a database path');
+});
+
+test('every club name is already a legal RTDB key', () => {
+  /* Which is WHY no encoding is needed. RTDB forbids . $ # [ ] / and control
+     characters in a key; spaces, & and apostrophes are all fine. If a club is
+     ever added whose name breaks this, the fix is a key that is not the name
+     — not an encoder, which is the bug above. */
+  const meta = JSON.parse(read('assets/data/clubs-meta.json'));
+  const bad = meta.clubs
+    .filter((c) => c.division)
+    .filter((c) => /[.$#[\]/\u0000-\u001f\u007f]/.test(c.name))
+    .map((c) => c.name);
+  assert.deepEqual(bad, [], 'these names cannot be used as RTDB keys as they stand');
 });
 
 test('both pages are noindex, and not by robots.txt', () => {
@@ -167,4 +200,63 @@ test('every consumer of _directory.* moved to the same version', () => {
     for (const m of read(p).matchAll(/_directory\.(?:css|js)\?v=(\d+)/g)) seen.add(m[1]);
   }
   assert.equal(seen.size, 1, `mixed versions across the family: ${[...seen].join(', ')}`);
+});
+
+/* -------------------------------------------------- the handbook, web-native */
+
+const HBJS = read('handbook/_reader.js');
+const HBR = read('handbook/reader/index.html');
+const HBED = RULES.rules['app-data']['ops-handbook'];
+
+test('one reader, two doors', () => {
+  /* v1.0 of handbook/public offered the edition, the date and the PDF —
+     which is what was asked for and is not what anyone wants: "handbook only
+     has pdf, not searchable and web native version". It is the reader now.
+
+     COPYING the reader would have been two rulebooks that agree today. The
+     one thing a rulebook must never do is say different things to different
+     people, so there is one implementation and the pages differ in a boot
+     call and nothing else. */
+  assert.match(HBJS, /window\.NLHandbook = \(function \(\) \{/);
+  assert.match(HBJS, /return \{ boot: boot/);
+  assert.match(HBR, /NLHandbook\.boot\(\{ gated: true \}\)/);
+  assert.match(HB, /NLHandbook\.boot\(\{ gated: false \}\)/);
+  for (const [name, src] of [['reader', HBR], ['public', HB]]) {
+    assert.match(src, /handbook\/_reader\.js/, `${name} does not load the shared reader`);
+    assert.match(src, /handbook\/_reader\.css/, `${name} does not load the shared styles`);
+    /* And neither carries its own copy. */
+    assert.ok(!/function showArea\(/.test(src), `${name} still has an inline reader`);
+  }
+});
+
+test('a page that forgets to say gets the door, not the open room', () => {
+  /* boot() defaults to gated. A new caller that omits the flag must not
+     silently publish the handbook. */
+  const fn = HBJS.slice(HBJS.indexOf('function boot(opts)'));
+  assert.match(fn.slice(0, 200), /var gated = !opts \|\| opts\.gated !== false;/);
+});
+
+test('the public handbook still has no auth SDK, no gate and no sign-out', () => {
+  assert.ok(!/firebase-auth-compat/.test(HBCODE), 'the public page loads the auth SDK');
+  assert.ok(!/rdGate/.test(HBCODE), 'the public page carries a gate mount');
+  assert.ok(!/rdOut/.test(HBCODE), 'the public page carries a sign-out button');
+  /* Which is why the shared file guards both rather than assuming them. */
+  assert.match(HBJS, /var outBtn = \$\('rdOut'\);\s*\n\s*if \(outBtn\)/);
+});
+
+test('the public handbook still offers the PDF', () => {
+  assert.match(HB, /id="rdPdf"/, 'the download went missing in the rewrite');
+});
+
+test('only the edition that is published is world-readable', () => {
+  /* Not "every edition anyone can name". The rule compares $edition against
+     the live pointer, so publishing the next edition closes the previous one
+     with no second action — and the editions node itself stays shut, so the
+     ids cannot be listed in the first place. */
+  assert.equal(HBED.editions.$edition['.read'],
+    "root.child('app-data/ops-handbook/publishedEditionId').val() === $edition");
+  assert.match(HBED.editions['.read'], /auth != null/, 'the editions list must stay shut');
+  assert.equal(HBED.publishedEditionId['.read'], true, 'the pointer is a push key, and public');
+  /* The draft is the unpublished handbook and is nobody's business. */
+  assert.match(HBED.draft['.read'], /auth != null/);
 });
