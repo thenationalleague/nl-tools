@@ -1,7 +1,16 @@
 /* =========================================================================
    NL Tools — Club Directory presentation
    File: /club-directory/_directory.js
-   Version: v1.8 (22/08/2026)
+   Version: v1.9 (26/08/2026)
+
+   v1.9 — the club banner is the club's PRIMARY and its TERTIARY, with no
+   substitution. It read primary + secondary and threw the club's own type
+   away for white or near-black on any pair under 4.5:1, which fired on
+   twenty of the eighty-two. Tertiary is the field that holds the type
+   colour; the nine clubs whose tertiary disagreed with their strip were
+   corrected in clubs-meta the same day, and all 72 now clear 3:1 — the bar
+   for large text, which .cd-banner__name at --text-xl/900 is. The remaining
+   fallback answers MISSING data, not low contrast.
 
    v1.8 — viewSwitch(), and names set as their owners write them.
    · The List/Cards switcher is built here, above the people it acts on,
@@ -287,19 +296,27 @@
       return arr(p.roles).some(function (r) { return r.section === section; });
     }).sort(bySurname);
   }
-  /* Banner colours: the club's primary as the background, their secondary as
-     the type. That is the pairing the clubs use themselves, so Forest Green
-     read as lime on black rather than the white-on-black a contrast-first
-     rule picks.
+  /* BANNER COLOURS: THE CLUB'S PRIMARY AND ITS TERTIARY. Nothing else, and no
+     substitution — the record is trusted because the record is now correct.
 
-     It needs a floor, though. Twenty of the eighty-two pairs fall below 4.5:1
-     against each other — Carlisle's blue on red is 1.17:1, which is unreadable
-     rather than merely bold. Where the club's own pair fails, the background
-     is kept and the type falls to whichever of white or near-black actually
-     reads on it, so the club identity survives and the name stays legible.
+     It used to read primary + SECONDARY, with a rule that threw the club's
+     own type away for white or near-black whenever the pair fell under 4.5:1.
+     That fired on twenty of the eighty-two: Carlisle's blue on red is 1.17:1,
+     genuinely unreadable, so the guard was doing real work against the data
+     as it then stood.
 
-     Duplicated logic warning: club-kits/admin.html has its own luminance test.
-     Second use, so this belongs in NL.clubs as colours(name). Flagged. */
+     Tertiary is the field that actually holds the club's TYPE colour, and the
+     nine clubs whose tertiary disagreed with their strip were corrected in
+     clubs-meta on 26/08/2026 (Aldershot, Braintree, Chorley, Hornchurch,
+     Kidderminster, Scunthorpe, Walton & Hersham, Worthing, Yeovil), with
+     Scunthorpe's primary and secondary inverted at the same time — they play
+     in claret. Against primary, all 72 tertiaries clear 3:1, which is the
+     WCAG bar for large text; .cd-banner__name is --text-xl at weight 900 and
+     is emphatically that. Only 54 secondaries reached even 4.5:1.
+
+     So the fallback below is for MISSING data, not for low contrast: it fires
+     only when a club has no usable tertiary at all. None do today. A club
+     whose own two colours look bold is showing you the club. */
   function lum(hex) {
     var h = String(hex || '').replace('#', '');
     if (h.length === 3) { h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2]; }
@@ -318,9 +335,9 @@
   function bannerColours(clubName) {
     var meta = (window.NL && NL.clubs && NL.clubs.byName) ? NL.clubs.byName(clubName) : null;
     var cols = (meta && meta.colors) || {};
-    var bg = cols.primary, fg = cols.secondary;
+    var bg = cols.primary, fg = cols.tertiary;
     if (lum(bg) === null) { return null; }              /* no usable primary */
-    if (lum(fg) === null || contrast(bg, fg) < 4.5) {
+    if (lum(fg) === null) {
       fg = contrast(bg, '#FFFFFF') >= contrast(bg, '#0A1628') ? '#FFFFFF' : '#0A1628';
     }
     return { bg: bg, fg: fg };
