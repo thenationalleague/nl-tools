@@ -21,6 +21,12 @@ import sys
 import cv2
 import numpy as np
 
+# Bumped whenever a change here would move the numbers. Two matches are only
+# comparable if they were measured the same way, and a roll-up that mixes
+# versions is silently wrong rather than obviously wrong — so every export
+# carries this, and anything aggregating them checks it.
+ENGINE_VERSION = "1.0"
+
 # --- tunables, all in one place so a run can be described in one line ---------
 SAMPLE_FPS = 2.0            # samples per second of match
 NFEATURES = 6000            # SIFT cap per frame; a football frame has far more
@@ -324,6 +330,28 @@ def detect(frame_bgr, refs, sift, matcher):
         if kept:
             out[name] = kept
     return out
+
+
+def settings():
+    """
+    Everything that decides what a number comes out as, for the export.
+
+    Clarity weights are a stated choice rather than a measurement, so a roll-up
+    that quietly mixes two versions of them is comparing nothing. Recording them
+    beside the results is what lets anything downstream refuse to.
+    """
+    return {
+        "engine_version": ENGINE_VERSION,
+        "sample_fps": SAMPLE_FPS,
+        "nfeatures": NFEATURES,
+        "band_frac": BAND_FRAC, "band_stride": BAND_STRIDE,
+        "ratio": RATIO, "min_inliers": MIN_INLIERS, "max_per_band": MAX_PER_BAND,
+        "aspect": list(ASPECT), "max_tilt": MAX_TILT, "area_pct": list(AREA_PCT),
+        "min_run": MIN_RUN, "bridge": BRIDGE,
+        "clarity_weights": {"size": 0.40, "focus": 0.25,
+                            "contrast": 0.20, "angle": 0.15},
+        "clarity_saturation": {"area_pct": 0.6, "sharp": 300.0, "contrast": 60.0},
+    }
 
 
 def runs_from(indices, bridge=BRIDGE, min_run=MIN_RUN):

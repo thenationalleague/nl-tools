@@ -443,9 +443,15 @@ def main():
             "duration": duration, "interval": interval, "samples": n_samples,
             "video_w": info["w"], "video_h": info["h"],
             "scan_seconds": round(scan_secs, 1),
+            "settings": C.settings(),
             "references": [{"sponsor": n, "scope": s, "file": os.path.basename(p)}
                            for n, p, s in entries],
-            "scope": scope}
+            "scope": scope,
+            # Whether the reference set covered every board at this ground, which
+            # only a person can know. Share of voice is meaningless without it —
+            # five references at a twenty-board ground make any sponsor's share
+            # look enormous. Left null here; the tool asks on upload.
+            "reference_set_complete": None}
     with open(f"{base}-data.json", "w", encoding="utf-8") as f:
         json.dump(dict(head, sponsors=payload["stats"]), f, indent=2)
 
