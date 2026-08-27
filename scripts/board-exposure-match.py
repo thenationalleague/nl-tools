@@ -4,16 +4,21 @@ Full match, on your own machine. Nothing uploads, nothing downloads.
 
     python board-exposure-match.py --init --refs refs
 
-Then name each video after its fixture, drop them in inbox/, and:
+Then drop videos in inbox/ and:
 
     python board-exposure-match.py --batch inbox --refs refs
 
+It reads the fixture off each filename if it can, shows you what it read, and
+lets you correct it — every file up front, so the measuring itself runs
+unattended. Naming a file after its fixture just means pressing Enter:
+
     2026-08-23 Sutton United v Hartlepool United.mp4
 
-The home club in the filename picks which reference folder joins the league
-partner marks, so a batch needs no arguments per match. A file whose name it
-cannot read is skipped and reported, never guessed at — the wrong club means
-the wrong reference set, and the run would still look like it worked.
+The home club decides which reference folder joins the league partner marks,
+which is why it is confirmed rather than assumed: the wrong ground silently
+drops every local board and still prints a table that looks fine.
+
+`-y` skips the questions and takes the filename as read, for unattended runs.
 
 On Windows, measure-matches.bat does the same thing by being double-clicked, or
 by having videos dragged onto it. One match at a time still works:
@@ -305,6 +310,96 @@ def parse_fixture(path):
     return (date, home, away) if home and away else None
 
 
+def ask(prompt):
+    """
+    input(), but Ctrl-C and a closed stdin end the run with a sentence rather
+    than a traceback. Both are ordinary — changing your mind halfway through
+    confirming six matches is not an error condition.
+    """
+    try:
+        return input(prompt).strip()
+    except EOFError:
+        die("stopped: no more input. Nothing was measured.")
+    except KeyboardInterrupt:
+        die("stopped. Nothing was measured.")
+
+
+def confirm_fixture(path, clubs, refs_root, assume_yes=False):
+    """
+    Show what was read off the filename and let it be corrected.
+
+    The filename is a good guess, not a contract. Getting the home club wrong
+    silently drops every local board and still prints a plausible table, so the
+    guess gets shown and accepted rather than trusted — and a name that says
+    nothing is a question, not a reason to skip the file.
+
+    Returns {"club", "home", "away", "date"} or None to skip.
+    """
+    fx = parse_fixture(path)
+    date, home, away = fx if fx else (None, "", "")
+
+    def club_note(name):
+        if name and name in clubs:
+            d = os.path.join(refs_root, "clubs", name)
+            n = len([x for x in os.listdir(d) if os.path.isdir(os.path.join(d, x))])
+            return f"{n} local board{'s' if n != 1 else ''} + the partner marks"
+        if name:
+            return "no reference folder — partner marks only"
+        return "partner marks only"
+
+    print(f"\n  {os.path.basename(path)}")
+    if assume_yes or not sys.stdin.isatty():
+        if not fx:
+            print("    ! filename does not say the fixture, and there is no one to ask.")
+            return None
+        print(f"    {home} v {away}   ({date or 'no date'}) — {club_note(home)}")
+        return {"club": home if home in clubs else None,
+                "home": home, "away": away, "date": date or ""}
+
+    while True:
+        if home:
+            print(f"    Fixture : {home} v {away}")
+            print(f"    Ground  : {club_note(home)}")
+        else:
+            print("    Fixture : not in the filename")
+        ans = ask("    Enter to accept, a new fixture as 'Home v Away', "
+                  "'?' for grounds, or 's' to skip: ")
+
+        if ans.lower() == "s":
+            return None
+        if ans == "?":
+            print("    Grounds with reference folders:")
+            for c in clubs:
+                print(f"      · {c}")
+            if not clubs:
+                print("      (none yet — every match runs on partner marks only)")
+            continue
+        if ans:
+            m = re.match(r"^(.+?)\s+vs?\.?\s+(.+)$", ans, re.I)
+            if not m:
+                print("    ! write it as 'Sutton United v Hartlepool United'.")
+                continue
+            home, away = m.group(1).strip(), m.group(2).strip()
+            continue
+        if not home:
+            print("    ! no fixture yet — type one, or 's' to skip this file.")
+            continue
+
+        if home not in clubs:
+            print(f"    ! no refs/clubs/{home}/ — this match will be measured on the "
+                  f"league partner marks only.")
+            if ask("      Enter to accept that, or 'n' to correct the name: ").lower() == "n":
+                continue
+
+        while not re.match(r"^\d{4}-\d{2}-\d{2}$", date or ""):
+            date = ask(f"    Date (YYYY-MM-DD)"
+                       f"{' [' + date + ']' if date else ''}: ") or date
+            if not date:
+                print("    ! needed — it is how the match is filed and deduped.")
+        return {"club": home if home in clubs else None,
+                "home": home, "away": away, "date": date}
+
+
 def scaffold(root):
     for p in [root, os.path.join(root, "partners"), os.path.join(root, "clubs")]:
         os.makedirs(p, exist_ok=True)
@@ -343,6 +438,8 @@ def main():
     ap.add_argument("--ffprobe", default="ffprobe")
     ap.add_argument("--init", action="store_true", help="create the refs folder tree and exit")
     ap.add_argument("--list", action="store_true", help="show references and exit")
+    ap.add_argument("-y", "--yes", action="store_true",
+                    help="take the fixture from the filename without asking")
     ap.add_argument("--stills", type=int, default=0, metavar="N",
                     help="write N full-size frames spread across the match, to crop boards from")
     a = ap.parse_args()
@@ -373,13 +470,13 @@ def main():
     if not os.path.isfile(a.video):
         die(f"no file at {a.video}")
 
-    club, title = a.club, a.match
-    if not club or not title:
-        fx = parse_fixture(a.video)
-        if fx:
-            club = club or (fx[1] if fx[1] in clubs else None)
-            title = title or (fx[1] + " v " + fx[2])
-    run_one(a, a.video, club, title)
+    if a.club or a.match:
+        run_one(a, a.video, a.club, a.match or os.path.basename(a.video))
+        return
+    fx = confirm_fixture(a.video, clubs, a.refs, a.yes)
+    if not fx:
+        die("nothing to measure.")
+    run_one(a, a.video, fx["club"], fx["home"] + " v " + fx["away"], fx["date"])
 
 
 def known_clubs(refs_root):
@@ -443,26 +540,30 @@ def run_batch(a, clubs):
 
     done_dir = os.path.join(folder, "done")
     print(f"\n  {len(vids)} video{'s' if len(vids) != 1 else ''} in {folder}/")
-    ok, skipped = [], []
 
-    for i, name in enumerate(vids, 1):
+    # Every question first, then walk away. Stopping halfway through six matches
+    # to ask something is the difference between a batch you can leave running
+    # overnight and one you have to sit with.
+    print("\n  --- confirm the fixtures ---")
+    plan = []
+    for name in vids:
+        fx = confirm_fixture(os.path.join(folder, name), clubs, a.refs, a.yes)
+        if fx:
+            plan.append((name, fx))
+    if not plan:
+        die("nothing to measure.")
+
+    print(f"\n  Measuring {len(plan)} of {len(vids)}. Nothing else to answer.\n")
+    ok, skipped = [], [(n, "skipped") for n in vids
+                       if n not in [p[0] for p in plan]]
+
+    for i, (name, fx) in enumerate(plan, 1):
         path = os.path.join(folder, name)
-        fx = parse_fixture(path)
         print("\n" + "=" * 72)
-        print(f"  [{i}/{len(vids)}] {name}")
+        print(f"  [{i}/{len(plan)}] {fx['home']} v {fx['away']} — {fx['date'] or 'no date'}")
         print("=" * 72)
-        if not fx:
-            print("  ! cannot read the fixture from this filename — skipped.\n"
-                  "    Rename it like: 2026-08-23 Sutton United v Hartlepool United.mp4")
-            skipped.append((name, "filename"))
-            continue
-        _, home, away = fx
-        club = home if home in clubs else None
-        if club is None:
-            print(f"  ! no reference folder for '{home}' — measuring partner marks only.\n"
-                  f"    Add refs/clubs/{home}/ to pick up their own boards.")
         try:
-            run_one(a, path, club, home + " v " + away)
+            run_one(a, path, fx["club"], fx["home"] + " v " + fx["away"], fx["date"])
             ok.append(name)
             os.makedirs(done_dir, exist_ok=True)
             shutil.move(path, os.path.join(done_dir, name))
@@ -471,15 +572,15 @@ def run_batch(a, clubs):
             skipped.append((name, "failed"))
 
     print("\n" + "=" * 72)
-    print(f"  {len(ok)} measured, {len(skipped)} skipped")
+    print(f"  {len(ok)} measured, {len(skipped)} not")
     for name, why in skipped:
-        print(f"    skipped ({why}): {name}")
+        print(f"    {why}: {name}")
     if ok:
         print(f"  Measured videos moved to {done_dir}/")
     print()
 
 
-def run_one(a, video, club, title):
+def run_one(a, video, club, title, date=""):
     entries, scope, usable = describe_refs(a.refs, club)
 
     match = title or os.path.splitext(os.path.basename(video))[0]
@@ -576,7 +677,8 @@ def run_one(a, video, club, title):
     html = f"{base}-report.html"
     payload, size = R.build(html, meta, hits_by_index, frame_files, scope)
 
-    head = {"match": match, "club": club, "video": os.path.basename(video),
+    head = {"match": match, "club": club, "date": date,
+            "video": os.path.basename(video),
             "duration": duration, "interval": interval, "samples": n_samples,
             "video_w": info["w"], "video_h": info["h"],
             "scan_seconds": round(scan_secs, 1),

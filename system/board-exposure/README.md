@@ -19,21 +19,32 @@ pip install opencv-python-headless numpy
 python board-exposure-match.py --init --refs refs
 ```
 
-Then put reference images in `refs/`, name each video after its fixture, drop
-them in `inbox/`, and run the batch:
+Then put reference images in `refs/`, drop videos in `inbox/`, and run the batch:
 
 ```
-2026-08-23 Sutton United v Hartlepool United.mp4
-
 python board-exposure-match.py --batch inbox --refs refs
 ```
 
-**The filename is the only per-match input.** The home club in it picks which
-club folder joins the league partner marks, so a batch of six matches at six
-grounds needs no arguments at all — each one gets its own reference set. A file
-whose name cannot be read is skipped and reported rather than guessed at: the
-wrong club means the wrong reference set, and the run would still look like it
-worked.
+It reads the fixture off each filename where it can, shows what it read, and
+lets you correct it:
+
+```
+  2026-08-23 Sutton United v Hartlepool United.mp4
+    Fixture : Sutton United v Hartlepool United
+    Ground  : 5 local boards + the partner marks
+    Enter to accept, a new fixture as 'Home v Away', '?' for grounds, or 's' to skip:
+```
+
+**Every question is asked up front, then it runs unattended** — a batch that
+stops halfway through six matches to ask something is one you have to sit with.
+
+The home club is confirmed rather than assumed because it decides which club
+folder joins the league partner marks, and **the wrong ground silently drops
+every local board while still printing a table that looks entirely fine**. That
+is the worst failure mode this has: nothing about the output looks wrong.
+Naming a file after its fixture reduces the confirmation to pressing Enter; a
+file with an unhelpful name is a question, not a lost cause. `-y` skips the
+questions entirely for unattended runs.
 
 On Windows `measure-matches.bat` does the same by being double-clicked, or by
 having videos dragged onto it — no terminal, nothing to install beyond Python.

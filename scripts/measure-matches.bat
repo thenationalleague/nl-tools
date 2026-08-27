@@ -7,13 +7,16 @@ rem
 rem    Double-click it        - measures every video in the inbox folder.
 rem    Drag videos onto it    - measures just those.
 rem
-rem  Name each file after the fixture so nothing has to be typed:
+rem  It asks you to confirm the fixture for each video before measuring
+rem  anything, so the questions are all over with before it starts and you can
+rem  walk away. Naming a file after its fixture makes that a single Enter:
 rem
 rem       2026-08-23 Sutton United v Hartlepool United.mp4
 rem
 rem  The home club decides which reference folder is searched alongside the
-rem  league partner marks, which is why the name matters and why a file it
-rem  cannot read is skipped rather than guessed at.
+rem  league partner marks, which is why it is confirmed rather than assumed -
+rem  the wrong ground drops every local board and still prints a table that
+rem  looks fine.
 rem
 rem  Rename this file to whatever you like - Windows does not care.
 rem ---------------------------------------------------------------------------
