@@ -10,27 +10,44 @@ gated page, no RTDB node, no registry record, no workflow. Read
 
 ## Run a full match
 
-Three files, one command, on your own machine. Nothing uploads, nothing
-downloads, so there is no file-size limit and no egress bill — which is what
-killed every cloud-shaped version of this design.
+On your own machine. Nothing uploads, nothing downloads, so there is no
+file-size limit and no egress bill — which is what killed every cloud-shaped
+version of this design.
 
 ```
 pip install opencv-python-headless numpy
-
 python board-exposure-match.py --init --refs refs
-                                             # drop reference images in, then
-python board-exposure-match.py --video match.mp4 --refs refs \
-       --club "Sutton United" --match "Sutton United v Hartlepool"
 ```
 
-Out comes `<match>-report.html` — one self-contained page — and
-`<match>-data.json`, the numbers on their own.
+Then put reference images in `refs/`, name each video after its fixture, drop
+them in `inbox/`, and run the batch:
+
+```
+2026-08-23 Sutton United v Hartlepool United.mp4
+
+python board-exposure-match.py --batch inbox --refs refs
+```
+
+**The filename is the only per-match input.** The home club in it picks which
+club folder joins the league partner marks, so a batch of six matches at six
+grounds needs no arguments at all — each one gets its own reference set. A file
+whose name cannot be read is skipped and reported rather than guessed at: the
+wrong club means the wrong reference set, and the run would still look like it
+worked.
+
+On Windows `measure-matches.bat` does the same by being double-clicked, or by
+having videos dragged onto it — no terminal, nothing to install beyond Python.
+
+Out comes `<match>-report.html` — one self-contained page — plus
+`<match>-data.json` (the summary, which is what the Brand Exposure tool takes)
+and `<match>-detections.json` (every detection).
 
 | File | |
 |---|---|
 | `scripts/board-exposure-match.py` | the command. Extract, scan, report. |
 | `scripts/board_exposure_core.py` | the detector. One copy, imported by everything. |
 | `scripts/board_exposure_report.py` | the page. |
+| `scripts/measure-matches.bat` | Windows drop-target / double-click launcher. |
 
 ffmpeg is used for frame extraction when it is on PATH and OpenCV decodes
 directly when it is not, so ffmpeg is a nice-to-have rather than a requirement.

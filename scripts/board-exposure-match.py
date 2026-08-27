@@ -1,8 +1,23 @@
 #!/usr/bin/env python3
 """
-Full match, one command, on your own machine. Nothing uploads, nothing downloads.
+Full match, on your own machine. Nothing uploads, nothing downloads.
 
     python board-exposure-match.py --init --refs refs
+
+Then name each video after its fixture, drop them in inbox/, and:
+
+    python board-exposure-match.py --batch inbox --refs refs
+
+    2026-08-23 Sutton United v Hartlepool United.mp4
+
+The home club in the filename picks which reference folder joins the league
+partner marks, so a batch needs no arguments per match. A file whose name it
+cannot read is skipped and reported, never guessed at — the wrong club means
+the wrong reference set, and the run would still look like it worked.
+
+On Windows, measure-matches.bat does the same thing by being double-clicked, or
+by having videos dragged onto it. One match at a time still works:
+
     python board-exposure-match.py --video match.mp4 --refs refs ^
            --club "Sutton United" --match "Sutton United v Hartlepool"
 
@@ -265,21 +280,55 @@ def stills(video, n, out):
     print("  across the logo is the commonest reason a board is never found.\n")
 
 
+VIDEO_EXT = (".mp4", ".mov", ".mkv", ".m4v", ".ts", ".avi")
+FIXTURE_RE = re.compile(
+    r"^(?:(\d{4}-\d{2}-\d{2})[ _]+)?(.+?)[ _]+vs?\.?[ _]+(.+)$", re.I)
+
+
+def parse_fixture(path):
+    """
+    Read the fixture off the filename, so a batch needs no typing at all.
+
+        2026-08-23 Sutton United v Hartlepool United.mp4
+        Sutton United v Hartlepool United.mp4          (no date)
+
+    Returns (date|None, home, away) or None if the name does not say. Guessing
+    is not an option here: the home club decides which reference folder joins
+    the partner marks, so the wrong name silently drops every local board and
+    the run still looks like it worked.
+    """
+    stem = os.path.splitext(os.path.basename(path))[0]
+    m = FIXTURE_RE.match(stem.strip())
+    if not m:
+        return None
+    date, home, away = m.group(1), m.group(2).strip(), m.group(3).strip()
+    return (date, home, away) if home and away else None
+
+
 def scaffold(root):
     for p in [root, os.path.join(root, "partners"), os.path.join(root, "clubs")]:
         os.makedirs(p, exist_ok=True)
+    os.makedirs("inbox", exist_ok=True)
     readme = os.path.join(root, "READ-ME-FIRST.txt")
     with open(readme, "w", encoding="utf-8") as f:
         f.write(REFS_README)
-    print(f"\n  Created {root}/\n")
-    print("    partners/<Sponsor>/           league-wide, every ground")
-    print("    clubs/<Club>/<Sponsor>/       that club's ground only")
-    print(f"\n  Rules are in {readme}. Drop images in, then run without --init.\n")
+    print(f"\n  Created {root}/ and inbox/\n")
+    print(f"    {root}/partners/<Sponsor>/     league-wide, every ground")
+    print(f"    {root}/clubs/<Club>/<Sponsor>/ that club's ground only")
+    print("    inbox/                        drop match videos here")
+    print(f"\n  Reference rules are in {readme}.")
+    print("\n  Name each video after the fixture and nothing needs typing:")
+    print("    2026-08-23 Sutton United v Hartlepool United.mp4")
+    print("\n  Then double-click measure-matches.bat, or drag videos onto it.\n")
 
 
 def main():
     ap = argparse.ArgumentParser(add_help=True)
     ap.add_argument("--video")
+    ap.add_argument("--batch", metavar="FOLDER",
+                    help="measure every video in a folder, then move each aside")
+    ap.add_argument("--out-dir", default=None,
+                    help="where reports land (default: alongside; 'reports' in batch)")
     ap.add_argument("--refs", default="refs")
     ap.add_argument("--club", default=None, help="folder name under refs/clubs/")
     ap.add_argument("--match", default=None, help="how the fixture is titled on the report")
@@ -297,6 +346,8 @@ def main():
     ap.add_argument("--stills", type=int, default=0, metavar="N",
                     help="write N full-size frames spread across the match, to crop boards from")
     a = ap.parse_args()
+    if a.batch and a.out_dir is None:
+        a.out_dir = "reports"
 
     if a.init:
         scaffold(a.refs)
@@ -308,57 +359,144 @@ def main():
         stills(a.video, a.stills, a.out or "stills")
         return
 
-    if not os.path.isdir(a.refs):
-        die(f"no reference folder at {a.refs}. Run with --init first.")
+    clubs = known_clubs(a.refs)
 
-    clubs_dir = os.path.join(a.refs, "clubs")
-    known = sorted(os.listdir(clubs_dir)) if os.path.isdir(clubs_dir) else []
-    if a.club and a.club not in known:
-        die(f"no club folder '{a.club}'.\n  Found: {', '.join(known) or 'none'}")
-
-    entries = C.load_tree(a.refs, a.club)
-    if not entries:
-        die(f"no reference images under {a.refs}. See {a.refs}/READ-ME-FIRST.txt")
-
-    scope = {}
-    for name, _, sc in entries:
-        scope.setdefault(name, sc)
-    print(f"\n  {len(entries)} reference images, {len(scope)} sponsors")
-    sift0 = cv2.SIFT_create(nfeatures=C.NFEATURES)
-    usable = 0
-    for name, path, sc in entries:
-        g = C.flatten(path)
-        kp, des = sift0.detectAndCompute(g, None)
-        n = 0 if des is None else len(kp)
-        mark = "partner" if sc == "partner" else (a.club or "club")
-        h, w = g.shape[:2]
-        if n < C.MIN_INLIERS:
-            print(f"    {name:<24} {mark:<16} {os.path.basename(path):<28} "
-                  f"! only {n} features, skipped")
-            continue
-        usable += 1
-        print(f"    {name:<24} {mark:<16} {os.path.basename(path):<28} "
-              f"{w}x{h}  {n} features")
-    if not usable:
-        die("every reference was too plain to match. Use images with more detail.")
     if a.list:
+        describe_refs(a.refs, a.club)
         return
 
+    if a.batch:
+        return run_batch(a, clubs)
+
     if not a.video:
-        die("give me a video: --video match.mp4")
+        die("give me a video: --video match.mp4   (or a folder: --batch inbox)")
     if not os.path.isfile(a.video):
         die(f"no file at {a.video}")
 
-    match = a.match or os.path.splitext(os.path.basename(a.video))[0]
-    base = a.out or re.sub(r"[^a-z0-9]+", "-", match.lower()).strip("-") or "match"
+    club, title = a.club, a.match
+    if not club or not title:
+        fx = parse_fixture(a.video)
+        if fx:
+            club = club or (fx[1] if fx[1] in clubs else None)
+            title = title or (fx[1] + " v " + fx[2])
+    run_one(a, a.video, club, title)
+
+
+def known_clubs(refs_root):
+    if not os.path.isdir(refs_root):
+        die(f"no reference folder at {refs_root}. Run with --init first.")
+    d = os.path.join(refs_root, "clubs")
+    return sorted(os.listdir(d)) if os.path.isdir(d) else []
+
+
+def describe_refs(refs_root, club, quiet=False):
+    """Load the references for this ground and report what is usable."""
+    entries = C.load_tree(refs_root, club)
+    if not entries:
+        die(f"no reference images under {refs_root}. "
+            f"See {refs_root}/READ-ME-FIRST.txt")
+    scope = {}
+    for name, _, sc in entries:
+        scope.setdefault(name, sc)
+
+    sift = cv2.SIFT_create(nfeatures=C.NFEATURES)
+    usable = 0
+    if not quiet:
+        print(f"\n  {len(entries)} reference images, {len(scope)} sponsors")
+    for name, path, sc in entries:
+        g = C.flatten(path)
+        kp, des = sift.detectAndCompute(g, None)
+        n = 0 if des is None else len(kp)
+        if n < C.MIN_INLIERS:
+            print(f"    {name:<24} {os.path.basename(path):<28} "
+                  f"! only {n} features, skipped")
+            continue
+        usable += 1
+        if not quiet:
+            h, w = g.shape[:2]
+            mark = "partner" if sc == "partner" else (club or "club")
+            print(f"    {name:<24} {mark:<16} {os.path.basename(path):<24} "
+                  f"{w}x{h}  {n} features")
+    if not usable:
+        die("every reference was too plain to match. Use images with more detail.")
+    return entries, scope, usable
+
+
+def run_batch(a, clubs):
+    """
+    Every video in a folder, one after another, then move each one aside.
+
+    Named for the walk-away case: start it on six matches and come back. So a
+    file that cannot be identified is skipped and reported at the end rather
+    than stopping the run — but it is never guessed at, because the home club
+    picks the reference set and a wrong guess produces numbers that look fine.
+    """
+    folder = a.batch
+    if not os.path.isdir(folder):
+        die(f"no folder at {folder}")
+    vids = sorted(f for f in os.listdir(folder)
+                  if f.lower().endswith(VIDEO_EXT)
+                  and os.path.isfile(os.path.join(folder, f)))
+    if not vids:
+        die(f"no video files in {folder}/\n"
+            f"  Drop matches in named like: 2026-08-23 Sutton United v Hartlepool United.mp4")
+
+    done_dir = os.path.join(folder, "done")
+    print(f"\n  {len(vids)} video{'s' if len(vids) != 1 else ''} in {folder}/")
+    ok, skipped = [], []
+
+    for i, name in enumerate(vids, 1):
+        path = os.path.join(folder, name)
+        fx = parse_fixture(path)
+        print("\n" + "=" * 72)
+        print(f"  [{i}/{len(vids)}] {name}")
+        print("=" * 72)
+        if not fx:
+            print("  ! cannot read the fixture from this filename — skipped.\n"
+                  "    Rename it like: 2026-08-23 Sutton United v Hartlepool United.mp4")
+            skipped.append((name, "filename"))
+            continue
+        _, home, away = fx
+        club = home if home in clubs else None
+        if club is None:
+            print(f"  ! no reference folder for '{home}' — measuring partner marks only.\n"
+                  f"    Add refs/clubs/{home}/ to pick up their own boards.")
+        try:
+            run_one(a, path, club, home + " v " + away)
+            ok.append(name)
+            os.makedirs(done_dir, exist_ok=True)
+            shutil.move(path, os.path.join(done_dir, name))
+        except SystemExit as e:
+            print(f"  ! {e}")
+            skipped.append((name, "failed"))
+
+    print("\n" + "=" * 72)
+    print(f"  {len(ok)} measured, {len(skipped)} skipped")
+    for name, why in skipped:
+        print(f"    skipped ({why}): {name}")
+    if ok:
+        print(f"  Measured videos moved to {done_dir}/")
+    print()
+
+
+def run_one(a, video, club, title):
+    entries, scope, usable = describe_refs(a.refs, club)
+
+    match = title or os.path.splitext(os.path.basename(video))[0]
+    base = re.sub(r"[^a-z0-9]+", "-", match.lower()).strip("-") or "match"
+    if a.out and not a.batch:
+        base = a.out
+    if a.out_dir:
+        os.makedirs(a.out_dir, exist_ok=True)
+        base = os.path.join(a.out_dir, base)
     work = a.work or f"{base}-frames"
 
-    info = probe(a.video, a.ffprobe)
-    print(f"\n  {a.video}: {info['w']}x{info['h']}, {info['fps']:.0f}fps, "
+    info = probe(video, a.ffprobe)
+    print(f"\n  {video}: {info['w']}x{info['h']}, {info['fps']:.0f}fps, "
           f"{R.hhmm(info['duration'])}")
 
     expected = int(info["duration"] * a.fps)
-    files, interval = extract(a.video, work, a.fps, a.ffmpeg, expected, a.limit)
+    files, interval = extract(video, work, a.fps, a.ffmpeg, expected, a.limit)
     if a.limit:
         files = files[:a.limit]
     n_samples = len(files)
@@ -367,7 +505,6 @@ def main():
     jobs = a.jobs or max(1, (os.cpu_count() or 2) - 1)
     print(f"\n  scanning {n_samples} samples across {jobs} cores")
     print(f"  {usable} references x {n_samples} frames — this is the slow part\n")
-    del sift0
 
     # "spawn", not the default fork. OpenCV starts its own thread pool the first
     # time it is used, and this process has already used it to list the
@@ -419,27 +556,27 @@ def main():
            f"{len(partners)} National League partner mark"
            f"{'s' if len(partners) != 1 else ''} searched for at every camera angle"
            + (f", plus {len(clubbits)} board{'s' if len(clubbits) != 1 else ''} that only "
-              f"apply at {a.club}. " if clubbits else ". ")
+              f"apply at {club}. " if clubbits else ". ")
            + "Pick a sponsor, then scrub the timeline to see what the detector saw.")
     foot = (
         "Measured by this repository&rsquo;s own detector, run on a laptop from a local copy of the "
         "match &mdash; no upload, no third party, no per-match fee. League partner marks came from "
         "each brand&rsquo;s own logo file with nothing cropped from this ground, which is the part "
         "that matters for running it across 72 clubs"
-        + (f"; {a.club}&rsquo;s own boards were cropped at their ground and are searched for only "
+        + (f"; {club}&rsquo;s own boards were cropped at their ground and are searched for only "
            f"when they are at home. " if clubbits else ". ")
         + "The numbers are the detector&rsquo;s own and have <strong>not</strong> been checked "
         "against a hand-count, so treat this as the shape of the report rather than as evidence "
         "for a partner. Calibrating it is one afternoon with a stopwatch and one match.")
 
-    meta = {"match": match, "club": a.club, "duration": round(duration, 1),
+    meta = {"match": match, "club": club, "duration": round(duration, 1),
             "interval": interval, "n_samples": n_samples,
             "video_w": info["w"], "video_h": info["h"],
             "sub": sub, "foot": foot}
     html = f"{base}-report.html"
     payload, size = R.build(html, meta, hits_by_index, frame_files, scope)
 
-    head = {"match": match, "club": a.club, "video": os.path.basename(a.video),
+    head = {"match": match, "club": club, "video": os.path.basename(video),
             "duration": duration, "interval": interval, "samples": n_samples,
             "video_w": info["w"], "video_h": info["h"],
             "scan_seconds": round(scan_secs, 1),
