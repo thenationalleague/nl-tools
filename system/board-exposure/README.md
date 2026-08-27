@@ -257,11 +257,32 @@ The work is embarrassingly parallel — chunk the match across cores, and matche
 across jobs. A full matchweek fits inside a few hours of wall clock on standard
 runners, which are free on a public repository.
 
-**Do not put the video in Firebase Storage.** Egress at $0.12/GB is the only
-real cost in the whole design: a season of full matches pulled back out runs to
-hundreds of dollars, against ~$0 for everything else. Stream the file from
-wherever it already lives, extract, score, discard. Only the JSON persists, at a
-few hundred KB per match.
+**Egress is the only real cost, and it depends entirely on where the scan runs.**
+An earlier version of this section said flatly "do not put the video in Firebase
+Storage", which is half right and was misleading enough to rule out an
+architecture that works.
+
+The $0.12/GB is *internet* egress — the bill for pulling a match back out of the
+bucket to a laptop or a GitHub Actions runner. Reading the same object from a
+Google Cloud service in the same region as the bucket is not billed as network
+egress. So:
+
+| Where the scan runs | Video in Firebase Storage |
+|---|---|
+| A laptop, or a GitHub Actions runner | Costs $0.12/GB every run. Don't. |
+| Cloud Run / Cloud Run Jobs, same region as the bucket | No egress charge. Fine. |
+
+Which means the cheap designs are the two ends: keep the file local and scan it
+locally, or put it in the bucket and scan it next to the bucket. The expensive
+design is the middle — storing it in one place and computing in another.
+
+**Check the bucket's location before relying on this.** `nl-tools.firebasestorage.app`
+has to be in the same region as the job; the RTDB is `europe-west1`, but Storage
+location is set separately at project creation and is not readable from this
+repository. It is on the Firebase Storage page in the console.
+
+Either way only the JSON persists, at a few hundred KB per match for the summary
+and a few MB for every detection.
 
 ## The constraint that actually decides this
 
