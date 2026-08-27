@@ -88,6 +88,83 @@ def on_the_perimeter(frame_bgr, quad):
     return float(grass.mean()) >= 0.45
 
 
+def load_tree(root, club=None):
+    """
+    The folder IS the configuration. Everything under partners/ is checked at
+    every ground; a club's own folder is checked only when they are at home.
+    One folder per sponsor, any number of images inside it — a sponsor with
+    several board designs just gets several files, and they roll up under the
+    folder name.
+    """
+    import os
+    out = []
+    def scan(base):
+        if not os.path.isdir(base):
+            return
+        for sponsor in sorted(os.listdir(base)):
+            d = os.path.join(base, sponsor)
+            if not os.path.isdir(d):
+                continue
+            for f in sorted(os.listdir(d)):
+                if f.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
+                    out.append((sponsor, os.path.join(d, f)))
+    scan(os.path.join(root, "partners"))
+    if club:
+        scan(os.path.join(root, "clubs", club))
+    return out
+
+
+def grow_to_board(frame_bgr, quad):
+    """
+    The logo is not the advertisement — the board is. Enterprise's wordmark sits
+    on a green panel roughly twice its width, and measuring the wordmark
+    understates what the sponsor actually bought.
+
+    So: sample the panel's own colour from inside the matched area, then walk
+    outwards column by column for as long as that colour continues. Works for
+    any board with a solid ground, whatever the hue.
+    """
+    pts = quad.astype(np.float32)
+    H, W = frame_bgr.shape[:2]
+    y0 = int(max(0, pts[:, 1].min()))
+    y1 = int(min(H, pts[:, 1].max()))
+    x0 = int(max(0, pts[:, 0].min()))
+    x1 = int(min(W, pts[:, 0].max()))
+    if y1 - y0 < 6 or x1 - x0 < 12:
+        return None
+
+    hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
+    inside = hsv[y0:y1, x0:x1].reshape(-1, 3)
+    if inside.size == 0:
+        return None
+    # The board's ground colour is the commonest thing inside the quad; the
+    # lettering is the minority, so a median lands on the panel not the text.
+    base = np.median(inside, axis=0)
+
+    def same(x):
+        col = hsv[y0:y1, x:x + 1].reshape(-1, 3)
+        if col.size == 0:
+            return False
+        m = np.median(col, axis=0)
+        dh = min(abs(float(m[0] - base[0])), 180 - abs(float(m[0] - base[0])))
+        return dh < 14 and abs(float(m[1] - base[1])) < 70 and abs(float(m[2] - base[2])) < 70
+
+    # A dark board against a dark stand has nothing to stop the walk, so cap it.
+    # genie cloud's black hoarding grew to 21% of frame without this.
+    span = x1 - x0
+    limit = int(span * 3.0)
+    L, Rr = x0, x1
+    while L > 1 and (x0 - L) < limit and same(L - 1):
+        L -= 1
+    while Rr < W - 2 and (Rr - x1) < limit and same(Rr):
+        Rr += 1
+    if Rr - L <= span:
+        return None
+    if 100.0 * (Rr - L) * (y1 - y0) / (H * W) > 6.0:
+        return None                      # implausible for a perimeter board
+    return (L, y0, Rr, y1)
+
+
 def quality(gray, quad, ref_wh):
     w, h = max(int(ref_wh[0]), 32), max(int(ref_wh[1]), 32)
     dst = np.float32([[0, 0], [w, 0], [w, h], [0, h]]).reshape(-1, 1, 2)
