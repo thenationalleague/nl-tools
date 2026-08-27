@@ -19,6 +19,8 @@ import json
 import os
 import statistics as st
 
+import board_exposure_core as C
+
 # Distinct hues that survive being drawn small on dark navy. The National
 # League primary leads, then a spread that stays apart at 3px on the timeline.
 PALETTE = ["#ff4d4d", "#4db2ff", "#ffb020", "#5fd38d", "#c78bff",
@@ -48,7 +50,7 @@ def stats_for(hits_by_index, name, interval, duration):
     idxs = [i for i, h in hits_by_index.items() if h.get(name)]
     if not idxs:
         return None
-    runs = runs_from(idxs)
+    runs = runs_from(idxs, interval=interval)
     if not runs:
         return None
     flat = [h for i in idxs for h in hits_by_index[i][name]]
@@ -143,6 +145,8 @@ def build(out_path, meta, hits_by_index, frame_files, sponsors_meta):
             .replace("__MATCH__", meta["match"])
             .replace("__SUB__", meta["sub"])
             .replace("__FOOT__", meta["foot"])
+            .replace("__MINRUNSECS__", str(C.MIN_RUN_SECS))
+            .replace("__BRIDGESECS__", str(C.BRIDGE_SECS))
             .replace("__DURSEC__", str(round(duration, 1)))
             .replace("__DUR__", hhmm(duration)))
     with open(out_path, "w", encoding="utf-8") as f:
@@ -336,6 +340,11 @@ code{font-family:"IBM Plex Mono",monospace;font-size:.92em}
 const D = __DATA__;
 const F = D.frames, HITS = D.hits;
 const FKEYS = Object.keys(F).map(Number).sort((a,b)=>a-b);
+// Same appearance thresholds the measurement used, derived from the sample
+// interval rather than hardcoded — a page built from a 5/s run must not group
+// runs differently from the numbers printed beside it.
+const MIN_RUN = Math.max(1, Math.round(__MINRUNSECS__ / D.interval));
+const BRIDGE  = Math.max(0, Math.round(__BRIDGESECS__ / D.interval) - 1);
 let sponsor = D.primary, cur = 0, playing = false, timer = null;
 
 const shot=document.getElementById('shot'), ov=document.getElementById('ov');
@@ -482,11 +491,11 @@ function runsFor(n){
   const out = []; let run = null;
   keys.forEach(i => {
     const cl = HITS[i][n].map(h=>h.c);
-    if (run && i - run.last <= 3){ run.last = i; run.cl.push(...cl); }
+    if (run && i - run.last <= BRIDGE + 1){ run.last = i; run.cl.push(...cl); }
     else { if (run) out.push(run); run = {first:i, last:i, cl}; }
   });
   if (run) out.push(run);
-  return out.filter(r => r.last > r.first);
+  return out.filter(r => (r.last - r.first + 1) >= MIN_RUN);
 }
 
 // The whole league table, so one sponsor's number has something to sit against.

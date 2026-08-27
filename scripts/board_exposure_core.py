@@ -36,7 +36,14 @@ ASPECT = (1.6, 7.0)         # a hoarding is wide
 MAX_TILT = 28.0             # degrees off level
 AREA_PCT = (0.02, 5.0)      # share of frame the logo may occupy
 MIN_SIDE = 18               # pixels
-MIN_RUN, BRIDGE = 2, 2      # a run is 2+ samples; 2 missing samples don't break it
+# In SECONDS, not samples. These were sample counts until 27/08/2026, which made
+# them silently depend on --fps: at 2/s a gap of 1.5s stayed one appearance, at
+# 5/s the same real gap became three, and the fragments fell under the minimum.
+# Raising the sample rate then *lowered* a sponsor's seconds, which is nonsense.
+# Runtime knobs must not change what is being measured.
+MIN_RUN_SECS = 1.0          # shortest appearance that counts at all
+BRIDGE_SECS = 1.5           # longest blocked gap still inside one appearance
+MIN_RUN, BRIDGE = 2, 2      # the same thing in samples at the default 2/s
 DEDUPE_PX = 45              # two hits closer than this are the same board
 
 
@@ -347,17 +354,30 @@ def settings():
         "band_frac": BAND_FRAC, "band_stride": BAND_STRIDE,
         "ratio": RATIO, "min_inliers": MIN_INLIERS, "max_per_band": MAX_PER_BAND,
         "aspect": list(ASPECT), "max_tilt": MAX_TILT, "area_pct": list(AREA_PCT),
-        "min_run": MIN_RUN, "bridge": BRIDGE,
+        "min_run_secs": MIN_RUN_SECS, "bridge_secs": BRIDGE_SECS,
         "clarity_weights": {"size": 0.40, "focus": 0.25,
                             "contrast": 0.20, "angle": 0.15},
         "clarity_saturation": {"area_pct": 0.6, "sharp": 300.0, "contrast": 60.0},
     }
 
 
-def runs_from(indices, bridge=BRIDGE, min_run=MIN_RUN):
+def run_limits(interval):
+    """
+    The appearance thresholds in samples, for a given seconds-per-sample.
+
+    One place, so the runner, the report builder and the page cannot drift into
+    three different answers about what counts as one appearance.
+    """
+    return (max(1, int(round(MIN_RUN_SECS / interval))),
+            max(0, int(round(BRIDGE_SECS / interval)) - 1))
+
+
+def runs_from(indices, bridge=BRIDGE, min_run=MIN_RUN, interval=None):
     """Group sample indices into continuous appearances, bridging short gaps."""
     if not indices:
         return []
+    if interval:
+        min_run, bridge = run_limits(interval)
     idxs = sorted(indices)
     runs, cur = [], [idxs[0]]
     for i in idxs[1:]:
