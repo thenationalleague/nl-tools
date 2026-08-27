@@ -8,21 +8,86 @@ The answer is yes. What is here is a working detector and nothing else — no
 gated page, no RTDB node, no registry record, no workflow. Read
 `system/tool-status-and-access.md` before assuming otherwise.
 
-## Run it
+## Run a full match
 
-```bash
+Three files, one command, on your own machine. Nothing uploads, nothing
+downloads, so there is no file-size limit and no egress bill — which is what
+killed every cloud-shaped version of this design.
+
+```
 pip install opencv-python-headless numpy
-python3 scripts/board-exposure.py --video match.mp4 --logos ./logos --out result.json
+
+python board-exposure-match.py --init --refs refs
+                                             # drop reference images in, then
+python board-exposure-match.py --video match.mp4 --refs refs \
+       --club "Sutton United" --match "Sutton United v Hartlepool"
 ```
 
-`--logos` is a directory holding one image per sponsor board, named for the
-sponsor (`enterprise.png`, `ashmead-roofing.png`). Crop them square-on from
-footage, or photograph the boards at the ground before kick-off — the second is
-better, because it gives you the artwork under that ground's actual lighting.
+Out comes `<match>-report.html` — one self-contained page — and
+`<match>-data.json`, the numbers on their own.
+
+| File | |
+|---|---|
+| `scripts/board-exposure-match.py` | the command. Extract, scan, report. |
+| `scripts/board_exposure_core.py` | the detector. One copy, imported by everything. |
+| `scripts/board_exposure_report.py` | the page. |
+
+ffmpeg is used for frame extraction when it is on PATH and OpenCV decodes
+directly when it is not, so ffmpeg is a nice-to-have rather than a requirement.
+Verified against OpenCV 5.0.0 and numpy 2.5.2 on Windows, Python 3.12 from the
+Microsoft Store — which matters, because that install needs no admin rights and
+was the only route available on the machine this has to run on.
+
+Useful flags: `--limit 200` scans the first hundred seconds so a ground can be
+checked before committing to the full run; `--stills 40` writes full-size frames
+spread across the match, each the sharpest of six nearby, to crop references
+from; `--list` prints what it would search for and stops; `--jobs` overrides the
+core count.
+
+### The folder is the configuration
+
+```
+refs/partners/<Sponsor>/*.png        searched at EVERY ground
+refs/clubs/<Club>/<Sponsor>/*.png    searched only when that club is at home
+```
+
+Folder name is the name printed on the report. Any number of images per
+sponsor — several board designs roll up under the one name. `--club` picks
+which club folder joins the partners for this match, so Sutton's hoardings are
+never hunted at Harrogate.
+
+That distinction is the whole point of the split: league partners are sold
+once and delivered at 72 grounds, club boards are sold by the club and
+delivered at one. A tool that cannot tell them apart cannot report either.
+
+### What makes a reference work
+
+- The brand's own logo file is a fine starting point — Enterprise was found at
+  a ground with nothing cropped from that ground.
+- Crop square-on and tight to the printed area.
+- **Nothing in front of it.** Skyline Roofing was never found at Sutton because
+  the only crop taken of it had a player across the board.
+- Greyscale detail is what matches. A flat two-colour wordmark has less to work
+  with than a busy one and will be harder to find.
 
 No footage to hand? `scripts/board-exposure-testclip.py` renders a synthetic
 match — panning camera, static boards, players crossing in front, focus drift —
 so the pipeline can be exercised without waiting on a rights conversation.
+
+### Runtime
+
+The scan is embarrassingly parallel and the runner splits it across cores. A
+90-minute match at two samples a second against ten references is roughly half
+an hour on sixteen cores, against about eight hours on one. Frame extraction is
+restartable — a killed run picks up from the frames already on disk rather than
+decoding again.
+
+One optimisation is deliberately **not** taken: batching every reference's
+descriptors into a single `knnMatch` per band would cut call overhead
+tenfold, but it changes which matches survive the iterative inlier-removal
+loop, and that would make a full-match run incomparable with the clip numbers
+already published below. Worth doing once there is a hand-count to re-validate
+against.
 
 ## Clarity and confidence are different numbers
 
@@ -116,7 +181,7 @@ happily, and counted it as perimeter exposure. It is not — it is a different
 piece of inventory, priced differently, and the first thing a partner would
 challenge.
 
-`on_the_perimeter()` in `board-exposure-run.py` rejects it on context rather
+`on_the_perimeter()` in `board_exposure_core.py` rejects it on context rather
 than appearance: a hoarding stands on the touchline, so there is always pitch
 below it. Sample the strip under the detected quad and require it to be mostly
 grass by hue and saturation. An ident on black fails; a real board passes.
@@ -132,9 +197,9 @@ equivalent. Without it the number is inflated in a way that looks plausible.
 
 ## Two clips, after the ident filter
 
-`scripts/board-exposure-run.py` over two real LIGR highlights packages, both
-1920×1080 at 50fps, sampled twice a second, matched against `assets/partners/`
-with nothing cropped from either ground:
+The detector now in `board_exposure_core.py`, over two real LIGR highlights
+packages, both 1920×1080 at 50fps, sampled twice a second, matched against
+`assets/partners/` with nothing cropped from either ground:
 
 | | Harrogate v Barnet (3m28s) | Sutton v Hartlepool (2m49s) |
 |---|---|---|
