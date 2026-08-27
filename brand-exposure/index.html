@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Brand Exposure
+  Version: v0.1 (27/08/2026)
+  File: /brand-exposure/index.html
+
+  Sponsor exposure measured from match video — seconds on screen, clarity and
+  placement, by partner and by ground.
+
+  The measuring is done by scripts/board-exposure-match.py on a laptop, which
+  writes <match>-data.json. This tool is where those land so they can be
+  compared: one match's seconds mean nothing on their own, and the whole point
+  is "third best of six grounds". See system/board-exposure/README.md.
+
+  Storage (RTDB):
+    app-data/ops-brand-exposure/matches/<matchId>   one uploaded summary
+    tools/ops-brand-exposure                        tool registration
+
+  Access (RTDB tools/ops-brand-exposure/defaults):
+    superadmin + admin → admin (upload, delete)
+    staff              → off; granted per-user, like Commercial Compliance
+
+  Changelog
+  v0.1 (27/08/2026) — First build. Upload, Matches, Partners, Grounds.
+    Share of voice is suppressed unless the reference set was complete at that
+    ground, and matches measured with different engine settings are never
+    averaged together — both are silent-wrongness traps rather than errors.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Brand Exposure — NL Tools</title>
+  <!-- Favicons. Static, not injected: nl-topbar.js adds these too, but a
+       standalone page never loads it, and an icon that arrives with the JS
+       leaves the tab blank until it does. /favicon.ico at the root is the
+       backstop every browser asks for without being told. -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+
+  <!-- Brand stylesheet -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=61">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'Brand Exposure',
+      toolKey: 'ops-brand-exposure'
+    };
+    var NL_TOOL_KEY = 'ops-brand-exposure';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '27/08/2026',
+        version: 'v0.1',
+        items: [
+          'Initial build — upload a measured match, compare by partner and by ground.',
+          'Share of voice suppressed where the reference set was incomplete.',
+          'Matches measured on different engine settings are flagged, never averaged.'
+        ]
+      }
+    ];
+
+    /* auth-guard fires this once the session is verified + pageWrap is
+       revealed. Boot the main app from here so RTDB reads happen with a
+       live auth token. Do NOT read RTDB before this fires. */
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts -->
+  <script src="/system/nl-utils.js?v=45"></script>
+  <script src="/system/nl-topbar.js?v=10"></script>
+  <script src="/system/auth-guard.js?v=16"></script>
+
+<style>
+  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
+     style.display = 'block'. Don't clear with '' — would re-trigger the
+     brand rule and re-hide the page. */
+
+  /* A fixture reads as one thing, so the crest and the two club names sit on
+     one line rather than becoming three table columns. */
+  .fx { display: flex; align-items: center; gap: 9px; }
+  .fx__crest { width: 22px; height: 22px; object-fit: contain; flex: none; }
+  .fx__home { font-weight: 600; }
+  .fx__v { color: var(--text-muted); }
+
+  /* Exposure share as a bar behind the number: the ranking is the point, and
+     eight rows of decimals do not rank at a glance. */
+  .meter { position: relative; min-width: 82px; }
+  .meter__fill { position: absolute; inset: 0 auto 0 0; border-radius: 3px;
+                 background: var(--primary-100); }
+  .meter__val { position: relative; padding: 0 6px; font-variant-numeric: tabular-nums; }
+
+  /* Suppressed rather than caveated — see shareOfVoice(). */
+  .sov-off { color: var(--text-muted); font-style: italic; }
+
+  .scope-tag { font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+               color: var(--text-muted); border: 1px solid var(--navy-100);
+               border-radius: 99px; padding: 1px 7px; margin-left: 7px;
+               white-space: nowrap; }
+
+  /* display:block matters — a <label> is inline, so without it the padding and
+     centring do nothing and the text clips out of the dashed box. */
+  .drop { display: block; border: 2px dashed var(--navy-200); border-radius: 10px;
+          padding: 26px 18px; text-align: center; cursor: pointer;
+          background: var(--navy-50); }
+  .drop.is-over { border-color: var(--primary); background: var(--primary-50); }
+  .drop input { display: none; }
+
+  .readout { margin-top: 14px; }
+  .readout dt { font-size: 11.5px; text-transform: uppercase; letter-spacing: .07em;
+                color: var(--text-muted); }
+  /* The engine profile is one unbroken run of digits and slashes, so without
+     overflow-wrap it never breaks and simply overlaps the next column. */
+  .readout dd { margin: 0 0 10px; font-weight: 600; overflow-wrap: anywhere; }
+  .readout__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                   gap: 4px 18px; }
+
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+
+<!-- Topbar — auto-rendered by /system/nl-topbar.js from window.NL_TOOL -->
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="page">
+
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-tab="matches" role="tab">Matches</button>
+      <button class="tab" data-tab="partners" role="tab">Partners</button>
+      <button class="tab" data-tab="grounds" role="tab">Grounds</button>
+    </div>
+
+    <div id="mixWarn"></div>
+
+    <!-- ── Matches ──────────────────────────────────────────────────── -->
+    <section id="viewMatches">
+      <!-- .stats is a direct child, not nested in .toolbar__left: inside the
+           toolbar it is width-constrained and the tiles stack into a column. -->
+      <div class="stats" id="mStats"></div>
+      <div class="toolbar">
+        <div class="toolbar__left"><div class="section-head"><h2>Matches measured</h2></div></div>
+        <div class="toolbar__right">
+          <button class="btn btn--primary" id="btnAdd" hidden>Add a match</button>
+        </div>
+      </div>
+      <div id="addPanel" hidden></div>
+      <div class="table-wrap"><table class="table" id="mTable"></table></div>
+    </section>
+
+    <!-- ── Partners ─────────────────────────────────────────────────── -->
+    <section id="viewPartners" hidden>
+      <div class="filter-pill-row" id="pPills"></div>
+      <div class="stats" id="pStats"></div>
+      <div class="toolbar">
+        <div class="toolbar__left"><div class="section-head"><h2 id="pHead">Every ground measured</h2></div></div>
+        <div class="toolbar__right"><button class="btn btn--ghost btn--sm" id="pCsv">Export CSV</button></div>
+      </div>
+      <div class="table-wrap"><table class="table" id="pTable"></table></div>
+    </section>
+
+    <!-- ── Grounds ──────────────────────────────────────────────────── -->
+    <section id="viewGrounds" hidden>
+      <div class="filter-row">
+        <span class="filter-label">Ground</span>
+        <div id="gPicker" style="min-width:260px"></div>
+      </div>
+      <div class="stats" id="gStats"></div>
+      <div class="table-wrap"><table class="table" id="gTable"></table></div>
+    </section>
+
+  </div>
+</div>
+
+<!-- Main app -->
+<script>
+(function () {
+  'use strict';
+
+  var ROOT     = 'app-data/ops-brand-exposure/matches';
+  var matches  = {};        // matchId -> stored record
+  var canWrite = false;
+  var view     = 'matches';
+  var partner  = null;      // selected sponsor on the Partners tab
+  var ground   = null;      // selected club on the Grounds tab
+  var pending  = null;      // parsed upload awaiting its details
+  var gPicker  = null;
+
+  var esc = function (s) { return NL.escHtml(s == null ? '' : String(s)); };
+  var $   = function (id) { return document.getElementById(id); };
+
+  function slug(s) {
+    return String(s || '').toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  }
+  function num(n, dp) { return n == null ? '—' : Number(n).toFixed(dp == null ? 1 : dp); }
+  function pctStr(n) { return n == null ? '—' : num(n, 1) + '%'; }
+  function secStr(n) { return NL.formatDuration(n, { seconds: true }); }
+
+  /* Two matches are only comparable if they were measured the same way. The
+     clarity weights are a stated choice, not a measurement, so averaging across
+     a change to them produces a number rather than an error — which is the
+     failure mode worth engineering against. */
+  function profileOf(settings) {
+    if (!settings) return 'unknown';
+    var w = settings.clarity_weights || {};
+    return [settings.engine_version, settings.sample_fps,
+            w.size, w.focus, w.contrast, w.angle].join('/');
+  }
+
+  function list() {
+    return Object.keys(matches).map(function (id) {
+      var m = matches[id]; m._id = id; return m;
+    }).sort(function (a, b) {
+      return String(b.meta.date || '').localeCompare(String(a.meta.date || ''));
+    });
+  }
+  /* Filtered, not mapped straight through. Every render walks this list and
+     reads .name off each entry, so one malformed record would blank the whole
+     page rather than lose a row — too total a failure for a node that is
+     hand-editable in the console. */
+  function sponsorsOf(m) {
+    return Object.keys(m.sponsors || {})
+      .map(function (k) { return m.sponsors[k]; })
+      .filter(function (s) { return s && s.name; });
+  }
+
+  /* Share of a match's total measured exposure. Only meaningful when the
+     reference set covered every board at that ground: five references at a
+     twenty-board ground make any sponsor look like it owns the place. Returns
+     null rather than a flattering number, and the table says why. */
+  function shareOfVoice(m, sponsorName) {
+    if (!m.meta.referenceSetComplete) return null;
+    var all = sponsorsOf(m), total = 0, mine = 0;
+    all.forEach(function (s) {
+      total += (s.index || 0);
+      if (s.name === sponsorName) mine = (s.index || 0);
+    });
+    return total > 0 ? 100 * mine / total : null;
+  }
+
+  function fixtureCell(m) {
+    var crest = '';
+    try { crest = NL.clubs.crestUrl(m.meta.club, 'thumb') || ''; } catch (e) {}
+    return '<div class="fx">' +
+      (crest ? '<img class="fx__crest" src="' + esc(crest) + '" alt="">' : '') +
+      '<span><span class="fx__home">' + esc(m.meta.club) + '</span>' +
+      '<span class="fx__v"> v </span>' + esc(m.meta.opponent || '—') + '</span></div>';
+  }
+
+  function meter(value, best, text) {
+    var w = (best > 0 && value != null) ? Math.max(2, Math.round(100 * value / best)) : 0;
+    return '<div class="meter"><div class="meter__fill" style="width:' + w + '%"></div>' +
+           '<div class="meter__val">' + text + '</div></div>';
+  }
+
+  function emptyState(title, text, cta) {
+    return '<div class="empty-state"><div class="empty-state__title">' + esc(title) +
+      '</div><div class="empty-state__text">' + text + '</div>' + (cta || '') + '</div>';
+  }
+
+  /* ── Mixed-settings banner ───────────────────────────────────────── */
+  function renderMixWarn() {
+    var seen = {};
+    list().forEach(function (m) { seen[m.meta.profile || 'unknown'] = true; });
+    var keys = Object.keys(seen);
+    $('mixWarn').innerHTML = keys.length > 1
+      ? '<div class="banner banner--amber">' + keys.length + ' engine settings in use ' +
+        'across these matches, so totals and averages here mix measurements taken ' +
+        'different ways. Re-run the older matches on the current engine before quoting ' +
+        'a combined figure. ' +
+        keys.map(function (k) { return '<strong>' + esc(k) + '</strong>'; }).join(' · ') +
+        '</div>'
+      : '';
+  }
+
+  /* ── Matches ─────────────────────────────────────────────────────── */
+  function renderMatches() {
+    var all = list();
+    var grounds = {}, sponsors = {}, footage = 0;
+    all.forEach(function (m) {
+      grounds[m.meta.club] = true;
+      footage += (m.meta.duration || 0);
+      sponsorsOf(m).forEach(function (s) { sponsors[s.name] = true; });
+    });
+    $('mStats').innerHTML =
+      '<div class="stat"><div class="stat__num">' + all.length + '</div><div class="stat__label">Matches</div></div>' +
+      '<div class="stat"><div class="stat__num">' + Object.keys(grounds).length + '</div><div class="stat__label">Grounds</div></div>' +
+      '<div class="stat"><div class="stat__num">' + Object.keys(sponsors).length + '</div><div class="stat__label">Sponsors seen</div></div>' +
+      '<div class="stat"><div class="stat__num">' + secStr(footage) + '</div><div class="stat__label">Footage measured</div></div>';
+
+    if (!all.length) {
+      $('mTable').innerHTML = '<tbody><tr><td>' + emptyState(
+        'Nothing measured yet',
+        'Run <code>board-exposure-match.py</code> over a match on your own machine, ' +
+        'then add the <code>-data.json</code> it writes. Raw seconds only mean ' +
+        'something next to other grounds, so the pile is the point.',
+        canWrite ? '<button class="btn btn--primary" id="btnAdd2">Add a match</button>' : ''
+      ) + '</td></tr></tbody>';
+      var b2 = $('btnAdd2');
+      if (b2) b2.onclick = openAdd;
+      return;
+    }
+
+    var rows = all.map(function (m) {
+      var found = sponsorsOf(m).filter(function (s) { return s.seconds > 0; }).length;
+      var total = sponsorsOf(m).length;
+      return '<tr data-id="' + esc(m._id) + '" style="cursor:pointer">' +
+        '<td>' + esc(NL.formatDateShort(m.meta.date)) + '</td>' +
+        '<td>' + fixtureCell(m) + '</td>' +
+        '<td>' + (m.meta.sourceType === 'full'
+          ? '<span class="pill pill--approved">Full match</span>'
+          : '<span class="pill pill--info">Highlights</span>') + '</td>' +
+        '<td class="num">' + secStr(m.meta.duration) + '</td>' +
+        '<td class="num">' + found + ' of ' + total + '</td>' +
+        '<td>' + (m.meta.referenceSetComplete
+          ? '<span class="pill pill--approved">Complete</span>'
+          : '<span class="pill pill--pending">Partial</span>') + '</td>' +
+        (canWrite ? '<td class="num"><button class="btn btn--ghost btn--sm" data-del="' +
+          esc(m._id) + '">Remove</button></td>' : '') +
+        '</tr>';
+    }).join('');
+
+    $('mTable').innerHTML =
+      '<thead><tr><th>Date</th><th>Fixture</th><th>Source</th><th class="num">Length</th>' +
+      '<th class="num">Sponsors found</th><th>Reference set</th>' +
+      (canWrite ? '<th></th>' : '') + '</tr></thead><tbody>' + rows + '</tbody>';
+
+    $('mTable').onclick = function (ev) {
+      var del = ev.target.closest('[data-del]');
+      if (del) { ev.stopPropagation(); return removeMatch(del.getAttribute('data-del')); }
+      var tr = ev.target.closest('tr[data-id]');
+      if (tr) showMatch(tr.getAttribute('data-id'));
+    };
+  }
+
+  function showMatch(id) {
+    var m = matches[id];
+    if (!m) return;
+    var ss = sponsorsOf(m).sort(function (a, b) { return (b.index || 0) - (a.index || 0); });
+    var best = Math.max.apply(null, ss.map(function (s) { return s.index || 0; }).concat([0]));
+    var body =
+      '<div class="table-wrap"><table class="table table--compact"><thead><tr>' +
+      '<th>Sponsor</th><th class="num">On screen</th><th class="num">Share of match</th>' +
+      '<th class="num">Index</th><th class="num">Clarity</th><th class="num">Board</th>' +
+      '<th class="num">Share of voice</th></tr></thead><tbody>' +
+      ss.map(function (s) {
+        var sov = shareOfVoice(m, s.name);
+        return '<tr><td>' + esc(s.name) +
+          (s.scope === 'club' ? '<span class="scope-tag">' + esc(m.meta.club) + '</span>' : '') +
+          '</td><td class="num">' + (s.seconds ? secStr(s.seconds) : '—') +
+          '</td><td class="num">' + pctStr(s.pct) +
+          '</td><td class="num">' + meter(s.index, best, num(s.index, 1)) +
+          '</td><td class="num">' + num(s.clarity, 2) +
+          '</td><td class="num">' + (s.area == null ? '—' : num(s.area, 2) + '%') +
+          '</td><td class="num">' + (sov == null
+            ? '<span class="sov-off">—</span>' : pctStr(sov)) + '</td></tr>';
+      }).join('') + '</tbody></table></div>' +
+      (m.meta.referenceSetComplete ? '' :
+        '<p class="form-hint">Share of voice is withheld: the reference set was ' +
+        'not complete at this ground, so a share would be measured against only ' +
+        'the boards that were looked for.</p>') +
+      '<p class="form-hint">Measured from ' + esc(m.meta.samples) + ' samples of ' +
+      secStr(m.meta.duration) + ' at ' + esc(m.meta.videoW) + '×' + esc(m.meta.videoH) +
+      '. Engine ' + esc(m.meta.profile) + '.</p>';
+
+    NL.modal({
+      title: m.meta.club + ' v ' + (m.meta.opponent || '—'),
+      body: body,
+      width: 'wide'
+    });
+  }
+
+  function removeMatch(id) {
+    var m = matches[id];
+    if (!m) return;
+    NL.confirm('Remove ' + m.meta.club + ' v ' + (m.meta.opponent || '—') + '?', {
+      title: 'Remove match',
+      detail: 'The measurements go. The JSON on your machine does not, so it can be added again.',
+      confirmText: 'Remove',
+      variant: 'danger'
+    }).then(function (ok) {
+      if (!ok) return;
+      db.ref(ROOT + '/' + id).remove().then(function () {
+        NL.toast('Match removed', 'success');
+      }).catch(function (e) { NL.toast('Could not remove: ' + e.message, 'error'); });
+    });
+  }
+
+  /* ── Partners ────────────────────────────────────────────────────── */
+  function allSponsors() {
+    var seen = {};
+    list().forEach(function (m) {
+      sponsorsOf(m).forEach(function (s) {
+        if (!seen[s.name]) seen[s.name] = { name: s.name, scope: s.scope, n: 0 };
+        if (s.seconds > 0) seen[s.name].n++;
+        /* A sponsor found under partners/ at any ground is league-wide, even if
+           some other ground filed it locally. */
+        if (s.scope === 'partner') seen[s.name].scope = 'partner';
+      });
+    });
+    return Object.keys(seen).map(function (k) { return seen[k]; })
+      .sort(function (a, b) {
+        if (a.scope !== b.scope) return a.scope === 'partner' ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+  }
+
+  function partnerRows() {
+    if (!partner) return [];
+    return list().map(function (m) {
+      var s = sponsorsOf(m).filter(function (x) { return x.name === partner; })[0];
+      if (!s || !s.seconds) return null;
+      return { m: m, s: s, sov: shareOfVoice(m, partner) };
+    }).filter(Boolean).sort(function (a, b) { return (b.s.index || 0) - (a.s.index || 0); });
+  }
+
+  function renderPartners() {
+    var ss = allSponsors();
+    if (!ss.length) {
+      $('pPills').innerHTML = '';
+      $('pStats').innerHTML = '';
+      $('pTable').innerHTML = '<tbody><tr><td>' + emptyState(
+        'No sponsors yet', 'Add a measured match first.') + '</td></tr></tbody>';
+      return;
+    }
+    if (!partner || !ss.some(function (s) { return s.name === partner; })) {
+      partner = (ss.filter(function (s) { return s.n; })[0] || ss[0]).name;
+    }
+    $('pPills').innerHTML = '<span class="filter-pill-row__label">Sponsor</span>' +
+      ss.map(function (s) {
+        return '<button class="filter-pill' + (s.name === partner ? ' active' : '') +
+          '" data-s="' + esc(s.name) + '">' + esc(s.name) +
+          (s.scope === 'club' ? '<span class="scope-tag">club</span>' : '') + '</button>';
+      }).join('');
+    $('pPills').onclick = function (ev) {
+      var b = ev.target.closest('[data-s]');
+      if (b) { partner = b.getAttribute('data-s'); renderPartners(); }
+    };
+
+    var rows = partnerRows();
+    var totalSecs = rows.reduce(function (a, r) { return a + (r.s.seconds || 0); }, 0);
+    var meanClar  = rows.length
+      ? rows.reduce(function (a, r) { return a + (r.s.clarity || 0); }, 0) / rows.length : null;
+    var bestRow   = rows[0];
+
+    $('pHead').textContent = partner + ' — every ground measured';
+    $('pStats').innerHTML =
+      '<div class="stat"><div class="stat__num">' + secStr(totalSecs) + '</div><div class="stat__label">Total on screen</div></div>' +
+      '<div class="stat"><div class="stat__num">' + rows.length + '</div><div class="stat__label">Grounds found at</div></div>' +
+      /* The number goes in the number slot: .stat__num is sized for digits, and
+         a club name long enough to wrap breaks the tile. The ground is the
+         useful half, so it names the label instead of shrinking to fit. */
+      '<div class="stat"><div class="stat__num">' + (bestRow ? num(bestRow.s.index, 1) : '—') +
+        '</div><div class="stat__label">Best index — ' +
+        (bestRow ? esc(bestRow.m.meta.club) : 'no ground yet') + '</div></div>' +
+      '<div class="stat"><div class="stat__num">' + num(meanClar, 2) + '</div><div class="stat__label">Mean clarity</div></div>';
+
+    if (!rows.length) {
+      $('pTable').innerHTML = '<tbody><tr><td>' + emptyState(
+        partner + ' not found in any match',
+        'Not the same as absent. A board with a player across it in the reference ' +
+        'crop is the commonest reason a sponsor is never found.') + '</td></tr></tbody>';
+      return;
+    }
+    var best = rows[0].s.index || 0;
+    $('pTable').innerHTML =
+      '<thead><tr><th>Ground</th><th>Date</th><th>Source</th><th class="num">On screen</th>' +
+      '<th class="num">Share of match</th><th class="num">Index</th><th class="num">Clarity</th>' +
+      '<th class="num">Board</th><th class="num">Share of voice</th></tr></thead><tbody>' +
+      rows.map(function (r) {
+        return '<tr><td>' + fixtureCell(r.m) + '</td>' +
+          '<td>' + esc(NL.formatDateShort(r.m.meta.date)) + '</td>' +
+          '<td>' + (r.m.meta.sourceType === 'full' ? 'Full match' : 'Highlights') + '</td>' +
+          '<td class="num">' + secStr(r.s.seconds) + '</td>' +
+          '<td class="num">' + pctStr(r.s.pct) + '</td>' +
+          '<td class="num">' + meter(r.s.index, best, num(r.s.index, 1)) + '</td>' +
+          '<td class="num">' + num(r.s.clarity, 2) + '</td>' +
+          '<td class="num">' + num(r.s.area, 2) + '%</td>' +
+          '<td class="num">' + (r.sov == null
+            ? '<span class="sov-off">withheld</span>' : pctStr(r.sov)) + '</td></tr>';
+      }).join('') + '</tbody>';
+  }
+
+  function exportPartnerCsv() {
+    var rows = partnerRows();
+    if (!rows.length) return NL.toast('Nothing to export', 'info');
+    var out = [['Sponsor', 'Ground', 'Opponent', 'Date', 'Source', 'Seconds on screen',
+                'Share of match %', 'Exposure index', 'Mean clarity', 'Mean board % of frame',
+                'Share of voice %', 'Reference set complete', 'Engine']];
+    rows.forEach(function (r) {
+      out.push([partner, r.m.meta.club, r.m.meta.opponent || '', r.m.meta.date,
+                r.m.meta.sourceType === 'full' ? 'Full match' : 'Highlights',
+                num(r.s.seconds, 1), num(r.s.pct, 1), num(r.s.index, 1),
+                num(r.s.clarity, 2), num(r.s.area, 3),
+                r.sov == null ? '' : num(r.sov, 1),
+                r.m.meta.referenceSetComplete ? 'yes' : 'no', r.m.meta.profile]);
+    });
+    NL.download(slug(partner) + '-brand-exposure.csv', NL.csv(out, { bom: true }), 'text/csv');
+    NL.writeAudit('export_csv', partner + ' — ' + rows.length + ' matches');
+  }
+
+  /* ── Grounds ─────────────────────────────────────────────────────── */
+  function renderGrounds() {
+    var all = list();
+    var here = all.filter(function (m) { return !ground || m.meta.club === ground; });
+
+    if (!all.length) {
+      $('gStats').innerHTML = '';
+      $('gTable').innerHTML = '<tbody><tr><td>' + emptyState(
+        'Nothing measured yet', 'Add a measured match first.') + '</td></tr></tbody>';
+      return;
+    }
+
+    var agg = {};
+    here.forEach(function (m) {
+      sponsorsOf(m).forEach(function (s) {
+        if (!s.seconds) return;
+        var a = agg[s.name] || (agg[s.name] = {
+          name: s.name, scope: s.scope, n: 0, pct: 0, clarity: 0, area: 0, index: 0, best: 0
+        });
+        a.n++; a.pct += s.pct || 0; a.clarity += s.clarity || 0;
+        a.area += s.area || 0; a.index += s.index || 0;
+        a.best = Math.max(a.best, s.index || 0);
+      });
+    });
+    var rows = Object.keys(agg).map(function (k) { return agg[k]; })
+      .sort(function (a, b) { return (b.index / b.n) - (a.index / a.n); });
+
+    var footage = here.reduce(function (a, m) { return a + (m.meta.duration || 0); }, 0);
+    $('gStats').innerHTML =
+      '<div class="stat"><div class="stat__num">' + here.length + '</div><div class="stat__label">Matches measured</div></div>' +
+      '<div class="stat"><div class="stat__num">' + rows.length + '</div><div class="stat__label">Sponsors found</div></div>' +
+      '<div class="stat"><div class="stat__num">' + secStr(footage) + '</div><div class="stat__label">Footage measured</div></div>';
+
+    if (!rows.length) {
+      $('gTable').innerHTML = '<tbody><tr><td>' + emptyState(
+        'Nothing found at this ground',
+        ground ? 'No sponsor was detected in the matches measured here.'
+               : 'Pick a ground above.') + '</td></tr></tbody>';
+      return;
+    }
+    var best = rows[0].index / rows[0].n;
+    $('gTable').innerHTML =
+      '<thead><tr><th>Sponsor</th><th class="num">Matches</th><th class="num">Mean share</th>' +
+      '<th class="num">Mean index</th><th class="num">Mean clarity</th>' +
+      '<th class="num">Mean board</th><th class="num">Best single match</th></tr></thead><tbody>' +
+      rows.map(function (a) {
+        return '<tr><td>' + esc(a.name) +
+          (a.scope === 'club' ? '<span class="scope-tag">local</span>' : '') + '</td>' +
+          '<td class="num">' + a.n + '</td>' +
+          '<td class="num">' + pctStr(a.pct / a.n) + '</td>' +
+          '<td class="num">' + meter(a.index / a.n, best, num(a.index / a.n, 1)) + '</td>' +
+          '<td class="num">' + num(a.clarity / a.n, 2) + '</td>' +
+          '<td class="num">' + num(a.area / a.n, 2) + '%</td>' +
+          '<td class="num">' + num(a.best, 1) + '</td></tr>';
+      }).join('') + '</tbody>';
+  }
+
+  /* ── Adding a match ──────────────────────────────────────────────── */
+  function openAdd() {
+    pending = null;
+    $('addPanel').hidden = false;
+    $('addPanel').innerHTML =
+      '<div class="form-panel"><div class="form-panel__head">Add a measured match</div>' +
+      '<div class="form-panel__body">' +
+        '<label class="drop" id="drop"><input type="file" id="file" accept=".json,application/json">' +
+        '<strong>Choose the <code>-data.json</code></strong><br>' +
+        '<span class="text-secondary">or drop it here</span></label>' +
+        '<div id="readout"></div>' +
+      '</div>' +
+      '<div class="form-panel__foot">' +
+        '<button class="btn btn--ghost" id="addCancel">Cancel</button>' +
+        '<button class="btn btn--primary" id="addSave" disabled>Add match</button>' +
+      '</div></div>';
+
+    var drop = $('drop'), file = $('file');
+    drop.ondragover  = function (e) { e.preventDefault(); drop.classList.add('is-over'); };
+    drop.ondragleave = function () { drop.classList.remove('is-over'); };
+    drop.ondrop = function (e) {
+      e.preventDefault(); drop.classList.remove('is-over');
+      if (e.dataTransfer.files[0]) readFile(e.dataTransfer.files[0]);
+    };
+    file.onchange = function () { if (file.files[0]) readFile(file.files[0]); };
+    $('addCancel').onclick = function () { $('addPanel').hidden = true; };
+    $('addSave').onclick = saveMatch;
+  }
+
+  function readFile(f) {
+    var r = new FileReader();
+    r.onload = function () {
+      try { parseExport(JSON.parse(r.result), f.name); }
+      catch (e) {
+        $('readout').innerHTML = '<div class="banner banner--error">' + esc(e.message) + '</div>';
+        $('addSave').disabled = true;
+        pending = null;
+      }
+    };
+    r.readAsText(f);
+  }
+
+  function parseExport(d, filename) {
+    /* The runner writes two files and they are easy to confuse. The detections
+       file is the big one and has no summary in it, so say which to use rather
+       than failing on a missing key. */
+    if (d && d.hits && !d.sponsors) {
+      throw new Error('That is the detections file. Use the smaller ' +
+                      '"-data.json" from the same run.');
+    }
+    if (!d || !d.sponsors || !d.settings || !d.match) {
+      throw new Error('Not a Brand Exposure export — expected the "-data.json" ' +
+                      'written by board-exposure-match.py.');
+    }
+    var parts = String(d.match).split(/\s+v\.?\s+/i);
+    pending = {
+      raw: d,
+      club: d.club || parts[0] || '',
+      opponent: parts.length > 1 ? parts[1] : '',
+      date: '',
+      sourceType: (d.duration || 0) > 45 * 60 ? 'full' : 'highlights',
+      complete: null
+    };
+
+    var found = Object.keys(d.sponsors).filter(function (k) { return d.sponsors[k]; });
+    var missing = Object.keys(d.sponsors).filter(function (k) { return !d.sponsors[k]; });
+
+    $('readout').innerHTML =
+      '<div class="readout"><div class="readout__grid">' +
+        '<div><dt>Fixture</dt><dd>' + esc(d.match) + '</dd></div>' +
+        '<div><dt>Ground</dt><dd>' + esc(pending.club) + '</dd></div>' +
+        '<div><dt>Length</dt><dd>' + secStr(d.duration) + '</dd></div>' +
+        '<div><dt>Samples</dt><dd>' + esc(d.samples) + '</dd></div>' +
+        '<div><dt>Engine</dt><dd>' + esc(profileOf(d.settings)) + '</dd></div>' +
+        '<div><dt>Sponsors found</dt><dd>' + found.length + ' of ' +
+          Object.keys(d.sponsors).length + '</dd></div>' +
+      '</div></div>' +
+      (missing.length ? '<p class="form-hint">Not found: ' + esc(missing.join(', ')) +
+        '. Worth checking those reference crops before treating the zeroes as absence.</p>' : '') +
+      '<div class="form-grid" style="margin-top:16px">' +
+        '<div class="form-group"><label for="fDate">Date of the match</label>' +
+          '<input class="modal__input" type="date" id="fDate"></div>' +
+        '<div class="form-group"><label for="fOpp">Opponent</label>' +
+          '<input class="modal__input" type="text" id="fOpp" value="' +
+          esc(pending.opponent) + '"></div>' +
+        '<div class="form-group"><label for="fSrc">Source</label>' +
+          '<select class="nl-select" id="fSrc">' +
+          '<option value="full"' + (pending.sourceType === 'full' ? ' selected' : '') +
+            '>Full match</option>' +
+          '<option value="highlights"' + (pending.sourceType === 'highlights' ? ' selected' : '') +
+            '>Highlights package</option></select></div>' +
+        '<div class="form-group"><label for="fComplete">Reference set at this ground</label>' +
+          '<select class="nl-select" id="fComplete">' +
+          '<option value="">Choose…</option>' +
+          '<option value="yes">Complete — every board was looked for</option>' +
+          '<option value="no">Partial — some boards had no reference</option>' +
+          '</select>' +
+          '<div class="form-hint">Share of voice is only calculated where the set ' +
+          'was complete. Five references at a twenty-board ground would make any ' +
+          'sponsor look like it owns the place.</div></div>' +
+      '</div>';
+
+    function check() {
+      pending.date       = $('fDate').value;
+      pending.opponent   = $('fOpp').value.trim();
+      pending.sourceType = $('fSrc').value;
+      pending.complete   = $('fComplete').value;
+      $('addSave').disabled = !(pending.date && pending.opponent && pending.complete);
+    }
+    ['fDate', 'fOpp', 'fSrc', 'fComplete'].forEach(function (id) {
+      $(id).oninput = check; $(id).onchange = check;
+    });
+    check();
+  }
+
+  function saveMatch() {
+    if (!pending) return;
+    var d  = pending.raw;
+    var id = [pending.date, slug(pending.club), 'v', slug(pending.opponent)].join('-');
+    var sponsors = {};
+    Object.keys(d.sponsors).forEach(function (name) {
+      var s = d.sponsors[name] || {};
+      sponsors[slug(name)] = {
+        name: name,
+        scope: (d.scope && d.scope[name]) || 'partner',
+        seconds: s.seconds || 0, pct: s.pct || 0, index: s.index || 0,
+        clarity: s.clarity || 0, area: s.area || 0, logoArea: s.logo_area || 0,
+        runs: s.runs || 0, most: s.most || 0, detections: s.detections || 0,
+        longest: s.longest || 0
+      };
+    });
+
+    var rec = {
+      meta: {
+        fixture: d.match, club: pending.club, opponent: pending.opponent,
+        date: pending.date, duration: d.duration, interval: d.interval,
+        samples: d.samples, videoW: d.video_w, videoH: d.video_h,
+        sourceType: pending.sourceType,
+        referenceSetComplete: pending.complete === 'yes',
+        profile: profileOf(d.settings),
+        engineVersion: (d.settings || {}).engine_version || 'unknown',
+        references: (d.references || []).length,
+        uploadedAt: firebase.database.ServerValue.TIMESTAMP,
+        uploadedBy: (firebase.auth().currentUser || {}).uid || null
+      },
+      sponsors: sponsors
+    };
+
+    var go = matches[id]
+      ? NL.confirm('Already added.', {
+          title: 'Replace this match?',
+          detail: pending.club + ' v ' + pending.opponent + ' on ' +
+                  NL.formatDateShort(pending.date) + ' is already here. Replace it?',
+          confirmText: 'Replace'
+        })
+      : Promise.resolve(true);
+
+    go.then(function (ok) {
+      if (!ok) return;
+      NL.ensureAuth().then(function () {
+        return db.ref(ROOT + '/' + id).set(rec);
+      }).then(function () {
+        NL.toast('Match added', 'success');
+        NL.writeAudit('add_match', rec.meta.fixture + ' (' + pending.date + ')');
+        $('addPanel').hidden = true;
+        pending = null;
+      }).catch(function (e) {
+        NL.toast('Could not save: ' + e.message, 'error');
+      });
+    });
+  }
+
+  /* ── Shell ───────────────────────────────────────────────────────── */
+  function show(name) {
+    view = name;
+    ['matches', 'partners', 'grounds'].forEach(function (v) {
+      $('view' + v[0].toUpperCase() + v.slice(1)).hidden = (v !== name);
+    });
+    document.querySelectorAll('.tab').forEach(function (t) {
+      t.classList.toggle('active', t.getAttribute('data-tab') === name);
+    });
+    render();
+  }
+
+  function render() {
+    renderMixWarn();
+    if (view === 'matches')  renderMatches();
+    if (view === 'partners') renderPartners();
+    if (view === 'grounds')  renderGrounds();
+  }
+
+  function wireGroundPicker() {
+    if (gPicker) return;
+    try {
+      gPicker = NL.clubPicker('#gPicker', {
+        mode: 'select', season: 'current', clearable: true,
+        placeholder: '— every ground —',
+        onSelect: function (sel) { ground = sel ? sel.name : null; renderGrounds(); }
+      });
+    } catch (e) { /* clubs-meta unavailable — the tab still lists every ground */ }
+  }
+
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function (session) {
+    canWrite = (session && session.toolLevel === 'admin');
+    $('btnAdd').hidden = !canWrite;
+    $('btnAdd').onclick = openAdd;
+    $('pCsv').onclick = exportPartnerCsv;
+
+    document.querySelector('.tabs').addEventListener('click', function (ev) {
+      var t = ev.target.closest('.tab');
+      if (t) show(t.getAttribute('data-tab'));
+    });
+
+    NL.ensureAuth().then(function () {
+      try { NL.clubs.load().then(wireGroundPicker); } catch (e) { wireGroundPicker(); }
+      db.ref(ROOT).on('value', function (snap) {
+        matches = snap.val() || {};
+        Object.keys(matches).forEach(function (k) {
+          matches[k].meta = matches[k].meta || {};
+          matches[k].sponsors = matches[k].sponsors || {};
+        });
+        render();
+      }, function (err) {
+        $('mixWarn').innerHTML = '<div class="banner banner--error">Could not read ' +
+          'the measurements: ' + esc(err.message) + '</div>';
+      });
+    });
+  };
+
+  /* If auth-guard fired before this script loaded, replay the session. */
+  if (window._toolDeferredSession) {
+    window.TOOL.boot(window._toolDeferredSession);
+    delete window._toolDeferredSession;
+  }
+})();
+</script>
+
+</body>
+</html>
