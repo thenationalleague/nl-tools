@@ -602,6 +602,12 @@ def main():
                     help="skip to kick-off, e.g. 18:30 — build-up is not match exposure")
     ap.add_argument("--end", default=None, metavar="TIME",
                     help="stop at the final whistle, e.g. 2:05:00")
+    ap.add_argument("--date", default=None, metavar="YYYY-MM-DD",
+                    help="match date — required with --club/--match for an upload, "
+                         "since it is half the match id")
+    ap.add_argument("--reference-set", choices=["complete", "partial"], default=None,
+                    help="did the references cover EVERY board at this ground? "
+                         "Share of voice stays withheld unless this says complete")
     ap.add_argument("--jobs", type=int, default=0, help="0 = all cores but one")
     ap.add_argument("--limit", type=int, default=0, help="stop after N samples — for a quick test")
     ap.add_argument("--frame-budget", type=int, default=DEFAULT_FRAME_BUDGET)
@@ -649,8 +655,14 @@ def main():
     if not os.path.isfile(a.video):
         die(f"no file at {a.video}")
 
+    # Fully scriptable path: everything named on the command line, nothing asked.
+    # This is what the cloud job runs, and what an unattended local run wants —
+    # before, it silently dropped the date, the trim and the reference-set answer,
+    # so a --club run uploaded a match with no date and share of voice withheld.
     if a.club or a.match:
-        run_one(a, a.video, a.club, a.match or os.path.basename(a.video))
+        run_one(a, a.video, a.club, a.match or os.path.basename(a.video),
+                a.date or "", parse_clock(a.start), parse_clock(a.end),
+                {"complete": True, "partial": False}.get(a.reference_set))
         return
     fx = confirm_fixture(a.video, clubs, a.refs, a.yes, a.upload)
     if not fx:
