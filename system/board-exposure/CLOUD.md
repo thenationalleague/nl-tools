@@ -10,9 +10,28 @@ There are two routes to a measured match and they produce the same record:
 | | Local | Cloud |
 |---|---|---|
 | Runs on | a laptop with Python, ffmpeg and OpenCV | Cloud Run Jobs |
-| Costs | nothing | roughly £1 for a full match, pennies for highlights |
+| Costs | nothing but electricity and half an hour of the machine | ~7p for a highlights package; ~£1.20 for a full match |
 | Started by | `board-exposure-match.py --upload` | `gcloud run jobs execute` (for now) |
-| Good for | full matches, anything already on the machine | highlights, anyone without the tooling |
+| Good for | **full matches** | **highlights, and anyone without the tooling** |
+
+**Full matches belong on a laptop.** Measured on the first real cloud run: an
+8m14s package took about four minutes of scanning at 8 vCPU. Samples scale with
+length and cost scales again with reference count, so a 95-minute match with ten
+references is roughly 11× the samples and 2.5× the references — near two hours,
+about £1.20, and past the 7200s task timeout set in the deploy workflow. The
+same match on a laptop is free and half an hour of a machine nobody is using.
+
+What the local route costs afterwards is almost nothing: uploading the proxy and
+detections is ingress, which is free, and storing a ~150 MB proxy is under half
+a penny a month. A season of full matches is pennies a month.
+
+Playback egress is smaller than the file size suggests, because the player never
+downloads the whole thing unless somebody sits and watches it. `preload` is
+metadata-only and `+faststart` puts the index at the front, so opening a match
+fetches a few hundred KB; jumping between appearances — which is what the player
+is *for* — pulls only the seconds around each one. A typical look at a match is
+10–30 MB, well under a penny. Watching all 95 minutes end to end is the 150 MB
+worst case, about 2p, and the browser caches it for the next visit.
 
 Both run **the same `scripts/board-exposure-match.py`**. The cloud container
 does not reimplement the detector; it fetches the inputs, runs that script, and

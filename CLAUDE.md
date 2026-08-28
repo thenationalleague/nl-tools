@@ -168,6 +168,36 @@ Verification of UI changes is still manual (open the page in a browser). There
 is no page-render test, so a converted page that silently breaks will not be
 caught by CI.
 
+### When you stub a third party, say where the shape came from
+
+**A stub you wrote from memory tests only that you were consistent with
+yourself.** If a test doubles an external API — Firebase, Identity Toolkit, NLS,
+Storage, the Cloud Run API — the comment beside it must cite a doc URL or a live
+call. Not "this is what it returns"; *how you know* that.
+
+This is not hypothetical. `signInWithCustomToken` answers with `idToken`,
+`refreshToken`, `expiresIn` and `isNewUser` — and **no** `localId`, unlike
+`signUp`, which does. `board_exposure_upload.py` read `localId` from it, and the
+stub was written to return `localId`, because the same wrong belief produced
+both. Nineteen tests passed. The first real cloud run died on
+`KeyError: 'localId'` after four minutes of paid CPU, and it took an hour at
+midnight to find, because the failure was in the one place the tests could not
+see: the boundary where the code stops being ours.
+
+Verifying was cheap and available the whole time — one `urllib` call to the live
+endpoint, with a public API key. The rule is really: **look up the thing you are
+confident about**, because the thing you already doubt is the thing you check
+anyway.
+
+Two habits that follow:
+
+- **Prove a test can fail.** Put the bug back and watch it go red. A test that
+  has never failed has never been shown to test anything.
+- **A harness that dies on setup reads exactly like a pass.** The local server
+  for these tests bound a fixed port, so a leftover process from an earlier run
+  killed the suite on bind with no `FAIL` line anywhere — which briefly looked
+  like proof the bug did not exist. Bind port 0, and make failure loud.
+
 ## Plans and decisions — read before proposing one
 
 These exist and are **not** linked from anywhere a session would find them,
