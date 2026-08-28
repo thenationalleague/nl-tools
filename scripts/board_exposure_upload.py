@@ -126,14 +126,41 @@ def _explain(e):
 # ------------------------------------------------------------------- steps --
 
 def sign_in_anonymously():
+    """A throwaway identity, purely to have a uid to hang a request node on.
+
+    signUp DOES answer with localId, unlike signInWithCustomToken below — the
+    two endpoints differ, which is exactly what went wrong the first time.
+    """
     r = _post(f"{IDENTITY}:signUp?key={API_KEY}", {"returnSecureToken": True})
+    missing = [k for k in ("localId", "idToken") if k not in r]
+    if missing:
+        raise UploadError(
+            f"Anonymous sign-in returned no {' or '.join(missing)}. Response "
+            f"carried: {', '.join(sorted(r)) or '(nothing)'}. Anonymous sign-in "
+            f"may be switched off for this Firebase project.")
     return r["localId"], r["idToken"]
 
 
 def sign_in_with_custom_token(custom_token):
+    """Redeem the grant's custom token for an ID token.
+
+    Returns the token ALONE. signInWithCustomToken answers with idToken,
+    refreshToken, expiresIn and isNewUser — and no localId, unlike signUp. Asking
+    for one here raised KeyError: 'localId' on the first real cloud run, after
+    the unit test had passed against a stub that returned localId because I
+    believed it did. A stub written from the same misunderstanding as the code
+    tests nothing; tests/ now asserts the documented shape instead.
+
+    The uid is not needed anyway — the caller has already deleted the grant by
+    this point, which was the only thing it would have been used for.
+    """
     r = _post(f"{IDENTITY}:signInWithCustomToken?key={API_KEY}",
               {"token": custom_token, "returnSecureToken": True})
-    return r["localId"], r["idToken"]
+    if "idToken" not in r:
+        raise UploadError(
+            "Signing in with the ingest token returned no idToken. Response "
+            f"carried: {', '.join(sorted(r)) or '(nothing)'}")
+    return r["idToken"]
 
 
 def request_grant(uid, token, key, match_id, on_wait=None):

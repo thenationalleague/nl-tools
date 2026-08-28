@@ -68,6 +68,10 @@ PROGRESS_EVERY = 3.0        # seconds between progress updates
 PROXY_W = 640
 PROXY_CRF = 30
 _ARGS = None                # parsed args, for the non-interactive confirm path
+# Counted rather than raised, so a batch measures every video it was given and
+# still exits non-zero. "The job succeeded" must not mean "some of the matches
+# arrived" — the first cloud run exited clean having uploaded nothing.
+_UPLOAD_FAILURES = 0
 
 REFS_README = """Reference images — this folder is the configuration.
 
@@ -144,7 +148,12 @@ def make_proxy(video, out, ffmpeg, start=None, end=None):
     +faststart is the load-bearing flag: it moves the index to the front of the
     file so a browser can seek without downloading all of it first.
     """
-    cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-stats", "-y"]
+    # -stats only on a terminal. It writes a progress line a second, which is a
+    # progress bar locally and a thousand log entries in Cloud Run — enough to
+    # bury the one line that says whether the upload worked.
+    cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y"]
+    if sys.stdout.isatty():
+        cmd.insert(-1, "-stats")
     if start:
         cmd += ["-ss", str(start)]
     if end:
@@ -172,10 +181,12 @@ def push_to_tool(a, base, head, stats, club, title, date, proxy, duration, compl
     Put the finished match into NL Tools, so nobody has to open a browser and
     upload three files that this machine is already holding.
 
-    Never fatal. The scan is the expensive part and it is done; a network blip
-    at this point must leave the files on disk and say so, not throw away half
-    an hour of CPU. Every failure ends with the same instruction: the files are
-    there, upload them by hand.
+    Never raises, but DOES report: returns True on success, False otherwise.
+    The scan is the expensive part and it is done, so a network blip here must
+    leave the files on disk and say so rather than throw away half an hour of
+    CPU. But "the job exited zero" and "the match arrived" have to stop being
+    the same thing — the first cloud run reported success while uploading
+    nothing, and it took four log queries to find out otherwise.
     """
     import board_exposure_upload as U
 
@@ -185,11 +196,11 @@ def push_to_tool(a, base, head, stats, club, title, date, proxy, duration, compl
         opponent = m.group(2).strip()
 
     if not (date and club and opponent):
-        print("\n  ! not uploaded: needs a date, a home club and an opponent, and "
+        print("\n  ! NOT UPLOADED: needs a date, a home club and an opponent, and "
               "this run has "
               + ", ".join(n for n, v in (("no date", not date), ("no club", not club),
                                          ("no opponent", not opponent)) if v) + ".")
-        return
+        return False
 
     match_id = U.match_id_for(date, club, opponent)
     # The tool guesses the same way from the same field, so the two agree
@@ -207,7 +218,7 @@ def push_to_tool(a, base, head, stats, club, title, date, proxy, duration, compl
         grant = U.request_grant(
             uid, token, key, match_id,
             on_wait=lambda s: print(f"    still waiting on the ingest function ({int(s)}s)…"))
-        _, token = U.sign_in_with_custom_token(grant["customToken"])
+        token = U.sign_in_with_custom_token(grant["customToken"])
 
         for path, name in files:
             mb = os.path.getsize(path) / 1e6
@@ -222,17 +233,24 @@ def push_to_tool(a, base, head, stats, club, title, date, proxy, duration, compl
             has_detections=True)
         U.write_record(match_id, rec, token)
 
-        print(f"    in the tool: https://nl.tools/brand-exposure/")
+        print(f"  UPLOADED: {match_id} -> https://nl.tools/brand-exposure/")
         if complete is None:
             print("    note: reference-set completeness was not recorded, so share "
                   "of voice stays withheld until someone sets it in the tool.")
+        return True
     except U.UploadError as e:
-        print(f"\n  ! not uploaded: {e}")
+        print(f"\n  ! NOT UPLOADED: {e}")
         print("    The measurement is fine and the files are listed below — "
               "upload them by hand at https://nl.tools/brand-exposure/.")
+        return False
     except Exception as e:                                   # noqa: BLE001
-        print(f"\n  ! not uploaded: unexpected error ({e.__class__.__name__}: {e}).")
+        # Traceback, not just the message. The one that actually happened was a
+        # KeyError whose name meant nothing without the line it came from.
+        import traceback
+        print(f"\n  ! NOT UPLOADED: unexpected {e.__class__.__name__}: {e}")
+        traceback.print_exc()
         print("    The files are listed below — upload them by hand.")
+        return False
 
 
 def parse_clock(s):
@@ -254,7 +272,12 @@ def parse_clock(s):
 
 def extract_ffmpeg(video, work, fps, ffmpeg, limit, start=None, end=None):
     """`fps=N` resamples to exactly N a second whatever the source does."""
-    cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-stats", "-y"]
+    # -stats only on a terminal. It writes a progress line a second, which is a
+    # progress bar locally and a thousand log entries in Cloud Run — enough to
+    # bury the one line that says whether the upload worked.
+    cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y"]
+    if sys.stdout.isatty():
+        cmd.insert(-1, "-stats")
     # -ss before -i is the fast seek: it jumps by keyframe rather than decoding
     # everything it is skipping. A second or two of imprecision at kick-off is
     # irrelevant here and it saves decoding the entire build-up.
@@ -940,12 +963,16 @@ def run_one(a, video, club, title, date="", start=None, end=None, complete=None)
         shutil.rmtree(work, ignore_errors=True)
         shutil.rmtree(small_dir, ignore_errors=True)
 
+    uploaded = None
     if a.upload:
         # After the files are written and before the summary, so a failure here
         # is reported next to the files that still exist and can be uploaded by
-        # hand. Never fatal: the measuring is the expensive part and it is done.
-        push_to_tool(a, base, head, payload["stats"], club, title, date,
-                     proxy, duration, complete)
+        # hand.
+        uploaded = push_to_tool(a, base, head, payload["stats"], club, title,
+                                date, proxy, duration, complete)
+        if not uploaded:
+            global _UPLOAD_FAILURES
+            _UPLOAD_FAILURES += 1
 
     print(f"\n  {html}  ({size/1e6:.1f} MB) — open this in a browser")
     print(f"  {base}-data.json — the numbers on their own")
@@ -962,3 +989,8 @@ def run_one(a, video, club, title, date="", start=None, end=None, complete=None)
 if __name__ == "__main__":
     mp.freeze_support()
     main()
+    if _UPLOAD_FAILURES:
+        # Non-zero, so whatever started this knows. The measurements are on disk
+        # either way and the message above says what went wrong.
+        sys.exit(f"\n  {_UPLOAD_FAILURES} match(es) measured but NOT uploaded. "
+                 f"See the reason above.\n")
