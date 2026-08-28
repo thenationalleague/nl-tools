@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Brand Exposure
-  Version: v0.1 (27/08/2026)
+  Version: v0.2 (28/08/2026)
   File: /brand-exposure/index.html
 
   Sponsor exposure measured from match video — seconds on screen, clarity and
@@ -16,11 +16,24 @@
     app-data/ops-brand-exposure/matches/<matchId>   one uploaded summary
     tools/ops-brand-exposure                        tool registration
 
+  Storage (Firebase Storage), per match, both optional:
+    brand-exposure/<matchId>/proxy.mp4        640px playback copy, ~150 MB
+    brand-exposure/<matchId>/detections.json  every detection, for the overlay
+  The source footage is never uploaded. It is scanned and discarded, so no
+  rights-bearing material sits in the bucket.
+
   Access (RTDB tools/ops-brand-exposure/defaults):
     superadmin + admin → admin (upload, delete)
     staff              → off; granted per-user, like Commercial Compliance
 
   Changelog
+  v0.2 (28/08/2026) — The match player. The scan writes a small proxy video
+    alongside the numbers; upload both and the match plays here with the
+    detected boards drawn over it, a timeline of every appearance, and
+    next/previous to jump between them. The boxes come from the full-resolution
+    scan and are scaled onto the proxy, so they stay accurate however soft the
+    playback looks. A match with no proxy — measured before this existed, or
+    where ffmpeg failed — still opens and still shows its numbers.
   v0.1 (27/08/2026) — First build. Upload, Matches, Partners, Grounds.
     Share of voice is suppressed unless the reference set was complete at that
     ground, and matches measured with different engine settings are never
@@ -47,6 +60,9 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <!-- Storage holds the per-match playback proxy and the detections file. The
+       summary lives in RTDB; these two are too big for it. -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
 
   <!-- Firebase init -->
   <script>
@@ -60,6 +76,7 @@
       appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
     });
     var db = firebase.database();
+    var storage = firebase.storage();
   </script>
 
   <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
@@ -72,6 +89,17 @@
     var NL_TOOL_KEY = 'ops-brand-exposure';
 
     window.NL_CHANGELOG = [
+      {
+        date: '28/08/2026',
+        version: 'v0.2',
+        items: [
+          'Match player — the proxy video with the detections drawn over it, ' +
+            'a timeline of every appearance, and next/previous between them.',
+          'Sponsor colours now match the local HTML report for the same match.',
+          'A match measured before proxies existed still opens; it says why ' +
+            'there is no video and shows the numbers.'
+        ]
+      },
       {
         date: '27/08/2026',
         version: 'v0.1',
@@ -147,6 +175,90 @@
                    gap: 4px 18px; }
 
   .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* ── The match viewer ───────────────────────────────────────────────────
+     A video with the detections drawn over it. Deliberately dark and its own
+     visual world rather than brand-token surfaces: it is a monitor, and a
+     board outlined in red reads badly against a light panel.
+
+     Canon candidate on second use — if another tool ever wants a scrubbing
+     video viewer, this block and its JS belong in nl-brand.css / nl-utils.js
+     rather than being copied. First use stays local, per the policy at the
+     top of nl-brand.css.
+
+     The dark end of the navy ladder does all the work — --navy-900 is exactly
+     the ground this wanted, so nothing here is a raw hex value except the two
+     washes over live video (see .quad) and white, which the brand already uses
+     literally on --primary. The canvas reads these same tokens back out via
+     getComputedStyle, because a 2D context cannot resolve var(). */
+  .stage { background: var(--navy-900); border: 1px solid var(--navy-700);
+           border-radius: 10px; overflow: hidden; }
+  .viewer { position: relative; line-height: 0; background: #000; }
+  .viewer video { width: 100%; height: auto; display: block; }
+  .viewer svg { position: absolute; inset: 0; width: 100%; height: 100%;
+                pointer-events: none; }
+  /* The one place an rgba wash is right rather than lazy: this sits over moving
+     video, so there is no backdrop for a solid ladder stop to be chosen against
+     — a solid fill would hide the board it is pointing at. */
+  .quad { fill: rgba(255,255,255,.13); stroke-width: 2.2; vector-effect: non-scaling-stroke; }
+  .board { fill: rgba(255,255,255,.07); stroke-width: 1.4; stroke-dasharray: 5 4;
+           vector-effect: non-scaling-stroke; }
+  .tag { font-size: 11px; font-weight: 600; fill: #fff;
+         paint-order: stroke; stroke: var(--navy-900); stroke-width: 3px; }
+  .vempty { position: absolute; inset: auto 0 0 0; padding: 9px 13px; font-size: 12px;
+            color: var(--navy-300);
+            /* Over-video exception again, and it matters here: this strip sits
+               at the bottom of the frame, which is where perimeter boards are.
+               A solid ladder stop would cover the thing being measured. */
+            background: linear-gradient(transparent, rgba(3, 8, 27, .85)); }
+  .transport { display: flex; align-items: center; gap: 12px; padding: 9px 13px;
+               border-top: 1px solid var(--navy-700); background: var(--navy-900);
+               flex-wrap: wrap; }
+  .transport .tc { font-size: 13px; color: var(--navy-300);
+                   font-variant-numeric: tabular-nums; }
+  .transport .tc b { color: #fff; }
+  .vbtn { background: var(--navy-700); color: var(--navy-200);
+          border: 1px solid var(--navy-600); border-radius: 5px;
+          padding: 6px 12px; cursor: pointer; font-size: 13px; line-height: 1; }
+  .vbtn:hover { background: var(--navy-600); color: #fff; }
+  .vbtn:disabled { opacity: .35; cursor: default; }
+  .vbtn--play { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .vbtn--play:hover { background: var(--primary-700); }
+  .vpicker { display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+             padding: 9px 13px; border-top: 1px solid var(--navy-700);
+             background: var(--navy-900); }
+  .vpill { background: transparent; border: 1px solid var(--navy-600);
+           color: var(--navy-300);
+           border-radius: 99px; padding: 4px 12px; cursor: pointer; font-size: 12.5px;
+           display: flex; align-items: center; gap: 6px; }
+  .vpill i { width: 9px; height: 9px; border-radius: 2px; display: block; }
+  .vpill[aria-pressed="true"] { color: #fff; border-color: var(--navy-400);
+                                background: var(--navy-700); }
+  .vpill.none { opacity: .45; }
+  /* Time across, height up the frame, brightness by clarity — a run reads as a
+     band, and you can see the board rise and fall as the camera tilts. */
+  .track { position: relative; height: 84px; background: var(--navy-900);
+           border-top: 1px solid var(--navy-700); cursor: pointer; }
+  .track canvas { width: 100%; height: 100%; display: block; }
+  .play-head { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff;
+               pointer-events: none; box-shadow: 0 0 7px rgba(255,255,255,.6); }
+  .cols { display: grid; grid-template-columns: minmax(0,1.6fr) minmax(280px,1fr);
+          gap: 18px; align-items: start; }
+  @media (max-width: 940px) { .cols { grid-template-columns: 1fr; } }
+  /* The match is what you are looking at; the sponsor is a filter within it.
+     Sizing follows that, which is why the fixture is not left as a
+     .section-head h2 (13-15px) beside a full-size heading in the aside. */
+  .match-title { font-size: clamp(17px, 0.8vw + 12px, 22px); font-weight: 900;
+                 font-variation-settings: 'wght' 900; margin: 0; }
+  .match-meta { font-size: var(--text-xs); color: var(--text-muted); }
+  .side-lead { margin: -6px 0 14px; color: var(--text-muted); font-size: 13px;
+               line-height: 1.45; }
+  .track-key { padding: 7px 13px; border-top: 1px solid var(--navy-700);
+               background: var(--navy-900); color: var(--navy-300);
+               font-size: 11.5px; }
+  .noproxy { padding: 40px 20px; text-align: center; color: var(--navy-300);
+             font-size: 13.5px; line-height: 1.5; }
+  .viewer.novideo video, .viewer.novideo svg { display: none; }
 </style>
 </head>
 <body>
@@ -191,6 +303,63 @@
       <div class="table-wrap"><table class="table" id="pTable"></table></div>
     </section>
 
+    <!-- ── One match, played back ───────────────────────────────────── -->
+    <section id="viewMatch" hidden>
+      <div class="toolbar">
+        <div class="toolbar__left">
+          <button class="btn btn--ghost btn--sm" id="mBack">&larr; All matches</button>
+          <h2 class="match-title" id="mHead"></h2>
+        </div>
+        <div class="toolbar__right"><span class="match-meta" id="mMetaLine"></span></div>
+      </div>
+      <div class="cols">
+        <section>
+          <div class="stage">
+            <div class="viewer" id="mViewer">
+              <video id="vid" playsinline preload="metadata"></video>
+              <svg id="vOv" preserveAspectRatio="none" aria-hidden="true"></svg>
+              <div class="vempty" id="vEmpty"></div>
+              <div class="noproxy" id="vNoProxy" hidden></div>
+            </div>
+            <div class="transport">
+              <button class="vbtn" id="vPrev" aria-label="Previous appearance">&#9664;</button>
+              <button class="vbtn vbtn--play" id="vPlay">Play</button>
+              <button class="vbtn" id="vNext" aria-label="Next appearance">&#9654;</button>
+              <div class="tc"><b id="vTc">0:00</b> / <span id="vDur">—</span></div>
+              <div class="tc" id="vCount"></div>
+            </div>
+            <div class="vpicker" id="vPills"></div>
+            <div class="track" id="vTrack" tabindex="0" role="slider"
+                 aria-label="Match timeline" aria-valuemin="0" aria-valuenow="0">
+              <canvas id="vTl"></canvas>
+              <div class="play-head" id="vHead" style="left:0"></div>
+            </div>
+            <div class="track-key">Each mark is a detection: across is match time,
+              up the frame is where on screen, brighter is clearer.</div>
+          </div>
+        </section>
+        <aside>
+          <div class="section-head"><h2 id="vSponHead">Time on screen</h2></div>
+          <p class="side-lead" id="vOf"></p>
+          <div class="stats">
+            <div class="stat"><div class="stat__num" id="vSecs">&mdash;</div>
+                 <div class="stat__label">On screen</div></div>
+            <div class="stat"><div class="stat__num" id="vIdx">&mdash;</div>
+                 <div class="stat__label">Exposure index</div></div>
+            <div class="stat"><div class="stat__num" id="vClr">&mdash;</div>
+                 <div class="stat__label">Mean clarity</div></div>
+            <div class="stat"><div class="stat__num" id="vAr">&mdash;</div>
+                 <div class="stat__label">Board size</div></div>
+          </div>
+          <p class="form-hint">Clarity is measured from the picture — size, focus,
+          contrast, angle — and kept apart from how confident the matcher is.</p>
+        </aside>
+      </div>
+      <div class="table-wrap" style="margin-top:16px">
+        <table class="table table--compact" id="vTable"></table>
+      </div>
+    </section>
+
     <!-- ── Grounds ──────────────────────────────────────────────────── -->
     <section id="viewGrounds" hidden>
       <div class="filter-row">
@@ -228,6 +397,17 @@
   function num(n, dp) { return n == null ? '—' : Number(n).toFixed(dp == null ? 1 : dp); }
   function pctStr(n) { return n == null ? '—' : num(n, 1) + '%'; }
   function secStr(n) { return NL.formatDuration(n, { seconds: true }); }
+
+  /* A running transport clock, m:ss. NL.formatDuration is the right helper for
+     prose durations ('2m 49s' in the tables) but deliberately renders exactly
+     zero as '—' — its own note says a caller needing a word instead owns it,
+     and a clock that reads '—' at the start of the video is that caller.
+     Canon candidate: NL.clock() the moment a second tool plays anything. */
+  function clock(n) {
+    n = Math.max(0, Math.floor(Number(n) || 0));
+    var s = n % 60;
+    return Math.floor(n / 60) + ':' + (s < 10 ? '0' : '') + s;
+  }
 
   /* Two matches are only comparable if they were measured the same way. The
      clarity weights are a stated choice, not a measurement, so averaging across
@@ -362,45 +542,349 @@
       var del = ev.target.closest('[data-del]');
       if (del) { ev.stopPropagation(); return removeMatch(del.getAttribute('data-del')); }
       var tr = ev.target.closest('tr[data-id]');
-      if (tr) showMatch(tr.getAttribute('data-id'));
+      if (tr) openMatch(tr.getAttribute('data-id'));
     };
   }
 
-  function showMatch(id) {
+  /* ── One match, played back ──────────────────────────────────────────
+     The video is a small proxy; the boxes come from the full-resolution scan
+     and are scaled onto it, so they stay accurate however soft the playback
+     looks. Sample index and video time are the same clock: idx = t / interval. */
+  var M = { id: null, det: null, spon: null, stops: [], raf: 0, at: -1, col: null };
+
+  /* A 2D canvas context cannot resolve var(), so the timeline reads the same
+     ladder stops the CSS uses and caches them. */
+  var _tok = {};
+  function tok(name) {
+    if (_tok[name] == null) {
+      _tok[name] = getComputedStyle(document.documentElement)
+        .getPropertyValue(name).trim() || '#000';
+    }
+    return _tok[name];
+  }
+
+  function openMatch(id) {
     var m = matches[id];
     if (!m) return;
+    M = { id: id, det: null, spon: null, stops: [], raf: 0, at: -1, col: null };
+    $('mHead').textContent = m.meta.club + ' v ' + (m.meta.opponent || '—');
+    /* How it was measured, which the old modal carried and the player must not
+       lose: two matches only compare if the engine and profile match. */
+    $('mMetaLine').textContent = [
+      m.meta.date ? NL.formatDate(m.meta.date) : null,
+      m.meta.sourceType,
+      m.meta.samples ? m.meta.samples + ' samples' : null,
+      (m.meta.videoW && m.meta.videoH) ? m.meta.videoW + '×' + m.meta.videoH : null,
+      m.meta.profile ? 'engine ' + m.meta.profile : null,
+      m.meta.runner === 'cloud' ? 'measured in the cloud' : null
+    ].filter(Boolean).join(' · ');
+
+    var vid = $('vid');
+    vid.pause(); vid.removeAttribute('src'); vid.load();
+    $('vOv').setAttribute('viewBox', '0 0 ' + (m.meta.videoW || 1920) + ' ' +
+                                     (m.meta.videoH || 1080));
+    $('vDur').textContent = clock(m.meta.duration);
+    $('vTc').textContent = '0:00';
+    $('vEmpty').textContent = '';
+    $('vNoProxy').hidden = true;
+    $('mViewer').classList.remove('novideo');
+    $('vPlay').disabled = false;
+
+    /* Last, so the section is visible before anything measures itself. */
+    show('match');
+
+    if (m.meta.hasProxy) {
+      storage.ref('brand-exposure/' + id + '/proxy.mp4').getDownloadURL()
+        .then(function (u) { vid.src = u; })
+        .catch(function () { noProxy('The playback video could not be loaded.'); });
+    } else {
+      noProxy('No playback video for this match — it was added before proxies, ' +
+              'or the scan could not build one. The measurements are unaffected.');
+    }
+
+    /* Every path through this ends in setDetections, including the ones with
+       nothing to show: buildStops() is what clears the appearance counter and
+       disables the step buttons, so skipping it on a match with no detections
+       left the previous match's "4 appearances" sitting under a blank timeline. */
+    if (m.meta.hasDetections) {
+      storage.ref('brand-exposure/' + id + '/detections.json').getDownloadURL()
+        .then(function (u) { return fetch(u); })
+        .then(function (r) { return r.json(); })
+        .then(function (d) { setDetections(id, d.hits || {}); })
+        .catch(function () { setDetections(id, {}); });
+    } else {
+      setDetections(id, {});
+    }
+  }
+
+  /* Guarded on id: the fetch is async and the user may already have gone back
+     to the list and opened something else. */
+  function setDetections(id, hits) {
+    if (M.id !== id) return;
+    M.det = hits;
+    buildStops();
+    paintTrack();
+    drawOverlay();
+  }
+
+  /* Hides the video, it does not replace it. Rewriting #mViewer's innerHTML
+     here — which is what this did — deleted #vid, #vOv and #vEmpty outright,
+     so one match without a proxy left every later match in the session with a
+     dead player and $('vid') returning null. */
+  function noProxy(msg) {
+    $('vNoProxy').textContent = msg;
+    $('vNoProxy').hidden = false;
+    $('mViewer').classList.add('novideo');
+    $('vOv').innerHTML = '';
+    $('vEmpty').textContent = '';
+    $('vPlay').disabled = true;
+  }
+
+  function mMeta() { return (matches[M.id] || { meta: {} }).meta; }
+  function mHitsAt(i) { return (M.det && M.det[i] && M.det[i][M.spon]) || []; }
+  function mIdx() {
+    var v = $('vid');
+    return Math.round((v && v.currentTime || 0) / (mMeta().interval || 0.5));
+  }
+
+  function renderMatchPills() {
+    var m = matches[M.id];
     var ss = sponsorsOf(m).sort(function (a, b) { return (b.index || 0) - (a.index || 0); });
-    var best = Math.max.apply(null, ss.map(function (s) { return s.index || 0; }).concat([0]));
-    var body =
-      '<div class="table-wrap"><table class="table table--compact"><thead><tr>' +
-      '<th>Sponsor</th><th class="num">On screen</th><th class="num">Share of match</th>' +
+    if (!M.spon || !ss.some(function (s) { return s.name === M.spon; })) {
+      M.spon = (ss.filter(function (s) { return s.seconds; })[0] || ss[0] || {}).name || null;
+    }
+    var cols = assignColours(ss.map(function (s) { return s.name; }));
+    M.col = cols[M.spon] || '#ff4d4d';
+    $('vPills').innerHTML = ss.map(function (s) {
+      return '<button class="vpill' + (s.seconds ? '' : ' none') + '" data-s="' +
+        esc(s.name) + '" aria-pressed="' + (s.name === M.spon) + '">' +
+        '<i style="background:' + cols[s.name] + '"></i>' + esc(s.name) + '</button>';
+    }).join('');
+    $('vPills').onclick = function (ev) {
+      var b = ev.target.closest('[data-s]');
+      if (!b) return;
+      M.spon = b.getAttribute('data-s');
+      renderMatchPills(); renderMatchSide(); buildStops();
+      paintTrack(); drawOverlay();
+    };
+  }
+
+  /* Deterministic per match, so a sponsor keeps its colour between the pills,
+     the timeline and the boxes — and, more importantly, between this page and
+     the HTML report the local script writes. Somebody scans a match, reads the
+     report, uploads it and opens it here; two different colour schemes for the
+     same match is a bug they would have to hold in their head.
+     PALETTE and this ordering must stay identical to assign_colours() in
+     scripts/board_exposure_report.py. Alphabetical, not by exposure: the pills
+     below are ordered by exposure, but colour must not move when a number does. */
+  var PALETTE = ['#ff4d4d', '#4db2ff', '#ffb020', '#5fd38d', '#c78bff',
+                 '#ff8bc4', '#7ee0d8', '#f2e14c', '#9aa8ff', '#ff9f66',
+                 '#8fdd52', '#ff6fa8'];
+  function assignColours(names) {
+    var out = {};
+    names.slice().sort().forEach(function (n, i) {
+      out[n] = PALETTE[i % PALETTE.length];
+    });
+    return out;
+  }
+  function mColour() { return M.col || '#ff4d4d'; }
+
+  /* One stop per appearance, at its clearest moment — so pressing next always
+     lands on a frame where the board is actually legible. */
+  function buildStops() {
+    var iv = mMeta().interval || 0.5;
+    var keys = Object.keys(M.det || {}).map(Number)
+      .filter(function (i) { return (M.det[i] || {})[M.spon]; })
+      .sort(function (a, b) { return a - b; });
+    var bridge = Math.max(0, Math.round(1.5 / iv) - 1);
+    var runs = [], cur = null;
+    keys.forEach(function (i) {
+      if (cur && i - cur.last <= bridge + 1) cur.last = i;
+      else { if (cur) runs.push(cur); cur = { first: i, last: i }; }
+    });
+    if (cur) runs.push(cur);
+    M.stops = runs.map(function (r) {
+      var best = r.first, bc = -1;
+      for (var i = r.first; i <= r.last; i++) {
+        ((M.det[i] || {})[M.spon] || []).forEach(function (h) {
+          if (h.c > bc) { bc = h.c; best = i; }
+        });
+      }
+      return best * iv;
+    });
+    var has = M.stops.length > 0;
+    $('vPrev').disabled = !has;
+    $('vNext').disabled = !has;
+    M.at = -1;   /* the boxes changed under the same sample index */
+    paintCount();
+  }
+
+  function paintCount() {
+    var t = ($('vid').currentTime) || 0, iv = mMeta().interval || 0.5;
+    var k = -1;
+    for (var i = 0; i < M.stops.length; i++) if (Math.abs(M.stops[i] - t) < iv) k = i;
+    $('vCount').textContent = !M.stops.length ? ''
+      : (k >= 0 ? 'appearance ' + (k + 1) + ' of ' + M.stops.length
+                : M.stops.length + ' appearances');
+  }
+
+  function mStep(dir) {
+    if (!M.stops.length) return;
+    var t = $('vid').currentTime || 0, iv = mMeta().interval || 0.5;
+    var n;
+    if (dir > 0) {
+      n = M.stops.findIndex(function (s) { return s > t + iv; });
+      if (n < 0) n = 0;
+    } else {
+      n = -1;
+      for (var i = 0; i < M.stops.length; i++) if (M.stops[i] < t - iv) n = i;
+      if (n < 0) n = M.stops.length - 1;
+    }
+    $('vid').currentTime = M.stops[n];
+  }
+
+  function drawOverlay() {
+    var v = $('vid'), i = mIdx(), col = mColour();
+    /* The clock and the play-head move continuously; everything below only
+       changes when the sample index does. This runs on every animation frame
+       while playing, so rebuilding the same SVG sixty times a second for two
+       samples' worth of boxes is the one thing worth guarding here. */
+    $('vTc').textContent = clock(v.currentTime);
+    $('vHead').style.left =
+      (100 * (v.currentTime || 0) / (mMeta().duration || 1)) + '%';
+    if (i === M.at) return;
+    M.at = i;
+
+    var hits = mHitsAt(i);
+    $('vOv').innerHTML = hits.map(function (h) {
+      var pts = h.q.map(function (p) { return p.join(','); }).join(' ');
+      var x = Math.min.apply(null, h.q.map(function (p) { return p[0]; }));
+      var y = Math.min.apply(null, h.q.map(function (p) { return p[1]; }));
+      return (h.b ? '<rect class="board" x="' + h.b[0] + '" y="' + h.b[1] +
+                    '" width="' + (h.b[2] - h.b[0]) + '" height="' + (h.b[3] - h.b[1]) +
+                    '" style="stroke:' + col + '"></rect>' : '') +
+        '<polygon class="quad" points="' + pts + '" style="stroke:' + col + '"></polygon>' +
+        '<text class="tag" x="' + x + '" y="' + Math.max(16, y - 8) + '">' +
+        esc(M.spon) + ' &middot; clarity ' + h.c.toFixed(2) + '</text>';
+    }).join('');
+    $('vEmpty').textContent = hits.length
+      ? hits.length + (hits.length > 1 ? ' detections' : ' detection') +
+        ' — solid is the logo, dashed is the whole panel'
+      : '';
+    $('vEmpty').style.color = hits.length ? col : tok('--navy-300');
+    paintCount();
+  }
+
+  function paintTrack() {
+    var c = $('vTl'), r = $('vTrack').getBoundingClientRect(), dpr = devicePixelRatio || 1;
+    c.width = Math.max(1, r.width * dpr); c.height = Math.max(1, r.height * dpr);
+    var g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, r.width, r.height);
+    var iv = mMeta().interval || 0.5, dur = mMeta().duration || 1;
+    var col = mColour();
+    var rgb = [1, 3, 5].map(function (k) { return parseInt(col.substr(k, 2), 16); });
+    var PAD = 9, plot = r.height - PAD * 2 - 11;
+
+    g.strokeStyle = tok('--navy-800'); g.lineWidth = 1;
+    [0, .5, 1].forEach(function (f) {
+      var y = PAD + f * plot;
+      g.beginPath(); g.moveTo(0, y + .5); g.lineTo(r.width, y + .5); g.stroke();
+    });
+    g.font = '9.5px system-ui, sans-serif'; g.fillStyle = tok('--navy-400');
+    var stepMin = dur > 3600 ? 15 : (dur > 900 ? 5 : 1);
+    for (var mn = stepMin; mn * 60 < dur; mn += stepMin) {
+      var x = (mn * 60 / dur) * r.width;
+      g.strokeStyle = tok('--navy-700');
+      g.beginPath(); g.moveTo(x + .5, PAD); g.lineTo(x + .5, PAD + plot); g.stroke();
+      g.fillText(mn + "'", x + 3, r.height - 3);
+    }
+    var vh = mMeta().videoH || 1080;
+    for (var k in (M.det || {})) {
+      var hs = (M.det[k] || {})[M.spon];
+      if (!hs) continue;
+      var px = (k * iv / dur) * r.width;
+      hs.forEach(function (h) {
+        var cy = h.q.reduce(function (a, p) { return a + p[1]; }, 0) / 4;
+        var y = PAD + (cy / vh) * plot;
+        var hh = Math.max(3, Math.min(11, 3 + h.a * 9));
+        g.fillStyle = 'rgba(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ',' +
+                      (0.30 + 0.70 * h.c) + ')';
+        g.fillRect(px, y - hh / 2, 2, hh);
+      });
+    }
+    /* The y-axis used to be labelled inside the plot at x=6, on top of the
+       first few seconds of every match. It reads once, under the track. */
+  }
+
+  function renderMatchSide() {
+    var m = matches[M.id];
+    var s = sponsorsOf(m).filter(function (x) { return x.name === M.spon; })[0];
+    $('vSponHead').textContent = M.spon || '—';
+    if (!s || !s.seconds) {
+      $('vSecs').innerHTML = '&mdash;';
+      $('vOf').textContent = 'Not detected in this match — which is not the same as absent.';
+      ['vIdx', 'vClr', 'vAr'].forEach(function (k) { $(k).innerHTML = '&mdash;'; });
+    } else {
+      $('vSecs').textContent = secStr(s.seconds);
+      $('vOf').textContent = pctStr(s.pct) + ' of the match, across ' + s.runs +
+                             ' separate appearances';
+      $('vIdx').textContent = num(s.index, 1);
+      $('vClr').textContent = num(s.clarity, 2);
+      $('vAr').textContent = num(s.area, 2) + '%';
+    }
+    var ss = sponsorsOf(m).sort(function (a, b) { return (b.index || 0) - (a.index || 0); });
+    var best = Math.max.apply(null, ss.map(function (x) { return x.index || 0; }).concat([0]));
+    $('vTable').innerHTML =
+      '<thead><tr><th>Sponsor</th><th class="num">On screen</th><th class="num">Share</th>' +
       '<th class="num">Index</th><th class="num">Clarity</th><th class="num">Board</th>' +
       '<th class="num">Share of voice</th></tr></thead><tbody>' +
-      ss.map(function (s) {
-        var sov = shareOfVoice(m, s.name);
-        return '<tr><td>' + esc(s.name) +
-          (s.scope === 'club' ? '<span class="scope-tag">' + esc(m.meta.club) + '</span>' : '') +
-          '</td><td class="num">' + (s.seconds ? secStr(s.seconds) : '—') +
-          '</td><td class="num">' + pctStr(s.pct) +
-          '</td><td class="num">' + meter(s.index, best, num(s.index, 1)) +
-          '</td><td class="num">' + num(s.clarity, 2) +
-          '</td><td class="num">' + (s.area == null ? '—' : num(s.area, 2) + '%') +
+      ss.map(function (x) {
+        var sov = shareOfVoice(m, x.name);
+        return '<tr><td>' + esc(x.name) +
+          (x.scope === 'club' ? '<span class="scope-tag">' + esc(m.meta.club) + '</span>' : '') +
+          '</td><td class="num">' + (x.seconds ? secStr(x.seconds) : '—') +
+          '</td><td class="num">' + pctStr(x.pct) +
+          '</td><td class="num">' + meter(x.index, best, num(x.index, 1)) +
+          '</td><td class="num">' + num(x.clarity, 2) +
+          '</td><td class="num">' + num(x.area, 2) + '%' +
           '</td><td class="num">' + (sov == null
-            ? '<span class="sov-off">—</span>' : pctStr(sov)) + '</td></tr>';
-      }).join('') + '</tbody></table></div>' +
-      (m.meta.referenceSetComplete ? '' :
-        '<p class="form-hint">Share of voice is withheld: the reference set was ' +
-        'not complete at this ground, so a share would be measured against only ' +
-        'the boards that were looked for.</p>') +
-      '<p class="form-hint">Measured from ' + esc(m.meta.samples) + ' samples of ' +
-      secStr(m.meta.duration) + ' at ' + esc(m.meta.videoW) + '×' + esc(m.meta.videoH) +
-      '. Engine ' + esc(m.meta.profile) + '.</p>';
+            ? '<span class="sov-off">withheld</span>' : pctStr(sov)) + '</td></tr>';
+      }).join('') + '</tbody>';
+  }
 
-    NL.modal({
-      title: m.meta.club + ' v ' + (m.meta.opponent || '—'),
-      body: body,
-      width: 'wide'
+  function wireViewer() {
+    var v = $('vid');
+    $('mBack').onclick = function () { v.pause(); show('matches'); };
+    $('vPrev').onclick = function () { mStep(-1); };
+    $('vNext').onclick = function () { mStep(1); };
+    $('vPlay').onclick = function () { v.paused ? v.play() : v.pause(); };
+    v.addEventListener('play', function () {
+      $('vPlay').textContent = 'Pause';
+      /* rAF while playing: timeupdate only fires about four times a second and
+         the boxes visibly lag the picture at that rate. */
+      (function loop() {
+        if (v.paused) return;
+        drawOverlay();
+        M.raf = requestAnimationFrame(loop);
+      })();
     });
+    v.addEventListener('pause', function () {
+      $('vPlay').textContent = 'Play';
+      cancelAnimationFrame(M.raf);
+      drawOverlay();
+    });
+    v.addEventListener('seeked', drawOverlay);
+    v.addEventListener('loadedmetadata', function () { paintTrack(); drawOverlay(); });
+
+    $('vTrack').addEventListener('pointerdown', function (e) {
+      var r = this.getBoundingClientRect();
+      v.currentTime = ((e.clientX - r.left) / r.width) * (mMeta().duration || 0);
+    });
+    $('vTrack').addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowRight') { mStep(1); e.preventDefault(); }
+      if (e.key === 'ArrowLeft') { mStep(-1); e.preventDefault(); }
+    });
+    addEventListener('resize', function () { if (view === 'match') paintTrack(); });
   }
 
   function removeMatch(id) {
@@ -596,9 +1080,12 @@
     $('addPanel').innerHTML =
       '<div class="form-panel"><div class="form-panel__head">Add a measured match</div>' +
       '<div class="form-panel__body">' +
-        '<label class="drop" id="drop"><input type="file" id="file" accept=".json,application/json">' +
-        '<strong>Choose the <code>-data.json</code></strong><br>' +
-        '<span class="text-secondary">or drop it here</span></label>' +
+        '<label class="drop" id="drop"><input type="file" id="file" multiple ' +
+          'accept=".json,application/json,video/mp4">' +
+        '<strong>Drop the whole run in</strong><br>' +
+        '<span class="text-secondary">the <code>-data.json</code>, and the ' +
+        '<code>-detections.json</code> and <code>-proxy.mp4</code> if you have them' +
+        '</span></label>' +
         '<div id="readout"></div>' +
       '</div>' +
       '<div class="form-panel__foot">' +
@@ -611,34 +1098,59 @@
     drop.ondragleave = function () { drop.classList.remove('is-over'); };
     drop.ondrop = function (e) {
       e.preventDefault(); drop.classList.remove('is-over');
-      if (e.dataTransfer.files[0]) readFile(e.dataTransfer.files[0]);
+      readFiles(e.dataTransfer.files);
     };
-    file.onchange = function () { if (file.files[0]) readFile(file.files[0]); };
+    file.onchange = function () { readFiles(file.files); };
     $('addCancel').onclick = function () { $('addPanel').hidden = true; };
     $('addSave').onclick = saveMatch;
   }
 
-  function readFile(f) {
-    var r = new FileReader();
-    r.onload = function () {
-      try { parseExport(JSON.parse(r.result), f.name); }
-      catch (e) {
-        $('readout').innerHTML = '<div class="banner banner--error">' + esc(e.message) + '</div>';
-        $('addSave').disabled = true;
-        pending = null;
+  /* Sort the run's files by what is inside them rather than by name, so it does
+     not matter what order they are dropped in or whether they were renamed. */
+  function readFiles(list) {
+    var files = Array.prototype.slice.call(list || []);
+    if (!files.length) return;
+    var video = files.filter(function (f) {
+      return /\.(mp4|m4v)$/i.test(f.name) || /^video\//.test(f.type);
+    })[0] || null;
+    var jsons = files.filter(function (f) { return /\.json$/i.test(f.name); });
+    if (!jsons.length) {
+      return fail('No -data.json in what you dropped. That is the small one the ' +
+                  'scan writes; it is the only file this needs.');
+    }
+    var read = jsons.map(function (f) {
+      return new Promise(function (res) {
+        var r = new FileReader();
+        r.onload = function () {
+          try { res({ f: f, d: JSON.parse(r.result) }); }
+          catch (e) { res({ f: f, d: null }); }
+        };
+        r.onerror = function () { res({ f: f, d: null }); };
+        r.readAsText(f);
+      });
+    });
+    Promise.all(read).then(function (got) {
+      var summary = got.filter(function (g) { return g.d && g.d.sponsors && !g.d.hits; })[0];
+      var det = got.filter(function (g) { return g.d && g.d.hits; })[0];
+      if (!summary) {
+        return fail(det
+          ? 'That is the detections file. The small "-data.json" from the same ' +
+            'run is the one that carries the summary.'
+          : 'Not a Brand Exposure export — expected the "-data.json" written by ' +
+            'board-exposure-match.py.');
       }
-    };
-    r.readAsText(f);
+      try { parseExport(summary.d, video, det ? det.f : null); }
+      catch (e) { fail(e.message); }
+    });
   }
 
-  function parseExport(d, filename) {
-    /* The runner writes two files and they are easy to confuse. The detections
-       file is the big one and has no summary in it, so say which to use rather
-       than failing on a missing key. */
-    if (d && d.hits && !d.sponsors) {
-      throw new Error('That is the detections file. Use the smaller ' +
-                      '"-data.json" from the same run.');
-    }
+  function fail(msg) {
+    $('readout').innerHTML = '<div class="banner banner--error">' + esc(msg) + '</div>';
+    $('addSave').disabled = true;
+    pending = null;
+  }
+
+  function parseExport(d, video, detFile) {
     if (!d || !d.sponsors || !d.settings || !d.match) {
       throw new Error('Not a Brand Exposure export — expected the "-data.json" ' +
                       'written by board-exposure-match.py.');
@@ -646,9 +1158,11 @@
     var parts = String(d.match).split(/\s+v\.?\s+/i);
     pending = {
       raw: d,
+      video: video || null,
+      detFile: detFile || null,
       club: d.club || parts[0] || '',
       opponent: parts.length > 1 ? parts[1] : '',
-      date: '',
+      date: d.date || '',
       sourceType: (d.duration || 0) > 45 * 60 ? 'full' : 'highlights',
       complete: null
     };
@@ -665,6 +1179,10 @@
         '<div><dt>Engine</dt><dd>' + esc(profileOf(d.settings)) + '</dd></div>' +
         '<div><dt>Sponsors found</dt><dd>' + found.length + ' of ' +
           Object.keys(d.sponsors).length + '</dd></div>' +
+        '<div><dt>Playback</dt><dd>' + (pending.video
+          ? esc((pending.video.size / 1e6).toFixed(0)) + ' MB video'
+          : '<span style="font-weight:400;color:var(--text-muted)">no proxy — ' +
+            'numbers only</span>') + '</dd></div>' +
       '</div></div>' +
       (missing.length ? '<p class="form-hint">Not found: ' + esc(missing.join(', ')) +
         '. Worth checking those reference crops before treating the zeroes as absence.</p>' : '') +
@@ -748,27 +1266,74 @@
 
     go.then(function (ok) {
       if (!ok) return;
-      NL.ensureAuth().then(function () {
-        return db.ref(ROOT + '/' + id).set(rec);
-      }).then(function () {
-        NL.toast('Match added', 'success');
-        NL.writeAudit('add_match', rec.meta.fixture + ' (' + pending.date + ')');
-        $('addPanel').hidden = true;
-        pending = null;
-      }).catch(function (e) {
-        NL.toast('Could not save: ' + e.message, 'error');
-      });
+      var job = pending;                 // saveMatch is async; pending gets cleared
+      rec.meta.hasProxy = !!job.video;
+      rec.meta.hasDetections = !!job.detFile;
+      /* Where it was measured. The tool already refuses to average across
+         different engine settings; if the laptop and the cloud ever disagree,
+         this is what makes that visible in the data rather than remembered. */
+      rec.meta.runner = 'local';
+
+      var save = $('addSave');
+      save.disabled = true;
+
+      NL.ensureAuth()
+        .then(function () { return db.ref(ROOT + '/' + id).set(rec); })
+        .then(function () { return upload(id, job, save); })
+        .then(function () {
+          NL.toast('Match added', 'success');
+          NL.writeAudit('add_match', rec.meta.fixture + ' (' + job.date + ')');
+          $('addPanel').hidden = true;
+          pending = null;
+        })
+        .catch(function (e) {
+          save.disabled = false;
+          save.textContent = 'Add match';
+          NL.toast('Could not save: ' + e.message, 'error');
+        });
     });
+  }
+
+  /* The video and detections go to Storage, not RTDB — 150 MB and a few MB
+     respectively, and RTDB loads a whole node at a time. The match record is
+     written first, so a failed upload leaves a match with numbers rather than
+     an orphaned file nothing points at. */
+  function upload(id, job, btn) {
+    var jobs = [];
+    if (job.video) jobs.push({ file: job.video, name: 'proxy.mp4', label: 'video' });
+    if (job.detFile) jobs.push({ file: job.detFile, name: 'detections.json',
+                                 label: 'detections' });
+    if (!jobs.length) return Promise.resolve();
+
+    var total = jobs.reduce(function (a, j) { return a + j.file.size; }, 0);
+    var done = 0;
+
+    return jobs.reduce(function (chain, j) {
+      return chain.then(function () {
+        return new Promise(function (res, rej) {
+          var task = storage.ref('brand-exposure/' + id + '/' + j.name).put(j.file);
+          task.on('state_changed', function (s) {
+            var pct = Math.round(100 * (done + s.bytesTransferred) / total);
+            btn.textContent = 'Uploading ' + j.label + ' ' + pct + '%';
+          }, rej, function () { done += j.file.size; res(); });
+        });
+      });
+    }, Promise.resolve());
   }
 
   /* ── Shell ───────────────────────────────────────────────────────── */
   function show(name) {
+    /* Leaving the player: stop the video rather than let it run behind a
+       hidden section, which keeps decoding and keeps the rAF loop alive. */
+    if (view === 'match' && name !== 'match') { $('vid').pause(); M.id = null; }
     view = name;
-    ['matches', 'partners', 'grounds'].forEach(function (v) {
+    ['matches', 'partners', 'grounds', 'match'].forEach(function (v) {
       $('view' + v[0].toUpperCase() + v.slice(1)).hidden = (v !== name);
     });
     document.querySelectorAll('.tab').forEach(function (t) {
-      t.classList.toggle('active', t.getAttribute('data-tab') === name);
+      /* The player is a child of Matches, not a fourth tab — keep Matches lit. */
+      var k = t.getAttribute('data-tab');
+      t.classList.toggle('active', k === name || (name === 'match' && k === 'matches'));
     });
     render();
   }
@@ -778,6 +1343,12 @@
     if (view === 'matches')  renderMatches();
     if (view === 'partners') renderPartners();
     if (view === 'grounds')  renderGrounds();
+    if (view === 'match') {
+      /* A live RTDB update can delete the match being watched. */
+      if (!M.id || !matches[M.id]) return show('matches');
+      renderMatchPills();
+      renderMatchSide();
+    }
   }
 
   function wireGroundPicker() {
@@ -802,6 +1373,8 @@
       var t = ev.target.closest('.tab');
       if (t) show(t.getAttribute('data-tab'));
     });
+
+    wireViewer();
 
     NL.ensureAuth().then(function () {
       try { NL.clubs.load().then(wireGroundPicker); } catch (e) { wireGroundPicker(); }

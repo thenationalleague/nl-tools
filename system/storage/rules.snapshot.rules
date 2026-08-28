@@ -17,6 +17,7 @@
 //   partner-logos/**      commercial-compliance partner logos, staff accounts
 //   programme/<CODE>/**   matchday programme packs, per-club
 //   data/**               the nightly pipeline's feeds, read-only to browsers
+//   brand-exposure/<id>/  per-match playback proxy + detections, staff accounts
 
 rules_version = '2';
 service firebase.storage {
@@ -72,6 +73,24 @@ service firebase.storage {
       allow write: if request.auth != null && request.auth.token.email != null
         && request.resource.size < 1 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
+    }
+
+    // ── Brand Exposure ────────────────────────────────────────────────────
+    // Per measured match: proxy.mp4 (a ~150 MB playback copy, never the source
+    // footage) and detections.json. The match video itself is deliberately not
+    // kept — it is scanned and discarded, so nothing here is rights-bearing
+    // material sitting in a bucket indefinitely.
+    //
+    // Read is any portal account with an email claim, matching the tool's own
+    // audience. Write is bounded by size and type rather than by role, because
+    // the RTDB record that makes a match visible is separately gated to admin —
+    // an upload nobody can point at is inert.
+    match /brand-exposure/{matchId}/{file} {
+      allow read: if request.auth != null && request.auth.token.email != null;
+      allow write: if request.auth != null && request.auth.token.email != null
+        && request.resource.size < 600 * 1024 * 1024
+        && (request.resource.contentType.matches('video/mp4')
+            || request.resource.contentType.matches('application/json'));
     }
 
     // ── Programme Packs ───────────────────────────────────────────────────

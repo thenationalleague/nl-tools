@@ -29,7 +29,13 @@ PALETTE = ["#ff4d4d", "#4db2ff", "#ffb020", "#5fd38d", "#c78bff",
 
 
 def assign_colours(sponsors):
-    return {n: PALETTE[i % len(PALETTE)] for i, n in enumerate(sponsors)}
+    """Sponsor -> colour, alphabetically.
+
+    PALETTE and this ordering are mirrored by assignColours() in
+    brand-exposure/index.html, so a match looks the same in this report and in
+    the tool once it is uploaded. Change one, change both.
+    """
+    return {n: PALETTE[i % len(PALETTE)] for i, n in enumerate(sorted(sponsors))}
 
 
 def mmss(t):
