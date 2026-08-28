@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Brand Exposure
-  Version: v0.2 (28/08/2026)
+  Version: v0.3 (28/08/2026)
   File: /brand-exposure/index.html
 
   Sponsor exposure measured from match video — seconds on screen, clarity and
@@ -27,6 +27,11 @@
     staff              → off; granted per-user, like Commercial Compliance
 
   Changelog
+  v0.3 (28/08/2026) — Ingest keys. A superadmin generates one per machine and
+    sees it once; board-exposure-match.py --upload trades it for a token scoped
+    to a single match and puts the measurement here itself. Minting happens in
+    the brandExposureIngest function, not on this page: the key config is
+    unreadable and unwritable by every client, which is what makes it a key.
   v0.2 (28/08/2026) — The match player. The scan writes a small proxy video
     alongside the numbers; upload both and the match plays here with the
     detected boards drawn over it, a timeline of every appearance, and
@@ -89,6 +94,14 @@
     var NL_TOOL_KEY = 'ops-brand-exposure';
 
     window.NL_CHANGELOG = [
+      {
+        date: '28/08/2026',
+        version: 'v0.3',
+        items: [
+          'Ingest keys — a superadmin generates one per machine, the scan ' +
+            'uploads itself, and the trip here to drag files is gone.'
+        ]
+      },
       {
         date: '28/08/2026',
         version: 'v0.2',
@@ -258,6 +271,14 @@
                font-size: 11.5px; }
   .noproxy { padding: 40px 20px; text-align: center; color: var(--navy-300);
              font-size: 13.5px; line-height: 1.5; }
+  /* Shown once, then never again — so it has to be readable enough to retype
+     if the copy button is missed. Monospace, spaced, and selectable. */
+  .key-once { font-family: var(--font-mono);
+              font-size: 15px; letter-spacing: .04em; word-break: break-all;
+              background: var(--navy-50); border: 1px solid var(--border);
+              border-radius: var(--radius); padding: 14px 16px; margin: 12px 0;
+              user-select: all; }
+  tr.is-revoked td { color: var(--text-muted); }
   .viewer.novideo video, .viewer.novideo svg { display: none; }
 </style>
 </head>
@@ -285,6 +306,7 @@
       <div class="toolbar">
         <div class="toolbar__left"><div class="section-head"><h2>Matches measured</h2></div></div>
         <div class="toolbar__right">
+          <button class="btn btn--ghost" id="btnKeys" hidden>Ingest keys</button>
           <button class="btn btn--primary" id="btnAdd" hidden>Add a match</button>
         </div>
       </div>
@@ -1321,6 +1343,158 @@
     }, Promise.resolve());
   }
 
+  /* ── Ingest keys ──────────────────────────────────────────────────────
+     A key lets board-exposure-match.py put a measured match into this tool
+     without anyone opening a browser. Minting one is superadmin-only and does
+     not happen here: config is unreadable and unwritable by every client, so
+     the only way in is the brandExposureIngest function. This page asks it the
+     same way the script does — write a request, wait for the reply — because
+     the org policy on this project blocks public invokers and there is no
+     endpoint to call. See functions/brand-exposure.js. */
+  var KEY_TIMEOUT = 30000;
+
+  function askFunction(payload) {
+    return NL.ensureAuth().then(function () {
+      var uid = firebase.auth().currentUser.uid;
+      var reqRef   = db.ref('app-data/ops-brand-exposure/ingestRequests/' + uid);
+      var grantRef = db.ref('app-data/ops-brand-exposure/ingestGrants/' + uid);
+
+      return grantRef.remove()                      /* any stale reply */
+        .then(function () { return reqRef.set(Object.assign({ admin: true }, payload)); })
+        .then(function () {
+          return new Promise(function (resolve, reject) {
+            var done = false;
+            var timer = setTimeout(function () {
+              if (done) return;
+              done = true; grantRef.off();
+              reject(new Error('No answer from the ingest function. It may not ' +
+                               'be deployed yet — check the Actions tab.'));
+            }, KEY_TIMEOUT);
+
+            grantRef.on('value', function (snap) {
+              var g = snap.val();
+              if (!g || done) return;
+              done = true;
+              clearTimeout(timer);
+              grantRef.off();
+              /* Delete before resolving: a mint reply carries the plaintext key
+                 and there is no reason for it to outlive being read. */
+              grantRef.remove().catch(function () {});
+              g.ok ? resolve(g) : reject(new Error(g.error || 'Refused.'));
+            });
+          });
+        });
+    });
+  }
+
+  function openKeys() {
+    var ctrl = NL.modal({
+      title: 'Ingest keys',
+      width: 'wide',
+      body: '<p class="form-hint">Loading…</p>',
+      /* NL.modal buttons do nothing without an onClick — there is no implicit
+         dismiss — so a footer button that only says "Close" is a dead control. */
+      buttons: [{ label: 'Close', className: 'btn btn--ghost',
+                  onClick: function (c) { c.close(); } }]
+    });
+    refreshKeys(ctrl);
+  }
+
+  function refreshKeys(ctrl) {
+    askFunction({ action: 'list' })
+      .then(function (g) { ctrl.body.innerHTML = keysHtml(g.keys || {}); wireKeys(ctrl); })
+      .catch(function (e) {
+        ctrl.body.innerHTML = '<div class="banner banner--error">' + esc(e.message) + '</div>';
+      });
+  }
+
+  function keysHtml(keys) {
+    var ids = Object.keys(keys).sort(function (a, b) {
+      return (keys[b].created || 0) - (keys[a].created || 0);
+    });
+    var rows = ids.map(function (id) {
+      var k = keys[id];
+      return '<tr' + (k.revoked ? ' class="is-revoked"' : '') + '>' +
+        '<td>' + esc(k.label) +
+          (k.revoked ? ' <span class="pill pill--pending">Revoked</span>' : '') + '</td>' +
+        '<td>' + (k.created ? NL.formatDate(k.created) : '—') + '</td>' +
+        '<td>' + (k.lastUsed ? NL.timeAgo(k.lastUsed) : 'never used') + '</td>' +
+        '<td class="num">' + (k.revoked ? '' :
+          '<button class="btn btn--ghost btn--sm" data-revoke="' + esc(id) + '" ' +
+          'data-label="' + esc(k.label) + '">Revoke</button>') + '</td></tr>';
+    }).join('');
+
+    return '<div class="form-group"><label for="kLabel">' +
+      'Name the machine this key is for</label>' +
+      '<input id="kLabel" maxlength="60" placeholder="Match laptop"></div>' +
+      '<button class="btn btn--primary" id="kMint">Generate a key</button>' +
+      '<p class="form-hint">The key is shown once and cannot be looked up again. ' +
+      'Revoke it if the machine is lost.</p>' +
+      (ids.length
+        ? '<div class="table-wrap"><table class="table table--compact"><thead><tr>' +
+          '<th>Machine</th><th>Created</th><th>Last used</th><th></th>' +
+          '</tr></thead><tbody>' + rows + '</tbody></table></div>'
+        : '<div class="empty-state">No keys yet.</div>');
+  }
+
+  function wireKeys(ctrl) {
+    var mint = ctrl.body.querySelector('#kMint');
+    mint.onclick = function () {
+      var label = (ctrl.body.querySelector('#kLabel').value || '').trim();
+      if (!label) return NL.toast('Name the machine first — it is how you revoke it later.');
+      mint.disabled = true; mint.textContent = 'Generating…';
+      askFunction({ action: 'mint', label: label })
+        .then(function (g) { showKeyOnce(g.key, g.label); refreshKeys(ctrl); })
+        .catch(function (e) {
+          mint.disabled = false; mint.textContent = 'Generate a key';
+          NL.toast(e.message, { variant: 'error' });
+        });
+    };
+
+    ctrl.body.querySelectorAll('[data-revoke]').forEach(function (b) {
+      b.onclick = function () {
+        NL.confirm('Revoke the key for ' + b.getAttribute('data-label') + '?', {
+          title: 'Revoke key',
+          detail: 'That machine stops being able to upload immediately. Measurements ' +
+                  'it has already sent stay where they are.',
+          confirmText: 'Revoke', variant: 'danger'
+        }).then(function (yes) {
+          if (!yes) return;
+          askFunction({ action: 'revoke', keyId: b.getAttribute('data-revoke') })
+            .then(function () { NL.toast('Revoked.'); refreshKeys(ctrl); })
+            .catch(function (e) { NL.toast(e.message, { variant: 'error' }); });
+        });
+      };
+    });
+  }
+
+  /* The only time the plaintext exists in a browser. Deliberately a second
+     modal rather than a line in the table: it has to be copied now, and a value
+     that can never be retrieved should not look like a value you can come back
+     to. */
+  function showKeyOnce(key, label) {
+    var m = NL.modal({
+      title: 'Key for ' + label,
+      body:
+        '<p>Copy this now. It is not stored anywhere it can be read back, ' +
+        'so if it is lost the only fix is to revoke it and generate another.</p>' +
+        '<pre class="key-once" id="kVal">' + esc(key) + '</pre>' +
+        '<p class="form-hint">On the machine that measures matches, save it as ' +
+        'the only line in <code>refs/ingest-key.txt</code>, then run the scan ' +
+        'with <code>--upload</code>.</p>',
+      buttons: [
+        { label: 'Copy key', className: 'btn btn--primary', autofocus: true,
+          /* Deliberately does not close: copying and then losing the modal
+             before you have pasted it anywhere is the one mistake that cannot
+             be undone here. */
+          onClick: function () { NL.copy(key, { ok: 'Key copied' }); } },
+        { label: 'Done', className: 'btn btn--ghost',
+          onClick: function (c) { c.close(); } }
+      ]
+    });
+    return m;
+  }
+
   /* ── Shell ───────────────────────────────────────────────────────── */
   function show(name) {
     /* Leaving the player: stop the video rather than let it run behind a
@@ -1367,6 +1541,10 @@
     canWrite = (session && session.toolLevel === 'admin');
     $('btnAdd').hidden = !canWrite;
     $('btnAdd').onclick = openAdd;
+    /* Minting is superadmin-only in the function too — this only hides a button
+       whose action would be refused anyway. */
+    $('btnKeys').hidden = !(session && session.role === 'superadmin');
+    $('btnKeys').onclick = openKeys;
     $('pCsv').onclick = exportPartnerCsv;
 
     document.querySelector('.tabs').addEventListener('click', function (ev) {
