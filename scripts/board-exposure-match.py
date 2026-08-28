@@ -62,6 +62,7 @@ REPORT_FRAME_W = 680
 REPORT_FRAME_Q = 55
 DEFAULT_FRAME_BUDGET = 240
 SIZE_WARN_MB = 14
+PROGRESS_EVERY = 3.0        # seconds between progress updates
 
 REFS_README = """Reference images — this folder is the configuration.
 
@@ -613,22 +614,34 @@ def run_one(a, video, club, title, date=""):
     # without the threads holding them, and every worker deadlocks on its first
     # OpenCV call — silently, at 0% CPU, forever. Windows only ever spawns, so
     # this also makes the two platforms run the same code path.
-    hits_by_index, t0, done = {}, time.time(), 0
+    # Overwrite one line in a terminal; plain lines when redirected to a log,
+    # where carriage returns would make an unreadable mess.
+    line_end = "\r" if sys.stdout.isatty() else "\n"
+    hits_by_index, t0, done, last = {}, time.time(), 0, 0.0
     with mp.get_context("spawn").Pool(jobs, initializer=_init_worker,
                                       initargs=(entries, C.NFEATURES)) as pool:
         for i, hit in pool.imap_unordered(_scan, list(enumerate(files)), chunksize=4):
             if hit:
                 hits_by_index[i] = hit
             done += 1
-            # About forty progress lines whatever the length of the run, so a
-            # 200-sample test is as legible as a 10,000-sample match.
-            if done % max(10, n_samples // 40) == 0 or done == n_samples:
-                el = time.time() - t0
-                rate = done / el
+            # On a timer, not every Nth sample. Forty lines spread across a run
+            # means one a minute on a full match, and a minute of silence reads
+            # as a hung process — which is exactly how the first real run felt.
+            # A fixed cadence looks alive whatever the length of the file.
+            now = time.time()
+            if now - last >= PROGRESS_EVERY or done == n_samples:
+                last = now
+                el = now - t0
+                rate = done / el if el else 0
                 eta = (n_samples - done) / rate if rate else 0
-                print(f"  {done:>6}/{n_samples}  {rate:5.1f} samples/s  "
-                      f"elapsed {R.hhmm(el)}  left {R.hhmm(eta)}  "
-                      f"found {len(hits_by_index)}", flush=True)
+                fill = int(round(24 * done / n_samples))
+                # ASCII, deliberately: this is usually launched from a .bat, and
+                # cmd.exe on a non-UTF-8 codepage turns block characters to mush.
+                print(f"  [{'#' * fill}{'.' * (24 - fill)}] {100 * done / n_samples:3.0f}%  "
+                      f"{done}/{n_samples}  {rate:.1f}/s  left {R.hhmm(eta)}  "
+                      f"found {len(hits_by_index)}   ", end=line_end, flush=True)
+    if line_end == "\r":
+        print()
 
     scan_secs = time.time() - t0
     print(f"\n  scanned in {R.hhmm(scan_secs)} — {len(hits_by_index)} samples with a detection")
