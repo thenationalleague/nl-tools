@@ -167,6 +167,74 @@ def make_proxy(video, out, ffmpeg, start=None, end=None):
     return out
 
 
+def push_to_tool(a, base, head, stats, club, title, date, proxy, duration, complete):
+    """
+    Put the finished match into NL Tools, so nobody has to open a browser and
+    upload three files that this machine is already holding.
+
+    Never fatal. The scan is the expensive part and it is done; a network blip
+    at this point must leave the files on disk and say so, not throw away half
+    an hour of CPU. Every failure ends with the same instruction: the files are
+    there, upload them by hand.
+    """
+    import board_exposure_upload as U
+
+    opponent = ""
+    m = re.match(r"^(.+?)\s+vs?\.?\s+(.+)$", str(title or ""), re.I)
+    if m:
+        opponent = m.group(2).strip()
+
+    if not (date and club and opponent):
+        print("\n  ! not uploaded: needs a date, a home club and an opponent, and "
+              "this run has "
+              + ", ".join(n for n, v in (("no date", not date), ("no club", not club),
+                                         ("no opponent", not opponent)) if v) + ".")
+        return
+
+    match_id = U.match_id_for(date, club, opponent)
+    # The tool guesses the same way from the same field, so the two agree
+    # without either asking. Anyone who disagrees can change it in the tool.
+    source_type = "full" if (duration or 0) > 45 * 60 else "highlights"
+
+    files = [(f"{base}-detections.json", "detections.json")]
+    if proxy and os.path.exists(proxy):
+        files.append((proxy, "proxy.mp4"))
+
+    print(f"\n  Uploading to nl.tools as {match_id} …")
+    try:
+        key = U.read_key(a.refs)
+        uid, token = U.sign_in_anonymously()
+        grant = U.request_grant(
+            uid, token, key, match_id,
+            on_wait=lambda s: print(f"    still waiting on the ingest function ({int(s)}s)…"))
+        _, token = U.sign_in_with_custom_token(grant["customToken"])
+
+        for path, name in files:
+            mb = os.path.getsize(path) / 1e6
+            print(f"    {name} ({mb:.0f} MB)…")
+            U.put_file(path, f"brand-exposure/{match_id}/{name}", token,
+                       on_progress=lambda d, sz, secs: print(
+                           f"      done in {secs:.0f}s ({sz/1e6/max(secs, .1):.0f} MB/s)"))
+
+        rec = U.build_record(
+            dict(head, sponsors=stats), club, opponent, date, source_type,
+            complete, has_proxy=any(n == "proxy.mp4" for _, n in files),
+            has_detections=True)
+        U.write_record(match_id, rec, token)
+
+        print(f"    in the tool: https://nl.tools/brand-exposure/")
+        if complete is None:
+            print("    note: reference-set completeness was not recorded, so share "
+                  "of voice stays withheld until someone sets it in the tool.")
+    except U.UploadError as e:
+        print(f"\n  ! not uploaded: {e}")
+        print("    The measurement is fine and the files are listed below — "
+              "upload them by hand at https://nl.tools/brand-exposure/.")
+    except Exception as e:                                   # noqa: BLE001
+        print(f"\n  ! not uploaded: unexpected error ({e.__class__.__name__}: {e}).")
+        print("    The files are listed below — upload them by hand.")
+
+
 def parse_clock(s):
     """'1:52:30', '18:30' or '1110' -> seconds. None passes through."""
     if s in (None, ""):
@@ -399,7 +467,7 @@ def ask(prompt):
         die("stopped. Nothing was measured.")
 
 
-def confirm_fixture(path, clubs, refs_root, assume_yes=False):
+def confirm_fixture(path, clubs, refs_root, assume_yes=False, upload=False):
     """
     Show what was read off the filename and let it be corrected.
 
@@ -481,9 +549,23 @@ def confirm_fixture(path, clubs, refs_root, assume_yes=False):
         print("    Blank measures the whole file.")
         start = parse_clock(ask("    Kick-off at (e.g. 18:30, blank for none): "))
         end = parse_clock(ask("    Ends at (e.g. 2:05:00, blank for end of file): "))
+
+        # Asked here rather than after the scan so a batch can be set going and
+        # left. It is the one fact about the measurement that no amount of
+        # looking at the video can establish, and share of voice is a lie
+        # without it: five references at a twenty-board ground make every
+        # sponsor's share look enormous. The tool asks the same question of
+        # anyone uploading by hand, and suppresses the column when the answer
+        # is no.
+        complete = None
+        if upload:
+            print("    Did the references cover EVERY board at this ground?")
+            complete = ask("    'y' if the set was complete, anything else for partial: "
+                           ).strip().lower() in ("y", "yes")
+
         return {"club": home if home in clubs else None,
                 "home": home, "away": away, "date": date,
-                "start": start, "end": end}
+                "start": start, "end": end, "complete": complete}
 
 
 def scaffold(root):
@@ -526,6 +608,9 @@ def main():
     ap.add_argument("--keep-frames", action="store_true")
     ap.add_argument("--no-proxy", action="store_true",
                     help="skip the small playback video the tool uses")
+    ap.add_argument("--upload", action="store_true",
+                    help="put the match into NL Tools when the scan finishes "
+                         "(needs refs/ingest-key.txt)")
     ap.add_argument("--ffmpeg", default="ffmpeg")
     ap.add_argument("--ffprobe", default="ffprobe")
     ap.add_argument("--init", action="store_true", help="create the refs folder tree and exit")
@@ -567,11 +652,11 @@ def main():
     if a.club or a.match:
         run_one(a, a.video, a.club, a.match or os.path.basename(a.video))
         return
-    fx = confirm_fixture(a.video, clubs, a.refs, a.yes)
+    fx = confirm_fixture(a.video, clubs, a.refs, a.yes, a.upload)
     if not fx:
         die("nothing to measure.")
     run_one(a, a.video, fx["club"], fx["home"] + " v " + fx["away"], fx["date"],
-            fx.get("start"), fx.get("end"))
+            fx.get("start"), fx.get("end"), fx.get("complete"))
 
 
 def known_clubs(refs_root):
@@ -642,7 +727,7 @@ def run_batch(a, clubs):
     print("\n  --- confirm the fixtures ---")
     plan = []
     for name in vids:
-        fx = confirm_fixture(os.path.join(folder, name), clubs, a.refs, a.yes)
+        fx = confirm_fixture(os.path.join(folder, name), clubs, a.refs, a.yes, a.upload)
         if fx:
             plan.append((name, fx))
     if not plan:
@@ -659,7 +744,7 @@ def run_batch(a, clubs):
         print("=" * 72)
         try:
             run_one(a, path, fx["club"], fx["home"] + " v " + fx["away"], fx["date"],
-                    fx.get("start"), fx.get("end"))
+                    fx.get("start"), fx.get("end"), fx.get("complete"))
             ok.append(name)
             os.makedirs(done_dir, exist_ok=True)
             shutil.move(path, os.path.join(done_dir, name))
@@ -676,7 +761,7 @@ def run_batch(a, clubs):
     print()
 
 
-def run_one(a, video, club, title, date="", start=None, end=None):
+def run_one(a, video, club, title, date="", start=None, end=None, complete=None):
     entries, scope, usable = describe_refs(a.refs, club)
 
     match = title or os.path.splitext(os.path.basename(video))[0]
@@ -842,6 +927,13 @@ def run_one(a, video, club, title, date="", start=None, end=None):
     if not a.keep_frames:
         shutil.rmtree(work, ignore_errors=True)
         shutil.rmtree(small_dir, ignore_errors=True)
+
+    if a.upload:
+        # After the files are written and before the summary, so a failure here
+        # is reported next to the files that still exist and can be uploaded by
+        # hand. Never fatal: the measuring is the expensive part and it is done.
+        push_to_tool(a, base, head, payload["stats"], club, title, date,
+                     proxy, duration, complete)
 
     print(f"\n  {html}  ({size/1e6:.1f} MB) — open this in a browser")
     print(f"  {base}-data.json — the numbers on their own")

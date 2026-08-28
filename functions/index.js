@@ -69,6 +69,15 @@ Object.assign(exports, require("./uw-promo"));
 // system/club-code-plan.md.
 Object.assign(exports, require("./club-code"));
 
+// Brand Exposure ingest key → a `be: <matchId>` claim (brandExposureIngest).
+// Fifth instance of the same shape, and the first whose client is a Python
+// script on a laptop rather than a browser: board-exposure-match.py measures a
+// match and then needs to put three files somewhere, with no Google account and
+// no service-account key on the machine. The claim names one match, so a key
+// lifted off that laptop can overwrite that match and nothing else. See
+// functions/brand-exposure.js.
+Object.assign(exports, require("./brand-exposure"));
+
 // NLS → RTDB live ingester (nlsIngestTick / nlsIngestHourly). Scheduled rather
 // than triggered, and it writes to the nl-widgets database rather than this
 // project's — see functions/nls-ingester.js for both reasons. Exported here so

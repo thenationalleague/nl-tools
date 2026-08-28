@@ -85,9 +85,19 @@ service firebase.storage {
     // audience. Write is bounded by size and type rather than by role, because
     // the RTDB record that makes a match visible is separately gated to admin —
     // an upload nobody can point at is inert.
+    //
+    // Two ways to write here, and the second is the interesting one:
+    //   · a portal account, uploading by hand from the tool page;
+    //   · a `be` claim, minted by brandExposureIngest for board-exposure-match.py
+    //     running on a laptop with no Google account. That claim names ONE
+    //     matchId and is compared against the path, so a key lifted off that
+    //     machine can overwrite the match it was minted for and nothing else.
+    //     It carries no email claim, which is exactly why the catch-all at the
+    //     foot of this file does not quietly cover it.
     match /brand-exposure/{matchId}/{file} {
       allow read: if request.auth != null && request.auth.token.email != null;
-      allow write: if request.auth != null && request.auth.token.email != null
+      allow write: if request.auth != null
+        && (request.auth.token.email != null || request.auth.token.be == matchId)
         && request.resource.size < 600 * 1024 * 1024
         && (request.resource.contentType.matches('video/mp4')
             || request.resource.contentType.matches('application/json'));
