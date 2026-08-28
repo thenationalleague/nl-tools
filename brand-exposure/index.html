@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Brand Exposure
-  Version: v0.3 (28/08/2026)
+  Version: v0.4 (28/08/2026)
   File: /brand-exposure/index.html
 
   Sponsor exposure measured from match video — seconds on screen, clarity and
@@ -27,6 +27,10 @@
     staff              → off; granted per-user, like Commercial Compliance
 
   Changelog
+  v0.4 (28/08/2026) — One Add a match on screen at a time. On a phone with an
+    empty list and the panel open there were three: the toolbar's, the empty
+    state's, and the panel's own submit — two of which reopened a panel that
+    was already open.
   v0.3 (28/08/2026) — Ingest keys. A superadmin generates one per machine and
     sees it once; board-exposure-match.py --upload trades it for a token scoped
     to a single match and puts the measurement here itself. Minting happens in
@@ -94,6 +98,13 @@
     var NL_TOOL_KEY = 'ops-brand-exposure';
 
     window.NL_CHANGELOG = [
+      {
+        date: '28/08/2026',
+        version: 'v0.4',
+        items: [
+          'One "Add a match" on screen at a time — there were three on a phone.'
+        ]
+      },
       {
         date: '28/08/2026',
         version: 'v0.3',
@@ -529,7 +540,11 @@
         'Run <code>board-exposure-match.py</code> over a match on your own machine, ' +
         'then add the <code>-data.json</code> it writes. Raw seconds only mean ' +
         'something next to other grounds, so the pile is the point.',
-        canWrite ? '<button class="btn btn--primary" id="btnAdd2">Add a match</button>' : ''
+        /* Not while the panel is already open. On a phone the toolbar button,
+           this one and the panel's own submit all end up on screen together —
+           three buttons saying Add a match, two of which do the same nothing. */
+        (canWrite && !addOpen())
+          ? '<button class="btn btn--primary" id="btnAdd2">Add a match</button>' : ''
       ) + '</td></tr></tbody>';
       var b2 = $('btnAdd2');
       if (b2) b2.onclick = openAdd;
@@ -1096,9 +1111,23 @@
   }
 
   /* ── Adding a match ──────────────────────────────────────────────── */
+  function addOpen() { return !$('addPanel').hidden; }
+
+  /* One way in at a time. While the panel is open the toolbar button is a
+     no-op that still looks pressable, so it goes; the panel's own submit is
+     the only Add left on screen. */
+  function closeAdd() {
+    $('addPanel').hidden = true;
+    $('btnAdd').hidden = !canWrite;
+    pending = null;
+    render();
+  }
+
   function openAdd() {
     pending = null;
     $('addPanel').hidden = false;
+    $('btnAdd').hidden = true;
+    render();
     $('addPanel').innerHTML =
       '<div class="form-panel"><div class="form-panel__head">Add a measured match</div>' +
       '<div class="form-panel__body">' +
@@ -1123,7 +1152,7 @@
       readFiles(e.dataTransfer.files);
     };
     file.onchange = function () { readFiles(file.files); };
-    $('addCancel').onclick = function () { $('addPanel').hidden = true; };
+    $('addCancel').onclick = closeAdd;
     $('addSave').onclick = saveMatch;
   }
 
@@ -1305,8 +1334,7 @@
         .then(function () {
           NL.toast('Match added', 'success');
           NL.writeAudit('add_match', rec.meta.fixture + ' (' + job.date + ')');
-          $('addPanel').hidden = true;
-          pending = null;
+          closeAdd();
         })
         .catch(function (e) {
           save.disabled = false;
