@@ -63,6 +63,10 @@ REPORT_FRAME_Q = 55
 DEFAULT_FRAME_BUDGET = 240
 SIZE_WARN_MB = 14
 PROGRESS_EVERY = 3.0        # seconds between progress updates
+# Playback only, never measurement. 640px wide keeps a 105-minute match around
+# 150 MB, which uploads in under a minute and streams without buffering.
+PROXY_W = 640
+PROXY_CRF = 30
 _ARGS = None                # parsed args, for the non-interactive confirm path
 
 REFS_README = """Reference images — this folder is the configuration.
@@ -126,6 +130,41 @@ def probe(video, ffprobe):
     if not info["duration"]:
         die(f"could not read a duration from {video}.")
     return info
+
+
+def make_proxy(video, out, ffmpeg, start=None, end=None):
+    """
+    A small, seekable copy of the match for playing back inside the tool.
+
+    Not for measuring — at this size a hoarding is about thirty pixels wide and
+    the detector would find nothing. The boxes come from the full-resolution
+    scan and are drawn over the top, so the proxy only has to be good enough to
+    recognise a board when one is outlined for you.
+
+    +faststart is the load-bearing flag: it moves the index to the front of the
+    file so a browser can seek without downloading all of it first.
+    """
+    cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-stats", "-y"]
+    if start:
+        cmd += ["-ss", str(start)]
+    if end:
+        cmd += ["-to", str(end)] if not start else ["-t", str(end - start)]
+    cmd += ["-i", video,
+            "-vf", f"scale={PROXY_W}:-2",
+            "-c:v", "libx264", "-crf", str(PROXY_CRF), "-preset", "veryfast",
+            "-an",                       # nobody needs the commentary to see a board
+            "-movflags", "+faststart",
+            out]
+    t0 = time.time()
+    try:
+        subprocess.run(cmd, check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        print(f"  ! could not build the proxy video ({e}). The match is still "
+              f"measured; the tool will fall back to stills.")
+        return None
+    mb = os.path.getsize(out) / 1e6 if os.path.exists(out) else 0
+    print(f"  proxy: {os.path.basename(out)}  {mb:.0f} MB in {time.time()-t0:.0f}s")
+    return out
 
 
 def parse_clock(s):
@@ -485,6 +524,8 @@ def main():
     ap.add_argument("--limit", type=int, default=0, help="stop after N samples — for a quick test")
     ap.add_argument("--frame-budget", type=int, default=DEFAULT_FRAME_BUDGET)
     ap.add_argument("--keep-frames", action="store_true")
+    ap.add_argument("--no-proxy", action="store_true",
+                    help="skip the small playback video the tool uses")
     ap.add_argument("--ffmpeg", default="ffmpeg")
     ap.add_argument("--ffprobe", default="ffprobe")
     ap.add_argument("--init", action="store_true", help="create the refs folder tree and exit")
@@ -794,6 +835,10 @@ def run_one(a, video, club, title, date="", start=None, end=None):
         print(f"  {n:<26}{R.hhmm(s['seconds']):>11}{s['pct']:>7.1f}%{s['index']:>8.1f}"
               f"{s['clarity']:>9.2f}{s['area']:>8.2f}%")
 
+    proxy = None
+    if not a.no_proxy:
+        proxy = make_proxy(video, f"{base}-proxy.mp4", a.ffmpeg, start, end)
+
     if not a.keep_frames:
         shutil.rmtree(work, ignore_errors=True)
         shutil.rmtree(small_dir, ignore_errors=True)
@@ -801,6 +846,8 @@ def run_one(a, video, club, title, date="", start=None, end=None):
     print(f"\n  {html}  ({size/1e6:.1f} MB) — open this in a browser")
     print(f"  {base}-data.json — the numbers on their own")
     print(f"  {base}-detections.json — every detection, for anything else you want to do")
+    if proxy:
+        print(f"  {base}-proxy.mp4 — playback for the tool")
     if size / 1e6 > SIZE_WARN_MB:
         print(f"\n  That page is large enough to be slow to open or email."
               f"\n  Re-run with --frame-budget {int(a.frame_budget * SIZE_WARN_MB / (size/1e6))}"

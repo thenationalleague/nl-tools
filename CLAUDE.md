@@ -142,16 +142,27 @@ npm run fetch-ga-metrics    # node scripts/fetch-ga-metrics.js — GA4 Data API,
 ```
 
 ```bash
-npm test                    # node --test tests/*.test.mjs — 260 tests, gates every PR
+npm test                    # node --test tests/*.test.mjs — gates every PR; prints its own count
 bash system/lint-tools.sh --strict   # what CI runs; exit 1 on drift
 ```
 
-There **is** a test suite: 17 files under `tests/`, run by `canon-checks.yml` on
-every push and PR. (This section said "No test framework" until 15/08/2026,
-which is the kind of wrong that stops someone adding a test.) `tests/canon.test.mjs`
-covers the `NL.*` API thoroughly; `tests/brand-canon.test.mjs` covers the CSS
-canon with four tests about one button variant, so the design system is
-effectively untested — that gap is real and worth closing.
+There **is** a test suite under `tests/`, run by `canon-checks.yml` on every
+push and PR. `tests/canon.test.mjs` covers the `NL.*` API; `tests/brand-canon.test.mjs`
+covers the CSS canon.
+
+**Do not write test counts, file counts or coverage verdicts here.** This
+paragraph has now been wrong twice in opposite directions. It said "No test
+framework" until 15/08/2026, which is the kind of wrong that stops someone
+adding a test. It was then replaced by "260 tests, 17 files, brand-canon has
+four tests about one button variant, so the design system is effectively
+untested — that gap is real and worth closing", and by 28/08/2026 the real
+figures were 837 tests across 41 files with 63 in brand-canon. The gap it
+called worth closing had been closed, and the doc was still commissioning the
+work. A stale number is a nuisance; a stale *conclusion* sends someone off to
+build something that exists.
+
+`npm test` prints the count. That is the same fix the `?v=` table got below,
+and for the same reason: a measurement belongs where it is measured.
 
 Verification of UI changes is still manual (open the page in a browser). There
 is no page-render test, so a converted page that silently breaks will not be
@@ -164,6 +175,7 @@ which is why work gets re-planned from scratch. Check here first.
 
 | Document | What it decides |
 |---|---|
+| `system/RUNBOOK.md` | **How the system is operated**, for a human with a browser and no terminal: where every part lives, which of the 18 Actions ships what, which are automatic vs one-button, and what to do when a tool denies everyone / a `?v=` is stale / the registry drifts. Written 28/08/2026 because the deployment table below covers six workflows out of eighteen. |
 | `system/CONSOLIDATION.md` | The master plan. Every tool draws from one shared place. Seven workstreams, safety rails, order of attack. Drafted 12/07/2026 from a five-way audit + external review. |
 | `system/gas-to-functions-migration.md` | **Locked decision**: retire the public Apps Script web app entirely; Firebase for everything, one private GAS email shim. |
 | `system/tool-status-and-access.md` | Which tools are live vs parked, and the per-role access model for each. |
@@ -183,8 +195,11 @@ its own `claude/*` branch — the branch name is given in the session prompt, no
 here. (A specific branch name lived in this section and was months stale.)
 
 Branches are **squash-merged**, which means `git branch --merged` is worthless
-here: a squashed branch's commits never become ancestors of `main`, so it reports
-every one of 241 branches as unmerged. Use **Actions → Prune merged branches**
+here: a squashed branch's commits never become ancestors of `main`, so it
+reports every branch on the remote as unmerged, however long ago it landed.
+(This said "every one of 241 branches" until 28/08/2026; the prune tool below
+has since done its job and the remote is down to a couple of dozen. The point
+stands, the number was decoration.) Use **Actions → Prune merged branches**
 instead — report mode first, then `delete` with `prune` typed in. It runs three
 tests and spares anything that fails all of them; the two lists beside it,
 `.github/branch-prune-allow.txt` and `.github/branch-prune-keep.txt`, record the
