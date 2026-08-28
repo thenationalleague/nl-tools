@@ -88,6 +88,24 @@ gcloud storage cp match.mp4 gs://nl-tools.firebasestorage.app/uploads/match.mp4
 gcloud run jobs execute brand-exposure-scan --region=europe-west2 --project=nl-tools --wait --update-env-vars=BE_VIDEO=uploads/match.mp4,BE_CLUB="Sutton United",BE_MATCH="Sutton United v Barnet",BE_DATE=2026-08-23,BE_REFERENCE_SET=complete,BE_START=18:30,BE_END=2:05:00
 ```
 
+**Every one of those variables has to be on the command, every single time.**
+`--update-env-vars` on `execute` is an *execution override*: it applies to that
+one run and is never written to the job, which
+[the reference states plainly](https://cloud.google.com/sdk/gcloud/reference/run/jobs/execute)
+— the parameters "affect only this execution and not subsequent ones, because
+the underlying job definition remains unchanged". So a bare
+`gcloud run jobs execute brand-exposure-scan --wait` cannot work. It refuses in
+about five seconds with `BE_VIDEO is not set`, which on a phone looks
+indistinguishable from the container being broken. It happened at 00:16 on
+29/08/2026 and cost half an hour, most of it spent blaming a deploy that had
+done nothing wrong. Re-run by editing the whole line, never by shortening it.
+
+**Quote any `gs://` URL you are going to paste from a phone.** Android linkifies
+it and copies only the host and path, so `gcloud storage ls gs://bucket/uploads`
+arrives in the terminal as `bucket/uploads` and bash answers `No such file or
+directory` — which reads like an empty bucket rather than a mangled paste. Same
+evening, twice. `gcloud storage ls "gs://…"` survives.
+
 `BE_START` / `BE_END` are optional and trim to the match itself. Leave them off
 and the whole file is measured, including the holding slate and the warm-up —
 which are real boards on real grass and will inflate every share.

@@ -61,7 +61,16 @@ def die(msg, code=2):
 def env(name, default=None, required=False):
     v = os.environ.get(name, default)
     if required and not v:
-        die(f"{name} is not set. The trigger is supposed to set it.")
+        # Almost always a re-run typed short. The run parameters arrive as
+        # execution overrides — `execute --update-env-vars=…` — which apply to
+        # one execution and are never written to the job, so a bare `execute`
+        # starts a container with none of them and dies here in five seconds.
+        # Saying so is the whole point: the bare failure looks like a broken
+        # image, and once cost half an hour of blaming an innocent deploy.
+        die(f"{name} is not set. Every run must pass the full "
+            f"--update-env-vars=… list; it is a per-execution override and does "
+            f"not persist on the job, so a shortened re-run arrives with "
+            f"nothing set. See system/board-exposure/CLOUD.md.")
     return v
 
 
