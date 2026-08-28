@@ -66,6 +66,15 @@
   function crestUrl(name) {
     return name ? CREST_BASE + encodeURIComponent(name) + ".png" : "";
   }
+  /* Guest sides — the PL2 teams that enter the National League Cup — live in
+     their own file and carry a crestName pointing at the parent club's badge,
+     so no crest is duplicated. "Birmingham City PL2" is drawn with the
+     Birmingham City crest; without this it asked for a file that isn't there
+     and rendered a gap. */
+  function crestKey(name) {
+    var guest = NL.clubs.guestByName && NL.clubs.guestByName(name);
+    return (guest && guest.crestName) || name;
+  }
 
   /* Any pasted spelling → the club's canonical name (used for crest lookup
      and club record lookup). Unknown names pass through untouched. */
@@ -121,7 +130,8 @@
     var canon = canonicalName(name);
     /* short-name mode uses each club's short label from the DB */
     if (state.fit === "short") {
-      var club = NL.clubs.byName(canon);
+      var club = NL.clubs.byName(canon) ||
+                 (NL.clubs.guestByName && NL.clubs.guestByName(canon));
       if (club && club.short) return club.short.toUpperCase();
     }
     /* a few names always shorten on arrival, every mode */
@@ -220,8 +230,8 @@
         return;
       }
       var homeName = canonicalName(r.home), awayName = canonicalName(r.away);
-      var homeCrest = crestUrl(homeName);
-      var awayCrest = crestUrl(awayName);
+      var homeCrest = crestUrl(crestKey(homeName));
+      var awayCrest = crestUrl(crestKey(awayName));
       var hasScore = state.mode === "results" && r.hs !== "" && r.hs != null && r.as !== "" && r.as != null;
       var mid;
       if (hasScore) {
@@ -408,10 +418,10 @@
           del;
       } else {
         tr.innerHTML = ins +
-          '<td><input class="g-team" data-i="' + i + '" data-k="home" list="teamList" value="' + escapeHtml(r.home) + '"></td>' +
+          '<td>' + teamSelect(i, "home", r.home) + '</td>' +
           '<td class="col-score"><input class="g-sc" data-i="' + i + '" data-k="hs" value="' + escapeHtml(r.hs) + '"></td>' +
           '<td class="col-score"><input class="g-sc" data-i="' + i + '" data-k="as" value="' + escapeHtml(r.as) + '"></td>' +
-          '<td><input class="g-team" data-i="' + i + '" data-k="away" list="teamList" value="' + escapeHtml(r.away) + '"></td>' +
+          '<td>' + teamSelect(i, "away", r.away) + '</td>' +
           '<td class="col-ko"><div class="kowrap">' +
             '<input type="checkbox" class="g-koon" data-i="' + i + '" data-k="koOn" title="Print this kick-off time"' +
               (r.ko && r.koOn !== false ? " checked" : "") + '>' +
@@ -420,6 +430,15 @@
           del;
       }
       gridBody.appendChild(tr);
+    });
+    /* Set the selection as a property rather than a `selected` attribute —
+       the value round-trips exactly, whatever punctuation the name carries. */
+    state.rows.slice(0, 26).forEach(function (r, i) {
+      if (r.divider != null) return;
+      ["home", "away"].forEach(function (k) {
+        var sel = gridBody.querySelector('select.g-team[data-i="' + i + '"][data-k="' + k + '"]');
+        if (sel) sel.value = r[k] || "";
+      });
     });
   }
   function gridChanged(e) {
@@ -709,16 +728,49 @@
     setStatus(msg, 8000);
   }
 
-  /* ---------------- team datalist ---------------- */
-  /* Roster comes from the canon (NL.clubs, one clubs-meta fetch per session),
-     not a local mirror — current season only, which is what a matchday
-     graphic is ever built from. */
-  function buildTeamList() {
-    NL.clubs.forSeason().then(function (clubs) {
-      $("teamList").innerHTML = clubs.map(function (c) {
-        return '<option value="' + escapeHtml(c.name) + '">';
+  /* ---------------- team roster ----------------
+     The editor picks teams from a list rather than taking typed text: on a
+     phone that is the native picker instead of a text box the width of a
+     thumbnail. Both files come from the canon — clubs-meta for the three
+     divisions, cup-clubs-meta for the guest sides that enter the NL Cup, which
+     are deliberately kept out of clubs-meta because they were never members. */
+  var _teamOptions = "";     /* <optgroup> markup, built once */
+  var _teamNames = {};       /* lower-cased roster name → true */
+
+  function buildTeamOptions() {
+    return Promise.all([
+      NL.clubs.forSeason(),
+      NL.clubs.guests().catch(function () { return []; })
+    ]).then(function (res) {
+      var clubs = res[0] || [], guests = res[1] || [];
+      var byDiv = function (d) { return clubs.filter(function (c) { return c.division === d; }); };
+      var groups = [
+        ["National League", byDiv("National")],
+        ["National League North", byDiv("North")],
+        ["National League South", byDiv("South")],
+        ["National League Cup guests", guests]
+      ];
+      _teamNames = {};
+      _teamOptions = groups.filter(function (g) { return g[1].length; }).map(function (g) {
+        return '<optgroup label="' + escapeHtml(g[0]) + '">' + g[1].map(function (c) {
+          _teamNames[String(c.name).toLowerCase()] = true;
+          return '<option value="' + escapeHtml(c.name) + '">' + escapeHtml(c.name) + '</option>';
+        }).join("") + '</optgroup>';
       }).join("");
-    }).catch(function () { /* datalist stays empty — names are free text anyway */ });
+    });
+  }
+
+  /* A value the roster doesn't carry — a pasted one-off opponent, a name NLS
+     spells differently — is added as its own option rather than being silently
+     swapped for whichever club happens to sort first. */
+  function teamSelect(i, key, val) {
+    var v = String(val || ""), own = "";
+    if (v && !_teamNames[v.toLowerCase()]) {
+      own = '<option value="' + escapeHtml(v) + '">' + escapeHtml(v) + '</option>';
+    }
+    return '<select class="nl-select g-team" data-i="' + i + '" data-k="' + key + '">' +
+             '<option value="">—</option>' + own + _teamOptions +
+           '</select>';
   }
 
   /* ---------------- export ---------------- */
@@ -856,7 +908,6 @@
 
     load();
     if (["wrap", "short"].indexOf(state.fit) < 0) state.fit = "wrap";
-    buildTeamList();
     if (!state.rows.length) state.rows = parse(SAMPLE);
     syncPasteFromRows();
     buildGrid();
@@ -910,6 +961,10 @@
        then — and the NLS date list needs seasons.current from the same file. */
     NL.clubs.load().then(function () { render(); loadDates(); })
       .catch(function () { loadDates(); });
+    /* The grid is built before the roster arrives, so rebuild it once the
+       options exist — and re-render, since guest crests and short names both
+       read cup-clubs-meta. */
+    buildTeamOptions().then(function () { buildGrid(); render(); }).catch(function () {});
     render();
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(render);
     /* re-fit after layout settles (fixes tiny 9x16 on first paint / in an iframe) */

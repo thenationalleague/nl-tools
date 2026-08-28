@@ -20,7 +20,7 @@ import { REPO } from './load-canon.mjs';
 
 const APP = join(REPO, 'graphics/fixtures-graphic/fixtures-app.js');
 const START = '  /* ---------------- National League Services';
-const END   = '  /* ---------------- team datalist';
+const END   = '  /* ---------------- team roster';
 
 const meta = JSON.parse(readFileSync(join(REPO, 'assets/data/clubs-meta.json'), 'utf8'));
 const optaIndex = Object.fromEntries(meta.clubs.filter(c => c.optaID).map(c => [c.optaID, c]));
