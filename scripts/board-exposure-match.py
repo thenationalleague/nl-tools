@@ -63,6 +63,7 @@ REPORT_FRAME_Q = 55
 DEFAULT_FRAME_BUDGET = 240
 SIZE_WARN_MB = 14
 PROGRESS_EVERY = 3.0        # seconds between progress updates
+_ARGS = None                # parsed args, for the non-interactive confirm path
 
 REFS_README = """Reference images — this folder is the configuration.
 
@@ -127,10 +128,34 @@ def probe(video, ffprobe):
     return info
 
 
-def extract_ffmpeg(video, work, fps, ffmpeg, limit):
+def parse_clock(s):
+    """'1:52:30', '18:30' or '1110' -> seconds. None passes through."""
+    if s in (None, ""):
+        return None
+    parts = str(s).strip().split(":")
+    try:
+        vals = [float(p) for p in parts]
+    except ValueError:
+        die(f"cannot read '{s}' as a time. Use 1:52:30, 18:30 or a number of seconds.")
+    if len(vals) > 3:
+        die(f"cannot read '{s}' as a time.")
+    secs = 0.0
+    for v in vals:
+        secs = secs * 60 + v
+    return secs
+
+
+def extract_ffmpeg(video, work, fps, ffmpeg, limit, start=None, end=None):
     """`fps=N` resamples to exactly N a second whatever the source does."""
-    cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-stats", "-y",
-           "-i", video, "-vf", f"fps={fps}", "-q:v", "3"]
+    cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-stats", "-y"]
+    # -ss before -i is the fast seek: it jumps by keyframe rather than decoding
+    # everything it is skipping. A second or two of imprecision at kick-off is
+    # irrelevant here and it saves decoding the entire build-up.
+    if start:
+        cmd += ["-ss", str(start)]
+    if end:
+        cmd += ["-to", str(end)] if not start else ["-t", str(end - start)]
+    cmd += ["-i", video, "-vf", f"fps={fps}", "-q:v", "3"]
     if limit:
         cmd += ["-frames:v", str(limit)]
     cmd.append(os.path.join(work, "f%06d.jpg"))
@@ -141,7 +166,7 @@ def extract_ffmpeg(video, work, fps, ffmpeg, limit):
     return 1.0 / fps
 
 
-def extract_opencv(video, work, fps, limit):
+def extract_opencv(video, work, fps, limit, start=None, end=None):
     """
     Fallback when ffmpeg is not installed. Single-threaded and slower, and it
     can only take every Nth frame rather than resample, so the true interval
@@ -152,9 +177,14 @@ def extract_opencv(video, work, fps, limit):
         die(f"OpenCV could not open {video}. Install ffmpeg and try again.")
     src = cap.get(cv2.CAP_PROP_FPS) or 25.0
     step = max(1, int(round(src / fps)))
+    if start:
+        cap.set(cv2.CAP_PROP_POS_MSEC, start * 1000.0)
+    span = (end - (start or 0)) if end else None
     n = fno = 0
     t0 = time.time()
     while not limit or n < limit:
+        if span is not None and (fno / src) >= span:
+            break
         ok, frame = cap.read()
         if not ok:
             break
@@ -169,7 +199,8 @@ def extract_opencv(video, work, fps, limit):
     return step / src
 
 
-def extract(video, work, fps, ffmpeg, expected, limit=0, prefer_ffmpeg=True):
+def extract(video, work, fps, ffmpeg, expected, limit=0, prefer_ffmpeg=True,
+            start=None, end=None):
     """
     Frames as JPEGs, at the sample rate. Restartable: if the folder already
     holds roughly the right number, it is reused rather than redone.
@@ -179,9 +210,13 @@ def extract(video, work, fps, ffmpeg, expected, limit=0, prefer_ffmpeg=True):
     have = sorted(f for f in os.listdir(work) if f.endswith(".jpg")) if os.path.isdir(work) else []
     stamp = os.path.join(work, "interval.txt")
     want = limit or expected
+    key = f"{1.0 / fps}|{start or 0}|{end or 0}"
     if len(have) >= want * 0.97 and os.path.exists(stamp):
-        print(f"  reusing {len(have)} frames already in {work}")
-        return [os.path.join(work, f) for f in have], float(open(stamp).read())
+        prev = open(stamp).read().strip()
+        if prev.split("|")[0] == key.split("|")[0] and prev == key:
+            print(f"  reusing {len(have)} frames already in {work}")
+            return [os.path.join(work, f) for f in have], 1.0 / fps
+        print("  frames on disk cover a different window — re-extracting")
 
     os.makedirs(work, exist_ok=True)
     for f in have:
@@ -198,13 +233,13 @@ def extract(video, work, fps, ffmpeg, expected, limit=0, prefer_ffmpeg=True):
             f"  Point --work at a drive with room, or drop --fps to 1.")
 
     t0 = time.time()
-    interval = (extract_ffmpeg(video, work, fps, ffmpeg, limit) if use_ffmpeg
-                else extract_opencv(video, work, fps, limit))
+    interval = (extract_ffmpeg(video, work, fps, ffmpeg, limit, start, end) if use_ffmpeg
+                else extract_opencv(video, work, fps, limit, start, end))
     files = sorted(f for f in os.listdir(work) if f.endswith(".jpg"))
     if not files:
         die("no frames were written.")
     with open(stamp, "w") as f:
-        f.write(str(interval))
+        f.write(f"{interval}|{start or 0}|{end or 0}")
     print(f"  {len(files)} frames in {time.time()-t0:.0f}s")
     return [os.path.join(work, f) for f in files], interval
 
@@ -355,7 +390,9 @@ def confirm_fixture(path, clubs, refs_root, assume_yes=False):
             return None
         print(f"    {home} v {away}   ({date or 'no date'}) — {club_note(home)}")
         return {"club": home if home in clubs else None,
-                "home": home, "away": away, "date": date or ""}
+                "home": home, "away": away, "date": date or "",
+                "start": parse_clock(getattr(_ARGS, "start", None)),
+                "end": parse_clock(getattr(_ARGS, "end", None))}
 
     while True:
         if home:
@@ -397,8 +434,17 @@ def confirm_fixture(path, clubs, refs_root, assume_yes=False):
                        f"{' [' + date + ']' if date else ''}: ") or date
             if not date:
                 print("    ! needed — it is how the match is filed and deduped.")
+
+        # A stream is rarely just the match. Build-up and warm-up show real
+        # boards on real grass, so they are counted as match exposure unless
+        # trimmed — and they inflate the denominator every share is divided by.
+        print("    Kick-off and full time, if the file has build-up either side.")
+        print("    Blank measures the whole file.")
+        start = parse_clock(ask("    Kick-off at (e.g. 18:30, blank for none): "))
+        end = parse_clock(ask("    Ends at (e.g. 2:05:00, blank for end of file): "))
         return {"club": home if home in clubs else None,
-                "home": home, "away": away, "date": date}
+                "home": home, "away": away, "date": date,
+                "start": start, "end": end}
 
 
 def scaffold(root):
@@ -431,6 +477,10 @@ def main():
     ap.add_argument("--out", default=None, help="output basename (default: from --match)")
     ap.add_argument("--work", default=None, help="frame scratch dir (default: <out>-frames)")
     ap.add_argument("--fps", type=float, default=C.SAMPLE_FPS)
+    ap.add_argument("--start", default=None, metavar="TIME",
+                    help="skip to kick-off, e.g. 18:30 — build-up is not match exposure")
+    ap.add_argument("--end", default=None, metavar="TIME",
+                    help="stop at the final whistle, e.g. 2:05:00")
     ap.add_argument("--jobs", type=int, default=0, help="0 = all cores but one")
     ap.add_argument("--limit", type=int, default=0, help="stop after N samples — for a quick test")
     ap.add_argument("--frame-budget", type=int, default=DEFAULT_FRAME_BUDGET)
@@ -444,6 +494,8 @@ def main():
     ap.add_argument("--stills", type=int, default=0, metavar="N",
                     help="write N full-size frames spread across the match, to crop boards from")
     a = ap.parse_args()
+    global _ARGS
+    _ARGS = a
     if a.batch and a.out_dir is None:
         a.out_dir = "reports"
 
@@ -477,7 +529,8 @@ def main():
     fx = confirm_fixture(a.video, clubs, a.refs, a.yes)
     if not fx:
         die("nothing to measure.")
-    run_one(a, a.video, fx["club"], fx["home"] + " v " + fx["away"], fx["date"])
+    run_one(a, a.video, fx["club"], fx["home"] + " v " + fx["away"], fx["date"],
+            fx.get("start"), fx.get("end"))
 
 
 def known_clubs(refs_root):
@@ -564,7 +617,8 @@ def run_batch(a, clubs):
         print(f"  [{i}/{len(plan)}] {fx['home']} v {fx['away']} — {fx['date'] or 'no date'}")
         print("=" * 72)
         try:
-            run_one(a, path, fx["club"], fx["home"] + " v " + fx["away"], fx["date"])
+            run_one(a, path, fx["club"], fx["home"] + " v " + fx["away"], fx["date"],
+                    fx.get("start"), fx.get("end"))
             ok.append(name)
             os.makedirs(done_dir, exist_ok=True)
             shutil.move(path, os.path.join(done_dir, name))
@@ -581,7 +635,7 @@ def run_batch(a, clubs):
     print()
 
 
-def run_one(a, video, club, title, date=""):
+def run_one(a, video, club, title, date="", start=None, end=None):
     entries, scope, usable = describe_refs(a.refs, club)
 
     match = title or os.path.splitext(os.path.basename(video))[0]
@@ -594,15 +648,26 @@ def run_one(a, video, club, title, date=""):
     work = a.work or f"{base}-frames"
 
     info = probe(video, a.ffprobe)
+    start = parse_clock(a.start) if start is None else start
+    end = parse_clock(a.end) if end is None else end
+    if end and end > info["duration"]:
+        end = None
+    span = (end or info["duration"]) - (start or 0)
+    if span <= 0:
+        die("the start and end times leave nothing to measure.")
     print(f"\n  {video}: {info['w']}x{info['h']}, {info['fps']:.0f}fps, "
           f"{R.hhmm(info['duration'])}")
+    if start or end:
+        print(f"  measuring {R.hhmm(start or 0)} to {R.hhmm(end or info['duration'])}"
+              f" — {R.hhmm(span)} of match, {R.hhmm(info['duration'] - span)} skipped")
 
-    expected = int(info["duration"] * a.fps)
-    files, interval = extract(video, work, a.fps, a.ffmpeg, expected, a.limit)
+    expected = int(span * a.fps)
+    files, interval = extract(video, work, a.fps, a.ffmpeg, expected, a.limit,
+                              start=start, end=end)
     if a.limit:
         files = files[:a.limit]
     n_samples = len(files)
-    duration = n_samples * interval if a.limit else info["duration"]
+    duration = n_samples * interval if a.limit else span
 
     jobs = a.jobs or max(1, (os.cpu_count() or 2) - 1)
     print(f"\n  scanning {n_samples} samples across {jobs} cores")
@@ -696,6 +761,8 @@ def run_one(a, video, club, title, date=""):
             "video_w": info["w"], "video_h": info["h"],
             "scan_seconds": round(scan_secs, 1),
             "settings": C.settings(),
+            "source_duration": round(info["duration"], 1),
+            "window": {"start": start or 0, "end": end or round(info["duration"], 1)},
             "references": [{"sponsor": n, "scope": s, "file": os.path.basename(p)}
                            for n, p, s in entries],
             "scope": scope,

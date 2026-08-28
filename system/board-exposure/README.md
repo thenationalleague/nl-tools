@@ -38,6 +38,24 @@ lets you correct it:
 **Every question is asked up front, then it runs unattended** — a batch that
 stops halfway through six matches to ask something is one you have to sit with.
 
+### Trim to the match
+
+It also asks for kick-off and full time, because **a stream is rarely just the
+match**. A LIGR file opens on a holding slate and runs through the warm-up, and
+that costs twice:
+
+- The warm-up shows real boards on real grass, so it is counted as match
+  exposure. It is exposure, but it is not what anyone means by "on screen
+  during the match", and how much of it a stream carries varies by fixture.
+- Every share is divided by the file's length. Half an hour of build-up in a
+  two-and-a-half hour file understates every sponsor by about 20%.
+
+Blank means measure the whole file. `--start 18:30 --end 2:05:00` does the same
+non-interactively. Trimming also skips extracting and scanning the build-up, so
+it is faster as well as more accurate. The holding slate itself was already
+rejected — no grass beneath it, the same check that kills the ident card — but
+nothing was catching the warm-up.
+
 The home club is confirmed rather than assumed because it decides which club
 folder joins the league partner marks, and **the wrong ground silently drops
 every local board while still printing a table that looks entirely fine**. That
