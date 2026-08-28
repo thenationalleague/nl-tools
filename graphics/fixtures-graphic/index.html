@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   Fixtures & Results Graphic — NL Tools (Graphics sub-tool)
-  Version: v1.9 (28/08/2026)
+  Version: v1.10 (28/08/2026)
   File: /graphics/fixtures-graphic/index.html
 
   On-brand fixtures/results social graphic. Fixtures ⇄ Results toggle,
@@ -65,6 +65,16 @@
   var NL_TOOL_KEY = 'staff-graphics';
 
   window.NL_CHANGELOG = [
+    {
+      date: '28/08/2026',
+      version: 'v1.10',
+      items: [
+        'Fixed: the graphic grew a little every time the preview redrew, so repeatedly pressing Show all times / Hide all times inflated it off the screen.',
+        'Fixed on phones: the preview no longer sits pinned over the controls. Division, Matchday and half the editor were disappearing behind it as you scrolled.',
+        'Fixed on phones: the editor no longer squeezes team names into 74px — the row scrolls sideways at a width you can actually read and type in.',
+        'One toggle at the top now chooses where fixtures come from — the feed or typed in by hand — instead of both panels being on screen at once.'
+      ]
+    },
     {
       date: '28/08/2026',
       version: 'v1.9',
@@ -185,6 +195,13 @@
     border: 2px solid var(--nl-ink); border-radius: var(--radius-lg);
     padding: 20px; box-shadow: var(--shadow-md);
   }
+  /* Must stay BELOW the .preview rule above: same specificity, so source order
+     decides. Single column stacks the preview on top of the controls, and a
+     pinned preview then paints over whatever scrolls beneath it — Division,
+     Matchday, Long-name handling and half the editor were all disappearing
+     behind it. It scrolls with the page here. */
+  @media (max-width: 1100px) { .preview { position: static; } }
+
   .preview-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
   .preview-head .eyebrow { color: var(--nl-league-navy); font-family: var(--font-bold);
     font-size: var(--text-xs); letter-spacing: var(--tracking-wider); text-transform: uppercase; }
@@ -203,7 +220,14 @@
     text-transform: uppercase; color: var(--nl-grey-700); }
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   /* stack paired fields (incl. the Type + Size segmented controls) on phones */
-  @media (max-width: 560px) { .row2 { grid-template-columns: 1fr; } }
+  @media (max-width: 560px) {
+    .row2 { grid-template-columns: 1fr; }
+    /* Seven columns inside ~306px left the team inputs 74px wide — "Kidderminster
+       Harriers" rendered as "Kidde", and the kick-off as "15:0". Hold the table
+       at a width the fields are usable at and let the scroller carry it. */
+    .grid-scroller { overflow-x: auto; }
+    table.grid { min-width: 490px; }
+  }
   select, input[type="text"], textarea {
     width: 100%; padding: 9px 11px; border: 1px solid var(--nl-grey-300); border-radius: var(--radius-sm);
     background: var(--nl-white); font-family: var(--font-regular); font-size: var(--text-sm); color: var(--nl-ink);
@@ -230,7 +254,7 @@
   .grid .g-team { width: 100%; }
   .grid td { overflow: hidden; }
   .grid .g-sc { width: 34px; text-align: center; }
-  .grid .g-ko { width: 46px; text-align: center; }
+  .grid .g-ko { width: 58px; text-align: center; }
   .grid .kowrap { display: flex; align-items: center; gap: 5px; }
   .grid .kowrap input[type="checkbox"] { flex: 0 0 auto; width: 14px; height: 14px; margin: 0; accent-color: var(--nl-rose-red); cursor: pointer; }
   .grid .g-del { border: none; background: var(--nl-grey-100); color: var(--nl-grey-700); width: 24px; height: 24px;
@@ -249,6 +273,11 @@
   /* hide score columns in fixtures mode, KO column in results mode */
   body[data-mode="fixtures"] .col-score { display: none; }
   body[data-mode="results"] .col-ko { display: none; }
+  /* show-all / hide-all only mean something where times are drawn */
+  body[data-mode="results"] .ko-bulk { display: none; }
+  /* one source at a time — the editor below is shared by both */
+  body[data-source="manual"] #nlsCard { display: none; }
+  body[data-source="feed"] #pasteCard { display: none; }
 
   footer.status { display: flex; justify-content: space-between; align-items: center;
     font-family: var(--font-bold); font-size: var(--text-xs); letter-spacing: var(--tracking-wide);
@@ -259,7 +288,7 @@
   .toollinks a:hover { color: var(--nl-rose-red); }
 </style>
 </head>
-<body data-mode="fixtures">
+<body data-mode="fixtures" data-source="feed">
 
 <div id="pageWrap">
 
@@ -285,6 +314,13 @@
 
     <div class="card">
       <h2>Setup</h2>
+      <div class="field">
+        <label>Fixtures from</label>
+        <div class="seg" id="sourceSeg">
+          <button type="button" class="src-btn active" data-src="feed">The feed</button>
+          <button type="button" class="src-btn" data-src="manual">Typed in</button>
+        </div>
+      </div>
       <div class="row2">
         <div class="field">
           <label for="divisionSel">Division</label>
@@ -297,7 +333,7 @@
         </div>
         <div class="field">
           <label for="matchdayInput">Matchday / title</label>
-          <input type="text" id="matchdayInput" placeholder="Blank = MATCHDAY — or type e.g. 4, or Christmas Fixtures">
+          <input type="text" id="matchdayInput" placeholder="e.g. 4 — or Christmas Fixtures">
         </div>
       </div>
       <div class="field">
@@ -326,7 +362,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" id="nlsCard">
       <h2>Load from National League Services</h2>
       <div class="row2">
         <div class="field">
@@ -343,7 +379,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" id="pasteCard">
       <h2>Paste fixtures</h2>
       <textarea id="pasteIn" rows="7" placeholder="One match per line:&#10;Home Team [tab] [tab] Away Team&#10;(any middle column is ignored)"></textarea>
       <p class="note" style="margin:8px 0 0;">Home in column&nbsp;1, Away in the last column — <b>anything in between is ignored</b>. Up to 12 matches. Add scores &amp; kick-off times in the editor below.</p>
@@ -357,13 +393,13 @@
             <th style="width:24px"></th>
             <th>Home</th>
             <th class="col-score">H</th><th class="col-score">A</th>
-            <th>Away</th><th class="col-ko" style="width:84px">KO</th><th style="width:30px"></th>
+            <th>Away</th><th class="col-ko" style="width:96px">KO</th><th style="width:30px"></th>
           </tr></thead>
           <tbody id="gridBody"></tbody>
         </table>
       </div>
       <p class="note" style="margin:8px 0 0;">H/A = score (Results). Tick a row's KO box to print that kick-off time. Use <b>＋</b> on any row to drop a date divider above it (e.g. TUE 19 AUG), then <b>▲▼</b> to move it.</p>
-      <div class="btns col-ko" style="margin-top:10px">
+      <div class="btns ko-bulk" style="margin-top:10px">
         <button type="button" class="btn btn--ghost" id="koAllBtn">Show all times</button>
         <button type="button" class="btn btn--ghost" id="koNoneBtn">Hide all times</button>
       </div>
@@ -376,7 +412,6 @@
 
     <footer class="status">
       <span id="status">Ready</span>
-      <span>Screenshot the preview, or use Download PNG</span>
     </footer>
 
   </div>

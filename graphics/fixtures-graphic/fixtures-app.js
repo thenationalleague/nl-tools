@@ -89,6 +89,7 @@
     division: "National",
     format: "1x1",
     mode: "fixtures",          /* fixtures | results */
+    source: "feed",            /* feed | manual — which entry card is shown */
     matchday: "",              /* "" = MATCHDAY (no number) | "1".."46" */
     fit: "wrap",               /* wrap | short | truncate | scale | kern */
     rows: []                   /* {home, away, hs, as, ko} */
@@ -133,7 +134,7 @@
     try {
       var d = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
       if (d && typeof d === "object") {
-        ["division", "format", "mode", "matchday", "fit"].forEach(function (k) {
+        ["division", "format", "mode", "matchday", "fit", "source"].forEach(function (k) {
           if (typeof d[k] === "string") state[k] = d[k];
         });
         if (Array.isArray(d.rows)) state.rows = d.rows;
@@ -360,8 +361,30 @@
     if (!gfx) return;
     var h = (state.format === "1x1" ? 1080 : state.format === "4x5" ? 1350 : 1920);
     var availW = stageWrap.clientWidth - 24;
-    var top = stageWrap.getBoundingClientRect().top;
-    var availH = window.innerHeight - top - 24;
+
+    /* The height budget must NOT be read from where the stage happens to sit.
+       .preview is sticky, so a taller graphic pushes the pinned panel further
+       up, which lowers stageWrap's top, which hands out more height, which
+       grows the graphic again. Once the page was scrolled the graphic gained
+       ~22px on EVERY re-render — pressing show/hide times a few times inflated
+       it off the screen, and it crept on keystrokes too.
+
+       Derive the budget instead from the sticky offset plus the preview's own
+       chrome. The first is fixed by CSS; the second is the height of the
+       preview header. Neither moves when the stage resizes, so the measurement
+       can't feed back into the thing it measures. */
+    var preview = stageWrap.closest ? stageWrap.closest(".preview") : stageWrap.parentNode;
+    var availH = window.innerHeight - 24;
+    if (preview) {
+      var pv = getComputedStyle(preview);
+      var pinned = (pv.position === "sticky" || pv.position === "fixed") ? parseFloat(pv.top) : NaN;
+      /* Not pinned (the single-column layout) — the stage scrolls with the
+         page, so the viewport is the only limit worth applying. */
+      if (!isNaN(pinned)) {
+        var chrome = stageWrap.getBoundingClientRect().top - preview.getBoundingClientRect().top;
+        availH = window.innerHeight - pinned - chrome - 24;
+      }
+    }
     var scale = Math.min(1, availW / 1080);
     if (availH > 160) scale = Math.min(scale, availH / h);
     gfx.style.transformOrigin = "top left";
@@ -528,8 +551,10 @@
   function dateOptionLabel(ymd, info) {
     var d = new Date(ymd + "T12:00:00Z");
     var lab = d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }).replace(/,/g, "");
+    /* Kept short on purpose: "Sat 29 Aug · 12 matches" was being cut off
+       mid-word inside the select at the panel's width. */
     var n = info && info.count;
-    return lab + (n ? " · " + n + (n === 1 ? " match" : " matches") : "");
+    return lab + (n ? " (" + n + ")" : "");
   }
 
   /* meta.populatedDates is the whole season's calendar and comes back whatever
@@ -795,6 +820,19 @@
     statusT = setTimeout(function () { el.textContent = "Ready"; }, ms || 2200);
   }
 
+  /* ---------------- source + mode toggles ----------------
+     Source picks which half of the tool is on screen: the feed loader or the
+     paste box. The editor underneath belongs to both, so a card loaded from
+     the feed stays editable by hand after switching. */
+  function setSource(src) {
+    state.source = (src === "manual") ? "manual" : "feed";
+    document.querySelectorAll(".src-btn").forEach(function (b) {
+      b.classList.toggle("active", b.getAttribute("data-src") === state.source);
+    });
+    document.body.setAttribute("data-source", state.source);
+    save();
+  }
+
   /* ---------------- mode toggle ---------------- */
   function setMode(m) {
     state.mode = m;
@@ -827,6 +865,7 @@
     syncSizeSeg();
     $("matchdayInput").value = state.matchday;
     if ($("fitSel")) $("fitSel").value = state.fit;
+    setSource(state.source);
     setMode(state.mode);
 
     $("divisionSel").addEventListener("change", function () {
@@ -847,6 +886,9 @@
     document.querySelectorAll(".mode-btn").forEach(function (b) {
       b.addEventListener("click", function () { setMode(b.getAttribute("data-mode")); });
     });
+    document.querySelectorAll(".src-btn").forEach(function (b) {
+      b.addEventListener("click", function () { setSource(b.getAttribute("data-src")); fitStage(); });
+    });
 
     var pt;
     pasteEl.addEventListener("input", function () { clearTimeout(pt); pt = setTimeout(syncRowsFromPaste, 140); });
@@ -857,9 +899,9 @@
     $("resetBtn").addEventListener("click", function () {
       try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
       state.rows = parse(SAMPLE); state.division = "National"; state.format = "1x1";
-      state.mode = "fixtures"; state.matchday = "";
+      state.mode = "fixtures"; state.matchday = ""; state.source = "feed";
       $("divisionSel").value = "National"; syncSizeSeg(); $("matchdayInput").value = "";
-      syncPasteFromRows(); buildGrid(); setMode("fixtures"); setStatus("Reset");
+      syncPasteFromRows(); buildGrid(); setSource("feed"); setMode("fixtures"); setStatus("Reset");
     });
 
     window.addEventListener("resize", fitStage);

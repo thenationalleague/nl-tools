@@ -100,6 +100,17 @@ test('a match is filed under its UK day, and dividers read as a date', () => {
   assert.equal(dividerLabel('2026-12-26'), 'SAT 26 DEC');
 });
 
+test('date options stay short enough to read inside the select', () => {
+  const { dateOptionLabel } = loadSection();
+  assert.equal(dateOptionLabel('2026-08-29', { count: 12 }), 'Sat 29 Aug (12)');
+  assert.equal(dateOptionLabel('2026-08-25', { count: 1 }), 'Tue 25 Aug (1)');
+  assert.equal(dateOptionLabel('2026-08-25', null), 'Tue 25 Aug');
+  for (const n of [1, 12]) {
+    assert.ok(dateOptionLabel('2026-08-29', { count: n }).length <= 16,
+      'a longer label was being cut off mid-word in the panel');
+  }
+});
+
 test('clubs resolve on optaID, so a crest never depends on the name NLS sends', () => {
   const { nlsTeamName } = loadSection();
   assert.equal(nlsTeamName({ teamID: optaFor('Hednesford Town'), name: 'Hednesford' }), 'Hednesford Town');
