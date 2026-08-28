@@ -118,7 +118,10 @@ input.
    terminal. Firebase Storage does resumable uploads natively, so a 6 GB full
    match is the same code as a 300 MB highlights package.
 3. **A reference manager**, so sponsor artwork can be added without
-   `gcloud storage cp`.
+   `gcloud storage cp` — specced in `system/board-exposure/REFERENCES.md`,
+   which also carries the open question of whether share of voice is a metric
+   anybody actually wants. If it is not, most of the completeness machinery in
+   this system stops being needed.
 4. **A real bill.** Everything above about cost is arithmetic from measured
    local runtime, not an invoice. Run one match and read the actual number
    before anyone plans around it.
