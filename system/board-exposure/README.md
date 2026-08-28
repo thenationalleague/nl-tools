@@ -10,27 +10,73 @@ gated page, no RTDB node, no registry record, no workflow. Read
 
 ## Run a full match
 
-Three files, one command, on your own machine. Nothing uploads, nothing
-downloads, so there is no file-size limit and no egress bill — which is what
-killed every cloud-shaped version of this design.
+On your own machine. Nothing uploads, nothing downloads, so there is no
+file-size limit and no egress bill — which is what killed every cloud-shaped
+version of this design.
 
 ```
 pip install opencv-python-headless numpy
-
 python board-exposure-match.py --init --refs refs
-                                             # drop reference images in, then
-python board-exposure-match.py --video match.mp4 --refs refs \
-       --club "Sutton United" --match "Sutton United v Hartlepool"
 ```
 
-Out comes `<match>-report.html` — one self-contained page — and
-`<match>-data.json`, the numbers on their own.
+Then put reference images in `refs/`, drop videos in `inbox/`, and run the batch:
+
+```
+python board-exposure-match.py --batch inbox --refs refs
+```
+
+It reads the fixture off each filename where it can, shows what it read, and
+lets you correct it:
+
+```
+  2026-08-23 Sutton United v Hartlepool United.mp4
+    Fixture : Sutton United v Hartlepool United
+    Ground  : 5 local boards + the partner marks
+    Enter to accept, a new fixture as 'Home v Away', '?' for grounds, or 's' to skip:
+```
+
+**Every question is asked up front, then it runs unattended** — a batch that
+stops halfway through six matches to ask something is one you have to sit with.
+
+### Trim to the match
+
+It also asks for kick-off and full time, because **a stream is rarely just the
+match**. A LIGR file opens on a holding slate and runs through the warm-up, and
+that costs twice:
+
+- The warm-up shows real boards on real grass, so it is counted as match
+  exposure. It is exposure, but it is not what anyone means by "on screen
+  during the match", and how much of it a stream carries varies by fixture.
+- Every share is divided by the file's length. Half an hour of build-up in a
+  two-and-a-half hour file understates every sponsor by about 20%.
+
+Blank means measure the whole file. `--start 18:30 --end 2:05:00` does the same
+non-interactively. Trimming also skips extracting and scanning the build-up, so
+it is faster as well as more accurate. The holding slate itself was already
+rejected — no grass beneath it, the same check that kills the ident card — but
+nothing was catching the warm-up.
+
+The home club is confirmed rather than assumed because it decides which club
+folder joins the league partner marks, and **the wrong ground silently drops
+every local board while still printing a table that looks entirely fine**. That
+is the worst failure mode this has: nothing about the output looks wrong.
+Naming a file after its fixture reduces the confirmation to pressing Enter; a
+file with an unhelpful name is a question, not a lost cause. `-y` skips the
+questions entirely for unattended runs.
+
+On Windows `measure-matches.bat` does the same by being double-clicked, or by
+having videos dragged onto it — no terminal, nothing to install beyond Python.
+
+Out comes `<match>-report.html` — one self-contained page — plus
+`<match>-data.json` (the summary, which is what the Brand Exposure tool takes)
+and `<match>-detections.json` (every detection).
 
 | File | |
 |---|---|
 | `scripts/board-exposure-match.py` | the command. Extract, scan, report. |
 | `scripts/board_exposure_core.py` | the detector. One copy, imported by everything. |
 | `scripts/board_exposure_report.py` | the page. |
+| `scripts/measure-matches.bat` | Windows drop-target / double-click launcher. |
 
 ffmpeg is used for frame extraction when it is on PATH and OpenCV decodes
 directly when it is not, so ffmpeg is a nice-to-have rather than a requirement.

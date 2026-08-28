@@ -1,8 +1,28 @@
 #!/usr/bin/env python3
 """
-Full match, one command, on your own machine. Nothing uploads, nothing downloads.
+Full match, on your own machine. Nothing uploads, nothing downloads.
 
     python board-exposure-match.py --init --refs refs
+
+Then drop videos in inbox/ and:
+
+    python board-exposure-match.py --batch inbox --refs refs
+
+It reads the fixture off each filename if it can, shows you what it read, and
+lets you correct it — every file up front, so the measuring itself runs
+unattended. Naming a file after its fixture just means pressing Enter:
+
+    2026-08-23 Sutton United v Hartlepool United.mp4
+
+The home club decides which reference folder joins the league partner marks,
+which is why it is confirmed rather than assumed: the wrong ground silently
+drops every local board and still prints a table that looks fine.
+
+`-y` skips the questions and takes the filename as read, for unattended runs.
+
+On Windows, measure-matches.bat does the same thing by being double-clicked, or
+by having videos dragged onto it. One match at a time still works:
+
     python board-exposure-match.py --video match.mp4 --refs refs ^
            --club "Sutton United" --match "Sutton United v Hartlepool"
 
@@ -42,6 +62,8 @@ REPORT_FRAME_W = 680
 REPORT_FRAME_Q = 55
 DEFAULT_FRAME_BUDGET = 240
 SIZE_WARN_MB = 14
+PROGRESS_EVERY = 3.0        # seconds between progress updates
+_ARGS = None                # parsed args, for the non-interactive confirm path
 
 REFS_README = """Reference images — this folder is the configuration.
 
@@ -106,10 +128,34 @@ def probe(video, ffprobe):
     return info
 
 
-def extract_ffmpeg(video, work, fps, ffmpeg, limit):
+def parse_clock(s):
+    """'1:52:30', '18:30' or '1110' -> seconds. None passes through."""
+    if s in (None, ""):
+        return None
+    parts = str(s).strip().split(":")
+    try:
+        vals = [float(p) for p in parts]
+    except ValueError:
+        die(f"cannot read '{s}' as a time. Use 1:52:30, 18:30 or a number of seconds.")
+    if len(vals) > 3:
+        die(f"cannot read '{s}' as a time.")
+    secs = 0.0
+    for v in vals:
+        secs = secs * 60 + v
+    return secs
+
+
+def extract_ffmpeg(video, work, fps, ffmpeg, limit, start=None, end=None):
     """`fps=N` resamples to exactly N a second whatever the source does."""
-    cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-stats", "-y",
-           "-i", video, "-vf", f"fps={fps}", "-q:v", "3"]
+    cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-stats", "-y"]
+    # -ss before -i is the fast seek: it jumps by keyframe rather than decoding
+    # everything it is skipping. A second or two of imprecision at kick-off is
+    # irrelevant here and it saves decoding the entire build-up.
+    if start:
+        cmd += ["-ss", str(start)]
+    if end:
+        cmd += ["-to", str(end)] if not start else ["-t", str(end - start)]
+    cmd += ["-i", video, "-vf", f"fps={fps}", "-q:v", "3"]
     if limit:
         cmd += ["-frames:v", str(limit)]
     cmd.append(os.path.join(work, "f%06d.jpg"))
@@ -120,7 +166,7 @@ def extract_ffmpeg(video, work, fps, ffmpeg, limit):
     return 1.0 / fps
 
 
-def extract_opencv(video, work, fps, limit):
+def extract_opencv(video, work, fps, limit, start=None, end=None):
     """
     Fallback when ffmpeg is not installed. Single-threaded and slower, and it
     can only take every Nth frame rather than resample, so the true interval
@@ -131,9 +177,14 @@ def extract_opencv(video, work, fps, limit):
         die(f"OpenCV could not open {video}. Install ffmpeg and try again.")
     src = cap.get(cv2.CAP_PROP_FPS) or 25.0
     step = max(1, int(round(src / fps)))
+    if start:
+        cap.set(cv2.CAP_PROP_POS_MSEC, start * 1000.0)
+    span = (end - (start or 0)) if end else None
     n = fno = 0
     t0 = time.time()
     while not limit or n < limit:
+        if span is not None and (fno / src) >= span:
+            break
         ok, frame = cap.read()
         if not ok:
             break
@@ -148,7 +199,8 @@ def extract_opencv(video, work, fps, limit):
     return step / src
 
 
-def extract(video, work, fps, ffmpeg, expected, limit=0, prefer_ffmpeg=True):
+def extract(video, work, fps, ffmpeg, expected, limit=0, prefer_ffmpeg=True,
+            start=None, end=None):
     """
     Frames as JPEGs, at the sample rate. Restartable: if the folder already
     holds roughly the right number, it is reused rather than redone.
@@ -158,9 +210,13 @@ def extract(video, work, fps, ffmpeg, expected, limit=0, prefer_ffmpeg=True):
     have = sorted(f for f in os.listdir(work) if f.endswith(".jpg")) if os.path.isdir(work) else []
     stamp = os.path.join(work, "interval.txt")
     want = limit or expected
+    key = f"{1.0 / fps}|{start or 0}|{end or 0}"
     if len(have) >= want * 0.97 and os.path.exists(stamp):
-        print(f"  reusing {len(have)} frames already in {work}")
-        return [os.path.join(work, f) for f in have], float(open(stamp).read())
+        prev = open(stamp).read().strip()
+        if prev.split("|")[0] == key.split("|")[0] and prev == key:
+            print(f"  reusing {len(have)} frames already in {work}")
+            return [os.path.join(work, f) for f in have], 1.0 / fps
+        print("  frames on disk cover a different window — re-extracting")
 
     os.makedirs(work, exist_ok=True)
     for f in have:
@@ -177,13 +233,13 @@ def extract(video, work, fps, ffmpeg, expected, limit=0, prefer_ffmpeg=True):
             f"  Point --work at a drive with room, or drop --fps to 1.")
 
     t0 = time.time()
-    interval = (extract_ffmpeg(video, work, fps, ffmpeg, limit) if use_ffmpeg
-                else extract_opencv(video, work, fps, limit))
+    interval = (extract_ffmpeg(video, work, fps, ffmpeg, limit, start, end) if use_ffmpeg
+                else extract_opencv(video, work, fps, limit, start, end))
     files = sorted(f for f in os.listdir(work) if f.endswith(".jpg"))
     if not files:
         die("no frames were written.")
     with open(stamp, "w") as f:
-        f.write(str(interval))
+        f.write(f"{interval}|{start or 0}|{end or 0}")
     print(f"  {len(files)} frames in {time.time()-t0:.0f}s")
     return [os.path.join(work, f) for f in files], interval
 
@@ -265,27 +321,166 @@ def stills(video, n, out):
     print("  across the logo is the commonest reason a board is never found.\n")
 
 
+VIDEO_EXT = (".mp4", ".mov", ".mkv", ".m4v", ".ts", ".avi")
+FIXTURE_RE = re.compile(
+    r"^(?:(\d{4}-\d{2}-\d{2})[ _]+)?(.+?)[ _]+vs?\.?[ _]+(.+)$", re.I)
+
+
+def parse_fixture(path):
+    """
+    Read the fixture off the filename, so a batch needs no typing at all.
+
+        2026-08-23 Sutton United v Hartlepool United.mp4
+        Sutton United v Hartlepool United.mp4          (no date)
+
+    Returns (date|None, home, away) or None if the name does not say. Guessing
+    is not an option here: the home club decides which reference folder joins
+    the partner marks, so the wrong name silently drops every local board and
+    the run still looks like it worked.
+    """
+    stem = os.path.splitext(os.path.basename(path))[0]
+    m = FIXTURE_RE.match(stem.strip())
+    if not m:
+        return None
+    date, home, away = m.group(1), m.group(2).strip(), m.group(3).strip()
+    return (date, home, away) if home and away else None
+
+
+def ask(prompt):
+    """
+    input(), but Ctrl-C and a closed stdin end the run with a sentence rather
+    than a traceback. Both are ordinary — changing your mind halfway through
+    confirming six matches is not an error condition.
+    """
+    try:
+        return input(prompt).strip()
+    except EOFError:
+        die("stopped: no more input. Nothing was measured.")
+    except KeyboardInterrupt:
+        die("stopped. Nothing was measured.")
+
+
+def confirm_fixture(path, clubs, refs_root, assume_yes=False):
+    """
+    Show what was read off the filename and let it be corrected.
+
+    The filename is a good guess, not a contract. Getting the home club wrong
+    silently drops every local board and still prints a plausible table, so the
+    guess gets shown and accepted rather than trusted — and a name that says
+    nothing is a question, not a reason to skip the file.
+
+    Returns {"club", "home", "away", "date"} or None to skip.
+    """
+    fx = parse_fixture(path)
+    date, home, away = fx if fx else (None, "", "")
+
+    def club_note(name):
+        if name and name in clubs:
+            d = os.path.join(refs_root, "clubs", name)
+            n = len([x for x in os.listdir(d) if os.path.isdir(os.path.join(d, x))])
+            return f"{n} local board{'s' if n != 1 else ''} + the partner marks"
+        if name:
+            return "no reference folder — partner marks only"
+        return "partner marks only"
+
+    print(f"\n  {os.path.basename(path)}")
+    if assume_yes or not sys.stdin.isatty():
+        if not fx:
+            print("    ! filename does not say the fixture, and there is no one to ask.")
+            return None
+        print(f"    {home} v {away}   ({date or 'no date'}) — {club_note(home)}")
+        return {"club": home if home in clubs else None,
+                "home": home, "away": away, "date": date or "",
+                "start": parse_clock(getattr(_ARGS, "start", None)),
+                "end": parse_clock(getattr(_ARGS, "end", None))}
+
+    while True:
+        if home:
+            print(f"    Fixture : {home} v {away}")
+            print(f"    Ground  : {club_note(home)}")
+        else:
+            print("    Fixture : not in the filename")
+        ans = ask("    Enter to accept, a new fixture as 'Home v Away', "
+                  "'?' for grounds, or 's' to skip: ")
+
+        if ans.lower() == "s":
+            return None
+        if ans == "?":
+            print("    Grounds with reference folders:")
+            for c in clubs:
+                print(f"      · {c}")
+            if not clubs:
+                print("      (none yet — every match runs on partner marks only)")
+            continue
+        if ans:
+            m = re.match(r"^(.+?)\s+vs?\.?\s+(.+)$", ans, re.I)
+            if not m:
+                print("    ! write it as 'Sutton United v Hartlepool United'.")
+                continue
+            home, away = m.group(1).strip(), m.group(2).strip()
+            continue
+        if not home:
+            print("    ! no fixture yet — type one, or 's' to skip this file.")
+            continue
+
+        if home not in clubs:
+            print(f"    ! no refs/clubs/{home}/ — this match will be measured on the "
+                  f"league partner marks only.")
+            if ask("      Enter to accept that, or 'n' to correct the name: ").lower() == "n":
+                continue
+
+        while not re.match(r"^\d{4}-\d{2}-\d{2}$", date or ""):
+            date = ask(f"    Date (YYYY-MM-DD)"
+                       f"{' [' + date + ']' if date else ''}: ") or date
+            if not date:
+                print("    ! needed — it is how the match is filed and deduped.")
+
+        # A stream is rarely just the match. Build-up and warm-up show real
+        # boards on real grass, so they are counted as match exposure unless
+        # trimmed — and they inflate the denominator every share is divided by.
+        print("    Kick-off and full time, if the file has build-up either side.")
+        print("    Blank measures the whole file.")
+        start = parse_clock(ask("    Kick-off at (e.g. 18:30, blank for none): "))
+        end = parse_clock(ask("    Ends at (e.g. 2:05:00, blank for end of file): "))
+        return {"club": home if home in clubs else None,
+                "home": home, "away": away, "date": date,
+                "start": start, "end": end}
+
+
 def scaffold(root):
     for p in [root, os.path.join(root, "partners"), os.path.join(root, "clubs")]:
         os.makedirs(p, exist_ok=True)
+    os.makedirs("inbox", exist_ok=True)
     readme = os.path.join(root, "READ-ME-FIRST.txt")
     with open(readme, "w", encoding="utf-8") as f:
         f.write(REFS_README)
-    print(f"\n  Created {root}/\n")
-    print("    partners/<Sponsor>/           league-wide, every ground")
-    print("    clubs/<Club>/<Sponsor>/       that club's ground only")
-    print(f"\n  Rules are in {readme}. Drop images in, then run without --init.\n")
+    print(f"\n  Created {root}/ and inbox/\n")
+    print(f"    {root}/partners/<Sponsor>/     league-wide, every ground")
+    print(f"    {root}/clubs/<Club>/<Sponsor>/ that club's ground only")
+    print("    inbox/                        drop match videos here")
+    print(f"\n  Reference rules are in {readme}.")
+    print("\n  Name each video after the fixture and nothing needs typing:")
+    print("    2026-08-23 Sutton United v Hartlepool United.mp4")
+    print("\n  Then double-click measure-matches.bat, or drag videos onto it.\n")
 
 
 def main():
     ap = argparse.ArgumentParser(add_help=True)
     ap.add_argument("--video")
+    ap.add_argument("--batch", metavar="FOLDER",
+                    help="measure every video in a folder, then move each aside")
+    ap.add_argument("--out-dir", default=None,
+                    help="where reports land (default: alongside; 'reports' in batch)")
     ap.add_argument("--refs", default="refs")
     ap.add_argument("--club", default=None, help="folder name under refs/clubs/")
     ap.add_argument("--match", default=None, help="how the fixture is titled on the report")
     ap.add_argument("--out", default=None, help="output basename (default: from --match)")
     ap.add_argument("--work", default=None, help="frame scratch dir (default: <out>-frames)")
     ap.add_argument("--fps", type=float, default=C.SAMPLE_FPS)
+    ap.add_argument("--start", default=None, metavar="TIME",
+                    help="skip to kick-off, e.g. 18:30 — build-up is not match exposure")
+    ap.add_argument("--end", default=None, metavar="TIME",
+                    help="stop at the final whistle, e.g. 2:05:00")
     ap.add_argument("--jobs", type=int, default=0, help="0 = all cores but one")
     ap.add_argument("--limit", type=int, default=0, help="stop after N samples — for a quick test")
     ap.add_argument("--frame-budget", type=int, default=DEFAULT_FRAME_BUDGET)
@@ -294,9 +489,15 @@ def main():
     ap.add_argument("--ffprobe", default="ffprobe")
     ap.add_argument("--init", action="store_true", help="create the refs folder tree and exit")
     ap.add_argument("--list", action="store_true", help="show references and exit")
+    ap.add_argument("-y", "--yes", action="store_true",
+                    help="take the fixture from the filename without asking")
     ap.add_argument("--stills", type=int, default=0, metavar="N",
                     help="write N full-size frames spread across the match, to crop boards from")
     a = ap.parse_args()
+    global _ARGS
+    _ARGS = a
+    if a.batch and a.out_dir is None:
+        a.out_dir = "reports"
 
     if a.init:
         scaffold(a.refs)
@@ -308,66 +509,169 @@ def main():
         stills(a.video, a.stills, a.out or "stills")
         return
 
-    if not os.path.isdir(a.refs):
-        die(f"no reference folder at {a.refs}. Run with --init first.")
+    clubs = known_clubs(a.refs)
 
-    clubs_dir = os.path.join(a.refs, "clubs")
-    known = sorted(os.listdir(clubs_dir)) if os.path.isdir(clubs_dir) else []
-    if a.club and a.club not in known:
-        die(f"no club folder '{a.club}'.\n  Found: {', '.join(known) or 'none'}")
-
-    entries = C.load_tree(a.refs, a.club)
-    if not entries:
-        die(f"no reference images under {a.refs}. See {a.refs}/READ-ME-FIRST.txt")
-
-    scope = {}
-    for name, _, sc in entries:
-        scope.setdefault(name, sc)
-    print(f"\n  {len(entries)} reference images, {len(scope)} sponsors")
-    sift0 = cv2.SIFT_create(nfeatures=C.NFEATURES)
-    usable = 0
-    for name, path, sc in entries:
-        g = C.flatten(path)
-        kp, des = sift0.detectAndCompute(g, None)
-        n = 0 if des is None else len(kp)
-        mark = "partner" if sc == "partner" else (a.club or "club")
-        h, w = g.shape[:2]
-        if n < C.MIN_INLIERS:
-            print(f"    {name:<24} {mark:<16} {os.path.basename(path):<28} "
-                  f"! only {n} features, skipped")
-            continue
-        usable += 1
-        print(f"    {name:<24} {mark:<16} {os.path.basename(path):<28} "
-              f"{w}x{h}  {n} features")
-    if not usable:
-        die("every reference was too plain to match. Use images with more detail.")
     if a.list:
+        describe_refs(a.refs, a.club)
         return
 
+    if a.batch:
+        return run_batch(a, clubs)
+
     if not a.video:
-        die("give me a video: --video match.mp4")
+        die("give me a video: --video match.mp4   (or a folder: --batch inbox)")
     if not os.path.isfile(a.video):
         die(f"no file at {a.video}")
 
-    match = a.match or os.path.splitext(os.path.basename(a.video))[0]
-    base = a.out or re.sub(r"[^a-z0-9]+", "-", match.lower()).strip("-") or "match"
+    if a.club or a.match:
+        run_one(a, a.video, a.club, a.match or os.path.basename(a.video))
+        return
+    fx = confirm_fixture(a.video, clubs, a.refs, a.yes)
+    if not fx:
+        die("nothing to measure.")
+    run_one(a, a.video, fx["club"], fx["home"] + " v " + fx["away"], fx["date"],
+            fx.get("start"), fx.get("end"))
+
+
+def known_clubs(refs_root):
+    if not os.path.isdir(refs_root):
+        die(f"no reference folder at {refs_root}. Run with --init first.")
+    d = os.path.join(refs_root, "clubs")
+    return sorted(os.listdir(d)) if os.path.isdir(d) else []
+
+
+def describe_refs(refs_root, club, quiet=False):
+    """Load the references for this ground and report what is usable."""
+    entries = C.load_tree(refs_root, club)
+    if not entries:
+        die(f"no reference images under {refs_root}. "
+            f"See {refs_root}/READ-ME-FIRST.txt")
+    scope = {}
+    for name, _, sc in entries:
+        scope.setdefault(name, sc)
+
+    sift = cv2.SIFT_create(nfeatures=C.NFEATURES)
+    usable = 0
+    if not quiet:
+        print(f"\n  {len(entries)} reference images, {len(scope)} sponsors")
+    for name, path, sc in entries:
+        g = C.flatten(path)
+        kp, des = sift.detectAndCompute(g, None)
+        n = 0 if des is None else len(kp)
+        if n < C.MIN_INLIERS:
+            print(f"    {name:<24} {os.path.basename(path):<28} "
+                  f"! only {n} features, skipped")
+            continue
+        usable += 1
+        if not quiet:
+            h, w = g.shape[:2]
+            mark = "partner" if sc == "partner" else (club or "club")
+            print(f"    {name:<24} {mark:<16} {os.path.basename(path):<24} "
+                  f"{w}x{h}  {n} features")
+    if not usable:
+        die("every reference was too plain to match. Use images with more detail.")
+    return entries, scope, usable
+
+
+def run_batch(a, clubs):
+    """
+    Every video in a folder, one after another, then move each one aside.
+
+    Named for the walk-away case: start it on six matches and come back. So a
+    file that cannot be identified is skipped and reported at the end rather
+    than stopping the run — but it is never guessed at, because the home club
+    picks the reference set and a wrong guess produces numbers that look fine.
+    """
+    folder = a.batch
+    if not os.path.isdir(folder):
+        die(f"no folder at {folder}")
+    vids = sorted(f for f in os.listdir(folder)
+                  if f.lower().endswith(VIDEO_EXT)
+                  and os.path.isfile(os.path.join(folder, f)))
+    if not vids:
+        die(f"no video files in {folder}/\n"
+            f"  Drop matches in named like: 2026-08-23 Sutton United v Hartlepool United.mp4")
+
+    done_dir = os.path.join(folder, "done")
+    print(f"\n  {len(vids)} video{'s' if len(vids) != 1 else ''} in {folder}/")
+
+    # Every question first, then walk away. Stopping halfway through six matches
+    # to ask something is the difference between a batch you can leave running
+    # overnight and one you have to sit with.
+    print("\n  --- confirm the fixtures ---")
+    plan = []
+    for name in vids:
+        fx = confirm_fixture(os.path.join(folder, name), clubs, a.refs, a.yes)
+        if fx:
+            plan.append((name, fx))
+    if not plan:
+        die("nothing to measure.")
+
+    print(f"\n  Measuring {len(plan)} of {len(vids)}. Nothing else to answer.\n")
+    ok, skipped = [], [(n, "skipped") for n in vids
+                       if n not in [p[0] for p in plan]]
+
+    for i, (name, fx) in enumerate(plan, 1):
+        path = os.path.join(folder, name)
+        print("\n" + "=" * 72)
+        print(f"  [{i}/{len(plan)}] {fx['home']} v {fx['away']} — {fx['date'] or 'no date'}")
+        print("=" * 72)
+        try:
+            run_one(a, path, fx["club"], fx["home"] + " v " + fx["away"], fx["date"],
+                    fx.get("start"), fx.get("end"))
+            ok.append(name)
+            os.makedirs(done_dir, exist_ok=True)
+            shutil.move(path, os.path.join(done_dir, name))
+        except SystemExit as e:
+            print(f"  ! {e}")
+            skipped.append((name, "failed"))
+
+    print("\n" + "=" * 72)
+    print(f"  {len(ok)} measured, {len(skipped)} not")
+    for name, why in skipped:
+        print(f"    {why}: {name}")
+    if ok:
+        print(f"  Measured videos moved to {done_dir}/")
+    print()
+
+
+def run_one(a, video, club, title, date="", start=None, end=None):
+    entries, scope, usable = describe_refs(a.refs, club)
+
+    match = title or os.path.splitext(os.path.basename(video))[0]
+    base = re.sub(r"[^a-z0-9]+", "-", match.lower()).strip("-") or "match"
+    if a.out and not a.batch:
+        base = a.out
+    if a.out_dir:
+        os.makedirs(a.out_dir, exist_ok=True)
+        base = os.path.join(a.out_dir, base)
     work = a.work or f"{base}-frames"
 
-    info = probe(a.video, a.ffprobe)
-    print(f"\n  {a.video}: {info['w']}x{info['h']}, {info['fps']:.0f}fps, "
+    info = probe(video, a.ffprobe)
+    start = parse_clock(a.start) if start is None else start
+    end = parse_clock(a.end) if end is None else end
+    if end and end > info["duration"]:
+        end = None
+    span = (end or info["duration"]) - (start or 0)
+    if span <= 0:
+        die("the start and end times leave nothing to measure.")
+    print(f"\n  {video}: {info['w']}x{info['h']}, {info['fps']:.0f}fps, "
           f"{R.hhmm(info['duration'])}")
+    if start or end:
+        print(f"  measuring {R.hhmm(start or 0)} to {R.hhmm(end or info['duration'])}"
+              f" — {R.hhmm(span)} of match, {R.hhmm(info['duration'] - span)} skipped")
 
-    expected = int(info["duration"] * a.fps)
-    files, interval = extract(a.video, work, a.fps, a.ffmpeg, expected, a.limit)
+    expected = int(span * a.fps)
+    files, interval = extract(video, work, a.fps, a.ffmpeg, expected, a.limit,
+                              start=start, end=end)
     if a.limit:
         files = files[:a.limit]
     n_samples = len(files)
-    duration = n_samples * interval if a.limit else info["duration"]
+    duration = n_samples * interval if a.limit else span
 
     jobs = a.jobs or max(1, (os.cpu_count() or 2) - 1)
     print(f"\n  scanning {n_samples} samples across {jobs} cores")
     print(f"  {usable} references x {n_samples} frames — this is the slow part\n")
-    del sift0
 
     # "spawn", not the default fork. OpenCV starts its own thread pool the first
     # time it is used, and this process has already used it to list the
@@ -375,22 +679,34 @@ def main():
     # without the threads holding them, and every worker deadlocks on its first
     # OpenCV call — silently, at 0% CPU, forever. Windows only ever spawns, so
     # this also makes the two platforms run the same code path.
-    hits_by_index, t0, done = {}, time.time(), 0
+    # Overwrite one line in a terminal; plain lines when redirected to a log,
+    # where carriage returns would make an unreadable mess.
+    line_end = "\r" if sys.stdout.isatty() else "\n"
+    hits_by_index, t0, done, last = {}, time.time(), 0, 0.0
     with mp.get_context("spawn").Pool(jobs, initializer=_init_worker,
                                       initargs=(entries, C.NFEATURES)) as pool:
         for i, hit in pool.imap_unordered(_scan, list(enumerate(files)), chunksize=4):
             if hit:
                 hits_by_index[i] = hit
             done += 1
-            # About forty progress lines whatever the length of the run, so a
-            # 200-sample test is as legible as a 10,000-sample match.
-            if done % max(10, n_samples // 40) == 0 or done == n_samples:
-                el = time.time() - t0
-                rate = done / el
+            # On a timer, not every Nth sample. Forty lines spread across a run
+            # means one a minute on a full match, and a minute of silence reads
+            # as a hung process — which is exactly how the first real run felt.
+            # A fixed cadence looks alive whatever the length of the file.
+            now = time.time()
+            if now - last >= PROGRESS_EVERY or done == n_samples:
+                last = now
+                el = now - t0
+                rate = done / el if el else 0
                 eta = (n_samples - done) / rate if rate else 0
-                print(f"  {done:>6}/{n_samples}  {rate:5.1f} samples/s  "
-                      f"elapsed {R.hhmm(el)}  left {R.hhmm(eta)}  "
-                      f"found {len(hits_by_index)}", flush=True)
+                fill = int(round(24 * done / n_samples))
+                # ASCII, deliberately: this is usually launched from a .bat, and
+                # cmd.exe on a non-UTF-8 codepage turns block characters to mush.
+                print(f"  [{'#' * fill}{'.' * (24 - fill)}] {100 * done / n_samples:3.0f}%  "
+                      f"{done}/{n_samples}  {rate:.1f}/s  left {R.hhmm(eta)}  "
+                      f"found {len(hits_by_index)}   ", end=line_end, flush=True)
+    if line_end == "\r":
+        print()
 
     scan_secs = time.time() - t0
     print(f"\n  scanned in {R.hhmm(scan_secs)} — {len(hits_by_index)} samples with a detection")
@@ -419,31 +735,34 @@ def main():
            f"{len(partners)} National League partner mark"
            f"{'s' if len(partners) != 1 else ''} searched for at every camera angle"
            + (f", plus {len(clubbits)} board{'s' if len(clubbits) != 1 else ''} that only "
-              f"apply at {a.club}. " if clubbits else ". ")
+              f"apply at {club}. " if clubbits else ". ")
            + "Pick a sponsor, then scrub the timeline to see what the detector saw.")
     foot = (
         "Measured by this repository&rsquo;s own detector, run on a laptop from a local copy of the "
         "match &mdash; no upload, no third party, no per-match fee. League partner marks came from "
         "each brand&rsquo;s own logo file with nothing cropped from this ground, which is the part "
         "that matters for running it across 72 clubs"
-        + (f"; {a.club}&rsquo;s own boards were cropped at their ground and are searched for only "
+        + (f"; {club}&rsquo;s own boards were cropped at their ground and are searched for only "
            f"when they are at home. " if clubbits else ". ")
         + "The numbers are the detector&rsquo;s own and have <strong>not</strong> been checked "
         "against a hand-count, so treat this as the shape of the report rather than as evidence "
         "for a partner. Calibrating it is one afternoon with a stopwatch and one match.")
 
-    meta = {"match": match, "club": a.club, "duration": round(duration, 1),
+    meta = {"match": match, "club": club, "duration": round(duration, 1),
             "interval": interval, "n_samples": n_samples,
             "video_w": info["w"], "video_h": info["h"],
             "sub": sub, "foot": foot}
     html = f"{base}-report.html"
     payload, size = R.build(html, meta, hits_by_index, frame_files, scope)
 
-    head = {"match": match, "club": a.club, "video": os.path.basename(a.video),
+    head = {"match": match, "club": club, "date": date,
+            "video": os.path.basename(video),
             "duration": duration, "interval": interval, "samples": n_samples,
             "video_w": info["w"], "video_h": info["h"],
             "scan_seconds": round(scan_secs, 1),
             "settings": C.settings(),
+            "source_duration": round(info["duration"], 1),
+            "window": {"start": start or 0, "end": end or round(info["duration"], 1)},
             "references": [{"sponsor": n, "scope": s, "file": os.path.basename(p)}
                            for n, p, s in entries],
             "scope": scope,
