@@ -74,6 +74,14 @@ effect of a merge.
 | Storage rules | **Deploy Storage rules** | `publish` |
 | `tools/` registry | **Deploy tools registry** | `report` writes nothing; `publish` + type `publish` replaces the node |
 | Apps Script | **Deploy Apps Script** | `publish` |
+| Brand Exposure scan container | **Deploy scan job** | `publish` |
+
+**Deploy scan job** is manual for a stronger reason than the rest. That
+container **is** the measurement: a rebuild can move every number Brand Exposure
+reports, not because anything in this repo changed but because a base image or a
+pinned wheel moved underneath it. It must never happen as a side effect of
+merging something unrelated. It also does not *run* a scan — building the tin
+and opening it are separate acts. See `system/board-exposure/CLOUD.md`.
 
 The file in git **is** the thing deployed:
 
