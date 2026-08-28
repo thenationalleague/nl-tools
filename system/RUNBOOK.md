@@ -246,6 +246,7 @@ runtime behind auth-guard, gated by rules.
 | `system/roles-and-access-plan.md` | The role model; the settled launch model is the block at the top |
 | `system/rtdb/README.md` | The snapshot contract — which files are deployed vs reference |
 | `system/storage/README.md` | The four feeds in the bucket, and how to recover them |
+| `system/deployer-migration.md` | Why every deploy runs as `nl-archive-ga-reader`, and the parked plan to replace it with something honestly named and minimally permitted |
 | `system/retired/README.md` | Tools that were deleted and why. **Read before proposing to build something that existed once.** |
 | `functions/README.md` | The Cloud Functions |
 | `embeds/widget-handover.md` | The fan-facing embeds and their CMS invariants |
