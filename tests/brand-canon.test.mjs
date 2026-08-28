@@ -343,22 +343,79 @@ test('tool-domain state colours stay out of canon — no --cal-* tokens', () => 
 });
 
 test('position bands live only as NL.positionBands — no --pos-* CSS twins', () => {
-  /* v2.44: the CSS tokens had zero live consumers (canvas exporters read
-     the JS mirror; embeds cannot read nl-brand.css) and existed only to
-     drift. The mirror is the single source; these are the settled values. */
+  /* v2.44: the CSS tokens had zero live consumers and existed only to drift.
+     The object is the palette. */
   assert.doesNotMatch(rules, /--pos-(champ|sf|qf|releg|c-fg|po-sf-bg|po-fg|r-bg|r-fg):/,
     'no --pos-* CSS tokens — NL.positionBands is the single source');
+
+  /* Two values per zone since 28/08/2026: the `rail` is positional and always
+     drawn, the `band` is confirmed and only appears once a club's tally
+     guarantees the zone. A palette that carried only one of them could not
+     describe what the graphic renders. */
   const settled = {
-    champ: '#7F99DC', sf: '#3760C8', qf: '#2D4FA4', releg: '#192C5C',
-    cFg: '#000000', poSfBg: '#9aa3ad', poFg: '#000000',
-    rBg: '#000000', rFg: '#ffffff',
+    champ:   '#9e0000',  sf:      '#223b7c',  qf:      '#5f86d6',  releg:   '#8a8a8a',
+    champBg: '#f7e4e4',  sfBg:    '#b3c8ef',  qfBg:    '#dcebfb',  relegBg: '#f8f8f8',
   };
   /* Key-by-key rather than deepEqual: NL comes from a node:vm sandbox, so
      its object literals carry the vm realm's prototype. */
   assert.deepEqual(Object.keys(NL.positionBands).sort(), Object.keys(settled).sort(),
     'NL.positionBands carries exactly the settled band keys');
   for (const [k, v] of Object.entries(settled)) {
-    assert.equal(NL.positionBands[k], v, `NL.positionBands.${k} is the settled value`);
+    assert.equal(String(NL.positionBands[k]).toLowerCase(), v,
+      `NL.positionBands.${k} is the settled value`);
+  }
+});
+
+test('NL.positionBands matches the table graphic it mirrors', () => {
+  /* This palette existed for months claiming to be the single source while the
+     only tool publishing a table graphic rendered a different one — nothing
+     compared them, so nothing caught it. The mirror is a documented contract
+     (as NL.projColours is with --proj-*), and a contract nobody checks is just
+     two copies. This checks it: change the CSS without changing the object, or
+     the object without the CSS, and this fails. */
+  const brand  = readFileSync(join(REPO, 'graphics/_shared/brand-graphic.css'), 'utf8');
+  const styles = readFileSync(join(REPO, 'graphics/table-graphic/styles.css'), 'utf8');
+
+  const tokens = {};
+  for (const m of brand.matchAll(/(--nl-[a-z0-9-]+)\s*:\s*(#[0-9a-fA-F]{3,8})\s*;/g)) {
+    tokens[m[1]] = m[2].toLowerCase();
+  }
+  assert.ok(Object.keys(tokens).length > 10, 'brand-graphic.css token map parsed');
+
+  /* Resolve one level of var(); the graphic's rails alias brand colours and the
+     play-off blues are literals with no brand twin. */
+  const resolve = (raw) => {
+    const v = raw.trim().toLowerCase();
+    const ref = v.match(/^var\((--nl-[a-z0-9-]+)\)$/);
+    if (ref) {
+      assert.ok(tokens[ref[1]], `${ref[1]} is defined in brand-graphic.css`);
+      return tokens[ref[1]];
+    }
+    assert.match(v, /^#[0-9a-f]{3,8}$/, `${raw} is a literal or a --nl-* token`);
+    return v;
+  };
+  const background = (selector) => {
+    const re = new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') +
+                          '\\s*\\{[^}]*?background:\\s*([^;]+);');
+    const m = styles.match(re);
+    assert.ok(m, `styles.css still declares a background for ${selector}`);
+    return resolve(m[1]);
+  };
+
+  /* selector in the artwork → the key that must carry the same colour */
+  const contract = [
+    ['.row.z-champ .rail',                   'champ'],
+    ['.row.z-po-sf .rail',                   'sf'],
+    ['.row.z-po-qf .rail',                   'qf'],
+    ['.row.z-releg .rail',                   'releg'],
+    ['.gfx[data-dir="1"] .row.is-champ',     'champBg'],
+    ['.row.is-po-sf',                        'sfBg'],
+    ['.row.is-po-qf',                        'qfBg'],
+    ['.gfx[data-dir="1"] .row.is-releg',     'relegBg'],
+  ];
+  for (const [selector, key] of contract) {
+    assert.equal(String(NL.positionBands[key]).toLowerCase(), background(selector),
+      `NL.positionBands.${key} matches ${selector} in table-graphic/styles.css`);
   }
 });
 

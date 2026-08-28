@@ -15,6 +15,7 @@ when someone asks for it, and when they do, this is where the thinking is.
 | [`public-site-tickers.md`](public-site-tickers.md) | 15/08/2026 | Three Sheet-fed CMS ticker widgets. All silently dead since March — one missing brace, one identity theft, one squatter. |
 | [`dazn-vip.md`](dazn-vip.md) | 15/08/2026 | VIP request log for the DAZN feed. The proposes→approves→confirms shape and the Reconcile tab are the keepers. |
 | [`chase-hq.md`](chase-hq.md) | 15/08/2026 | Commercial-chasing CRM, parked since July. Backend deleted; the unanswered question was ownership, not code. |
+| [`league-tables.md`](league-tables.md) | 28/08/2026 | Canvas table-graphic tool, superseded by the Broadsheet rebuild at `/graphics/table-graphic/`. Its position-band palette was canon's, and was wrong. |
 
 ## Why one place
 

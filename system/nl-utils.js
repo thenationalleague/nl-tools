@@ -68,6 +68,21 @@
        carried either retired/renamed key. Cache-bust ?v=39 -> ?v=40 in
        lockstep with auth-guard ?v=12 -> ?v=13.
 
+   v1.37 (28/08/2026)
+     - NL.positionBands now carries the Broadsheet palette that
+       /graphics/table-graphic/ actually renders, and gains a band shade
+       per zone (champBg / sfBg / qfBg / relegBg) because a table graphic
+       draws each zone twice — a positional rail and a confirmed band.
+       The old values came from /graphics/league-tables/ and were called
+       the single source while that tool was their only reader; the
+       rebuild that replaced it shipped its own palette and read none of
+       them. league-tables is retired as of this commit, so the claim and
+       the values now agree. REMOVED with it: cFg / poSfBg / poFg / rBg /
+       rFg, the canvas foreground/background pairs that only
+       league-tables' renderer used — no other caller referenced them.
+       Old values are recorded in system/retired/league-tables.md.
+       Cache-bust ?v=45 -> ?v=46 in lockstep.
+
    v1.36 (16/08/2026)
      - NL.positionBands is now the SINGLE SOURCE for the NL competition
        position-band palette. The CSS twins (--pos-*) were deleted in
@@ -1469,21 +1484,34 @@
     '#374151'  /* --proj-8 cool slate    (no semantic equivalent) */
   ];
 
-  /* NL competition position-band palette — the SINGLE SOURCE since brand
-     v2.44 (the --pos-* CSS twins were deleted; they had no live consumer
-     and existed only to drift). Used by canvas/image-generation in
-     graphics tools; the Style Guide renders its reference swatches from
-     this object. */
+  /* NL competition position-band palette.
+
+     Two values per zone, because a table graphic draws the zones twice:
+     a `rail` down the left edge, which is POSITIONAL and always on, and a
+     row `band`, which is CONFIRMED and only lights up once a club's tally
+     guarantees the zone. Keeping both here means the two layers cannot be
+     given different identities by accident.
+
+     This is the Broadsheet palette that /graphics/table-graphic/ renders,
+     adopted 28/08/2026. The values it replaced (#7F99DC / #3760C8 /
+     #2D4FA4 / #192C5C) came from /graphics/league-tables/ and were called
+     the single source while that tool was the only thing reading them —
+     the rebuild that replaced it had shipped its own palette and read none
+     of this. league-tables is now retired (see system/retired/), so the
+     claim and the values finally agree.
+
+     The rails alias brand colours; the play-off blues have no brand twin.
+     Mirrored from graphics/table-graphic/styles.css — change them together,
+     the same contract NL.projColours has with --proj-*. */
   window.NL.positionBands = {
-    champ:   '#7F99DC', /* champion row background      */
-    sf:      '#3760C8', /* play-off semi-final row      */
-    qf:      '#2D4FA4', /* play-off quarter-final row   */
-    releg:   '#192C5C', /* relegation row               */
-    cFg:     '#000000', /* foreground on champ          */
-    poSfBg:  '#9aa3ad', /* light play-off semi shade    */
-    poFg:    '#000000', /* foreground on play-off rows  */
-    rBg:     '#000000', /* relegated solid bg           */
-    rFg:     '#ffffff'  /* foreground on rBg            */
+    champ:   '#9e0000', /* champion rail    — --nl-rose-red    */
+    sf:      '#223b7c', /* play-off SF rail — --nl-league-navy */
+    qf:      '#5f86d6', /* play-off QF rail — no brand twin    */
+    releg:   '#8a8a8a', /* relegation rail  — --nl-grey-500    */
+    champBg: '#f7e4e4', /* champion band    — --nl-red-100     */
+    sfBg:    '#b3c8ef', /* play-off SF band — no brand twin    */
+    qfBg:    '#dcebfb', /* play-off QF band — no brand twin    */
+    relegBg: '#f8f8f8'  /* relegation band  — --nl-grey-50     */
   };
 
   /* Google Maps style arrays — pass directly to new google.maps.Map({...styles: NL.mapStyle.drive}).
