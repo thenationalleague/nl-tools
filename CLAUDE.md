@@ -164,6 +164,7 @@ which is why work gets re-planned from scratch. Check here first.
 
 | Document | What it decides |
 |---|---|
+| `system/RUNBOOK.md` | **How the system is operated**, for a human with a browser and no terminal: where every part lives, which of the 18 Actions ships what, which are automatic vs one-button, and what to do when a tool denies everyone / a `?v=` is stale / the registry drifts. Written 28/08/2026 because the deployment table below covers six workflows out of eighteen. |
 | `system/CONSOLIDATION.md` | The master plan. Every tool draws from one shared place. Seven workstreams, safety rails, order of attack. Drafted 12/07/2026 from a five-way audit + external review. |
 | `system/gas-to-functions-migration.md` | **Locked decision**: retire the public Apps Script web app entirely; Firebase for everything, one private GAS email shim. |
 | `system/tool-status-and-access.md` | Which tools are live vs parked, and the per-role access model for each. |
