@@ -154,7 +154,8 @@ def build(out_path, meta, hits_by_index, frame_files, sponsors_meta):
     return payload, len(html)
 
 
-TEMPLATE = """<title>__TITLE__</title>
+TEMPLATE = """<meta charset="utf-8">
+<title>__TITLE__</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
@@ -202,6 +203,11 @@ button.play{font-family:"Barlow Condensed",sans-serif;text-transform:uppercase;
   letter-spacing:.1em;font-weight:600;font-size:14px;background:var(--primary);color:#fff;
   border:0;border-radius:5px;padding:7px 16px;cursor:pointer}
 button.play:hover{background:#7e0000}
+button.nav{background:#16233d;color:#cfdbf0;border:1px solid #2a3c60;border-radius:5px;
+  padding:6px 12px;cursor:pointer;font-size:13px;line-height:1}
+button.nav:hover{background:#1e2f50;color:#fff}
+button.nav:disabled{opacity:.35;cursor:default}
+button.nav:focus-visible{outline:2px solid #ff6b6b;outline-offset:2px}
 button.play:focus-visible,.track:focus-visible,.tab:focus-visible{outline:2px solid #ff6b6b;outline-offset:2px}
 .tc{font-family:"IBM Plex Mono",monospace;font-size:13px;color:#9fb0d0;font-variant-numeric:tabular-nums}
 .tc b{color:#fff;font-weight:600}
@@ -272,8 +278,11 @@ code{font-family:"IBM Plex Mono",monospace;font-size:.92em}
           <div class="empty" id="empty"></div>
         </div>
         <div class="transport">
+          <button class="nav" id="prev" type="button" aria-label="Previous appearance">&#9664;</button>
           <button class="play" id="play" type="button">Play</button>
+          <button class="nav" id="next" type="button" aria-label="Next appearance">&#9654;</button>
           <div class="tc"><b id="tc">0:00.0</b> / __DUR__</div>
+          <div class="tc" id="apcount"></div>
         </div>
         <div class="picker" id="picker"></div>
         <div class="track" id="track" tabindex="0" role="slider" aria-label="Timeline"
@@ -389,7 +398,8 @@ function select(n){
   sponsor = n;
   document.querySelectorAll('.tab').forEach(t =>
     t.setAttribute('aria-pressed', String(t.dataset.s === sponsor)));
-  renderSponsor(); paintTrack(); draw(cur);
+  renderSponsor(); paintTrack(); buildStops();
+  draw(stops.length ? stops[0] : cur);
 }
 
 function draw(i){
@@ -419,6 +429,7 @@ function draw(i){
     ? `${hits.length} board${hits.length>1?'s':''} detected — solid outline is the logo, dashed is the board`
     : (fi !== null && off > D.interval ? '' : 'no board detected in this frame');
   empty.style.color = hits.length ? col : '#7d8db0';
+  paintCount();
 }
 
 // Time across, height up the frame, brightness by clarity — so a run reads as a
@@ -474,15 +485,62 @@ function seek(ev){
 track.addEventListener('pointerdown', e => { track.setPointerCapture(e.pointerId); seek(e); });
 track.addEventListener('pointermove', e => { if (e.buttons) seek(e); });
 track.addEventListener('keydown', e => {
-  if (e.key==='ArrowRight'){ draw(cur+1); e.preventDefault(); }
-  if (e.key==='ArrowLeft'){ draw(cur-1); e.preventDefault(); }
+  const jump = e.shiftKey ? 0 : 1;    // shift = appearance to appearance
+  if (e.key==='ArrowRight'){ jump ? draw(cur+1) : step(1); e.preventDefault(); }
+  if (e.key==='ArrowLeft'){ jump ? draw(cur-1) : step(-1); e.preventDefault(); }
 });
+
+// Not a video player, and pretending otherwise was the bug. Only a few hundred
+// frames of ten thousand samples are embedded, so stepping sample-by-sample
+// changes the picture roughly every forty-fifth press and reads as frozen.
+// What anyone actually wants is "show me the next bit where the board is", so
+// the transport walks this sponsor's appearances instead of the clock.
+let stops = [];        // one sample index per appearance — its clearest moment
+
+function buildStops(){
+  stops = runsFor(sponsor).sort((a,b) => a.first - b.first).map(r => {
+    let best = r.first, bestC = -1;
+    for (let i = r.first; i <= r.last; i++){
+      (hitsAt(i, sponsor) || []).forEach(h => { if (h.c > bestC){ bestC = h.c; best = i; } });
+    }
+    return best;      // the clearest frame in the run, not its first
+  });
+  const has = stops.length > 1;
+  document.getElementById('prev').disabled = !has;
+  document.getElementById('next').disabled = !has;
+  if (!stops.length) playing = false;
+  paintCount();
+}
+
+function nearestStop(){
+  let k = -1;
+  for (let i = 0; i < stops.length; i++) if (stops[i] <= cur) k = i;
+  return k;
+}
+function paintCount(){
+  const el = document.getElementById('apcount');
+  if (!stops.length){ el.textContent = ''; return; }
+  const k = stops.indexOf(cur);
+  el.textContent = k >= 0 ? `appearance ${k+1} of ${stops.length}`
+                          : `${stops.length} appearances`;
+}
+function step(dir){
+  if (!stops.length) return;
+  const k = nearestStop();
+  let n = dir > 0 ? k + 1 : (cur > stops[Math.max(0,k)] ? k : k - 1);
+  if (n < 0) n = stops.length - 1;
+  if (n >= stops.length) n = 0;
+  draw(stops[n]);
+}
+document.getElementById('prev').addEventListener('click', () => step(-1));
+document.getElementById('next').addEventListener('click', () => step(1));
 
 const playBtn = document.getElementById('play');
 playBtn.addEventListener('click', () => {
+  if (!stops.length) return;
   playing = !playing;
   playBtn.textContent = playing ? 'Pause' : 'Play';
-  if (playing) timer = setInterval(() => draw(cur >= D.n-1 ? 0 : cur+1), 1000*D.interval);
+  if (playing) timer = setInterval(() => step(1), 1600);
   else clearInterval(timer);
 });
 
@@ -596,6 +654,6 @@ function renderSponsor(){
 }
 
 addEventListener('resize', () => { paintTrack(); renderSponsor(); });
-renderSponsor(); paintTrack(); draw(0);
+renderSponsor(); paintTrack(); buildStops(); draw(stops.length ? stops[0] : 0);
 </script>
 """
