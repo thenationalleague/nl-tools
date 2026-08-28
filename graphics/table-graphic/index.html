@@ -1,16 +1,23 @@
 <!DOCTYPE html>
 <!--
   League Table Graphic — NL Tools (Graphics sub-tool)
-  Version: v1.5 (16/08/2026)
+  Version: v1.6 (28/08/2026)
   File: /graphics/table-graphic/index.html
 
-  On-brand league-table social graphic (Broadsheet design). Paste a
-  CSV/TSV table → live preview → 1:1 / 4:5 / 9:16 PNG export. Gated to
-  NL Staff via the shared graphics tool key.
+  On-brand league-table social graphic (Broadsheet design). The table comes
+  either from National League Services or from a pasted CSV/TSV → live
+  preview → 1:1 / 4:5 / 9:16 PNG export. Gated to NL Staff via the shared
+  graphics tool key.
+
+  NLS carries no qualification zones, so champion / play-off / relegation
+  marks stay the operator's call — per row in the grid, or filled from the
+  standings in one press.
 
   Storage:
     localStorage nl-table-gfx-v1   (tool state only — no RTDB)
   Data:
+    NLS league-tables API (public, no auth) — the standings themselves.
+      Clubs match on clubs-meta optaID, which is the NLS teamID.
     /assets/data/clubs-meta.json           (live club list / short names)
     /assets/crests|divisions|partners/*     (crests, Enterprise lockups, TIC Health)
   Access (auth-guard):
@@ -59,6 +66,17 @@
   var NL_TOOL_KEY = 'staff-graphics';
 
   window.NL_CHANGELOG = [
+    {
+      date: '28/08/2026',
+      version: 'v1.6',
+      items: [
+        'The current table can now be pulled straight from National League Services — pick a division and press Load. One toggle at the top chooses between the feed and typing it in; typed still works exactly as it did.',
+        'Champion, play-off and relegation marks stay yours: the feed does not carry them. Mark by position fills them from the standings in one press, Clear marks empties them, and any row can still be set by hand.',
+        'A loaded table arrives unmarked on purpose — mid-season nothing is confirmed yet, and the positional bands down the left already show the cut-offs.',
+        'Fixed: the graphic grew a little on every redraw once the page was scrolled, so repeated edits inflated it.',
+        'Fixed on phones: the preview no longer sits pinned over the controls beneath it.'
+      ]
+    },
     {
       date: '16/08/2026',
       version: 'v1.4',
@@ -133,7 +151,7 @@
   }
   .seg button + button { border-left: 1px solid var(--nl-grey-300); }
   .seg button:hover { background: var(--nl-grey-100); }
-  .seg button.active { background: var(--nl-rose-red); color: #fff; }
+  .seg button.active { background: var(--nl-rose-red); color: var(--nl-white); }
 
   .tool {
     display: grid;
@@ -156,6 +174,11 @@
     padding: 20px;
     box-shadow: var(--shadow-md);
   }
+  /* Must stay BELOW the .preview rule above: same specificity, so source order
+     decides. Single column stacks the preview on top of the controls, and a
+     pinned preview then paints over whatever scrolls beneath it. */
+  @media (max-width: 1100px) { .preview { position: static; } }
+
   .preview-head {
     display: flex; align-items: center; justify-content: space-between;
     margin-bottom: 14px;
@@ -187,7 +210,7 @@
   .dir-btn .n { display:block; font-size: var(--text-xs); color: var(--nl-grey-500); letter-spacing: var(--tracking-wide); }
   .dir-btn .t { display:block; font-size: var(--text-sm); color: var(--nl-ink); margin-top: 3px; }
   .dir-btn:hover { border-color: var(--nl-league-navy); }
-  .dir-btn.active { border-color: var(--nl-rose-red); border-width: 2px; box-shadow: 0 0 0 3px rgba(158,0,0,.10); }
+  .dir-btn.active { border-color: var(--nl-rose-red); border-width: 2px; box-shadow: 0 0 0 3px var(--nl-red-100); }
 
   .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
   .field:last-child { margin-bottom: 0; }
@@ -202,7 +225,7 @@
     font-family: var(--font-regular); font-size: var(--text-sm); color: var(--nl-ink);
   }
   select:focus, input:focus, textarea:focus {
-    outline: none; border-color: var(--nl-rose-red); box-shadow: 0 0 0 3px rgba(158,0,0,.10);
+    outline: none; border-color: var(--nl-rose-red); box-shadow: 0 0 0 3px var(--nl-red-100);
   }
   textarea { resize: vertical; line-height: 1.4; font-size: var(--text-xs); }
 
@@ -213,25 +236,34 @@
     transition: filter var(--dur-fast) var(--ease-standard);
   }
   .btn:hover { filter: brightness(0.93); }
-  .btn--primary { background: var(--nl-rose-red); color: #fff; flex: 1; }
-  .btn--navy { background: var(--nl-league-navy); color: #fff; }
+  .btn--primary { background: var(--nl-rose-red); color: var(--nl-white); flex: 1; }
+  .btn--navy { background: var(--nl-league-navy); color: var(--nl-white); }
   .btn--ghost { background: var(--nl-grey-100); color: var(--nl-grey-700); }
 
   .fmt-pills .btn { padding: 6px 10px; font-size: var(--text-xs); }
 
   /* grid editor */
   .grid-scroller { max-height: 460px; overflow: auto; border: 1px solid var(--nl-grey-200); border-radius: var(--radius-sm); }
-  table.grid { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+  /* Fixed layout: without it the intrinsic widths pushed the table to 527px
+     inside a 424px panel, so the editor scrolled sideways even on a full
+     desktop. The header cells below carry the column widths. */
+  table.grid { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: var(--text-sm); }
   .grid thead th {
-    position: sticky; top: 0; z-index: 2; background: var(--nl-navy-900); color: #fff;
+    position: sticky; top: 0; z-index: 2; background: var(--nl-navy-900); color: var(--nl-white);
     font-family: var(--font-bold); font-size: var(--text-xs); letter-spacing: var(--tracking-wide);
     text-transform: uppercase; text-align: left; padding: 8px; white-space: nowrap;
   }
-  .grid tbody td { border-bottom: 1px solid var(--nl-grey-100); padding: 4px 5px; }
-  .grid .g-pos { text-align: center; font-family: var(--font-bold); color: var(--nl-grey-500); width: 30px; }
-  .grid select, .grid input { padding: 6px 7px; font-size: var(--text-sm); }
-  .grid .g-flag { width: 64px; }
-  .grid .g-num { width: 56px; text-align: center; }
+  .grid tbody td { border-bottom: 1px solid var(--nl-grey-100); padding: 4px 5px; overflow: hidden; }
+  .grid .g-pos { text-align: center; font-family: var(--font-bold); color: var(--nl-grey-500); }
+  .grid input { padding: 6px 7px; font-size: var(--text-sm); }
+  /* .nl-select sets everything but width — the canon leaves that to the tool. */
+  .grid select, .grid input { width: 100%; min-width: 0; max-width: 100%; }
+  .grid .g-num { text-align: center; }
+  /* Below the breakpoint the panel is ~306px wide, which would squeeze the
+     club column to nothing. Hold a readable width and let the scroller carry
+     it sideways there — where a sideways nudge is expected — rather than on
+     the desktop, where it is not. */
+  @media (max-width: 560px) { table.grid { min-width: 470px; } }
 
   footer.status {
     display: flex; justify-content: space-between; align-items: center;
@@ -239,16 +271,17 @@
     text-transform: uppercase; color: var(--nl-grey-500); padding-top: 4px;
   }
   .note { font-size: var(--text-xs); color: var(--nl-grey-500); line-height: 1.5; font-family: var(--font-regular); }
+  /* one source at a time — the grid editor below is shared by both */
+  body[data-source="manual"] #nlsCard { display: none; }
+  body[data-source="feed"] #pasteCard { display: none; }
 </style>
 </head>
-<body>
+<body data-source="feed">
 
 <div id="pageWrap">
 
 <!-- Standard NL topbar — auto-rendered by /system/nl-topbar.js -->
 <div id="nlTopbar"></div>
-
-<datalist id="teamList"></datalist>
 
 <div class="tool">
 
@@ -267,6 +300,13 @@
 
     <div class="card">
       <h2>Setup</h2>
+      <div class="field">
+        <label>Table from</label>
+        <div class="seg" id="sourceSeg">
+          <button type="button" class="src-btn active" data-src="feed">The feed</button>
+          <button type="button" class="src-btn" data-src="manual">Typed in</button>
+        </div>
+      </div>
       <div class="row2">
         <div class="field">
           <label for="divisionSel">Division</label>
@@ -299,7 +339,14 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" id="nlsCard">
+      <h2>Load from National League Services</h2>
+      <div class="btns">
+        <button type="button" class="btn btn--primary" id="nlsLoadBtn">Load current table</button>
+      </div>
+    </div>
+
+    <div class="card" id="pasteCard">
       <h2>Paste table (CSV / TSV)</h2>
       <textarea id="pasteIn" rows="7" placeholder="Paste columns: flag/pos · team · P · W · D · L · F · A · GD · Pts"></textarea>
       <p class="note" style="margin:8px 0 0;">Column 1 accepts <b>C</b> (champion), <b>SF</b>/<b>QF</b> (play-offs), <b>R</b> (relegation) or a plain position number. P, GD and Pts are shown.</p>
@@ -309,9 +356,16 @@
       <h2>Grid editor</h2>
       <div class="grid-scroller">
         <table class="grid">
-          <thead><tr><th>#</th><th>Zone</th><th>Team</th><th>P</th><th>GD</th><th>Pts</th></tr></thead>
+          <thead><tr>
+            <th style="width:26px">#</th><th style="width:78px">Zone</th><th>Club</th>
+            <th style="width:40px">P</th><th style="width:52px">GD</th><th style="width:52px">Pts</th>
+          </tr></thead>
           <tbody id="gridBody"></tbody>
         </table>
+      </div>
+      <div class="btns" style="margin-top:10px">
+        <button type="button" class="btn btn--ghost" id="zoneFillBtn">Mark by position</button>
+        <button type="button" class="btn btn--ghost" id="zoneClearBtn">Clear marks</button>
       </div>
     </div>
 
@@ -322,7 +376,6 @@
 
     <footer class="status">
       <span id="status">Ready</span>
-      <span>Screenshot the preview, or use Download PNG</span>
     </footer>
 
   </div>
