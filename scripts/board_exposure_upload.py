@@ -286,6 +286,11 @@ def build_record(data, club, opponent, date, source_type, complete,
             "most": s.get("most") or 0,
             "detections": s.get("detections") or 0,
             "longest": s.get("longest") or 0,
+            # Nullable on purpose, and RTDB drops null keys, so a match
+            # measured before visibility existed simply lacks them — the tool
+            # renders absent as "—", never as 0% blocked.
+            "visibility": s.get("visibility"),
+            "blockedPct": s.get("blockedPct"),
         }
 
     return {

@@ -93,6 +93,38 @@ test('both build the same match id for the same fixture', () => {
   assert.equal(pyMatchId(date, club, opp), fromTool);
 });
 
+test('the script and the tool write the same sponsor fields', () => {
+  /* build_record() in the script and saveMatch() in the page both write a
+     sponsor object, and every field added to one has to reach the other or a
+     match renders with gaps depending on which door it came through — the
+     visibility/blockedPct pair (v0.5) is the kind of addition this exists to
+     catch. The tool's keys are read from the shipped assignment; the script's
+     from actually running build_record. */
+  const src = readFileSync(join(ROOT, 'brand-exposure/index.html'), 'utf8');
+  const i = src.indexOf('sponsors[slug(name)] = {');
+  assert.ok(i >= 0, 'brand-exposure/index.html no longer builds sponsors[slug(name)]');
+  const block = src.slice(i, src.indexOf('};', i))
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+  /* A key follows {, a comma, or a newline — which is what keeps the colon in
+     a ternary ("? null : x") from reading as one. */
+  const toolKeys = new Set(
+    [...block.matchAll(/[{,\n]\s*([A-Za-z_][A-Za-z0-9_]*)\s*:/g)].map((m) => m[1]));
+
+  const py = execFileSync('python3', ['-c', `
+import json, sys
+sys.path.insert(0, 'scripts')
+import board_exposure_upload as U
+rec = U.build_record({"sponsors": {"X": {"seconds": 1}}, "scope": {}},
+                     "Sutton United", "Barnet", "2026-08-23", "highlights",
+                     True, has_proxy=False, has_detections=True)
+print(json.dumps(sorted(rec["sponsors"]["x"].keys())))
+`], { cwd: ROOT, encoding: 'utf8' });
+  const scriptKeys = new Set(JSON.parse(py));
+
+  assert.deepEqual([...toolKeys].sort(), [...scriptKeys].sort(),
+    'saveMatch() and build_record() have drifted apart');
+});
+
 test('a match id built by the script is one the ingest function will accept', () => {
   // Three files enforce this shape and all three must agree: the script builds
   // the id, the function validates it before putting it in a token claim, and
