@@ -289,6 +289,30 @@ homography, so their visibility is null, never faked. Depends on whole-board
 references, which exist as of the same date. Goes through the eval like
 everything else.
 
+Two more rulings from the same review, parked with it:
+
+**The full match is the true metric, marked in halves.** Highlights are a
+preview; the number a partner is ever shown comes from a full match. A match
+should carry TWO measured windows — whistle to whistle, each half — with
+half-time excluded entirely (that is ~15 minutes of the most polluted footage
+in the broadcast, and a sixth of the scan bill), per-half and combined stats,
+and in-play time as the denominator. ONE record and one stitched timeline,
+with the half boundary marked: the runner grows a pair of window arguments
+(the existing single start/end trim becomes the degenerate case), samples
+carry their half, the proxy is built from the two windows joined, and the
+tool draws the divider. The cloud timeout is 6h as of 29/08/2026, so either
+route takes a full match; local overnight remains the free one.
+
+**Stinger wipes, without leaning only on grass.** The branded transition
+graphic is already caught three separate ways: the grass check (no pitch
+below a full-screen graphic), the area cap (a stinger logo is far over the
+5% ceiling), and the minimum run (a ~0.5s wipe dies under the 1.0s floor).
+If a fourth is ever needed, the clean mechanism is EXCLUSION references —
+`refs/exclude/` holding the broadcast furniture itself (the stinger frame,
+the corner watermark), matched first and masked out of the frame before any
+sponsor is searched. Folder-as-configuration again, deterministic, and it
+never touches the three guards that already work.
+
 ## The ident trap — a false positive worth knowing about
 
 A highlights package opens with a sponsor ident card: the Enterprise mark and

@@ -14,12 +14,17 @@ There are two routes to a measured match and they produce the same record:
 | Started by | `board-exposure-match.py --upload` | `gcloud run jobs execute` (for now) |
 | Good for | **full matches** | **highlights, and anyone without the tooling** |
 
-**Full matches belong on a laptop.** Measured on the first real cloud run: an
-8m14s package took about four minutes of scanning at 8 vCPU. Samples scale with
-length and cost scales again with reference count, so a 95-minute match with ten
-references is roughly 11× the samples and 2.5× the references — near two hours,
-about £1.20, and past the 7200s task timeout set in the deploy workflow. The
-same match on a laptop is free and half an hour of a machine nobody is using.
+**Full matches belong on a laptop when a laptop is to hand — the cloud can
+now take them too.** Measured on the first real cloud run: an 8m14s package
+took about four minutes of scanning at 8 vCPU. Samples scale with length and
+cost scales again with reference count, so a 95-minute match against a club's
+15-20 boards is legitimately 3-5 hours and £2-3. The task timeout is 21600s
+(6h) to cover exactly that — it was 7200s while reference sets were four
+marks, and moved on 29/08/2026 when club-scale sets made 3-hour scans honest
+rather than stuck. The same match on a laptop is still free electricity and
+an overnight run of a machine nobody is using; per the halves ruling in the
+engine README, trimming to whistle-to-whistle halves shaves ~15 minutes of
+half-time adverts off either route.
 
 What the local route costs afterwards is almost nothing: uploading the proxy and
 detections is ingress, which is free, and storing a ~150 MB proxy is under half
