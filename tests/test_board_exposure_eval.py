@@ -18,7 +18,8 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 from board_exposure_eval import (  # noqa: E402
-    LabelError, load_labels, overall, parse_clock, score)
+    LabelError, load_labels, merge_spans, overall, parse_clock, rollup, score,
+    sponsor_of)
 
 
 class ParseClock(unittest.TestCase):
@@ -118,6 +119,40 @@ class Score(unittest.TestCase):
         truth = {"DAZN": [(2.0, 3.0)]}
         hits = {2: {"DAZN": [hit()], "Enterprise": [hit()]}}
         self.assertEqual(list(score(truth, (0.0, 5.0), hits, 1.0)), ["DAZN"])
+
+
+class PerBoardRollup(unittest.TestCase):
+    def test_slash_names_roll_up_to_the_sponsor(self):
+        self.assertEqual(sponsor_of("Enterprise/goal-left"), "Enterprise")
+        self.assertEqual(sponsor_of("DAZN"), "DAZN")
+        t = rollup({"Enterprise/goal-left": [(0.0, 10.0)],
+                    "Enterprise/dugout": [(8.0, 20.0)],
+                    "DAZN/corner": [(5.0, 6.0)]})
+        self.assertEqual(t, {"Enterprise": [(0.0, 20.0)], "DAZN": [(5.0, 6.0)]})
+
+    def test_merge_kills_interior_edges(self):
+        # A labeller splitting at a shot cut (…-3:09, 3:09-…) must not leave a
+        # grace hole in the middle of unbroken presence.
+        self.assertEqual(merge_spans([(178.0, 189.0), (189.0, 213.0)]),
+                         [(178.0, 213.0)])
+        self.assertEqual(merge_spans([(5.0, 6.0), (8.0, 9.0)]),
+                         [(5.0, 6.0), (8.0, 9.0)])
+
+    def test_the_committed_answer_sheet_parses(self):
+        p = os.path.join(os.path.dirname(__file__), "..", "system",
+                         "board-exposure", "labels",
+                         "2026-04-18-sutton-united-v-altrincham.csv")
+        with open(p, encoding="utf-8") as f:
+            window, truth = load_labels(f)
+        self.assertEqual(window, (0.0, 8 * 60 + 14.0))
+        rolled = rollup(truth)
+        self.assertIn("Enterprise", rolled)
+        self.assertIn("DAZN", rolled)
+        # Every span forwards, inside the window.
+        for spans in truth.values():
+            for s, e in spans:
+                self.assertLess(s, e)
+                self.assertLessEqual(e, window[1])
 
 
 class Overall(unittest.TestCase):

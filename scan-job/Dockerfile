@@ -35,7 +35,12 @@ COPY scripts/board_exposure_core.py \
      scripts/board_exposure_upload.py \
      scripts/board_exposure_eval.py \
      scripts/board-exposure-match.py \
+     scripts/board-exposure-sweep.py \
      ./scripts/
+# The answer sheets ride in the image so a sweep can be started with just a
+# filename — BE_MODE=sweep BE_LABELS=<file>. They are hand-labelled truth,
+# already public in the repo, and a few KB.
+COPY system/board-exposure/labels/ ./labels/
 COPY scan-job/run_job.py .
 
 # Cloud Run Jobs give the container /tmp as tmpfs, which counts against memory.
