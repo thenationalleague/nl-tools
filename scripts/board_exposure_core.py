@@ -60,6 +60,18 @@ TRACK_MAX_GAP_SECS = 4.0    # longest gap tracking may close (bridge stays 1.5)
 TRACK_MIN_CORR = 0.60       # normalised correlation below this = not the board
 TRACK_SCALE = 0.25          # match at quarter resolution: cheap and blur-tolerant
 TRACK_Y_PAD = 2.0           # vertical search reach, in patch heights
+# Visibility. A detected board is either fully credited or absent — nothing
+# records that a steward stood across half of it. So each hit also measures
+# how much of the board's face agrees with the reference: both are squeezed
+# onto one small canvas, compared cell by cell, and the share of agreeing
+# cells is the hit's visibility. Additive to the 1.1 numbers — seconds,
+# clarity and detections do not move, which is why ENGINE_VERSION does not.
+VIS_W, VIS_H = 160, 48      # the common canvas; distortion hits both sides alike
+VIS_GRID = (4, 8)           # rows x cols of compared cells
+VIS_MIN_STD = 0.12          # under this a cell is flat (solid colour), in norm units
+VIS_CELL_CORR = 0.30        # a textured cell agrees at this correlation or better
+VIS_FLAT_DIFF = 0.55        # a flat cell agrees if the brightness gap is under this
+VIS_BLOCKED = 0.60          # a hit below this counts as obstructed in roll-ups
 
 
 def flatten(path):
@@ -218,18 +230,71 @@ def grow_to_board(frame_bgr, quad):
     return (L, y0, Rr, y1)
 
 
-def quality(gray, quad, ref_wh):
-    """Focus and contrast, measured on the board rectified back to square-on."""
+def rectify(gray, quad, ref_wh):
+    """The board's face, warped back to square-on. None when degenerate."""
     w, h = max(int(ref_wh[0]), 32), max(int(ref_wh[1]), 32)
     dst = np.float32([[0, 0], [w, 0], [w, h], [0, h]]).reshape(-1, 1, 2)
     try:
         M = cv2.getPerspectiveTransform(quad.astype(np.float32), dst)
         crop = cv2.warpPerspective(gray, M, (w, h))
     except cv2.error:
-        return 0.0, 0.0
-    if crop.size == 0:
+        return None
+    return crop if crop.size else None
+
+
+def focus_of(crop):
+    """Focus and contrast of a rectified board face."""
+    if crop is None:
         return 0.0, 0.0
     return float(cv2.Laplacian(crop, cv2.CV_64F).var()), float(crop.std())
+
+
+def quality(gray, quad, ref_wh):
+    """Focus and contrast, measured on the board rectified back to square-on."""
+    return focus_of(rectify(gray, quad, ref_wh))
+
+
+def visibility(vis_ref, crop):
+    """
+    How much of the board's face agrees with its reference, 0..1.
+
+    Both sides are squeezed onto the same small canvas (identical distortion,
+    so shape differences cancel), globally normalised (overall gain and
+    lighting cancel), and compared cell by cell. A textured cell agrees by
+    correlation; a flat cell — a solid panel has no texture to correlate — by
+    brightness alone, which is what stops a plain green board scoring as
+    half-hidden. Cells that disagree are the steward, the physio table, the
+    player through whom the artwork cannot be seen.
+
+    A judgement about coverage, not a measurement of anything physical: the
+    thresholds are stated in settings() so two exports can refuse to compare
+    if they were judged differently.
+    """
+    if vis_ref is None or crop is None:
+        return None
+    f = cv2.resize(crop, (VIS_W, VIS_H))
+
+    def norm(a):
+        a = a.astype(np.float32)
+        s = float(a.std())
+        return (a - float(a.mean())) / (s if s > 1e-6 else 1.0)
+
+    r, f = norm(vis_ref), norm(f)
+    rows, cols = VIS_GRID
+    ch, cw = VIS_H // rows, VIS_W // cols
+    ok, total = 0, rows * cols
+    for gy in range(rows):
+        for gx in range(cols):
+            rc = r[gy * ch:(gy + 1) * ch, gx * cw:(gx + 1) * cw]
+            fc = f[gy * ch:(gy + 1) * ch, gx * cw:(gx + 1) * cw]
+            if float(rc.std()) < VIS_MIN_STD:
+                ok += abs(float(rc.mean()) - float(fc.mean())) < VIS_FLAT_DIFF
+            else:
+                denom = float(rc.std()) * float(fc.std())
+                ncc = (float(np.mean((rc - rc.mean()) * (fc - fc.mean()))) / denom
+                       if denom > 1e-6 else 0.0)
+                ok += ncc >= VIS_CELL_CORR
+    return ok / total
 
 
 def clarity(area_pct, sharp, contrast, skew):
@@ -252,9 +317,11 @@ def build_refs(entries, sift):
     """
     Turn [(sponsor, path, scope)] into matchable references.
 
-    Returns [(sponsor, scope, keypoints, descriptors, corners, (w, h))], one per
-    image — several images for one sponsor stay separate here and roll up under
-    the sponsor name at aggregation time.
+    Returns [(sponsor, scope, keypoints, descriptors, corners, (w, h),
+    vis_ref)], one per image — several images for one sponsor stay separate
+    here and roll up under the sponsor name at aggregation time. vis_ref is
+    the reference squeezed onto the visibility canvas, kept because the
+    keypoints alone cannot say what the board's face LOOKS like.
     """
     refs, skipped = [], []
     for sponsor, path, scope in entries:
@@ -266,7 +333,7 @@ def build_refs(entries, sift):
         h, w = g.shape[:2]
         refs.append((sponsor, scope, kp, des,
                      np.float32([[0, 0], [w, 0], [w, h], [0, h]]).reshape(-1, 1, 2),
-                     (w, h)))
+                     (w, h), cv2.resize(g, (VIS_W, VIS_H))))
     return refs, skipped
 
 
@@ -294,7 +361,7 @@ def detect(frame_bgr, refs, sift, matcher):
     bh = H * BAND_FRAC
     by_sponsor = {}
 
-    for name, scope, kp_r, des_r, corners, ref_wh in refs:
+    for name, scope, kp_r, des_r, corners, ref_wh, vis_ref in refs:
         hits = by_sponsor.setdefault(name, [])
         for y0 in np.arange(0, H - bh, H * BAND_STRIDE):
             sel = np.flatnonzero((ys >= y0) & (ys < y0 + bh))
@@ -317,7 +384,8 @@ def detect(frame_bgr, refs, sift, matcher):
                     break
                 quad = cv2.perspectiveTransform(corners, Hm).reshape(4, 2)
                 if geometry_ok(quad, shape) and on_the_perimeter(frame_bgr, quad):
-                    sh, ct = quality(gray, quad, ref_wh)
+                    crop = rectify(gray, quad, ref_wh)
+                    sh, ct = focus_of(crop)
                     logo_pct = 100.0 * abs(cv2.contourArea(
                         quad.astype(np.float32))) / (H * W)
                     board = grow_to_board(frame_bgr, quad)
@@ -333,6 +401,7 @@ def detect(frame_bgr, refs, sift, matcher):
                         "area": board_pct,
                         "inliers": int(mask.sum()),
                         "clarity": clarity(board_pct, sh, ct, 0.1),
+                        "visibility": visibility(vis_ref, crop),
                     })
                 used = [np.flatnonzero(sel == idx[m.trainIdx])[0]
                         for m, k in zip(good, mask.ravel()) if k]
@@ -372,6 +441,8 @@ def settings():
         "min_run_secs": MIN_RUN_SECS, "bridge_secs": BRIDGE_SECS,
         "track_max_gap_secs": TRACK_MAX_GAP_SECS, "track_min_corr": TRACK_MIN_CORR,
         "track_scale": TRACK_SCALE,
+        "visibility": {"grid": list(VIS_GRID), "cell_corr": VIS_CELL_CORR,
+                       "flat_diff": VIS_FLAT_DIFF, "blocked_under": VIS_BLOCKED},
         "clarity_weights": {"size": 0.40, "focus": 0.25,
                             "contrast": 0.20, "angle": 0.15},
         "clarity_saturation": {"area_pct": 0.6, "sharp": 300.0, "contrast": 60.0},

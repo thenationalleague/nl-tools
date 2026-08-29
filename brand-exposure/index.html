@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Brand Exposure
-  Version: v0.4 (28/08/2026)
+  Version: v0.5 (29/08/2026)
   File: /brand-exposure/index.html
 
   Sponsor exposure measured from match video — seconds on screen, clarity and
@@ -27,6 +27,11 @@
     staff              → off; granted per-user, like Commercial Compliance
 
   Changelog
+  v0.5 (29/08/2026) — Blocked column in the match table: share of a sponsor's
+  detections where part of the board was covered. Comes from the engine's new
+  per-hit visibility measure; null-safe, so older matches show a dash. Kept a
+  separate column rather than an index discount by ruling — what a half-blocked
+  board is worth is a commercial judgement, made after real data, not baked in.
   v0.4 (28/08/2026) — One Add a match on screen at a time. On a phone with an
     empty list and the panel open there were three: the toolbar's, the empty
     state's, and the panel's own submit — two of which reopened a panel that
@@ -98,6 +103,16 @@
     var NL_TOOL_KEY = 'ops-brand-exposure';
 
     window.NL_CHANGELOG = [
+      {
+        date: '29/08/2026',
+        version: 'v0.5',
+        items: [
+          'Blocked column — the share of a sponsor\'s detections where part ' +
+            'of the board was covered by someone standing in front of it. ' +
+            'Measured per detection by the engine; a match scanned before ' +
+            'this existed shows a dash, never a fake 0%.'
+        ]
+      },
       {
         date: '28/08/2026',
         version: 'v0.4',
@@ -874,6 +889,8 @@
     $('vTable').innerHTML =
       '<thead><tr><th>Sponsor</th><th class="num">On screen</th><th class="num">Share</th>' +
       '<th class="num">Index</th><th class="num">Clarity</th><th class="num">Board</th>' +
+      '<th class="num" title="Share of detections where part of the board was ' +
+      'covered — a steward, the physio table, a player">Blocked</th>' +
       '<th class="num">Share of voice</th></tr></thead><tbody>' +
       ss.map(function (x) {
         var sov = shareOfVoice(m, x.name);
@@ -884,6 +901,9 @@
           '</td><td class="num">' + meter(x.index, best, num(x.index, 1)) +
           '</td><td class="num">' + num(x.clarity, 2) +
           '</td><td class="num">' + num(x.area, 2) + '%' +
+          /* null-safe on purpose: a match measured before visibility existed
+             has no number here, and a dash is not the same claim as 0%. */
+          '</td><td class="num">' + (x.blockedPct == null ? '—' : pctStr(x.blockedPct)) +
           '</td><td class="num">' + (sov == null
             ? '<span class="sov-off">withheld</span>' : pctStr(sov)) + '</td></tr>';
       }).join('') + '</tbody>';
@@ -1286,7 +1306,13 @@
         seconds: s.seconds || 0, pct: s.pct || 0, index: s.index || 0,
         clarity: s.clarity || 0, area: s.area || 0, logoArea: s.logo_area || 0,
         runs: s.runs || 0, most: s.most || 0, detections: s.detections || 0,
-        longest: s.longest || 0
+        longest: s.longest || 0,
+        /* Nullable, and Firebase drops nulls: a pre-visibility export simply
+           lacks these keys, which the views render as a dash. Mirrors
+           build_record() in scripts/board_exposure_upload.py — two writers,
+           one shape. */
+        visibility: s.visibility == null ? null : s.visibility,
+        blockedPct: s.blockedPct == null ? null : s.blockedPct
       };
     });
 

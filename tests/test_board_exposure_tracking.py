@@ -199,13 +199,53 @@ class SerialisedHitShape(unittest.TestCase):
         gray = cv2.cvtColor(board_frame(100), cv2.COLOR_BGR2GRAY)
         h = bem._synth_hit("partner", (100, 200, 260, 240), gray, 0.8)
         scan_fields = {"scope", "quad", "board", "logo_area", "area",
-                       "inliers", "clarity"}
+                       "inliers", "clarity", "visibility"}
         self.assertTrue(scan_fields <= set(h))
         self.assertTrue(h["tracked"])
         self.assertEqual(h["inliers"], 0)
+        # No homography behind a tracked hit, so no visibility — null, never a
+        # number that pretends the coverage was measured.
+        self.assertIsNone(h["visibility"])
         self.assertEqual(len(h["quad"]), 4)
         json_safe = __import__("json").dumps(h)      # must serialise as-is
         self.assertIn('"tracked": true', json_safe)
+
+
+@unittest.skipUnless(HAVE_CV, "opencv-python-headless + numpy not installed")
+class Visibility(unittest.TestCase):
+    """The coverage judgement, against faces we control."""
+
+    def setUp(self):
+        rng = np.random.default_rng(3)
+        board = np.zeros((80, 320), np.uint8)
+        board[:] = 70
+        cv2.putText(board, "ACME LTD", (10, 55), cv2.FONT_HERSHEY_SIMPLEX,
+                    1.6, 255, 6)
+        cv2.rectangle(board, (250, 15), (305, 65), 255, -1)
+        self.board = board
+        self.vis_ref = cv2.resize(board, (C.VIS_W, C.VIS_H))
+        self.noise = rng.integers(0, 255, (80, 320), dtype=np.uint8)
+
+    def test_unobstructed_board_scores_high(self):
+        self.assertGreaterEqual(C.visibility(self.vis_ref, self.board.copy()), 0.9)
+
+    def test_flat_board_is_not_called_hidden(self):
+        # A solid panel has no texture to correlate; the brightness fallback is
+        # what keeps a plain green board from scoring as half-covered.
+        flat = np.full((80, 320), 70, np.uint8)
+        flat_ref = cv2.resize(flat, (C.VIS_W, C.VIS_H))
+        self.assertGreaterEqual(C.visibility(flat_ref, flat.copy()), 0.9)
+
+    def test_half_covered_board_scores_low(self):
+        covered = self.board.copy()
+        covered[:, :160] = self.noise[:, :160]        # a body across half of it
+        v = C.visibility(self.vis_ref, covered)
+        self.assertLess(v, C.VIS_BLOCKED)
+        self.assertLess(v, C.visibility(self.vis_ref, self.board.copy()))
+
+    def test_none_face_is_none(self):
+        self.assertIsNone(C.visibility(self.vis_ref, None))
+        self.assertIsNone(C.visibility(None, self.board))
 
 
 if __name__ == "__main__":

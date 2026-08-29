@@ -64,6 +64,9 @@ def stats_for(hits_by_index, name, interval, duration):
     index = sum((r[-1] - r[0] + 1) * interval
                 * st.mean([h["clarity"] for i in r for h in hits_by_index[i][name]])
                 for r in runs)
+    # Tracked hits carry visibility None — absent from both numbers, never a
+    # pretend zero. A sponsor with no measured hits at all reports null.
+    vis = [h["visibility"] for h in flat if h.get("visibility") is not None]
     return {
         "seconds": round(secs, 1),
         "pct": round(100 * secs / duration, 1),
@@ -75,6 +78,9 @@ def stats_for(hits_by_index, name, interval, duration):
         "most": max(len(hits_by_index[i][name]) for i in idxs),
         "detections": len(idxs),
         "longest": round(max((r[-1] - r[0] + 1) * interval for r in runs), 1),
+        "visibility": round(st.mean(vis), 2) if vis else None,
+        "blockedPct": (round(100 * sum(v < C.VIS_BLOCKED for v in vis) / len(vis), 1)
+                       if vis else None),
     }
 
 
@@ -302,7 +308,8 @@ code{font-family:"IBM Plex Mono",monospace;font-size:.92em}
         <h2>Every sponsor, ranked</h2>
         <table>
           <thead><tr><th>Sponsor</th><th class="r">On screen</th><th class="r">Share</th>
-            <th class="r">Index</th><th class="r">Clarity</th><th class="r">Board</th></tr></thead>
+            <th class="r">Index</th><th class="r">Clarity</th><th class="r">Board</th>
+            <th class="r" title="Share of detections where part of the board was covered — a steward, the physio table, a player">Blocked</th></tr></thead>
           <tbody id="league" class="click"></tbody>
         </table>
         <p class="note">Index is seconds weighted by clarity, so a board held large and sharp
@@ -571,11 +578,12 @@ function runsFor(n){
     const tag = D.scope[n]==='club' ? `<span class="scopetag">${D.club}</span>` : '';
     if (!s) return `<tr data-s="${n}"><td><span class="swatch" style="background:${col};opacity:.4"></span>` +
       `<span style="opacity:.55">${n}</span>${tag}</td>` +
-      `<td class="r mono" colspan="5" style="opacity:.55">not detected</td></tr>`;
+      `<td class="r mono" colspan="6" style="opacity:.55">not detected</td></tr>`;
     return `<tr data-s="${n}"><td><span class="swatch" style="background:${col}"></span>${n}${tag}</td>` +
       `<td class="r mono">${held(s.seconds)}</td><td class="r mono">${s.pct}%</td>` +
       `<td class="r mono">${s.index.toFixed(1)}</td><td class="r mono">${s.clarity.toFixed(2)}</td>` +
-      `<td class="r mono">${s.area.toFixed(2)}%</td></tr>`;
+      `<td class="r mono">${s.area.toFixed(2)}%</td>` +
+      `<td class="r mono">${s.blockedPct == null ? '—' : s.blockedPct + '%'}</td></tr>`;
   }).join('');
   document.getElementById('league').onclick = e => {
     const tr = e.target.closest('tr'); if (tr) select(tr.dataset.s);

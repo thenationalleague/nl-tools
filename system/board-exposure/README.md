@@ -268,26 +268,32 @@ manufacture phantoms. The scoring maths is unit-tested in CI
 wherever a scan runs, and were proven against synthetic pans, cuts and
 motion blur — including watching each test fail under sabotage first.
 
-## Next: engine 1.2, a visibility metric (decided 29/08/2026, not built)
+## Visibility — the blocked column (built 29/08/2026, additive to 1.1)
 
 Watching the measured match showed boards part-blocked by players and
-stewards, which today is a cliff: a half-hidden board either still matches
-and gets FULL credit — the homography projects the whole reference quad — or
-drops below the inlier floor and scores zero for that sample. Nothing records
-that a detected board was half-covered.
+stewards, which had been a cliff: a half-hidden board either still matched
+and got FULL credit — the homography projects the whole reference quad — or
+dropped below the inlier floor and scored zero. Nothing recorded that a
+detected board was half-covered.
 
-The build, when it happens: after a detection locks a homography, rectify the
-frame patch back to reference space (the warp `quality()` already does) and
-compare it to the reference on a coarse grid; disagreeing cells are occluded.
-Per-hit `visibility` 0..1, rolled up as mean visibility and an obstruction
-rate ("on screen 2m 17s, part-blocked 38% of it") — which is placement
+Now every detection also measures coverage: the matched face is rectified
+square-on (the warp the clarity score already paid for), both it and the
+reference are squeezed onto one small canvas, and they are compared cell by
+cell — textured cells by correlation, flat cells by brightness, because a
+solid green panel has no texture to correlate and must not read as hidden.
+The share of agreeing cells is the hit's `visibility`; per sponsor it rolls
+up as mean visibility and a **Blocked** column — the share of detections with
+visibility under 0.6. "On screen 2m 17s, part-blocked 38% of it" is placement
 intelligence a sponsor and club can act on at renewal: a board regularly
-obscured is a board worth moving. Kept a SEPARATE column, never an index
-discount, until real data has been looked at — what a half-blocked board is
-worth is a commercial judgement, not a constant. Tracked hits have no
-homography, so their visibility is null, never faked. Depends on whole-board
-references, which exist as of the same date. Goes through the eval like
-everything else.
+obscured is a board worth moving.
+
+Rulings that shipped with it: a SEPARATE column, never an index discount,
+until real data has been looked at — what a half-blocked board is worth is a
+commercial judgement, not a constant. Tracked hits have no homography, so
+their visibility is null, never faked, and every surface renders absent as a
+dash — a match measured before this existed shows "—", which is not the same
+claim as 0% blocked. `ENGINE_VERSION` stays 1.1 deliberately: the bump exists
+to guard comparability, and no number that existed before this moved.
 
 Two more rulings from the same review, parked with it:
 
