@@ -27,10 +27,13 @@ WORKDIR /app
 COPY scan-job/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# The detector, the report builder, the uploader and the CLI, unchanged.
+# The detector, the report builder, the uploader, the eval helpers and the
+# CLI, unchanged. The eval module is imported by the CLI (parse_clock lives
+# there), so leaving it out breaks the container at import time, not scan time.
 COPY scripts/board_exposure_core.py \
      scripts/board_exposure_report.py \
      scripts/board_exposure_upload.py \
+     scripts/board_exposure_eval.py \
      scripts/board-exposure-match.py \
      ./scripts/
 COPY scan-job/run_job.py .

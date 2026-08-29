@@ -25,7 +25,11 @@ import numpy as np
 # comparable if they were measured the same way, and a roll-up that mixes
 # versions is silently wrong rather than obviously wrong — so every export
 # carries this, and anything aggregating them checks it.
-ENGINE_VERSION = "1.0"
+# 1.1: verified gap-tracking. Blurred pans between two real detections are
+# filled by template-tracking the board through them, so those seconds carry
+# per-frame evidence instead of relying on the 1.5s bridge. Recall moves, so
+# 1.1 numbers do not compare with 1.0 numbers — that is what this bump is for.
+ENGINE_VERSION = "1.1"
 
 # --- tunables, all in one place so a run can be described in one line ---------
 SAMPLE_FPS = 2.0            # samples per second of match
@@ -45,6 +49,17 @@ MIN_RUN_SECS = 1.0          # shortest appearance that counts at all
 BRIDGE_SECS = 1.5           # longest blocked gap still inside one appearance
 MIN_RUN, BRIDGE = 2, 2      # the same thing in samples at the default 2/s
 DEDUPE_PX = 45              # two hits closer than this are the same board
+# Gap-tracking. SIFT needs sharp detail and a broadcast pan smears the whole
+# frame, so a board that is plainly on screen goes undetected until the camera
+# settles and its run fragments. When the SAME sponsor is detected on both
+# sides of a short gap, the board's patch is template-tracked through the
+# blurred frames instead — at quarter scale, where blur costs little — and the
+# gap is filled only if EVERY frame in it is accounted for. Tracking never
+# extends a run past its last real detection; it only closes bounded gaps.
+TRACK_MAX_GAP_SECS = 4.0    # longest gap tracking may close (bridge stays 1.5)
+TRACK_MIN_CORR = 0.60       # normalised correlation below this = not the board
+TRACK_SCALE = 0.25          # match at quarter resolution: cheap and blur-tolerant
+TRACK_Y_PAD = 2.0           # vertical search reach, in patch heights
 
 
 def flatten(path):
@@ -355,6 +370,8 @@ def settings():
         "ratio": RATIO, "min_inliers": MIN_INLIERS, "max_per_band": MAX_PER_BAND,
         "aspect": list(ASPECT), "max_tilt": MAX_TILT, "area_pct": list(AREA_PCT),
         "min_run_secs": MIN_RUN_SECS, "bridge_secs": BRIDGE_SECS,
+        "track_max_gap_secs": TRACK_MAX_GAP_SECS, "track_min_corr": TRACK_MIN_CORR,
+        "track_scale": TRACK_SCALE,
         "clarity_weights": {"size": 0.40, "focus": 0.25,
                             "contrast": 0.20, "angle": 0.15},
         "clarity_saturation": {"area_pct": 0.6, "sharp": 300.0, "contrast": 60.0},
@@ -388,3 +405,57 @@ def runs_from(indices, bridge=BRIDGE, min_run=MIN_RUN, interval=None):
             cur = [i]          # a fresh list — clearing the stored one empties it too
     runs.append(cur)
     return [r for r in runs if len(r) >= min_run]
+
+
+def gap_candidates(indices, max_gap):
+    """
+    Pairs (a, b) of detected sample indices with a fillable gap between them:
+    at least one missing sample, at most max_gap. Pure, so the selection rule
+    is testable without a frame in sight — the rule IS the precision guard.
+    Only bounded gaps qualify: a run's ends are never extended, because past
+    the last real detection there is no second anchor to verify against.
+    """
+    idxs = sorted(set(indices))
+    return [(a, b) for a, b in zip(idxs, idxs[1:]) if 1 <= b - a - 1 <= max_gap]
+
+
+def find_patch(prev_bgr, bbox, cur_bgr):
+    """
+    Locate the content of prev's bbox inside cur. Returns ((x0,y0,x1,y1), corr)
+    or None when the search is impossible (patch at the frame edge, degenerate
+    box). corr is TM_CCOEFF_NORMED in [-1, 1]; the caller compares it against
+    TRACK_MIN_CORR and treats anything below as "the board is not there".
+
+    Both sides are matched at TRACK_SCALE with a slight blur, which is what
+    makes this work on the pan-blurred frames SIFT gives up on: motion blur is
+    a low-pass filter, and at quarter scale a sharp template and a smeared
+    frame look alike again. The search is the full frame width — half a frame
+    of travel between samples is an ordinary pan — but only TRACK_Y_PAD patch
+    heights vertically, because perimeter boards live in a horizontal band and
+    a match found far above one is a graphic, not the board.
+    """
+    H, W = prev_bgr.shape[:2]
+    x0, y0 = max(0, int(bbox[0])), max(0, int(bbox[1]))
+    x1, y1 = min(W, int(bbox[2])), min(H, int(bbox[3]))
+    ph, pw = y1 - y0, x1 - x0
+    if ph < 8 or pw < 16:
+        return None
+
+    def prep(img):
+        g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        g = cv2.resize(g, (max(4, int(g.shape[1] * TRACK_SCALE)),
+                           max(4, int(g.shape[0] * TRACK_SCALE))))
+        return cv2.GaussianBlur(g, (3, 3), 0)
+
+    tmpl = prep(prev_bgr[y0:y1, x0:x1])
+    sy0 = max(0, int(y0 - TRACK_Y_PAD * ph))
+    sy1 = min(cur_bgr.shape[0], int(y1 + TRACK_Y_PAD * ph))
+    search = prep(cur_bgr[sy0:sy1, :])
+    if search.shape[0] < tmpl.shape[0] or search.shape[1] < tmpl.shape[1]:
+        return None
+
+    res = cv2.matchTemplate(search, tmpl, cv2.TM_CCOEFF_NORMED)
+    _, corr, _, loc = cv2.minMaxLoc(res)
+    bx0 = loc[0] / TRACK_SCALE
+    by0 = sy0 + loc[1] / TRACK_SCALE
+    return (bx0, by0, bx0 + pw, by0 + ph), float(corr)

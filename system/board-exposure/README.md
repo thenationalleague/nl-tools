@@ -219,6 +219,55 @@ concluded it was absent from the ground. Five frames of not-looking-hard-enough
 produced a confident wrong answer about a league partner's delivery. That is the
 false-negative trap this tool exists to avoid, and it caught its own author.
 
+## Engine 1.1 — tracked gap fill, and the eval that gates every tune
+
+Watching the first cloud-measured match back (29/08/2026) showed boards
+plainly on screen with no boxes. Two causes, two remedies, and a rule.
+
+**Cause one is the references** — logo lockups instead of board crops — and
+that is artwork, not engine: see REFERENCES.md.
+
+**Cause two is pan blur.** SIFT matches fine detail, and every time the camera
+pans with play the whole frame smears; the board is still there, but its run
+fragments and the seconds leak. Engine 1.1 answers with tracking: when the
+same sponsor is detected on both sides of a gap of up to 4s, the board's patch
+is template-chased through the blurred frames at quarter scale (where blur
+costs little), forward from one anchor and backward from the other so the
+most-smeared middle frame is reached from its least-smeared neighbour. The
+fill is all-or-nothing — a frame neither chain can account for, which is what
+a cut to the crowd looks like, abandons the whole gap. Tracked hits are
+honest: `tracked: true`, `inliers: 0`, correlation recorded, clarity measured
+on the actual blurred frame, and a run is never extended past its last real
+detection. Cost is ~10–20% of scan CPU, pennies.
+
+Numbers moved, so this is **engine 1.1** and does not compare with 1.0 —
+which cuts both ways usefully: the Sutton match measured on 1.0 is the natural
+before/after once it is re-scanned.
+
+**The rule that comes with it:** no threshold, weight or tracking parameter
+moves again without `scripts/board_exposure_eval.py` saying what it did.
+Label a couple of minutes of a real match while watching it —
+
+```
+window,0:00,2:00
+Enterprise,0:12,0:31
+DAZN,0:20,0:48
+```
+
+— one row per legible appearance, and run it against the detections export:
+
+```
+python scripts/board_exposure_eval.py match-detections.json labels.csv
+```
+
+It prints recall and precision per sponsor, what tracking contributed, and
+shouts if precision drops under 95% — because a phantom second sold to a
+partner is worse than a missed one, and every recall lever can also
+manufacture phantoms. The scoring maths is unit-tested in CI
+(`tests/test_board_exposure_*.py`); the OpenCV-dependent tracker cases run
+wherever a scan runs, and were proven against synthetic pans, cuts and
+motion blur — including watching each test fail under sabotage first.
+
 ## The ident trap — a false positive worth knowing about
 
 A highlights package opens with a sponsor ident card: the Enterprise mark and

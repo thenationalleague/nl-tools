@@ -54,6 +54,7 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import board_exposure_core as C            # noqa: E402
 import board_exposure_report as R          # noqa: E402
+from board_exposure_eval import parse_clock as _parse_clock  # noqa: E402
 
 # Frames are inlined as base64, which costs a third again on top of the JPEG, so
 # the budget is what keeps a full match inside a page a browser will open. 240 at
@@ -254,20 +255,17 @@ def push_to_tool(a, base, head, stats, club, title, date, proxy, duration, compl
 
 
 def parse_clock(s):
-    """'1:52:30', '18:30' or '1110' -> seconds. None passes through."""
-    if s in (None, ""):
-        return None
-    parts = str(s).strip().split(":")
+    """'1:52:30', '18:30' or '1110' -> seconds. None passes through.
+
+    The parsing itself lives in board_exposure_eval (the one cv2-free module,
+    so the eval can run anywhere) — this wrapper only keeps the CLI habit of
+    dying with a sentence instead of raising.
+    """
+    import board_exposure_eval as E
     try:
-        vals = [float(p) for p in parts]
-    except ValueError:
-        die(f"cannot read '{s}' as a time. Use 1:52:30, 18:30 or a number of seconds.")
-    if len(vals) > 3:
-        die(f"cannot read '{s}' as a time.")
-    secs = 0.0
-    for v in vals:
-        secs = secs * 60 + v
-    return secs
+        return _parse_clock(s)
+    except E.LabelError as e:
+        die(str(e))
 
 
 def extract_ffmpeg(video, work, fps, ffmpeg, limit, start=None, end=None):
@@ -406,6 +404,107 @@ def _scan(job):
             "clarity": float(h["clarity"]),
         } for h in hs]
     return i, out
+
+
+def _synth_hit(scope, bbox, gray, corr):
+    """A hit shaped exactly like _scan's, minted from a tracked box.
+
+    Honest about what it is: inliers 0 (SIFT found nothing here), tracked True,
+    the correlation recorded, and clarity measured on the actual blurred frame —
+    so a board tracked through a pan counts its seconds while its low sharpness
+    keeps the exposure index truthful about how readable it was.
+    """
+    x0, y0, x1, y1 = bbox
+    quad = np.float32([[x0, y0], [x1, y0], [x1, y1], [x0, y1]])
+    H, W = gray.shape[:2]
+    logo_pct = 100.0 * max(0.0, x1 - x0) * max(0.0, y1 - y0) / (H * W)
+    sh, ct = C.quality(gray, quad, (x1 - x0, y1 - y0))
+    return {
+        "scope": scope,
+        "quad": [[float(x), float(y)] for x, y in quad],
+        "board": None,
+        "logo_area": float(logo_pct),
+        "area": float(logo_pct),
+        "inliers": 0,
+        "clarity": float(C.clarity(logo_pct, sh, ct, 0.1)),
+        "tracked": True,
+        "corr": round(float(corr), 3),
+    }
+
+
+def _track_gap(name, a, b, hits_by_index, files):
+    """
+    Chain the board's patch across the gap between detections at a and b —
+    forward from a and backward from b, so the most-blurred frame in the middle
+    only has to be reached from its less-blurred neighbour. All or nothing: if
+    any frame in the gap cannot be accounted for from either side, nothing is
+    filled, because a frame no chain reaches is exactly what a cut to the crowd
+    looks like.
+    """
+    def anchor(i):
+        h = max(hits_by_index[i][name], key=lambda h: h["inliers"])
+        xs = [p[0] for p in h["quad"]]
+        ys = [p[1] for p in h["quad"]]
+        return h["scope"], (min(xs), min(ys), max(xs), max(ys))
+
+    cache = {}
+
+    def frame(i):
+        if i not in cache:
+            cache[i] = cv2.imread(files[i], cv2.IMREAD_COLOR)
+        return cache[i]
+
+    found = {}
+    for start, step in ((a, 1), (b, -1)):
+        scope, bbox = anchor(start)
+        prev = frame(start)
+        if prev is None:
+            return None
+        i = start + step
+        while a < i < b and i not in found:
+            cur = frame(i)
+            if cur is None:
+                break
+            r = C.find_patch(prev, bbox, cur)
+            if not r or r[1] < C.TRACK_MIN_CORR:
+                break
+            bbox, corr = r
+            found[i] = _synth_hit(scope, bbox,
+                                  cv2.cvtColor(cur, cv2.COLOR_BGR2GRAY), corr)
+            prev = cur
+            i += step
+    if len(found) != b - a - 1:
+        return None
+    return sorted(found.items())
+
+
+def close_blurred_gaps(hits_by_index, files, interval):
+    """
+    Engine 1.1's recall pass. SIFT loses boards for the length of a camera pan
+    because motion blur erases the detail it matches on; the board is still on
+    screen, and until now those seconds either leant on the blind 1.5s bridge
+    or fragmented the run entirely. This fills a gap of up to
+    TRACK_MAX_GAP_SECS between two REAL detections of the same sponsor with
+    per-frame tracked evidence — and never extends a run past its last real
+    detection, which is what keeps a recall pass from becoming an imagination.
+    """
+    max_gap = max(1, int(round(C.TRACK_MAX_GAP_SECS / interval)))
+    filled, gained = 0, set()
+    t0 = time.time()
+    for name in sorted({n for h in hits_by_index.values() for n in h}):
+        idxs = [i for i, h in hits_by_index.items() if h.get(name)]
+        for a, b in C.gap_candidates(idxs, max_gap):
+            chain = _track_gap(name, a, b, hits_by_index, files)
+            if chain:
+                for i, hit in chain:
+                    hits_by_index.setdefault(i, {}).setdefault(name, []).append(hit)
+                filled += len(chain)
+                gained.add(name)
+    if filled:
+        print(f"  tracking closed blurred gaps: +{filled} samples "
+              f"({filled * interval:.1f}s) across {len(gained)} sponsor(s) "
+              f"in {time.time() - t0:.0f}s")
+    return filled
 
 
 def stills(video, n, out):
@@ -871,6 +970,12 @@ def run_one(a, video, club, title, date="", start=None, end=None, complete=None)
 
     scan_secs = time.time() - t0
     print(f"\n  scanned in {R.hhmm(scan_secs)} — {len(hits_by_index)} samples with a detection")
+
+    # After the scan, before anything reads the results: fill pan-blur gaps
+    # with tracked evidence, so the stats, the report and the tool all see one
+    # consistent set of hits. Needs the extracted frames, so it must run before
+    # the cleanup below.
+    close_blurred_gaps(hits_by_index, files, interval)
 
     # Report frames: a spread across the match plus the clearest shot of each
     # sponsor, shrunk to something a page can hold.

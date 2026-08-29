@@ -159,9 +159,12 @@ input.
    which also carries the open question of whether share of voice is a metric
    anybody actually wants. If it is not, most of the completeness machinery in
    this system stops being needed.
-4. **A real bill.** Everything above about cost is arithmetic from measured
-   local runtime, not an invoice. Run one match and read the actual number
-   before anyone plans around it.
+4. ~~**A real bill.**~~ Answered 29/08/2026 by the billing console: the day
+   the pipeline was built and first run cost ~25p all-in — the real scan ~7p
+   (the arithmetic above held), the two container image builds 9p, storage
+   and the instant-failing runs the rest. The month to date, everything on
+   the project included, is 84p. The daily penny of Cloud Run Functions on
+   the chart is the estate's normal functions, not this system.
 
 ## First run, before any of this works
 
