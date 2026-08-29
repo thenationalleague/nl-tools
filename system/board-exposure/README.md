@@ -319,6 +319,20 @@ the corner watermark), matched first and masked out of the frame before any
 sponsor is searched. Folder-as-configuration again, deterministic, and it
 never touches the three guards that already work.
 
+*The corner watermark, meanwhile, actually got through* — the first scan
+with a whole-board reference proved it (29/08/2026). A partial feature match
+against the DAZN board crop can drop a WIDE quad over the square overlay,
+which passes the aspect gate, and in a pitch-filled shot there is grass
+below the top corner, which passes the grass check. Engine 1.2's answer is
+the tell furniture cannot fake: a perimeter board's on-screen position moves
+every time the camera does, and the camera at a football match never stops
+moving — so any position (24px cell, neighbours merged) holding a sponsor's
+hits through more than 30% of ALL samples is an overlay, and its hits are
+stripped before furniture-bridging tracking or any counting happens. That
+removes seconds, so ENGINE_VERSION bumped to 1.2 and 1.1 exports no longer
+compare. Catches every future broadcaster's bug with zero configuration;
+the exclusion-refs idea above stays parked for furniture that moves.
+
 ## The ident trap — a false positive worth knowing about
 
 A highlights package opens with a sponsor ident card: the Enterprise mark and
