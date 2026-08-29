@@ -333,6 +333,29 @@ removes seconds, so ENGINE_VERSION bumped to 1.2 and 1.1 exports no longer
 compare. Catches every future broadcaster's bug with zero configuration;
 the exclusion-refs idea above stays parked for furniture that moves.
 
+## The first sweep, recorded — 29/08/2026
+
+Sutton v Altrincham highlights, 989 samples, 8 reference images, scored
+against Richard's 73-span hand count. Eight sensitivity combos, 100 minutes,
+about £1:
+
+    ratio  inliers  side   recall  precision  phantom
+    0.80      9      12      56%      84%       135     <- shipping settings
+    0.80      7      12      60%      84%       147
+    0.85      9      12      58%      83%       149
+    0.85      7      12      64%      82%       180
+
+(The side-floor 12 vs 9 rows were identical in every pair, so they are not
+repeated: below 12px the far side fails on features, not the gate — which
+also says the 1.3 floor drop bought little.) What the table settles: the
+dials are exhausted — eight points of recall for two of precision is the
+whole range on offer — and precision sits at ~84% at EVERY setting, so the
+~135 disputed samples are confident detections, not marginal ones. The sweep
+declined to pick a knee, correctly. Next: adjudicate the phantoms
+(`board_exposure_eval.py --phantoms` prints the disputed timestamps) — each
+one is either a board the conservative hand count skipped, or an engine
+error to fix; nobody moves a threshold until those rulings are in.
+
 ## The ident trap — a false positive worth knowing about
 
 A highlights package opens with a sponsor ident card: the Enterprise mark and
