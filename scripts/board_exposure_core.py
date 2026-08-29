@@ -52,6 +52,12 @@ import numpy as np
 # half the match — no operated camera returns to the same sixteen pixels
 # across separate visits spanning an afternoon; a digital overlay does
 # nothing else. Two thirds of all measured phantoms were this.
+# Also in 1.4: the face check. The remaining third included a 17-second
+# impostor — the board reference's white-on-black lettering matched a
+# DIFFERENT black board, ruled by eye at 4:10-4:27. Features can be fooled;
+# the rectified face cannot: judged on the reference's textured cells only
+# (the flat fallback would let any dark board vouch for any other), a hit
+# whose face agrees under VIS_REJECT is discarded at detection time.
 ENGINE_VERSION = "1.4"
 
 # --- tunables, all in one place so a run can be described in one line ---------
@@ -113,6 +119,14 @@ STATIC_CELL_PX = 24         # position granularity; jitter smaller than this mer
 STATIC_FINE_CELL_PX = 16
 STATIC_FINE_SHARE = 0.08
 STATIC_FINE_SPAN = 0.50
+# The face check. Richard's adjudication found the board reference's generic
+# parts (white capitals on black) matching a DIFFERENT black board across the
+# pitch — letterforms fooled the matcher for 17 straight seconds. But an
+# impostor cannot fake the face: rectified square-on, it does not resemble
+# the reference, and visibility says so. A hit whose face agrees this little
+# is a lie whatever its inlier count. Deliberately low: a genuine board that
+# is small, blurred or half-covered still scores well above this.
+VIS_REJECT = 0.18
 
 
 def flatten(path):
@@ -354,6 +368,46 @@ def clarity(area_pct, sharp, contrast, skew):
                          + 0.15 * (1.0 - skew), 0.0, 1.0))
 
 
+def face_agreement(vis_ref, crop):
+    """
+    Identity, not coverage. visibility() above answers "how much of the board
+    could be seen" and needs its flat-cell brightness fallback so a plain
+    panel does not read as hidden — but that same fallback lets any dark
+    board vouch for any other dark board. The reject decision therefore looks
+    ONLY at the cells where the REFERENCE has texture (the lettering, the
+    marks — the parts that carry identity) and asks how many correlate. An
+    impostor wearing different lettering fails nearly all of them; a genuine
+    board half-covered still passes the visible half's. None when the
+    reference has no textured cells to judge by, in which case nothing is
+    rejected — a rule this destructive does not run on guesswork.
+    """
+    if vis_ref is None or crop is None:
+        return None
+    f = cv2.resize(crop, (VIS_W, VIS_H))
+
+    def norm(a):
+        a = a.astype(np.float32)
+        s = float(a.std())
+        return (a - float(a.mean())) / (s if s > 1e-6 else 1.0)
+
+    r, f = norm(vis_ref), norm(f)
+    rows, cols = VIS_GRID
+    ch, cw = VIS_H // rows, VIS_W // cols
+    ok, total = 0, 0
+    for gy in range(rows):
+        for gx in range(cols):
+            rc = r[gy * ch:(gy + 1) * ch, gx * cw:(gx + 1) * cw]
+            if float(rc.std()) < VIS_MIN_STD:
+                continue
+            fc = f[gy * ch:(gy + 1) * ch, gx * cw:(gx + 1) * cw]
+            total += 1
+            denom = float(rc.std()) * float(fc.std())
+            ncc = (float(np.mean((rc - rc.mean()) * (fc - fc.mean()))) / denom
+                   if denom > 1e-6 else 0.0)
+            ok += ncc >= VIS_CELL_CORR
+    return ok / total if total else None
+
+
 def build_refs(entries, sift):
     """
     Turn [(sponsor, path, scope)] into matchable references.
@@ -429,28 +483,39 @@ def detect(frame_bgr, refs, sift, matcher):
                     # projected box says the board is. An overlay's features
                     # are pixel-locked while its projected box wanders, which
                     # is what the fine furniture rule keys on.
-                    used = dst.reshape(-1, 2)[mask.ravel().astype(bool)]
-                    mc = [float(used[:, 0].mean()), float(used[:, 1].mean())]
+                    used_pts = dst.reshape(-1, 2)[mask.ravel().astype(bool)]
+                    mc = [float(used_pts[:, 0].mean()),
+                          float(used_pts[:, 1].mean())]
                     crop = rectify(gray, quad, ref_wh)
-                    sh, ct = focus_of(crop)
-                    logo_pct = 100.0 * abs(cv2.contourArea(
-                        quad.astype(np.float32))) / (H * W)
-                    board = grow_to_board(frame_bgr, quad)
-                    board_pct = logo_pct
-                    if board:
-                        bx0, by0, bx1, by1 = board
-                        board_pct = 100.0 * (bx1 - bx0) * (by1 - by0) / (H * W)
-                    hits.append({
-                        "scope": scope,
-                        "quad": quad,
-                        "board": board,
-                        "logo_area": logo_pct,
-                        "area": board_pct,
-                        "inliers": int(mask.sum()),
-                        "clarity": clarity(board_pct, sh, ct, 0.1),
-                        "visibility": visibility(vis_ref, crop),
-                        "mc": mc,
-                    })
+                    agree = face_agreement(vis_ref, crop)
+                    # The face check: features can be fooled by another black
+                    # board wearing similar lettering, but rectified square-on
+                    # an impostor does not RESEMBLE the reference where the
+                    # reference has identity. A rejected hit still falls
+                    # through to the keypoint bookkeeping below, so its
+                    # features are consumed rather than re-matched on every
+                    # remaining pass of this band.
+                    if agree is None or agree >= VIS_REJECT:
+                        vis = visibility(vis_ref, crop)
+                        sh, ct = focus_of(crop)
+                        logo_pct = 100.0 * abs(cv2.contourArea(
+                            quad.astype(np.float32))) / (H * W)
+                        board = grow_to_board(frame_bgr, quad)
+                        board_pct = logo_pct
+                        if board:
+                            bx0, by0, bx1, by1 = board
+                            board_pct = 100.0 * (bx1 - bx0) * (by1 - by0) / (H * W)
+                        hits.append({
+                            "scope": scope,
+                            "quad": quad,
+                            "board": board,
+                            "logo_area": logo_pct,
+                            "area": board_pct,
+                            "inliers": int(mask.sum()),
+                            "clarity": clarity(board_pct, sh, ct, 0.1),
+                            "visibility": vis,
+                            "mc": mc,
+                        })
                 used = [np.flatnonzero(sel == idx[m.trainIdx])[0]
                         for m, k in zip(good, mask.ravel()) if k]
                 alive[used] = False

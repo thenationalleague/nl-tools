@@ -369,9 +369,16 @@ matches anchor different parts of the wide reference, so the projected box's
 centre wanders hundreds of pixels while the matched features never move, and
 it only matched in ~13% of samples — under the 30% line. Hence 1.4. Recall
 by board, for the record: goal boards 77-86%, TIC 69%, DAZN board 53%,
-far-side dugouts 24-36% — the resolution story, measured. One human ruling
-still open: DAZN claims at 4:10-4:27, just before the first corner-board
-label.
+far-side dugouts 24-36% — the resolution story, measured.
+
+The last ruling came by eye: at 4:10-4:27 the engine claimed DAZN mid-frame
+for 17 straight seconds and Richard's scrub found nothing there — the board
+reference's white-on-black lettering had matched a DIFFERENT black board
+across the pitch. That is 1.4's second guard, the face check: judged on the
+reference's textured cells only (visibility()'s flat fallback would let any
+dark board vouch for any other — its first draft scored the impostor 0.47),
+an impostor face agrees at ~0.15 where a genuine half-covered board still
+holds ~0.6, and anything under VIS_REJECT is discarded at detection time.
 
 ## The ident trap — a false positive worth knowing about
 
