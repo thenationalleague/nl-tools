@@ -18,8 +18,8 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 from board_exposure_eval import (  # noqa: E402
-    LabelError, load_labels, merge_spans, overall, parse_clock, rollup, score,
-    sponsor_of)
+    LabelError, clockfmt, load_labels, merge_spans, overall, parse_clock,
+    phantoms, rollup, score, sponsor_of)
 
 
 class ParseClock(unittest.TestCase):
@@ -153,6 +153,36 @@ class PerBoardRollup(unittest.TestCase):
             for s, e in spans:
                 self.assertLess(s, e)
                 self.assertLessEqual(e, window[1])
+
+
+class Phantoms(unittest.TestCase):
+    def test_disputed_samples_group_into_ranges_longest_first(self):
+        truth = {"DAZN": [(20.0, 30.0)]}
+        hits = {}
+        for i in (4, 5, 6, 40, 50, 51, 52, 53):     # two clusters + a loner
+            hits[i] = {"DAZN": [hit()]}
+        ph = phantoms(truth, (0.0, 60.0), hits, 1.0, grace=0.0)["DAZN"]
+        # 50-53 (4 samples) first, then 4-6 (3), then the loner at 40.
+        self.assertEqual([(a, b) for a, b, _ in ph],
+                         [(50.0, 54.0), (4.0, 7.0), (40.0, 41.0)])
+
+    def test_inside_truth_is_never_disputed(self):
+        truth = {"DAZN": [(2.0, 5.0)]}
+        hits = {3: {"DAZN": [hit()]}}
+        self.assertEqual(phantoms(truth, (0.0, 10.0), hits, 1.0,
+                                  grace=0.0)["DAZN"], [])
+
+    def test_tracked_share_is_reported(self):
+        truth = {"DAZN": [(20.0, 30.0)]}
+        hits = {4: {"DAZN": [hit(tracked=True)]},
+                5: {"DAZN": [hit(tracked=True)]}}
+        ((a, b, share),) = phantoms(truth, (0.0, 40.0), hits, 1.0,
+                                    grace=0.0)["DAZN"]
+        self.assertEqual(share, 1.0)
+
+    def test_clockfmt(self):
+        self.assertEqual(clockfmt(213.5), "3:33")
+        self.assertEqual(clockfmt(0), "0:00")
 
 
 class Overall(unittest.TestCase):

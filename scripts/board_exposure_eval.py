@@ -169,6 +169,50 @@ def score(truth, window, hits_by_index, interval, grace=0.75):
     return out
 
 
+def phantoms(truth, window, hits_by_index, interval, grace=0.75):
+    """
+    The disputed moments, for a human to adjudicate: per sponsor, the time
+    ranges where the engine claims presence and the labels say nothing.
+    Returns {sponsor: [(start_s, end_s, tracked_share), ...]} sorted longest
+    first — because 135 phantom samples is an argument, but "scrub to 3:41
+    and look" settles it. tracked_share says how much of the range came from
+    gap-tracking rather than direct detection, which is its own diagnosis:
+    a fully tracked phantom means tracking bridged between two mistakes.
+    """
+    hits = {int(k): v for k, v in hits_by_index.items()}
+    w0, w1 = window
+    out = {}
+    for name, spans in truth.items():
+        fp = []
+        i = int(w0 // interval)
+        while (t := i * interval) <= w1:
+            if t >= w0:
+                inside = any(s <= t <= e for s, e in spans)
+                near = any(abs(t - x) < grace for s, e in spans for x in (s, e))
+                hs = (hits.get(i) or {}).get(name) or []
+                if hs and not inside and not near:
+                    fp.append((i, all(h.get("tracked") for h in hs)))
+            i += 1
+        ranges = []
+        for idx, tracked in fp:
+            # A one-sample gap does not break a viewing: group with slack 1.
+            if ranges and idx - ranges[-1][1] <= 2:
+                ranges[-1][1] = idx
+                ranges[-1][2] += tracked
+                ranges[-1][3] += 1
+            else:
+                ranges.append([idx, idx, int(tracked), 1])
+        out[name] = sorted(
+            ((a * interval, (b + 1) * interval, tk / n)
+             for a, b, tk, n in ranges),
+            key=lambda r: r[0] - r[1])
+    return out
+
+
+def clockfmt(t):
+    return f"{int(t // 60)}:{int(t % 60):02d}"
+
+
 def overall(per_sponsor):
     """Pooled totals — every scored sample counted once, no averaging of rates."""
     tp = sum(s["tp"] for s in per_sponsor.values())
@@ -249,6 +293,24 @@ def main(argv):
         print("  ! precision under 95%: the engine is claiming exposure that "
               "was not there.\n    That is worse than missing some — check the "
               "phantom samples before\n    trusting any recall gain.\n")
+
+    if "--phantoms" in argv:
+        # The adjudication list: scrub the player to each range and rule —
+        # board there (label was conservative) or not (engine error). Ten
+        # rulings usually settle which side owns the precision gap.
+        ph = phantoms(truth, window, hits, interval, grace=grace)
+        print("  disputed ranges — longest first, video clock:")
+        for name in sorted(ph):
+            rows = ph[name][:12]
+            if not rows:
+                continue
+            print(f"  {name}")
+            for a, b, tk in rows:
+                note = "  (all tracked)" if tk == 1 else (
+                    f"  ({int(tk * 100)}% tracked)" if tk > 0 else "")
+                print(f"    {clockfmt(a)} - {clockfmt(b)}  "
+                      f"{b - a:.1f}s{note}")
+        print()
 
 
 if __name__ == "__main__":

@@ -186,6 +186,19 @@ def main():
         print("\n  no combo held 97% precision — loosening is manufacturing "
               "exposure on this\n  footage, and the honest answer is the "
               "reference set, not the thresholds.")
+        # Still say WHERE the disagreement lives, from the strictest combo —
+        # precision is flat across the grid, so the diagnosis is too.
+        ov, o, per = results[0]
+        print(f"\n  per sponsor at ratio {ov['RATIO']}, inliers "
+              f"{ov['MIN_INLIERS']}, side {ov['MIN_SIDE']}:")
+        for name in sorted(per):
+            s = per[name]
+            r = "—" if s["recall"] is None else f"{100 * s['recall']:.0f}%"
+            p = "—" if s["precision"] is None else f"{100 * s['precision']:.0f}%"
+            print(f"    {name:<24}recall {r:>5}  precision {p:>5}  "
+                  f"missed {s['fn']}  phantom {s['fp']}")
+        print("\n  Run board_exposure_eval.py --phantoms against this match's "
+              "detections to get\n  the disputed timestamps for a human ruling.")
 
 
 if __name__ == "__main__":
