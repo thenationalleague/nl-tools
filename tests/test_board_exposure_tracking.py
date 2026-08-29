@@ -262,6 +262,39 @@ class StaticFurniture(unittest.TestCase):
         self.assertEqual(C.strip_static({}, 100), {})
         self.assertEqual(C.strip_static({0: {"X": [quad_at(0, 0)]}}, 0), {})
 
+    def test_wandering_box_with_locked_features_is_furniture(self):
+        # The watermark that beat 1.2: partial matches anchor different parts
+        # of the wide reference, so the projected box's centre wanders hundreds
+        # of pixels — but the matched features never leave the overlay. 13% of
+        # samples, spread across the whole match: the fine rule's exact target.
+        hits = {}
+        for k, i in enumerate(range(0, 989, 8)):        # ~12.5%, full span
+            h = quad_at(1200 + (k % 9) * 90, 80 + (k % 4) * 30)
+            h["mc"] = [1701.0 + (k % 3), 121.0 + (k % 2)]
+            hits[i] = {"DAZN": [h]}
+        gone = C.strip_static(hits, 989)
+        self.assertEqual(gone, {"DAZN": len(range(0, 989, 8))})
+        self.assertEqual(hits, {})
+
+    def test_one_spell_at_a_spot_survives_the_fine_rule(self):
+        # A board CAN hold a position through one long spell — 10% of samples
+        # but all in the first quarter fails the span condition and stays.
+        hits = {}
+        for k, i in enumerate(range(0, 99)):
+            h = quad_at(400, 500)
+            h["mc"] = [450.0, 520.0]
+            hits[i] = {"Enterprise": [h]}
+        self.assertEqual(C.strip_static(hits, 989), {})
+        self.assertEqual(len(hits), 99)
+
+    def test_hits_without_mc_are_immune_to_the_fine_rule(self):
+        # Old exports and tracked fills carry no matched-feature centroid; the
+        # aggressive rule must never condemn what it cannot see.
+        hits = {}
+        for i in range(0, 989, 8):
+            hits[i] = {"DAZN": [quad_at(1200 + (i % 90) * 9, 80)]}
+        self.assertEqual(C.strip_static(hits, 989), {})
+
 
 @unittest.skipUnless(HAVE_CV, "opencv-python-headless + numpy not installed")
 class Visibility(unittest.TestCase):

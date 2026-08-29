@@ -42,7 +42,17 @@ import numpy as np
 # Clarity's size term already prices smallness: more seconds, tiny index.
 # UNMEASURED against labelled truth as of 29/08/2026 — the first labels file
 # should run the eval on a 1.3 export before these numbers reach a partner.
-ENGINE_VERSION = "1.3"
+# 1.4: furniture filter re-keyed on the matched features. Adjudicating the
+# first answer sheet showed the watermark still leaking past 1.2: a partial
+# match anchors different parts of the wide board reference onto the fixed
+# overlay, so the PROJECTED box's centre wanders hundreds of pixels while
+# the MATCHED features never move — and it only matched in ~13% of samples,
+# under 1.2's 30% line. Hits now carry the inlier centroid, and a fine rule
+# strips any position it holds to 16px through 8%+ of samples spread across
+# half the match — no operated camera returns to the same sixteen pixels
+# across separate visits spanning an afternoon; a digital overlay does
+# nothing else. Two thirds of all measured phantoms were this.
+ENGINE_VERSION = "1.4"
 
 # --- tunables, all in one place so a run can be described in one line ---------
 SAMPLE_FPS = 2.0            # samples per second of match
@@ -93,6 +103,16 @@ VIS_BLOCKED = 0.60          # a hit below this counts as obstructed in roll-ups
 # every hit at it is removed before anything is counted.
 STATIC_SHARE = 0.30         # share of the whole match one position may hold
 STATIC_CELL_PX = 24         # position granularity; jitter smaller than this merges
+# The fine rule, on the matched-feature centroid ("mc") rather than the
+# projected box: an overlay's matched features are pixel-locked however much
+# the projected quad wanders, and it may match only intermittently — so the
+# bar is lower but TWO-part: a 16px cell holding 8%+ of all samples AND those
+# samples spread across at least half the video. A real board can hold a
+# spot for one spell; nothing physical holds sixteen pixels across separate
+# camera visits spanning the whole match.
+STATIC_FINE_CELL_PX = 16
+STATIC_FINE_SHARE = 0.08
+STATIC_FINE_SPAN = 0.50
 
 
 def flatten(path):
@@ -405,6 +425,12 @@ def detect(frame_bgr, refs, sift, matcher):
                     break
                 quad = cv2.perspectiveTransform(corners, Hm).reshape(4, 2)
                 if geometry_ok(quad, shape) and on_the_perimeter(frame_bgr, quad):
+                    # Where the AGREEING features actually sit — not where the
+                    # projected box says the board is. An overlay's features
+                    # are pixel-locked while its projected box wanders, which
+                    # is what the fine furniture rule keys on.
+                    used = dst.reshape(-1, 2)[mask.ravel().astype(bool)]
+                    mc = [float(used[:, 0].mean()), float(used[:, 1].mean())]
                     crop = rectify(gray, quad, ref_wh)
                     sh, ct = focus_of(crop)
                     logo_pct = 100.0 * abs(cv2.contourArea(
@@ -423,6 +449,7 @@ def detect(frame_bgr, refs, sift, matcher):
                         "inliers": int(mask.sum()),
                         "clarity": clarity(board_pct, sh, ct, 0.1),
                         "visibility": visibility(vis_ref, crop),
+                        "mc": mc,
                     })
                 used = [np.flatnonzero(sel == idx[m.trainIdx])[0]
                         for m, k in zip(good, mask.ravel()) if k]
@@ -466,6 +493,8 @@ def settings():
         "visibility": {"grid": list(VIS_GRID), "cell_corr": VIS_CELL_CORR,
                        "flat_diff": VIS_FLAT_DIFF, "blocked_under": VIS_BLOCKED},
         "static_share": STATIC_SHARE, "static_cell_px": STATIC_CELL_PX,
+        "static_fine": {"cell_px": STATIC_FINE_CELL_PX,
+                        "share": STATIC_FINE_SHARE, "span": STATIC_FINE_SPAN},
         "clarity_weights": {"size": 0.40, "focus": 0.25,
                             "contrast": 0.20, "angle": 0.15},
         "clarity_saturation": {"area_pct": 0.6, "sharp": 300.0, "contrast": 60.0},
@@ -501,7 +530,9 @@ def runs_from(indices, bridge=BRIDGE, min_run=MIN_RUN, interval=None):
     return [r for r in runs if len(r) >= min_run]
 
 
-def _hit_cell(h, cell):
+def _hit_cell(h, cell, prefer_mc=False):
+    if prefer_mc and h.get("mc"):
+        return int(float(h["mc"][0]) // cell), int(float(h["mc"][1]) // cell)
     q = h["quad"]
     cx = sum(float(p[0]) for p in q) / 4.0
     cy = sum(float(p[1]) for p in q) / 4.0
@@ -546,19 +577,54 @@ def static_positions(hits_by_index, n_samples, cell=STATIC_CELL_PX,
     return out
 
 
+def static_fine_positions(hits_by_index, n_samples, cell=STATIC_FINE_CELL_PX,
+                          share=STATIC_FINE_SHARE, span=STATIC_FINE_SPAN):
+    """
+    {sponsor: set of fine cells that are overlays}, judged on the matched
+    features. Pure, like static_positions. Hits without an "mc" (older
+    exports, tracked fills) never contribute and are never condemned by this
+    rule — a rule this aggressive only runs on the evidence it was designed
+    for.
+    """
+    from collections import defaultdict
+    out = {}
+    if not n_samples:
+        return out
+    per = defaultdict(lambda: defaultdict(set))
+    for i, row in hits_by_index.items():
+        for name, hs in row.items():
+            for h in hs:
+                if h.get("mc"):
+                    per[name][_hit_cell(h, cell, prefer_mc=True)].add(i)
+    for name, cells in per.items():
+        bad = set()
+        for c, samples in cells.items():
+            if (len(samples) >= share * n_samples
+                    and max(samples) - min(samples) >= span * n_samples):
+                bad.add(c)
+        if bad:
+            out[name] = bad
+    return out
+
+
 def strip_static(hits_by_index, n_samples, cell=STATIC_CELL_PX,
                  share=STATIC_SHARE):
     """Remove furniture hits in place. Returns {sponsor: hits removed}."""
     bad = static_positions(hits_by_index, n_samples, cell, share)
+    fine = static_fine_positions(hits_by_index, n_samples)
     removed = {}
-    if not bad:
+    if not bad and not fine:
         return removed
     for i in list(hits_by_index):
         row = hits_by_index[i]
         for name in list(row):
-            if name not in bad:
+            if name not in bad and name not in fine:
                 continue
-            keep = [h for h in row[name] if _hit_cell(h, cell) not in bad[name]]
+            keep = [h for h in row[name]
+                    if _hit_cell(h, cell) not in bad.get(name, ())
+                    and (not h.get("mc")
+                         or _hit_cell(h, STATIC_FINE_CELL_PX, prefer_mc=True)
+                         not in fine.get(name, ()))]
             gone = len(row[name]) - len(keep)
             if gone:
                 removed[name] = removed.get(name, 0) + gone

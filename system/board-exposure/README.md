@@ -356,6 +356,23 @@ declined to pick a knee, correctly. Next: adjudicate the phantoms
 one is either a board the conservative hand count skipped, or an engine
 error to fix; nobody moves a threshold until those rulings are in.
 
+**Adjudicated the same afternoon, mostly from the data.** Splitting the
+eval by sponsor changed the story: Enterprise scored 98% precision and TIC
+Health 99% — the engine barely invents boards, and the hand count was
+excellent. The entire precision gap was DAZN at 57%, and the phantom hits'
+positions convict the watermark: two thirds sit at the top of frame, some
+with quads hanging off the edge, wide because a partial match stretches the
+board reference over the fixed overlay — and the giant wide-shot boxes
+Richard spotted in playback are TRACKED continuations of those watermark
+matches (inliers 0, drifting to 800px). Why 1.2's filter missed it: partial
+matches anchor different parts of the wide reference, so the projected box's
+centre wanders hundreds of pixels while the matched features never move, and
+it only matched in ~13% of samples — under the 30% line. Hence 1.4. Recall
+by board, for the record: goal boards 77-86%, TIC 69%, DAZN board 53%,
+far-side dugouts 24-36% — the resolution story, measured. One human ruling
+still open: DAZN claims at 4:10-4:27, just before the first corner-board
+label.
+
 ## The ident trap — a false positive worth knowing about
 
 A highlights package opens with a sponsor ident card: the Enterprise mark and
