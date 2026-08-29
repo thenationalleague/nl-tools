@@ -33,6 +33,11 @@ Environment (all set by the trigger, none baked into the image):
     BE_INGEST_KEY      the key, injected from Secret Manager
     BE_REFS_PREFIX     default brand-exposure/refs
     BE_FPS             optional sample rate override
+    BE_MODE            scan (default) | sweep — sweep trials the sensitivity
+                       grid against a labels file and uploads nothing
+    BE_LABELS          sweep only: a labels filename baked into the image
+                       under /app/labels (from system/board-exposure/labels/),
+                       or a bucket object path to download
 """
 import json
 import os
@@ -154,11 +159,14 @@ def fetch_refs(bucket, prefix, token):
 def main():
     t0 = time.time()
     bucket = env("BE_BUCKET", "nl-tools.firebasestorage.app")
+    mode = env("BE_MODE", "scan")
     video_obj = env("BE_VIDEO", required=True)
     club = env("BE_CLUB", required=True)
-    match = env("BE_MATCH", required=True)
-    date = env("BE_DATE", required=True)
-    key = env("BE_INGEST_KEY", required=True)
+    # A sweep names no match and uploads nothing, so it needs neither the
+    # fixture nor the ingest key; a scan needs all of them.
+    match = env("BE_MATCH", required=mode == "scan")
+    date = env("BE_DATE", required=mode == "scan")
+    key = env("BE_INGEST_KEY", required=mode == "scan")
     ref_set = env("BE_REFERENCE_SET", "partial")
     start, end = env("BE_START"), env("BE_END")
 
@@ -169,26 +177,42 @@ def main():
 
     # The key goes where the scan already looks for it, rather than adding a
     # second way of supplying one. One code path, already tested.
-    with open(os.path.join(refs, "ingest-key.txt"), "w", encoding="utf-8") as f:
-        f.write(key + "\n")
+    if key:
+        with open(os.path.join(refs, "ingest-key.txt"), "w", encoding="utf-8") as f:
+            f.write(key + "\n")
 
     log(f"fetching {video_obj}")
     video = storage_get(bucket, video_obj,
                         os.path.join(WORK, os.path.basename(video_obj)), token)
     log(f"video: {os.path.getsize(video) / 1e6:.0f} MB in {time.time() - t0:.0f}s")
 
-    cmd = [sys.executable, "scripts/board-exposure-match.py",
-           "--video", video, "--refs", refs,
-           "--club", club, "--match", match, "--date", date,
-           "--reference-set", ref_set,
-           "--out-dir", os.path.join(WORK, "out"),
-           "--upload", "-y"]
-    if start:
-        cmd += ["--start", start]
-    if end:
-        cmd += ["--end", end]
-    if env("BE_FPS"):
-        cmd += ["--fps", env("BE_FPS")]
+    if mode == "sweep":
+        # Trial run: same frames, a grid of sensitivities, scored against the
+        # hand-labelled answer sheet. Writes nothing to the tool — the table in
+        # this log IS the output.
+        name = env("BE_LABELS", required=True)
+        baked = os.path.join("labels", os.path.basename(name))
+        if os.path.exists(baked):
+            labels = baked
+        else:
+            labels = storage_get(bucket, name, os.path.join(WORK, "labels.csv"),
+                                 token)
+        cmd = [sys.executable, "scripts/board-exposure-sweep.py",
+               "--video", video, "--refs", refs, "--labels", labels,
+               "--club", club, "--out-dir", WORK]
+    else:
+        cmd = [sys.executable, "scripts/board-exposure-match.py",
+               "--video", video, "--refs", refs,
+               "--club", club, "--match", match, "--date", date,
+               "--reference-set", ref_set,
+               "--out-dir", os.path.join(WORK, "out"),
+               "--upload", "-y"]
+        if start:
+            cmd += ["--start", start]
+        if end:
+            cmd += ["--end", end]
+        if env("BE_FPS"):
+            cmd += ["--fps", env("BE_FPS")]
 
     log("scanning — this is the long part")
     # Streamed, not captured: Cloud Run's log tail is the only progress anyone

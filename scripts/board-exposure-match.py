@@ -378,7 +378,12 @@ def extract(video, work, fps, ffmpeg, expected, limit=0, prefer_ffmpeg=True,
 _W = {}
 
 
-def _init_worker(entries, nfeatures):
+def _init_worker(entries, nfeatures, overrides=None):
+    # overrides lets the sweep (board-exposure-sweep.py) trial sensitivity
+    # settings without forking the engine: each spawned worker re-imports the
+    # module constants fresh, so setting them here is per-run, never global.
+    for k, v in (overrides or {}).items():
+        setattr(C, k, v)
     cv2.setNumThreads(1)          # OpenCV's own threads fight the process pool
     sift = cv2.SIFT_create(nfeatures=nfeatures)
     refs, _ = C.build_refs(entries, sift)

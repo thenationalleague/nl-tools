@@ -94,6 +94,33 @@ def load_labels(lines):
     return window, truth
 
 
+def sponsor_of(name):
+    """'Enterprise/goal-left' -> 'Enterprise'. Labels may name individual
+    boards after a slash; detections only know sponsors, so scoring rolls up."""
+    return name.split("/", 1)[0].strip()
+
+
+def merge_spans(spans):
+    """Union of intervals. Kills the interior edges where a labeller split a
+    continuous appearance at a shot cut — without this, the grace zone would
+    punch scoring holes into the middle of unbroken presence."""
+    out = []
+    for s, e in sorted(spans):
+        if out and s <= out[-1][1]:
+            out[-1] = (out[-1][0], max(out[-1][1], e))
+        else:
+            out.append((s, e))
+    return out
+
+
+def rollup(truth):
+    """Per-board truth -> per-sponsor truth, spans merged."""
+    by = {}
+    for name, spans in truth.items():
+        by.setdefault(sponsor_of(name), []).extend(spans)
+    return {n: merge_spans(spans) for n, spans in by.items()}
+
+
 def score(truth, window, hits_by_index, interval, grace=0.75):
     """
     Sample-level precision and recall per sponsor, inside the window.
@@ -180,6 +207,9 @@ def main(argv):
     except LabelError as e:
         sys.exit(f"labels: {e}")
 
+    boards = {n: spans for n, spans in truth.items() if "/" in n}
+    truth = rollup(truth)
+
     known = {n for h in hits.values() for n in h}
     for name in truth:
         if name not in known and name not in (data.get("sponsors") or {}):
@@ -200,6 +230,21 @@ def main(argv):
     print("  " + "-" * 71)
     print(f"  {'overall':<26}{_pct(o['recall']):>8}{_pct(o['precision']):>11}"
           f"{o['fn']:>8}{o['fp']:>9}{o['tracked_tp']:>9}\n")
+
+    if boards:
+        # Recall only: a detection says which SPONSOR it found, not which of
+        # their boards, so a per-board row credits any of the sponsor's
+        # detections during that board's spans. When two boards of one sponsor
+        # share the screen this over-credits both — read it as "was anything
+        # of theirs found while this board was up", which is still exactly
+        # what locates the miss.
+        print(f"  {'board':<30}{'recall':>8}{'missed':>8}")
+        print("  " + "-" * 46)
+        for name in sorted(boards):
+            spans = {sponsor_of(name): merge_spans(boards[name])}
+            s = score(spans, window, hits, interval, grace=grace)[sponsor_of(name)]
+            print(f"  {name:<30}{_pct(s['recall']):>8}{s['fn']:>8}")
+        print()
     if o["precision"] is not None and o["precision"] < 0.95:
         print("  ! precision under 95%: the engine is claiming exposure that "
               "was not there.\n    That is worse than missing some — check the "
