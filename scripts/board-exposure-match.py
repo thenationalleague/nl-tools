@@ -976,10 +976,19 @@ def run_one(a, video, club, title, date="", start=None, end=None, complete=None)
     scan_secs = time.time() - t0
     print(f"\n  scanned in {R.hhmm(scan_secs)} — {len(hits_by_index)} samples with a detection")
 
-    # After the scan, before anything reads the results: fill pan-blur gaps
-    # with tracked evidence, so the stats, the report and the tool all see one
-    # consistent set of hits. Needs the extracted frames, so it must run before
-    # the cleanup below.
+    # Furniture first, tracking second, and the order is load-bearing: a
+    # watermark's hits must be gone BEFORE gap-filling, or tracking would
+    # dutifully bridge between two overlay detections and hand the overlay
+    # back its seconds with per-frame evidence attached.
+    gone = C.strip_static(hits_by_index, n_samples)
+    for name, count in sorted(gone.items()):
+        print(f"  static furniture stripped: {name} x{count} — one position "
+              f"held over {int(C.STATIC_SHARE * 100)}% of the match is an "
+              f"overlay, not a board")
+
+    # Then fill pan-blur gaps with tracked evidence, so the stats, the report
+    # and the tool all see one consistent set of hits. Needs the extracted
+    # frames, so it must run before the cleanup below.
     close_blurred_gaps(hits_by_index, files, interval)
 
     # Report frames: a spread across the match plus the clearest shot of each

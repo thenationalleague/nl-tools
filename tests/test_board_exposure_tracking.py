@@ -211,6 +211,58 @@ class SerialisedHitShape(unittest.TestCase):
         self.assertIn('"tracked": true', json_safe)
 
 
+def quad_at(x, y, w=160, h=40):
+    return {"quad": [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]}
+
+
+class StaticFurniture(unittest.TestCase):
+    """The 1.2 rule that deletes measurements — pure, so CI runs it.
+
+    A watermark holds one screen position for the whole broadcast; no real
+    board can, because the camera never stops moving. These pin both the
+    catch and, more importantly, what must NOT be caught."""
+
+    def test_watermark_is_stripped_and_board_survives(self):
+        hits = {}
+        for i in range(100):
+            hits[i] = {"DAZN": [quad_at(1700, 80)]}          # bolted to the frame
+            if i % 3 == 0:
+                hits[i]["Enterprise"] = [quad_at(200 + 7 * i, 500)]   # pans about
+        gone = C.strip_static(hits, 100)
+        self.assertEqual(gone, {"DAZN": 100})
+        self.assertTrue(all("DAZN" not in row for row in hits.values()))
+        self.assertTrue(any("Enterprise" in row for row in hits.values()))
+
+    def test_share_is_of_all_samples_not_detected_ones(self):
+        # Present in 20 of 100 samples: a fifth of the match, under the 30%
+        # line, stays — even though it is 100% of its own detections.
+        hits = {i: {"DAZN": [quad_at(1700, 80)]} for i in range(20)}
+        self.assertEqual(C.strip_static(hits, 100), {})
+        self.assertEqual(len(hits), 20)
+
+    def test_jitter_within_a_cell_still_counts_as_one_position(self):
+        hits = {i: {"DAZN": [quad_at(1700 + (i % 3) * 4, 80 + (i % 2) * 3)]}
+                for i in range(50)}
+        self.assertEqual(C.strip_static(hits, 100), {"DAZN": 50})
+
+    def test_a_sponsor_keeps_moving_hits_when_its_overlay_goes(self):
+        # The real DAZN case: a watermark AND genuine boards. Only the fixed
+        # position dies; the moving detections keep their seconds.
+        hits = {}
+        for i in range(100):
+            hits[i] = {"DAZN": [quad_at(1700, 80)]}
+            if 40 <= i < 52:
+                hits[i]["DAZN"].append(quad_at(300 + 15 * (i - 40), 620))
+        gone = C.strip_static(hits, 100)
+        self.assertEqual(gone, {"DAZN": 100})
+        kept = [i for i, row in hits.items() if row.get("DAZN")]
+        self.assertEqual(kept, list(range(40, 52)))
+
+    def test_empty_and_zero_samples_are_safe(self):
+        self.assertEqual(C.strip_static({}, 100), {})
+        self.assertEqual(C.strip_static({0: {"X": [quad_at(0, 0)]}}, 0), {})
+
+
 @unittest.skipUnless(HAVE_CV, "opencv-python-headless + numpy not installed")
 class Visibility(unittest.TestCase):
     """The coverage judgement, against faces we control."""

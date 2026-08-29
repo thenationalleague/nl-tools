@@ -29,7 +29,13 @@ import numpy as np
 # filled by template-tracking the board through them, so those seconds carry
 # per-frame evidence instead of relying on the 1.5s bridge. Recall moves, so
 # 1.1 numbers do not compare with 1.0 numbers — that is what this bump is for.
-ENGINE_VERSION = "1.1"
+# 1.2: static-furniture filter. The DAZN corner watermark leaked past the
+# grass check the first time a whole-board reference existed — a partial
+# feature match can drop a wide quad over the overlay, and in a pitch-filled
+# shot there IS grass below it. The tell furniture cannot hide is that it
+# never moves: any position holding through a third of the match is an
+# overlay, and its hits are removed. Seconds move, hence the bump.
+ENGINE_VERSION = "1.2"
 
 # --- tunables, all in one place so a run can be described in one line ---------
 SAMPLE_FPS = 2.0            # samples per second of match
@@ -72,6 +78,14 @@ VIS_MIN_STD = 0.12          # under this a cell is flat (solid colour), in norm 
 VIS_CELL_CORR = 0.30        # a textured cell agrees at this correlation or better
 VIS_FLAT_DIFF = 0.55        # a flat cell agrees if the brightness gap is under this
 VIS_BLOCKED = 0.60          # a hit below this counts as obstructed in roll-ups
+# Static furniture. A perimeter board's on-screen position changes every time
+# the camera moves, and the camera at a football match never stops moving; a
+# broadcast overlay is bolted to the frame. So a position (to the nearest
+# cell, neighbours merged) that carries a sponsor's hits through more than
+# STATIC_SHARE of ALL samples — not just detected ones — is an overlay, and
+# every hit at it is removed before anything is counted.
+STATIC_SHARE = 0.30         # share of the whole match one position may hold
+STATIC_CELL_PX = 24         # position granularity; jitter smaller than this merges
 
 
 def flatten(path):
@@ -443,6 +457,7 @@ def settings():
         "track_scale": TRACK_SCALE,
         "visibility": {"grid": list(VIS_GRID), "cell_corr": VIS_CELL_CORR,
                        "flat_diff": VIS_FLAT_DIFF, "blocked_under": VIS_BLOCKED},
+        "static_share": STATIC_SHARE, "static_cell_px": STATIC_CELL_PX,
         "clarity_weights": {"size": 0.40, "focus": 0.25,
                             "contrast": 0.20, "angle": 0.15},
         "clarity_saturation": {"area_pct": 0.6, "sharp": 300.0, "contrast": 60.0},
@@ -476,6 +491,76 @@ def runs_from(indices, bridge=BRIDGE, min_run=MIN_RUN, interval=None):
             cur = [i]          # a fresh list — clearing the stored one empties it too
     runs.append(cur)
     return [r for r in runs if len(r) >= min_run]
+
+
+def _hit_cell(h, cell):
+    q = h["quad"]
+    cx = sum(float(p[0]) for p in q) / 4.0
+    cy = sum(float(p[1]) for p in q) / 4.0
+    return int(cx // cell), int(cy // cell)
+
+
+def static_positions(hits_by_index, n_samples, cell=STATIC_CELL_PX,
+                     share=STATIC_SHARE):
+    """
+    {sponsor: set of grid cells that are broadcast furniture}. Pure — plain
+    dicts and lists in, so the rule that deletes measurements is testable in
+    CI without OpenCV anywhere near it.
+
+    Per sponsor, count the DISTINCT samples whose hits centre in each cell;
+    a cell whose 3x3 neighbourhood covers more than `share` of every sample
+    in the match is a position no real board can occupy, because holding one
+    screen position for a third of a football match means the camera never
+    moved. The denominator is all samples, deliberately: an overlay matched
+    in only half its appearances still trips this, while a real board would
+    need the impossible framing streak either way.
+    """
+    from collections import defaultdict
+    out = {}
+    if not n_samples:
+        return out
+    per = defaultdict(lambda: defaultdict(set))
+    for i, row in hits_by_index.items():
+        for name, hs in row.items():
+            for h in hs:
+                per[name][_hit_cell(h, cell)].add(i)
+    for name, cells in per.items():
+        bad = set()
+        for gx, gy in cells:
+            seen = set()
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    seen |= cells.get((gx + dx, gy + dy), set())
+            if len(seen) > share * n_samples:
+                bad.add((gx, gy))
+        if bad:
+            out[name] = bad
+    return out
+
+
+def strip_static(hits_by_index, n_samples, cell=STATIC_CELL_PX,
+                 share=STATIC_SHARE):
+    """Remove furniture hits in place. Returns {sponsor: hits removed}."""
+    bad = static_positions(hits_by_index, n_samples, cell, share)
+    removed = {}
+    if not bad:
+        return removed
+    for i in list(hits_by_index):
+        row = hits_by_index[i]
+        for name in list(row):
+            if name not in bad:
+                continue
+            keep = [h for h in row[name] if _hit_cell(h, cell) not in bad[name]]
+            gone = len(row[name]) - len(keep)
+            if gone:
+                removed[name] = removed.get(name, 0) + gone
+            if keep:
+                row[name] = keep
+            else:
+                del row[name]
+        if not row:
+            del hits_by_index[i]
+    return removed
 
 
 def gap_candidates(indices, max_gap):
