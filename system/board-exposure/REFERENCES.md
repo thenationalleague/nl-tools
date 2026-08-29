@@ -22,7 +22,29 @@ sponsor that silently never appears.
 
 A sponsor may have as many images as you like; they all roll up under the one
 name. That is how one brand with a different board design at each ground is
-handled — one crop per ground, one name in the report.
+handled — one crop per ground, one name in the report. It is also how one brand
+with several designs at the SAME ground is handled: every image is searched
+independently, everything any of them finds rolls up under the folder name, and
+duplicate hits on the same physical board are deduped to the strongest. Do not
+split designs into folders (`Enterprise green`, `Enterprise white`) — the
+folder name is the report name, so that splits one sponsor's seconds across two
+lines.
+
+**A logo lockup is not a board.** The first cloud-measured match (29/08/2026)
+was scanned against the league partners' clean logo files and visibly
+under-detected — boards plainly on screen, no boxes. The scan finds what it has
+been shown a picture of, and what a camera sees is the whole board as designed:
+Enterprise's green-and-white, DAZN's board with everything around the mark. The
+reference that works is a crop of the full board, from footage or from the
+artwork the boards were printed from; a logo on a white card is a fallback that
+finds close-ups and misses the rest. Crops need the board a few hundred pixels
+wide and sharp — from close-up shots, not wide ones.
+
+**Per-design attribution is not recorded.** A hit carries the sponsor, never
+which image found it, so "which creative got seen most" cannot be answered
+after the fact. If creative-level reporting is ever sold, stamping each hit
+with the matching reference's filename is a small engine change — flagged here
+rather than built, because nothing yet asks the question.
 
 ## Where they live now
 
