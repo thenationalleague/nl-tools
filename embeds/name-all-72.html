@@ -1,0 +1,514 @@
+<!-- ============================================================
+     NAME ALL 72 — embeddable quiz widget for thenationalleague.org.uk
+     Source of truth. Copy/paste into the CMS custom HTML block.
+
+     Self-contained: no auth, no Firebase, no external <script src>.
+     Client-side only. Name every club across the Enterprise National
+     League, North and South for the 2026/27 season against the clock.
+
+     Scope contract (fan embed — see embeds/widget-handover.md §1,§3,§4):
+       - Everything lives under #nlQuiz; BEM .nlq__ prefix on every class.
+       - Every CSS selector is prefixed with #nlQuiz so nothing leaks
+         into (or out of) the host CMS page. No bare html/body/* rules.
+       - Typography is Carbona Variable, loaded inline via @font-face
+         (Adobe Fonts / Typekit — same kit the other NL embeds use).
+         Carbona Regular (400) for body copy; Bold (700) for section
+         labels / buttons; Extra Bold (800) for titles / the done banner.
+         Numeric read-outs use tabular-nums so the live timer never jitters.
+         No Google Fonts (Inter / Roboto Mono removed).
+
+     Changelog:
+       2026-07-02  Reworked from a full standalone HTML doc into a scoped
+                   CMS embed. Removed global resets and page-level body
+                   styling, prefixed all selectors/classes/ids, swapped
+                   Inter + Roboto Mono + base64 Carbona-800 for the shared
+                   Carbona Variable kit, and set body copy to Carbona Regular.
+     ============================================================ -->
+
+<div id="nlQuiz">
+  <div class="nlq__card">
+    <div class="nlq__header">
+      <p class="nlq__kicker">Quiz</p>
+      <h2 class="nlq__title">Name All 72</h2>
+      <p class="nlq__subtitle">Name every club across the Enterprise National League, Enterprise National League North and Enterprise National League South for the 2026/27 season.</p>
+      <div class="nlq__stat-row">
+        <div class="nlq__stat"><span>Found</span><span id="nlq-found">0</span> / 72</div>
+        <div class="nlq__stat"><span>Time</span><span id="nlq-timer">00:00</span></div>
+        <div class="nlq__progress-track"><div class="nlq__progress-fill" id="nlq-progress"></div></div>
+      </div>
+    </div>
+
+    <div class="nlq__controls">
+      <div class="nlq__input-row">
+        <input id="nlq-input" class="nlq__input" type="text" placeholder="Type a club name and hit enter…" autocomplete="off" />
+        <button class="nlq__btn nlq__btn--primary" id="nlq-submit">Guess</button>
+      </div>
+      <div class="nlq__msg" id="nlq-msg"></div>
+    </div>
+    <div class="nlq__secondary-row">
+      <button class="nlq__btn-ghost" id="nlq-reveal">Give up &amp; reveal</button>
+      <button class="nlq__btn-ghost" id="nlq-reset">Restart</button>
+    </div>
+
+    <div class="nlq__done-banner" id="nlq-done"></div>
+
+    <div class="nlq__divisions" id="nlq-divisions"></div>
+
+    <p class="nlq__footer">The National League</p>
+  </div>
+</div>
+
+<style>
+  /* Carbona Variable — Adobe Fonts / Typekit (shared NL embed kit) */
+  @font-face {
+    font-family: "carbona-variable";
+    src: url("https://use.typekit.net/af/184cf2/0000000000000000774c3175/31/l?primer=7cdcb44be4a7db8877ffa5c0007b8dd865b3bbc383831fe2ea177f62257a9191&fvd=n4&v=3") format("woff2"),
+         url("https://use.typekit.net/af/184cf2/0000000000000000774c3175/31/d?primer=7cdcb44be4a7db8877ffa5c0007b8dd865b3bbc383831fe2ea177f62257a9191&fvd=n4&v=3") format("woff");
+    font-display: swap; font-style: normal; font-weight: 200 900; font-stretch: normal;
+  }
+
+  #nlQuiz {
+    --navy:#223b7c;
+    --navy-dark:#182a5c;
+    --red:#9e0000;
+    --white:#ffffff;
+    --ink:#1c1f2b;
+    --ink-soft:#5a5f72;
+    --green:#1f6b3d;
+    --green-bg:#eaf4ee;
+    --amber:#c98a1c;
+    --line:#e3dbcb;
+    --slot-bg:#f7f5f0;
+
+    font-family:'carbona-variable','carbona',sans-serif;
+    font-size:15px; line-height:1.45;
+    font-weight:400; font-variation-settings:'wght' 400;
+    color:var(--ink); -webkit-font-smoothing:antialiased;
+    max-width:800px; margin:24px auto; padding:0 14px;
+  }
+  #nlQuiz, #nlQuiz *, #nlQuiz *::before, #nlQuiz *::after { box-sizing:border-box; }
+  @media (prefers-reduced-motion: reduce){
+    #nlQuiz *{ animation-duration:0.01ms !important; transition-duration:0.01ms !important; }
+  }
+
+  #nlQuiz .nlq__card{
+    width:100%;
+    background:var(--white);
+    border:1px solid var(--line);
+    border-radius:6px;
+    overflow:hidden;
+    box-shadow:0 1px 2px rgba(24,42,92,0.06);
+  }
+
+  #nlQuiz .nlq__header{
+    background:linear-gradient(135deg, var(--navy) 0%, var(--navy-dark) 100%);
+    color:var(--white);
+    padding:18px 22px 16px;
+    position:relative;
+  }
+  #nlQuiz .nlq__header::after{ content:""; position:absolute; left:0; right:0; bottom:0; height:4px; background:var(--red); }
+  #nlQuiz .nlq__kicker{
+    font-size:11px; letter-spacing:0.14em; text-transform:uppercase;
+    font-weight:600; font-variation-settings:'wght' 600;
+    color:#c9d3ec; margin:0 0 4px;
+  }
+  #nlQuiz .nlq__title{
+    font-weight:800; font-variation-settings:'wght' 800; font-size:23px;
+    letter-spacing:0.01em; text-transform:uppercase; margin:0;
+  }
+  #nlQuiz .nlq__subtitle{ font-size:13px; color:#c9d3ec; margin:6px 0 0; }
+
+  #nlQuiz .nlq__stat-row{
+    display:flex; align-items:center; gap:14px; margin-top:14px; flex-wrap:wrap;
+  }
+  #nlQuiz .nlq__stat{
+    font-size:13px; color:var(--white);
+    font-weight:700; font-variation-settings:'wght' 700;
+    font-variant-numeric:tabular-nums;
+    background:rgba(255,255,255,0.14);
+    padding:5px 10px; border-radius:3px; letter-spacing:0.03em;
+  }
+  #nlQuiz .nlq__stat span{ color:#c9d3ec; font-weight:500; font-variation-settings:'wght' 500; margin-right:4px; }
+  #nlQuiz .nlq__progress-track{
+    flex:1; min-width:120px; height:8px; background:rgba(255,255,255,0.18);
+    border-radius:4px; overflow:hidden;
+  }
+  #nlQuiz .nlq__progress-fill{ height:100%; background:var(--red); width:0%; transition:width 0.3s ease; }
+
+  #nlQuiz .nlq__controls{
+    padding:18px 22px 6px;
+    border-bottom:1px solid var(--line);
+  }
+  #nlQuiz .nlq__input-row{ display:flex; gap:8px; }
+  #nlQuiz .nlq__input{
+    flex:1;
+    font-family:inherit;
+    font-weight:400; font-variation-settings:'wght' 400;
+    font-size:15.5px;
+    padding:12px 14px;
+    border:1.5px solid var(--line);
+    border-radius:5px;
+    outline:none;
+    color:var(--ink);
+    background:var(--white);
+  }
+  #nlQuiz .nlq__input:focus{ border-color:var(--navy); }
+  #nlQuiz .nlq__btn{
+    font-family:inherit;
+    font-weight:700; font-variation-settings:'wght' 700; font-size:13.5px;
+    letter-spacing:0.03em; text-transform:uppercase;
+    border:none; border-radius:5px; padding:0 18px; cursor:pointer;
+  }
+  #nlQuiz .nlq__btn--primary{ background:var(--navy); color:var(--white); }
+  #nlQuiz .nlq__btn--primary:hover{ background:var(--navy-dark); }
+  #nlQuiz .nlq__msg{
+    min-height:20px;
+    font-size:13px;
+    margin:8px 0 12px;
+    font-weight:400; font-variation-settings:'wght' 400;
+  }
+  #nlQuiz .nlq__msg.is-correct{ color:var(--green); font-weight:600; font-variation-settings:'wght' 600; }
+  #nlQuiz .nlq__msg.is-dupe{ color:var(--amber); font-weight:600; font-variation-settings:'wght' 600; }
+  #nlQuiz .nlq__msg.is-wrong{ color:var(--ink-soft); }
+
+  #nlQuiz .nlq__secondary-row{ display:flex; gap:8px; padding:0 22px 16px; }
+  #nlQuiz .nlq__btn-ghost{
+    background:var(--white); color:var(--navy);
+    border:1.5px solid var(--navy);
+    font-family:inherit;
+    font-weight:700; font-variation-settings:'wght' 700; font-size:12.5px;
+    letter-spacing:0.03em; text-transform:uppercase;
+    padding:8px 14px; border-radius:5px; cursor:pointer;
+  }
+  #nlQuiz .nlq__btn-ghost:hover{ background:#f2f4fa; }
+
+  #nlQuiz .nlq__divisions{ padding:6px 22px 22px; display:flex; flex-direction:column; gap:20px; }
+  #nlQuiz .nlq__division-head{
+    display:flex; align-items:center; justify-content:space-between;
+    margin-bottom:8px;
+  }
+  #nlQuiz .nlq__division-name{
+    font-weight:700; font-variation-settings:'wght' 700; font-size:13.5px;
+    letter-spacing:0.06em; text-transform:uppercase; color:var(--navy);
+    display:flex; align-items:center; gap:8px;
+  }
+  #nlQuiz .nlq__division-name::before{
+    content:""; width:8px; height:8px; border-radius:2px; background:var(--red); display:inline-block;
+  }
+  #nlQuiz .nlq__division-count{
+    font-size:12px; color:var(--ink-soft);
+    font-weight:500; font-variation-settings:'wght' 500;
+    font-variant-numeric:tabular-nums;
+  }
+  #nlQuiz .nlq__grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill, minmax(150px, 1fr));
+    gap:6px;
+  }
+  #nlQuiz .nlq__slot{
+    background:var(--slot-bg);
+    border:1px solid var(--line);
+    border-radius:4px;
+    padding:8px 9px;
+    font-size:12.5px;
+    font-weight:400; font-variation-settings:'wght' 400;
+    color:transparent;
+    min-height:34px;
+    display:flex; align-items:center;
+    transition:background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  }
+  #nlQuiz .nlq__slot.is-found{
+    background:var(--green-bg);
+    border-color:var(--green);
+    color:var(--ink);
+    font-weight:500; font-variation-settings:'wght' 500;
+  }
+  #nlQuiz .nlq__slot.is-revealed{
+    background:#fbecec;
+    border-color:var(--red);
+    color:var(--ink-soft);
+  }
+
+  #nlQuiz .nlq__footer{
+    text-align:center; font-size:11px; color:var(--ink-soft);
+    padding:4px 0 16px; margin:0; letter-spacing:0.03em;
+    font-weight:400; font-variation-settings:'wght' 400;
+  }
+
+  #nlQuiz .nlq__done-banner{
+    display:none;
+    margin:0 22px 18px;
+    background:var(--navy);
+    color:var(--white);
+    border-radius:5px;
+    padding:14px 16px;
+    font-weight:800; font-variation-settings:'wght' 800;
+    font-size:14.5px;
+    text-align:center;
+  }
+  #nlQuiz .nlq__done-banner.is-show{ display:block; }
+</style>
+
+<script>
+(function(){
+  // Official name, plus accepted short-form aliases (all normalized on load)
+  const DATA = {
+    "National League": [
+      ["AFC Fylde", ["fylde","afc fylde"]],
+      ["Aldershot Town", ["aldershot"]],
+      ["Altrincham", ["altrincham","alty"]],
+      ["Barrow", ["barrow"]],
+      ["Boreham Wood", ["boreham wood","borehamwood","the wood"]],
+      ["Boston United", ["boston","boston united"]],
+      ["Carlisle United", ["carlisle"]],
+      ["Eastleigh", ["eastleigh"]],
+      ["FC Halifax Town", ["halifax","fc halifax","halifax town"]],
+      ["Forest Green Rovers", ["forest green","fgr","forest green rovers"]],
+      ["Gateshead", ["gateshead"]],
+      ["Harrogate Town", ["harrogate"]],
+      ["Hartlepool United", ["hartlepool","pools"]],
+      ["Hornchurch", ["hornchurch"]],
+      ["Kidderminster Harriers", ["kidderminster","kiddy","kidderminster harriers"]],
+      ["Scunthorpe United", ["scunthorpe","the iron"]],
+      ["Solihull Moors", ["solihull","solihull moors"]],
+      ["Southend United", ["southend"]],
+      ["Sutton United", ["sutton"]],
+      ["Tamworth", ["tamworth"]],
+      ["Wealdstone", ["wealdstone"]],
+      ["Woking", ["woking"]],
+      ["Worthing", ["worthing"]],
+      ["Yeovil Town", ["yeovil"]]
+    ],
+    "National League North": [
+      ["AFC Telford United", ["telford","afc telford"]],
+      ["Bedford Town", ["bedford"]],
+      ["Brackley Town", ["brackley"]],
+      ["Buxton", ["buxton"]],
+      ["Chester", ["chester"]],
+      ["Chorley", ["chorley"]],
+      ["Darlington", ["darlington","darlo"]],
+      ["Harborough Town", ["harborough"]],
+      ["Hebburn Town", ["hebburn"]],
+      ["Hednesford Town", ["hednesford"]],
+      ["Hereford", ["hereford"]],
+      ["King's Lynn Town", ["kings lynn","king's lynn","kings lynn town"]],
+      ["Macclesfield", ["macclesfield","macc"]],
+      ["Marine", ["marine"]],
+      ["Merthyr Town", ["merthyr","merthyr town"]],
+      ["Morecambe", ["morecambe"]],
+      ["Oxford City", ["oxford city"]],
+      ["Radcliffe", ["radcliffe"]],
+      ["Scarborough Athletic", ["scarborough","scarborough athletic"]],
+      ["South Shields", ["south shields"]],
+      ["Southport", ["southport"]],
+      ["Spalding United", ["spalding"]],
+      ["Spennymoor Town", ["spennymoor"]],
+      ["Worksop Town", ["worksop"]]
+    ],
+    "National League South": [
+      ["AFC Totton", ["totton","afc totton"]],
+      ["Billericay Town", ["billericay"]],
+      ["Braintree Town", ["braintree"]],
+      ["Chelmsford City", ["chelmsford"]],
+      ["Chesham United", ["chesham"]],
+      ["Dagenham & Redbridge", ["dagenham","dagenham and redbridge","dagenham & redbridge","daggers"]],
+      ["Dorking Wanderers", ["dorking"]],
+      ["Dover Athletic", ["dover"]],
+      ["Ebbsfleet United", ["ebbsfleet"]],
+      ["Farnborough", ["farnborough"]],
+      ["Farnham Town", ["farnham"]],
+      ["Folkestone Invicta", ["folkestone"]],
+      ["Hampton & Richmond Borough", ["hampton","hampton and richmond","hampton & richmond","hampton and richmond borough"]],
+      ["Hemel Hempstead Town", ["hemel","hemel hempstead"]],
+      ["Horsham", ["horsham"]],
+      ["Maidenhead United", ["maidenhead"]],
+      ["Maidstone United", ["maidstone"]],
+      ["Salisbury", ["salisbury"]],
+      ["Slough Town", ["slough"]],
+      ["Tonbridge Angels", ["tonbridge"]],
+      ["Torquay United", ["torquay"]],
+      ["Truro City", ["truro"]],
+      ["Walton & Hersham", ["walton","walton and hersham","walton & hersham"]],
+      ["Weston-super-Mare", ["weston super mare","weston-super-mare","weston"]]
+    ]
+  };
+
+  const root = document.getElementById('nlQuiz');
+  const slug = s => s.replace(/\s+/g,'');
+
+  function normalize(s){
+    return s
+      .toLowerCase()
+      .replace(/&/g, ' and ')
+      .replace(/['’.]/g, '')
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  // Build lookup: normalized alias -> {division, index}
+  const lookup = {};
+  const state = {}; // "division|index" -> found boolean
+  let totalFound = 0;
+  const TOTAL = 72;
+
+  Object.keys(DATA).forEach(div => {
+    DATA[div].forEach((entry, idx) => {
+      const [official, aliases] = entry;
+      const allAliases = [official, ...aliases].map(normalize);
+      allAliases.forEach(a => { lookup[a] = { div, idx }; });
+      state[div + '|' + idx] = false;
+    });
+  });
+
+  const divisionsEl = document.getElementById('nlq-divisions');
+  const foundCountEl = document.getElementById('nlq-found');
+  const progressFill = document.getElementById('nlq-progress');
+  const timerEl = document.getElementById('nlq-timer');
+  const msgEl = document.getElementById('nlq-msg');
+  const doneBanner = document.getElementById('nlq-done');
+
+  // Render grid
+  Object.keys(DATA).forEach(div => {
+    const wrap = document.createElement('div');
+    wrap.className = 'nlq__division';
+    wrap.innerHTML = `
+      <div class="nlq__division-head">
+        <div class="nlq__division-name">${div}</div>
+        <div class="nlq__division-count" id="nlq-count-${slug(div)}">0 / 24</div>
+      </div>
+      <div class="nlq__grid" id="nlq-grid-${slug(div)}"></div>
+    `;
+    divisionsEl.appendChild(wrap);
+    const grid = wrap.querySelector('.nlq__grid');
+    DATA[div].forEach((entry, idx) => {
+      const slot = document.createElement('div');
+      slot.className = 'nlq__slot';
+      slot.id = 'nlq-slot-' + slug(div) + '-' + idx;
+      slot.textContent = '';
+      grid.appendChild(slot);
+    });
+  });
+
+  function updateDivisionCount(div){
+    const count = DATA[div].filter((_, idx) => state[div + '|' + idx]).length;
+    document.getElementById('nlq-count-' + slug(div)).textContent = count + ' / 24';
+  }
+
+  function updateGlobal(){
+    foundCountEl.textContent = totalFound;
+    progressFill.style.width = (totalFound / TOTAL * 100) + '%';
+    if(totalFound >= TOTAL){
+      doneBanner.textContent = 'Full house — all 72 clubs named in ' + timerEl.textContent + '. Solid non-league knowledge.';
+      doneBanner.classList.add('is-show');
+      stopTimer();
+    }
+  }
+
+  function markFound(div, idx){
+    const key = div + '|' + idx;
+    if(state[key]) return false;
+    state[key] = true;
+    totalFound++;
+    const slot = document.getElementById('nlq-slot-' + slug(div) + '-' + idx);
+    slot.textContent = DATA[div][idx][0];
+    slot.classList.add('is-found');
+    updateDivisionCount(div);
+    updateGlobal();
+    return true;
+  }
+
+  function handleGuess(){
+    const inputEl = document.getElementById('nlq-input');
+    const raw = inputEl.value;
+    if(!raw.trim()) return;
+    const norm = normalize(raw);
+    inputEl.value = '';
+    startTimerIfNeeded();
+
+    if(lookup[norm]){
+      const { div, idx } = lookup[norm];
+      const key = div + '|' + idx;
+      if(state[key]){
+        msgEl.textContent = 'Already got ' + DATA[div][idx][0] + '.';
+        msgEl.className = 'nlq__msg is-dupe';
+      } else {
+        markFound(div, idx);
+        msgEl.textContent = 'Yes — ' + DATA[div][idx][0] + ' (' + div + ')';
+        msgEl.className = 'nlq__msg is-correct';
+      }
+    } else {
+      msgEl.textContent = 'Not a match — try again.';
+      msgEl.className = 'nlq__msg is-wrong';
+    }
+  }
+
+  document.getElementById('nlq-submit').addEventListener('click', handleGuess);
+  document.getElementById('nlq-input').addEventListener('keydown', e => {
+    if(e.key === 'Enter') handleGuess();
+  });
+
+  document.getElementById('nlq-reveal').addEventListener('click', () => {
+    Object.keys(DATA).forEach(div => {
+      DATA[div].forEach((entry, idx) => {
+        const key = div + '|' + idx;
+        if(!state[key]){
+          const slot = document.getElementById('nlq-slot-' + slug(div) + '-' + idx);
+          slot.textContent = entry[0];
+          slot.classList.add('is-revealed');
+        }
+      });
+    });
+    msgEl.textContent = 'Remaining clubs revealed.';
+    msgEl.className = 'nlq__msg is-dupe';
+    stopTimer();
+  });
+
+  document.getElementById('nlq-reset').addEventListener('click', () => {
+    Object.keys(DATA).forEach(div => {
+      DATA[div].forEach((entry, idx) => {
+        state[div + '|' + idx] = false;
+        const slot = document.getElementById('nlq-slot-' + slug(div) + '-' + idx);
+        slot.textContent = '';
+        slot.className = 'nlq__slot';
+      });
+      updateDivisionCount(div);
+    });
+    totalFound = 0;
+    updateGlobal();
+    doneBanner.classList.remove('is-show');
+    msgEl.textContent = '';
+    msgEl.className = 'nlq__msg';
+    resetTimer();
+  });
+
+  // Timer
+  let timerInterval = null;
+  let seconds = 0;
+  let timerStarted = false;
+
+  function pad2(n){ return n < 10 ? '0'+n : ''+n; }
+  function renderTimer(){
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    timerEl.textContent = pad2(m) + ':' + pad2(s);
+  }
+  function startTimerIfNeeded(){
+    if(timerStarted) return;
+    timerStarted = true;
+    timerInterval = setInterval(() => { seconds++; renderTimer(); }, 1000);
+  }
+  function stopTimer(){
+    if(timerInterval){ clearInterval(timerInterval); timerInterval = null; }
+  }
+  function resetTimer(){
+    stopTimer();
+    seconds = 0;
+    timerStarted = false;
+    renderTimer();
+  }
+
+  Object.keys(DATA).forEach(updateDivisionCount);
+  renderTimer();
+})();
+</script>
