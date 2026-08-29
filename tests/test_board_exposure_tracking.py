@@ -262,6 +262,39 @@ class StaticFurniture(unittest.TestCase):
         self.assertEqual(C.strip_static({}, 100), {})
         self.assertEqual(C.strip_static({0: {"X": [quad_at(0, 0)]}}, 0), {})
 
+    def test_wandering_box_with_locked_features_is_furniture(self):
+        # The watermark that beat 1.2: partial matches anchor different parts
+        # of the wide reference, so the projected box's centre wanders hundreds
+        # of pixels — but the matched features never leave the overlay. 13% of
+        # samples, spread across the whole match: the fine rule's exact target.
+        hits = {}
+        for k, i in enumerate(range(0, 989, 8)):        # ~12.5%, full span
+            h = quad_at(1200 + (k % 9) * 90, 80 + (k % 4) * 30)
+            h["mc"] = [1701.0 + (k % 3), 121.0 + (k % 2)]
+            hits[i] = {"DAZN": [h]}
+        gone = C.strip_static(hits, 989)
+        self.assertEqual(gone, {"DAZN": len(range(0, 989, 8))})
+        self.assertEqual(hits, {})
+
+    def test_one_spell_at_a_spot_survives_the_fine_rule(self):
+        # A board CAN hold a position through one long spell — 10% of samples
+        # but all in the first quarter fails the span condition and stays.
+        hits = {}
+        for k, i in enumerate(range(0, 99)):
+            h = quad_at(400, 500)
+            h["mc"] = [450.0, 520.0]
+            hits[i] = {"Enterprise": [h]}
+        self.assertEqual(C.strip_static(hits, 989), {})
+        self.assertEqual(len(hits), 99)
+
+    def test_hits_without_mc_are_immune_to_the_fine_rule(self):
+        # Old exports and tracked fills carry no matched-feature centroid; the
+        # aggressive rule must never condemn what it cannot see.
+        hits = {}
+        for i in range(0, 989, 8):
+            hits[i] = {"DAZN": [quad_at(1200 + (i % 90) * 9, 80)]}
+        self.assertEqual(C.strip_static(hits, 989), {})
+
 
 @unittest.skipUnless(HAVE_CV, "opencv-python-headless + numpy not installed")
 class Visibility(unittest.TestCase):
@@ -298,6 +331,73 @@ class Visibility(unittest.TestCase):
     def test_none_face_is_none(self):
         self.assertIsNone(C.visibility(self.vis_ref, None))
         self.assertIsNone(C.visibility(None, self.board))
+
+    def test_an_impostor_face_scores_under_the_reject_floor(self):
+        # Richard's ruling at 4:10-4:27: white capitals on black matched a
+        # DIFFERENT black board for 17 seconds. Judged on the textured cells
+        # only — visibility()'s flat fallback would let any dark board vouch
+        # for any other, which is precisely how a first draft of this floor
+        # failed its own test (impostor 0.47 on visibility).
+        impostor = np.zeros((80, 320), np.uint8)
+        impostor[:] = 20
+        cv2.putText(impostor, "ZORBA LTD", (10, 55), cv2.FONT_HERSHEY_SIMPLEX,
+                    1.5, 255, 6)
+        self.assertLess(C.face_agreement(self.vis_ref, impostor), C.VIS_REJECT)
+        # And the floor must not eat a genuine but half-covered board: the
+        # visible half's lettering still agrees.
+        covered = self.board.copy()
+        covered[:, :160] = self.noise[:, :160]
+        self.assertGreaterEqual(C.face_agreement(self.vis_ref, covered),
+                                C.VIS_REJECT)
+
+    def test_a_textureless_reference_cannot_judge(self):
+        flat = np.full((80, 320), 70, np.uint8)
+        flat_ref = cv2.resize(flat, (C.VIS_W, C.VIS_H))
+        self.assertIsNone(C.face_agreement(flat_ref, self.board))
+
+
+@unittest.skipUnless(HAVE_CV, "opencv-python-headless + numpy not installed")
+class FaceCheckInDetect(unittest.TestCase):
+    """The guard wired into detect(), end to end on a synthetic frame."""
+
+    def _detect(self, frame):
+        sift = cv2.SIFT_create(nfeatures=6000)
+        refs, _ = C.build_refs(
+            [("ACME", self._ref_path, "partner")], sift)
+        return C.detect(frame, refs, sift, cv2.BFMatcher(cv2.NORM_L2))
+
+    def setUp(self):
+        import tempfile
+        rng = np.random.default_rng(9)
+        board = np.zeros((40, 160, 3), np.uint8)
+        board[:] = (40, 160, 40)
+        cv2.putText(board, "ACME", (8, 30), cv2.FONT_HERSHEY_SIMPLEX,
+                    1.0, (255, 255, 255), 4)
+        cv2.rectangle(board, (120, 8), (150, 32), (255, 255, 255), -1)
+        self._ref_path = tempfile.mktemp(suffix=".png")
+        cv2.imwrite(self._ref_path,
+                    cv2.resize(board, (480, 120),
+                               interpolation=cv2.INTER_NEAREST))
+        frame = rng.integers(60, 90, (360, 640, 3), dtype=np.uint8)
+        frame[240:, :] = (45, 150, 45)                # grass under the board
+        frame[200:240, 200:360] = board
+        self.frame = frame
+
+    def test_a_real_board_passes_the_face_check(self):
+        hits = self._detect(self.frame)
+        self.assertIn("ACME", hits)
+        self.assertGreaterEqual(hits["ACME"][0]["visibility"], C.VIS_REJECT)
+
+    def test_the_guard_actually_guards(self):
+        # Sabotage from the other side: force every face to read as an
+        # impostor and the same board must now be rejected — proving the
+        # comparison in detect() is live, not decorative.
+        real = C.face_agreement
+        C.face_agreement = lambda *a: 0.0
+        try:
+            self.assertEqual(self._detect(self.frame), {})
+        finally:
+            C.face_agreement = real
 
 
 if __name__ == "__main__":

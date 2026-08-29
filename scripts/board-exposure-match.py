@@ -409,6 +409,8 @@ def _scan(job):
             "clarity": float(h["clarity"]),
             "visibility": (None if h.get("visibility") is None
                            else round(float(h["visibility"]), 3)),
+            "mc": ([round(float(h["mc"][0]), 1), round(float(h["mc"][1]), 1)]
+                   if h.get("mc") else None),
         } for h in hs]
     return i, out
 
@@ -438,7 +440,9 @@ def _synth_hit(scope, bbox, gray, corr):
         "corr": round(float(corr), 3),
         # No homography, no rectified face — a tracked hit cannot measure how
         # covered the board was, and null must never become a faked number.
+        # Same for the matched-feature centroid: nothing matched.
         "visibility": None,
+        "mc": None,
     }
 
 

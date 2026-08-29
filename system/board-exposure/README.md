@@ -356,6 +356,30 @@ declined to pick a knee, correctly. Next: adjudicate the phantoms
 one is either a board the conservative hand count skipped, or an engine
 error to fix; nobody moves a threshold until those rulings are in.
 
+**Adjudicated the same afternoon, mostly from the data.** Splitting the
+eval by sponsor changed the story: Enterprise scored 98% precision and TIC
+Health 99% — the engine barely invents boards, and the hand count was
+excellent. The entire precision gap was DAZN at 57%, and the phantom hits'
+positions convict the watermark: two thirds sit at the top of frame, some
+with quads hanging off the edge, wide because a partial match stretches the
+board reference over the fixed overlay — and the giant wide-shot boxes
+Richard spotted in playback are TRACKED continuations of those watermark
+matches (inliers 0, drifting to 800px). Why 1.2's filter missed it: partial
+matches anchor different parts of the wide reference, so the projected box's
+centre wanders hundreds of pixels while the matched features never move, and
+it only matched in ~13% of samples — under the 30% line. Hence 1.4. Recall
+by board, for the record: goal boards 77-86%, TIC 69%, DAZN board 53%,
+far-side dugouts 24-36% — the resolution story, measured.
+
+The last ruling came by eye: at 4:10-4:27 the engine claimed DAZN mid-frame
+for 17 straight seconds and Richard's scrub found nothing there — the board
+reference's white-on-black lettering had matched a DIFFERENT black board
+across the pitch. That is 1.4's second guard, the face check: judged on the
+reference's textured cells only (visibility()'s flat fallback would let any
+dark board vouch for any other — its first draft scored the impostor 0.47),
+an impostor face agrees at ~0.15 where a genuine half-covered board still
+holds ~0.6, and anything under VIS_REJECT is discarded at detection time.
+
 ## The ident trap — a false positive worth knowing about
 
 A highlights package opens with a sponsor ident card: the Enterprise mark and

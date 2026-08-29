@@ -86,6 +86,8 @@ def _scan(job):
             "clarity": float(h["clarity"]),
             "visibility": (None if h.get("visibility") is None
                            else round(float(h["visibility"]), 3)),
+            "mc": ([round(float(h["mc"][0]), 1), round(float(h["mc"][1]), 1)]
+                   if h.get("mc") else None),
         } for h in hs]
     return i, out
 
