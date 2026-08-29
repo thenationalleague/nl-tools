@@ -35,7 +35,14 @@ import numpy as np
 # shot there IS grass below it. The tell furniture cannot hide is that it
 # never moves: any position holding through a third of the match is an
 # overlay, and its hits are removed. Seconds move, hence the bump.
-ENGINE_VERSION = "1.2"
+# 1.3: size floor lowered, 18px -> 12px. Wide shots put far-side boards
+# under the old floor, so a board that mustered nine agreeing features was
+# thrown away purely for being small — the one case the floor punished
+# unfairly, since MIN_INLIERS is untouched and still does the guarding.
+# Clarity's size term already prices smallness: more seconds, tiny index.
+# UNMEASURED against labelled truth as of 29/08/2026 — the first labels file
+# should run the eval on a 1.3 export before these numbers reach a partner.
+ENGINE_VERSION = "1.3"
 
 # --- tunables, all in one place so a run can be described in one line ---------
 SAMPLE_FPS = 2.0            # samples per second of match
@@ -45,7 +52,7 @@ RATIO, MIN_INLIERS, MAX_PER_BAND = 0.80, 9, 6
 ASPECT = (1.6, 7.0)         # a hoarding is wide
 MAX_TILT = 28.0             # degrees off level
 AREA_PCT = (0.02, 5.0)      # share of frame the logo may occupy
-MIN_SIDE = 18               # pixels
+MIN_SIDE = 12               # pixels; 18 until engine 1.3 — see the version note
 # In SECONDS, not samples. These were sample counts until 27/08/2026, which made
 # them silently depend on --fps: at 2/s a gap of 1.5s stayed one appearance, at
 # 5/s the same real gap became three, and the fragments fell under the minimum.
@@ -452,6 +459,7 @@ def settings():
         "band_frac": BAND_FRAC, "band_stride": BAND_STRIDE,
         "ratio": RATIO, "min_inliers": MIN_INLIERS, "max_per_band": MAX_PER_BAND,
         "aspect": list(ASPECT), "max_tilt": MAX_TILT, "area_pct": list(AREA_PCT),
+        "min_side": MIN_SIDE,
         "min_run_secs": MIN_RUN_SECS, "bridge_secs": BRIDGE_SECS,
         "track_max_gap_secs": TRACK_MAX_GAP_SECS, "track_min_corr": TRACK_MIN_CORR,
         "track_scale": TRACK_SCALE,
