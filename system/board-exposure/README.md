@@ -293,13 +293,15 @@ Two more rulings from the same review, parked with it:
 
 **The full match is the true metric, marked in halves.** Highlights are a
 preview; the number a partner is ever shown comes from a full match. A match
-should carry TWO measured windows — each half's kick-off to its whistle —
-with half-time excluded entirely, per-half and combined stats, and in-play
-time as the denominator. The runner grows a pair of window arguments (the
-existing single start/end trim becomes the degenerate case), the record
-stores which half each sample belongs to, and the tool shows halves side by
-side. Full matches run locally overnight by ruling (see CLOUD.md), so the
-cloud timeout does not constrain this.
+should carry TWO measured windows — whistle to whistle, each half — with
+half-time excluded entirely (that is ~15 minutes of the most polluted footage
+in the broadcast, and a sixth of the scan bill), per-half and combined stats,
+and in-play time as the denominator. ONE record and one stitched timeline,
+with the half boundary marked: the runner grows a pair of window arguments
+(the existing single start/end trim becomes the degenerate case), samples
+carry their half, the proxy is built from the two windows joined, and the
+tool draws the divider. The cloud timeout is 6h as of 29/08/2026, so either
+route takes a full match; local overnight remains the free one.
 
 **Stinger wipes, without leaning only on grass.** The branded transition
 graphic is already caught three separate ways: the grass check (no pitch
