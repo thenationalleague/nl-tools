@@ -623,6 +623,20 @@ matches. Helps most where recall hurts most (distinctive boards in wides);
 does little for black-on-black. Also the answer to the zoom pass's cost if
 the 1.7 ablation says the blanket version is worth keeping but expensive.
 
+Refined 30/08/2026, from Richard's Enterprise observation (four physical
+boards per ground, different positions, different light): the signature is
+learned **per board cluster, not per sponsor** — confirmed sightings
+cluster by screen position and scale (the eval already tells them apart:
+dugout-left, goal-right…), and each cluster gets its own colour as this
+footage renders it, so the shaded dugout and the floodlit goal-line never
+average into a colour that matches neither. Light change inside a match is
+absorbed by recency-weighting the running signature; light change across
+matches is why nothing is ever stored. Note the risk shape stays one-sided
+either way: colour only nominates, so bad light can waste a nomination —
+it can never mint a phantom second. (References themselves are colour-blind
+— flatten() greys everything before SIFT — which is why light has never
+broken detection; colour exists only in this scout.)
+
 **Tool + engine, after that — the adjudication queue.** Everything the
 engine barely-passed or barely-failed goes to a Review strip in the tool:
 frame shown, box drawn, tick = count it, untick = bin it. Short by
