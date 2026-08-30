@@ -577,8 +577,35 @@ does not ship:
 
 Also parked, in rough order: the stinger/ident exclusion (the one known
 precision leak left — brief full-screen sponsor graphics), a second
-ground's hand-labels to prove generalisation, the halves runner, per-design
-attribution, board print artwork as references.
+ground's hand-labels to prove generalisation, per-design attribution,
+board print artwork as references.
+
+**The halves marks — recorded 30/08/2026, Richard's ruling from the first
+live uploads.** A full-90 broadcast file carries half-time, and half-time
+carries ad breaks: a sponsor's OWN 30-second advert matches its reference
+perfectly and sails past every guard — the corners don't catch it, the
+permanence tier doesn't (too short), and the face check passes because it
+genuinely is the logo. So until this is built, **a full-90 scan counts HT
+ads as board exposure**, and full-90 numbers should be read with that
+asterisk. (Every verified number so far — Sutton, Horsham — is single
+continuous windows with no HT in frame, so 99%/64% is untouched.)
+
+The fix is marks, not magic: the upload form grows kick-off / half-time /
+second-half restart / full-time (it has the outer pair today), and the
+scan skips the HT window outright — which is also ~14% of a full-90's
+frames unpaid, so the honest thing is again the cheap thing. It is engine
+work, not form work: the sample-index-to-time arithmetic assumes one
+contiguous window everywhere (eval, report, tracker), and the HT gap must
+be a hard boundary that gap-fill and carry-forward can never bridge — the
+same rule a camera cut already gets. This supersedes the old "halves
+runner" idea (two scans of one match collide on the same matchId — the
+second upload replaces the first, so two-record merging is a dead end).
+
+Interim, today: either half can be scanned cleanly on its own — set the
+trims to KO→HT for the first half, or restart→end for the second — just
+never upload both halves of one match as two scans (the id collision
+above). A full 90 with HT left in still measures; it just needs the
+asterisk until the marks exist.
 
 ## Roadmap after 1.7 — agreed 30/08/2026
 
