@@ -664,8 +664,19 @@ the SAME three borderline sites 1.6 and 1.7 disputed (2:53, 5:51, 1:59),
 now trimmed rather than stretched, and DAZN's phantom is gone outright.
 Read: the three recall points bought back nothing a partner could trust —
 they were the stretchy ends the player's-back screenshot came from. The
-deciding half is Horsham, where all six phantoms were tracked and the
-walls should kill all six.
+deciding half is Horsham, where all six phantoms — DAZN's, both disputed
+ranges — were tracked and the walls should kill all six.
+
+One confound, caught by the export's own reference list: both
+Horsham-harvested Enterprise crops were already in refs/partners when
+this rescan ran, so the Enterprise row is engine PLUS two new
+references, not engine alone — its true tighten cost is at least the
+three points shown, possibly masked by harvest gain. DAZN and TIC ran
+on unchanged references and are the pure engine read. This sharpens the
+precision claim rather than weakening it: 99% held with two fresh crops
+live in the most active sponsor, and the Horsham-harvested artwork fired
+no phantoms on Sutton footage — first evidence that cross-ground
+references pollute nothing.
 
 **The Horsham half raced the container build and lost.** Its rescan
 arrived stamped `engine_version: 1.7`: the pair was pasted while the
@@ -673,6 +684,11 @@ arrived stamped `engine_version: 1.7`: the pair was pasted while the
 job image at launch — Horsham ran first on the old image, Sutton ran
 after the push landed. The engine stamp in every export exists for
 exactly this; the file was refused at the ledger and the line re-pasted.
+With the crops already uploaded, the re-run doubles as the Enterprise
+harvest A/B: one scan, three answers — DAZN is the pure tighten read and
+carries the phantom-kill check, Enterprise is tighten + harvest against
+its 34% baseline, TIC (no new references) stays the pure starvation
+control for the audition pass.
 
 ## Roadmap — engine 1.7, the recall pair (agreed 30/08/2026, superseded by the build above)
 
