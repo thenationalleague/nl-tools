@@ -571,6 +571,135 @@ class TrackedFaceCheck(unittest.TestCase):
             C.FACE_NCC_REJECT = old
 
 
+class GraphicsCorners(unittest.TestCase):
+    """Engine 1.6, rule one: broadcast furniture lives in the top corners;
+    a board's matched features never do — zero of 643 genuine hits across
+    two grounds. Pure, so CI runs it."""
+
+    def test_corner_membership(self):
+        self.assertTrue(C.in_graphics_corner(1900, 120, 1920, 1080))
+        self.assertTrue(C.in_graphics_corner(100, 100, 1920, 1080))
+        self.assertFalse(C.in_graphics_corner(960, 120, 1920, 1080))   # top centre
+        self.assertFalse(C.in_graphics_corner(1900, 500, 1920, 1080))  # right edge, low
+        self.assertFalse(C.in_graphics_corner(960, 540, 1920, 1080))   # mid-frame
+
+    def test_watermark_class_stripped_boards_kept(self):
+        wm = quad_at(1200, 80)                 # projected box wanders mid-frame
+        wm["mc"] = [1901.0, 121.0]             # matched features locked top-right
+        board = quad_at(400, 500)
+        board["mc"] = [460.0, 520.0]
+        hits = {0: {"DAZN": [dict(wm)], "Enterprise": [dict(board)]},
+                1: {"DAZN": [dict(wm)]}}
+        gone = C.strip_corner(hits, 1920, 1080)
+        self.assertEqual(gone, {"DAZN": 2})
+        self.assertEqual(sorted(hits), [0])
+        self.assertIn("Enterprise", hits[0])
+        self.assertNotIn("DAZN", hits[0])
+
+    def test_no_dims_means_no_strip(self):
+        wm = quad_at(1700, 40)
+        wm["mc"] = [1901.0, 121.0]
+        hits = {0: {"DAZN": [wm]}}
+        self.assertEqual(C.strip_corner(hits, 0, 0), {})
+        self.assertEqual(len(hits), 1)
+
+
+@unittest.skipUnless(HAVE_CV, "opencv-python-headless + numpy not installed")
+class FurnitureMask(unittest.TestCase):
+    """Engine 1.6, rule two — Richard's frame-stack probe: overlay an even
+    spread of frames; whatever persists is furniture."""
+
+    W, H = 640, 360
+
+    def _frames(self, n=24, bug=True, translucent=False, locked=False,
+                seed=2):
+        rng = np.random.default_rng(seed)
+        out = []
+        for k in range(n):
+            if locked:
+                f = np.full((self.H, self.W), 90, np.uint8)
+                cv2.putText(f, "PITCH", (200, 200),
+                            cv2.FONT_HERSHEY_SIMPLEX, 2.0, 200, 8)
+                f = f + rng.integers(0, 2, f.shape, dtype=np.uint8)
+            else:
+                # A moving world. Softened noise, deliberately: raw per-pixel
+                # noise carries strong gradients EVERYWHERE, and half of them
+                # agree with any threshold by coin-flip — a fixture like that
+                # masks the whole frame and proves nothing about real video,
+                # where the background is smooth-ish structure that MOVES.
+                f = rng.integers(40, 110, (self.H, self.W), dtype=np.uint8)
+                f = cv2.GaussianBlur(f, (9, 9), 0)
+                x = 40 + 18 * k
+                cv2.rectangle(f, (x, 250), (x + 140, 290), 30, -1)
+                cv2.putText(f, "ACME", (x + 8, 280),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.9, 250, 3)
+            if bug:
+                if translucent:
+                    over = np.full((50, 120), 10, np.uint8)
+                    cv2.putText(over, "TV", (18, 40),
+                                cv2.FONT_HERSHEY_SIMPLEX, 1.2, 255, 4)
+                    roi = f[20:70, 500:620].astype(np.float32)
+                    f[20:70, 500:620] = (0.5 * roi + 0.5 * over.astype(
+                        np.float32)).astype(np.uint8)
+                else:
+                    cv2.rectangle(f, (500, 20), (620, 70), 245, 2)
+                    cv2.putText(f, "TV", (518, 60),
+                                cv2.FONT_HERSHEY_SIMPLEX, 1.2, 245, 4)
+            out.append(f)
+        return out
+
+    def _write(self, frames):
+        import tempfile
+        d = tempfile.mkdtemp()
+        files = []
+        for i, f in enumerate(frames):
+            p = os.path.join(d, f"f{i:03d}.png")
+            cv2.imwrite(p, f)
+            files.append(p)
+        return files
+
+    def test_opaque_bug_masked_moving_board_not(self):
+        mask, info = C.build_furniture_mask(self._write(self._frames()))
+        self.assertIsNotNone(mask)
+        self.assertTrue(mask[45, 560])                 # inside the bug
+        self.assertFalse(mask[270, 300])               # on the board's path
+        self.assertLess(info["coverage"], C.FURN_MAX_COVERAGE)
+
+    def test_translucent_bug_still_masked(self):
+        # Half-alpha fill wobbles with the background; the OUTLINE persists,
+        # which is why the probe judges edges rather than colours.
+        mask, info = C.build_furniture_mask(
+            self._write(self._frames(translucent=True)))
+        self.assertIsNotNone(mask)
+        self.assertTrue(mask[40:60, 510:600].any())
+
+    def test_locked_camera_stands_down(self):
+        mask, info = C.build_furniture_mask(
+            self._write(self._frames(locked=True)))
+        self.assertIsNone(mask)
+        self.assertIn("locked", info["why"])
+
+    def test_impossible_agreement_masks_nothing(self):
+        # Sabotage from the other side: demand 101% persistence and the same
+        # bug must survive — proving the mask above came from the agreement
+        # test, not from dilation or thresholding accidents.
+        mask, _ = C.build_furniture_mask(self._write(self._frames()),
+                                         agree=1.01)
+        self.assertTrue(mask is None or not mask.any())
+
+    def test_strip_masked_removes_by_centre_and_none_is_noop(self):
+        mask = np.zeros((360, 640), bool)
+        mask[20:70, 500:620] = True
+        bug = quad_at(500, 20, w=120, h=50)
+        bug["mc"] = [560.0, 45.0]
+        board = quad_at(100, 250)
+        hits = {0: {"DAZN": [bug, dict(board)]}}
+        gone = C.strip_masked(hits, mask)
+        self.assertEqual(gone, {"DAZN": 1})
+        self.assertEqual(len(hits[0]["DAZN"]), 1)
+        self.assertEqual(C.strip_masked({0: {"X": [dict(board)]}}, None), {})
+
+
 @unittest.skipUnless(HAVE_CV, "opencv-python-headless + numpy not installed")
 class CompactExportKeys(unittest.TestCase):
     """The shipped detections.json dialect. The tracked flag was absent from
