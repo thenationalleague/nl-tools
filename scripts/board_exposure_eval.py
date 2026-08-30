@@ -121,6 +121,16 @@ def rollup(truth):
     return {n: merge_spans(spans) for n, spans in by.items()}
 
 
+def _tracked(h):
+    """True for a gap-tracked hit in either export dialect: the pipeline's
+    long form carries "tracked": True, the shipped compact export "t": 1.
+    The compact key was missing entirely until engine 1.5, so the tracked
+    column silently read zero on every real detections.json — recovered
+    during the 29/08 adjudication only because synthesised hits also carry
+    inliers 0. Read both, forever."""
+    return bool(h.get("tracked") or h.get("t"))
+
+
 def score(truth, window, hits_by_index, interval, grace=0.75):
     """
     Sample-level precision and recall per sponsor, inside the window.
@@ -154,7 +164,7 @@ def score(truth, window, hits_by_index, interval, grace=0.75):
                 if not near_edge:
                     if inside and detected:
                         tp += 1
-                        if all(h.get("tracked") for h in hs):
+                        if all(_tracked(h) for h in hs):
                             tracked_tp += 1
                     elif inside:
                         fn += 1
@@ -191,7 +201,7 @@ def phantoms(truth, window, hits_by_index, interval, grace=0.75):
                 near = any(abs(t - x) < grace for s, e in spans for x in (s, e))
                 hs = (hits.get(i) or {}).get(name) or []
                 if hs and not inside and not near:
-                    fp.append((i, all(h.get("tracked") for h in hs)))
+                    fp.append((i, all(_tracked(h) for h in hs)))
             i += 1
         ranges = []
         for idx, tracked in fp:

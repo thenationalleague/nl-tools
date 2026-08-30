@@ -94,10 +94,14 @@ def _scan(job):
 
 # The grid. Small on purpose: eight combos is ~25 minutes and answers the
 # question; a hundred combos is overfitting to one afternoon at one ground.
+# MIN_SIDE was a dimension until engine 1.5: the 29/08 sweep produced four
+# identical row-pairs at 12 vs 9, so the dial does nothing on real footage
+# and its slots go to the whole-face floor instead — 0.0 rows are the
+# ablation that shows what the face NCC check is buying.
 GRID = {
-    "RATIO": [0.80, 0.85],          # Lowe ratio — looser admits more matches
-    "MIN_INLIERS": [9, 7],          # agreeing features a match must muster
-    "MIN_SIDE": [12, 9],            # smallest quad side worth believing
+    "RATIO": [0.85, 0.80],          # Lowe ratio — looser admits more matches
+    "MIN_INLIERS": [7, 9],          # agreeing features a match must muster
+    "FACE_NCC_REJECT": [0.25, 0.0],  # whole-face floor; 0.0 = check off
 }
 
 
@@ -115,7 +119,7 @@ def scan_once(bem, entries, files, interval, n_samples, overrides, jobs):
     for k, v in overrides.items():
         setattr(C, k, v)
     C.strip_static(hits, n_samples)
-    bem.close_blurred_gaps(hits, files, interval)
+    bem.close_blurred_gaps(hits, files, interval, C.build_faces(entries))
     return hits
 
 
@@ -154,7 +158,7 @@ def main():
 
     combos = [dict(zip(GRID, vals))
               for vals in itertools.product(*GRID.values())]
-    print(f"  {'ratio':>6}{'inliers':>9}{'side':>6}{'recall':>9}"
+    print(f"  {'ratio':>6}{'inliers':>9}{'ncc':>6}{'recall':>9}"
           f"{'precision':>11}{'phantom':>9}{'mins':>6}")
     print("  " + "-" * 56)
     results = []
@@ -164,7 +168,7 @@ def main():
         per = E.score(truth, window, hits, interval)
         o = E.overall(per)
         results.append((ov, o, per))
-        print(f"  {ov['RATIO']:>6.2f}{ov['MIN_INLIERS']:>9}{ov['MIN_SIDE']:>6}"
+        print(f"  {ov['RATIO']:>6.2f}{ov['MIN_INLIERS']:>9}{ov['FACE_NCC_REJECT']:>6}"
               f"{'' if o['recall'] is None else format(100 * o['recall'], '.0f') + '%':>9}"
               f"{'' if o['precision'] is None else format(100 * o['precision'], '.0f') + '%':>11}"
               f"{o['fp']:>9}{(time.time() - t0) / 60:>6.1f}", flush=True)
@@ -175,7 +179,7 @@ def main():
     if honest:
         ov, o, per = max(honest, key=lambda r: r[1]["recall"] or 0)
         print(f"\n  knee: ratio {ov['RATIO']}, inliers {ov['MIN_INLIERS']}, "
-              f"side {ov['MIN_SIDE']} — recall {100 * (o['recall'] or 0):.0f}% "
+              f"ncc {ov['FACE_NCC_REJECT']} — recall {100 * (o['recall'] or 0):.0f}% "
               f"at precision {100 * (o['precision'] or 0):.0f}%")
         for name in sorted(per):
             s = per[name]
@@ -192,7 +196,7 @@ def main():
         # precision is flat across the grid, so the diagnosis is too.
         ov, o, per = results[0]
         print(f"\n  per sponsor at ratio {ov['RATIO']}, inliers "
-              f"{ov['MIN_INLIERS']}, side {ov['MIN_SIDE']}:")
+              f"{ov['MIN_INLIERS']}, ncc {ov['FACE_NCC_REJECT']}:")
         for name in sorted(per):
             s = per[name]
             r = "—" if s["recall"] is None else f"{100 * s['recall']:.0f}%"

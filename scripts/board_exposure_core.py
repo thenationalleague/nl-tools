@@ -58,13 +58,36 @@ import numpy as np
 # the rectified face cannot: judged on the reference's textured cells only
 # (the flat fallback would let any dark board vouch for any other), a hit
 # whose face agrees under VIS_REJECT is discarded at detection time.
-ENGINE_VERSION = "1.4"
+#
+# 1.5 — the answer-sheet rerun of 1.4 named every remaining phantom, and they
+# were two mechanisms. (1) The broadcast watermark AGAIN: 1.4's face check
+# thinned its detections to ~5% of samples — under the fine rule's 8% share
+# floor — so the furniture strip stopped firing. The fix is Richard's ruling,
+# stated as the concept rather than a threshold: ANYTHING PERMANENTLY ON
+# SCREEN IS NOT A BOARD. The fine rule gains a permanence tier — a 16px
+# feature-centroid cell seen in most of the match's separate stretches is
+# furniture at ANY share, because nothing physical re-lands on sixteen pixels
+# across camera visits spanning the whole broadcast. (2) A tracked impostor
+# chain: 25 of the 33 samples at the ruled 4:10-4:27 range were the tracker
+# faithfully multiplying a few confident wrong-end seeds. Two guards: the
+# whole-face NCC (the cell test judges only reference-textured cells, so a
+# mostly-dark board offered nothing to judge and slipped through — the global
+# NCC always has an opinion), applied at detection AND to every patch the
+# tracker wants to synthesise. Dials promoted from the 29/08 sweep: RATIO
+# 0.80->0.85, MIN_INLIERS 9->7 — strictly dominant (recall 55->60%, precision
+# 87->89%, phantoms 105->94) at the price of scan time.
+ENGINE_VERSION = "1.5"
 
 # --- tunables, all in one place so a run can be described in one line ---------
 SAMPLE_FPS = 2.0            # samples per second of match
 NFEATURES = 6000            # SIFT cap per frame; a football frame has far more
 BAND_FRAC, BAND_STRIDE = 0.22, 0.055   # sliding horizontal search window
-RATIO, MIN_INLIERS, MAX_PER_BAND = 0.80, 9, 6
+# 0.80/9 until engine 1.5. The 29/08/2026 labelled sweep found 0.85/7
+# strictly dominant on real footage — more recall AND more precision (the
+# looser ratio detects furniture consistently enough for the static rules to
+# fingerprint it) — costing only scan time. Promoted with the sweep table in
+# the commit message, per the sweep script's contract.
+RATIO, MIN_INLIERS, MAX_PER_BAND = 0.85, 7, 6
 ASPECT = (1.6, 7.0)         # a hoarding is wide
 MAX_TILT = 28.0             # degrees off level
 AREA_PCT = (0.02, 5.0)      # share of frame the logo may occupy
@@ -119,6 +142,18 @@ STATIC_CELL_PX = 24         # position granularity; jitter smaller than this mer
 STATIC_FINE_CELL_PX = 16
 STATIC_FINE_SHARE = 0.08
 STATIC_FINE_SPAN = 0.50
+# The permanence tier (engine 1.5). Richard's ruling, verbatim concept:
+# "anything permanently on screen is not a board." The share floor above let
+# the watermark back in the moment the face check thinned its detections to
+# 5% of samples — so permanence is judged directly: split the match into
+# STATIC_FINE_WINDOWS equal stretches, and a fine cell with hits in at least
+# STATIC_FINE_EPISODES of them is furniture at ANY share (a small absolute
+# floor keeps five lone flickers from condemning a cell). A real board
+# re-entering shot lands cells apart every time the camera comes back; only
+# something bolted to the frame re-lands on sixteen pixels all match long.
+STATIC_FINE_WINDOWS = 8
+STATIC_FINE_EPISODES = 5
+STATIC_FINE_MIN_SHARE = 0.02
 # The face check. Richard's adjudication found the board reference's generic
 # parts (white capitals on black) matching a DIFFERENT black board across the
 # pitch — letterforms fooled the matcher for 17 straight seconds. But an
@@ -127,6 +162,21 @@ STATIC_FINE_SPAN = 0.50
 # is a lie whatever its inlier count. Deliberately low: a genuine board that
 # is small, blurred or half-covered still scores well above this.
 VIS_REJECT = 0.18
+# The whole-face floor (engine 1.5). The cell test above judges only the
+# cells where the REFERENCE has texture — so a reference that is mostly dark
+# panel offered almost nothing to judge, returned None, and the DAZN
+# impostors walked through the 1.4 check unjudged. Global NCC over the whole
+# rectified face always has an opinion: a different board's lettering lands
+# near zero however confident the feature match was, while a genuine board —
+# small, blurred, half-covered or clipped by the frame edge — keeps enough
+# aligned structure to clear a floor this low. Applied wherever a hit is
+# minted: at detection, and to every patch the tracker wants to synthesise.
+# 0.25 sits mid-gap in the measured separation on representative fixtures:
+# a different dark board's lettering scores ~0.11, while a genuine board
+# still scores 0.53 half-covered and 0.84 blurred-and-small — roughly 2x
+# clear air on either side. The sweep grid carries a 0.0 ablation row so the
+# floor's real cost on footage stays measured, not assumed.
+FACE_NCC_REJECT = 0.25
 
 
 def flatten(path):
@@ -408,6 +458,50 @@ def face_agreement(vis_ref, crop):
     return ok / total if total else None
 
 
+def face_ncc(vis_ref, crop):
+    """
+    Whole-face identity, one number: global normalised cross-correlation of
+    the rectified face against the reference on the shared canvas. Blunt on
+    purpose — face_agreement() is the finer instrument, but it abstains when
+    the reference has no textured cells, and an abstention is exactly where
+    the 1.4 impostors lived. This never abstains unless a side is genuinely
+    featureless. None when there is nothing to compare.
+    """
+    if vis_ref is None or crop is None or getattr(crop, "size", 0) == 0:
+        return None
+    f = cv2.resize(crop, (VIS_W, VIS_H)).astype(np.float32)
+    r = vis_ref.astype(np.float32)
+    rs, fs = float(r.std()), float(f.std())
+    if rs < 1e-6 or fs < 1e-6:
+        return None
+    return float(np.mean((r - r.mean()) * (f - f.mean())) / (rs * fs))
+
+
+def face_ok(vis_ref, crop):
+    """The reject decision both minting sites share: a hit stands unless a
+    test that COULD judge it says impostor. detect() uses it on fresh
+    detections; the tracker uses it on every patch before synthesising."""
+    agree = face_agreement(vis_ref, crop)
+    if agree is not None and agree < VIS_REJECT:
+        return False
+    ncc = face_ncc(vis_ref, crop)
+    return ncc is None or ncc >= FACE_NCC_REJECT
+
+
+def build_faces(entries):
+    """
+    {sponsor: [reference face, ...]} on the visibility canvas — no SIFT, so
+    it is cheap enough for the main process to build after the pool is done.
+    The tracker needs it: a tracked patch is face-checked against the
+    sponsor's reference designs before it may become a hit.
+    """
+    out = {}
+    for sponsor, path, scope in entries:
+        g = flatten(path)
+        out.setdefault(sponsor, []).append(cv2.resize(g, (VIS_W, VIS_H)))
+    return out
+
+
 def build_refs(entries, sift):
     """
     Turn [(sponsor, path, scope)] into matchable references.
@@ -487,15 +581,16 @@ def detect(frame_bgr, refs, sift, matcher):
                     mc = [float(used_pts[:, 0].mean()),
                           float(used_pts[:, 1].mean())]
                     crop = rectify(gray, quad, ref_wh)
-                    agree = face_agreement(vis_ref, crop)
                     # The face check: features can be fooled by another black
                     # board wearing similar lettering, but rectified square-on
-                    # an impostor does not RESEMBLE the reference where the
-                    # reference has identity. A rejected hit still falls
-                    # through to the keypoint bookkeeping below, so its
+                    # an impostor does not RESEMBLE the reference. Two tests —
+                    # the textured-cell agreement, and (1.5) the whole-face
+                    # NCC that still has an opinion when the reference offers
+                    # no textured cells to judge by. A rejected hit still
+                    # falls through to the keypoint bookkeeping below, so its
                     # features are consumed rather than re-matched on every
                     # remaining pass of this band.
-                    if agree is None or agree >= VIS_REJECT:
+                    if face_ok(vis_ref, crop):
                         vis = visibility(vis_ref, crop)
                         sh, ct = focus_of(crop)
                         logo_pct = 100.0 * abs(cv2.contourArea(
@@ -559,7 +654,11 @@ def settings():
                        "flat_diff": VIS_FLAT_DIFF, "blocked_under": VIS_BLOCKED},
         "static_share": STATIC_SHARE, "static_cell_px": STATIC_CELL_PX,
         "static_fine": {"cell_px": STATIC_FINE_CELL_PX,
-                        "share": STATIC_FINE_SHARE, "span": STATIC_FINE_SPAN},
+                        "share": STATIC_FINE_SHARE, "span": STATIC_FINE_SPAN,
+                        "windows": STATIC_FINE_WINDOWS,
+                        "episodes": STATIC_FINE_EPISODES,
+                        "min_share": STATIC_FINE_MIN_SHARE},
+        "face_ncc_reject": FACE_NCC_REJECT, "face_agree_reject": VIS_REJECT,
         "clarity_weights": {"size": 0.40, "focus": 0.25,
                             "contrast": 0.20, "angle": 0.15},
         "clarity_saturation": {"area_pct": 0.6, "sharp": 300.0, "contrast": 60.0},
@@ -643,13 +742,26 @@ def static_positions(hits_by_index, n_samples, cell=STATIC_CELL_PX,
 
 
 def static_fine_positions(hits_by_index, n_samples, cell=STATIC_FINE_CELL_PX,
-                          share=STATIC_FINE_SHARE, span=STATIC_FINE_SPAN):
+                          share=STATIC_FINE_SHARE, span=STATIC_FINE_SPAN,
+                          windows=STATIC_FINE_WINDOWS,
+                          episodes=STATIC_FINE_EPISODES,
+                          min_share=STATIC_FINE_MIN_SHARE):
     """
     {sponsor: set of fine cells that are overlays}, judged on the matched
     features. Pure, like static_positions. Hits without an "mc" (older
     exports, tracked fills) never contribute and are never condemned by this
     rule — a rule this aggressive only runs on the evidence it was designed
     for.
+
+    Two ways in, either suffices:
+      · the share tier — the cell holds `share` of ALL samples across `span`
+        of the video (the 1.4 rule);
+      · the permanence tier (1.5) — the cell has hits in `episodes` of the
+        match's `windows` equal stretches, above a small absolute floor.
+        "Anything permanently on screen is not a board": a watermark matched
+        in only 5% of samples still shows up early, middle and late, and no
+        physical board re-lands on one 16px cell across separate camera
+        visits spanning the broadcast.
     """
     from collections import defaultdict
     out = {}
@@ -661,11 +773,15 @@ def static_fine_positions(hits_by_index, n_samples, cell=STATIC_FINE_CELL_PX,
             for h in hs:
                 if h.get("mc"):
                     per[name][_hit_cell(h, cell, prefer_mc=True)].add(i)
+    win = max(1.0, n_samples / windows)
     for name, cells in per.items():
         bad = set()
         for c, samples in cells.items():
-            if (len(samples) >= share * n_samples
-                    and max(samples) - min(samples) >= span * n_samples):
+            share_tier = (len(samples) >= share * n_samples
+                          and max(samples) - min(samples) >= span * n_samples)
+            perm_tier = (len(samples) >= max(3, min_share * n_samples)
+                         and len({int(i // win) for i in samples}) >= episodes)
+            if share_tier or perm_tier:
                 bad.add(c)
         if bad:
             out[name] = bad

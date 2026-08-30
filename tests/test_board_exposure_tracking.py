@@ -400,5 +400,209 @@ class FaceCheckInDetect(unittest.TestCase):
             C.face_agreement = real
 
 
+class PermanenceTier(unittest.TestCase):
+    """Engine 1.5's half of the fine rule — Richard's ruling as code:
+    "anything permanently on screen is not a board." Pure, so CI runs it.
+
+    The 1.4 rerun proved the share tier alone is gameable by accident: the
+    face check thinned the watermark to ~5% of samples, under the 8% floor,
+    and 50+ phantom seconds walked back in. Permanence judges presence
+    across the match's separate stretches instead — no real board re-lands
+    on one 16px feature cell in five of eight windows of a broadcast."""
+
+    def _watermark(self, idxs, cell_mc=(1701.0, 121.0)):
+        hits = {}
+        for k, i in enumerate(idxs):
+            h = quad_at(1200 + (k % 9) * 90, 80 + (k % 4) * 30)
+            h["mc"] = [cell_mc[0] + (k % 3), cell_mc[1] + (k % 2)]
+            hits[i] = {"DAZN": [h]}
+        return hits
+
+    def test_five_percent_watermark_spread_across_the_match_is_stripped(self):
+        # 50 of 989 samples — half the old share floor — but present in every
+        # eighth of the video. Exactly the 1.4 leak, exactly the ruling.
+        hits = self._watermark(range(0, 989, 20))
+        gone = C.strip_static(hits, 989)
+        self.assertEqual(gone, {"DAZN": 50})
+        self.assertEqual(hits, {})
+
+    def test_one_long_spell_is_not_permanence(self):
+        # A real board CAN hold a spot for a fifth of the match in ONE spell —
+        # 200 consecutive samples span two windows, not five, and survive.
+        hits = self._watermark(range(0, 200), cell_mc=(450.0, 520.0))
+        self.assertEqual(C.strip_static(hits, 989), {})
+        self.assertEqual(len(hits), 200)
+
+    def test_a_handful_of_flickers_never_condemns_a_cell(self):
+        # Six lone samples in six windows sit under the absolute floor
+        # (2% of samples): permanence needs presence, not coincidence.
+        hits = self._watermark(range(0, 989, 165))
+        self.assertEqual(C.strip_static(hits, 989), {})
+
+    def test_the_tier_is_doing_the_work(self):
+        # Sabotage: demand more windows than exist and the same watermark
+        # must survive — proving the strip above came from the permanence
+        # tier, not from the share tier catching it by accident.
+        hits = self._watermark(range(0, 989, 20))
+        fine = C.static_fine_positions(hits, 989, episodes=9)
+        self.assertEqual(fine, {})
+
+
+@unittest.skipUnless(HAVE_CV, "opencv-python-headless + numpy not installed")
+class WholeFaceNcc(unittest.TestCase):
+    """The 1.5 identity floor that cannot abstain. The DAZN impostors lived
+    in face_agreement's abstention: a mostly-dark reference offers almost no
+    textured cells, the cell test returned None, and the hit walked. Global
+    NCC always has an opinion about layout."""
+
+    def setUp(self):
+        # A DAZN-shaped reference: mostly dark panel, small bright mark high
+        # left, slogan block low right. Layout IS the identity.
+        ref = np.full((80, 320), 15, np.uint8)
+        cv2.putText(ref, "DAZN", (14, 34), cv2.FONT_HERSHEY_SIMPLEX,
+                    1.1, 245, 5)
+        cv2.rectangle(ref, (200, 52), (300, 70), 230, -1)
+        self.ref = ref
+        self.vis_ref = cv2.resize(ref, (C.VIS_W, C.VIS_H))
+        # A different black board: same palette, different layout — the
+        # impostor class from the 29/08 adjudication.
+        imp = np.full((80, 320), 18, np.uint8)
+        cv2.putText(imp, "ZORBA HIRE", (60, 66), cv2.FONT_HERSHEY_SIMPLEX,
+                    1.0, 240, 5)
+        cv2.rectangle(imp, (10, 8), (46, 30), 235, -1)
+        self.impostor = imp
+
+    def test_impostor_layout_fails_where_cell_test_cannot_judge(self):
+        ncc = C.face_ncc(self.vis_ref, self.impostor)
+        self.assertIsNotNone(ncc)
+        self.assertLess(ncc, C.FACE_NCC_REJECT)
+        # The point of the floor: face_ok must reject this hit even if the
+        # cell test abstained or waved it through.
+        self.assertFalse(C.face_ok(self.vis_ref, self.impostor))
+
+    def test_true_board_survives_blur_and_distance(self):
+        # Small on screen and smeared by a pan — the honest worst case for a
+        # genuine board. Global structure survives a low-pass.
+        small = cv2.resize(self.ref, (64, 16))
+        k = np.ones((1, 9), np.float32) / 9
+        blurred = cv2.filter2D(small, -1, k)
+        self.assertGreaterEqual(C.face_ncc(self.vis_ref, blurred),
+                                C.FACE_NCC_REJECT)
+        self.assertTrue(C.face_ok(self.vis_ref, blurred))
+
+    def test_half_covered_true_board_survives(self):
+        rng = np.random.default_rng(5)
+        covered = self.ref.copy()
+        covered[:, :160] = rng.integers(0, 255, (80, 160), dtype=np.uint8)
+        self.assertGreaterEqual(C.face_ncc(self.vis_ref, covered),
+                                C.FACE_NCC_REJECT)
+
+    def test_featureless_sides_abstain(self):
+        flat = np.full((80, 320), 70, np.uint8)
+        self.assertIsNone(C.face_ncc(cv2.resize(flat, (C.VIS_W, C.VIS_H)),
+                                     flat))
+        self.assertIsNone(C.face_ncc(self.vis_ref, None))
+        self.assertIsNone(C.face_ncc(None, self.ref))
+
+
+@unittest.skipUnless(HAVE_CV, "opencv-python-headless + numpy not installed")
+class TrackedFaceCheck(unittest.TestCase):
+    """Engine 1.5: the tracker answers the identity question too. Same
+    frames-on-disk harness as CloseBlurredGaps, now with reference faces."""
+
+    def _run(self, faces):
+        import tempfile
+        bem = _load_match_module()
+        d = tempfile.mkdtemp()
+        files = []
+        for i, x in enumerate([100, 140, 180, 220, 260]):
+            f = board_frame(x, blur_px=(14 if 0 < i < 4 else 0))
+            p = os.path.join(d, f"f{i}.png")
+            cv2.imwrite(p, f)
+            files.append(p)
+        real = {"scope": "partner",
+                "quad": [[100, 200], [260, 200], [260, 240], [100, 240]],
+                "board": None, "logo_area": 2.8, "area": 2.8,
+                "inliers": 30, "clarity": 0.6}
+        far = dict(real, quad=[[260, 200], [420, 200], [420, 240], [260, 240]])
+        h = {0: {"ACME": [real]}, 4: {"ACME": [far]}}
+        return bem.close_blurred_gaps(h, files, 0.5, faces), h
+
+    def _acme_face(self):
+        board = np.zeros((40, 160, 3), np.uint8)
+        board[:] = (40, 160, 40)
+        cv2.putText(board, "ACME", (8, 30), cv2.FONT_HERSHEY_SIMPLEX,
+                    1.0, (255, 255, 255), 4)
+        cv2.rectangle(board, (120, 8), (150, 32), (255, 255, 255), -1)
+        return cv2.resize(cv2.cvtColor(board, cv2.COLOR_BGR2GRAY),
+                          (C.VIS_W, C.VIS_H))
+
+    def test_matching_face_still_fills_through_blur(self):
+        # The recall tracking exists for: blurred true patches must PASS,
+        # or the face check un-ships engine 1.1.
+        n, h = self._run({"ACME": [self._acme_face()]})
+        self.assertEqual(n, 3)
+        self.assertEqual(sorted(h), [0, 1, 2, 3, 4])
+
+    def test_wrong_face_stops_the_chain(self):
+        # The 4:10-4:27 mechanism: anchors exist, patches track cleanly, but
+        # the patch is not this sponsor's board. A dark different-layout face
+        # for "ACME" means every patch fails identity and the gap stays open.
+        imp = np.full((C.VIS_H, C.VIS_W), 15, np.uint8)
+        cv2.putText(imp, "ZORBA", (30, 34), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.9, 245, 3)
+        n, h = self._run({"ACME": [imp]})
+        self.assertEqual(n, 0)
+        self.assertEqual(sorted(h), [0, 4])
+
+    def test_no_faces_means_no_check(self):
+        n, h = self._run(None)
+        self.assertEqual(n, 3)
+
+    def test_the_gate_is_live(self):
+        # Sabotage: an impossible floor must stop even the matching face —
+        # proving the fill above passed BECAUSE of the check, not despite it.
+        old = C.FACE_NCC_REJECT
+        C.FACE_NCC_REJECT = 0.99
+        try:
+            n, _ = self._run({"ACME": [self._acme_face()]})
+            self.assertEqual(n, 0)
+        finally:
+            C.FACE_NCC_REJECT = old
+
+
+@unittest.skipUnless(HAVE_CV, "opencv-python-headless + numpy not installed")
+class CompactExportKeys(unittest.TestCase):
+    """The shipped detections.json dialect. The tracked flag was absent from
+    every real export until 1.5 — the eval's tracked column read zero while
+    the in-memory pipeline showed real counts, and nobody could see which
+    phantoms tracking had grown. The compact row now carries "t" and "v",
+    sparsely, and this pins the contract."""
+
+    def test_compact_rows_carry_t_and_v_sparsely(self):
+        import importlib.util, tempfile
+        p = os.path.join(os.path.dirname(__file__), "..", "scripts",
+                         "board_exposure_report.py")
+        spec = importlib.util.spec_from_file_location("ber", p)
+        R = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(R)
+        detected = {"scope": "partner", "quad": [[0, 0], [10, 0], [10, 5], [0, 5]],
+                    "board": None, "logo_area": 1.0, "area": 1.0,
+                    "inliers": 20, "clarity": 0.5, "visibility": 0.4231}
+        tracked = dict(detected, inliers=0, tracked=True, visibility=None)
+        meta = {"interval": 0.5, "duration": 10.0, "n_samples": 20,
+                "video_w": 1920, "video_h": 1080, "match": "T v T",
+                "club": "", "sub": "", "foot": "", "source": ""}
+        payload, _ = R.build(tempfile.mktemp(suffix=".html"), meta,
+                             {3: {"X": [detected, tracked]}}, {},
+                             {"X": "partner"})
+        det_row, trk_row = payload["hits"]["3"]["X"]
+        self.assertNotIn("t", det_row)
+        self.assertEqual(det_row["v"], 0.423)
+        self.assertEqual(trk_row["t"], 1)
+        self.assertNotIn("v", trk_row)
+        self.assertEqual(trk_row["n"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

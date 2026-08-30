@@ -184,6 +184,21 @@ class Phantoms(unittest.TestCase):
         self.assertEqual(clockfmt(213.5), "3:33")
         self.assertEqual(clockfmt(0), "0:00")
 
+    def test_compact_export_dialect_reports_tracked(self):
+        # The shipped detections.json carries "t": 1, not "tracked": True —
+        # and carried NEITHER until engine 1.5, which is why the tracked
+        # column read zero on every real file while the sweep showed real
+        # counts. Both dialects must read as tracked, forever.
+        truth = {"DAZN": [(20.0, 30.0)]}
+        hits = {4: {"DAZN": [{"n": 0, "t": 1}]},
+                5: {"DAZN": [{"n": 0, "t": 1}]}}
+        ((_, _, share),) = phantoms(truth, (0.0, 40.0), hits, 1.0,
+                                    grace=0.0)["DAZN"]
+        self.assertEqual(share, 1.0)
+        s = score({"DAZN": [(3.0, 7.0)]}, (0.0, 10.0),
+                  {4: {"DAZN": [{"n": 0, "t": 1}]}}, 1.0, grace=0.0)["DAZN"]
+        self.assertEqual(s["tracked_tp"], 1)
+
 
 class Overall(unittest.TestCase):
     def test_pools_samples_not_rates(self):
