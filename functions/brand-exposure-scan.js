@@ -128,7 +128,21 @@ function validRequest(req) {
   if (!!req.ht !== !!req.restart) {
     return "half-time marks come as a pair — ht and restart together";
   }
+  if (req.mode != null && req.mode !== "scan" && req.mode !== "audition") {
+    return "mode must be scan or audition";
+  }
+  if (req.mode === "audition" &&
+      !/^brand-exposure\/[a-z0-9-]+$/.test(String(req.dest || ""))) {
+    return "an audition names its destination folder under brand-exposure/";
+  }
   return null;
+}
+
+/* An audition leaves the source in place: its whole point is that a full
+   scan of the SAME upload follows once the references are ticked. Scans
+   (and their failure sweeps) keep the delete-on-terminal lifecycle. */
+function shouldDeleteSource(req) {
+  return !req || req.mode !== "audition";
 }
 
 /* The env contract is scan-job/run_job.py's docstring, name for name. The
@@ -154,6 +168,12 @@ function buildEnv(req) {
   if (req.ht && req.restart) {
     env.push(["BE_HT", req.ht]);
     env.push(["BE_RESTART", req.restart]);
+  }
+  if (req.mode === "audition") {
+    /* run_job reads the rest only on the scan path, so the scan fields
+       above ride along inert; these two are what change the run. */
+    env.push(["BE_MODE", "audition"]);
+    env.push(["BE_DEST", req.dest]);
   }
   return env.map(([name, value]) => ({ name, value: String(value) }));
 }
@@ -359,7 +379,7 @@ exports.brandExposureScanPoll = onSchedule(SCHED_OPTS, async () => {
       if (verdict === "running") continue;
       if (verdict === "done") {
         /* Source deletion is safe here and only here — see the header. */
-        if (VIDEO_PATH.test(String(r.video || ""))) {
+        if (shouldDeleteSource(r) && VIDEO_PATH.test(String(r.video || ""))) {
           try {
             await admin.storage().bucket(BUCKET).file(r.video).delete();
           } catch (err) {
@@ -377,7 +397,7 @@ exports.brandExposureScanPoll = onSchedule(SCHED_OPTS, async () => {
         });
       }
     } else if (
-      r.status === "failed" && !r.swept &&
+      r.status === "failed" && !r.swept && shouldDeleteSource(r) &&
       VIDEO_PATH.test(String(r.video || "")) &&
       (r.finishedAt || r.at || 0) < now - SWEEP_AFTER_MS
     ) {
@@ -410,4 +430,5 @@ exports.brandExposureScanPoll = onSchedule(SCHED_OPTS, async () => {
 /* Exported for tests. */
 exports._internals = {
   validRequest, buildEnv, verdictOf, oldestQueued, failureNote, VIDEO_PATH,
+  shouldDeleteSource,
 };

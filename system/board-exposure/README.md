@@ -904,7 +904,13 @@ attribution-bearing; and CAD is chased in parallel, never waited on.
    Audition tab reads audition.json + crops from the match folder,
    shows each reference's verdict, and promotes ticked crops into
    refs/partners/<Sponsor>/ by browser re-upload, audited. Needs one
-   storage-rules deploy (the refs block) before first promotion. Yield
+   storage-rules deploy (the refs block) before first promotion. And
+   LAUNCHED FROM THE TOOL, on Richard's ruling the same night: "Audition
+   first" on the upload form queues mode=audition through the same
+   serial queue (the poller leaves the source video in place), the tab
+   lists finished auditions, and "Run the full scan" clones the request
+   into a normal scan of the same upload — Cloud Shell is out of the
+   audition loop entirely. Yield
    already measured twice by hand: Enterprise centre 14% → 29% (two
    crops), TIC 3% → 30% (one). First real audition run is the next
    milestone; a camera-1 sweep clip is its ideal input.

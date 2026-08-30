@@ -66,7 +66,8 @@ function lift(relPath, fnNames, constNames = []) {
 
 const be = lift(
   'functions/brand-exposure-scan.js',
-  ['validRequest', 'buildEnv', 'verdictOf', 'oldestQueued', 'failureNote'],
+  ['validRequest', 'buildEnv', 'verdictOf', 'oldestQueued', 'failureNote',
+   'shouldDeleteSource'],
   ['VIDEO_PATH']
 );
 
@@ -238,4 +239,39 @@ test('a request with no timestamp sorts first rather than never', () => {
     a: { status: 'queued', at: 5 },
     b: { status: 'queued' },
   }), 'b');
+});
+
+/* ---- Audition mode (v0.13): the tool launches auditions, not Cloud Shell */
+
+test('audition mode needs a well-formed destination folder', () => {
+  assert.equal(be.validRequest({ ...GOOD, mode: 'audition',
+    dest: 'brand-exposure/2026-08-18-horsham-v-hampton-and-richmond' }), null);
+  assert.match(String(be.validRequest({ ...GOOD, mode: 'audition' })),
+    /destination/);
+  assert.match(String(be.validRequest({ ...GOOD, mode: 'audition',
+    dest: 'uploads/evil' })), /destination/);
+  assert.match(String(be.validRequest({ ...GOOD, mode: 'audition',
+    dest: 'brand-exposure/x/../../data' })), /destination/);
+});
+
+test('unknown modes are refused, absent and scan pass', () => {
+  assert.equal(be.validRequest({ ...GOOD }), null);
+  assert.equal(be.validRequest({ ...GOOD, mode: 'scan' }), null);
+  assert.match(String(be.validRequest({ ...GOOD, mode: 'sweep' })), /mode/);
+});
+
+test('buildEnv sends BE_MODE and BE_DEST for auditions only', () => {
+  const dest = 'brand-exposure/2026-08-18-horsham-v-hampton-and-richmond';
+  const aud = be.buildEnv({ ...GOOD, mode: 'audition', dest });
+  const names = aud.map((e) => e.name);
+  assert.ok(names.includes('BE_MODE'));
+  assert.equal(aud.find((e) => e.name === 'BE_DEST').value, dest);
+  const scan = be.buildEnv({ ...GOOD });
+  assert.ok(!scan.some((e) => e.name === 'BE_MODE' || e.name === 'BE_DEST'));
+});
+
+test('an audition never surrenders its source; everything else does', () => {
+  assert.equal(be.shouldDeleteSource({ ...GOOD, mode: 'audition' }), false);
+  assert.equal(be.shouldDeleteSource({ ...GOOD }), true);
+  assert.equal(be.shouldDeleteSource({ ...GOOD, mode: 'scan' }), true);
 });
