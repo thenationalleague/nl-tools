@@ -110,7 +110,21 @@ import numpy as np
 # check is the terminator that makes it buildable. Both levers carry 0-off
 # switches and the sweep grid ablates them, so what each buys stays
 # measured, never assumed.
-ENGINE_VERSION = "1.7"
+#
+# 1.7.1 (30/08/2026) — TIGHTEN, from the first club-footage phantoms.
+# Horsham's hand-labels caught carry-forward's tail sitting on a player's
+# back during a fast pan-out: at 2 samples/s the board leaves the frame
+# between samples, the tracker matches the best remaining smear, and the
+# 1.7 gates (corr 0.60, face 0.25) both clear on night blur. Two changes,
+# both on MINTED steps only: every synthetic fill now answers
+# TRACK_FACE_FLOOR (0.45 — detections keep 0.25; a mint has no inlier
+# evidence, so it pays a higher identity bar inside the measured 0.11/0.84
+# impostor/genuine gap), and a one-sided carry step that crosses more than
+# CARRY_MAX_STEP_FRAC of the frame width in one sample stops — that is a
+# pan, and past it the walk is into the dark. Gap-fill keeps full-width
+# steps (anchored both sides). Gate: Sutton must hold 99/64; Horsham's six
+# tracked phantoms should die.
+ENGINE_VERSION = "1.7.1"
 
 # --- tunables, all in one place so a run can be described in one line ---------
 SAMPLE_FPS = 2.0            # samples per second of match
@@ -211,6 +225,23 @@ VIS_REJECT = 0.18
 # clear air on either side. The sweep grid carries a 0.0 ablation row so the
 # floor's real cost on footage stays measured, not assumed.
 FACE_NCC_REJECT = 0.25
+# 1.7.1: minted steps answer a HIGHER identity bar than detections. A real
+# detection arrives with 7+ features agreeing on position and perspective; a
+# tracked fill arrives with correlation against its own previous frame only
+# — which proves continuity, never identity. The Horsham pan-out proved the
+# difference on camera: a carry chain's tail sat on a player's back at
+# night, clearing 0.25 on smear. The measured gap has room for a higher
+# synthetic floor (genuine-blurred ~0.84, impostor ~0.11), so mints pay
+# 0.45 while detections keep 0.25 — tightening the fills without touching
+# what detect() accepts.
+TRACK_FACE_FLOOR = 0.45
+# And a one-sided carry step that crosses a quarter of the frame in half a
+# second is a fast pan: either the board is leaving shot or the tracker has
+# jumped to something else — the same Horsham chain crossed x1284 -> x236 in
+# two steps. Gap-fill keeps its full-width search on purpose: it holds an
+# anchor on BOTH sides, so a big jump there is a pan being bridged, not a
+# walk into the dark.
+CARRY_MAX_STEP_FRAC = 0.25
 # The graphics corners (1.6). Broadcast furniture lives in the frame's top
 # corners; a perimeter board's matched features never do — zero of 643
 # genuine hits across two grounds, against every watermark-class hit. A hit
@@ -767,6 +798,8 @@ def settings():
                         "episodes": STATIC_FINE_EPISODES,
                         "min_share": STATIC_FINE_MIN_SHARE},
         "face_ncc_reject": FACE_NCC_REJECT, "face_agree_reject": VIS_REJECT,
+        "track_face_floor": TRACK_FACE_FLOOR,
+        "carry_max_step_frac": CARRY_MAX_STEP_FRAC,
         "corner": {"x_frac": CORNER_X_FRAC, "y_frac": CORNER_Y_FRAC},
         "zoom_scale": ZOOM_SCALE, "carry_max_secs": CARRY_MAX_SECS,
         "furniture": {"frames": FURN_FRAMES, "edge_t": FURN_EDGE_T,

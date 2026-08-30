@@ -604,6 +604,35 @@ tracked fills carry no inlier evidence, so they pay a higher face bar
 (the measured gap is wide: genuine-blurred 0.84 vs impostor 0.11) —
 plus an exit rule stopping a one-sided carry step that teleports a large
 fraction of the frame in one sample.
+
+## Engine 1.7.1 — tighten (built 30/08/2026, awaiting the two rescans)
+
+Both walls sit on MINTED steps only; nothing detect() accepts changes.
+
+- **`TRACK_FACE_FLOOR` 0.45** — every synthetic fill (gap-fill and
+  carry-forward alike) must now clear 0.45 whole-face NCC, while real
+  detections keep the 0.25 floor: a detection arrives with 7+ agreeing
+  features, a mint arrives with correlation against its own previous
+  frame — continuity, never identity. The raised floor sits inside the
+  measured gap (genuine-blurred ~0.84, impostor ~0.11), so honest fills
+  clear it with room and the Horsham player's-back chain dies at the
+  step where it leaves the board.
+- **`CARRY_MAX_STEP_FRAC` 0.25** — a one-sided carry step crossing more
+  than a quarter of the frame width in one sample is a fast pan: the
+  board is leaving shot, or the tracker has already jumped (the Horsham
+  chain crossed x1284 to x236 in two steps). Gap-fill keeps its
+  full-width search on purpose — it holds an anchor on both sides.
+
+Tests: the teleport fixture walks a strolling board then jumps it 300px —
+the walk must die at the jump and the same fixture must fill straight
+across with the fraction sabotaged to 1.0, proving the rule and not the
+chase stopped it; the old gate-liveness sabotage caught the floor moving
+(it failed the moment synthetic paths stopped reading FACE_NCC_REJECT)
+and now sabotages the floor the fills actually read. **No number is
+quotable until both rescans land**: Sutton must hold 99/64, Horsham's
+six tracked phantoms should die, and whatever recall the walls cost is
+the price of boxes that stay on boards — a partner watching playback
+must never see ours on a person.
 The stated target moved most: the far-side dugout boards went from 24-36%
 to 53-60%, and Enterprise's goal-line boards now read 86-97%. The phantom
 cost of the extra recall is 6.0s across a 494s window (up from 2.0s in

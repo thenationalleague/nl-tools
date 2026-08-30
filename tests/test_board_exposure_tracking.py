@@ -562,13 +562,17 @@ class TrackedFaceCheck(unittest.TestCase):
     def test_the_gate_is_live(self):
         # Sabotage: an impossible floor must stop even the matching face —
         # proving the fill above passed BECAUSE of the check, not despite it.
-        old = C.FACE_NCC_REJECT
-        C.FACE_NCC_REJECT = 0.99
+        # 1.7.1 moved the synthetic paths onto TRACK_FACE_FLOOR (mints pay a
+        # higher identity bar than detections), and this test caught the move
+        # by failing — exactly its job. It now sabotages the floor the fills
+        # actually read.
+        old = C.TRACK_FACE_FLOOR
+        C.TRACK_FACE_FLOOR = 0.99
         try:
             n, _ = self._run({"ACME": [self._acme_face()]})
             self.assertEqual(n, 0)
         finally:
-            C.FACE_NCC_REJECT = old
+            C.TRACK_FACE_FLOOR = old
 
 
 class GraphicsCorners(unittest.TestCase):
@@ -1022,6 +1026,90 @@ class SeamStopsTracking(unittest.TestCase):
         self.assertGreater(len(h2), 4, "control: without the seam the same "
                            "fixture extends past sample 4 — the seam, not "
                            "the footage, is what stopped the walk above")
+
+
+@unittest.skipUnless(HAVE_CV, "opencv-python-headless + numpy not installed")
+class TightenedCarry(unittest.TestCase):
+    """Engine 1.7.1, from the Horsham pan-out: a carry chain's tail sat on a
+    player's back because at 2 samples/s a fast pan moves the board most of
+    a frame between samples, and the 1.7 gates cleared on smear. Two new
+    walls, minted steps only: TRACK_FACE_FLOOR and the teleport exit rule."""
+
+    def _acme_face(self):
+        board = np.zeros((40, 160, 3), np.uint8)
+        board[:] = (40, 160, 40)
+        cv2.putText(board, "ACME", (8, 30), cv2.FONT_HERSHEY_SIMPLEX,
+                    1.0, (255, 255, 255), 4)
+        cv2.rectangle(board, (120, 8), (150, 32), (255, 255, 255), -1)
+        return {"ACME": [cv2.resize(cv2.cvtColor(board, cv2.COLOR_BGR2GRAY),
+                                    (C.VIS_W, C.VIS_H))]}
+
+    def _seed(self, x):
+        return {"scope": "partner",
+                "quad": [[x, 200], [x + 160, 200], [x + 160, 240], [x, 240]],
+                "board": None, "logo_area": 2.8, "area": 2.8,
+                "inliers": 30, "clarity": 0.6}
+
+    def _files(self, xs):
+        import tempfile
+        d = tempfile.mkdtemp()
+        files = []
+        for i, x in enumerate(xs):
+            p = os.path.join(d, f"f{i}.png")
+            cv2.imwrite(p, board_frame(x, blur_px=6))
+            files.append(p)
+        return files
+
+    def test_teleport_stops_the_walk_and_a_pan_does_not(self):
+        bem = _load_match_module()
+        # The board strolls for three frames then teleports 300px — a fast
+        # pan-out by another name (frame is 640 wide, so 300px is well
+        # past the quarter-frame limit). find_patch WILL find it, so only
+        # the exit rule stands
+        # between the chain and the far side of the frame.
+        files = self._files([100, 120, 140, 440, 460, 470])
+        h = {0: {"ACME": [self._seed(100)]}}
+        bem.extend_run_ends(h, files, 0.5, self._acme_face())
+        self.assertEqual(sorted(h), [0, 1, 2],
+                         "the walk must die at the 300px jump (frame is 640 wide)")
+        # Control: the same spacing without the jump walks on — proving the
+        # rule, not the fixture, stopped it above.
+        files2 = self._files([100, 120, 140, 160, 180, 200])
+        h2 = {0: {"ACME": [self._seed(100)]}}
+        bem.extend_run_ends(h2, files2, 0.5, self._acme_face())
+        self.assertGreater(len(h2), 3)
+
+    def test_teleport_rule_reads_its_constant(self):
+        bem = _load_match_module()
+        # Sabotage: with the fraction at 1.0 (a whole frame allowed) the same
+        # teleport fixture must fill straight across — the rule above bit
+        # BECAUSE of CARRY_MAX_STEP_FRAC, not because the chase failed.
+        files = self._files([100, 120, 140, 440, 460, 470])
+        old = C.CARRY_MAX_STEP_FRAC
+        C.CARRY_MAX_STEP_FRAC = 1.0
+        try:
+            h = {0: {"ACME": [self._seed(100)]}}
+            bem.extend_run_ends(h, files, 0.5, self._acme_face())
+            self.assertGreater(len(h), 3)
+        finally:
+            C.CARRY_MAX_STEP_FRAC = old
+
+    def test_carry_floor_is_live(self):
+        bem = _load_match_module()
+        # Same sabotage the gap-fill gate gets: an impossible synthetic floor
+        # stops even the matching face, so carry's fills pass BECAUSE of
+        # TRACK_FACE_FLOOR — and detections' own FACE_NCC_REJECT is not
+        # consulted by mints at all.
+        files = self._files([100, 120, 140, 160, 180, 200])
+        old = C.TRACK_FACE_FLOOR
+        C.TRACK_FACE_FLOOR = 0.99
+        try:
+            h = {0: {"ACME": [self._seed(100)]}}
+            n = bem.extend_run_ends(h, files, 0.5, self._acme_face())
+            self.assertEqual(n, 0)
+            self.assertEqual(sorted(h), [0])
+        finally:
+            C.TRACK_FACE_FLOOR = old
 
 
 if __name__ == "__main__":

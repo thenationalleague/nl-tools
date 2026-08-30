@@ -527,7 +527,7 @@ def _synth_hit(scope, bbox, gray, corr):
     }
 
 
-def _face_fail(faces, name, gray, bbox):
+def _face_fail(faces, name, gray, bbox, floor=None):
     """Engine 1.5: the tracker mints hits, so its patches answer for their
     identity too. The 4:10-4:27 impostor chain was 25 tracked samples grown
     from a few wrong-end seeds — template correlation only proves the patch
@@ -537,10 +537,18 @@ def _face_fail(faces, name, gray, bbox):
     global structure survives a pan smear. Passing any one of the sponsor's
     designs suffices. No faces supplied (older callers, tests of the chaining
     itself) = no check, and a sponsor with no reference face is never
-    condemned on missing evidence."""
+    condemned on missing evidence.
+
+    1.7.1: every SYNTHETIC caller passes floor=C.TRACK_FACE_FLOOR — a mint
+    has no inlier evidence, so it pays a higher identity bar than a
+    detection. The Horsham pan-out chain sat on a player's back while
+    clearing 0.25 on night smear; the raised floor is what kills that chain
+    at the step where it leaves the board."""
     refs = (faces or {}).get(name)
     if not refs:
         return False
+    if floor is None:
+        floor = C.FACE_NCC_REJECT
     H, W = gray.shape[:2]
     x0, y0, x1, y1 = bbox
     ix0, iy0 = max(0, int(x0)), max(0, int(y0))
@@ -550,7 +558,7 @@ def _face_fail(faces, name, gray, bbox):
     crop = gray[iy0:iy1, ix0:ix1]
     for vr in refs:
         ncc = C.face_ncc(vr, crop)
-        if ncc is None or ncc >= C.FACE_NCC_REJECT:
+        if ncc is None or ncc >= floor:
             return False
     return True
 
@@ -594,7 +602,7 @@ def _track_gap(name, a, b, hits_by_index, files, faces=None):
                 break
             bbox, corr = r
             g = cv2.cvtColor(cur, cv2.COLOR_BGR2GRAY)
-            if _face_fail(faces, name, g, bbox):
+            if _face_fail(faces, name, g, bbox, floor=C.TRACK_FACE_FLOOR):
                 break
             found[i] = _synth_hit(scope, bbox, g, corr)
             prev = cur
@@ -680,9 +688,20 @@ def extend_run_ends(hits_by_index, files, interval, faces=None, seams=None):
                     r = C.find_patch(prev, bbox, cur)
                     if not r or r[1] < C.TRACK_MIN_CORR:
                         break
-                    bbox, corr = r
+                    new_bbox, corr = r
+                    # 1.7.1 exit rule: a one-sided step that crosses a
+                    # quarter of the frame in half a second is a fast pan —
+                    # the board is leaving shot, or the tracker has already
+                    # jumped to something else. The Horsham chain crossed
+                    # x1284 -> x236 in two steps and landed on a player.
+                    if abs(((new_bbox[0] + new_bbox[2]) -
+                            (bbox[0] + bbox[2])) / 2.0) > \
+                            C.CARRY_MAX_STEP_FRAC * cur.shape[1]:
+                        break
+                    bbox = new_bbox
                     g = cv2.cvtColor(cur, cv2.COLOR_BGR2GRAY)
-                    if _face_fail(faces, name, g, bbox):
+                    if _face_fail(faces, name, g, bbox,
+                                  floor=C.TRACK_FACE_FLOOR):
                         break
                     hits_by_index.setdefault(j, {}).setdefault(name, []) \
                         .append(_synth_hit(h0["scope"], bbox, g, corr))
