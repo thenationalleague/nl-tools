@@ -831,6 +831,11 @@ def main():
     ap.add_argument("--date", default=None, metavar="YYYY-MM-DD",
                     help="match date — required with --club/--match for an upload, "
                          "since it is half the match id")
+    ap.add_argument("--sponsors", default=None, metavar="A,B",
+                    help="scan only these reference folders (comma list, exact "
+                         "folder names). A subset means the reference set is "
+                         "incomplete, so the scan is recorded as partial and "
+                         "share of voice is withheld.")
     ap.add_argument("--reference-set", choices=["complete", "partial"], default=None,
                     help="did the references cover EVERY board at this ground? "
                          "Share of voice stays withheld unless this says complete")
@@ -870,7 +875,7 @@ def main():
     clubs = known_clubs(a.refs)
 
     if a.list:
-        describe_refs(a.refs, a.club)
+        describe_refs(a.refs, a.club, only=a.sponsors)
         return
 
     if a.batch:
@@ -904,10 +909,13 @@ def known_clubs(refs_root):
     return sorted(os.listdir(d)) if os.path.isdir(d) else []
 
 
-def describe_refs(refs_root, club, quiet=False):
+def describe_refs(refs_root, club, quiet=False, only=None):
     """Load the references for this ground and report what is usable."""
-    entries = C.load_tree(refs_root, club)
+    entries = C.load_tree(refs_root, club, only)
     if not entries:
+        if only:
+            die(f"none of the --sponsors names match a folder under "
+                f"{refs_root}. Folder names are exact — check them with --list.")
         die(f"no reference images under {refs_root}. "
             f"See {refs_root}/READ-ME-FIRST.txt")
     scope = {}
@@ -1000,7 +1008,14 @@ def run_batch(a, clubs):
 
 
 def run_one(a, video, club, title, date="", start=None, end=None, complete=None):
-    entries, scope, usable = describe_refs(a.refs, club)
+    entries, scope, usable = describe_refs(a.refs, club, only=a.sponsors)
+    if a.sponsors:
+        # A narrowed scan can never claim a complete reference set, whatever
+        # the caller said — share of voice against a subset is meaningless.
+        if complete:
+            print("  note: --sponsors narrows the reference set, so this scan "
+                  "is recorded as partial and share of voice is withheld.")
+        complete = False
 
     match = title or os.path.splitext(os.path.basename(video))[0]
     base = re.sub(r"[^a-z0-9]+", "-", match.lower()).strip("-") or "match"

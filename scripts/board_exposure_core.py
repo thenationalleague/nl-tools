@@ -317,7 +317,7 @@ def on_the_perimeter(frame_bgr, quad):
     return float(grass.mean()) >= 0.45
 
 
-def load_tree(root, club=None):
+def load_tree(root, club=None, only=None):
     """
     The folder IS the configuration. Everything under partners/ is checked at
     every ground; a club's own folder is checked only when they are at home.
@@ -325,10 +325,21 @@ def load_tree(root, club=None):
     several board designs just gets several files, and they roll up under the
     folder name.
 
+    `only` narrows the tree to the named sponsor FOLDERS — exact folder names,
+    the same names the report rolls up under. None or empty means everything.
+    A comma string is accepted because that is how BE_SPONSORS arrives from
+    the cloud job. A subset always means the reference set is incomplete, so
+    callers that use it force reference_set to partial — share of voice
+    against a partial set is a lie, and the tool already refuses to show it.
+
     Returns [(sponsor, path, scope)] where scope is 'partner' or 'club', so a
     report can say which sponsors were league-wide and which were local.
     """
     out = []
+    if isinstance(only, str):
+        only = only.split(",")
+    # `or None` collapses "", [] and [''] alike — empty means everything.
+    keep = {s.strip() for s in (only or []) if s and s.strip()} or None
 
     def scan(base, scope):
         if not os.path.isdir(base):
@@ -336,6 +347,8 @@ def load_tree(root, club=None):
         for sponsor in sorted(os.listdir(base)):
             d = os.path.join(base, sponsor)
             if not os.path.isdir(d):
+                continue
+            if keep is not None and sponsor not in keep:
                 continue
             for f in sorted(os.listdir(d)):
                 if f.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):

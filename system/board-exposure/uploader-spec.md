@@ -1,4 +1,30 @@
-# The uploader — spec, not built (30/08/2026)
+# The uploader — built 30/08/2026, same day as the spec
+
+Everything below shipped as written, in one PR: the Scan footage view in
+the tool (v0.8), `brandExposureScanRequest` + `brandExposureScanPoll` in
+functions/, the `load_tree` allow-list, `BE_SPONSORS` through `run_job.py`,
+and both rules snapshots. Two one-time follow-ups after the merge, and one
+standing fact:
+
+- **Rules buttons**: `deploy-storage-rules.yml` and `deploy-rtdb-rules.yml`
+  (nl-tools target), each Run workflow → type `publish`.
+- **IAM, once, in Cloud Shell** — the functions' service account has to be
+  allowed to fire the job and clean up after it (grants are idempotent):
+
+      gcloud run jobs add-iam-policy-binding brand-exposure-scan \
+        --region=europe-west2 --project=nl-tools \
+        --member=serviceAccount:firebase-adminsdk-fbsvc@nl-tools.iam.gserviceaccount.com \
+        --role=roles/run.jobsExecutorWithOverrides
+      gcloud projects add-iam-policy-binding nl-tools \
+        --member=serviceAccount:firebase-adminsdk-fbsvc@nl-tools.iam.gserviceaccount.com \
+        --role=roles/run.viewer
+      gcloud storage buckets add-iam-policy-binding gs://nl-tools.firebasestorage.app \
+        --member=serviceAccount:firebase-adminsdk-fbsvc@nl-tools.iam.gserviceaccount.com \
+        --role=roles/storage.objectAdmin
+
+- The poller trusts the Run API's documented Execution shape (doc URL in
+  the source); on the first real scan through the tool, check the request
+  flips to done and the source vanishes before trusting it unattended.
 
 A "New match" view inside the Brand Exposure tool: pick the fixture, choose
 what to scan for, eyeball the references, drop the video, watch it become a

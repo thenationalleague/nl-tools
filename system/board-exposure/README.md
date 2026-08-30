@@ -506,7 +506,7 @@ time on the marked match. Three honest footnotes:
   fake recall, part the price of the floors. The trade is the right way
   round for a sponsor-facing number, and recall is engine 1.7's whole job.
 
-## Engine 1.7 — built 30/08/2026, awaiting the labelled verification run
+## Engine 1.7 — verified 30/08/2026, shipped
 
 Richard's diagnosis from the Horsham playback, verbatim: "big miss is
 failing to initiate — short runs on persistently on-screen items." That
@@ -530,9 +530,30 @@ reorders the pair: initiation first.
 Both carry 0-off switches; the sweep grid is now exactly their ablation
 (zoom x carry, four combos), so what each lever buys stays measured. The
 retired grid dials are listed in the sweep header with the dates they were
-settled. **No number from 1.7 is quotable until the Sutton labels rerun**
-— expected: recall well above 54% with precision holding 97%+; if precision
-slips, the levers ship dialled down, not the claim dialled up.
+settled.
+
+**Verified against the Sutton hand-labels, 30/08/2026 — the gate passed:**
+
+| sponsor      | 1.6 recall | 1.7 recall | 1.7 precision | phantom samples |
+|--------------|-----------:|-----------:|--------------:|----------------:|
+| DAZN         |        40% |        49% |           99% |               1 |
+| Enterprise   |        53% |        66% |           98% |               9 |
+| TIC Health   |        69% |        74% |           99% |               2 |
+| **overall**  |    **54%** |    **64%** |       **99%** |          **12** |
+
+Recall +10 points with precision holding at 99% — comfortably above the
+97% floor, so both levers ship at full strength (zoom 2.0, carry 3.0).
+The stated target moved most: the far-side dugout boards went from 24-36%
+to 53-60%, and Enterprise's goal-line boards now read 86-97%. The phantom
+cost of the extra recall is 6.0s across a 494s window (up from 2.0s in
+1.6), and the disputed ranges are carried extensions of the same three
+sites 1.6 already disputed (2:53, 5:51, 1:59) rather than new inventions —
+the carry-forward stretching borderline run-ends, exactly the failure mode
+its cap exists to bound. The furniture probe correctly stood down on this
+broadcast footage (coverage 10.7% > 10% — self-distrust), same as 1.6.
+Remaining recall lives where it always did: the DAZN corner board in
+ultra-wides (49%, and the largest miss pool) — that is the colour scout's
+target, not a threshold's.
 
 ## Roadmap — engine 1.7, the recall pair (agreed 30/08/2026, superseded by the build above)
 

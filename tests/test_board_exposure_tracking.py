@@ -860,5 +860,62 @@ class CompactExportKeys(unittest.TestCase):
         self.assertEqual(trk_row["n"], 0)
 
 
+class SponsorAllowList(unittest.TestCase):
+    """load_tree's `only` filter — the BE_SPONSORS contract for the uploader's
+    scope switcher. Pure os.listdir, so it runs everywhere; the files are
+    empty because load_tree lists names and never opens them."""
+
+    def _tree(self, tmp):
+        for d in ("partners/DAZN", "partners/Enterprise",
+                  "clubs/Sutton United/Skyline"):
+            os.makedirs(os.path.join(tmp, d), exist_ok=True)
+            open(os.path.join(tmp, d, "board.png"), "w").close()
+        return tmp
+
+    def test_none_and_empty_mean_everything(self):
+        import tempfile
+        import board_exposure_core as C
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._tree(tmp)
+            names = {s for s, _, _ in C.load_tree(root, "Sutton United")}
+            self.assertEqual(names, {"DAZN", "Enterprise", "Skyline"})
+            for empty in (None, [], ""):
+                got = {s for s, _, _ in
+                       C.load_tree(root, "Sutton United", only=empty)}
+                self.assertEqual(got, names, f"only={empty!r} must not filter")
+
+    def test_subset_filters_both_scopes(self):
+        import tempfile
+        import board_exposure_core as C
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._tree(tmp)
+            got = C.load_tree(root, "Sutton United", only=["DAZN", "Skyline"])
+            names = {s for s, _, _ in got}
+            self.assertEqual(names, {"DAZN", "Skyline"})
+            scopes = {s: sc for s, _, sc in got}
+            self.assertEqual(scopes["DAZN"], "partner")
+            self.assertEqual(scopes["Skyline"], "club")
+
+    def test_comma_string_is_how_the_cloud_job_passes_it(self):
+        import tempfile
+        import board_exposure_core as C
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._tree(tmp)
+            got = {s for s, _, _ in
+                   C.load_tree(root, "Sutton United", only=" DAZN , Skyline ")}
+            self.assertEqual(got, {"DAZN", "Skyline"},
+                             "comma string with spaces must parse")
+
+    def test_unknown_name_yields_nothing_not_everything(self):
+        # The failure mode that matters: a typo silently scanning the full
+        # tree would bill a full scan and report sponsors nobody asked for.
+        import tempfile
+        import board_exposure_core as C
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._tree(tmp)
+            self.assertEqual(
+                C.load_tree(root, "Sutton United", only=["DAZNN"]), [])
+
+
 if __name__ == "__main__":
     unittest.main()
