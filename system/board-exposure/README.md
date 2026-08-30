@@ -888,13 +888,22 @@ attribution-bearing; and CAD is chased in parallel, never waited on.
    The shipping engine. Not in the doc; forced by its own discipline:
    the labels caught the tracker drifting onto a player, and recall
    gains are worthless on a tracker that lies.
-4. The audition pass, rescoped — the next big build (few hundred
-   weighted frames, per-reference verdicts with best-hit crops,
-   tick/untick, Tier-3 harvest, output configures the full scan). The
-   hand-harvested crops of 30/08 are its proof-of-concept, and the
-   yield is now measured twice: Enterprise centre 14% → 29% from two
-   crops, TIC 3% → 30% from one (occlusions baked in — see the harvest
-   note above). Highest-yield lever on club footage; build the pass.
+4. The audition pass — ENGINE HALF BUILT 30/08 as `BE_MODE=audition`
+   (`board_exposure_audition.py`): sharpest-in-window frame selection
+   (which also stands up step 5's machinery), the CANONICAL detector
+   run one reference at a time (same guards, no forked logic — the
+   per-reference feature recompute is minutes at audition scale and
+   drift-free), per-reference verdicts with best-hit crops, whole-board
+   candidate crops behind every real hit, and a bounded relaxed-floor
+   pass (candidates only, face gate still live, floor restored by
+   context manager) for starved sponsors — the TIC case. Outputs
+   audition.json + audition-*.png flat into BE_DEST. Proven on
+   synthetic footage end to end: fired counts, first/last times,
+   starved counts and time-diverse whole-face crops all correct. The
+   TOOL HALF (tick/untick, promote to refs/) is next; until it lands,
+   ticked crops go into refs by console upload exactly like the 30/08
+   hand-harvest. Yield already measured twice: Enterprise centre
+   14% → 29% (two crops), TIC 3% → 30% (one).
 5. Sharpest-in-window sampling — promoted by the diagnostic: Sutton's
    misses concentrate in soft frames (0.56x found sharpness), and
    picking the sharpest frame per window attacks exactly that pool at

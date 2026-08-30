@@ -35,6 +35,7 @@ COPY scripts/board_exposure_core.py \
      scripts/board_exposure_upload.py \
      scripts/board_exposure_eval.py \
      scripts/board_exposure_diagnose.py \
+     scripts/board_exposure_audition.py \
      scripts/board-exposure-match.py \
      scripts/board-exposure-sweep.py \
      ./scripts/
