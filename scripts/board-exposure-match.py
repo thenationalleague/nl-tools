@@ -446,14 +446,43 @@ def _synth_hit(scope, bbox, gray, corr):
     }
 
 
-def _track_gap(name, a, b, hits_by_index, files):
+def _face_fail(faces, name, gray, bbox):
+    """Engine 1.5: the tracker mints hits, so its patches answer for their
+    identity too. The 4:10-4:27 impostor chain was 25 tracked samples grown
+    from a few wrong-end seeds — template correlation only proves the patch
+    matches the PREVIOUS patch, never that it is the board. Judged by the
+    whole-face NCC ALONE, deliberately: the tracker exists for blurred
+    frames, and blur is exactly what the cell-agreement test punishes, while
+    global structure survives a pan smear. Passing any one of the sponsor's
+    designs suffices. No faces supplied (older callers, tests of the chaining
+    itself) = no check, and a sponsor with no reference face is never
+    condemned on missing evidence."""
+    refs = (faces or {}).get(name)
+    if not refs:
+        return False
+    H, W = gray.shape[:2]
+    x0, y0, x1, y1 = bbox
+    ix0, iy0 = max(0, int(x0)), max(0, int(y0))
+    ix1, iy1 = min(W, int(round(x1))), min(H, int(round(y1)))
+    if ix1 - ix0 < 8 or iy1 - iy0 < 4:
+        return True
+    crop = gray[iy0:iy1, ix0:ix1]
+    for vr in refs:
+        ncc = C.face_ncc(vr, crop)
+        if ncc is None or ncc >= C.FACE_NCC_REJECT:
+            return False
+    return True
+
+
+def _track_gap(name, a, b, hits_by_index, files, faces=None):
     """
     Chain the board's patch across the gap between detections at a and b —
     forward from a and backward from b, so the most-blurred frame in the middle
     only has to be reached from its less-blurred neighbour. All or nothing: if
     any frame in the gap cannot be accounted for from either side, nothing is
     filled, because a frame no chain reaches is exactly what a cut to the crowd
-    looks like.
+    looks like. A patch that stops resembling the sponsor's reference face is
+    treated exactly like a lost patch — the chain stops, the gap stays open.
     """
     def anchor(i):
         h = max(hits_by_index[i][name], key=lambda h: h["inliers"])
@@ -483,8 +512,10 @@ def _track_gap(name, a, b, hits_by_index, files):
             if not r or r[1] < C.TRACK_MIN_CORR:
                 break
             bbox, corr = r
-            found[i] = _synth_hit(scope, bbox,
-                                  cv2.cvtColor(cur, cv2.COLOR_BGR2GRAY), corr)
+            g = cv2.cvtColor(cur, cv2.COLOR_BGR2GRAY)
+            if _face_fail(faces, name, g, bbox):
+                break
+            found[i] = _synth_hit(scope, bbox, g, corr)
             prev = cur
             i += step
     if len(found) != b - a - 1:
@@ -492,7 +523,7 @@ def _track_gap(name, a, b, hits_by_index, files):
     return sorted(found.items())
 
 
-def close_blurred_gaps(hits_by_index, files, interval):
+def close_blurred_gaps(hits_by_index, files, interval, faces=None):
     """
     Engine 1.1's recall pass. SIFT loses boards for the length of a camera pan
     because motion blur erases the detail it matches on; the board is still on
@@ -508,7 +539,7 @@ def close_blurred_gaps(hits_by_index, files, interval):
     for name in sorted({n for h in hits_by_index.values() for n in h}):
         idxs = [i for i, h in hits_by_index.items() if h.get(name)]
         for a, b in C.gap_candidates(idxs, max_gap):
-            chain = _track_gap(name, a, b, hits_by_index, files)
+            chain = _track_gap(name, a, b, hits_by_index, files, faces)
             if chain:
                 for i, hit in chain:
                     hits_by_index.setdefault(i, {}).setdefault(name, []).append(hit)
@@ -997,8 +1028,10 @@ def run_one(a, video, club, title, date="", start=None, end=None, complete=None)
 
     # Then fill pan-blur gaps with tracked evidence, so the stats, the report
     # and the tool all see one consistent set of hits. Needs the extracted
-    # frames, so it must run before the cleanup below.
-    close_blurred_gaps(hits_by_index, files, interval)
+    # frames, so it must run before the cleanup below. The reference faces go
+    # along so every synthesised patch passes the same face test a detection
+    # does — the tracker must never mint what detect() would refuse.
+    close_blurred_gaps(hits_by_index, files, interval, C.build_faces(entries))
 
     # Report frames: a spread across the match plus the clearest shot of each
     # sponsor, shrunk to something a page can hold.

@@ -380,6 +380,68 @@ dark board vouch for any other — its first draft scored the impostor 0.47),
 an impostor face agrees at ~0.15 where a genuine half-covered board still
 holds ~0.6, and anything under VIS_REJECT is discarded at detection time.
 
+## Engine 1.5 — permanence, and the tracker answers for identity (29/08/2026)
+
+The 1.4 verification sweep (same labels, live pipeline, eight combos, 95
+minutes, ~£1) landed at 87-89% precision — short of the mid-90s the offline
+simulation promised — and flat 105 phantoms at the strict end:
+
+    ratio  inliers  side   recall  precision  phantom
+    0.80      9      12      55%      87%       105
+    0.80      7      12      58%      87%       105
+    0.85      9      12      56%      88%        93
+    0.85      7      12      60%      89%        94
+
+(Side 12 vs 9: four identical row-pairs — the dial is dead on real footage
+and left the sweep grid in 1.5.) A fresh 1.4 scan plus `--phantoms` then
+named every disputed second, and they were two mechanisms:
+
+- **The watermark, back from the dead — ~60%.** Three ranges pixel-locked at
+  the top-right corner across four and a half minutes. The 1.4 face check
+  had thinned its detections to ~5% of samples — under the fine rule's 8%
+  share floor — so the furniture strip stopped firing. 1.4's two fixes
+  fought each other; it also explains why the looser 0.85 rows show FEWER
+  phantoms (more watermark detections push it back over the floor).
+- **A tracked impostor chain — ~35%.** 25 of the 33 samples at the ruled
+  4:10-4:27 range were the tracker faithfully multiplying a few confident
+  wrong-end seeds. Template correlation proves a patch matches the previous
+  patch, never that it is the board.
+
+Also found on the way: the shipped detections.json (compact q/b/c/a/n rows)
+**dropped the tracked flag entirely**, so the eval's tracked column read
+zero on every real export — recovered during adjudication only because
+synthesised hits carry inliers 0.
+
+1.5 is five changes, each with a test that fails without it:
+
+1. **The permanence tier** — Richard's ruling stated as the concept, not a
+   threshold: *anything permanently on screen is not a board.* A 16px
+   feature-centroid cell with hits in 5 of the match's 8 equal stretches is
+   furniture at ANY share (small absolute floor so flickers can't condemn a
+   cell). One long spell at one spot still survives — that is a real board.
+2. **The whole-face NCC floor** (`FACE_NCC_REJECT` 0.25) — the cell-based
+   face check abstains when the reference offers no textured cells, and the
+   abstention is exactly where the impostors lived. Global NCC always has an
+   opinion: measured on representative fixtures, a different dark board's
+   lettering scores ~0.11 while a genuine board holds 0.53 half-covered and
+   0.84 blurred-and-small — 2x clear air both sides of the floor.
+3. **The tracker face-checks every patch** before minting a hit, against the
+   whole-face NCC only (cell agreement punishes blur, and blur is the reason
+   tracking exists). A patch that stops resembling the sponsor's reference
+   is treated as a lost patch: chain stops, gap stays open, all-or-nothing.
+4. **The export carries `t` and `v`** (sparse keys) and the eval reads both
+   dialects — the tracked column now works on real files, forever.
+5. **Dials promoted from the sweep**: RATIO 0.80→0.85, MIN_INLIERS 9→7 —
+   strictly dominant (recall +5, precision +2, phantoms −11) at the price of
+   scan time. The sweep grid's third dimension is now the NCC floor with a
+   0.0 ablation row, so the check's real cost stays measured.
+
+Expected on the labelled match: DAZN's 98 phantoms mostly gone, pooled
+precision ~97% at ~60% recall — **to be verified by rerunning the sweep and
+a normal scan against the same labels before these numbers are quoted.**
+Recall (Enterprise dugouts 24-36% in ultra-wide shots) is untouched by
+design; that is the zoom-pass lever, a separate version.
+
 ## The ident trap — a false positive worth knowing about
 
 A highlights package opens with a sponsor ident card: the Enterprise mark and

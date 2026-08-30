@@ -130,13 +130,23 @@ def build(out_path, meta, hits_by_index, frame_files, sponsors_meta):
     for i, per in hits_by_index.items():
         row = {}
         for name, hs in per.items():
-            row[name] = [{
-                "q": [[int(round(x)), int(round(y))] for x, y in h["quad"]],
-                "b": ([int(v) for v in h["board"]] if h["board"] else None),
-                "c": round(h["clarity"], 2),
-                "a": round(h["area"], 3),
-                "n": h["inliers"],
-            } for h in hs]
+            # Sparse keys: "t" only when tracked, "v" only when measured. The
+            # tracked flag was silently absent from every shipped export until
+            # engine 1.5 — the eval's tracked column read zero on real files
+            # while working in-memory, which is exactly the kind of contract
+            # gap the shape tests exist to catch. Now they do.
+            row[name] = [dict(
+                {
+                    "q": [[int(round(x)), int(round(y))] for x, y in h["quad"]],
+                    "b": ([int(v) for v in h["board"]] if h["board"] else None),
+                    "c": round(h["clarity"], 2),
+                    "a": round(h["area"], 3),
+                    "n": h["inliers"],
+                },
+                **({"t": 1} if h.get("tracked") else {}),
+                **({} if h.get("visibility") is None
+                   else {"v": round(h["visibility"], 3)}),
+            ) for h in hs]
         if row:
             compact[str(i)] = row
 
