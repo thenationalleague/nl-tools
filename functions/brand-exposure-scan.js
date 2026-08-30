@@ -143,6 +143,9 @@ function buildEnv(req) {
   if (Array.isArray(req.sponsors) && req.sponsors.length) {
     env.push(["BE_SPONSORS", req.sponsors.join(",")]);
   }
+  if (req.source === "full" || req.source === "highlights") {
+    env.push(["BE_SOURCE_TYPE", req.source]);
+  }
   if (req.start) env.push(["BE_START", req.start]);
   if (req.end) env.push(["BE_END", req.end]);
   return env.map(([name, value]) => ({ name, value: String(value) }));

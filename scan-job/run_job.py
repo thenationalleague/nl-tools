@@ -30,6 +30,9 @@ Environment (all set by the trigger, none baked into the image):
     BE_DATE            YYYY-MM-DD
     BE_START, BE_END   optional kick-off / final whistle, '18:30' style
     BE_REFERENCE_SET   complete | partial
+    BE_SOURCE_TYPE     optional full | highlights — how the footage is
+                       recorded on the report. Absent = derived from
+                       duration (>45 min = full).
     BE_SPONSORS        optional comma list of reference FOLDER names — scan
                        only these. Empty means everything. A subset makes the
                        scan reference-set partial whatever BE_REFERENCE_SET
@@ -219,6 +222,8 @@ def main():
             cmd += ["--fps", env("BE_FPS")]
         if env("BE_SPONSORS"):
             cmd += ["--sponsors", env("BE_SPONSORS")]
+        if env("BE_SOURCE_TYPE") in ("full", "highlights"):
+            cmd += ["--source-type", env("BE_SOURCE_TYPE")]
 
     log("scanning — this is the long part")
     # Streamed, not captured: Cloud Run's log tail is the only progress anyone

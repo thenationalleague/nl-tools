@@ -154,6 +154,16 @@ test('sponsors join to the comma list load_tree parses; empty list sends nothing
   assert.ok(!('BE_SPONSORS' in envMap(GOOD)));
 });
 
+test('the source switcher passes through only its two legal values', () => {
+  assert.equal(envMap({ ...GOOD, source: 'full' }).BE_SOURCE_TYPE, 'full');
+  assert.equal(envMap({ ...GOOD, source: 'highlights' }).BE_SOURCE_TYPE,
+    'highlights');
+  /* Anything else stays absent so the script derives from duration — a
+     freeform value would land in argparse choices and kill the scan. */
+  assert.ok(!('BE_SOURCE_TYPE' in envMap({ ...GOOD, source: 'Full match' })));
+  assert.ok(!('BE_SOURCE_TYPE' in envMap(GOOD)));
+});
+
 test('trims ride along only when set', () => {
   const m = envMap({ ...GOOD, start: '18:30', end: '1:52:30' });
   assert.equal(m.BE_START, '18:30');

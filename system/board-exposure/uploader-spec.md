@@ -44,7 +44,11 @@ Sutton United v Altrincham, 18/04/2026, VBS Community Stadium, in one
 filtered call. Free-text entry stays as the fallback for footage NLS has no
 row for (friendlies, pre-season). Then: source type (highlights / full 90)
 and optional kick-off and full-time trims (become `BE_START`/`BE_END` — the
-warm-up rule from the README applies). scout-sid pins the exact
+warm-up rule from the README applies). **v2 of the trims is four marks, not
+two** — KO / HT / second-half restart / FT — so the scan can skip half-time
+and its ad breaks, which today count as genuine exposure on a full 90. See
+"The halves marks" in the README roadmap for the engine work it needs and
+the interim rule (either half cleanly, never both as two scans). scout-sid pins the exact
 browser-side feed shape before any fetch code is written — several tools
 already read NLS from the page, so the transport is proven.
 
