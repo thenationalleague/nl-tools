@@ -559,6 +559,35 @@ precision leak left — brief full-screen sponsor graphics), a second
 ground's hand-labels to prove generalisation, the halves runner, per-design
 attribution, board print artwork as references.
 
+## Roadmap after 1.7 — agreed 30/08/2026
+
+**Engine 1.8 — the colour scout.** Richard's ruling, and the reason colour
+was banned no longer applies to it: a REFERENCE's colour lies across
+broadcasts (floodlights, white balance, grading), but the colour of THIS
+scan's own confirmed detections does not. Once a sponsor has enough
+confirmed hits (say 10+, across 2+ spells), learn that board's colour
+signature as this footage renders it, then use cheap colour back-projection
+to NOMINATE regions in empty frames and aim the zoom pass there — instead
+of zooming every empty frame blanket. The iron rule: **colour proposes,
+features confirm** — no second is ever counted on colour alone, precision
+floors untouched. Learned per sponsor per scan, never stored across
+matches. Helps most where recall hurts most (distinctive boards in wides);
+does little for black-on-black. Also the answer to the zoom pass's cost if
+the 1.7 ablation says the blanket version is worth keeping but expensive.
+
+**Tool + engine, after that — the adjudication queue.** Everything the
+engine barely-passed or barely-failed goes to a Review strip in the tool:
+frame shown, box drawn, tick = count it, untick = bin it. Short by
+construction (the sweeps proved most decisions are not marginal — 4
+phantoms survive 1.6), so ~5 phone-minutes a match. Three things it buys:
+a "human-adjudicated" line on the report (the Certified tier made real);
+rulings as labels that re-price the floors continuously (the Sutton loop as
+a by-product of use instead of a labelling session); and the long game —
+every ruling and confirmed box accumulates into the training set for a
+learned verdict layer over the hand-set floors, and eventually for a
+learned detector to succeed SIFT. The judge never changes: anything taught
+must beat the current engine on held-out hand-labels or it does not ship.
+
 ## The ident trap — a false positive worth knowing about
 
 A highlights package opens with a sponsor ident card: the Enterprise mark and
