@@ -543,6 +543,17 @@ settled.
 
 Recall +10 points with precision holding at 99% — comfortably above the
 97% floor, so both levers ship at full strength (zoom 2.0, carry 3.0).
+The stated target moved most: the far-side dugout boards went from 24-36%
+to 53-60%, and Enterprise's goal-line boards now read 86-97%. The phantom
+cost of the extra recall is 6.0s across a 494s window (up from 2.0s in
+1.6), and the disputed ranges are carried extensions of the same three
+sites 1.6 already disputed (2:53, 5:51, 1:59) rather than new inventions —
+the carry-forward stretching borderline run-ends, exactly the failure mode
+its cap exists to bound. The furniture probe correctly stood down on this
+broadcast footage (coverage 10.7% > 10% — self-distrust), same as 1.6.
+Remaining recall lives where it always did: the DAZN corner board in
+ultra-wides (49%, and the largest miss pool) — that is the colour scout's
+target, not a threshold's.
 
 **The second ground — Horsham hand-labels, 30/08/2026.** Richard labelled
 the Horsham v Hampton & Richmond YouTube rip (a 1080p club stream, 4½
@@ -605,7 +616,7 @@ tracked fills carry no inlier evidence, so they pay a higher face bar
 plus an exit rule stopping a one-sided carry step that teleports a large
 fraction of the frame in one sample.
 
-## Engine 1.7.1 — tighten (built 30/08/2026, awaiting the two rescans)
+## Engine 1.7.1 — tighten (built 30/08/2026; Sutton holds, Horsham re-running)
 
 Both walls sit on MINTED steps only; nothing detect() accepts changes.
 
@@ -628,22 +639,40 @@ the walk must die at the jump and the same fixture must fill straight
 across with the fraction sabotaged to 1.0, proving the rule and not the
 chase stopped it; the old gate-liveness sabotage caught the floor moving
 (it failed the moment synthetic paths stopped reading FACE_NCC_REJECT)
-and now sabotages the floor the fills actually read. **No number is
-quotable until both rescans land**: Sutton must hold 99/64, Horsham's
-six tracked phantoms should die, and whatever recall the walls cost is
-the price of boxes that stay on boards — a partner watching playback
-must never see ours on a person.
-The stated target moved most: the far-side dugout boards went from 24-36%
-to 53-60%, and Enterprise's goal-line boards now read 86-97%. The phantom
-cost of the extra recall is 6.0s across a 494s window (up from 2.0s in
-1.6), and the disputed ranges are carried extensions of the same three
-sites 1.6 already disputed (2:53, 5:51, 1:59) rather than new inventions —
-the carry-forward stretching borderline run-ends, exactly the failure mode
-its cap exists to bound. The furniture probe correctly stood down on this
-broadcast footage (coverage 10.7% > 10% — self-distrust), same as 1.6.
-Remaining recall lives where it always did: the DAZN corner board in
-ultra-wides (49%, and the largest miss pool) — that is the colour scout's
-target, not a threshold's.
+and now sabotages the floor the fills actually read. The gate as stated
+before the rescans: Sutton must hold 99/64, Horsham's six tracked
+phantoms should die, and whatever recall the walls cost is the price of
+boxes that stay on boards — a partner watching playback must never see
+ours on a person.
+
+**The Sutton rescan, 30/08/2026 — precision holds, phantoms halve,
+recall pays three points:**
+
+| sponsor      | 1.7 recall | 1.7.1 recall | 1.7.1 precision | phantoms 1.7 → 1.7.1 |
+|--------------|-----------:|-------------:|----------------:|---------------------:|
+| DAZN         |        49% |          45% |            100% |                1 → 0 |
+| Enterprise   |        66% |          63% |             99% |                9 → 3 |
+| TIC Health   |        74% |          74% |             99% |                2 → 2 |
+| **overall**  |    **64%** |      **61%** |         **99%** |           **12 → 5** |
+
+Against the stated gate: precision held, recall gave back three of the
+ten points 1.7 bought. The walls cost fell exactly where the mechanism
+says it should — TIC, whose carries are static-camera fills, paid
+nothing; DAZN and Enterprise, where the camera pans, paid the tail ends
+of stretched runs. What remains disputed is 2.5s across the whole match:
+the SAME three borderline sites 1.6 and 1.7 disputed (2:53, 5:51, 1:59),
+now trimmed rather than stretched, and DAZN's phantom is gone outright.
+Read: the three recall points bought back nothing a partner could trust —
+they were the stretchy ends the player's-back screenshot came from. The
+deciding half is Horsham, where all six phantoms were tracked and the
+walls should kill all six.
+
+**The Horsham half raced the container build and lost.** Its rescan
+arrived stamped `engine_version: 1.7`: the pair was pasted while the
+1.7.1 image was still building, and a Cloud Run execution snapshots the
+job image at launch — Horsham ran first on the old image, Sutton ran
+after the push landed. The engine stamp in every export exists for
+exactly this; the file was refused at the ledger and the line re-pasted.
 
 ## Roadmap — engine 1.7, the recall pair (agreed 30/08/2026, superseded by the build above)
 
@@ -742,9 +771,12 @@ attribution-bearing; and CAD is chased in parallel, never waited on.
 1. Blur/compression diagnostic, both grounds — pending; an afternoon,
    and the premise-check the doc itself demands.
 2. Horsham hand-labels — DONE 30/08; the generalisation verdict above.
-3. Engine 1.7.1 tighten — built 30/08, rescans pending. Not in the doc;
-   forced by its own discipline: the labels caught the tracker drifting
-   onto a player, and recall gains are worthless on a tracker that lies.
+3. Engine 1.7.1 tighten — built 30/08; Sutton verdict in (99% precision
+   held, recall 64→61, phantoms 12→5), Horsham re-running after its
+   first attempt raced the container build and ran 1.7 — caught by the
+   engine stamp. Not in the doc; forced by its own discipline: the
+   labels caught the tracker drifting onto a player, and recall gains
+   are worthless on a tracker that lies.
 4. The audition pass, rescoped — the next big build (few hundred
    weighted frames, per-reference verdicts with best-hit crops,
    tick/untick, Tier-3 harvest, output configures the full scan). The
