@@ -478,6 +478,31 @@ raw per-pixel noise backgrounds carry chance edges everywhere and mask the
 whole frame, so the fixture world is smoothed structure that moves, which is
 what real footage is.
 
+## Roadmap — engine 1.7, the recall pair (agreed 30/08/2026, not started)
+
+Precision's ladder is built and verified; recall (55-60% pooled, far-side
+dugouts 24-36%) is the remaining half. Two levers, shipped together and
+gated the usual way — recall up, precision holds 97%+ on the labels or it
+does not ship:
+
+1. **The zoom pass.** 58% of all misses sit in four ultra-wide passages
+   where boards fall under the detector's floor. Re-scan only the frames
+   with few or no hits at 2x resolution — targeted, so the cost stays
+   pennies, and the eval prices exactly what it buys.
+2. **One-sided, face-checked extension** — Richard's carry-forward ruling:
+   a detected board that stops clearing the 7-feature bar visibly stays on
+   screen, but the tracker only bridges between TWO anchors, so runs die at
+   the flicker edge. Extend past the last real sighting while the patch
+   stays template-similar AND keeps passing the whole-face identity check,
+   capped at a few seconds. Unsafe before 1.5 (the Sutton impostor chain
+   proved similarity alone never knows when to stop); the face gate is the
+   terminator that makes it buildable now.
+
+Also parked, in rough order: the stinger/ident exclusion (the one known
+precision leak left — brief full-screen sponsor graphics), a second
+ground's hand-labels to prove generalisation, the halves runner, per-design
+attribution, board print artwork as references.
+
 ## The ident trap — a false positive worth knowing about
 
 A highlights package opens with a sponsor ident card: the Enterprise mark and
