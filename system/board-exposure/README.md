@@ -442,6 +442,42 @@ a normal scan against the same labels before these numbers are quoted.**
 Recall (Enterprise dugouts 24-36% in ultra-wide shots) is untouched by
 design; that is the zoom-pass lever, a separate version.
 
+## Engine 1.6 — the graphics corners, and Richard's frame-stack probe (29/08/2026)
+
+The Horsham head-to-head (the Miggle reference match, scanned with 1.5)
+exposed the permanence tier's structural limit: **a 4.5-minute clip cannot
+prove permanence.** The stream's corner graphic matched in only 5 samples
+across 2 of 8 windows — under every evidence floor — and Richard spotted it
+in playback. Two of his rulings became the fix, both cheaper than what they
+replace and both able to work on a 30-second clip:
+
+1. **The graphics corners.** A hit whose matched features centre in the top
+   18% AND outer 18% of the frame is refused. Grounded in measurement, not
+   taste: across both grounds' real footage, zero of 643 genuine
+   Enterprise/TIC hits ever put their features there; every watermark-class
+   hit did. Run against the Sutton labels through the real strip:
+   phantoms 105→51, precision 87%→93%, recall unchanged — and DAZN's
+   apparent 3-point recall dip is the rule exposing watermark-credited
+   seconds that had been scoring as true.
+2. **The frame-stack furniture probe** — Richard's design, verbatim:
+   "sample an even spread of ~20 frames and overlay them; a persistent item
+   suggests permanence." ~24 evenly-spread frames (already on disk), judged
+   on STRONG EDGES so translucent graphics keep their outlines and grass
+   texture — edges everywhere, never twice at the same pixel — stays out.
+   An edge-pixel persisting in 60% of the stack is furniture wherever it
+   sits, learned per production with no geometry assumed. Two stand-downs,
+   both logged and exported (`furniture_probe` in the head): a locked-off
+   camera (global edge churn under the floor — permanence proves nothing
+   when nothing moves, and a real board on a static camera is real
+   exposure), and a mask claiming over 10% of the frame (distrusts itself
+   rather than eating boards).
+
+Order in the pipeline is cheapest-evidence-first: corners → mask → static
+rules → tracking. 68 tests; the mask fixtures re-learned the old lesson —
+raw per-pixel noise backgrounds carry chance edges everywhere and mask the
+whole frame, so the fixture world is smoothed structure that moves, which is
+what real footage is.
+
 ## The ident trap — a false positive worth knowing about
 
 A highlights package opens with a sponsor ident card: the Enterprise mark and

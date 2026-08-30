@@ -105,7 +105,8 @@ GRID = {
 }
 
 
-def scan_once(bem, entries, files, interval, n_samples, overrides, jobs):
+def scan_once(bem, entries, files, interval, n_samples, overrides, jobs,
+              frame_w, frame_h, furniture_mask):
     hits, done = {}, 0
     with mp.get_context("spawn").Pool(
             jobs, initializer=_init,
@@ -118,6 +119,8 @@ def scan_once(bem, entries, files, interval, n_samples, overrides, jobs):
     # The full shipping pipeline, under the same overrides in THIS process.
     for k, v in overrides.items():
         setattr(C, k, v)
+    C.strip_corner(hits, frame_w, frame_h)
+    C.strip_masked(hits, furniture_mask)
     C.strip_static(hits, n_samples)
     bem.close_blurred_gaps(hits, files, interval, C.build_faces(entries))
     return hits
@@ -153,6 +156,12 @@ def main():
     files, interval = bem.extract(a.video, work, a.fps, a.ffmpeg, expected, 0)
     n_samples = len(files)
     jobs = a.jobs or max(1, (os.cpu_count() or 2) - 1)
+    # Built once: the frame-stack probe depends on the footage, not the dials.
+    furniture_mask, furn_info = C.build_furniture_mask(files)
+    print(f"  furniture probe: "
+          + (f"mask {100 * furn_info['coverage']:.1f}% of frame, "
+             f"motion {furn_info['motion']}" if furniture_mask is not None
+             else f"stood down ({furn_info.get('why', '?')})"))
     print(f"  {n_samples} samples x {len(entries)} reference images, "
           f"{jobs} cores per combo\n")
 
@@ -164,7 +173,8 @@ def main():
     results = []
     for ov in combos:
         t0 = time.time()
-        hits = scan_once(bem, entries, files, interval, n_samples, ov, jobs)
+        hits = scan_once(bem, entries, files, interval, n_samples, ov, jobs,
+                         info["w"], info["h"], furniture_mask)
         per = E.score(truth, window, hits, interval)
         o = E.overall(per)
         results.append((ov, o, per))

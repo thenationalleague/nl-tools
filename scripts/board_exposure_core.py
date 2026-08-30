@@ -76,7 +76,23 @@ import numpy as np
 # tracker wants to synthesise. Dials promoted from the 29/08 sweep: RATIO
 # 0.80->0.85, MIN_INLIERS 9->7 — strictly dominant (recall 55->60%, precision
 # 87->89%, phantoms 105->94) at the price of scan time.
-ENGINE_VERSION = "1.5"
+#
+# 1.6 — furniture gets caught by WHERE IT LIVES and BY ITS PIXELS, because a
+# 4.5-minute Horsham clip proved permanence needs footage to prove itself: the
+# stream's corner graphic appeared in too few samples for any evidence tier.
+# Two of Richard's rulings, built: (1) the graphics corners — on two grounds'
+# real footage not one of 643 genuine board hits put its matched features in
+# the frame's top corners, while every watermark-class hit did (Sutton sim:
+# phantoms 105->51 from this rule alone, zero collateral); (2) the frame-stack
+# furniture mask — ~24 evenly-spread frames, judged on STRONG EDGES so
+# translucency survives, and anything edge-locked to the same pixels in 60%+
+# of them is furniture wherever it sits, learned per video with no geometry
+# assumed. Guards: a locked-off camera (some club streams never move) makes
+# permanence meaningless — the same stack measures global motion and the mask
+# stands down below the floor; and a mask claiming over a tenth of the frame
+# distrusts itself. Coverage and motion go in the export, so a runaway mask
+# can never hide.
+ENGINE_VERSION = "1.6"
 
 # --- tunables, all in one place so a run can be described in one line ---------
 SAMPLE_FPS = 2.0            # samples per second of match
@@ -177,6 +193,24 @@ VIS_REJECT = 0.18
 # clear air on either side. The sweep grid carries a 0.0 ablation row so the
 # floor's real cost on footage stays measured, not assumed.
 FACE_NCC_REJECT = 0.25
+# The graphics corners (1.6). Broadcast furniture lives in the frame's top
+# corners; a perimeter board's matched features never do — zero of 643
+# genuine hits across two grounds, against every watermark-class hit. A hit
+# centring inside the top corner margins is refused outright, which works on
+# a 30-second clip where no evidence tier can.
+CORNER_Y_FRAC = 0.18        # top margin, as a share of frame height
+CORNER_X_FRAC = 0.18        # left/right margins, as a share of frame width
+# The frame-stack furniture mask (1.6). Richard's design: overlay an even
+# spread of frames and whatever persists is furniture. Judged on STRONG
+# edges (crisp graphics survive, translucent fills and soft grass texture do
+# not) at pixel level, where a few pixels of camera drift already breaks
+# agreement — so in a moving production only frame-bolted items can pass.
+FURN_FRAMES = 24            # evenly-spread frames in the stack
+FURN_EDGE_T = 60.0          # gradient magnitude that counts as a strong edge
+FURN_AGREE = 0.60           # share of frames an edge-pixel must persist in
+FURN_MIN_MOTION = 0.005     # mean edge churn below this = locked-off camera
+FURN_MAX_COVERAGE = 0.10    # a mask claiming more of the frame distrusts itself
+FURN_DILATE_PX = 9          # grown a little so a hit centred at the rim still counts
 
 
 def flatten(path):
@@ -659,6 +693,10 @@ def settings():
                         "episodes": STATIC_FINE_EPISODES,
                         "min_share": STATIC_FINE_MIN_SHARE},
         "face_ncc_reject": FACE_NCC_REJECT, "face_agree_reject": VIS_REJECT,
+        "corner": {"x_frac": CORNER_X_FRAC, "y_frac": CORNER_Y_FRAC},
+        "furniture": {"frames": FURN_FRAMES, "edge_t": FURN_EDGE_T,
+                      "agree": FURN_AGREE, "min_motion": FURN_MIN_MOTION,
+                      "max_coverage": FURN_MAX_COVERAGE},
         "clarity_weights": {"size": 0.40, "focus": 0.25,
                             "contrast": 0.20, "angle": 0.15},
         "clarity_saturation": {"area_pct": 0.6, "sharp": 300.0, "contrast": 60.0},
@@ -809,6 +847,129 @@ def strip_static(hits_by_index, n_samples, cell=STATIC_CELL_PX,
             gone = len(row[name]) - len(keep)
             if gone:
                 removed[name] = removed.get(name, 0) + gone
+            if keep:
+                row[name] = keep
+            else:
+                del row[name]
+        if not row:
+            del hits_by_index[i]
+    return removed
+
+
+def in_graphics_corner(cx, cy, frame_w, frame_h,
+                       x_frac=None, y_frac=None):
+    """Pure: is this point inside the top corner margins where broadcast
+    graphics live? Defaults read the module constants at CALL time so a
+    sweep override actually overrides."""
+    xf = CORNER_X_FRAC if x_frac is None else x_frac
+    yf = CORNER_Y_FRAC if y_frac is None else y_frac
+    return (cy < yf * frame_h
+            and (cx < xf * frame_w or cx > (1.0 - xf) * frame_w))
+
+
+def strip_corner(hits_by_index, frame_w, frame_h):
+    """Remove hits whose matched-feature centre (projected centre when no mc)
+    sits in the graphics corners. In place; returns {sponsor: removed}."""
+    removed = {}
+    if not frame_w or not frame_h:
+        return removed
+    for i in list(hits_by_index):
+        row = hits_by_index[i]
+        for name in list(row):
+            keep = []
+            for h in row[name]:
+                if h.get("mc"):
+                    cx, cy = float(h["mc"][0]), float(h["mc"][1])
+                else:
+                    q = h["quad"]
+                    cx = sum(float(p[0]) for p in q) / 4.0
+                    cy = sum(float(p[1]) for p in q) / 4.0
+                if in_graphics_corner(cx, cy, frame_w, frame_h):
+                    removed[name] = removed.get(name, 0) + 1
+                else:
+                    keep.append(h)
+            if keep:
+                row[name] = keep
+            else:
+                del row[name]
+        if not row:
+            del hits_by_index[i]
+    return removed
+
+
+def build_furniture_mask(files, n_frames=None, edge_t=None, agree=None):
+    """
+    Richard's frame-stack probe: overlay an even spread of frames and call
+    whatever persists furniture. Returns (mask or None, info) — mask is a
+    bool HxW array, info always carries what was decided and why, because a
+    rule that deletes measurements must never act silently.
+
+    Edge-locked, not colour-locked: strong-gradient pixels present in
+    `agree`+ of the stack. Translucent graphics keep their outlines; grass
+    and crowd churn edges everywhere but never at the same pixels twice.
+    Two stand-downs: a locked-off camera (global edge churn under
+    FURN_MIN_MOTION — permanence proves nothing when nothing moves, and a
+    real board on a static camera is real exposure), and a mask claiming
+    over FURN_MAX_COVERAGE of the frame (something is wrong; measuring
+    beats guessing).
+    """
+    n_frames = FURN_FRAMES if n_frames is None else n_frames
+    edge_t = FURN_EDGE_T if edge_t is None else edge_t
+    agree = FURN_AGREE if agree is None else agree
+    if not files:
+        return None, {"why": "no frames"}
+    picks = sorted({int(i) for i in
+                    np.linspace(0, len(files) - 1,
+                                min(n_frames, len(files)))})
+    edges = []
+    for i in picks:
+        g = cv2.imread(files[i], cv2.IMREAD_GRAYSCALE)
+        if g is None:
+            continue
+        mag = cv2.magnitude(cv2.Sobel(g, cv2.CV_32F, 1, 0),
+                            cv2.Sobel(g, cv2.CV_32F, 0, 1))
+        edges.append((mag > edge_t).astype(np.uint8))
+    if len(edges) < 8:
+        return None, {"why": f"only {len(edges)} readable frames"}
+    stack = np.stack(edges)
+    motion = float(np.mean(stack[1:] != stack[:-1]))
+    info = {"frames": len(edges), "motion": round(motion, 4)}
+    if motion < FURN_MIN_MOTION:
+        info["why"] = "locked-off camera — permanence proves nothing here"
+        return None, info
+    mask = (stack.mean(axis=0) >= agree).astype(np.uint8)
+    k = np.ones((FURN_DILATE_PX, FURN_DILATE_PX), np.uint8)
+    mask = cv2.dilate(mask, k).astype(bool)
+    info["coverage"] = round(float(mask.mean()), 4)
+    if info["coverage"] > FURN_MAX_COVERAGE:
+        info["why"] = "mask claimed too much of the frame — distrusted"
+        return None, info
+    return mask, info
+
+
+def strip_masked(hits_by_index, mask):
+    """Remove hits centring inside the furniture mask. In place; returns
+    {sponsor: removed}. A None mask (probe stood down) removes nothing."""
+    removed = {}
+    if mask is None:
+        return removed
+    H, W = mask.shape[:2]
+    for i in list(hits_by_index):
+        row = hits_by_index[i]
+        for name in list(row):
+            keep = []
+            for h in row[name]:
+                if h.get("mc"):
+                    cx, cy = float(h["mc"][0]), float(h["mc"][1])
+                else:
+                    q = h["quad"]
+                    cx = sum(float(p[0]) for p in q) / 4.0
+                    cy = sum(float(p[1]) for p in q) / 4.0
+                x, y = int(cx), int(cy)
+                if 0 <= x < W and 0 <= y < H and mask[y, x]:
+                    removed[name] = removed.get(name, 0) + 1
+                else:
+                    keep.append(h)
             if keep:
                 row[name] = keep
             else:

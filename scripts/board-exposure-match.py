@@ -1019,7 +1019,22 @@ def run_one(a, video, club, title, date="", start=None, end=None, complete=None)
     # Furniture first, tracking second, and the order is load-bearing: a
     # watermark's hits must be gone BEFORE gap-filling, or tracking would
     # dutifully bridge between two overlay detections and hand the overlay
-    # back its seconds with per-frame evidence attached.
+    # back its seconds with per-frame evidence attached. Cheapest evidence
+    # first: the graphics corners, then the per-video frame-stack mask, then
+    # the detection-based static rules.
+    gone_corner = C.strip_corner(hits_by_index, info["w"], info["h"])
+    for name, count in sorted(gone_corner.items()):
+        print(f"  graphics-corner hits stripped: {name} x{count}")
+    furniture_mask, furn_info = C.build_furniture_mask(files)
+    if furniture_mask is None:
+        print(f"  furniture mask stood down: {furn_info.get('why', '?')} "
+              f"(motion {furn_info.get('motion', '—')})")
+    else:
+        print(f"  furniture mask: {100 * furn_info['coverage']:.1f}% of frame, "
+              f"motion {furn_info['motion']}")
+        gone_mask = C.strip_masked(hits_by_index, furniture_mask)
+        for name, count in sorted(gone_mask.items()):
+            print(f"  masked furniture stripped: {name} x{count}")
     gone = C.strip_static(hits_by_index, n_samples)
     for name, count in sorted(gone.items()):
         print(f"  static furniture stripped: {name} x{count} — one position "
@@ -1083,6 +1098,9 @@ def run_one(a, video, club, title, date="", start=None, end=None, complete=None)
             "video_w": info["w"], "video_h": info["h"],
             "scan_seconds": round(scan_secs, 1),
             "settings": C.settings(),
+            # What the frame-stack probe decided and why — a rule that deletes
+            # measurements must be auditable from the export alone.
+            "furniture_probe": furn_info,
             "source_duration": round(info["duration"], 1),
             "window": {"start": start or 0, "end": end or round(info["duration"], 1)},
             "references": [{"sponsor": n, "scope": s, "file": os.path.basename(p)}
