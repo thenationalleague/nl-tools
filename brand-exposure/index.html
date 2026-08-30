@@ -27,6 +27,14 @@
     staff              → off; granted per-user, like Commercial Compliance
 
   Changelog
+  v0.12 (30/08/2026) — The audition tab (superadmin). Reads the
+  BE_MODE=audition output from the match folder: a verdict per reference
+  (fired N times with its best match, or dead on this footage) and a grid
+  of harvested board crops — the whole face behind each real hit, plus
+  relaxed-floor candidates for starved sponsors. Tick crops and promote:
+  the browser re-uploads them into refs/partners/<Sponsor>/, audited, and
+  the next scan of the ground picks them up. This is the 30/08
+  hand-harvest (TIC 3%→30% from one crop) without the screenshots.
   v0.11 (30/08/2026) — The halves marks. The upload form takes half-time
   whistle + second-half restart alongside the existing trims; the pair is
   validated live (order, pairness) and travels as BE_HT/BE_RESTART, and the
@@ -158,6 +166,17 @@
     var NL_TOOL_KEY = 'ops-brand-exposure';
 
     window.NL_CHANGELOG = [
+      {
+        date: '30/08/2026',
+        version: 'v0.12',
+        items: [
+          'Audition — a superadmin tab reading BE_MODE=audition output: ' +
+            'every reference’s verdict on the footage (fired or dead, ' +
+            'with its best match), and harvested board crops to tick ' +
+            'straight into the reference library. The hand-harvest that ' +
+            'took TIC from 3% to 30% recall, without the screenshots.'
+        ]
+      },
       {
         date: '30/08/2026',
         version: 'v0.11',
@@ -479,6 +498,10 @@
                  background: var(--white); }
   .refcard figcaption { font-size: 10.5px; padding: 4px 6px; color: var(--text-muted);
                         white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Audition ticks: the selection state is the outline, not a hidden
+     checkbox — the card IS the control. */
+  .refcard.aud-on { outline: 2px solid var(--primary); outline-offset: -2px; }
+  .refcard figcaption b { color: var(--amber); }
   /* Upload / scan progress. */
   .prog { height: 10px; border-radius: 99px; background: var(--navy-100);
           overflow: hidden; margin: 8px 0 4px; }
@@ -700,6 +723,7 @@
       <button class="tab" data-tab="partners" role="tab">Partners</button>
       <button class="tab" data-tab="grounds" role="tab">Grounds</button>
       <button class="tab" data-tab="story" role="tab">How it works</button>
+      <button class="tab" data-tab="audition" role="tab" id="tabAudition" hidden>Audition</button>
     </div>
 
     <div id="mixWarn"></div>
@@ -1179,6 +1203,15 @@
       </div>
       <div class="stats" id="gStats"></div>
       <div class="table-wrap"><table class="table" id="gTable"></table></div>
+    </section>
+
+    <!-- ── Audition (v0.12, superadmin) ─────────────────────────────── -->
+    <section id="viewAudition" hidden>
+      <div class="filter-row">
+        <span class="filter-label">Match</span>
+        <select class="nl-select" id="audMatch" style="min-width:260px"></select>
+      </div>
+      <div id="audBody"></div>
     </section>
 
   </div>
@@ -3277,13 +3310,156 @@
     recompute();
   }
 
+  /* ── Audition (v0.12, superadmin) ────────────────────────────────────
+     The tick/untick half of the audition pass: BE_MODE=audition writes
+     audition.json + crop PNGs into the match folder; this view shows each
+     reference's verdict and lets a superadmin promote ticked crops into
+     refs/partners/<Sponsor>/ — the browser download-and-reupload IS the
+     promotion, there is no copy primitive in the Storage SDK. */
+  var AUD = { id: null, data: null, ticked: {}, busy: false, urls: {} };
+
+  function renderAudition() {
+    var sel = $('audMatch');
+    var opts = '<option value="">Choose a match</option>' +
+      list().map(function (m) {
+        return '<option value="' + esc(m._id) + '"' +
+          (m._id === AUD.id ? ' selected' : '') + '>' +
+          esc(m.name || m._id) + '</option>';
+      }).join('');
+    if (sel.innerHTML !== opts) sel.innerHTML = opts;
+    sel.onchange = function () { audLoad(sel.value || null); };
+    if (!AUD.id) { $('audBody').innerHTML = ''; return; }
+    if (AUD.data) audRender();
+  }
+
+  function audLoad(id) {
+    AUD.id = id; AUD.data = null; AUD.ticked = {}; AUD.urls = {};
+    if (!id) { $('audBody').innerHTML = ''; return; }
+    $('audBody').textContent = 'Loading…';
+    storage.ref('brand-exposure/' + id + '/audition.json').getDownloadURL()
+      .then(function (u) { return fetch(u); })
+      .then(function (r) { return r.json(); })
+      .then(function (d) { AUD.data = d; audRender(); })
+      .catch(function () {
+        $('audBody').innerHTML =
+          '<div class="banner">No audition for this match yet.</div>';
+      });
+  }
+
+  function audUrl(crop) {
+    if (AUD.urls[crop]) return Promise.resolve(AUD.urls[crop]);
+    return storage.ref('brand-exposure/' + AUD.id + '/' + crop)
+      .getDownloadURL().then(function (u) {
+        AUD.urls[crop] = u; return u;
+      });
+  }
+
+  function audImg(img, crop) {
+    audUrl(crop).then(function (u) { img.src = u; })
+      .catch(function () { img.alt = 'crop missing'; });
+  }
+
+  function audRender() {
+    var d = AUD.data;
+    var h = '<div class="table-wrap"><table class="table"><tr>' +
+      '<th>Reference</th><th>Verdict</th><th class="num">First–last</th></tr>';
+    (d.refs || []).forEach(function (r) {
+      var v = r.fired
+        ? 'fired ' + r.fired + '× (best ' + r.best.inliers + ' features)'
+        : 'DEAD — never matched on this footage';
+      h += '<tr><td>' + esc(r.sponsor) + ' · ' + esc(r.file) + '</td>' +
+        '<td>' + esc(v) + '</td><td class="num">' +
+        (r.fired ? esc(clock(r.first_t) + '–' + clock(r.last_t)) : '—') +
+        '</td></tr>';
+    });
+    h += '</table></div>';
+
+    var meta = d.crop_meta || [];
+    if (meta.length) {
+      h += '<div class="section-head" style="margin-top:18px"><h2>Harvest — ' +
+        'tick what a reference should look like here</h2>' +
+        '<button class="btn btn--primary" id="audPromote"></button></div>' +
+        '<div class="refgrid" id="audGrid"></div>';
+    } else {
+      h += '<div class="banner" style="margin-top:14px">No crops came out of ' +
+        'this audition.</div>';
+    }
+    $('audBody').innerHTML = h;
+
+    var grid = $('audGrid');
+    if (grid) meta.forEach(function (c, i) {
+      var b = document.createElement('button');
+      b.className = 'refcard' + (AUD.ticked[i] ? ' aud-on' : '');
+      b.type = 'button';
+      b.innerHTML = '<img alt=""><figcaption>' + esc(c.sponsor) + ' · ' +
+        esc(clock(c.t)) + ' · ' + esc(c.inliers + ' feat') +
+        (c.relaxed ? ' · <b>relaxed</b>' : '') + '</figcaption>';
+      audImg(b.querySelector('img'), c.crop);
+      b.onclick = function () {
+        if (AUD.busy || b.disabled) return;
+        AUD.ticked[i] = !AUD.ticked[i];
+        b.classList.toggle('aud-on', !!AUD.ticked[i]);
+        audCount();
+      };
+      grid.appendChild(b);
+    });
+    audCount();
+    var btn = $('audPromote');
+    if (btn) btn.onclick = audPromote;
+  }
+
+  function audCount() {
+    var btn = $('audPromote');
+    if (!btn) return;
+    var n = Object.keys(AUD.ticked).filter(function (k) {
+      return AUD.ticked[k];
+    }).length;
+    btn.textContent = 'Promote ' + n + ' to references';
+    btn.disabled = !n || AUD.busy;
+  }
+
+  function audPromote() {
+    var meta = (AUD.data && AUD.data.crop_meta) || [];
+    var picks = Object.keys(AUD.ticked).filter(function (k) {
+      return AUD.ticked[k];
+    }).map(function (k) { return meta[Number(k)]; }).filter(Boolean);
+    if (!picks.length || AUD.busy) return;
+    AUD.busy = true; audCount();
+    var done = 0;
+    var chain = picks.reduce(function (p, c) {
+      return p.then(function () {
+        var name = c.sponsor + ' audition ' + AUD.id + ' ' +
+          Math.round(c.t) + 's.png';
+        return audUrl(c.crop)
+          .then(function (u) { return fetch(u); })
+          .then(function (r) { return r.blob(); })
+          .then(function (blob) {
+            return storage.ref('brand-exposure/refs/partners/' + c.sponsor +
+              '/' + name).put(blob, { contentType: 'image/png' });
+          }).then(function () { done++; });
+      });
+    }, NL.ensureAuth());
+    chain.then(function () {
+      NL.writeAudit('be-audition-promote', {
+        match: AUD.id,
+        crops: picks.map(function (c) { return c.sponsor + '@' + c.t; })
+      });
+      NL.toast(done + ' promoted — the next scan of this ground uses them');
+      AUD.busy = false; AUD.ticked = {}; audRender();
+    }).catch(function (e) {
+      NL.toast('Promotion failed after ' + done + ': ' + e.message);
+      AUD.busy = false; audCount();
+    });
+  }
+
   /* ── Shell ───────────────────────────────────────────────────────── */
   function show(name) {
     /* Leaving the player: stop the video rather than let it run behind a
        hidden section, which keeps decoding and keeps the rAF loop alive. */
     if (view === 'match' && name !== 'match') { $('vid').pause(); M.id = null; }
     view = name;
-    ['matches', 'partners', 'grounds', 'match', 'scan', 'story'].forEach(function (v) {
+    ['matches', 'partners', 'grounds', 'match', 'scan', 'story',
+     'audition'].forEach(function (v) {
       var el = $('view' + v[0].toUpperCase() + v.slice(1));
       var entering = (v === name) && el.hidden;
       el.hidden = (v !== name);
@@ -3317,6 +3493,7 @@
     if (view === 'matches')  renderMatches();
     if (view === 'partners') renderPartners();
     if (view === 'grounds')  renderGrounds();
+    if (view === 'audition') renderAudition();
     /* Only the live strip — the form's own renderers run on their events, so
        a matches update never rebuilds a half-filled form under the user. */
     if (view === 'scan')     renderReqs();
@@ -3354,6 +3531,9 @@
     canScan = !!(session && session.role === 'superadmin');
     $('btnScan').hidden = !canScan;
     $('btnScan').onclick = openScan;
+    /* The audition view promotes into refs/, which shapes every future
+       measurement — same audience as the uploader. */
+    $('tabAudition').hidden = !canScan;
     $('sBack').onclick = function () { show('matches'); };
     $('pCsv').onclick = exportPartnerCsv;
 

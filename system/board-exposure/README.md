@@ -900,10 +900,14 @@ attribution-bearing; and CAD is chased in parallel, never waited on.
    audition.json + audition-*.png flat into BE_DEST. Proven on
    synthetic footage end to end: fired counts, first/last times,
    starved counts and time-diverse whole-face crops all correct. The
-   TOOL HALF (tick/untick, promote to refs/) is next; until it lands,
-   ticked crops go into refs by console upload exactly like the 30/08
-   hand-harvest. Yield already measured twice: Enterprise centre
-   14% → 29% (two crops), TIC 3% → 30% (one).
+   TOOL HALF is BUILT the same night (tool v0.12): a superadmin
+   Audition tab reads audition.json + crops from the match folder,
+   shows each reference's verdict, and promotes ticked crops into
+   refs/partners/<Sponsor>/ by browser re-upload, audited. Needs one
+   storage-rules deploy (the refs block) before first promotion. Yield
+   already measured twice by hand: Enterprise centre 14% → 29% (two
+   crops), TIC 3% → 30% (one). First real audition run is the next
+   milestone; a camera-1 sweep clip is its ideal input.
 5. Sharpest-in-window sampling — promoted by the diagnostic: Sutton's
    misses concentrate in soft frames (0.56x found sharpness), and
    picking the sharpest frame per window attacks exactly that pool at

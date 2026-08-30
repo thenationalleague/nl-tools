@@ -273,9 +273,9 @@ def run(a):
                 for s, rs in relaxed_rows.items()}
     needed = sorted({r["t"] for rows in keep_ref.values() for r in rows} |
                     {r["t"] for rows in keep_rel.values() for r in rows})
-    crops = []
+    crops, crop_meta = [], []
 
-    def save_crop(frame, prefix, sponsor, row):
+    def save_crop(frame, prefix, sponsor, row, relaxed=False):
         img = crop_board(frame, row)
         if img is None:
             return None
@@ -283,6 +283,11 @@ def run(a):
               f"{row['inliers']}i.png")
         cv2.imwrite(os.path.join(a.out_dir, fn), img)
         crops.append(fn)
+        # The tool's tick/untick view joins on this — a crop without its
+        # sponsor and provenance is just a picture.
+        crop_meta.append({"crop": fn, "sponsor": sponsor,
+                          "t": row["t"], "inliers": row["inliers"],
+                          "relaxed": relaxed})
         return fn
 
     cap = cv2.VideoCapture(a.video)
@@ -298,7 +303,8 @@ def run(a):
         for sponsor, rows in keep_rel.items():
             for row in rows:
                 if row["t"] == t:
-                    row["crop"] = save_crop(frame, "relaxed-", sponsor, row)
+                    row["crop"] = save_crop(frame, "relaxed-", sponsor, row,
+                                            relaxed=True)
     cap.release()
 
     candidates = [
@@ -325,6 +331,7 @@ def run(a):
         "duration": round(duration, 1),
         "frames_auditioned": len(chosen), "starved_frames": starved,
         "refs": rows, "candidates": candidates, "crops": crops,
+        "crop_meta": crop_meta,
     }
     path = os.path.join(a.out_dir, "audition.json")
     with open(path, "w", encoding="utf-8") as f:
