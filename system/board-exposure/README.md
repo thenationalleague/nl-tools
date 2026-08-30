@@ -543,6 +543,37 @@ settled.
 
 Recall +10 points with precision holding at 99% — comfortably above the
 97% floor, so both levers ship at full strength (zoom 2.0, carry 3.0).
+
+**The second ground — Horsham hand-labels, 30/08/2026.** Richard labelled
+the Horsham v Hampton & Richmond YouTube rip (a 1080p club stream, 4½
+min) from the ORIGINAL file — not the 640px proxy, which would have set a
+lower truth bar than the engine's own input — against the engine-1.6 scan
+of the same footage. 63 appearances across three sponsors, his standard
+noted in the file: "very generous read of very zoomed out items".
+
+| sponsor      | recall | precision | phantoms |
+|--------------|-------:|----------:|---------:|
+| DAZN         |     9% |      100% |        0 |
+| Enterprise   |    26% |      100% |        0 |
+| TIC Health   |     3% |      100% |        0 |
+| **overall**  | **15%**|  **100%** |    **0** |
+
+Two verdicts in one number. **Precision generalises perfectly**: not one
+phantom second on hostile footage — corners, permanence, frame-stack and
+face check all held, and the frame-stack probe (which stood down on the
+Sutton broadcast) engaged correctly here. **Recall does not**: 54% on the
+Sutton broadcast, 15% here, same engine — the detector is currently a
+broadcast-calibrated instrument, and the generous-read caveat cannot
+rescue that (halve the truth sheet and Horsham still sits nowhere near
+Sutton). Cross-ground comparability, the thing the product sells, does
+not yet hold on club footage. The footage-quality fingerprint matches:
+Horsham's confirmed hits are bigger and clearer than Sutton's but carry
+far fewer agreeing features (mean 16 vs 26; a third scrape under 12) —
+compression starvation, not optics. This is the recall campaign's real
+target: club streams, not broadcast wides. Caveat on the caveat: this is
+a 1.6 scan — Horsham has never been scanned on 1.7 (which bought Sutton
++10); rerun pending before further conclusions. Labels:
+`labels/2026-08-18-horsham-v-hampton-and-richmond.csv`.
 The stated target moved most: the far-side dugout boards went from 24-36%
 to 53-60%, and Enterprise's goal-line boards now read 86-97%. The phantom
 cost of the extra recall is 6.0s across a 494s window (up from 2.0s in
