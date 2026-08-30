@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Brand Exposure
-  Version: v0.8 (30/08/2026)
+  Version: v0.9 (30/08/2026)
   File: /brand-exposure/index.html
 
   Sponsor exposure measured from match video — seconds on screen, clarity and
@@ -27,6 +27,18 @@
     staff              → off; granted per-user, like Commercial Compliance
 
   Changelog
+  v0.9 (30/08/2026) — The first live scan's review round, from Richard's
+  phone. The scan bar ticks every 15s and shimmers while running — it only
+  moved on status flips before, which read as a hang. "Scan footage" is now
+  "Upload footage" (it is the upload place) and takes the primary slot;
+  Add a match demotes to ghost — dropping a laptop JSON is the rare path
+  now. A Source switcher (highlights / full match) rides to the report as
+  BE_SOURCE_TYPE, beating the duration guess — a 50-minute compilation is
+  not a full match, and only a person knows. Phone fixes: the fixture list
+  shows twelve with a Show-all tap instead of a nested scrollbox (the
+  scroll snag), rows wrap instead of blowing the page width, engine chips
+  no longer render above the upload form, and the Club label matches the
+  Season label's case (filter-row, not a shouting form label).
   v0.8 (30/08/2026) — Scan footage from the tool. A superadmin picks the
   fixture from the NLS results feed (current season or last, one tap fills
   opponent, date, competition and venue; manual entry stays for friendlies),
@@ -128,6 +140,22 @@
     var NL_TOOL_KEY = 'ops-brand-exposure';
 
     window.NL_CHANGELOG = [
+      {
+        date: '30/08/2026',
+        version: 'v0.9',
+        items: [
+          'The scan bar moves: it ticks every 15 seconds and shimmers while ' +
+            'a scan runs, instead of sitting frozen between status changes.',
+          'Scan footage is now Upload footage and takes the primary button; ' +
+            'Add a match steps back — dropping a laptop JSON is the rare ' +
+            'path now.',
+          'Source switcher: say highlights or full match yourself instead ' +
+            'of the tool guessing from the file’s length.',
+          'Phone fixes: no more nested scrollbox on the fixture list (twelve ' +
+            'shown, tap for all), rows wrap instead of pushing the page ' +
+            'sideways, and the engine chips stay off the upload view.'
+        ]
+      },
       {
         date: '30/08/2026',
         version: 'v0.8',
@@ -380,19 +408,22 @@
   tr.is-revoked td { color: var(--text-muted); }
   .viewer.novideo video, .viewer.novideo svg { display: none; }
 
-  /* ── Scan new footage (v0.8) ──────────────────────────────────────────── */
-  /* A results row is a button — the whole row selects the fixture. */
-  .fxlist { display: flex; flex-direction: column; gap: 6px; margin-top: 12px;
-            max-height: 340px; overflow-y: auto; }
-  .fxrow { display: flex; align-items: center; gap: 10px; width: 100%;
+  /* ── Upload footage (v0.8, reworked v0.9) ─────────────────────────────── */
+  /* A results row is a button — the whole row selects the fixture. No inner
+     scrollbox: a nested scroll area inside the page scroll snags the thumb on
+     a phone, so the list shows twelve and grows on a tap instead (v0.9). */
+  .fxlist { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+  .fxrow { display: flex; align-items: center; gap: 8px 10px; width: 100%;
+           box-sizing: border-box; flex-wrap: wrap;
            text-align: left; background: var(--navy-50);
            border: 1px solid var(--border); border-radius: 8px;
-           padding: 9px 12px; cursor: pointer; font-size: 13.5px; }
+           padding: 9px 12px; cursor: pointer; font-size: var(--text-sm, 13.5px); }
   .fxrow:hover { border-color: var(--navy-300); }
   .fxrow[aria-pressed="true"] { border-color: var(--primary);
                                 background: var(--primary-50); }
   .fxrow .fxrow__date { color: var(--text-muted); font-variant-numeric: tabular-nums;
-                        flex: none; width: 64px; }
+                        flex: none; width: 88px; white-space: nowrap; }
+  .fxrow .fxrow__teams { flex: 1 1 auto; min-width: 0; }
   .fxrow .fxrow__score { font-variant-numeric: tabular-nums; font-weight: 600;
                          flex: none; }
   .fxrow .fxrow__comp { margin-left: auto; flex: none; }
@@ -412,7 +443,15 @@
           overflow: hidden; margin: 8px 0 4px; }
   .prog i { display: block; height: 100%; background: var(--primary);
             border-radius: 99px; transition: width .3s; }
-  .prog--est i { background: var(--navy-300); }
+  /* The estimate bar shimmers while a scan runs: the width only advances on
+     the 15s tick, and a stationary solid bar reads as a hang (v0.9). */
+  .prog--est i { background: linear-gradient(90deg, var(--navy-300),
+                   var(--navy-100), var(--navy-300));
+                 background-size: 200% 100%;
+                 animation: progShimmer 2.2s linear infinite; }
+  @keyframes progShimmer { to { background-position: -200% 0; } }
+  @media (prefers-reduced-motion: reduce) { .prog--est i { animation: none;
+                 background: var(--navy-300); } }
   /* One scan request, in the watch panel. */
   .scanreq { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
          border: 1px solid var(--border); border-radius: 8px;
@@ -447,8 +486,10 @@
         <div class="toolbar__left"><div class="section-head"><h2>Matches measured</h2></div></div>
         <div class="toolbar__right">
           <button class="btn btn--ghost" id="btnKeys" hidden>Ingest keys</button>
-          <button class="btn btn--ghost" id="btnScan" hidden>Scan footage</button>
-          <button class="btn btn--primary" id="btnAdd" hidden>Add a match</button>
+          <!-- Upload leads, Add trails: uploading is the everyday path now,
+               and dropping a laptop-measured JSON is the occasional one. -->
+          <button class="btn btn--ghost" id="btnAdd" hidden>Add a match</button>
+          <button class="btn btn--primary" id="btnScan" hidden>Upload footage</button>
         </div>
       </div>
       <div id="addPanel" hidden></div>
@@ -534,7 +575,7 @@
       <div class="toolbar">
         <div class="toolbar__left">
           <button class="btn btn--ghost btn--sm" id="sBack">Back</button>
-          <h2 class="match-title">Scan new footage</h2>
+          <h2 class="match-title">Upload footage</h2>
         </div>
       </div>
       <div id="sReqs"></div>
@@ -542,8 +583,12 @@
         <div class="form-panel__head">The fixture</div>
         <div class="form-panel__body">
           <div class="filter-pill-row" id="sSeasons"></div>
-          <div class="form-grid">
-            <div class="form-group"><label>Club</label><div id="sClub"></div></div>
+          <!-- filter-row, not a form-group: an uppercase form label beside the
+               sentence-case "Season" pill label read as two different pages.
+               Same pattern as the Grounds tab's picker. -->
+          <div class="filter-row">
+            <span class="filter-label">Club</span>
+            <div id="sClub" style="min-width:260px"></div>
           </div>
           <div id="sFixtures"></div>
           <div id="sManualWrap"></div>
@@ -596,6 +641,7 @@
 
   var esc = function (s) { return NL.escHtml(s == null ? '' : String(s)); };
   var $   = function (id) { return document.getElementById(id); };
+  var canScan = false;      // superadmin — set in boot, gates the uploader
 
   function slug(s) {
     return String(s || '').toLowerCase()
@@ -687,6 +733,10 @@
   var engineFilter = null;                    /* null = all engines */
 
   function renderMixWarn() {
+    /* Engine chips are match-list context. On the upload view they are noise
+       above the form — and on a phone they were the row blowing the page
+       width (v0.9). */
+    if (view === 'scan') { $('mixWarn').innerHTML = ''; return; }
     var counts = {};
     list().forEach(function (m) {
       var k = m.meta.profile || 'unknown';
@@ -744,11 +794,14 @@
         /* Not while the panel is already open. On a phone the toolbar button,
            this one and the panel's own submit all end up on screen together —
            three buttons saying Add a match, two of which do the same nothing. */
-        (canWrite && !addOpen())
-          ? '<button class="btn btn--primary" id="btnAdd2">Add a match</button>' : ''
+        canScan
+          ? '<button class="btn btn--primary" id="btnScan2">Upload footage</button>'
+          : ((canWrite && !addOpen())
+            ? '<button class="btn btn--primary" id="btnAdd2">Add a match</button>' : '')
       ) + '</td></tr></tbody>';
-      var b2 = $('btnAdd2');
+      var b2 = $('btnAdd2'), s2 = $('btnScan2');
       if (b2) b2.onclick = openAdd;
+      if (s2) s2.onclick = openScan;
       return;
     }
 
@@ -1856,6 +1909,7 @@
       if (!b) return;
       SCAN.season = b.getAttribute('data-season');
       SCAN.fixture = null;
+      SCAN.showAllFx = false;
       if (SCAN.picker) SCAN.picker.setSeason(SCAN.season);
       renderScan();
     };
@@ -1870,6 +1924,7 @@
         onSelect: function (sel) {
           SCAN.clubSel = sel;
           SCAN.fixture = null;
+          SCAN.showAllFx = false;
           renderFixtures(); renderChosen(); renderScope(); renderRefs(); renderGo();
         }
       });
@@ -1951,23 +2006,31 @@
       if (SCAN.season !== season || SCAN.manual) return;
       var mine = rows.filter(function (r) {
         return r.homeId === opta || r.awayId === opta;
-      }).slice(0, 40);
+      });
       if (!mine.length) {
         box.innerHTML = '<p class="form-hint">No completed results for ' +
           esc(SCAN.clubSel.name) + ' in this season’s feed.</p>' + manualBtn;
         wireManualBtn();
         return;
       }
-      box.innerHTML = '<div class="fxlist">' + mine.map(function (r) {
+      /* Twelve, then a tap for the rest — never a nested scrollbox. */
+      var shown = SCAN.showAllFx ? mine : mine.slice(0, 12);
+      box.innerHTML = '<div class="fxlist">' + shown.map(function (r) {
         var on = SCAN.fixture && SCAN.fixture.nlsId === r.id;
         return '<button class="fxrow" data-fx="' + esc(r.id) + '" aria-pressed="' +
           (on ? 'true' : 'false') + '">' +
           '<span class="fxrow__date">' + esc(NL.formatDateShort(r.date)) + '</span>' +
-          '<span>' + esc(r.homeName) + ' v ' + esc(r.awayName) + '</span>' +
+          '<span class="fxrow__teams">' + esc(r.homeName) + ' v ' + esc(r.awayName) + '</span>' +
           '<span class="fxrow__score">' + (r.hs == null ? '' : esc(r.hs + '–' + r.as)) + '</span>' +
           '<span class="scope-tag fxrow__comp">' + esc(r.comp) + '</span></button>';
-      }).join('') + '</div>' + manualBtn;
+      }).join('') + '</div>' +
+      (mine.length > shown.length
+        ? '<p style="margin:8px 0 0"><button class="btn btn--ghost btn--sm" ' +
+          'id="sMoreFx">Show all ' + mine.length + ' results</button></p>' : '') +
+      manualBtn;
       wireManualBtn();
+      var more = $('sMoreFx');
+      if (more) more.onclick = function () { SCAN.showAllFx = true; renderFixtures(); };
       box.querySelectorAll('[data-fx]').forEach(function (b) {
         b.onclick = function () { pickFixture(season, b.getAttribute('data-fx')); };
       });
@@ -2242,6 +2305,10 @@
     file.onchange = function () { takeFile(file.files[0]); };
     if (!$('sTrims').innerHTML) {
       $('sTrims').innerHTML = '<div class="form-grid" style="margin-top:12px">' +
+        '<div class="form-group"><label for="sSource">Source</label>' +
+          '<select class="nl-select" id="sSource">' +
+          '<option value="highlights">Highlights package</option>' +
+          '<option value="full">Full match</option></select></div>' +
         '<div class="form-group"><label for="sStart">Kick-off in the file ' +
           '(optional)</label><input class="modal__input" id="sStart" ' +
           'placeholder="18:30 or 1:52:30"></div>' +
@@ -2251,6 +2318,9 @@
         '<p class="form-hint">A full-90 file usually has warm-up either side — ' +
         'trimming it keeps warm-up exposure out of the numbers and the pennies ' +
         'down.</p>';
+      /* Guessed from the file’s length until the person says otherwise — a
+         stated choice is never overwritten by a later file drop. */
+      $('sSource').onchange = function () { SCAN.sourceTouched = true; };
     }
   }
 
@@ -2265,6 +2335,10 @@
     v.onloadedmetadata = function () {
       SCAN.duration = v.duration || null;
       URL.revokeObjectURL(v.src);
+      var sel = $('sSource');
+      if (sel && !SCAN.sourceTouched && SCAN.duration) {
+        sel.value = SCAN.duration > 45 * 60 ? 'full' : 'highlights';
+      }
       renderGo();
     };
     v.onerror = function () { URL.revokeObjectURL(v.src); renderGo(); };
@@ -2366,7 +2440,12 @@
       by: (firebase.auth().currentUser || {}).uid || null,
       at: firebase.database.ServerValue.TIMESTAMP,
       sizeMB: Math.round(file.size / 1e6),
-      source: (SCAN.duration || 0) > 45 * 60 ? 'full' : 'highlights'
+      /* The switcher’s word beats the duration guess — it reaches the scan
+         as BE_SOURCE_TYPE, so the report says what the person said. */
+      source: (($('sSource') || {}).value === 'full' ||
+               ($('sSource') || {}).value === 'highlights')
+        ? $('sSource').value
+        : ((SCAN.duration || 0) > 45 * 60 ? 'full' : 'highlights')
     };
     if (subset !== null) req.sponsors = subset;
     if (SCAN.duration) req.durationSecs = Math.round(SCAN.duration);
@@ -2394,6 +2473,17 @@
       SCAN.requests = snap.val() || {};
       if (view === 'scan') renderReqs();
     }, function () { /* read refused — the panel just stays empty */ });
+    /* The record only changes on status flips, so between them the elapsed
+       figure and the estimate bar would sit frozen — which reads as dead
+       (v0.9, from the first live scan). A 15s tick keeps them honest. */
+    setInterval(function () {
+      if (view !== 'scan') return;
+      var live = Object.keys(SCAN.requests).some(function (k) {
+        var s = (SCAN.requests[k] || {}).status;
+        return s === 'queued' || s === 'running';
+      });
+      if (live) renderReqs();
+    }, 15000);
   }
 
   function renderReqs() {
@@ -2420,7 +2510,8 @@
       } else if (r.status === 'running') {
         var estMin = ((r.durationSecs || 0) / 60) * EST_WALL_X || 20;
         var gone = (Date.now() - (r.startedAt || Date.now())) / 60000;
-        var pct = Math.min(96, Math.round(100 * gone / estMin));
+        /* Floor of 3%: a zero-width bar at minute nought reads as a hang. */
+        var pct = Math.max(3, Math.min(96, Math.round(100 * gone / estMin)));
         body = '<span class="pill pill--info">Scanning</span>' +
           '<div class="scanreq__bar"><div class="prog prog--est"><i style="width:' +
           pct + '%"></i></div></div>' +
@@ -2541,9 +2632,10 @@
        whose action would be refused anyway. */
     $('btnKeys').hidden = !(session && session.role === 'superadmin');
     $('btnKeys').onclick = openKeys;
-    /* Scanning likewise: the rules refuse a non-superadmin request and the
+    /* Uploading likewise: the rules refuse a non-superadmin request and the
        function re-checks — hiding the button is a courtesy, not the gate. */
-    $('btnScan').hidden = !(session && session.role === 'superadmin');
+    canScan = !!(session && session.role === 'superadmin');
+    $('btnScan').hidden = !canScan;
     $('btnScan').onclick = openScan;
     $('sBack').onclick = function () { show('matches'); };
     $('pCsv').onclick = exportPartnerCsv;

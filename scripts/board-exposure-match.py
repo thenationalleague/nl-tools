@@ -204,9 +204,12 @@ def push_to_tool(a, base, head, stats, club, title, date, proxy, duration, compl
         return False
 
     match_id = U.match_id_for(date, club, opponent)
-    # The tool guesses the same way from the same field, so the two agree
-    # without either asking. Anyone who disagrees can change it in the tool.
-    source_type = "full" if (duration or 0) > 45 * 60 else "highlights"
+    # Stated beats derived: the uploader's switcher arrives as --source-type
+    # (a 50-minute highlights compilation is not a full match, and only a
+    # person knows that). Without it, the tool guesses the same way from the
+    # same field, so the two agree without either asking.
+    source_type = (getattr(a, "source_type", None) or
+                   ("full" if (duration or 0) > 45 * 60 else "highlights"))
 
     files = [(f"{base}-detections.json", "detections.json")]
     if proxy and os.path.exists(proxy):
@@ -831,6 +834,10 @@ def main():
     ap.add_argument("--date", default=None, metavar="YYYY-MM-DD",
                     help="match date — required with --club/--match for an upload, "
                          "since it is half the match id")
+    ap.add_argument("--source-type", choices=["full", "highlights"], default=None,
+                    help="record the footage as a full match or a highlights "
+                         "package (default: derived from duration, >45 min = "
+                         "full)")
     ap.add_argument("--sponsors", default=None, metavar="A,B",
                     help="scan only these reference folders (comma list, exact "
                          "folder names). A subset means the reference set is "
