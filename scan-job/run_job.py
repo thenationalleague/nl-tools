@@ -44,11 +44,19 @@ Environment (all set by the trigger, none baked into the image):
     BE_INGEST_KEY      the key, injected from Secret Manager
     BE_REFS_PREFIX     default brand-exposure/refs
     BE_FPS             optional sample rate override
-    BE_MODE            scan (default) | sweep — sweep trials the sensitivity
-                       grid against a labels file and uploads nothing
-    BE_LABELS          sweep only: a labels filename baked into the image
-                       under /app/labels (from system/board-exposure/labels/),
-                       or a bucket object path to download
+    BE_MODE            scan (default) | sweep | diagnose — sweep trials the
+                       sensitivity grid against a labels file and uploads
+                       nothing; diagnose measures what a finished scan's
+                       missed frames look like (blur / compression /
+                       starvation) and writes diagnose.json beside the export
+    BE_LABELS          sweep + diagnose: a labels filename baked into the
+                       image under /app/labels (from
+                       system/board-exposure/labels/), or a bucket object
+                       path to download
+    BE_DETECTIONS      diagnose only: bucket object path of the finished
+                       scan's export, e.g.
+                       brand-exposure/<match-id>/detections.json — the
+                       diagnose output lands in the same folder
 """
 import json
 import os
@@ -145,6 +153,26 @@ def storage_get(bucket, name, dest, token):
     return dest
 
 
+def storage_put(bucket, name, path, token):
+    """Upload one file. Same twenty-lines-not-twenty-megabytes reasoning as
+    the token fetch; the runtime service account already writes this bucket."""
+    url = (STORAGE.format(bucket=bucket).replace(
+        "/storage/v1/", "/upload/storage/v1/") + "?" +
+        urllib.parse.urlencode({"uploadType": "media", "name": name}))
+    with open(path, "rb") as f:
+        body = f.read()
+    req = urllib.request.Request(url, data=body, method="POST", headers={
+        "Authorization": "Bearer " + token,
+        "Content-Type": "application/json",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=300) as r:
+            r.read()
+    except urllib.error.HTTPError as e:
+        die(f"uploading {name} failed: {e.code} {e.reason}. The runtime "
+            f"service account needs objectCreator on {bucket}.")
+
+
 def fetch_refs(bucket, prefix, token):
     """Mirror the reference tree out of Storage into the layout the scan expects.
 
@@ -184,23 +212,26 @@ def main():
     os.makedirs(WORK, exist_ok=True)
     token = access_token()
 
-    refs = fetch_refs(bucket, env("BE_REFS_PREFIX", "brand-exposure/refs"), token)
-
-    # The key goes where the scan already looks for it, rather than adding a
-    # second way of supplying one. One code path, already tested.
-    if key:
-        with open(os.path.join(refs, "ingest-key.txt"), "w", encoding="utf-8") as f:
-            f.write(key + "\n")
+    # Diagnose reads an existing export instead of matching references, so
+    # the reference tree (and the ingest key that lives in it) stays unfetched.
+    refs = None
+    if mode != "diagnose":
+        refs = fetch_refs(bucket, env("BE_REFS_PREFIX", "brand-exposure/refs"),
+                          token)
+        # The key goes where the scan already looks for it, rather than adding
+        # a second way of supplying one. One code path, already tested.
+        if key:
+            with open(os.path.join(refs, "ingest-key.txt"), "w",
+                      encoding="utf-8") as f:
+                f.write(key + "\n")
 
     log(f"fetching {video_obj}")
     video = storage_get(bucket, video_obj,
                         os.path.join(WORK, os.path.basename(video_obj)), token)
     log(f"video: {os.path.getsize(video) / 1e6:.0f} MB in {time.time() - t0:.0f}s")
 
-    if mode == "sweep":
-        # Trial run: same frames, a grid of sensitivities, scored against the
-        # hand-labelled answer sheet. Writes nothing to the tool — the table in
-        # this log IS the output.
+    diagnose_out = diagnose_obj = None
+    if mode in ("sweep", "diagnose"):
         name = env("BE_LABELS", required=True)
         baked = os.path.join("labels", os.path.basename(name))
         if os.path.exists(baked):
@@ -208,9 +239,26 @@ def main():
         else:
             labels = storage_get(bucket, name, os.path.join(WORK, "labels.csv"),
                                  token)
+
+    if mode == "sweep":
+        # Trial run: same frames, a grid of sensitivities, scored against the
+        # hand-labelled answer sheet. Writes nothing to the tool — the table in
+        # this log IS the output.
         cmd = [sys.executable, "scripts/board-exposure-sweep.py",
                "--video", video, "--refs", refs, "--labels", labels,
                "--club", club, "--out-dir", WORK]
+    elif mode == "diagnose":
+        # Post-mortem on a finished scan: what do the missed frames look like?
+        # Reads the export it names, writes diagnose.json into the same match
+        # folder, touches neither the tool nor the references.
+        det_obj = env("BE_DETECTIONS", required=True)
+        det = storage_get(bucket, det_obj, os.path.join(WORK, "detections.json"),
+                          token)
+        diagnose_out = os.path.join(WORK, "diagnose.json")
+        diagnose_obj = det_obj.rsplit("/", 1)[0] + "/diagnose.json"
+        cmd = [sys.executable, "scripts/board_exposure_diagnose.py",
+               "--detections", det, "--labels", labels,
+               "--video", video, "--out", diagnose_out]
     else:
         cmd = [sys.executable, "scripts/board-exposure-match.py",
                "--video", video, "--refs", refs,
@@ -238,6 +286,11 @@ def main():
     rc = subprocess.call(cmd)
     if rc != 0:
         die(f"the scan exited {rc}. The log above is the scan's own output.", rc)
+
+    if mode == "diagnose":
+        storage_put(bucket, diagnose_obj, diagnose_out, token)
+        log(f"diagnose.json -> {diagnose_obj} (download it from the match "
+            f"folder, same as the export)")
 
     log(f"done in {(time.time() - t0) / 60:.1f} min")
 

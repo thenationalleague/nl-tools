@@ -719,6 +719,25 @@ scanned, doubled recall on their own board. TIC, the starvation control,
 sat flat at 3% on cue — and is therefore the next harvest target: same
 trick, purest patient.
 
+**The reference sweep — the standing acquisition method (agreed
+30/08/2026).** Richard's derivation from the harvest results: the best
+possible reference is a pre-match sweep shot from CAMERA 1'S MATCH
+POSITION — zoom changes magnification, not viewpoint, so every fixed
+occlusion the match footage carries (the goalpost through Horsham's TIC
+board, the netting) rides along in the sweep automatically, sharp, while
+everything that should never be in a reference (players) is absent
+because the pitch is empty. The spec: camera 1's position, floodlights
+in match state, boards final; slow pass along everything that camera can
+see (far side, both ends), pausing ~1 second per board at a zoom where
+the board fills a third to half the frame; delivered as its own short
+clip, never inside the billed match window. The ask, ready to hand to a
+camera operator: "Before KO, under floodlights: slow zoomed pass along
+all the ad boards you can see — pause a second on each one, close enough
+to fill half the frame. 60 seconds total, send as its own clip." The
+audition pass ingests sweep clips and mints references from them; until
+it exists, sweep frames are cropped by hand exactly like the 30/08
+harvest.
+
 Engine verdict: **1.7.1 confirmed as the shipping engine.** Precision
 99–100 on both grounds, the partner-facing failure mode gone, recall
 cost bounded (3–4 points of tail) and priced. A floor sweep (0.35/0.40)
@@ -837,8 +856,18 @@ attribution-bearing; and CAD is chased in parallel, never waited on.
 
 **Build order and status:**
 
-1. Blur/compression diagnostic, both grounds — pending; an afternoon,
-   and the premise-check the doc itself demands.
+1. Blur/compression diagnostic, both grounds — BUILT 30/08 as
+   `BE_MODE=diagnose` on the scan job (`board_exposure_diagnose.py`):
+   classifies every labelled sample found/tracked/missed against a
+   finished export, measures frame sharpness (Laplacian), compression
+   blockiness (8px boundary energy) and a zoom proxy, and counts
+   STARVED frames — misses where no sponsor hit anything, the share no
+   threshold or variant can reach. The classification half already ran
+   against the Horsham export: 342 of 425 missed samples (80%) are
+   starved frames, so the doc's own premise-check points at references
+   and zoom before the variant ladder. The frame-measure half needs the
+   container (video access) — one paste per ground, writes
+   diagnose.json beside the export.
 2. Horsham hand-labels — DONE 30/08; the generalisation verdict above.
 3. Engine 1.7.1 tighten — VERIFIED 30/08 on both grounds: Sutton 61/99
    (phantoms 12→5), Horsham 17/100 (phantoms 6→0, disputed list empty).
