@@ -616,7 +616,7 @@ tracked fills carry no inlier evidence, so they pay a higher face bar
 plus an exit rule stopping a one-sided carry step that teleports a large
 fraction of the frame in one sample.
 
-## Engine 1.7.1 — tighten (built 30/08/2026; Sutton holds, Horsham re-running)
+## Engine 1.7.1 — tighten (built and verified 30/08/2026 — the shipping engine)
 
 Both walls sit on MINTED steps only; nothing detect() accepts changes.
 
@@ -689,6 +689,41 @@ harvest A/B: one scan, three answers — DAZN is the pure tighten read and
 carries the phantom-kill check, Enterprise is tighten + harvest against
 its 34% baseline, TIC (no new references) stays the pure starvation
 control for the audition pass.
+
+**The Horsham rescan (1.7.1, harvest references live) — zero phantoms:**
+
+| sponsor      | 1.7 recall | 1.7.1 recall | 1.7.1 precision | phantoms 1.7 → 1.7.1 |
+|--------------|-----------:|-------------:|----------------:|---------------------:|
+| DAZN         |        17% |          11% |            100% |                6 → 0 |
+| Enterprise   |        34% |          28% |            100% |                0 → 0 |
+| TIC Health   |         3% |           3% |            100% |                0 → 0 |
+| **overall**  |    **21%** |      **17%** |        **100%** |            **6 → 0** |
+
+All six tracked phantoms died and the disputed-ranges list is EMPTY —
+the first scan of either ground with nothing disputed at all. On the
+footage that put a box on a player's back, the engine now claims
+nothing the human didn't mark. The walls cost four points here against
+three on Sutton: club-footage carries were doing more of the work, so
+trimming them bites harder — priced and accepted, because recall on
+this footage is an initiation problem (the campaign's target), not a
+duration-padding problem.
+
+The run's second answer reads cleanly per board despite the confound:
+**the harvest worked exactly where the harvested artwork lives.**
+Enterprise CENTRE — the double the two crops were cut from — went
+14% → 29% while the tighten was simultaneously taking 19 points off
+left-end carries (49% → 30%); net −6 for the sponsor, but the board
+table separates the two effects. That is the audition-pass thesis
+measured for the first time: two crops, cut from the match being
+scanned, doubled recall on their own board. TIC, the starvation control,
+sat flat at 3% on cue — and is therefore the next harvest target: same
+trick, purest patient.
+
+Engine verdict: **1.7.1 confirmed as the shipping engine.** Precision
+99–100 on both grounds, the partner-facing failure mode gone, recall
+cost bounded (3–4 points of tail) and priced. A floor sweep (0.35/0.40)
+stays available if those points ever matter; the campaign's answer to
+club-footage recall is initiation, never looser walls.
 
 ## Roadmap — engine 1.7, the recall pair (agreed 30/08/2026, superseded by the build above)
 
@@ -787,17 +822,18 @@ attribution-bearing; and CAD is chased in parallel, never waited on.
 1. Blur/compression diagnostic, both grounds — pending; an afternoon,
    and the premise-check the doc itself demands.
 2. Horsham hand-labels — DONE 30/08; the generalisation verdict above.
-3. Engine 1.7.1 tighten — built 30/08; Sutton verdict in (99% precision
-   held, recall 64→61, phantoms 12→5), Horsham re-running after its
-   first attempt raced the container build and ran 1.7 — caught by the
-   engine stamp. Not in the doc; forced by its own discipline: the
-   labels caught the tracker drifting onto a player, and recall gains
-   are worthless on a tracker that lies.
+3. Engine 1.7.1 tighten — VERIFIED 30/08 on both grounds: Sutton 61/99
+   (phantoms 12→5), Horsham 17/100 (phantoms 6→0, disputed list empty).
+   The shipping engine. Not in the doc; forced by its own discipline:
+   the labels caught the tracker drifting onto a player, and recall
+   gains are worthless on a tracker that lies.
 4. The audition pass, rescoped — the next big build (few hundred
    weighted frames, per-reference verdicts with best-hit crops,
    tick/untick, Tier-3 harvest, output configures the full scan). The
    hand-harvested Enterprise crops of 30/08 are its proof-of-concept,
-   and the harvest A/B rescan is its first yield measurement.
+   and the yield is now measured: Enterprise centre 14% → 29% from two
+   crops cut off the match being scanned. TIC (flat 3%, starved) is the
+   next hand-harvest target while the pass itself gets built.
 5. Sharpest-in-window sampling.
 6. The main event: synthetic variants + the blur gate + the escalation
    ladder.
