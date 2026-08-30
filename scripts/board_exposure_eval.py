@@ -255,6 +255,15 @@ def main(argv):
     if not interval or hits is None:
         sys.exit(f"{argv[1]} does not look like a -detections.json export "
                  "(needs 'interval' and 'hits').")
+    if data.get("seams"):
+        # Refused loudly rather than mis-mapped silently: this scorer turns a
+        # sample index into a time as i * interval, which is wrong the moment
+        # a seam skips the half-time break. Labels live on the file clock.
+        sys.exit("this is a halves scan (half-time skipped at "
+                 f"seams {data['seams']}). The eval's index-to-time mapping "
+                 "assumes one continuous window — scan and label each half "
+                 "as its own run to grade it, rather than trusting a silent "
+                 "mis-map here.")
     try:
         with open(argv[2], encoding="utf-8") as f:
             window, truth = load_labels(f)

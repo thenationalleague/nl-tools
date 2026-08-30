@@ -29,6 +29,10 @@ Environment (all set by the trigger, none baked into the image):
     BE_MATCH           'Home v Away'
     BE_DATE            YYYY-MM-DD
     BE_START, BE_END   optional kick-off / final whistle, '18:30' style
+    BE_HT, BE_RESTART  optional half-time whistle / second-half kick-off, as
+                       a pair — the break between them is skipped entirely,
+                       so half-time adverts never count and its frames are
+                       never billed
     BE_REFERENCE_SET   complete | partial
     BE_SOURCE_TYPE     optional full | highlights — how the footage is
                        recorded on the report. Absent = derived from
@@ -218,6 +222,8 @@ def main():
             cmd += ["--start", start]
         if end:
             cmd += ["--end", end]
+        if env("BE_HT") and env("BE_RESTART"):
+            cmd += ["--ht", env("BE_HT"), "--restart", env("BE_RESTART")]
         if env("BE_FPS"):
             cmd += ["--fps", env("BE_FPS")]
         if env("BE_SPONSORS"):

@@ -125,6 +125,9 @@ function validRequest(req) {
   if (req.sponsors != null && !Array.isArray(req.sponsors)) {
     return "sponsors must be a list of reference folder names";
   }
+  if (!!req.ht !== !!req.restart) {
+    return "half-time marks come as a pair — ht and restart together";
+  }
   return null;
 }
 
@@ -148,6 +151,10 @@ function buildEnv(req) {
   }
   if (req.start) env.push(["BE_START", req.start]);
   if (req.end) env.push(["BE_END", req.end]);
+  if (req.ht && req.restart) {
+    env.push(["BE_HT", req.ht]);
+    env.push(["BE_RESTART", req.restart]);
+  }
   return env.map(([name, value]) => ({ name, value: String(value) }));
 }
 

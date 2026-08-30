@@ -917,5 +917,112 @@ class SponsorAllowList(unittest.TestCase):
                 C.load_tree(root, "Sutton United", only=["DAZNN"]), [])
 
 
+class HalvesSeams(unittest.TestCase):
+    """The half-time seam contract: a seam is the first sample index of a new
+    extraction window, and no time-based rule may reach across one — two
+    index-adjacent samples there are a whole half-time apart. Pure rules
+    here; the frame-level passes get their own cv2 classes below."""
+
+    def test_seam_between(self):
+        import board_exposure_core as C2
+        self.assertTrue(C2.seam_between(3, 4, {4}))    # stepping into a window
+        self.assertTrue(C2.seam_between(0, 9, {4}))    # spanning it entirely
+        self.assertFalse(C2.seam_between(4, 5, {4}))   # inside the new window
+        self.assertFalse(C2.seam_between(0, 3, {4}))   # inside the old one
+        self.assertFalse(C2.seam_between(0, 9, None))  # no seams, no walls
+        self.assertFalse(C2.seam_between(0, 9, set()))
+
+    def test_runs_split_at_the_seam_and_merge_without_it(self):
+        import board_exposure_core as C2
+        idxs = [2, 3, 4, 5]
+        merged = C2.runs_from(idxs, bridge=2, min_run=1)
+        self.assertEqual(len(merged), 1, "control: no seam means one run")
+        split = C2.runs_from(idxs, bridge=2, min_run=1, seams={4})
+        self.assertEqual([r[0] for r in split], [2, 4],
+                         "a board up before AND after half-time is two "
+                         "appearances, not one sixteen-minute one")
+
+    def test_gap_candidates_refuse_a_seam_spanning_gap(self):
+        import board_exposure_core as C2
+        self.assertEqual(C2.gap_candidates([0, 4], 5), [(0, 4)],
+                         "control: the gap is fillable without a seam")
+        self.assertEqual(C2.gap_candidates([0, 4], 5, seams={2}), [],
+                         "the same gap across half-time must never fill")
+
+    def test_halves_windows_validation(self):
+        bem = _load_match_module()
+        self.assertEqual(bem.halves_windows(None, None, None, None),
+                         [(0, None)])
+        self.assertEqual(bem.halves_windows(60, 2760, 3660, 6600),
+                         [(60, 2760), (3660, 6600)])
+        with self.assertRaises(SystemExit):
+            bem.halves_windows(0, 2760, None, None)      # half a pair
+        with self.assertRaises(SystemExit):
+            bem.halves_windows(0, 3660, 2760, None)      # swapped
+        with self.assertRaises(SystemExit):
+            bem.halves_windows(0, 2760, 3660, 3000)      # restart past end
+
+
+@unittest.skipUnless(HAVE_CV, "opencv-python-headless + numpy not installed")
+class SeamStopsTracking(unittest.TestCase):
+    """The frame-level passes against the seam. Fixtures are deliberately
+    EASY — a board the tracker would happily follow — so the only thing
+    standing between the anchors is the seam itself. A fixture the tracker
+    fails on its own merits would pass these tests with the seam logic
+    deleted, proving nothing."""
+
+    def test_gap_fill_refuses_to_bridge_half_time(self):
+        import tempfile
+        bem = _load_match_module()
+        d = tempfile.mkdtemp()
+        files = []
+        for i, x in enumerate([100, 140, 180, 220, 260]):
+            f = board_frame(x, blur_px=(14 if 0 < i < 4 else 0))
+            p = os.path.join(d, f"f{i}.png")
+            cv2.imwrite(p, f)
+            files.append(p)
+        real = {"scope": "partner",
+                "quad": [[100, 200], [260, 200], [260, 240], [100, 240]],
+                "board": None, "logo_area": 2.8, "area": 2.8,
+                "inliers": 30, "clarity": 0.6}
+        far = dict(real, quad=[[260, 200], [420, 200], [420, 240], [260, 240]])
+        h = {0: {"ACME": [real]}, 4: {"ACME": [far]}}
+        n = bem.close_blurred_gaps(h, files, 0.5, None, seams={2})
+        self.assertEqual(n, 0, "an anchor each side of half-time is not a gap")
+        self.assertEqual(sorted(h), [0, 4])
+
+    def test_carry_forward_stops_at_the_seam_both_ways(self):
+        import tempfile
+        bem = _load_match_module()
+        d = tempfile.mkdtemp()
+        files = []
+        for i in range(8):
+            f = board_frame(100 + 20 * i, blur_px=6)
+            p = os.path.join(d, f"f{i}.png")
+            cv2.imwrite(p, f)
+            files.append(p)
+        board = np.zeros((40, 160, 3), np.uint8)
+        board[:] = (40, 160, 40)
+        cv2.putText(board, "ACME", (8, 30), cv2.FONT_HERSHEY_SIMPLEX,
+                    1.0, (255, 255, 255), 4)
+        cv2.rectangle(board, (120, 8), (150, 32), (255, 255, 255), -1)
+        faces = {"ACME": [cv2.resize(cv2.cvtColor(board, cv2.COLOR_BGR2GRAY),
+                                     (C.VIS_W, C.VIS_H))]}
+        seed = {"scope": "partner",
+                "quad": [[200, 200], [360, 200], [360, 240], [200, 240]],
+                "board": None, "logo_area": 2.8, "area": 2.8,
+                "inliers": 30, "clarity": 0.6}
+        h = {5: {"ACME": [dict(seed)]}}
+        bem.extend_run_ends(h, files, 0.5, faces, seams={4})
+        self.assertEqual(sorted(h), [4, 5, 6, 7],
+                         "back to the window's first sample and no further; "
+                         "forward unaffected")
+        h2 = {5: {"ACME": [dict(seed)]}}
+        bem.extend_run_ends(h2, files, 0.5, faces)
+        self.assertGreater(len(h2), 4, "control: without the seam the same "
+                           "fixture extends past sample 4 — the seam, not "
+                           "the footage, is what stopped the walk above")
+
+
 if __name__ == "__main__":
     unittest.main()

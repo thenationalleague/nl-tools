@@ -580,32 +580,34 @@ precision leak left — brief full-screen sponsor graphics), a second
 ground's hand-labels to prove generalisation, per-design attribution,
 board print artwork as references.
 
-**The halves marks — recorded 30/08/2026, Richard's ruling from the first
-live uploads.** A full-90 broadcast file carries half-time, and half-time
-carries ad breaks: a sponsor's OWN 30-second advert matches its reference
-perfectly and sails past every guard — the corners don't catch it, the
-permanence tier doesn't (too short), and the face check passes because it
-genuinely is the logo. So until this is built, **a full-90 scan counts HT
-ads as board exposure**, and full-90 numbers should be read with that
-asterisk. (Every verified number so far — Sutton, Horsham — is single
-continuous windows with no HT in frame, so 99%/64% is untouched.)
+**The halves marks — built 30/08/2026, same day as the ruling.** A full-90
+broadcast file carries half-time, and half-time carries ad breaks: a
+sponsor's OWN 30-second advert matches its reference perfectly and sails
+past every guard — the corners don't catch it, the permanence tier doesn't
+(too short), and the face check passes because it genuinely is the logo.
+The fix as shipped: `--ht` + `--restart` on the match script (a validated
+pair; `halves_windows()` dies in a sentence on a swapped order), carried
+as `BE_HT`/`BE_RESTART` from the uploader's two new fields, and the break
+between them is **never extracted** — half-time adverts cannot count, and
+~14% of a full-90's frames go unbilled. The honest thing and the cheap
+thing point the same way again.
 
-The fix is marks, not magic: the upload form grows kick-off / half-time /
-second-half restart / full-time (it has the outer pair today), and the
-scan skips the HT window outright — which is also ~14% of a full-90's
-frames unpaid, so the honest thing is again the cheap thing. It is engine
-work, not form work: the sample-index-to-time arithmetic assumes one
-contiguous window everywhere (eval, report, tracker), and the HT gap must
-be a hard boundary that gap-fill and carry-forward can never bridge — the
-same rule a camera cut already gets. This supersedes the old "halves
-runner" idea (two scans of one match collide on the same matchId — the
-second upload replaces the first, so two-record merging is a dead end).
+The engine's new word is the **seam**: the first sample index of a later
+extraction window. Two index-adjacent samples across a seam are a whole
+half-time apart, so every rule that treats index distance as time distance
+refuses to reach across one — `runs_from` (a board up before AND after the
+break is two appearances, not one sixteen-minute one), `gap_candidates`,
+and the carry-forward's walk, which treats a seam as a wall in both
+directions. The proxy is built per half and joined (stream-copy concat),
+so playback and the sample clock stay one clock, in the tool's viewer and
+the local report alike. The export head carries `windows` and `seams`;
+the eval REFUSES a seamed export loudly rather than silently mis-mapping
+its one-window index-to-time arithmetic — grading a halves scan means
+labelling each half as its own run. (Every verified number — Sutton,
+Horsham — predates seams: single continuous windows, 99%/64% untouched.)
 
-Interim, today: either half can be scanned cleanly on its own — set the
-trims to KO→HT for the first half, or restart→end for the second — just
-never upload both halves of one match as two scans (the id collision
-above). A full 90 with HT left in still measures; it just needs the
-asterisk until the marks exist.
+This supersedes the old "halves runner" idea (two scans of one match
+collide on the same matchId — the second upload replaces the first).
 
 ## Roadmap after 1.7 — agreed 30/08/2026
 
@@ -636,6 +638,22 @@ either way: colour only nominates, so bad light can waste a nomination —
 it can never mint a phantom second. (References themselves are colour-blind
 — flatten() greys everything before SIFT — which is why light has never
 broken detection; colour exists only in this scout.)
+
+**The audition pass — Richard's idea, recorded 30/08/2026.** Before paying
+for a full scan, a cheap interim verdict on the references against THIS
+footage: sample two dozen spread frames (the furniture probe already picks
+exactly this kind of spread), run detection over just those, and show the
+result per reference FILE — found n times, best clarity, a crop of its
+best hit, or "never found". Tick or untick each reference, then the real
+scan runs with the approved set. Pennies and about a minute, and it
+catches the two expensive mistakes before the spend instead of after: the
+Skyline-style bad crop (a player across the reference means never found),
+and the missing board design (Enterprise runs several per ground). Wants
+two small pieces when built: a `preview` mode on the job beside scan/sweep
+that writes a tiny result JSON instead of a match, and a per-FILE
+allow-list (BE_SPONSORS filters folders today; the audition's verdict is
+per file). The tick/untick surface is the same muscle the adjudication
+queue below wants — build one, get the habit for both.
 
 **Tool + engine, after that — the adjudication queue.** Everything the
 engine barely-passed or barely-failed goes to a Review strip in the tool:
