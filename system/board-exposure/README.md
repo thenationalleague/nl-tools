@@ -582,12 +582,28 @@ first phantoms on this footage arrived with a lesson attached: 6 samples
 (3.0s), ALL tracked, both disputed ranges sitting 1-2s beyond the ends
 of runs Richard himself marked (0:30 before his 0:32 start; 4:16 past
 his 4:15 end) — carry-forward stretching into frames where the human
-couldn't confirm the board either. Not invented objects: overshot
-boundaries. DAZN precision 84%, overall 95% — the first sub-97% cell in
+couldn't confirm the board either. DAZN precision 84%, overall 95% — the first sub-97% cell in
 the ledger, and a warning shot for the carry-sweep idea: longer carry
 buys recall at exactly this edge, so the sweep's precision gate is not a
 formality on club footage. The club-stream wall stands: 21% here vs 64%
 on broadcast, and the missing mass is initiation, not completion.
+
+Diagnosed from the tool playback, Richard spotting it: the 4:15 chain's
+box is sitting on a PLAYER'S BACK. The mechanism is a fast pan-out — at
+2 samples a second the board moves most of a frame, or clean out of it,
+between consecutive samples; the tracker hunts for last frame's patch in
+a frame where the target no longer exists, and the best remaining
+correlation wins (a dark torso, at night, on smear). The gates that
+should say "gone" are too soft at that scale: correlation 0.6 and face
+0.25 both clear on blur. Two consequences recorded: the tail of a run
+can be temporally right and SPATIALLY wrong — and the eval scores time
+and sponsor, not position, so 84% is optimistic about tail quality; and
+a partner watching playback must never see the box on a person. The fix
+is 1.7.1 (tighten): a higher identity floor for every minted step —
+tracked fills carry no inlier evidence, so they pay a higher face bar
+(the measured gap is wide: genuine-blurred 0.84 vs impostor 0.11) —
+plus an exit rule stopping a one-sided carry step that teleports a large
+fraction of the frame in one sample.
 The stated target moved most: the far-side dugout boards went from 24-36%
 to 53-60%, and Enterprise's goal-line boards now read 86-97%. The phantom
 cost of the extra recall is 6.0s across a 494s window (up from 2.0s in
