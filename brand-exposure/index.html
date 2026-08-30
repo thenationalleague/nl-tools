@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Brand Exposure
-  Version: v0.7 (30/08/2026)
+  Version: v0.8 (30/08/2026)
   File: /brand-exposure/index.html
 
   Sponsor exposure measured from match video — seconds on screen, clarity and
@@ -27,6 +27,17 @@
     staff              → off; granted per-user, like Commercial Compliance
 
   Changelog
+  v0.8 (30/08/2026) — Scan footage from the tool. A superadmin picks the
+  fixture from the NLS results feed (current season or last, one tap fills
+  opponent, date, competition and venue; manual entry stays for friendlies),
+  chooses what to scan for (partners / home club / both / individual boards —
+  a subset is recorded reference-set partial and says so), eyeballs every
+  reference image the scan will use (tap for full size — the bad-crop catch),
+  drops the video (resumable upload, priced up front from its duration, no
+  size cap because ingress is free), and watches queued → scanning → done in
+  a live strip. The scan itself is launched serially by the new
+  brandExposureScanRequest function; the source video is deleted on success
+  and swept 48h after a failure. Storage/RTDB rules updated in the same PR.
   v0.7 (30/08/2026) — The page explains itself. Engine chips replace the
   mixed-settings banner: pick an engine and the list, totals and averages
   recompute over that engine only — like for like by construction, with the
@@ -117,6 +128,20 @@
     var NL_TOOL_KEY = 'ops-brand-exposure';
 
     window.NL_CHANGELOG = [
+      {
+        date: '30/08/2026',
+        version: 'v0.8',
+        items: [
+          'Scan footage without a terminal: pick the fixture from the NLS ' +
+            'results feed (this season or last), choose what to scan for, ' +
+            'check the reference images, drop the video and watch it become ' +
+            'a measured match.',
+          'Uploads are resumable and priced up front from the video’s ' +
+            'length; the source is deleted once the scan lands and swept ' +
+            '48 hours after a failure.',
+          'Scans run one at a time — a queue position shows while one is on.'
+        ]
+      },
       {
         date: '30/08/2026',
         version: 'v0.7',
@@ -354,6 +379,47 @@
               user-select: all; }
   tr.is-revoked td { color: var(--text-muted); }
   .viewer.novideo video, .viewer.novideo svg { display: none; }
+
+  /* ── Scan new footage (v0.8) ──────────────────────────────────────────── */
+  /* A results row is a button — the whole row selects the fixture. */
+  .fxlist { display: flex; flex-direction: column; gap: 6px; margin-top: 12px;
+            max-height: 340px; overflow-y: auto; }
+  .fxrow { display: flex; align-items: center; gap: 10px; width: 100%;
+           text-align: left; background: var(--navy-50);
+           border: 1px solid var(--border); border-radius: 8px;
+           padding: 9px 12px; cursor: pointer; font-size: 13.5px; }
+  .fxrow:hover { border-color: var(--navy-300); }
+  .fxrow[aria-pressed="true"] { border-color: var(--primary);
+                                background: var(--primary-50); }
+  .fxrow .fxrow__date { color: var(--text-muted); font-variant-numeric: tabular-nums;
+                        flex: none; width: 64px; }
+  .fxrow .fxrow__score { font-variant-numeric: tabular-nums; font-weight: 600;
+                         flex: none; }
+  .fxrow .fxrow__comp { margin-left: auto; flex: none; }
+  /* Reference thumbnails: the lightbox's index. */
+  .refgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+             gap: 10px; margin-top: 12px; }
+  .refcard { border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+             background: var(--navy-50); cursor: pointer; padding: 0; }
+  /* White ground on purpose: reference crops are often transparent PNGs and
+     boards are judged as printed — on the panel tint they read as artwork. */
+  .refcard img { width: 100%; height: 64px; object-fit: contain; display: block;
+                 background: var(--white); }
+  .refcard figcaption { font-size: 10.5px; padding: 4px 6px; color: var(--text-muted);
+                        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Upload / scan progress. */
+  .prog { height: 10px; border-radius: 99px; background: var(--navy-100);
+          overflow: hidden; margin: 8px 0 4px; }
+  .prog i { display: block; height: 100%; background: var(--primary);
+            border-radius: 99px; transition: width .3s; }
+  .prog--est i { background: var(--navy-300); }
+  /* One scan request, in the watch panel. */
+  .scanreq { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+         border: 1px solid var(--border); border-radius: 8px;
+         padding: 10px 13px; margin-bottom: 8px; background: var(--white); }
+  .scanreq__fx { font-weight: 600; }
+  .scanreq__sub { font-size: 12px; color: var(--text-muted); width: 100%; }
+  .scanreq__bar { flex: 1 1 160px; min-width: 140px; }
 </style>
 </head>
 <body>
@@ -381,6 +447,7 @@
         <div class="toolbar__left"><div class="section-head"><h2>Matches measured</h2></div></div>
         <div class="toolbar__right">
           <button class="btn btn--ghost" id="btnKeys" hidden>Ingest keys</button>
+          <button class="btn btn--ghost" id="btnScan" hidden>Scan footage</button>
           <button class="btn btn--primary" id="btnAdd" hidden>Add a match</button>
         </div>
       </div>
@@ -459,6 +526,44 @@
       </div>
       <div class="table-wrap" style="margin-top:16px">
         <table class="table table--compact" id="vTable"></table>
+      </div>
+    </section>
+
+    <!-- ── Scan new footage (v0.8) ──────────────────────────────────── -->
+    <section id="viewScan" hidden>
+      <div class="toolbar">
+        <div class="toolbar__left">
+          <button class="btn btn--ghost btn--sm" id="sBack">Back</button>
+          <h2 class="match-title">Scan new footage</h2>
+        </div>
+      </div>
+      <div id="sReqs"></div>
+      <div class="form-panel">
+        <div class="form-panel__head">The fixture</div>
+        <div class="form-panel__body">
+          <div class="filter-pill-row" id="sSeasons"></div>
+          <div class="form-grid">
+            <div class="form-group"><label>Club</label><div id="sClub"></div></div>
+          </div>
+          <div id="sFixtures"></div>
+          <div id="sManualWrap"></div>
+          <div id="sChosen"></div>
+        </div>
+      </div>
+      <div class="form-panel">
+        <div class="form-panel__head">What to scan for</div>
+        <div class="form-panel__body">
+          <div id="sScope"></div>
+          <div id="sRefs"></div>
+        </div>
+      </div>
+      <div class="form-panel">
+        <div class="form-panel__head">The footage</div>
+        <div class="form-panel__body">
+          <div id="sUpload"></div>
+          <div id="sTrims"></div>
+          <div id="sGo"></div>
+        </div>
       </div>
     </section>
 
@@ -1675,13 +1780,703 @@
     return m;
   }
 
+  /* ── Scan new footage (v0.8) ─────────────────────────────────────────
+     The uploader: pick the fixture from NLS results, choose what to scan
+     for, eyeball the references, drop the video, and the cloud does the
+     rest — no terminal anywhere. Superadmin-only by ruling (30/08/2026).
+     The storage rule on uploads/ stays type-check-only because Storage
+     rules cannot read RTDB roles; the request record (rules-tested,
+     superadmin create) and the scan-request function's own author check
+     are the real gate. See system/board-exposure/uploader-spec.md. */
+  var REQ_ROOT    = 'app-data/ops-brand-exposure/requests';
+  var REFS_PREFIX = 'brand-exposure/refs';
+
+  /* The NLS results feed — the same public, CORS-open API the travel
+     planner and the embeds already read from the browser. Season is a
+     query parameter (2025 = the 2025/26 campaign); there is no club
+     parameter, so one season list is fetched per competition and filtered
+     by teamID (= clubs-meta optaID) client-side. Field names verified
+     against live rows 30/08/2026 — kickOffDateUTC has no 'T' and is UTC. */
+  var NLS_BASE  = 'https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2';
+  var NLS_COMPS = { 89: 'National League', 373: 'National League North',
+                    372: 'National League South', 1275: 'National League Cup' };
+
+  /* The 1.7 cost model, tool-side: pence per footage-minute (a range, and
+     an estimate on a form — never a billed number) and how many minutes of
+     wall clock a minute of footage costs to scan. */
+  var EST_PENCE_MIN = [2.5, 4.5];
+  var EST_WALL_X    = 5;
+
+  var SCAN = {
+    season: null, clubSel: null, fixture: null, manual: false,
+    scope: 'both', partnersList: null, clubList: null, clubListFor: null,
+    picked: {}, file: null, duration: null, task: null, upState: null,
+    reqSub: false, requests: {}, picker: null, manualPicker: null,
+    resCache: {}
+  };
+
+  function scanSeasons() {
+    var meta = null;
+    try { meta = NL.clubs.meta(); } catch (e) {}
+    /* Derived, never hardcoded — the travel planner pinned SID=2026 and its
+       changelog shows a person rolling it over by hand each July. */
+    var cur = Number(NL.season.current(meta) || NL.season.fromDate());
+    return [String(cur), String(cur - 1)];
+  }
+
+  function openScan() {
+    SCAN.fixture = null; SCAN.file = null; SCAN.duration = null;
+    if (!SCAN.season) SCAN.season = scanSeasons()[0];
+    show('scan');
+    subReqs();
+    renderScan();
+  }
+
+  function renderScan() {
+    renderSeasonChips();
+    wireScanClub();
+    renderFixtures();
+    renderChosen();
+    renderScope();
+    renderRefs();
+    renderUpload();
+    renderGo();
+  }
+
+  function renderSeasonChips() {
+    var meta = null;
+    try { meta = NL.clubs.meta(); } catch (e) {}
+    $('sSeasons').innerHTML = '<span class="filter-pill-row__label">Season</span>' +
+      scanSeasons().map(function (k) {
+        return '<button class="filter-pill' + (k === SCAN.season ? ' active' : '') +
+          '" data-season="' + esc(k) + '">' + esc(NL.season.label(meta, k)) + '</button>';
+      }).join('');
+    $('sSeasons').onclick = function (ev) {
+      var b = ev.target.closest('[data-season]');
+      if (!b) return;
+      SCAN.season = b.getAttribute('data-season');
+      SCAN.fixture = null;
+      if (SCAN.picker) SCAN.picker.setSeason(SCAN.season);
+      renderScan();
+    };
+  }
+
+  function wireScanClub() {
+    if (SCAN.picker) return;
+    try {
+      SCAN.picker = NL.clubPicker('#sClub', {
+        mode: 'select', season: SCAN.season, clearable: true,
+        placeholder: 'Whose matches?',
+        onSelect: function (sel) {
+          SCAN.clubSel = sel;
+          SCAN.fixture = null;
+          renderFixtures(); renderChosen(); renderScope(); renderRefs(); renderGo();
+        }
+      });
+    } catch (e) { /* clubs-meta unavailable — manual entry still works */ }
+  }
+
+  /* One season list per competition, paged, cached — then filtered by club
+     in the browser (the feed has no club parameter). */
+  function loadResults(season) {
+    if (SCAN.resCache[season]) return Promise.resolve(SCAN.resCache[season]);
+    var today = new Date().toISOString().slice(0, 10);
+    var jobs = Object.keys(NLS_COMPS).map(function (comp) {
+      var rows = [], page = 1;
+      function next() {
+        var qs = '?competitionID=' + comp + '&seasonID=' + season +
+          '&sort=-kickOffDateUTC&page.number=' + page + '&page.size=100' +
+          '&from=' + season + '-07-01+00%3A00%3A00Z' +
+          '&to=' + today + '+23%3A59%3A59Z';
+        return fetch(NLS_BASE + '/matches/' + qs)
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            var got = (d && d.data) || [];
+            got.forEach(function (m) {
+              var a = m.attributes || {};
+              var period = String(a.matchPeriod || '').toLowerCase();
+              if (period !== 'fulltime' && period !== 'postmatch') return;
+              var iso = String(a.kickOffDateUTC || '').replace(' ', 'T') + 'Z';
+              rows.push({
+                id: m.id,
+                /* The UTC date part IS the match date here: no National
+                   League fixture kicks off near midnight UK time. */
+                date: iso.slice(0, 10),
+                homeName: (a.homeTeam || {}).name || (a.homeTeam || {}).shortName || '',
+                homeId: (a.homeTeam || {}).teamID || '',
+                awayName: (a.awayTeam || {}).name || (a.awayTeam || {}).shortName || '',
+                awayId: (a.awayTeam || {}).teamID || '',
+                hs: (a.homeTeam || {}).score, as: (a.awayTeam || {}).score,
+                comp: NLS_COMPS[comp] || String(a.competitionID || '')
+              });
+            });
+            if (got.length === 100 && page < 8) { page++; return next(); }
+          })
+          .catch(function () { /* one competition down ≠ no picker */ });
+      }
+      return next().then(function () { return rows; });
+    });
+    return Promise.all(jobs).then(function (per) {
+      var all = [].concat.apply([], per).sort(function (a, b) {
+        return b.date.localeCompare(a.date);
+      });
+      SCAN.resCache[season] = all;
+      return all;
+    });
+  }
+
+  function renderFixtures() {
+    var box = $('sFixtures');
+    if (!box) return;
+    var manualBtn = '<p style="margin:12px 0 0"><button class="btn btn--ghost btn--sm" ' +
+      'id="sManualBtn">' + (SCAN.manual ? 'Back to the fixture list' :
+      'Enter the fixture by hand') + '</button></p>';
+    if (SCAN.manual) {
+      box.innerHTML = manualBtn;
+      wireManualBtn();
+      renderManual();
+      return;
+    }
+    $('sManualWrap').innerHTML = '';
+    if (!SCAN.clubSel || !SCAN.clubSel.club) {
+      box.innerHTML = '<p class="form-hint">Pick the club and the played fixtures ' +
+        'fill in from the NLS results feed.</p>' + manualBtn;
+      wireManualBtn();
+      return;
+    }
+    box.innerHTML = '<p class="form-hint">Loading results…</p>' + manualBtn;
+    wireManualBtn();
+    var season = SCAN.season, opta = SCAN.clubSel.club.optaID;
+    loadResults(season).then(function (rows) {
+      if (SCAN.season !== season || SCAN.manual) return;
+      var mine = rows.filter(function (r) {
+        return r.homeId === opta || r.awayId === opta;
+      }).slice(0, 40);
+      if (!mine.length) {
+        box.innerHTML = '<p class="form-hint">No completed results for ' +
+          esc(SCAN.clubSel.name) + ' in this season’s feed.</p>' + manualBtn;
+        wireManualBtn();
+        return;
+      }
+      box.innerHTML = '<div class="fxlist">' + mine.map(function (r) {
+        var on = SCAN.fixture && SCAN.fixture.nlsId === r.id;
+        return '<button class="fxrow" data-fx="' + esc(r.id) + '" aria-pressed="' +
+          (on ? 'true' : 'false') + '">' +
+          '<span class="fxrow__date">' + esc(NL.formatDateShort(r.date)) + '</span>' +
+          '<span>' + esc(r.homeName) + ' v ' + esc(r.awayName) + '</span>' +
+          '<span class="fxrow__score">' + (r.hs == null ? '' : esc(r.hs + '–' + r.as)) + '</span>' +
+          '<span class="scope-tag fxrow__comp">' + esc(r.comp) + '</span></button>';
+      }).join('') + '</div>' + manualBtn;
+      wireManualBtn();
+      box.querySelectorAll('[data-fx]').forEach(function (b) {
+        b.onclick = function () { pickFixture(season, b.getAttribute('data-fx')); };
+      });
+    });
+  }
+
+  function wireManualBtn() {
+    var b = $('sManualBtn');
+    if (b) b.onclick = function () {
+      SCAN.manual = !SCAN.manual;
+      SCAN.fixture = null;
+      renderFixtures(); renderChosen(); renderScope(); renderRefs(); renderGo();
+    };
+  }
+
+  function pickFixture(season, id) {
+    var r = (SCAN.resCache[season] || []).filter(function (x) { return x.id === id; })[0];
+    if (!r) return;
+    /* The GROUND is the fixture's home side, whoever was picked to find it —
+       the scan joins refs/clubs/<home> and measures that ground's boards.
+       byOpta maps the NLS teamID back to the clubs-meta name, which is what
+       the reference folders are named after; a cup guest misses and keeps
+       the row's own name. */
+    var home = null, away = null;
+    try { home = NL.clubs.byOpta(r.homeId); away = NL.clubs.byOpta(r.awayId); } catch (e) {}
+    SCAN.fixture = {
+      nlsId: r.id, date: r.date,
+      club: (home && home.name) || r.homeName,
+      opponent: (away && away.name) || r.awayName,
+      comp: r.comp, venue: null
+    };
+    /* Venue lives reliably on the detail response only — one fetch per tap,
+       and the only source that gets a neutral final right. */
+    fetch(NLS_BASE + '/matches/' + encodeURIComponent(r.id))
+      .then(function (x) { return x.json(); })
+      .then(function (d) {
+        var v = d && d.data && d.data.attributes && d.data.attributes.venue;
+        if (v && SCAN.fixture && SCAN.fixture.nlsId === r.id) {
+          SCAN.fixture.venue = v;
+          renderChosen();
+        }
+      }).catch(function () {});
+    renderFixtures(); renderChosen(); renderScope(); renderRefs(); renderGo();
+  }
+
+  function renderManual() {
+    $('sManualWrap').innerHTML =
+      '<div class="form-grid" style="margin-top:12px">' +
+      '<div class="form-group"><label for="smDate">Date of the match</label>' +
+        '<input class="modal__input" type="date" id="smDate"></div>' +
+      '<div class="form-group"><label>Ground (home club)</label><div id="smClub"></div></div>' +
+      '<div class="form-group"><label for="smOpp">Opponent</label>' +
+        '<input class="modal__input" type="text" id="smOpp"></div>' +
+      '</div>' +
+      '<p class="form-hint">For footage NLS has no row for — friendlies, ' +
+      'pre-season. The ground name decides which club reference folder joins ' +
+      'the partners.</p>';
+    SCAN.manualPicker = null;
+    try {
+      SCAN.manualPicker = NL.clubPicker('#smClub', {
+        mode: 'select', season: SCAN.season, clearable: true,
+        extraClubs: (NL.clubs.guests && NL.clubs.guests()) || [],
+        onSelect: function () { readManual(); }
+      });
+    } catch (e) {}
+    function readManual() {
+      var sel = SCAN.manualPicker && SCAN.manualPicker.getValue &&
+                SCAN.manualPicker.getValue();
+      var date = ($('smDate') || {}).value || '';
+      var opp = (($('smOpp') || {}).value || '').trim();
+      SCAN.fixture = (date && sel && sel.name && opp)
+        ? { nlsId: null, date: date, club: sel.name, opponent: opp,
+            comp: null, venue: null }
+        : null;
+      renderChosen(); renderScope(); renderRefs(); renderGo();
+    }
+    ['smDate', 'smOpp'].forEach(function (id) {
+      $(id).oninput = readManual; $(id).onchange = readManual;
+    });
+  }
+
+  function renderChosen() {
+    var f = SCAN.fixture;
+    $('sChosen').innerHTML = !f ? '' :
+      '<div class="readout"><div class="readout__grid">' +
+      '<div><dt>Fixture</dt><dd>' + esc(f.club) + ' v ' + esc(f.opponent) + '</dd></div>' +
+      '<div><dt>Date</dt><dd>' + esc(NL.formatDateShort(f.date)) + '</dd></div>' +
+      '<div><dt>Ground</dt><dd>' + esc(f.club) + (f.venue ? ' — ' + esc(f.venue) : '') +
+        '</dd></div>' +
+      (f.comp ? '<div><dt>Competition</dt><dd>' + esc(f.comp) + '</dd></div>' : '') +
+      '</div></div>';
+  }
+
+  /* ── Scope: which reference folders join the scan ─────────────────── */
+  function loadFolders() {
+    if (SCAN.partnersList === null) {
+      storage.ref(REFS_PREFIX + '/partners').listAll().then(function (r) {
+        SCAN.partnersList = r.prefixes.map(function (p) { return p.name; });
+        renderScope(); renderRefs(); renderGo();
+      }).catch(function () { SCAN.partnersList = []; renderScope(); });
+    }
+    var club = SCAN.fixture && SCAN.fixture.club;
+    if (club && SCAN.clubListFor !== club) {
+      SCAN.clubListFor = club;
+      SCAN.clubList = null;
+      storage.ref(REFS_PREFIX + '/clubs/' + club).listAll().then(function (r) {
+        if (SCAN.clubListFor !== club) return;
+        SCAN.clubList = r.prefixes.map(function (p) { return p.name; });
+        renderScope(); renderRefs(); renderGo();
+      }).catch(function () {
+        if (SCAN.clubListFor === club) { SCAN.clubList = []; renderScope(); }
+      });
+    }
+  }
+
+  /* The effective allow-list. null = everything (scope Both, or literally
+     every folder ticked) — which is also what the engine treats as "no
+     filter", so the two stay one idea. */
+  function chosenSponsors() {
+    var partners = SCAN.partnersList || [], clubs = SCAN.clubList || [];
+    if (SCAN.scope === 'both') return null;
+    if (SCAN.scope === 'partners') return partners.slice();
+    if (SCAN.scope === 'club') return clubs.slice();
+    var all = partners.concat(clubs);
+    var picked = all.filter(function (n) { return SCAN.picked[n]; });
+    return picked.length === all.length && all.length ? null : picked;
+  }
+
+  function renderScope() {
+    loadFolders();
+    var chips = [
+      ['partners', 'League partners'],
+      ['club', 'Home club’s boards'],
+      ['both', 'Both'],
+      ['pick', 'Pick individually']
+    ];
+    var html = '<div class="engset">' + chips.map(function (c) {
+      return '<button class="btn btn--ghost btn--sm" data-scope="' + c[0] +
+        '" aria-pressed="' + (SCAN.scope === c[0]) + '">' + c[1] + '</button>';
+    }).join('') + '</div>';
+
+    if (SCAN.scope === 'pick') {
+      var groups = [['League partners', SCAN.partnersList],
+                    [(SCAN.fixture ? SCAN.fixture.club : 'Home club'), SCAN.clubList]];
+      html += groups.map(function (g) {
+        var names = g[1];
+        if (names === null) return '<p class="form-hint">Loading ' + esc(g[0]) + '…</p>';
+        if (!names.length) return '';
+        return '<div class="form-group"><label>' + esc(g[0]) + '</label>' +
+          names.map(function (n) {
+            return '<label style="display:inline-flex;align-items:center;gap:6px;' +
+              'margin:0 14px 6px 0"><input type="checkbox" data-pick="' + esc(n) +
+              '"' + (SCAN.picked[n] ? ' checked' : '') + '> ' + esc(n) + '</label>';
+          }).join('') + '</div>';
+      }).join('');
+    }
+
+    var subset = chosenSponsors();
+    if (subset && subset.length) {
+      html += '<p class="form-hint">A narrowed scan is recorded as ' +
+        'reference-set partial — share of voice stays withheld.</p>';
+    }
+    if (SCAN.fixture && SCAN.clubList !== null && !((SCAN.clubList || []).length) &&
+        (SCAN.scope === 'club' || SCAN.scope === 'both')) {
+      html += '<div class="banner banner--amber">No local boards on file for ' +
+        esc(SCAN.fixture.club) + ' — ' +
+        (SCAN.scope === 'club' ? 'there is nothing to scan for.'
+                               : 'scanning partners only.') + '</div>';
+    }
+    $('sScope').innerHTML = html;
+    $('sScope').onclick = function (ev) {
+      var b = ev.target.closest('[data-scope]');
+      if (b) {
+        SCAN.scope = b.getAttribute('data-scope');
+        renderScope(); renderRefs(); renderGo();
+      }
+    };
+    $('sScope').querySelectorAll('[data-pick]').forEach(function (cb) {
+      cb.onchange = function () {
+        SCAN.picked[cb.getAttribute('data-pick')] = cb.checked;
+        renderScope(); renderRefs(); renderGo();
+      };
+    });
+  }
+
+  /* ── The reference strip: what the scan will actually look for ────── */
+  function renderRefs() {
+    var box = $('sRefs');
+    if (!box) return;
+    var subset = chosenSponsors();
+    var partners = SCAN.partnersList || [], clubs = SCAN.clubList || [];
+    var folders;
+    if (subset === null) folders = partners.map(function (n) { return ['partners', n]; })
+      .concat(clubs.map(function (n) { return ['club', n]; }));
+    else folders = subset.map(function (n) {
+      return [partners.indexOf(n) >= 0 ? 'partners' : 'club', n];
+    });
+    if (!folders.length) { box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="refgrid" id="sRefGrid"></div>' +
+      '<p class="form-hint">Every image the scan will look for. A player across ' +
+      'the crop means never found — tap one to check it.</p>';
+    var grid = $('sRefGrid');
+    var club = SCAN.fixture && SCAN.fixture.club;
+    folders.forEach(function (f) {
+      var base = f[0] === 'partners'
+        ? REFS_PREFIX + '/partners/' + f[1]
+        : REFS_PREFIX + '/clubs/' + club + '/' + f[1];
+      if (f[0] === 'club' && !club) return;
+      storage.ref(base).listAll().then(function (r) {
+        r.items.forEach(function (item) {
+          item.getDownloadURL().then(function (u) {
+            var fig = document.createElement('button');
+            fig.className = 'refcard';
+            fig.innerHTML = '<img loading="lazy" alt="">' +
+              '<figcaption>' + esc(f[1]) + ' · ' + esc(item.name) + '</figcaption>';
+            fig.querySelector('img').src = u;
+            fig.onclick = function () {
+              NL.modal({
+                title: f[1] + ' — ' + item.name,
+                width: 'wide',
+                body: '<img src="' + esc(u) + '" alt="" style="max-width:100%;' +
+                      'background:var(--white);border-radius:8px">',
+                buttons: [{ label: 'Close', className: 'btn btn--ghost',
+                            onClick: function (c) { c.close(); } }]
+              });
+            };
+            grid.appendChild(fig);
+          }).catch(function () {});
+        });
+      }).catch(function () {});
+    });
+  }
+
+  /* ── The footage itself ───────────────────────────────────────────── */
+  function renderUpload() {
+    var box = $('sUpload');
+    if (SCAN.upState) {
+      var u = SCAN.upState;
+      box.innerHTML = '<div><b>' + esc(u.label) + '</b>' +
+        '<div class="prog"><i style="width:' + u.pct + '%"></i></div>' +
+        '<span class="form-hint">' + u.pct + '% · ' + esc(u.note || '') + '</span> ' +
+        '<button class="btn btn--ghost btn--sm" id="sPause">' +
+          (u.paused ? 'Resume' : 'Pause') + '</button> ' +
+        '<button class="btn btn--ghost btn--sm" id="sCancel">Cancel</button></div>';
+      $('sPause').onclick = function () {
+        if (!SCAN.task) return;
+        u.paused ? SCAN.task.resume() : SCAN.task.pause();
+        u.paused = !u.paused;
+        renderUpload();
+      };
+      $('sCancel').onclick = function () {
+        if (SCAN.task) SCAN.task.cancel();
+        SCAN.task = null; SCAN.upState = null;
+        renderUpload(); renderGo();
+      };
+      return;
+    }
+    box.innerHTML =
+      '<label class="drop" id="sDrop"><input type="file" id="sFile" accept="video/*">' +
+      '<strong>' + (SCAN.file ? esc(SCAN.file.name) : 'Drop the match video in') +
+      '</strong><br><span class="text-secondary">' +
+      (SCAN.file ? (SCAN.file.size / 1e9).toFixed(2) + ' GB — drop another to swap' :
+       'MP4 straight from the camera or the stream — uploads resume if the line drops') +
+      '</span></label>';
+    var drop = $('sDrop'), file = $('sFile');
+    drop.ondragover  = function (e) { e.preventDefault(); drop.classList.add('is-over'); };
+    drop.ondragleave = function () { drop.classList.remove('is-over'); };
+    drop.ondrop = function (e) {
+      e.preventDefault(); drop.classList.remove('is-over');
+      takeFile(e.dataTransfer.files[0]);
+    };
+    file.onchange = function () { takeFile(file.files[0]); };
+    if (!$('sTrims').innerHTML) {
+      $('sTrims').innerHTML = '<div class="form-grid" style="margin-top:12px">' +
+        '<div class="form-group"><label for="sStart">Kick-off in the file ' +
+          '(optional)</label><input class="modal__input" id="sStart" ' +
+          'placeholder="18:30 or 1:52:30"></div>' +
+        '<div class="form-group"><label for="sEnd">Full time (optional)</label>' +
+          '<input class="modal__input" id="sEnd" placeholder="blank = to the end">' +
+        '</div></div>' +
+        '<p class="form-hint">A full-90 file usually has warm-up either side — ' +
+        'trimming it keeps warm-up exposure out of the numbers and the pennies ' +
+        'down.</p>';
+    }
+  }
+
+  function takeFile(f) {
+    if (!f) return;
+    if (!/^video\//.test(f.type || '') && !/\.(mp4|m4v|mov)$/i.test(f.name)) {
+      return NL.toast('That is not a video file.', 'error');
+    }
+    SCAN.file = f; SCAN.duration = null;
+    var v = document.createElement('video');
+    v.preload = 'metadata';
+    v.onloadedmetadata = function () {
+      SCAN.duration = v.duration || null;
+      URL.revokeObjectURL(v.src);
+      renderGo();
+    };
+    v.onerror = function () { URL.revokeObjectURL(v.src); renderGo(); };
+    v.src = URL.createObjectURL(f);
+    renderUpload(); renderGo();
+  }
+
+  function renderGo() {
+    var box = $('sGo');
+    if (!box) return;
+    var f = SCAN.fixture, subset = chosenSponsors();
+    var needComplete = subset === null;
+    var lines = [];
+    if (SCAN.file && SCAN.duration) {
+      var mins = SCAN.duration / 60;
+      lines.push('~' + Math.round(mins) + ' min of footage → roughly ' +
+        Math.max(1, Math.round(mins * EST_PENCE_MIN[0])) + '–' +
+        Math.max(2, Math.round(mins * EST_PENCE_MIN[1])) + 'p to scan, done ~' +
+        Math.max(2, Math.round(mins * EST_WALL_X)) + ' min after the upload finishes.');
+    } else if (SCAN.file) {
+      lines.push('Could not read the video’s length — the scan still prices ' +
+        'itself the same, there is just no estimate to show.');
+    }
+    if (SCAN.file && SCAN.file.size > 20e9) {
+      lines.push('That is bigger than a typical full 90 — right file? ' +
+        '(Uploading costs nothing either way.)');
+    }
+    box.innerHTML =
+      (needComplete
+        ? '<div class="form-group" style="margin-top:4px">' +
+          '<label for="sComplete">Reference set at this ground</label>' +
+          '<select class="nl-select" id="sComplete">' +
+          '<option value="">Choose…</option>' +
+          '<option value="complete">Complete — every board is on file</option>' +
+          '<option value="partial">Partial — some boards have no reference</option>' +
+          '</select></div>'
+        : '') +
+      lines.map(function (l) { return '<p class="form-hint">' + esc(l) + '</p>'; }).join('') +
+      '<button class="btn btn--primary" id="sStartBtn"' +
+      (f && SCAN.file && !SCAN.upState ? '' : ' disabled') + '>Upload and scan</button>' +
+      (!f ? ' <span class="form-hint">Pick the fixture first.</span>'
+          : (!SCAN.file ? ' <span class="form-hint">Drop the video in first.</span>' : ''));
+    var btn = $('sStartBtn');
+    if (btn) btn.onclick = startScan;
+  }
+
+  function startScan() {
+    var f = SCAN.fixture, file = SCAN.file;
+    if (!f || !file) return;
+    var subset = chosenSponsors();
+    if (subset !== null && !subset.length) {
+      return NL.toast('Nothing selected to scan for.', 'error');
+    }
+    var completeSel = $('sComplete');
+    var refSet = subset === null ? (completeSel && completeSel.value) : 'partial';
+    if (!refSet) {
+      return NL.toast('Say whether the reference set is complete first — share ' +
+        'of voice depends on it.', 'error');
+    }
+    var ext = (file.name.match(/\.[a-z0-9]{2,4}$/i) || ['.mp4'])[0];
+    var path = 'uploads/' + f.date + ' ' + f.club + ' v ' + f.opponent +
+               ' ' + Date.now() + ext;
+    SCAN.upState = { label: 'Uploading ' + file.name, pct: 0, paused: false,
+                     note: '' };
+    renderUpload(); renderGo();
+
+    NL.ensureAuth().then(function () {
+      /* The compat SDK's put() speaks the resumable protocol — pause and
+         resume are real, and a dropped line retries rather than restarts. */
+      var task = storage.ref(path).put(file, { contentType: file.type || 'video/mp4' });
+      SCAN.task = task;
+      task.on('state_changed', function (s) {
+        SCAN.upState.pct = Math.round(100 * s.bytesTransferred / (s.totalBytes || 1));
+        SCAN.upState.note = (s.bytesTransferred / 1e9).toFixed(2) + ' of ' +
+          (s.totalBytes / 1e9).toFixed(2) + ' GB';
+        renderUpload();
+      }, function (err) {
+        SCAN.task = null; SCAN.upState = null;
+        renderUpload(); renderGo();
+        if (err && err.code !== 'storage/canceled') {
+          NL.toast('Upload failed: ' + err.message, 'error');
+        }
+      }, function () {
+        SCAN.task = null; SCAN.upState = null;
+        writeRequest(path, f, subset, refSet, file);
+      });
+    });
+  }
+
+  function writeRequest(path, f, subset, refSet, file) {
+    var req = {
+      video: path,
+      club: f.club,
+      match: f.club + ' v ' + f.opponent,
+      opponent: f.opponent,
+      date: f.date,
+      referenceSet: refSet,
+      status: 'queued',
+      by: (firebase.auth().currentUser || {}).uid || null,
+      at: firebase.database.ServerValue.TIMESTAMP,
+      sizeMB: Math.round(file.size / 1e6),
+      source: (SCAN.duration || 0) > 45 * 60 ? 'full' : 'highlights'
+    };
+    if (subset !== null) req.sponsors = subset;
+    if (SCAN.duration) req.durationSecs = Math.round(SCAN.duration);
+    if (f.venue) req.venue = f.venue;
+    if (f.nlsId) req.nlsMatchId = f.nlsId;
+    var st = ($('sStart') || {}).value, en = ($('sEnd') || {}).value;
+    if (st && st.trim()) req.start = st.trim();
+    if (en && en.trim()) req.end = en.trim();
+
+    db.ref(REQ_ROOT).push(req).then(function () {
+      NL.toast('Queued — the scan starts itself.', 'success');
+      NL.writeAudit('scan_request', req.match + ' (' + req.date + ')');
+      SCAN.file = null; SCAN.duration = null;
+      renderUpload(); renderGo();
+    }).catch(function (e) {
+      NL.toast('The upload landed but the request did not: ' + e.message, 'error');
+    });
+  }
+
+  /* ── Watching: the queue, live ────────────────────────────────────── */
+  function subReqs() {
+    if (SCAN.reqSub) return;
+    SCAN.reqSub = true;
+    db.ref(REQ_ROOT).limitToLast(12).on('value', function (snap) {
+      SCAN.requests = snap.val() || {};
+      if (view === 'scan') renderReqs();
+    }, function () { /* read refused — the panel just stays empty */ });
+  }
+
+  function renderReqs() {
+    var box = $('sReqs');
+    if (!box) return;
+    var ids = Object.keys(SCAN.requests).sort(function (a, b) {
+      return (SCAN.requests[b].at || 0) - (SCAN.requests[a].at || 0);
+    });
+    if (!ids.length) { box.innerHTML = ''; return; }
+    var queuedAsc = ids.filter(function (k) {
+      return SCAN.requests[k].status === 'queued';
+    }).sort(function (a, b) {
+      return (SCAN.requests[a].at || 0) - (SCAN.requests[b].at || 0);
+    });
+    box.innerHTML = '<div class="section-head" style="margin-bottom:10px">' +
+      '<h2>Scans</h2></div>' + ids.slice(0, 8).map(function (id) {
+      var r = SCAN.requests[id];
+      var fx = esc(r.match || '—') + ' · ' + esc(NL.formatDateShort(r.date));
+      var body = '';
+      if (r.status === 'queued') {
+        var pos = queuedAsc.indexOf(id) + 1;
+        body = '<span class="pill pill--pending">Queued' +
+          (pos > 1 ? ' — #' + pos + ' in line' : '') + '</span>';
+      } else if (r.status === 'running') {
+        var estMin = ((r.durationSecs || 0) / 60) * EST_WALL_X || 20;
+        var gone = (Date.now() - (r.startedAt || Date.now())) / 60000;
+        var pct = Math.min(96, Math.round(100 * gone / estMin));
+        body = '<span class="pill pill--info">Scanning</span>' +
+          '<div class="scanreq__bar"><div class="prog prog--est"><i style="width:' +
+          pct + '%"></i></div></div>' +
+          '<span class="form-hint" style="margin:0">' + Math.round(gone) +
+          ' of ~' + Math.round(estMin) + ' min — estimate</span>';
+      } else if (r.status === 'done') {
+        var mid = [r.date, slug(r.club), 'v', slug(r.opponent ||
+          String(r.match || '').replace(/^.*?\sv\s/i, ''))].join('-');
+        body = '<span class="pill pill--approved">Done</span>' +
+          '<button class="btn btn--ghost btn--sm" data-open="' + esc(mid) +
+          '">Open the match</button>';
+      } else if (r.status === 'failed') {
+        body = '<span class="pill pill--rejected">Failed</span>' +
+          '<span class="scanreq__sub">' + esc(r.error || 'No reason recorded.') +
+          (r.swept ? ' The source video has been cleared — upload it again to retry.'
+                   : '') + '</span>' +
+          (!r.swept ? '<button class="btn btn--ghost btn--sm" data-retry="' +
+            esc(id) + '">Retry</button>' : '');
+      } else {
+        body = '<span class="pill">' + esc(r.status || '—') + '</span>';
+      }
+      return '<div class="scanreq"><span class="scanreq__fx">' + fx + '</span>' + body + '</div>';
+    }).join('');
+
+    box.querySelectorAll('[data-open]').forEach(function (b) {
+      b.onclick = function () {
+        var mid = b.getAttribute('data-open');
+        if (matches[mid]) openMatch(mid);
+        else NL.toast('The measured match is still arriving — give it a few seconds.');
+      };
+    });
+    box.querySelectorAll('[data-retry]').forEach(function (b) {
+      b.onclick = function () {
+        var r = SCAN.requests[b.getAttribute('data-retry')];
+        if (!r) return;
+        var copy = {};
+        ['video', 'club', 'match', 'opponent', 'date', 'referenceSet', 'sponsors',
+         'start', 'end', 'venue', 'nlsMatchId', 'sizeMB', 'durationSecs', 'source']
+          .forEach(function (k) { if (r[k] != null) copy[k] = r[k]; });
+        copy.status = 'queued';
+        copy.by = (firebase.auth().currentUser || {}).uid || null;
+        copy.at = firebase.database.ServerValue.TIMESTAMP;
+        db.ref(REQ_ROOT).push(copy).then(function () {
+          NL.toast('Queued again.', 'success');
+        }).catch(function (e) { NL.toast(e.message, 'error'); });
+      };
+    });
+  }
+
   /* ── Shell ───────────────────────────────────────────────────────── */
   function show(name) {
     /* Leaving the player: stop the video rather than let it run behind a
        hidden section, which keeps decoding and keeps the rAF loop alive. */
     if (view === 'match' && name !== 'match') { $('vid').pause(); M.id = null; }
     view = name;
-    ['matches', 'partners', 'grounds', 'match'].forEach(function (v) {
+    ['matches', 'partners', 'grounds', 'match', 'scan'].forEach(function (v) {
       var el = $('view' + v[0].toUpperCase() + v.slice(1));
       var entering = (v === name) && el.hidden;
       el.hidden = (v !== name);
@@ -1694,9 +2489,11 @@
       }
     });
     document.querySelectorAll('.tab').forEach(function (t) {
-      /* The player is a child of Matches, not a fourth tab — keep Matches lit. */
+      /* The player and the scanner are children of Matches, not extra tabs —
+         keep Matches lit. */
       var k = t.getAttribute('data-tab');
-      t.classList.toggle('active', k === name || (name === 'match' && k === 'matches'));
+      t.classList.toggle('active', k === name ||
+        ((name === 'match' || name === 'scan') && k === 'matches'));
     });
     render();
   }
@@ -1713,6 +2510,9 @@
     if (view === 'matches')  renderMatches();
     if (view === 'partners') renderPartners();
     if (view === 'grounds')  renderGrounds();
+    /* Only the live strip — the form's own renderers run on their events, so
+       a matches update never rebuilds a half-filled form under the user. */
+    if (view === 'scan')     renderReqs();
     if (view === 'match') {
       /* A live RTDB update can delete the match being watched. */
       if (!M.id || !matches[M.id]) return show('matches');
@@ -1741,6 +2541,11 @@
        whose action would be refused anyway. */
     $('btnKeys').hidden = !(session && session.role === 'superadmin');
     $('btnKeys').onclick = openKeys;
+    /* Scanning likewise: the rules refuse a non-superadmin request and the
+       function re-checks — hiding the button is a courtesy, not the gate. */
+    $('btnScan').hidden = !(session && session.role === 'superadmin');
+    $('btnScan').onclick = openScan;
+    $('sBack').onclick = function () { show('matches'); };
     $('pCsv').onclick = exportPartnerCsv;
 
     document.querySelector('.tabs').addEventListener('click', function (ev) {

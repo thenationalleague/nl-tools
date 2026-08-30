@@ -78,6 +78,16 @@ Object.assign(exports, require("./club-code"));
 // functions/brand-exposure.js.
 Object.assign(exports, require("./brand-exposure"));
 
+// Brand Exposure scan requests (brandExposureScanRequest /
+// brandExposureScanPoll). The uploader's engine room: a request record
+// written by the tool becomes a Cloud Run job execution, watched to
+// done/failed by a minute poller that also deletes scanned source footage
+// and sweeps failed uploads after 48h. The trigger half is the same
+// org-policy-proof RTDB shape as brand-exposure.js above; the poller is
+// scheduled for the same no-console reason as nls-ingester.js below. See
+// functions/brand-exposure-scan.js for the two safety rails.
+Object.assign(exports, require("./brand-exposure-scan"));
+
 // NLS → RTDB live ingester (nlsIngestTick / nlsIngestHourly). Scheduled rather
 // than triggered, and it writes to the nl-widgets database rather than this
 // project's — see functions/nls-ingester.js for both reasons. Exported here so

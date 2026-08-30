@@ -1,0 +1,217 @@
+/* Brand Exposure scan requests — unit tests for the pure logic in
+   functions/brand-exposure-scan.js.
+
+   The Firebase-dependent half (the trigger, the poller, the Run Admin API
+   calls) needs the emulator or a live run; what IS pinned here is every
+   decision the function makes before it touches anything:
+
+     · validRequest — the gate whose sharpest tooth is VIDEO_PATH. The
+                      function deletes req.video with Admin credentials on
+                      success and at sweep time, so an unconstrained path is
+                      an arbitrary-object-delete primitive against a bucket
+                      that holds the unrebuildable GA archive. Fail-closed
+                      cases are the point.
+     · buildEnv     — the env contract with scan-job/run_job.py, name for
+                      name. A silently dropped BE_SPONSORS would scan (and
+                      bill) the full reference tree; a defaulted-complete
+                      reference set would invent share of voice.
+     · verdictOf    — Execution → running|done|failed. Fixtures are derived
+                      from the REST doc (URL in the source), NOT from a live
+                      call — they prove consistency with the doc, which is
+                      exactly as far as they go.
+     · oldestQueued — the serial queue's ordering. Two requests swapping
+                      places would scan someone's match before the one ahead
+                      of it, which is the kind of wrong nobody reports.
+
+   Same source-lifting trick as brand-exposure-ingest.test.mjs: the function
+   file requires firebase-functions at module load, which is not installed at
+   the repo root, so the pure helpers are lifted out of the SHIPPED source
+   text — drift between these tests and the real file fails rather than
+   passing against a stale copy. */
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const ROOT = join(HERE, '..');
+
+function lift(relPath, fnNames, constNames = []) {
+  const src = readFileSync(join(ROOT, relPath), 'utf8');
+
+  const block = (startIdx, label) => {
+    assert.ok(startIdx >= 0, relPath + ' no longer defines ' + label);
+    let depth = 0, j = src.indexOf('{', startIdx);
+    for (; j < src.length; j++) {
+      if (src[j] === '{') depth++;
+      else if (src[j] === '}' && --depth === 0) { j++; break; }
+    }
+    return src.slice(startIdx, j);
+  };
+
+  const consts = constNames.map((name) => {
+    const i = src.indexOf('const ' + name + ' =');
+    assert.ok(i >= 0, relPath + ' no longer defines ' + name);
+    const end = src.indexOf('\n', i);
+    return src.slice(i, end);
+  });
+  const bodies = fnNames.map((name) =>
+    block(src.indexOf('function ' + name + '('), name));
+
+  return eval('(function(){' + consts.join('\n') + '\n' + bodies.join('\n') +
+    '\nreturn {' + fnNames.join(',') + '};})')();
+}
+
+const be = lift(
+  'functions/brand-exposure-scan.js',
+  ['validRequest', 'buildEnv', 'verdictOf', 'oldestQueued', 'failureNote'],
+  ['VIDEO_PATH']
+);
+
+const GOOD = {
+  video: 'uploads/Sutton v Altrincham 18Apr26.mp4',
+  club: 'Sutton United',
+  match: 'Sutton United v Altrincham',
+  date: '2026-04-18',
+  status: 'queued',
+  by: 'uid-1',
+  at: 1,
+};
+
+// --- validRequest: the delete-primitive gate --------------------------------
+
+test('a complete request passes', () => {
+  assert.equal(be.validRequest(GOOD), null);
+});
+
+test('video outside uploads/ is refused — every traversal shape', () => {
+  for (const video of [
+    'data/ga-hourly-archive.json',          // the unrebuildable one
+    'brand-exposure/x/proxy.mp4',           // another tool's output
+    'uploads/../data/ga-hourly-archive.json',
+    'uploads/deep/er.mp4',                  // no second segment
+    'uploads/',                             // no object at all
+    '',                                     //
+    'Uploads/x.mp4',                        // case is not a loophole
+  ]) {
+    const r = { ...GOOD, video };
+    assert.ok(be.validRequest(r), 'must refuse video=' + JSON.stringify(video));
+  }
+});
+
+test('spaces and ampersands in the filename are fine — Richard names files that way', () => {
+  assert.equal(be.validRequest(
+    { ...GOOD, video: 'uploads/Horsham v Hampton & Richmond 18Aug26.mp4' }),
+  null);
+});
+
+test('missing club, match or a malformed date are each refused', () => {
+  assert.ok(be.validRequest({ ...GOOD, club: ' ' }));
+  assert.ok(be.validRequest({ ...GOOD, match: '' }));
+  assert.ok(be.validRequest({ ...GOOD, date: '18/04/2026' }));
+  assert.ok(be.validRequest({ ...GOOD, date: '2026-4-18' }));
+});
+
+test('sponsors must be a list when present, and may be absent', () => {
+  assert.ok(be.validRequest({ ...GOOD, sponsors: 'DAZN' }));
+  assert.equal(be.validRequest({ ...GOOD, sponsors: ['DAZN'] }), null);
+  assert.equal(be.validRequest({ ...GOOD, sponsors: null }), null);
+});
+
+test('null and non-object requests are refused, not thrown on', () => {
+  assert.ok(be.validRequest(null));
+  assert.ok(be.validRequest('scan please'));
+});
+
+// --- buildEnv: the run_job.py contract --------------------------------------
+
+const envMap = (req) =>
+  Object.fromEntries(be.buildEnv(req).map((e) => [e.name, e.value]));
+
+test('the five always-present envs match run_job.py names and values', () => {
+  const m = envMap(GOOD);
+  assert.equal(m.BE_VIDEO, GOOD.video);
+  assert.equal(m.BE_CLUB, 'Sutton United');
+  assert.equal(m.BE_MATCH, 'Sutton United v Altrincham');
+  assert.equal(m.BE_DATE, '2026-04-18');
+  assert.equal(m.BE_REFERENCE_SET, 'partial');
+});
+
+test('reference set defaults to partial — the direction that withholds share of voice', () => {
+  assert.equal(envMap({ ...GOOD, referenceSet: 'complete' }).BE_REFERENCE_SET,
+    'complete');
+  assert.equal(envMap({ ...GOOD, referenceSet: 'yes please' }).BE_REFERENCE_SET,
+    'partial');
+  assert.equal(envMap(GOOD).BE_REFERENCE_SET, 'partial');
+});
+
+test('sponsors join to the comma list load_tree parses; empty list sends nothing', () => {
+  assert.equal(envMap({ ...GOOD, sponsors: ['DAZN', 'TIC Health'] }).BE_SPONSORS,
+    'DAZN,TIC Health');
+  assert.ok(!('BE_SPONSORS' in envMap({ ...GOOD, sponsors: [] })));
+  assert.ok(!('BE_SPONSORS' in envMap(GOOD)));
+});
+
+test('trims ride along only when set', () => {
+  const m = envMap({ ...GOOD, start: '18:30', end: '1:52:30' });
+  assert.equal(m.BE_START, '18:30');
+  assert.equal(m.BE_END, '1:52:30');
+  assert.ok(!('BE_START' in envMap(GOOD)));
+});
+
+test('every env value is a string — the Run API rejects numbers', () => {
+  for (const e of be.buildEnv({ ...GOOD, start: 1110 })) {
+    assert.equal(typeof e.value, 'string', e.name);
+  }
+});
+
+// --- verdictOf: doc-derived Execution fixtures ------------------------------
+
+test('no completionTime means still running, whatever the counts say', () => {
+  assert.equal(be.verdictOf({ name: 'x' }), 'running');
+  assert.equal(be.verdictOf({ succeededCount: 1 }), 'running');
+  assert.equal(be.verdictOf(null), 'running');
+});
+
+test('completionTime plus a succeeded task is done; without one, failed', () => {
+  assert.equal(be.verdictOf(
+    { completionTime: '2026-08-30T20:00:00Z', succeededCount: 1 }), 'done');
+  assert.equal(be.verdictOf(
+    { completionTime: '2026-08-30T20:00:00Z', failedCount: 1 }), 'failed');
+  assert.equal(be.verdictOf(
+    { completionTime: '2026-08-30T20:00:00Z' }), 'failed');
+});
+
+test('failureNote names the execution when it can and stays calm when it cannot', () => {
+  assert.match(be.failureNote(
+    { name: 'projects/p/locations/l/jobs/j/executions/scan-abc12' }),
+  /scan-abc12/);
+  assert.ok(be.failureNote(null).length > 0);
+});
+
+// --- oldestQueued: the serial queue's ordering ------------------------------
+
+test('picks the oldest queued request and ignores every other status', () => {
+  assert.equal(be.oldestQueued({
+    a: { status: 'done', at: 1 },
+    b: { status: 'queued', at: 30 },
+    c: { status: 'queued', at: 20 },
+    d: { status: 'running', at: 2 },
+    e: { status: 'failed', at: 3 },
+  }), 'c');
+});
+
+test('empty, null and no-queued all yield null', () => {
+  assert.equal(be.oldestQueued({}), null);
+  assert.equal(be.oldestQueued(null), null);
+  assert.equal(be.oldestQueued({ a: { status: 'done', at: 1 } }), null);
+});
+
+test('a request with no timestamp sorts first rather than never', () => {
+  assert.equal(be.oldestQueued({
+    a: { status: 'queued', at: 5 },
+    b: { status: 'queued' },
+  }), 'b');
+});

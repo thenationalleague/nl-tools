@@ -30,6 +30,10 @@ Environment (all set by the trigger, none baked into the image):
     BE_DATE            YYYY-MM-DD
     BE_START, BE_END   optional kick-off / final whistle, '18:30' style
     BE_REFERENCE_SET   complete | partial
+    BE_SPONSORS        optional comma list of reference FOLDER names — scan
+                       only these. Empty means everything. A subset makes the
+                       scan reference-set partial whatever BE_REFERENCE_SET
+                       says (the match script enforces it).
     BE_INGEST_KEY      the key, injected from Secret Manager
     BE_REFS_PREFIX     default brand-exposure/refs
     BE_FPS             optional sample rate override
@@ -213,6 +217,8 @@ def main():
             cmd += ["--end", end]
         if env("BE_FPS"):
             cmd += ["--fps", env("BE_FPS")]
+        if env("BE_SPONSORS"):
+            cmd += ["--sponsors", env("BE_SPONSORS")]
 
     log("scanning — this is the long part")
     # Streamed, not captured: Cloud Run's log tail is the only progress anyone

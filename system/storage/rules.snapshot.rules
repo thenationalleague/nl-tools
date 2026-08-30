@@ -18,6 +18,7 @@
 //   programme/<CODE>/**   matchday programme packs, per-club
 //   data/**               the nightly pipeline's feeds, read-only to browsers
 //   brand-exposure/<id>/  per-match playback proxy + detections, staff accounts
+//   uploads/**            brand-exposure source footage, transient — see block
 
 rules_version = '2';
 service firebase.storage {
@@ -101,6 +102,31 @@ service firebase.storage {
         && request.resource.size < 600 * 1024 * 1024
         && (request.resource.contentType.matches('video/mp4')
             || request.resource.contentType.matches('application/json'));
+    }
+
+    // ── Brand Exposure — source footage drop ──────────────────────────────
+    // Where the tool's New match view puts the video before a scan. Transient
+    // by design: the scan-request function deletes the source on a successful
+    // scan and sweeps failed ones after 48h, so nothing rights-bearing sits
+    // here indefinitely.
+    //
+    // Write is any portal (email-claim) account with a video content type —
+    // deliberately NOT role-gated, because Storage rules cannot read RTDB
+    // roles and the superadmin gate lives where it can be enforced: the
+    // request record under app-data/ops-brand-exposure/requests (rules-
+    // tested) and the function's own author check. Same philosophy as the
+    // brand-exposure block above: an upload nobody can point at is inert.
+    //
+    // No size cap, on a ruling (30/08/2026): GCS ingress is free and parked
+    // footage costs ~2p/GB/month pro-rata, so a cap defends no cost — and a
+    // full 90 is ~10GB, which any cap would have to clear anyway. The type
+    // check is mistake protection, and it also denies browser deletes
+    // (request.resource is null on delete), which is intended — cleanup is
+    // the function's job, through the Admin SDK.
+    match /uploads/{file} {
+      allow read:  if request.auth != null && request.auth.token.email != null;
+      allow write: if request.auth != null && request.auth.token.email != null
+        && request.resource.contentType.matches('video/.*');
     }
 
     // ── Programme Packs ───────────────────────────────────────────────────
