@@ -699,6 +699,69 @@ Horsham — predates seams: single continuous windows, 99%/64% untouched.)
 This supersedes the old "halves runner" idea (two scans of one match
 collide on the same matchId — the second upload replaces the first).
 
+## The recall campaign — plan of record (30/08/2026)
+
+Adopted from Richard's recall-workflow document (a working doc held
+outside this repo), with four amendments agreed on review, after the
+Horsham hand-labels settled the target: precision generalises (100% on a
+club stream), recall does not (21% vs 64%), and the missing mass is
+initiation on compressed, pan-blurred club footage — the footage most of
+72 clubs actually produce.
+
+**The shape — a layered scan.** Tiered references: permanent design refs
+(CAD when agencies deliver it, face-on photographs meanwhile — nothing
+blocks on CAD); accumulated per-ground refs behind hard promotion guards
+(multi-match only, always validated against the design parent so no
+harvest chains off a harvest, every promotion recorded and reversible);
+and per-match harvests ticked by a human in the audition. Synthetic
+variants generated from each design — horizontal pan-blur at several
+magnitudes AND a compression variant, because the Horsham fingerprint is
+detail starvation as much as smear — never uploaded, always attributed
+to their parent design, logged when they fire so dead magnitudes get
+retired. Escalation per empty frame: native match → zoom → blur gate
+(cheap Laplacian sharpness) → blur-sized variants; a sharp frame that
+found nothing stops, the board is not there. Verification unchanged at
+every tier — the face check and the three furniture guards are exactly
+why widening the reference set cannot threaten precision. Cost lives in
+the frame, not the reference count: features extract once per frame, so
+better references mean fewer escalations, plausibly faster scans. Every
+stage is graded against both answer sheets before it ships.
+
+**The four amendments to the source doc**: the 1.7 zoom pass did not
+stall — it bought +10 and doubled the dugouts, so the diagnostic decides
+how much of the REMAINDER is blur rather than assuming 70-80%; adaptive
+sampling arrives as sharpest-frame-within-the-2fps-window first, keeping
+the index-to-time contract intact (true pan-dense sampling only if the
+cheap version leaves value on the table); colour is demoted as a
+standalone build but kept as the targeting layer — per board cluster,
+per scan, colour proposes and features confirm, never
+attribution-bearing; and CAD is chased in parallel, never waited on.
+
+**Build order and status:**
+
+1. Blur/compression diagnostic, both grounds — pending; an afternoon,
+   and the premise-check the doc itself demands.
+2. Horsham hand-labels — DONE 30/08; the generalisation verdict above.
+3. Engine 1.7.1 tighten — built 30/08, rescans pending. Not in the doc;
+   forced by its own discipline: the labels caught the tracker drifting
+   onto a player, and recall gains are worthless on a tracker that lies.
+4. The audition pass, rescoped — the next big build (few hundred
+   weighted frames, per-reference verdicts with best-hit crops,
+   tick/untick, Tier-3 harvest, output configures the full scan). The
+   hand-harvested Enterprise crops of 30/08 are its proof-of-concept,
+   and the harvest A/B rescan is its first yield measurement.
+5. Sharpest-in-window sampling.
+6. The main event: synthetic variants + the blur gate + the escalation
+   ladder.
+7. Tier-2 ground-reference accumulation behind the promotion guards.
+8. The layered demo — every detection tagged with the pass that found
+   it, toggleable over playback. After grading, so the layers are real
+   gains; doubles as the diagnostic for retiring passes that never fire.
+9. Colour, as targeting, if the ledger still wants it.
+
+This supersedes the ordering of "Roadmap after 1.7" below where the two
+differ — the colour scout's demotion and the audition's promotion.
+
 ## Roadmap after 1.7 — agreed 30/08/2026
 
 **Engine 1.8 — the colour scout.** Richard's ruling, and the reason colour
