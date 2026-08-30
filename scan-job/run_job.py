@@ -170,7 +170,10 @@ def storage_put(bucket, name, path, token):
             r.read()
     except urllib.error.HTTPError as e:
         die(f"uploading {name} failed: {e.code} {e.reason}. The runtime "
-            f"service account needs objectCreator on {bucket}.")
+            f"service account needs roles/storage.objectAdmin on {bucket} "
+            f"(objectCreator alone cannot overwrite on a re-run) — the "
+            f"one-time grant is recorded in "
+            f"system/board-exposure/uploader-spec.md.")
 
 
 def fetch_refs(bucket, prefix, token):

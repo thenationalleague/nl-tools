@@ -856,18 +856,32 @@ attribution-bearing; and CAD is chased in parallel, never waited on.
 
 **Build order and status:**
 
-1. Blur/compression diagnostic, both grounds — BUILT 30/08 as
-   `BE_MODE=diagnose` on the scan job (`board_exposure_diagnose.py`):
-   classifies every labelled sample found/tracked/missed against a
-   finished export, measures frame sharpness (Laplacian), compression
-   blockiness (8px boundary energy) and a zoom proxy, and counts
-   STARVED frames — misses where no sponsor hit anything, the share no
-   threshold or variant can reach. The classification half already ran
-   against the Horsham export: 342 of 425 missed samples (80%) are
-   starved frames, so the doc's own premise-check points at references
-   and zoom before the variant ladder. The frame-measure half needs the
-   container (video access) — one paste per ground, writes
-   diagnose.json beside the export.
+1. Blur/compression diagnostic, both grounds — DONE 30/08, built as
+   `BE_MODE=diagnose` on the scan job (`board_exposure_diagnose.py`:
+   found/tracked/missed classification against a finished export,
+   frame sharpness, 8px blockiness, zoom proxy, starved-frame count)
+   and run the same evening. The verdicts:
+   - **Starvation dominates both grounds** — 80% of Horsham's misses
+     and 71% of Sutton's sit in frames where NO sponsor hit anything.
+     References and zoom before everything else, now by measurement.
+   - **Compression is a non-factor on both** (missed/found blockiness
+     0.98x and 1.01x) — compression variants are CUT from step 6.
+   - **Blur splits by footage type**: Horsham's missed frames are not
+     meaningfully softer than its found ones (0.86x) — club-rip misses
+     are reference-shaped, not blur-shaped. Sutton's ARE (0.56x) —
+     broadcast misses concentrate in soft moments, so blur handling is
+     a broadcast lever, and sharpest-in-window (step 5) is its direct,
+     cheap counter before any synthetic variant.
+   - One number for the business file: Horsham's FOUND frames measure
+     ~100 on the sharpness scale where Sutton's measure ~540 — club
+     footage is ~5x softer wall-to-wall, which is the club-footage
+     recall wall quantified for the first time.
+   (Operational note: the first diagnose runs died twice — once on a
+   Dockerfile COPY the image guard test now enforces, once because the
+   job's service account had never needed bucket WRITE; scans upload
+   through the ingest door, diagnose writes back directly. Fixed with a
+   one-time `roles/storage.objectAdmin` grant, recorded in
+   uploader-spec.md.)
 2. Horsham hand-labels — DONE 30/08; the generalisation verdict above.
 3. Engine 1.7.1 tighten — VERIFIED 30/08 on both grounds: Sutton 61/99
    (phantoms 12→5), Horsham 17/100 (phantoms 6→0, disputed list empty).
@@ -881,9 +895,15 @@ attribution-bearing; and CAD is chased in parallel, never waited on.
    yield is now measured twice: Enterprise centre 14% → 29% from two
    crops, TIC 3% → 30% from one (occlusions baked in — see the harvest
    note above). Highest-yield lever on club footage; build the pass.
-5. Sharpest-in-window sampling.
-6. The main event: synthetic variants + the blur gate + the escalation
-   ladder.
+5. Sharpest-in-window sampling — promoted by the diagnostic: Sutton's
+   misses concentrate in soft frames (0.56x found sharpness), and
+   picking the sharpest frame per window attacks exactly that pool at
+   zero new references.
+6. Rescoped by the diagnostic: BLUR variants + the blur gate + the
+   escalation ladder, targeted at broadcast footage (where soft misses
+   live). Compression variants are cut — measured a non-factor on both
+   grounds — and club-footage recall is reference work, not variant
+   work.
 7. Tier-2 ground-reference accumulation behind the promotion guards.
 8. The layered demo — every detection tagged with the pass that found
    it, toggleable over playback. After grading, so the layers are real
