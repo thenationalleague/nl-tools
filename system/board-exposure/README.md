@@ -543,6 +543,17 @@ settled.
 
 Recall +10 points with precision holding at 99% — comfortably above the
 97% floor, so both levers ship at full strength (zoom 2.0, carry 3.0).
+The stated target moved most: the far-side dugout boards went from 24-36%
+to 53-60%, and Enterprise's goal-line boards now read 86-97%. The phantom
+cost of the extra recall is 6.0s across a 494s window (up from 2.0s in
+1.6), and the disputed ranges are carried extensions of the same three
+sites 1.6 already disputed (2:53, 5:51, 1:59) rather than new inventions —
+the carry-forward stretching borderline run-ends, exactly the failure mode
+its cap exists to bound. The furniture probe correctly stood down on this
+broadcast footage (coverage 10.7% > 10% — self-distrust), same as 1.6.
+Remaining recall lives where it always did: the DAZN corner board in
+ultra-wides (49%, and the largest miss pool) — that is the colour scout's
+target, not a threshold's.
 
 **The second ground — Horsham hand-labels, 30/08/2026.** Richard labelled
 the Horsham v Hampton & Richmond YouTube rip (a 1080p club stream, 4½
@@ -605,7 +616,7 @@ tracked fills carry no inlier evidence, so they pay a higher face bar
 plus an exit rule stopping a one-sided carry step that teleports a large
 fraction of the frame in one sample.
 
-## Engine 1.7.1 — tighten (built 30/08/2026, awaiting the two rescans)
+## Engine 1.7.1 — tighten (built and verified 30/08/2026 — the shipping engine)
 
 Both walls sit on MINTED steps only; nothing detect() accepts changes.
 
@@ -628,22 +639,109 @@ the walk must die at the jump and the same fixture must fill straight
 across with the fraction sabotaged to 1.0, proving the rule and not the
 chase stopped it; the old gate-liveness sabotage caught the floor moving
 (it failed the moment synthetic paths stopped reading FACE_NCC_REJECT)
-and now sabotages the floor the fills actually read. **No number is
-quotable until both rescans land**: Sutton must hold 99/64, Horsham's
-six tracked phantoms should die, and whatever recall the walls cost is
-the price of boxes that stay on boards — a partner watching playback
-must never see ours on a person.
-The stated target moved most: the far-side dugout boards went from 24-36%
-to 53-60%, and Enterprise's goal-line boards now read 86-97%. The phantom
-cost of the extra recall is 6.0s across a 494s window (up from 2.0s in
-1.6), and the disputed ranges are carried extensions of the same three
-sites 1.6 already disputed (2:53, 5:51, 1:59) rather than new inventions —
-the carry-forward stretching borderline run-ends, exactly the failure mode
-its cap exists to bound. The furniture probe correctly stood down on this
-broadcast footage (coverage 10.7% > 10% — self-distrust), same as 1.6.
-Remaining recall lives where it always did: the DAZN corner board in
-ultra-wides (49%, and the largest miss pool) — that is the colour scout's
-target, not a threshold's.
+and now sabotages the floor the fills actually read. The gate as stated
+before the rescans: Sutton must hold 99/64, Horsham's six tracked
+phantoms should die, and whatever recall the walls cost is the price of
+boxes that stay on boards — a partner watching playback must never see
+ours on a person.
+
+**The Sutton rescan, 30/08/2026 — precision holds, phantoms halve,
+recall pays three points:**
+
+| sponsor      | 1.7 recall | 1.7.1 recall | 1.7.1 precision | phantoms 1.7 → 1.7.1 |
+|--------------|-----------:|-------------:|----------------:|---------------------:|
+| DAZN         |        49% |          45% |            100% |                1 → 0 |
+| Enterprise   |        66% |          63% |             99% |                9 → 3 |
+| TIC Health   |        74% |          74% |             99% |                2 → 2 |
+| **overall**  |    **64%** |      **61%** |         **99%** |           **12 → 5** |
+
+Against the stated gate: precision held, recall gave back three of the
+ten points 1.7 bought. The walls cost fell exactly where the mechanism
+says it should — TIC, whose carries are static-camera fills, paid
+nothing; DAZN and Enterprise, where the camera pans, paid the tail ends
+of stretched runs. What remains disputed is 2.5s across the whole match:
+the SAME three borderline sites 1.6 and 1.7 disputed (2:53, 5:51, 1:59),
+now trimmed rather than stretched, and DAZN's phantom is gone outright.
+Read: the three recall points bought back nothing a partner could trust —
+they were the stretchy ends the player's-back screenshot came from. The
+deciding half is Horsham, where all six phantoms — DAZN's, both disputed
+ranges — were tracked and the walls should kill all six.
+
+One confound, caught by the export's own reference list: both
+Horsham-harvested Enterprise crops were already in refs/partners when
+this rescan ran, so the Enterprise row is engine PLUS two new
+references, not engine alone — its true tighten cost is at least the
+three points shown, possibly masked by harvest gain. DAZN and TIC ran
+on unchanged references and are the pure engine read. This sharpens the
+precision claim rather than weakening it: 99% held with two fresh crops
+live in the most active sponsor, and the Horsham-harvested artwork fired
+no phantoms on Sutton footage — first evidence that cross-ground
+references pollute nothing.
+
+**The Horsham half raced the container build and lost.** Its rescan
+arrived stamped `engine_version: 1.7`: the pair was pasted while the
+1.7.1 image was still building, and a Cloud Run execution snapshots the
+job image at launch — Horsham ran first on the old image, Sutton ran
+after the push landed. The engine stamp in every export exists for
+exactly this; the file was refused at the ledger and the line re-pasted.
+With the crops already uploaded, the re-run doubles as the Enterprise
+harvest A/B: one scan, three answers — DAZN is the pure tighten read and
+carries the phantom-kill check, Enterprise is tighten + harvest against
+its 34% baseline, TIC (no new references) stays the pure starvation
+control for the audition pass.
+
+**The Horsham rescan (1.7.1, harvest references live) — zero phantoms:**
+
+| sponsor      | 1.7 recall | 1.7.1 recall | 1.7.1 precision | phantoms 1.7 → 1.7.1 |
+|--------------|-----------:|-------------:|----------------:|---------------------:|
+| DAZN         |        17% |          11% |            100% |                6 → 0 |
+| Enterprise   |        34% |          28% |            100% |                0 → 0 |
+| TIC Health   |         3% |           3% |            100% |                0 → 0 |
+| **overall**  |    **21%** |      **17%** |        **100%** |            **6 → 0** |
+
+All six tracked phantoms died and the disputed-ranges list is EMPTY —
+the first scan of either ground with nothing disputed at all. On the
+footage that put a box on a player's back, the engine now claims
+nothing the human didn't mark. The walls cost four points here against
+three on Sutton: club-footage carries were doing more of the work, so
+trimming them bites harder — priced and accepted, because recall on
+this footage is an initiation problem (the campaign's target), not a
+duration-padding problem.
+
+The run's second answer reads cleanly per board despite the confound:
+**the harvest worked exactly where the harvested artwork lives.**
+Enterprise CENTRE — the double the two crops were cut from — went
+14% → 29% while the tighten was simultaneously taking 19 points off
+left-end carries (49% → 30%); net −6 for the sponsor, but the board
+table separates the two effects. That is the audition-pass thesis
+measured for the first time: two crops, cut from the match being
+scanned, doubled recall on their own board. TIC, the starvation control,
+sat flat at 3% on cue — and is therefore the next harvest target: same
+trick, purest patient.
+
+Engine verdict: **1.7.1 confirmed as the shipping engine.** Precision
+99–100 on both grounds, the partner-facing failure mode gone, recall
+cost bounded (3–4 points of tail) and priced. A floor sweep (0.35/0.40)
+stays available if those points ever matter; the campaign's answer to
+club-footage recall is initiation, never looser walls.
+
+**The TIC harvest (same evening) — one crop, tenfold.** Richard
+screenshotted the TIC board from the original file, and the frame was
+the engine's own diagnosis made flesh: a 160px panel with the goalpost
+through the C and netting over the left third — the camera position is
+fixed at this ground, so every sighting carries the same occlusions,
+which is why clean-artwork references never cleared seven features. The
+whole panel went in as a reference with the post and netting
+deliberately baked in: at this ground, that IS what the board looks
+like. Rescan: TIC 3% → **30%**, precision 100%, disputed list still
+empty — the riskiest reference shape yet (a white panel with a pole
+through it) invented nothing, and DAZN and Enterprise came back
+byte-identical, so the isolation is total. Horsham overall now reads
+**23%/100%** — above the 1.7 baseline with the phantoms gone. The
+harvest ledger so far: Enterprise centre 14→29 (two crops), TIC 3→30
+(one crop). Match-harvested references are the highest-yield lever yet
+measured on club footage — exactly what the audition pass exists to
+industrialise.
 
 ## Roadmap — engine 1.7, the recall pair (agreed 30/08/2026, superseded by the build above)
 
@@ -742,14 +840,18 @@ attribution-bearing; and CAD is chased in parallel, never waited on.
 1. Blur/compression diagnostic, both grounds — pending; an afternoon,
    and the premise-check the doc itself demands.
 2. Horsham hand-labels — DONE 30/08; the generalisation verdict above.
-3. Engine 1.7.1 tighten — built 30/08, rescans pending. Not in the doc;
-   forced by its own discipline: the labels caught the tracker drifting
-   onto a player, and recall gains are worthless on a tracker that lies.
+3. Engine 1.7.1 tighten — VERIFIED 30/08 on both grounds: Sutton 61/99
+   (phantoms 12→5), Horsham 17/100 (phantoms 6→0, disputed list empty).
+   The shipping engine. Not in the doc; forced by its own discipline:
+   the labels caught the tracker drifting onto a player, and recall
+   gains are worthless on a tracker that lies.
 4. The audition pass, rescoped — the next big build (few hundred
    weighted frames, per-reference verdicts with best-hit crops,
    tick/untick, Tier-3 harvest, output configures the full scan). The
-   hand-harvested Enterprise crops of 30/08 are its proof-of-concept,
-   and the harvest A/B rescan is its first yield measurement.
+   hand-harvested crops of 30/08 are its proof-of-concept, and the
+   yield is now measured twice: Enterprise centre 14% → 29% from two
+   crops, TIC 3% → 30% from one (occlusions baked in — see the harvest
+   note above). Highest-yield lever on club footage; build the pass.
 5. Sharpest-in-window sampling.
 6. The main event: synthetic variants + the blur gate + the escalation
    ladder.
