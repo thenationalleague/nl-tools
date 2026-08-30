@@ -396,7 +396,7 @@ def _scan(job):
     frame = cv2.imread(path, cv2.IMREAD_COLOR)
     if frame is None:
         return i, {}
-    hits = C.detect(frame, _W["refs"], _W["sift"], _W["matcher"])
+    hits = C.detect2(frame, _W["refs"], _W["sift"], _W["matcher"])
     out = {}
     for name, hs in hits.items():
         out[name] = [{
@@ -550,6 +550,65 @@ def close_blurred_gaps(hits_by_index, files, interval, faces=None):
               f"({filled * interval:.1f}s) across {len(gained)} sponsor(s) "
               f"in {time.time() - t0:.0f}s")
     return filled
+
+
+def extend_run_ends(hits_by_index, files, interval, faces=None):
+    """
+    Engine 1.7's completion pass — Richard's flicker diagnosis: a board that
+    stops clearing the feature bar visibly stays on screen, but the gap
+    tracker needs an anchor on BOTH sides, so runs died at the last real
+    sighting. This extends each run's ends one-sided: every step must
+    template-match the previous frame (a cut to the crowd fails here) AND
+    keep passing the whole-face identity check (a drift onto the wrong thing
+    fails here — the terminator similarity alone lacks), capped at
+    CARRY_MAX_SECS. Meeting another run stops the walk; the tracker's gap
+    fill already owns the space between anchors.
+    """
+    if not C.CARRY_MAX_SECS or C.CARRY_MAX_SECS <= 0:
+        return 0
+    cap = max(1, int(round(C.CARRY_MAX_SECS / interval)))
+    n = len(files)
+    added, gained = 0, set()
+    t0 = time.time()
+    for name in sorted({k for h in hits_by_index.values() for k in h}):
+        idxs = sorted(i for i, h in hits_by_index.items() if h.get(name))
+        idx_set = set(idxs)
+        for i in idxs:
+            for step in (1, -1):
+                if (i + step) in idx_set:
+                    continue                      # interior sample, not an end
+                h0 = max(hits_by_index[i][name], key=lambda h: h["inliers"])
+                xs = [p[0] for p in h0["quad"]]
+                ys = [p[1] for p in h0["quad"]]
+                bbox = (min(xs), min(ys), max(xs), max(ys))
+                prev = cv2.imread(files[i], cv2.IMREAD_COLOR)
+                if prev is None:
+                    continue
+                j, steps = i + step, 0
+                while 0 <= j < n and steps < cap and j not in idx_set:
+                    cur = cv2.imread(files[j], cv2.IMREAD_COLOR)
+                    if cur is None:
+                        break
+                    r = C.find_patch(prev, bbox, cur)
+                    if not r or r[1] < C.TRACK_MIN_CORR:
+                        break
+                    bbox, corr = r
+                    g = cv2.cvtColor(cur, cv2.COLOR_BGR2GRAY)
+                    if _face_fail(faces, name, g, bbox):
+                        break
+                    hits_by_index.setdefault(j, {}).setdefault(name, []) \
+                        .append(_synth_hit(h0["scope"], bbox, g, corr))
+                    idx_set.add(j)
+                    added += 1
+                    gained.add(name)
+                    prev = cur
+                    j += step
+                    steps += 1
+    if added:
+        print(f"  carry-forward extended run ends: +{added} samples "
+              f"({added * interval:.1f}s) across {len(gained)} sponsor(s) "
+              f"in {time.time() - t0:.0f}s")
+    return added
 
 
 def stills(video, n, out):
@@ -1045,8 +1104,11 @@ def run_one(a, video, club, title, date="", start=None, end=None, complete=None)
     # and the tool all see one consistent set of hits. Needs the extracted
     # frames, so it must run before the cleanup below. The reference faces go
     # along so every synthesised patch passes the same face test a detection
-    # does — the tracker must never mint what detect() would refuse.
-    close_blurred_gaps(hits_by_index, files, interval, C.build_faces(entries))
+    # does — the tracker must never mint what detect() would refuse. Gap fill
+    # first, then the 1.7 carry-forward extends whatever ends remain.
+    faces = C.build_faces(entries)
+    close_blurred_gaps(hits_by_index, files, interval, faces)
+    extend_run_ends(hits_by_index, files, interval, faces)
 
     # Report frames: a spread across the match plus the clearest shot of each
     # sponsor, shrunk to something a page can hold.

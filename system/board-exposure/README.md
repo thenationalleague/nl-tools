@@ -478,6 +478,87 @@ raw per-pixel noise backgrounds carry chance edges everywhere and mask the
 whole frame, so the fixture world is smoothed structure that moves, which is
 what real footage is.
 
+## Engine 1.6 verified — 30/08/2026, the cloud rerun against the labels
+
+    sponsor        recall  precision  missed  phantom  tracked
+    DAZN              40%      100%      191        0       20
+    Enterprise        53%       99%      275        2       35
+    TIC Health        69%       99%      106        2        0
+    overall           54%       99%      572        4       55
+
+**Phantoms 105 → 4** — and the 4 are three moments totalling 2.0 seconds
+(2:53, 5:51, 1:59-2:00), at the labelling noise floor and adjudicable by
+eye. When this engine claims a board was on screen, it is right 99% of the
+time on the marked match. Three honest footnotes:
+
+- **DAZN's recall reads 40% (was 50), and most of that drop is truth
+  arriving**: the removed "recall" was watermark-credited — samples where
+  the corner graphic scored while the real board went undetected. Some may
+  also be the NCC floor pricing genuinely dark, soft corner-board hits; the
+  sweep's ncc-0.0 ablation row exists to price exactly that.
+- **The furniture probe stood down on this broadcast** — its edge mask
+  claimed 10.7% of the frame, just over the 10% self-distrust line, so it
+  refused to act. The guard worked as designed, and 99% was reached without
+  it (corners + permanence + faces + tracker gate). Tuning note, not a bug:
+  the probe matters most on single-cam club streams, and the edge threshold
+  / dilation deserve a look before it is relied on there.
+- Recall overall is 54% (60% at the same dials before 1.6) — part exposed
+  fake recall, part the price of the floors. The trade is the right way
+  round for a sponsor-facing number, and recall is engine 1.7's whole job.
+
+## Engine 1.7 — built 30/08/2026, awaiting the labelled verification run
+
+Richard's diagnosis from the Horsham playback, verbatim: "big miss is
+failing to initiate — short runs on persistently on-screen items." That
+reorders the pair: initiation first.
+
+- **The zoom pass** (`ZOOM_SCALE` 2.0): a frame where nothing was found is
+  re-scanned upscaled — a far-side board in an ultra-wide sits under the
+  feature floor at native size, and more pixels per letterform is more
+  features. Only empty frames pay the 4x pixel cost; hits are built at the
+  zoomed scale, every guard included (geometry, perimeter, both face
+  checks), and mapped back to original-frame geometry. The test proves both
+  halves: the fixture board is genuinely missed at 1x and found at 2x with
+  coordinates at original scale.
+- **Carry-forward** (`CARRY_MAX_SECS` 3.0): one-sided extension past a
+  run's last real sighting — each step must template-match the previous
+  frame (a cut fails here) AND keep passing the whole-face check (a drift
+  onto the wrong thing fails here), capped, stopping at any run it meets.
+  The 1.5 face gate is what makes this buildable; before it, similarity
+  alone never knew when to stop.
+
+Both carry 0-off switches; the sweep grid is now exactly their ablation
+(zoom x carry, four combos), so what each lever buys stays measured. The
+retired grid dials are listed in the sweep header with the dates they were
+settled. **No number from 1.7 is quotable until the Sutton labels rerun**
+— expected: recall well above 54% with precision holding 97%+; if precision
+slips, the levers ship dialled down, not the claim dialled up.
+
+## Roadmap — engine 1.7, the recall pair (agreed 30/08/2026, superseded by the build above)
+
+Precision's ladder is built and verified; recall (55-60% pooled, far-side
+dugouts 24-36%) is the remaining half. Two levers, shipped together and
+gated the usual way — recall up, precision holds 97%+ on the labels or it
+does not ship:
+
+1. **The zoom pass.** 58% of all misses sit in four ultra-wide passages
+   where boards fall under the detector's floor. Re-scan only the frames
+   with few or no hits at 2x resolution — targeted, so the cost stays
+   pennies, and the eval prices exactly what it buys.
+2. **One-sided, face-checked extension** — Richard's carry-forward ruling:
+   a detected board that stops clearing the 7-feature bar visibly stays on
+   screen, but the tracker only bridges between TWO anchors, so runs die at
+   the flicker edge. Extend past the last real sighting while the patch
+   stays template-similar AND keeps passing the whole-face identity check,
+   capped at a few seconds. Unsafe before 1.5 (the Sutton impostor chain
+   proved similarity alone never knows when to stop); the face gate is the
+   terminator that makes it buildable now.
+
+Also parked, in rough order: the stinger/ident exclusion (the one known
+precision leak left — brief full-screen sponsor graphics), a second
+ground's hand-labels to prove generalisation, the halves runner, per-design
+attribution, board print artwork as references.
+
 ## The ident trap — a false positive worth knowing about
 
 A highlights package opens with a sponsor ident card: the Enterprise mark and
