@@ -27,6 +27,16 @@
     staff              → off; granted per-user, like Commercial Compliance
 
   Changelog
+  v0.13 (30/08/2026) — Auditions launch from the tool, Richard's ruling
+  ("this audition all takes place on the tool, no?"). The upload form gains
+  an "Audition first" tick: the request carries mode+dest, the function
+  passes BE_MODE/BE_DEST, and the poller leaves the source video in place
+  so the follow-up full scan reuses the same upload. The Audition tab
+  lists finished audition requests alongside measured matches (a new
+  ground's first audition has no match record yet), and "Run the full
+  scan" clones the audition request into a normal scan request — same
+  file, same trims and halves marks, references as promoted. Cloud Shell
+  leaves the audition loop entirely.
   v0.12 (30/08/2026) — The audition tab (superadmin). Reads the
   BE_MODE=audition output from the match folder: a verdict per reference
   (fired N times with its best match, or dead on this footage) and a grid
@@ -166,6 +176,18 @@
     var NL_TOOL_KEY = 'ops-brand-exposure';
 
     window.NL_CHANGELOG = [
+      {
+        date: '30/08/2026',
+        version: 'v0.13',
+        items: [
+          'Auditions launch from the tool: tick “Audition first” on an ' +
+            'upload and the queue runs the reference check instead of the ' +
+            'scan, keeping the footage in place. When it lands, the ' +
+            'Audition tab lists it, and “Run the full scan” queues the real ' +
+            'measurement on the same upload — promoted crops included. ' +
+            'Cloud Shell retires from the loop.'
+        ]
+      },
       {
         date: '30/08/2026',
         version: 'v0.12',
@@ -2929,7 +2951,12 @@
         '<p class="form-hint">Trims keep warm-up out of the numbers; mark both ' +
         'half-time points on a full 90 and the break is skipped entirely — ' +
         'half-time adverts never count as boards, and its minutes are never ' +
-        'billed.</p>';
+        'billed.</p>' +
+        '<label class="form-hint" style="display:flex;gap:8px;align-items:' +
+        'center;cursor:pointer"><input type="checkbox" id="sAudition"> ' +
+        'Audition first — a quick reference check on this footage; tick its ' +
+        'harvested crops in the Audition tab, then run the full scan from ' +
+        'there</label>';
       /* Guessed from the file’s length until the person says otherwise — a
          stated choice is never overwritten by a later file drop. */
       $('sSource').onchange = function () { SCAN.sourceTouched = true; };
@@ -3119,10 +3146,19 @@
       req.ht = $('sHt').value.trim();
       req.restart = $('sRestart').value.trim();
     }
+    var audition = !!(($('sAudition') || {}).checked);
+    if (audition) {
+      req.mode = 'audition';
+      req.dest = 'brand-exposure/' + f.date + '-' + slug(f.club) + '-v-' +
+        slug(f.opponent);
+    }
 
     db.ref(REQ_ROOT).push(req).then(function () {
-      NL.toast('Queued — the scan starts itself.', 'success');
-      NL.writeAudit('scan_request', req.match + ' (' + req.date + ')');
+      NL.toast(audition
+        ? 'Queued — the audition starts itself; its crops land in the Audition tab.'
+        : 'Queued — the scan starts itself.', 'success');
+      NL.writeAudit(audition ? 'audition_request' : 'scan_request',
+        req.match + ' (' + req.date + ')');
       SCAN.file = null; SCAN.duration = null;
       renderUpload(); renderGo();
     }).catch(function (e) {
@@ -3137,6 +3173,8 @@
     db.ref(REQ_ROOT).limitToLast(12).on('value', function (snap) {
       SCAN.requests = snap.val() || {};
       if (view === 'scan') renderReqs();
+      /* A finishing audition should appear in its tab without a reload. */
+      if (view === 'audition') renderAudition();
     }, function () { /* read refused — the panel just stays empty */ });
     /* The record only changes on status flips, so between them the elapsed
        figure and the estimate bar would sit frozen — which reads as dead
@@ -3318,18 +3356,73 @@
      promotion, there is no copy primitive in the Storage SDK. */
   var AUD = { id: null, data: null, ticked: {}, busy: false, urls: {} };
 
+  /* One row per storage folder that could hold an audition: every measured
+     match, plus every finished audition request — a NEW ground's first
+     audition has no match record yet, only its request. */
+  function audSources() {
+    var by = {};
+    list().forEach(function (m) { by[m._id] = m.name || m._id; });
+    Object.keys(SCAN.requests || {}).forEach(function (k) {
+      var r = SCAN.requests[k] || {};
+      if (r.mode !== 'audition' || r.status !== 'done' || !r.dest) return;
+      var seg = String(r.dest).split('/')[1];
+      if (seg && !by[seg]) by[seg] = (r.match || seg) + ' — audition';
+    });
+    return by;
+  }
+
   function renderAudition() {
+    subReqs();
     var sel = $('audMatch');
+    var by = audSources();
     var opts = '<option value="">Choose a match</option>' +
-      list().map(function (m) {
-        return '<option value="' + esc(m._id) + '"' +
-          (m._id === AUD.id ? ' selected' : '') + '>' +
-          esc(m.name || m._id) + '</option>';
+      Object.keys(by).sort().reverse().map(function (id) {
+        return '<option value="' + esc(id) + '"' +
+          (id === AUD.id ? ' selected' : '') + '>' + esc(by[id]) + '</option>';
       }).join('');
     if (sel.innerHTML !== opts) sel.innerHTML = opts;
     sel.onchange = function () { audLoad(sel.value || null); };
     if (!AUD.id) { $('audBody').innerHTML = ''; return; }
     if (AUD.data) audRender();
+  }
+
+  /* The finished audition request whose dest is the loaded folder — the
+     handle that lets "run the full scan" reuse the SAME upload with the
+     same details, which is the whole reason auditions keep their source. */
+  function audRequestFor(seg) {
+    var found = null;
+    Object.keys(SCAN.requests || {}).forEach(function (k) {
+      var r = SCAN.requests[k] || {};
+      if (r.mode === 'audition' && r.status === 'done' &&
+          String(r.dest || '').split('/')[1] === seg) found = r;
+    });
+    return found;
+  }
+
+  function audScanNow() {
+    var src = audRequestFor(AUD.id);
+    if (!src || AUD.busy) return;
+    NL.confirm('It uses every reference currently in the library, promoted ' +
+      'crops included, and bills as a normal scan.', {
+      title: 'Run the full scan', confirmText: 'Scan'
+    }).then(function (yes) {
+        if (!yes) return;
+        var req = {};
+        Object.keys(src).forEach(function (k) {
+          if (['mode', 'dest', 'status', 'at', 'by', 'execution', 'startedAt',
+               'finishedAt', 'error', 'swept'].indexOf(k) < 0) req[k] = src[k];
+        });
+        req.status = 'queued';
+        req.by = (firebase.auth().currentUser || {}).uid || null;
+        req.at = firebase.database.ServerValue.TIMESTAMP;
+        return db.ref(REQ_ROOT).push(req).then(function () {
+          NL.writeAudit('scan_request', req.match + ' (' + req.date +
+            ') after audition');
+          NL.toast('Queued — the scan starts itself.', 'success');
+        });
+      }).catch(function (e) {
+        NL.toast('Could not queue the scan: ' + e.message, 'error');
+      });
   }
 
   function audLoad(id) {
@@ -3384,7 +3477,13 @@
       h += '<div class="banner" style="margin-top:14px">No crops came out of ' +
         'this audition.</div>';
     }
+    if (audRequestFor(AUD.id)) {
+      h += '<div style="margin-top:16px"><button class="btn btn--ghost" ' +
+        'id="audScan">Run the full scan on this footage</button></div>';
+    }
     $('audBody').innerHTML = h;
+    var scanBtn = $('audScan');
+    if (scanBtn) scanBtn.onclick = audScanNow;
 
     var grid = $('audGrid');
     if (grid) meta.forEach(function (c, i) {
