@@ -570,10 +570,24 @@ not yet hold on club footage. The footage-quality fingerprint matches:
 Horsham's confirmed hits are bigger and clearer than Sutton's but carry
 far fewer agreeing features (mean 16 vs 26; a third scrape under 12) —
 compression starvation, not optics. This is the recall campaign's real
-target: club streams, not broadcast wides. Caveat on the caveat: this is
-a 1.6 scan — Horsham has never been scanned on 1.7 (which bought Sutton
-+10); rerun pending before further conclusions. Labels:
-`labels/2026-08-18-horsham-v-hampton-and-richmond.csv`.
+target: club streams, not broadcast wides. Labels: `labels/2026-08-18-horsham-v-hampton-and-richmond.csv`.
+
+**The 1.7 rerun (same day).** Recall 15% → 21% (DAZN 9→17, Enterprise
+26→34 with left-end 38→49; TIC flat at 3% — nothing to anchor, too
+starved to initiate, the pure test case for harvested references). The
+anchor census predicted a 44% ceiling if carry-forward converted
+perfectly; it converted about a fifth of its room — the template and
+face gates kill most steps on compression mush, as designed. And the
+first phantoms on this footage arrived with a lesson attached: 6 samples
+(3.0s), ALL tracked, both disputed ranges sitting 1-2s beyond the ends
+of runs Richard himself marked (0:30 before his 0:32 start; 4:16 past
+his 4:15 end) — carry-forward stretching into frames where the human
+couldn't confirm the board either. Not invented objects: overshot
+boundaries. DAZN precision 84%, overall 95% — the first sub-97% cell in
+the ledger, and a warning shot for the carry-sweep idea: longer carry
+buys recall at exactly this edge, so the sweep's precision gate is not a
+formality on club footage. The club-stream wall stands: 21% here vs 64%
+on broadcast, and the missing mass is initiation, not completion.
 The stated target moved most: the far-side dugout boards went from 24-36%
 to 53-60%, and Enterprise's goal-line boards now read 86-97%. The phantom
 cost of the extra recall is 6.0s across a 494s window (up from 2.0s in
