@@ -506,7 +506,35 @@ time on the marked match. Three honest footnotes:
   fake recall, part the price of the floors. The trade is the right way
   round for a sponsor-facing number, and recall is engine 1.7's whole job.
 
-## Roadmap — engine 1.7, the recall pair (agreed 30/08/2026, not started)
+## Engine 1.7 — built 30/08/2026, awaiting the labelled verification run
+
+Richard's diagnosis from the Horsham playback, verbatim: "big miss is
+failing to initiate — short runs on persistently on-screen items." That
+reorders the pair: initiation first.
+
+- **The zoom pass** (`ZOOM_SCALE` 2.0): a frame where nothing was found is
+  re-scanned upscaled — a far-side board in an ultra-wide sits under the
+  feature floor at native size, and more pixels per letterform is more
+  features. Only empty frames pay the 4x pixel cost; hits are built at the
+  zoomed scale, every guard included (geometry, perimeter, both face
+  checks), and mapped back to original-frame geometry. The test proves both
+  halves: the fixture board is genuinely missed at 1x and found at 2x with
+  coordinates at original scale.
+- **Carry-forward** (`CARRY_MAX_SECS` 3.0): one-sided extension past a
+  run's last real sighting — each step must template-match the previous
+  frame (a cut fails here) AND keep passing the whole-face check (a drift
+  onto the wrong thing fails here), capped, stopping at any run it meets.
+  The 1.5 face gate is what makes this buildable; before it, similarity
+  alone never knew when to stop.
+
+Both carry 0-off switches; the sweep grid is now exactly their ablation
+(zoom x carry, four combos), so what each lever buys stays measured. The
+retired grid dials are listed in the sweep header with the dates they were
+settled. **No number from 1.7 is quotable until the Sutton labels rerun**
+— expected: recall well above 54% with precision holding 97%+; if precision
+slips, the levers ship dialled down, not the claim dialled up.
+
+## Roadmap — engine 1.7, the recall pair (agreed 30/08/2026, superseded by the build above)
 
 Precision's ladder is built and verified; recall (55-60% pooled, far-side
 dugouts 24-36%) is the remaining half. Two levers, shipped together and

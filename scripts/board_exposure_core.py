@@ -92,7 +92,25 @@ import numpy as np
 # stands down below the floor; and a mask claiming over a tenth of the frame
 # distrusts itself. Coverage and motion go in the export, so a runaway mask
 # can never hide.
-ENGINE_VERSION = "1.6"
+#
+# 1.7 — recall's turn, precision's rules. Richard's diagnosis from the
+# Horsham playback, verbatim: "big miss is failing to initiate — short runs
+# on persistently on-screen items." Two levers, both wearing every 1.4-1.6
+# guard: (1) the ZOOM PASS attacks initiation — a frame where nothing was
+# found is re-scanned at ZOOM_SCALE, because a far-side board in an
+# ultra-wide is under the feature floor at native size and 58% of all
+# labelled misses lived in exactly those passages; hits are built at the
+# zoomed scale (face checks included) and their geometry mapped back.
+# (2) CARRY-FORWARD finishes the runs the seeds start — the tracker could
+# only bridge BETWEEN two anchors, so a flickering-but-visible board died at
+# the last detection; now a run's ends extend one-sided while the patch
+# stays template-similar AND keeps passing the whole-face check, capped at
+# CARRY_MAX_SECS. Unsafe before the 1.5 face gate existed (similarity alone
+# never knows when to stop — the Sutton impostor chain proved it); the face
+# check is the terminator that makes it buildable. Both levers carry 0-off
+# switches and the sweep grid ablates them, so what each buys stays
+# measured, never assumed.
+ENGINE_VERSION = "1.7"
 
 # --- tunables, all in one place so a run can be described in one line ---------
 SAMPLE_FPS = 2.0            # samples per second of match
@@ -211,6 +229,17 @@ FURN_AGREE = 0.60           # share of frames an edge-pixel must persist in
 FURN_MIN_MOTION = 0.005     # mean edge churn below this = locked-off camera
 FURN_MAX_COVERAGE = 0.10    # a mask claiming more of the frame distrusts itself
 FURN_DILATE_PX = 9          # grown a little so a hit centred at the rim still counts
+# The zoom pass (1.7): initiation. A frame that yielded NOTHING is re-scanned
+# upscaled — a small far-side board carries too few features at native size,
+# and more pixels per letterform is more features. Only empty frames pay the
+# 4x pixel cost, hits are built at the zoomed scale (every face and geometry
+# guard runs there) and mapped back. 0 disables.
+ZOOM_SCALE = 2.0
+# Carry-forward (1.7): completion. One-sided extension past a run's last
+# real sighting, each step template-matched from the previous frame AND
+# whole-face checked against the sponsor's reference — the terminator that
+# similarity alone lacks. In seconds; 0 disables.
+CARRY_MAX_SECS = 3.0
 
 
 def flatten(path):
@@ -665,6 +694,38 @@ def detect(frame_bgr, refs, sift, matcher):
     return out
 
 
+def _scale_hit_back(h, s):
+    """Map a hit found on an upscaled frame onto original-frame geometry.
+    Percentages (area, visibility, clarity) are scale-relative already."""
+    h["quad"] = h["quad"] / s if hasattr(h["quad"], "__truediv__") else h["quad"]
+    if h.get("board"):
+        h["board"] = tuple(v / s for v in h["board"])
+    if h.get("mc"):
+        h["mc"] = [h["mc"][0] / s, h["mc"][1] / s]
+    return h
+
+
+def detect2(frame_bgr, refs, sift, matcher, zoom=None):
+    """
+    detect(), plus the 1.7 initiation pass: when the native-size scan finds
+    NOTHING, the frame is re-scanned at `zoom` and any hits mapped back.
+    Only empty frames pay the 4x pixel cost — a frame that already yielded a
+    board was never the initiation problem. Every guard (geometry, perimeter,
+    both face checks) runs at the zoomed scale, where the evidence is.
+    """
+    zoom = ZOOM_SCALE if zoom is None else zoom
+    hits = detect(frame_bgr, refs, sift, matcher)
+    if hits or not zoom or zoom <= 1.0:
+        return hits
+    big = cv2.resize(frame_bgr, None, fx=zoom, fy=zoom,
+                     interpolation=cv2.INTER_CUBIC)
+    zoomed = detect(big, refs, sift, matcher)
+    for name, hs in zoomed.items():
+        for h in hs:
+            _scale_hit_back(h, zoom)
+    return zoomed
+
+
 def settings():
     """
     Everything that decides what a number comes out as, for the export.
@@ -694,6 +755,7 @@ def settings():
                         "min_share": STATIC_FINE_MIN_SHARE},
         "face_ncc_reject": FACE_NCC_REJECT, "face_agree_reject": VIS_REJECT,
         "corner": {"x_frac": CORNER_X_FRAC, "y_frac": CORNER_Y_FRAC},
+        "zoom_scale": ZOOM_SCALE, "carry_max_secs": CARRY_MAX_SECS,
         "furniture": {"frames": FURN_FRAMES, "edge_t": FURN_EDGE_T,
                       "agree": FURN_AGREE, "min_motion": FURN_MIN_MOTION,
                       "max_coverage": FURN_MAX_COVERAGE},

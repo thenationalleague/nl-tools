@@ -701,6 +701,133 @@ class FurnitureMask(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_CV, "opencv-python-headless + numpy not installed")
+class ZoomPass(unittest.TestCase):
+    """Engine 1.7, initiation: a board too small to muster the feature floor
+    at native size is found when the empty frame is re-scanned upscaled —
+    Richard's 'failing to initiate' diagnosis, and 58% of labelled misses."""
+
+    def setUp(self):
+        import tempfile
+        rng = np.random.default_rng(9)
+        board = np.zeros((40, 160, 3), np.uint8)
+        board[:] = (40, 160, 40)
+        cv2.putText(board, "ACME", (8, 30), cv2.FONT_HERSHEY_SIMPLEX,
+                    1.0, (255, 255, 255), 4)
+        cv2.rectangle(board, (120, 8), (150, 32), (255, 255, 255), -1)
+        self._ref_path = tempfile.mktemp(suffix=".png")
+        cv2.imwrite(self._ref_path,
+                    cv2.resize(board, (480, 120),
+                               interpolation=cv2.INTER_NEAREST))
+        frame = rng.integers(60, 90, (360, 640, 3), dtype=np.uint8)
+        frame = cv2.GaussianBlur(frame, (5, 5), 0)
+        frame[240:, :] = (45, 150, 45)               # grass under the board
+        # The far-side case: the same board at a quarter the size, sitting on
+        # the grass line — too few pixels per letterform at native scale.
+        frame[224:240, 300:364] = cv2.resize(board, (64, 16),
+                                             interpolation=cv2.INTER_AREA)
+        self.frame = frame
+        sift = cv2.SIFT_create(nfeatures=6000)
+        self.refs, _ = C.build_refs([("ACME", self._ref_path, "partner")], sift)
+        self.sift, self.matcher = sift, cv2.BFMatcher(cv2.NORM_L2)
+
+    def test_native_scan_misses_zoom_finds_and_maps_back(self):
+        native = C.detect(self.frame, self.refs, self.sift, self.matcher)
+        self.assertEqual(native, {}, "fixture too easy — board found at 1x, "
+                                     "shrink it or the test proves nothing")
+        hits = C.detect2(self.frame, self.refs, self.sift, self.matcher)
+        self.assertIn("ACME", hits)
+        q = hits["ACME"][0]["quad"]
+        cx = sum(float(p[0]) for p in q) / 4
+        cy = sum(float(p[1]) for p in q) / 4
+        # Geometry must come back at ORIGINAL frame scale, on the small board.
+        self.assertLess(abs(cx - 332), 25)
+        self.assertLess(abs(cy - 232), 20)
+
+    def test_zoom_off_is_the_native_result(self):
+        self.assertEqual(
+            C.detect2(self.frame, self.refs, self.sift, self.matcher, zoom=0),
+            {})
+
+
+@unittest.skipUnless(HAVE_CV, "opencv-python-headless + numpy not installed")
+class CarryForward(unittest.TestCase):
+    """Engine 1.7, completion: runs extend one-sided past the last sighting
+    while the patch stays template-similar AND face-checked, capped."""
+
+    def _files(self, cut_from=6, n=8):
+        import tempfile
+        d = tempfile.mkdtemp()
+        files = []
+        for i in range(n):
+            f = board_frame(100 + 20 * i, blur_px=6,
+                            with_board=(i < cut_from))
+            p = os.path.join(d, f"f{i}.png")
+            cv2.imwrite(p, f)
+            files.append(p)
+        return files
+
+    def _seed(self, at):
+        real = {"scope": "partner",
+                "quad": [[100 + 20 * at, 200], [260 + 20 * at, 200],
+                         [260 + 20 * at, 240], [100 + 20 * at, 240]],
+                "board": None, "logo_area": 2.8, "area": 2.8,
+                "inliers": 30, "clarity": 0.6}
+        return {at: {"ACME": [real]}}
+
+    def _acme_face(self):
+        board = np.zeros((40, 160, 3), np.uint8)
+        board[:] = (40, 160, 40)
+        cv2.putText(board, "ACME", (8, 30), cv2.FONT_HERSHEY_SIMPLEX,
+                    1.0, (255, 255, 255), 4)
+        cv2.rectangle(board, (120, 8), (150, 32), (255, 255, 255), -1)
+        return {"ACME": [cv2.resize(cv2.cvtColor(board, cv2.COLOR_BGR2GRAY),
+                                    (C.VIS_W, C.VIS_H))]}
+
+    def test_extends_both_ways_and_stops_at_the_cut(self):
+        bem = _load_match_module()
+        h = self._seed(2)
+        n = bem.extend_run_ends(h, self._files(cut_from=6), 0.5,
+                                self._acme_face())
+        # Forward 3,4,5 (frame 6 has no board — correlation dies), back 1,0.
+        self.assertEqual(sorted(h), [0, 1, 2, 3, 4, 5])
+        self.assertEqual(n, 5)
+        for i in (0, 1, 3, 4, 5):
+            (t,) = h[i]["ACME"]
+            self.assertTrue(t["tracked"])
+
+    def test_cap_is_respected(self):
+        bem = _load_match_module()
+        old = C.CARRY_MAX_SECS
+        C.CARRY_MAX_SECS = 1.0                      # 2 samples at 0.5s
+        try:
+            h = self._seed(3)
+            bem.extend_run_ends(h, self._files(cut_from=8), 0.5,
+                                self._acme_face())
+            self.assertEqual(sorted(h), [1, 2, 3, 4, 5])
+        finally:
+            C.CARRY_MAX_SECS = old
+
+    def test_off_switch_and_wrong_face_add_nothing(self):
+        bem = _load_match_module()
+        old = C.CARRY_MAX_SECS
+        C.CARRY_MAX_SECS = 0
+        try:
+            h = self._seed(2)
+            self.assertEqual(
+                bem.extend_run_ends(h, self._files(), 0.5, self._acme_face()),
+                0)
+        finally:
+            C.CARRY_MAX_SECS = old
+        imp = np.full((C.VIS_H, C.VIS_W), 15, np.uint8)
+        cv2.putText(imp, "ZORBA", (30, 34), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.9, 245, 3)
+        h = self._seed(2)
+        self.assertEqual(
+            bem.extend_run_ends(h, self._files(), 0.5, {"ACME": [imp]}), 0)
+        self.assertEqual(sorted(h), [2])
+
+
+@unittest.skipUnless(HAVE_CV, "opencv-python-headless + numpy not installed")
 class CompactExportKeys(unittest.TestCase):
     """The shipped detections.json dialect. The tracked flag was absent from
     every real export until 1.5 — the eval's tracked column read zero while

@@ -73,7 +73,7 @@ def _scan(job):
     frame = cv2.imread(path, cv2.IMREAD_COLOR)
     if frame is None:
         return i, {}
-    hits = C.detect(frame, _W["refs"], _W["sift"], _W["matcher"])
+    hits = C.detect2(frame, _W["refs"], _W["sift"], _W["matcher"])
     out = {}
     for name, hs in hits.items():
         out[name] = [{
@@ -92,16 +92,15 @@ def _scan(job):
     return i, out
 
 
-# The grid. Small on purpose: eight combos is ~25 minutes and answers the
-# question; a hundred combos is overfitting to one afternoon at one ground.
-# MIN_SIDE was a dimension until engine 1.5: the 29/08 sweep produced four
-# identical row-pairs at 12 vs 9, so the dial does nothing on real footage
-# and its slots go to the whole-face floor instead — 0.0 rows are the
-# ablation that shows what the face NCC check is buying.
+# The grid. Small on purpose — and it changes with the engine version to
+# ablate whatever just shipped. The 1.7 grid prices recall's two new levers
+# separately: the zoom pass (initiation) and carry-forward (completion),
+# each with its off row. Dials retired from the grid once settled: MIN_SIDE
+# (four identical row-pairs, 29/08), RATIO/MIN_INLIERS (promoted 0.85/7),
+# FACE_NCC_REJECT (verified at 99% precision, 30/08).
 GRID = {
-    "RATIO": [0.85, 0.80],          # Lowe ratio — looser admits more matches
-    "MIN_INLIERS": [7, 9],          # agreeing features a match must muster
-    "FACE_NCC_REJECT": [0.25, 0.0],  # whole-face floor; 0.0 = check off
+    "ZOOM_SCALE": [2.0, 0],         # re-scan empty frames upscaled; 0 = off
+    "CARRY_MAX_SECS": [3.0, 0],     # one-sided face-checked extension; 0 = off
 }
 
 
@@ -122,7 +121,9 @@ def scan_once(bem, entries, files, interval, n_samples, overrides, jobs,
     C.strip_corner(hits, frame_w, frame_h)
     C.strip_masked(hits, furniture_mask)
     C.strip_static(hits, n_samples)
-    bem.close_blurred_gaps(hits, files, interval, C.build_faces(entries))
+    faces = C.build_faces(entries)
+    bem.close_blurred_gaps(hits, files, interval, faces)
+    bem.extend_run_ends(hits, files, interval, faces)
     return hits
 
 
@@ -167,9 +168,9 @@ def main():
 
     combos = [dict(zip(GRID, vals))
               for vals in itertools.product(*GRID.values())]
-    print(f"  {'ratio':>6}{'inliers':>9}{'ncc':>6}{'recall':>9}"
+    print(f"  {'zoom':>6}{'carry':>7}{'recall':>9}"
           f"{'precision':>11}{'phantom':>9}{'mins':>6}")
-    print("  " + "-" * 56)
+    print("  " + "-" * 48)
     results = []
     for ov in combos:
         t0 = time.time()
@@ -178,7 +179,7 @@ def main():
         per = E.score(truth, window, hits, interval)
         o = E.overall(per)
         results.append((ov, o, per))
-        print(f"  {ov['RATIO']:>6.2f}{ov['MIN_INLIERS']:>9}{ov['FACE_NCC_REJECT']:>6}"
+        print(f"  {ov['ZOOM_SCALE']:>6}{ov['CARRY_MAX_SECS']:>7}"
               f"{'' if o['recall'] is None else format(100 * o['recall'], '.0f') + '%':>9}"
               f"{'' if o['precision'] is None else format(100 * o['precision'], '.0f') + '%':>11}"
               f"{o['fp']:>9}{(time.time() - t0) / 60:>6.1f}", flush=True)
@@ -188,8 +189,8 @@ def main():
               if r[1]["precision"] is not None and r[1]["precision"] >= 0.97]
     if honest:
         ov, o, per = max(honest, key=lambda r: r[1]["recall"] or 0)
-        print(f"\n  knee: ratio {ov['RATIO']}, inliers {ov['MIN_INLIERS']}, "
-              f"ncc {ov['FACE_NCC_REJECT']} — recall {100 * (o['recall'] or 0):.0f}% "
+        print(f"\n  knee: zoom {ov['ZOOM_SCALE']}, carry {ov['CARRY_MAX_SECS']} "
+              f"— recall {100 * (o['recall'] or 0):.0f}% "
               f"at precision {100 * (o['precision'] or 0):.0f}%")
         for name in sorted(per):
             s = per[name]
@@ -205,8 +206,8 @@ def main():
         # Still say WHERE the disagreement lives, from the strictest combo —
         # precision is flat across the grid, so the diagnosis is too.
         ov, o, per = results[0]
-        print(f"\n  per sponsor at ratio {ov['RATIO']}, inliers "
-              f"{ov['MIN_INLIERS']}, ncc {ov['FACE_NCC_REJECT']}:")
+        print(f"\n  per sponsor at zoom {ov['ZOOM_SCALE']}, carry "
+              f"{ov['CARRY_MAX_SECS']}:")
         for name in sorted(per):
             s = per[name]
             r = "—" if s["recall"] is None else f"{100 * s['recall']:.0f}%"
