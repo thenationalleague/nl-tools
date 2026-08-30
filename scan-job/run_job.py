@@ -44,11 +44,15 @@ Environment (all set by the trigger, none baked into the image):
     BE_INGEST_KEY      the key, injected from Secret Manager
     BE_REFS_PREFIX     default brand-exposure/refs
     BE_FPS             optional sample rate override
-    BE_MODE            scan (default) | sweep | diagnose — sweep trials the
-                       sensitivity grid against a labels file and uploads
-                       nothing; diagnose measures what a finished scan's
-                       missed frames look like (blur / compression /
-                       starvation) and writes diagnose.json beside the export
+    BE_MODE            scan (default) | sweep | diagnose | audition — sweep
+                       trials the sensitivity grid against a labels file and
+                       uploads nothing; diagnose measures what a finished
+                       scan's missed frames look like (blur / compression /
+                       starvation) and writes diagnose.json beside the
+                       export; audition runs the per-reference casting call
+                       on a few hundred sharpest-in-window frames and writes
+                       audition.json + candidate crops to BE_DEST for the
+                       tool's tick/untick view
     BE_LABELS          sweep + diagnose: a labels filename baked into the
                        image under /app/labels (from
                        system/board-exposure/labels/), or a bucket object
@@ -57,6 +61,9 @@ Environment (all set by the trigger, none baked into the image):
                        scan's export, e.g.
                        brand-exposure/<match-id>/detections.json — the
                        diagnose output lands in the same folder
+    BE_DEST            audition only: bucket folder the outputs land in,
+                       e.g. brand-exposure/<match-id> — explicit like
+                       BE_DETECTIONS, so nothing re-derives a match id
 """
 import json
 import os
@@ -155,7 +162,10 @@ def storage_get(bucket, name, dest, token):
 
 def storage_put(bucket, name, path, token):
     """Upload one file. Same twenty-lines-not-twenty-megabytes reasoning as
-    the token fetch; the runtime service account already writes this bucket."""
+    the token fetch; the runtime service account already writes this bucket.
+    Content type follows the extension — a PNG stored as application/json
+    is a download the tool's <img> tags cannot show."""
+    ctype = ("image/png" if name.endswith(".png") else "application/json")
     url = (STORAGE.format(bucket=bucket).replace(
         "/storage/v1/", "/upload/storage/v1/") + "?" +
         urllib.parse.urlencode({"uploadType": "media", "name": name}))
@@ -163,7 +173,7 @@ def storage_put(bucket, name, path, token):
         body = f.read()
     req = urllib.request.Request(url, data=body, method="POST", headers={
         "Authorization": "Bearer " + token,
-        "Content-Type": "application/json",
+        "Content-Type": ctype,
     })
     try:
         with urllib.request.urlopen(req, timeout=300) as r:
@@ -262,6 +272,19 @@ def main():
         cmd = [sys.executable, "scripts/board_exposure_diagnose.py",
                "--detections", det, "--labels", labels,
                "--video", video, "--out", diagnose_out]
+    elif mode == "audition":
+        # The casting call: which references earn their place on this footage,
+        # plus candidate crops for the tool's tick/untick view. Writes
+        # audition.json and audition-*.png into BE_DEST, bills nothing.
+        audition_dest = env("BE_DEST", required=True).strip("/")
+        audition_out = os.path.join(WORK, "audition")
+        cmd = [sys.executable, "scripts/board_exposure_audition.py",
+               "--video", video, "--refs", refs, "--club", club,
+               "--out-dir", audition_out]
+        if match:
+            cmd += ["--match", match]
+        if date:
+            cmd += ["--date", date]
     else:
         cmd = [sys.executable, "scripts/board-exposure-match.py",
                "--video", video, "--refs", refs,
@@ -294,6 +317,13 @@ def main():
         storage_put(bucket, diagnose_obj, diagnose_out, token)
         log(f"diagnose.json -> {diagnose_obj} (download it from the match "
             f"folder, same as the export)")
+    elif mode == "audition":
+        names = sorted(os.listdir(audition_out))
+        for n in names:
+            storage_put(bucket, f"{audition_dest}/{n}",
+                        os.path.join(audition_out, n), token)
+        log(f"{len(names)} audition file(s) -> {audition_dest}/ — open the "
+            f"tool's Audition view to tick candidates into references")
 
     log(f"done in {(time.time() - t0) / 60:.1f} min")
 
