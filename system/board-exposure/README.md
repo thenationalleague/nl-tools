@@ -588,6 +588,13 @@ learned verdict layer over the hand-set floors, and eventually for a
 learned detector to succeed SIFT. The judge never changes: anything taught
 must beat the current engine on held-out hand-labels or it does not ship.
 
+**The demo kit.** Richard wants to run this live in a room. Three parts,
+two of which are already parked builds: the upload page (browser drag-drop,
+resumable); an auto-trigger so a file landing in uploads/ starts the scan
+itself — no terminal in the room; and a pre-staged 60-90 second clip so the
+audience watches upload -> scan -> match-in-the-tool inside two minutes,
+with the same clip on a laptop for the local-route demo.
+
 ## The ident trap — a false positive worth knowing about
 
 A highlights package opens with a sponsor ident card: the Enterprise mark and
