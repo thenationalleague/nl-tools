@@ -137,7 +137,7 @@ def probe(video, ffprobe):
     return info
 
 
-def make_proxy(video, out, ffmpeg, start=None, end=None):
+def make_proxy(video, out, ffmpeg, start=None, end=None, windows=None):
     """
     A small, seekable copy of the match for playing back inside the tool.
 
@@ -148,7 +148,42 @@ def make_proxy(video, out, ffmpeg, start=None, end=None):
 
     +faststart is the load-bearing flag: it moves the index to the front of the
     file so a browser can seek without downloading all of it first.
+
+    A halves scan (two windows) builds one proxy per window and joins them, so
+    the proxy's clock matches the sample clock — playback jumps straight from
+    the half-time whistle to the restart, exactly as the measurement does.
     """
+    if windows and len(windows) > 1:
+        parts, ok = [], True
+        for k, (s, e) in enumerate(windows):
+            p = f"{out}.part{k}.mp4"
+            if make_proxy(video, p, ffmpeg, s or None, e) is None:
+                ok = False
+                break
+            parts.append(p)
+        lst = out + ".parts.txt"
+        if ok:
+            with open(lst, "w", encoding="utf-8") as f:
+                for p in parts:
+                    f.write(f"file '{os.path.abspath(p)}'\n")
+            # Both parts share codec and settings, so the join is a stream
+            # copy — the concat demuxer method,
+            # https://trac.ffmpeg.org/wiki/Concatenate
+            cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                   "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy",
+                   "-movflags", "+faststart", out]
+            try:
+                subprocess.run(cmd, check=True)
+            except (subprocess.CalledProcessError, FileNotFoundError) as e2:
+                print(f"  ! could not join the half proxies ({e2}). The match "
+                      f"is still measured; the tool will fall back to stills.")
+                ok = False
+        for p in parts + [lst]:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+        return out if ok and os.path.exists(out) else None
     # -stats only on a terminal. It writes a progress line a second, which is a
     # progress bar locally and a thousand log entries in Cloud Run — enough to
     # bury the one line that says whether the upload worked.
@@ -269,6 +304,49 @@ def parse_clock(s):
         return _parse_clock(s)
     except E.LabelError as e:
         die(str(e))
+
+
+def halves_windows(start, ht, restart, end):
+    """
+    The measured windows for a scan, in file-clock seconds. One window
+    normally; two when the half-time pair is given, with the break between
+    them never extracted — the cheapest possible exclusion, and the honest
+    one: a sponsor's own half-time advert matches its reference perfectly
+    and passes every guard, because it genuinely is the logo. `end` may be
+    None (to the end of the file). Ordering is validated here so a swapped
+    pair dies in a sentence, not after an hour of extraction.
+    """
+    s = start or 0
+    if (ht is None) != (restart is None):
+        die("--ht and --restart come as a pair — one without the other "
+            "leaves the break unbounded.")
+    if ht is None:
+        return [(s, end)]
+    if not (s < ht < restart) or (end is not None and restart >= end):
+        die("half-time marks out of order: need start < ht < restart"
+            + (" < end" if end is not None else "") + ".")
+    return [(s, ht), (restart, end)]
+
+
+def extract_windows(video, work, fps, ffmpeg, windows, info, limit):
+    """
+    One extraction per window into its own subfolder, sample indices running
+    continuously across them. Returns (files, interval, seams) — a seam
+    being the index of each later window's first sample: the wall that
+    runs_from, gap-filling and carry-forward all refuse to reach across,
+    because two index-adjacent samples there are a whole half-time apart.
+    """
+    files, seams = [], set()
+    interval = 1.0 / fps
+    for k, (s, e) in enumerate(windows):
+        sub = os.path.join(work, f"w{k + 1}")
+        span_k = (e if e is not None else info["duration"]) - s
+        fs, interval = extract(video, sub, fps, ffmpeg, int(span_k * fps),
+                               limit, start=s or None, end=e)
+        if k:
+            seams.add(len(files))
+        files += fs
+    return files, interval, seams
 
 
 def extract_ffmpeg(video, work, fps, ffmpeg, limit, start=None, end=None):
@@ -526,7 +604,7 @@ def _track_gap(name, a, b, hits_by_index, files, faces=None):
     return sorted(found.items())
 
 
-def close_blurred_gaps(hits_by_index, files, interval, faces=None):
+def close_blurred_gaps(hits_by_index, files, interval, faces=None, seams=None):
     """
     Engine 1.1's recall pass. SIFT loses boards for the length of a camera pan
     because motion blur erases the detail it matches on; the board is still on
@@ -541,7 +619,7 @@ def close_blurred_gaps(hits_by_index, files, interval, faces=None):
     t0 = time.time()
     for name in sorted({n for h in hits_by_index.values() for n in h}):
         idxs = [i for i, h in hits_by_index.items() if h.get(name)]
-        for a, b in C.gap_candidates(idxs, max_gap):
+        for a, b in C.gap_candidates(idxs, max_gap, seams):
             chain = _track_gap(name, a, b, hits_by_index, files, faces)
             if chain:
                 for i, hit in chain:
@@ -555,7 +633,7 @@ def close_blurred_gaps(hits_by_index, files, interval, faces=None):
     return filled
 
 
-def extend_run_ends(hits_by_index, files, interval, faces=None):
+def extend_run_ends(hits_by_index, files, interval, faces=None, seams=None):
     """
     Engine 1.7's completion pass — Richard's flicker diagnosis: a board that
     stops clearing the feature bar visibly stays on screen, but the gap
@@ -589,6 +667,13 @@ def extend_run_ends(hits_by_index, files, interval, faces=None):
                     continue
                 j, steps = i + step, 0
                 while 0 <= j < n and steps < cap and j not in idx_set:
+                    # A seam (the first index of a new extraction window) is a
+                    # wall in both directions: stepping forward INTO one, or
+                    # backward across one, would carry a board over the
+                    # skipped half-time as if no time had passed.
+                    if seams and ((step == 1 and j in seams) or
+                                  (step == -1 and (j + 1) in seams)):
+                        break
                     cur = cv2.imread(files[j], cv2.IMREAD_COLOR)
                     if cur is None:
                         break
@@ -834,6 +919,12 @@ def main():
     ap.add_argument("--date", default=None, metavar="YYYY-MM-DD",
                     help="match date — required with --club/--match for an upload, "
                          "since it is half the match id")
+    ap.add_argument("--ht", default=None, metavar="TIME",
+                    help="half-time whistle in the file — with --restart, the "
+                         "break between them is skipped entirely (half-time "
+                         "adverts must never count as boards)")
+    ap.add_argument("--restart", default=None, metavar="TIME",
+                    help="second-half kick-off in the file; requires --ht")
     ap.add_argument("--source-type", choices=["full", "highlights"], default=None,
                     help="record the footage as a full match or a highlights "
                          "package (default: derived from duration, >45 min = "
@@ -1038,18 +1129,32 @@ def run_one(a, video, club, title, date="", start=None, end=None, complete=None)
     end = parse_clock(a.end) if end is None else end
     if end and end > info["duration"]:
         end = None
-    span = (end or info["duration"]) - (start or 0)
+    windows = halves_windows(start, parse_clock(a.ht), parse_clock(a.restart),
+                             end)
+    span = sum((e if e is not None else info["duration"]) - s
+               for s, e in windows)
     if span <= 0:
         die("the start and end times leave nothing to measure.")
     print(f"\n  {video}: {info['w']}x{info['h']}, {info['fps']:.0f}fps, "
           f"{R.hhmm(info['duration'])}")
-    if start or end:
+    if len(windows) > 1:
+        print(f"  measuring {R.hhmm(windows[0][0])} to {R.hhmm(windows[0][1])}"
+              f" and {R.hhmm(windows[1][0])} to "
+              f"{R.hhmm(windows[1][1] if windows[1][1] is not None else info['duration'])}"
+              f" — {R.hhmm(windows[1][0] - windows[0][1])} of half-time "
+              f"skipped, never extracted, never billed")
+    elif start or end:
         print(f"  measuring {R.hhmm(start or 0)} to {R.hhmm(end or info['duration'])}"
               f" — {R.hhmm(span)} of match, {R.hhmm(info['duration'] - span)} skipped")
 
-    expected = int(span * a.fps)
-    files, interval = extract(video, work, a.fps, a.ffmpeg, expected, a.limit,
-                              start=start, end=end)
+    if len(windows) == 1:
+        files, interval = extract(video, work, a.fps, a.ffmpeg,
+                                  int(span * a.fps), a.limit,
+                                  start=start, end=end)
+        seams = set()
+    else:
+        files, interval, seams = extract_windows(video, work, a.fps, a.ffmpeg,
+                                                 windows, info, a.limit)
     if a.limit:
         files = files[:a.limit]
     n_samples = len(files)
@@ -1129,8 +1234,8 @@ def run_one(a, video, club, title, date="", start=None, end=None, complete=None)
     # does — the tracker must never mint what detect() would refuse. Gap fill
     # first, then the 1.7 carry-forward extends whatever ends remain.
     faces = C.build_faces(entries)
-    close_blurred_gaps(hits_by_index, files, interval, faces)
-    extend_run_ends(hits_by_index, files, interval, faces)
+    close_blurred_gaps(hits_by_index, files, interval, faces, seams)
+    extend_run_ends(hits_by_index, files, interval, faces, seams)
 
     # Report frames: a spread across the match plus the clearest shot of each
     # sponsor, shrunk to something a page can hold.
@@ -1172,6 +1277,7 @@ def run_one(a, video, club, title, date="", start=None, end=None, complete=None)
     meta = {"match": match, "club": club, "duration": round(duration, 1),
             "interval": interval, "n_samples": n_samples,
             "video_w": info["w"], "video_h": info["h"],
+            "seams": sorted(seams),
             "sub": sub, "foot": foot}
     html = f"{base}-report.html"
     payload, size = R.build(html, meta, hits_by_index, frame_files, scope)
@@ -1187,6 +1293,15 @@ def run_one(a, video, club, title, date="", start=None, end=None, complete=None)
             "furniture_probe": furn_info,
             "source_duration": round(info["duration"], 1),
             "window": {"start": start or 0, "end": end or round(info["duration"], 1)},
+            # Halves scans: the measured windows on the file clock, and the
+            # sample indices where a later window begins. Single-window scans
+            # carry one window and no seams, so every existing consumer reads
+            # unchanged.
+            "windows": [{"start": s,
+                         "end": (e if e is not None
+                                 else round(info["duration"], 1))}
+                        for s, e in windows],
+            "seams": sorted(seams),
             "references": [{"sponsor": n, "scope": s, "file": os.path.basename(p)}
                            for n, p, s in entries],
             "scope": scope,
@@ -1220,7 +1335,8 @@ def run_one(a, video, club, title, date="", start=None, end=None, complete=None)
 
     proxy = None
     if not a.no_proxy:
-        proxy = make_proxy(video, f"{base}-proxy.mp4", a.ffmpeg, start, end)
+        proxy = make_proxy(video, f"{base}-proxy.mp4", a.ffmpeg, start, end,
+                           windows=windows)
 
     if not a.keep_frames:
         shutil.rmtree(work, ignore_errors=True)

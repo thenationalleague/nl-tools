@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Brand Exposure
-  Version: v0.10 (30/08/2026)
+  Version: v0.11 (30/08/2026)
   File: /brand-exposure/index.html
 
   Sponsor exposure measured from match video — seconds on screen, clarity and
@@ -27,6 +27,16 @@
     staff              → off; granted per-user, like Commercial Compliance
 
   Changelog
+  v0.11 (30/08/2026) — The halves marks. The upload form takes half-time
+  whistle + second-half restart alongside the existing trims; the pair is
+  validated live (order, pairness) and travels as BE_HT/BE_RESTART, and the
+  scan skips the break entirely — half-time adverts never count as boards
+  and the skipped minutes come off the price estimate. The engine gains
+  seams: the first sample after a skipped break is a wall that runs,
+  gap-filling and carry-forward never reach across (a board up before AND
+  after the break is two appearances, not one sixteen-minute one), the
+  proxy is built per half and joined so playback matches the sample clock,
+  and this viewer splits its appearance stops at the same seams.
   v0.10 (30/08/2026) — The two-routes story folds in as a fourth tab, How
   it works: the commercial routes pane (highlights/full toggle, board-count
   slider repricing live on the engine-1.7 cost model, the cloud route
@@ -148,6 +158,17 @@
     var NL_TOOL_KEY = 'ops-brand-exposure';
 
     window.NL_CHANGELOG = [
+      {
+        date: '30/08/2026',
+        version: 'v0.11',
+        items: [
+          'Half-time marks on upload: give the whistle and the restart and ' +
+            'the break is skipped entirely — half-time adverts never count ' +
+            'as boards, and the skipped minutes come off the price.',
+          'Playback matches: the video jumps from the whistle straight to ' +
+            'the restart, and appearances never bridge the break.'
+        ]
+      },
       {
         date: '30/08/2026',
         version: 'v0.10',
@@ -1382,7 +1403,8 @@
      The video is a small proxy; the boxes come from the full-resolution scan
      and are scaled onto it, so they stay accurate however soft the playback
      looks. Sample index and video time are the same clock: idx = t / interval. */
-  var M = { id: null, det: null, spon: null, stops: [], raf: 0, at: -1, col: null };
+  var M = { id: null, det: null, spon: null, stops: [], raf: 0, at: -1,
+            col: null, seams: [] };
 
   /* A 2D canvas context cannot resolve var(), so the timeline reads the same
      ladder stops the CSS uses and caches them. */
@@ -1398,7 +1420,8 @@
   function openMatch(id) {
     var m = matches[id];
     if (!m) return;
-    M = { id: id, det: null, spon: null, stops: [], raf: 0, at: -1, col: null };
+    M = { id: id, det: null, spon: null, stops: [], raf: 0, at: -1,
+          col: null, seams: [] };
     $('mHead').textContent = m.meta.club + ' v ' + (m.meta.opponent || '—');
     /* How it was measured, which the old modal carried and the player must not
        lose: two matches only compare if the engine and profile match. v0.7:
@@ -1450,7 +1473,7 @@
       storage.ref('brand-exposure/' + id + '/detections.json').getDownloadURL()
         .then(function (u) { return fetch(u); })
         .then(function (r) { return r.json(); })
-        .then(function (d) { setDetections(id, d.hits || {}); })
+        .then(function (d) { setDetections(id, d.hits || {}, d.seams || []); })
         .catch(function () { setDetections(id, {}); });
     } else {
       setDetections(id, {});
@@ -1459,9 +1482,10 @@
 
   /* Guarded on id: the fetch is async and the user may already have gone back
      to the list and opened something else. */
-  function setDetections(id, hits) {
+  function setDetections(id, hits, seams) {
     if (M.id !== id) return;
     M.det = hits;
+    M.seams = seams || [];
     buildStops();
     paintTrack();
     drawOverlay();
@@ -1537,9 +1561,16 @@
       .filter(function (i) { return (M.det[i] || {})[M.spon]; })
       .sort(function (a, b) { return a - b; });
     var bridge = Math.max(0, Math.round(1.5 / iv) - 1);
+    /* A halves scan's seam (first sample after the skipped break) is a wall:
+       index-adjacent samples across it are a whole half-time apart, so an
+       appearance never spans one. Mirrors runs_from() in the engine. */
+    var seams = M.seams || [];
+    var seamBetween = function (a, b) {
+      return seams.some(function (s) { return a < s && s <= b; });
+    };
     var runs = [], cur = null;
     keys.forEach(function (i) {
-      if (cur && i - cur.last <= bridge + 1) cur.last = i;
+      if (cur && i - cur.last <= bridge + 1 && !seamBetween(cur.last, i)) cur.last = i;
       else { if (cur) runs.push(cur); cur = { first: i, last: i }; }
     });
     if (cur) runs.push(cur);
@@ -2853,15 +2884,26 @@
         '<div class="form-group"><label for="sStart">Kick-off in the file ' +
           '(optional)</label><input class="modal__input" id="sStart" ' +
           'placeholder="18:30 or 1:52:30"></div>' +
+        '<div class="form-group"><label for="sHt">Half-time whistle ' +
+          '(optional)</label><input class="modal__input" id="sHt" ' +
+          'placeholder="45:10"></div>' +
+        '<div class="form-group"><label for="sRestart">Second half restarts</label>' +
+          '<input class="modal__input" id="sRestart" placeholder="1:01:30">' +
+        '</div>' +
         '<div class="form-group"><label for="sEnd">Full time (optional)</label>' +
           '<input class="modal__input" id="sEnd" placeholder="blank = to the end">' +
         '</div></div>' +
-        '<p class="form-hint">A full-90 file usually has warm-up either side — ' +
-        'trimming it keeps warm-up exposure out of the numbers and the pennies ' +
-        'down.</p>';
+        '<p class="form-hint">Trims keep warm-up out of the numbers; mark both ' +
+        'half-time points on a full 90 and the break is skipped entirely — ' +
+        'half-time adverts never count as boards, and its minutes are never ' +
+        'billed.</p>';
       /* Guessed from the file’s length until the person says otherwise — a
          stated choice is never overwritten by a later file drop. */
       $('sSource').onchange = function () { SCAN.sourceTouched = true; };
+      /* The half pair is validated live — renderGo owns the verdict. */
+      ['sStart', 'sHt', 'sRestart', 'sEnd'].forEach(function (id) {
+        $(id).oninput = renderGo;
+      });
     }
   }
 
@@ -2887,18 +2929,57 @@
     renderUpload(); renderGo();
   }
 
+  /* '1:52:30', '45:10' or '1110' → seconds; '' → null; garbage → NaN.
+     Mirrors parse_clock in board-exposure-match.py, which gets the same
+     strings verbatim — this copy only decides what the form may submit. */
+  function scanClock(s) {
+    s = String(s || '').trim();
+    if (!s) return null;
+    if (/^\d+$/.test(s)) return +s;
+    var m = s.match(/^(\d+):([0-5]?\d)(?::([0-5]?\d))?$/);
+    if (!m) return NaN;
+    return m[3] != null
+      ? (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3])
+      : (+m[1]) * 60 + (+m[2]);
+  }
+
+  /* The half-time pair, judged: {ok, skip} or {ok:false, err}. */
+  function halvesState() {
+    var ht = scanClock((($('sHt') || {}).value));
+    var rs = scanClock((($('sRestart') || {}).value));
+    if (ht == null && rs == null) return { ok: true, skip: 0 };
+    if (ht == null || rs == null) {
+      return { ok: false, err: 'Half-time marks come as a pair — whistle and restart.' };
+    }
+    if (isNaN(ht) || isNaN(rs)) {
+      return { ok: false, err: 'Half-time marks read like 45:10 or 1:01:30.' };
+    }
+    var st = scanClock((($('sStart') || {}).value)) || 0;
+    var en = scanClock((($('sEnd') || {}).value));
+    if (!(st < ht && ht < rs) || (en != null && !isNaN(en) && rs >= en)) {
+      return { ok: false, err: 'Order must run kick-off, half-time, restart' +
+        (en != null && !isNaN(en) ? ', full time.' : '.') };
+    }
+    return { ok: true, skip: rs - ht };
+  }
+
   function renderGo() {
     var box = $('sGo');
     if (!box) return;
     var f = SCAN.fixture, subset = chosenSponsors();
     var needComplete = subset === null;
+    var half = halvesState();
     var lines = [];
     if (SCAN.file && SCAN.duration) {
-      var mins = SCAN.duration / 60;
+      var mins = Math.max(0, SCAN.duration - (half.ok ? half.skip : 0)) / 60;
       lines.push('~' + Math.round(mins) + ' min of footage → roughly ' +
         Math.max(1, Math.round(mins * EST_PENCE_MIN[0])) + '–' +
         Math.max(2, Math.round(mins * EST_PENCE_MIN[1])) + 'p to scan, done ~' +
         Math.max(2, Math.round(mins * EST_WALL_X)) + ' min after the upload finishes.');
+      if (half.ok && half.skip > 0) {
+        lines.push('~' + Math.round(half.skip / 60) + ' min of half-time ' +
+          'skipped — not scanned, not billed, and its adverts never count.');
+      }
     } else if (SCAN.file) {
       lines.push('Could not read the video’s length — the scan still prices ' +
         'itself the same, there is just no estimate to show.');
@@ -2918,8 +2999,11 @@
           '</select></div>'
         : '') +
       lines.map(function (l) { return '<p class="form-hint">' + esc(l) + '</p>'; }).join('') +
+      (half.ok ? '' : '<p class="form-hint" style="color:var(--red)">' +
+        esc(half.err) + '</p>') +
       '<button class="btn btn--primary" id="sStartBtn"' +
-      (f && SCAN.file && !SCAN.upState ? '' : ' disabled') + '>Upload and scan</button>' +
+      (f && SCAN.file && half.ok && !SCAN.upState ? '' : ' disabled') +
+      '>Upload and scan</button>' +
       (!f ? ' <span class="form-hint">Pick the fixture first.</span>'
           : (!SCAN.file ? ' <span class="form-hint">Drop the video in first.</span>' : ''));
     var btn = $('sStartBtn');
@@ -2933,6 +3017,8 @@
     if (subset !== null && !subset.length) {
       return NL.toast('Nothing selected to scan for.', 'error');
     }
+    var half = halvesState();
+    if (!half.ok) return NL.toast(half.err, 'error');
     var completeSel = $('sComplete');
     var refSet = subset === null ? (completeSel && completeSel.value) : 'partial';
     if (!refSet) {
@@ -2995,6 +3081,11 @@
     var st = ($('sStart') || {}).value, en = ($('sEnd') || {}).value;
     if (st && st.trim()) req.start = st.trim();
     if (en && en.trim()) req.end = en.trim();
+    var half = halvesState();
+    if (half.ok && half.skip > 0) {
+      req.ht = $('sHt').value.trim();
+      req.restart = $('sRestart').value.trim();
+    }
 
     db.ref(REQ_ROOT).push(req).then(function () {
       NL.toast('Queued — the scan starts itself.', 'success');

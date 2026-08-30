@@ -49,14 +49,14 @@ def hhmm(t):
     return f"{h}h {m:02d}m {s:02d}s" if h else f"{m}m {s:02d}s"
 
 
-def stats_for(hits_by_index, name, interval, duration):
+def stats_for(hits_by_index, name, interval, duration, seams=None):
     """Seconds, runs and the clarity-weighted index for one sponsor."""
     from board_exposure_core import runs_from
 
     idxs = [i for i, h in hits_by_index.items() if h.get(name)]
     if not idxs:
         return None
-    runs = runs_from(idxs, interval=interval)
+    runs = runs_from(idxs, interval=interval, seams=seams)
     if not runs:
         return None
     flat = [h for i in idxs for h in hits_by_index[i][name]]
@@ -116,8 +116,10 @@ def build(out_path, meta, hits_by_index, frame_files, sponsors_meta):
     sponsors_meta — {sponsor: 'partner' | 'club'}, every sponsor searched for
     """
     interval, duration = meta["interval"], meta["duration"]
+    seams = sorted(meta.get("seams") or [])
     names = sorted(sponsors_meta)
-    stats = {n: stats_for(hits_by_index, n, interval, duration) for n in names}
+    stats = {n: stats_for(hits_by_index, n, interval, duration, seams)
+             for n in names}
     present = [n for n in names if stats[n]]
     primary = max(present, key=lambda n: stats[n]["index"]) if present else (names[0] if names else "—")
 
@@ -159,6 +161,7 @@ def build(out_path, meta, hits_by_index, frame_files, sponsors_meta):
         "colours": assign_colours(names),
         "hits": compact,
         "frames": frames,
+        "seams": seams,
     }
 
     html = (TEMPLATE
@@ -569,10 +572,16 @@ playBtn.addEventListener('click', () => {
 
 function runsFor(n){
   const keys = Object.keys(HITS).map(Number).filter(i => HITS[i][n]).sort((a,b)=>a-b);
+  const seams = D.seams || [];
+  // Mirrors runs_from() seams rule: two index-adjacent samples across a seam
+  // are a whole half-time apart, so a run never spans one.
+  const seamBetween = (a,b) => seams.some(s => a < s && s <= b);
   const out = []; let run = null;
   keys.forEach(i => {
     const cl = HITS[i][n].map(h=>h.c);
-    if (run && i - run.last <= BRIDGE + 1){ run.last = i; run.cl.push(...cl); }
+    if (run && i - run.last <= BRIDGE + 1 && !seamBetween(run.last, i)){
+      run.last = i; run.cl.push(...cl);
+    }
     else { if (run) out.push(run); run = {first:i, last:i, cl}; }
   });
   if (run) out.push(run);

@@ -789,8 +789,24 @@ def run_limits(interval):
             max(0, int(round(BRIDGE_SECS / interval)) - 1))
 
 
-def runs_from(indices, bridge=BRIDGE, min_run=MIN_RUN, interval=None):
-    """Group sample indices into continuous appearances, bridging short gaps."""
+def seam_between(a, b, seams):
+    """
+    True when a seam falls between samples a and b (a < b). A seam is the
+    index of the FIRST sample of a new extraction window — for a halves scan,
+    the first frame after the skipped half-time break. Two samples that read
+    as adjacent by index are fifteen real minutes apart across a seam, so
+    every rule that treats index distance as time distance must refuse to
+    reach across one: runs, gap-filling, carry-forward. Same idea as a
+    camera cut, but structural rather than detected.
+    """
+    return bool(seams) and any(a < s <= b for s in seams)
+
+
+def runs_from(indices, bridge=BRIDGE, min_run=MIN_RUN, interval=None,
+              seams=None):
+    """Group sample indices into continuous appearances, bridging short gaps.
+    Never across a seam: a board up before AND after half-time is two
+    appearances, not one 16-minute one."""
     if not indices:
         return []
     if interval:
@@ -798,7 +814,7 @@ def runs_from(indices, bridge=BRIDGE, min_run=MIN_RUN, interval=None):
     idxs = sorted(indices)
     runs, cur = [], [idxs[0]]
     for i in idxs[1:]:
-        if i - cur[-1] <= bridge + 1:
+        if i - cur[-1] <= bridge + 1 and not seam_between(cur[-1], i, seams):
             cur.append(i)
         else:
             runs.append(cur)
@@ -1054,16 +1070,19 @@ def strip_masked(hits_by_index, mask):
     return removed
 
 
-def gap_candidates(indices, max_gap):
+def gap_candidates(indices, max_gap, seams=None):
     """
     Pairs (a, b) of detected sample indices with a fillable gap between them:
     at least one missing sample, at most max_gap. Pure, so the selection rule
     is testable without a frame in sight — the rule IS the precision guard.
     Only bounded gaps qualify: a run's ends are never extended, because past
     the last real detection there is no second anchor to verify against.
+    A gap spanning a seam is never a candidate — the two anchors are a whole
+    half-time apart, whatever their indices say.
     """
     idxs = sorted(set(indices))
-    return [(a, b) for a, b in zip(idxs, idxs[1:]) if 1 <= b - a - 1 <= max_gap]
+    return [(a, b) for a, b in zip(idxs, idxs[1:])
+            if 1 <= b - a - 1 <= max_gap and not seam_between(a, b, seams)]
 
 
 def find_patch(prev_bgr, bbox, cur_bgr):

@@ -171,6 +171,20 @@ test('trims ride along only when set', () => {
   assert.ok(!('BE_START' in envMap(GOOD)));
 });
 
+test('half-time marks travel as a pair or not at all', () => {
+  const m = envMap({ ...GOOD, ht: '45:10', restart: '1:01:30' });
+  assert.equal(m.BE_HT, '45:10');
+  assert.equal(m.BE_RESTART, '1:01:30');
+  assert.ok(!('BE_HT' in envMap(GOOD)));
+  /* One without the other never reaches the job — and validRequest refuses
+     the request outright, so a lone mark fails visibly at creation. */
+  assert.ok(!('BE_HT' in envMap({ ...GOOD, ht: '45:10' })));
+  assert.ok(be.validRequest({ ...GOOD, ht: '45:10' }));
+  assert.ok(be.validRequest({ ...GOOD, restart: '1:01:30' }));
+  assert.equal(be.validRequest({ ...GOOD, ht: '45:10', restart: '1:01:30' }),
+    null);
+});
+
 test('every env value is a string — the Run API rejects numbers', () => {
   for (const e of be.buildEnv({ ...GOOD, start: 1110 })) {
     assert.equal(typeof e.value, 'string', e.name);
