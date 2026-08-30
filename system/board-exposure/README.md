@@ -478,6 +478,34 @@ raw per-pixel noise backgrounds carry chance edges everywhere and mask the
 whole frame, so the fixture world is smoothed structure that moves, which is
 what real footage is.
 
+## Engine 1.6 verified — 30/08/2026, the cloud rerun against the labels
+
+    sponsor        recall  precision  missed  phantom  tracked
+    DAZN              40%      100%      191        0       20
+    Enterprise        53%       99%      275        2       35
+    TIC Health        69%       99%      106        2        0
+    overall           54%       99%      572        4       55
+
+**Phantoms 105 → 4** — and the 4 are three moments totalling 2.0 seconds
+(2:53, 5:51, 1:59-2:00), at the labelling noise floor and adjudicable by
+eye. When this engine claims a board was on screen, it is right 99% of the
+time on the marked match. Three honest footnotes:
+
+- **DAZN's recall reads 40% (was 50), and most of that drop is truth
+  arriving**: the removed "recall" was watermark-credited — samples where
+  the corner graphic scored while the real board went undetected. Some may
+  also be the NCC floor pricing genuinely dark, soft corner-board hits; the
+  sweep's ncc-0.0 ablation row exists to price exactly that.
+- **The furniture probe stood down on this broadcast** — its edge mask
+  claimed 10.7% of the frame, just over the 10% self-distrust line, so it
+  refused to act. The guard worked as designed, and 99% was reached without
+  it (corners + permanence + faces + tracker gate). Tuning note, not a bug:
+  the probe matters most on single-cam club streams, and the edge threshold
+  / dilation deserve a look before it is relied on there.
+- Recall overall is 54% (60% at the same dials before 1.6) — part exposed
+  fake recall, part the price of the floors. The trade is the right way
+  round for a sponsor-facing number, and recall is engine 1.7's whole job.
+
 ## Roadmap — engine 1.7, the recall pair (agreed 30/08/2026, not started)
 
 Precision's ladder is built and verified; recall (55-60% pooled, far-side
