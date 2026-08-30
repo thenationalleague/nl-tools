@@ -22,6 +22,20 @@ standing fact:
         --member=serviceAccount:firebase-adminsdk-fbsvc@nl-tools.iam.gserviceaccount.com \
         --role=roles/storage.objectAdmin
 
+- **IAM for the JOB's own service account, once, granted 30/08/2026** —
+  the job never needed bucket WRITE until `BE_MODE=diagnose` (scans upload
+  through the ingest door instead; diagnose writes diagnose.json back
+  directly, and objectAdmin rather than objectCreator because a re-run
+  overwrites). The paste resolves the account itself:
+
+      SA=$(gcloud run jobs describe brand-exposure-scan \
+        --region=europe-west2 --project=nl-tools --format=export \
+        | grep -m1 serviceAccount | awk '{print $2}') \
+      && gcloud storage buckets add-iam-policy-binding \
+        gs://nl-tools.firebasestorage.app \
+        --member="serviceAccount:$SA" --role=roles/storage.objectAdmin \
+        --project=nl-tools
+
 - The poller trusts the Run API's documented Execution shape (doc URL in
   the source); on the first real scan through the tool, check the request
   flips to done and the source vanishes before trusting it unattended.
