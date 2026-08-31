@@ -966,3 +966,30 @@ test('the Style Guide shows the new pair', () => {
   assert.match(sg, /<code>icon-outdent<\/code>/);
   assert.match(sg, /id="sg-indent"/, 'with its own local copy of the symbol, as the others have');
 });
+
+/* ── Stacking order (v2.65) ─────────────────────────────────────────────
+   An open dropdown must beat every sticky bar, and only modals and toasts
+   may beat an open dropdown. The picker at 50 slid behind the topbar at
+   100 the moment a page scrolled — found live in brand-exposure's fixture
+   picker, latent in every tool with a picker. This pins the scale so the
+   next z tweak cannot silently reintroduce it. */
+
+test('open dropdowns stack above sticky bars, below modals', () => {
+  const z = (sel) => {
+    /* The rule, not the changelog: header comments name these selectors
+       too, so match the declaration's opening brace. */
+    const i = css.indexOf(sel + ' {');
+    assert.ok(i >= 0, sel + ' missing from nl-brand.css');
+    const block = css.slice(i, css.indexOf('}', i));
+    const m = block.match(/z-index:\s*(\d+)/);
+    assert.ok(m, sel + ' declares no z-index');
+    return Number(m[1]);
+  };
+  const dropdown = z('.club-picker__dropdown');
+  const topbar   = z('#nlTopbar');
+  const modal    = z('.modal-backdrop');
+  assert.ok(dropdown > topbar,
+    'dropdown (' + dropdown + ') must beat the sticky topbar (' + topbar + ')');
+  assert.ok(modal > dropdown,
+    'modal (' + modal + ') must beat an open dropdown (' + dropdown + ')');
+});
