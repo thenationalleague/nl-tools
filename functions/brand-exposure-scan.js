@@ -218,6 +218,33 @@ function oldestQueued(reqs) {
   return best;
 }
 
+/* A source object is shared state, not this request's own: a retry clones
+   the video path, and an audition's follow-up scan reuses its upload. On
+   31/08/2026 a sibling's lifecycle deleted the Southend source out from
+   under a scan, which then died on download — and its card still offered
+   Retry, because `swept` was only ever stamped on the record whose sweep
+   did the deleting. These two answer both halves: never delete a video a
+   queued or running request still needs, and when a video IS deleted,
+   stamp every failed request that shares it so no doomed Retry survives. */
+function othersWantVideo(reqs, id) {
+  const v = reqs && reqs[id] && reqs[id].video;
+  if (!v) return false;
+  return Object.keys(reqs).some((k) => {
+    const r = k !== id && reqs[k];
+    return r && r.video === v &&
+      (r.status === "queued" || r.status === "running");
+  });
+}
+
+function failedSharers(reqs, id) {
+  const v = reqs && reqs[id] && reqs[id].video;
+  if (!v) return [];
+  return Object.keys(reqs).filter((k) => {
+    const r = k !== id && reqs[k];
+    return r && r.video === v && r.status === "failed" && !r.swept;
+  });
+}
+
 /* ---- Run Admin API ------------------------------------------------------- */
 
 let _auth = null;
@@ -390,14 +417,20 @@ exports.brandExposureScanPoll = onSchedule(SCHED_OPTS, async () => {
       const verdict = verdictOf(exec);
       if (verdict === "running") continue;
       if (verdict === "done") {
-        /* Source deletion is safe here and only here — see the header. */
-        if (shouldDeleteSource(r) && VIDEO_PATH.test(String(r.video || ""))) {
+        /* Source deletion is safe here and only here — see the header —
+           and only while no queued/running request still shares the video
+           (the last active sharer's own terminal transition cleans up). */
+        if (shouldDeleteSource(r) && VIDEO_PATH.test(String(r.video || "")) &&
+            !othersWantVideo(reqs, id)) {
           try {
             await admin.storage().bucket(BUCKET).file(r.video).delete();
           } catch (err) {
             logger.warn("brandExposureScanPoll: source delete failed", {
               id, message: err && err.message,
             });
+          }
+          for (const sib of failedSharers(reqs, id)) {
+            await db.ref(ROOT + "/requests/" + sib).update({ swept: now });
           }
         }
         await db.ref(ROOT + "/requests/" + id).update({
@@ -412,12 +445,16 @@ exports.brandExposureScanPoll = onSchedule(SCHED_OPTS, async () => {
     } else if (
       r.status === "failed" && !r.swept && shouldDeleteSource(r) &&
       VIDEO_PATH.test(String(r.video || "")) &&
-      (r.finishedAt || r.at || 0) < now - SWEEP_AFTER_MS
+      (r.finishedAt || r.at || 0) < now - SWEEP_AFTER_MS &&
+      !othersWantVideo(reqs, id)
     ) {
       /* The 48h ruling: one retry window with the source still in place,
          then the bucket stops accumulating dead footage. `swept` stays on
          the record so the tool can say "source cleared" rather than
-         offering a retry that would 404. */
+         offering a retry that would 404 — and lands on every failed
+         sharer of the video, not just this one. A queued or running
+         sharer defers the sweep to a later tick: its scan still needs
+         the file it points at. */
       try {
         await admin.storage().bucket(BUCKET).file(r.video).delete();
       } catch (err) {
@@ -425,6 +462,9 @@ exports.brandExposureScanPoll = onSchedule(SCHED_OPTS, async () => {
            same source object). Sweeping is best-effort either way. */
       }
       await db.ref(ROOT + "/requests/" + id).update({ swept: now });
+      for (const sib of failedSharers(reqs, id)) {
+        await db.ref(ROOT + "/requests/" + sib).update({ swept: now });
+      }
     }
   }
 
@@ -443,5 +483,6 @@ exports.brandExposureScanPoll = onSchedule(SCHED_OPTS, async () => {
 /* Exported for tests. */
 exports._internals = {
   validRequest, buildEnv, verdictOf, oldestQueued, failureNote, VIDEO_PATH,
-  shouldDeleteSource, stageOnLaunch, stageOnDone,
+  shouldDeleteSource, stageOnLaunch, stageOnDone, othersWantVideo,
+  failedSharers,
 };
