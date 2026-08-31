@@ -10,23 +10,14 @@ Run: python3 -m unittest discover -s tests -p 'test_*.py'
 """
 import os
 import sys
-import types
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 
-def _stub_if_missing(name):
-    try:
-        __import__(name)
-        return False
-    except ImportError:
-        sys.modules[name] = types.ModuleType(name)
-        return True
-
-
-CV2_STUBBED = _stub_if_missing("cv2")
-NUMPY_STUBBED = _stub_if_missing("numpy")
+from _bexp_cv import HAVE_CV  # noqa: E402 — one probe for all four files;
+# private copies poisoned each other under discover (see _bexp_cv.py)
+CV2_STUBBED = NUMPY_STUBBED = not HAVE_CV
 
 import board_exposure_diagnose as D  # noqa: E402
 
