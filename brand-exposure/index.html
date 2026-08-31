@@ -27,15 +27,26 @@
     staff              → off; granted per-user, like Commercial Compliance
 
   Changelog
-  v0.15 (31/08/2026) — References can change scope. The v0.13 audition tab
-  promoted everything to the universal pool because club scoping didn't
-  exist yet; the ruling ("purely local to the game") landed in v0.14 for
-  NEW promotions but left the old ones stranded at every ground — and the
+  v0.15 (31/08/2026) — Four fixes from Richard's first pass over v0.14.
+  (1) References can change scope: the v0.13 audition tab promoted
+  everything to the universal pool because club scoping didn't exist yet;
+  the ruling ("purely local to the game") landed in v0.14 for NEW
+  promotions but left the old ones stranded at every ground — and the
   library's only tool was delete, which would have thrown away the crops
   behind the TIC 3%→30% gain. Every-ground references now carry a "move"
   link: club picker in a modal, copy-then-delete under the same filename
   (Storage has no rename), be-ref-move audit. Per-ground references don't
   get the link — promotion already puts new ones where they belong.
+  (2) The all-sponsors timeline was every colour in one plot — "like
+  overlaid… unintelligible". It is now one delimited lane per sponsor in
+  the table's order, named in-lane on a translucent backing, the track
+  growing to fit; the single-sponsor plot keeps its y = where-on-screen
+  encoding and the caption says which reading applies. (3) Library card
+  captions split into name (may truncate) and actions (may not) — a long
+  filename was eating the delete link entirely. (4) Lightboxes take the
+  programme-pack recipe: centred off-white surface, contained image,
+  Download beside Close. That surface is the second tool wanting
+  programme's .prev — flagged as a canon candidate.
   v0.14 (31/08/2026) — The rebuild, from Richard's first morning with the
   pipeline in his hands: "ui is all over the place… the sections don't
   feel like canon… think we need to rebuild this interface." Four tabs —
@@ -209,7 +220,13 @@
         items: [
           'Every-ground references gain a "move" link — pick a club and ' +
             'the file becomes that ground’s only, same name, one tap. ' +
-            'For crops promoted before club scoping existed.'
+            'For crops promoted before club scoping existed.',
+          'The all-sponsors timeline is one delimited lane per sponsor, ' +
+            'named and in table order, instead of every colour sharing ' +
+            'one plot.',
+          'Library captions keep move · delete visible however long the ' +
+            'filename; lightboxes take the programme-pack recipe with a ' +
+            'Download button.'
         ]
       },
       {
@@ -586,6 +603,10 @@
                  background: var(--white); }
   .refcard figcaption { font-size: 10.5px; padding: 4px 6px; color: var(--text-muted);
                         white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Library cards split the caption: the name may truncate, the actions
+     may not — a long filename was eating the delete link entirely. */
+  .refcard__name { display: block; overflow: hidden; text-overflow: ellipsis; }
+  .refcard__acts { display: flex; gap: 12px; padding-top: 2px; }
   /* Audition ticks: the selection state is the outline, not a hidden
      checkbox — the card IS the control. */
   .refcard.aud-on { outline: 2px solid var(--primary); outline-offset: -2px; }
@@ -834,8 +855,13 @@
                      color: var(--white); font-size: 11px; font-weight: 700; }
   /* The reference lightbox fills what the dialog gives it — "usable for
      imagery" (v0.14): the image is the point, so it takes the space. */
-  .lb-img { display: block; width: 100%; max-height: 78vh; object-fit: contain;
-            background: var(--white); border-radius: 8px; }
+  /* The programme-pack preview recipe (its .prev surface) — centred
+     off-white ground, contained image, Download beside Close. Second tool
+     wanting this exact surface: canon candidate (31/08/2026). */
+  .lb { display: flex; align-items: center; justify-content: center;
+        background: var(--off-white); border-radius: 8px; overflow: hidden; }
+  .lb-img { display: block; width: 100%; max-height: 74vh; object-fit: contain;
+            background: var(--white); }
   .reflib__group { margin-top: 14px; }
   .reflib__group h3 { font-size: var(--text-sm, 13px); font-weight: 800;
                       color: var(--navy); margin: 0 0 8px; }
@@ -927,8 +953,8 @@
               <canvas id="vTl"></canvas>
               <div class="play-head" id="vHead" style="left:0"></div>
             </div>
-            <div class="track-key">Each mark is a detection: across is match time,
-              up the frame is where on screen, brighter is clearer.</div>
+            <div class="track-key" id="vKey">Each mark is a detection: across is
+              match time, up the frame is where on screen, brighter is clearer.</div>
           </div>
         </section>
         <aside>
@@ -1869,19 +1895,52 @@
   }
 
   function paintTrack() {
-    var c = $('vTl'), r = $('vTrack').getBoundingClientRect(), dpr = devicePixelRatio || 1;
+    var all = M.spon === '*';
+    var iv = mMeta().interval || 0.5, dur = mMeta().duration || 1;
+    var track = $('vTrack');
+
+    /* All-sponsors mode: one delimited lane per sponsor, in the table's
+       order, instead of every colour sharing one plot — which read as
+       mush the first time a match had more than two sponsors. The
+       single-sponsor plot keeps its y = where-on-screen encoding; a lane
+       trades that for legibility, and the caption says which is which. */
+    var lanes = [], laneIdx = {};
+    if (all) {
+      var present = {};
+      for (var k0 in (M.det || {})) {
+        Object.keys(mHitsByName(Number(k0))).forEach(function (n) { present[n] = 1; });
+      }
+      lanes = sponsorsOf(matches[M.id])
+        .sort(function (a, b) { return (b.index || 0) - (a.index || 0); })
+        .map(function (x) { return x.name; })
+        .filter(function (n) { return present[n]; });
+      Object.keys(present).forEach(function (n) {
+        if (lanes.indexOf(n) === -1) lanes.push(n);
+      });
+      lanes.forEach(function (n, i) { laneIdx[n] = i; });
+    }
+
+    var LANE = 18, PAD = 9, AXIS = 11;
+    /* Height before measurement: rows need room, the CSS 84px is the
+       single-sponsor size. Cleared (not zeroed) so the stylesheet rules. */
+    track.style.height = all && lanes.length
+      ? (PAD * 2 + AXIS + LANE * lanes.length) + 'px' : '';
+
+    var c = $('vTl'), r = track.getBoundingClientRect(), dpr = devicePixelRatio || 1;
     c.width = Math.max(1, r.width * dpr); c.height = Math.max(1, r.height * dpr);
     var g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, r.width, r.height);
-    var iv = mMeta().interval || 0.5, dur = mMeta().duration || 1;
     var rgbOf = function (c) {
       return [1, 3, 5].map(function (k) { return parseInt(c.substr(k, 2), 16); });
     };
     var rgbBy = {};
-    var PAD = 9, plot = r.height - PAD * 2 - 11;
+    var plot = r.height - PAD * 2 - AXIS;
 
     g.strokeStyle = tok('--navy-800'); g.lineWidth = 1;
-    [0, .5, 1].forEach(function (f) {
+    var rules = all && lanes.length
+      ? lanes.map(function (_, i) { return i / lanes.length; }).concat([1])
+      : [0, .5, 1];
+    rules.forEach(function (f) {
       var y = PAD + f * plot;
       g.beginPath(); g.moveTo(0, y + .5); g.lineTo(r.width, y + .5); g.stroke();
     });
@@ -1898,18 +1957,45 @@
       var row = mHitsByName(Number(k));
       var px = (k * iv / dur) * r.width;
       Object.keys(row).forEach(function (name) {
-        var c = M.spon === '*' ? (M.cols || {})[name] || mColour() : mColour();
+        var c = all ? (M.cols || {})[name] || mColour() : mColour();
         var rgb = rgbBy[c] || (rgbBy[c] = rgbOf(c));
         row[name].forEach(function (h) {
-          var cy = h.q.reduce(function (a, p) { return a + p[1]; }, 0) / 4;
-          var y = PAD + (cy / vh) * plot;
-          var hh = Math.max(3, Math.min(11, 3 + h.a * 9));
+          var y, hh;
+          if (all) {
+            var li = laneIdx[name];
+            if (li === undefined) return;
+            y = PAD + li * LANE + LANE / 2;
+            hh = Math.max(3, Math.min(LANE - 4, 3 + h.a * 9));
+          } else {
+            var cy = h.q.reduce(function (a, p) { return a + p[1]; }, 0) / 4;
+            y = PAD + (cy / vh) * plot;
+            hh = Math.max(3, Math.min(11, 3 + h.a * 9));
+          }
           g.fillStyle = 'rgba(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ',' +
                         (0.30 + 0.70 * h.c) + ')';
           g.fillRect(px, y - hh / 2, 2, hh);
         });
       });
     }
+    if (all) {
+      /* Lane names on a translucent backing so the first minute's marks
+         never swallow them — same trade the y-axis label refused. */
+      g.font = '9.5px system-ui, sans-serif';
+      lanes.forEach(function (n, i) {
+        var y = PAD + i * LANE + LANE / 2;
+        var w = g.measureText(n).width;
+        g.save(); g.globalAlpha = 0.78; g.fillStyle = tok('--navy-900');
+        g.fillRect(2, y - 6.5, w + 6, 13); g.restore();
+        g.fillStyle = (M.cols || {})[n] || tok('--navy-300');
+        g.fillText(n, 5, y + 3.5);
+      });
+    }
+    var key = $('vKey');
+    if (key) key.textContent = all
+      ? 'Each mark is a detection: across is match time, one row per ' +
+        'sponsor, brighter is clearer. Pick one to see where on screen.'
+      : 'Each mark is a detection: across is match time, up the frame is ' +
+        'where on screen, brighter is clearer.';
     /* The y-axis used to be labelled inside the plot at x=6, on top of the
        first few seconds of every match. It reads once, under the track. */
   }
@@ -2191,20 +2277,27 @@
           var fig = document.createElement('div');
           fig.className = 'refcard';
           fig.innerHTML = '<img loading="lazy" alt="">' +
-            '<figcaption>' + esc(item.name) +
-            (canScan && universal ? ' · <a href="#" data-move>move</a>' : '') +
-            (canScan ? ' · <a href="#" data-del>delete</a>' : '') +
+            '<figcaption><span class="refcard__name">' + esc(item.name) +
+            '</span>' +
+            (canScan ? '<span class="refcard__acts">' +
+              (universal ? '<a href="#" data-move>move</a>' : '') +
+              '<a href="#" data-del>delete</a></span>' : '') +
             '</figcaption>';
           item.getDownloadURL().then(function (u) {
             var img = fig.querySelector('img');
             img.src = u;
             img.onclick = function () {
               NL.modal({
-                title: title + ' — ' + item.name,
+                title: item.name,
                 width: 'wide',
-                body: '<img src="' + esc(u) + '" alt="" class="lb-img">',
-                buttons: [{ label: 'Close', className: 'btn btn--ghost',
-                            onClick: function (c) { c.close(); } }]
+                body: '<div class="lb"><img src="' + esc(u) +
+                  '" alt="" class="lb-img"></div>',
+                buttons: [
+                  { label: 'Close', className: 'btn btn--ghost',
+                    onClick: function (c) { c.close(); } },
+                  { label: 'Download', className: 'btn btn--primary',
+                    onClick: function () { window.open(u, '_blank'); } }
+                ]
               });
             };
           }).catch(function () {});
@@ -3125,7 +3218,8 @@
               NL.modal({
                 title: f[1] + ' — ' + item.name,
                 width: 'wide',
-                body: '<img src="' + esc(u) + '" alt="" class="lb-img">',
+                body: '<div class="lb"><img src="' + esc(u) +
+                  '" alt="" class="lb-img"></div>',
                 buttons: [{ label: 'Close', className: 'btn btn--ghost',
                             onClick: function (c) { c.close(); } }]
               });
