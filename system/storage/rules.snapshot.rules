@@ -105,16 +105,32 @@ service firebase.storage {
     }
 
     // The reference tree the scan job matches against. The job READS it
-    // through the service account, which rules never bind — this block
-    // exists for the tool's audition view, whose promotion path is a
-    // browser re-upload of a ticked crop into the sponsor's folder. Staff
+    // through the service account, which rules never bind — these blocks
+    // exist for the tool: the audition Review promotes crops in, and the
+    // Partners reference library lists, retires and re-scopes them. Staff
     // sessions only, PNG only, small: a reference shapes every future
-    // measurement, and the tool gates the view to superadmin above this.
-    match /brand-exposure/refs/{scope}/{sponsor}/{file} {
+    // measurement, and the tool gates both views to superadmin above this.
+    // Delete is granted separately on purpose — the combined write rule's
+    // contentType check silently denied deletes (request.resource is null
+    // on delete), which is right for uploads/ and wrong for a library.
+    // Two blocks because the tree has two depths, not one wildcard rule:
+    // partners/<Sponsor>/ is searched at every ground,
+    // clubs/<Club>/<Sponsor>/ only at that one (load_tree's contract).
+    match /brand-exposure/refs/partners/{sponsor}/{file} {
       allow read: if request.auth != null && request.auth.token.email != null;
-      allow write: if request.auth != null && request.auth.token.email != null
+      allow create, update: if request.auth != null
+        && request.auth.token.email != null
         && request.resource.size < 5 * 1024 * 1024
         && request.resource.contentType.matches('image/png');
+      allow delete: if request.auth != null && request.auth.token.email != null;
+    }
+    match /brand-exposure/refs/clubs/{club}/{sponsor}/{file} {
+      allow read: if request.auth != null && request.auth.token.email != null;
+      allow create, update: if request.auth != null
+        && request.auth.token.email != null
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/png');
+      allow delete: if request.auth != null && request.auth.token.email != null;
     }
 
     // ── Brand Exposure — source footage drop ──────────────────────────────

@@ -145,6 +145,17 @@ function shouldDeleteSource(req) {
   return !req || req.mode !== "audition";
 }
 
+/* The stage spine (v0.14): one word the tool renders instead of deriving
+   "where is this match?" from three places — which is how the audition
+   dead-end shipped. queued is stamped at creation by the tool; these two
+   advance it. */
+function stageOnLaunch(req) {
+  return req && req.mode === "audition" ? "auditioning" : "scanning";
+}
+function stageOnDone(req) {
+  return req && req.mode === "audition" ? "review" : "measured";
+}
+
 /* The env contract is scan-job/run_job.py's docstring, name for name. The
    reference-set default is partial — the safe direction: partial withholds
    share of voice, complete would invent it. */
@@ -235,6 +246,7 @@ async function launch(db, id, req) {
   const execution = (op && op.metadata && op.metadata.name) || null;
   await db.ref(ROOT + "/requests/" + id).update({
     status: "running",
+    stage: stageOnLaunch(req),
     execution,
     startedAt: Date.now(),
   });
@@ -359,7 +371,7 @@ exports.brandExposureScanPoll = onSchedule(SCHED_OPTS, async () => {
            queue moves; the execution (if any) finishes harmlessly. */
         if ((r.startedAt || 0) < now - LOCK_STALE_MS) {
           await db.ref(ROOT + "/requests/" + id).update({
-            status: "failed",
+            status: "failed", stage: "failed",
             error: "The scan started but its execution was never recorded.",
             finishedAt: now,
           });
@@ -389,11 +401,12 @@ exports.brandExposureScanPoll = onSchedule(SCHED_OPTS, async () => {
           }
         }
         await db.ref(ROOT + "/requests/" + id).update({
-          status: "done", finishedAt: now,
+          status: "done", stage: stageOnDone(r), finishedAt: now,
         });
       } else {
         await db.ref(ROOT + "/requests/" + id).update({
-          status: "failed", error: failureNote(exec), finishedAt: now,
+          status: "failed", stage: "failed", error: failureNote(exec),
+          finishedAt: now,
         });
       }
     } else if (
@@ -430,5 +443,5 @@ exports.brandExposureScanPoll = onSchedule(SCHED_OPTS, async () => {
 /* Exported for tests. */
 exports._internals = {
   validRequest, buildEnv, verdictOf, oldestQueued, failureNote, VIDEO_PATH,
-  shouldDeleteSource,
+  shouldDeleteSource, stageOnLaunch, stageOnDone,
 };
