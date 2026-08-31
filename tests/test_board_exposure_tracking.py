@@ -16,30 +16,13 @@ Run: python3 -m unittest discover -s tests -p 'test_*.py'
 """
 import os
 import sys
-import types
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 
-def _stub_if_missing(name):
-    """True if `name` is genuinely uninstallable here and was stubbed.
-
-    The stub is an EMPTY module: it exists only so `import board_exposure_core`
-    succeeds far enough to reach gap_candidates, which touches neither library.
-    Nothing behavioural is faked — any test that would actually call into cv2
-    or numpy is skipped below, never run against the stub (the lesson of the
-    signInWithCustomToken stub: a fake that answers is a fake that lies).
-    """
-    try:
-        __import__(name)
-        return False
-    except ImportError:
-        sys.modules[name] = types.ModuleType(name)
-        return True
-
-
-HAVE_CV = not (_stub_if_missing("cv2") | _stub_if_missing("numpy"))
+from _bexp_cv import HAVE_CV  # noqa: E402 — one probe for all four files;
+# private copies poisoned each other under discover (see _bexp_cv.py)
 if HAVE_CV:
     import cv2
     import numpy as np
