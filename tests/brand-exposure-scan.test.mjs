@@ -67,7 +67,8 @@ function lift(relPath, fnNames, constNames = []) {
 const be = lift(
   'functions/brand-exposure-scan.js',
   ['validRequest', 'buildEnv', 'verdictOf', 'oldestQueued', 'failureNote',
-   'shouldDeleteSource', 'stageOnLaunch', 'stageOnDone'],
+   'shouldDeleteSource', 'stageOnLaunch', 'stageOnDone', 'othersWantVideo',
+   'failedSharers', 'dismissalPlan', 'matchPrefixOf'],
   ['VIDEO_PATH']
 );
 
@@ -281,4 +282,102 @@ test('the stage spine names each mode honestly', () => {
   assert.equal(be.stageOnLaunch({}), 'scanning');
   assert.equal(be.stageOnDone({ mode: 'audition' }), 'review');
   assert.equal(be.stageOnDone({}), 'measured');
+});
+
+/* ---- Shared source lifecycle (31/08/2026): a sibling's delete must not
+   strand another request, and a deleted video must kill every doomed
+   Retry, not just the sweeper's own. The Southend scan hit both halves:
+   its source vanished under it, then its failed card offered a retry of
+   footage that no longer existed. */
+
+const V = 'uploads/Southend v Kidderminster 28Aug26.mp4';
+
+test('a queued or running sharer blocks the delete; terminal ones do not', () => {
+  assert.equal(be.othersWantVideo({
+    a: { video: V, status: 'done' },
+    b: { video: V, status: 'queued' },
+  }, 'a'), true);
+  assert.equal(be.othersWantVideo({
+    a: { video: V, status: 'done' },
+    b: { video: V, status: 'running' },
+  }, 'a'), true);
+  assert.equal(be.othersWantVideo({
+    a: { video: V, status: 'done' },
+    b: { video: V, status: 'failed' },
+    c: { video: V, status: 'done' },
+  }, 'a'), false);
+});
+
+test('only the same video counts, and never the request itself', () => {
+  assert.equal(be.othersWantVideo({
+    a: { video: V, status: 'queued' },
+    b: { video: 'uploads/other.mp4', status: 'queued' },
+  }, 'a'), false);
+  assert.equal(be.othersWantVideo({ a: { status: 'done' } }, 'a'), false);
+  assert.equal(be.othersWantVideo({}, 'a'), false);
+});
+
+test('failedSharers finds every unswept failed sharer and nothing else', () => {
+  const reqs = {
+    a: { video: V, status: 'done' },
+    b: { video: V, status: 'failed' },            // doomed retry — stamp it
+    c: { video: V, status: 'failed', swept: 5 },  // already honest
+    d: { video: V, status: 'queued' },            // not terminal — leave it
+    e: { video: 'uploads/other.mp4', status: 'failed' },
+  };
+  assert.deepEqual(be.failedSharers(reqs, 'a'), ['b']);
+  assert.deepEqual(be.failedSharers({ a: { status: 'failed' } }, 'a'), []);
+});
+
+/* ---- Dismissal (v0.22): the tool flags, the poller settles ---------------- */
+
+const DEST = 'brand-exposure/2026-08-28-southend-v-kidderminster-aud';
+
+test('a dismissed request owes its source unless a success already paid it', () => {
+  const one = (r) => be.dismissalPlan({ a: r }, 'a');
+  // cancelled before running: the upload landed and nothing else will clean it
+  assert.equal(one({ video: V, status: 'cancelled', dismissed: 1 }).deleteSource, true);
+  // failed inside the retry window: source still there
+  assert.equal(one({ video: V, status: 'failed', dismissed: 1 }).deleteSource, true);
+  // failed and swept: already gone
+  assert.equal(one({ video: V, status: 'failed', swept: 2, dismissed: 1 }).deleteSource, false);
+  // done scan: success deleted it
+  assert.equal(one({ video: V, status: 'done', dismissed: 1 }).deleteSource, false);
+  // done audition: the follow-up scan is now never coming
+  assert.equal(one({ video: V, status: 'done', mode: 'audition', dest: DEST,
+    dismissed: 1 }).deleteSource, true);
+});
+
+test('a live sibling keeps the source; the audition harvest goes regardless', () => {
+  const plan = be.dismissalPlan({
+    a: { video: V, status: 'done', mode: 'audition', dest: DEST, dismissed: 1 },
+    b: { video: V, status: 'queued' },  // the follow-up scan — needs the file
+  }, 'a');
+  assert.equal(plan.deleteSource, false);
+  assert.equal(plan.destPrefix, DEST + '/');
+});
+
+test('no plan for the undismissed, the running, or the missing', () => {
+  assert.equal(be.dismissalPlan({ a: { video: V, status: 'failed' } }, 'a'), null);
+  assert.equal(be.dismissalPlan(
+    { a: { video: V, status: 'running', dismissed: 1 } }, 'a'), null);
+  assert.equal(be.dismissalPlan({}, 'a'), null);
+});
+
+test('a malformed audition dest never becomes a delete prefix', () => {
+  const plan = be.dismissalPlan({ a: { video: V, status: 'done',
+    mode: 'audition', dest: 'brand-exposure/x/../../refs', dismissed: 1 } }, 'a');
+  assert.equal(plan.destPrefix, null);
+});
+
+/* ---- Match cleanup: the prefix guard -------------------------------------- */
+
+test('only a dated matchId names a storage prefix', () => {
+  assert.equal(be.matchPrefixOf('2026-08-28-southend-united-v-kidderminster-harriers'),
+    'brand-exposure/2026-08-28-southend-united-v-kidderminster-harriers/');
+  // refs and every traversal shape stay unreachable
+  for (const id of ['refs', 'refs/partners', '2026-08-28-x/../refs',
+                    '', null, 'Southend v Kidderminster', '2026-08-28']) {
+    assert.equal(be.matchPrefixOf(id), null, 'must refuse ' + JSON.stringify(id));
+  }
 });

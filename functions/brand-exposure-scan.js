@@ -12,8 +12,13 @@
  *   brandExposureScanPoll    — every minute: flips running requests to
  *                              done/failed from their execution's state,
  *                              deletes the source video on success, sweeps
- *                              failed sources after 48h, heals a stale
- *                              launch lock, pumps the queue.
+ *                              failed sources after 48h, clears dismissed
+ *                              request cards (their sources and audition
+ *                              harvests with them), heals a stale launch
+ *                              lock, pumps the queue.
+ *   brandExposureMatchCleanup — on matches/{id} delete: clears the match's
+ *                              proxy + detections under brand-exposure/<id>/,
+ *                              which storage rules deny the browser.
  *
  * What this is for
  * ----------------
@@ -59,7 +64,7 @@
  *   roles/run.jobsExecutorWithOverrides + roles/run.viewer on the job (or
  *   project), and storage delete on the bucket. Grants are idempotent.
  */
-const { onValueCreated } = require("firebase-functions/v2/database");
+const { onValueCreated, onValueDeleted } = require("firebase-functions/v2/database");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
@@ -218,6 +223,68 @@ function oldestQueued(reqs) {
   return best;
 }
 
+/* A source object is shared state, not this request's own: a retry clones
+   the video path, and an audition's follow-up scan reuses its upload. On
+   31/08/2026 a sibling's lifecycle deleted the Southend source out from
+   under a scan, which then died on download — and its card still offered
+   Retry, because `swept` was only ever stamped on the record whose sweep
+   did the deleting. These two answer both halves: never delete a video a
+   queued or running request still needs, and when a video IS deleted,
+   stamp every failed request that shares it so no doomed Retry survives. */
+function othersWantVideo(reqs, id) {
+  const v = reqs && reqs[id] && reqs[id].video;
+  if (!v) return false;
+  return Object.keys(reqs).some((k) => {
+    const r = k !== id && reqs[k];
+    return r && r.video === v &&
+      (r.status === "queued" || r.status === "running");
+  });
+}
+
+function failedSharers(reqs, id) {
+  const v = reqs && reqs[id] && reqs[id].video;
+  if (!v) return [];
+  return Object.keys(reqs).filter((k) => {
+    const r = k !== id && reqs[k];
+    return r && r.video === v && r.status === "failed" && !r.swept;
+  });
+}
+
+/* Deleting a request card is a tool-side FLAG, function-side DELETION
+   (v0.22): the browser cannot delete under uploads/ or a match's own
+   folder (storage rules deny it on purpose), so the tool stamps
+   `dismissed` and this plan tells the poller what that request owes
+   before its record can go. A running request is never dismissed-away —
+   its execution still holds the truth. */
+function dismissalPlan(reqs, id) {
+  const r = reqs && reqs[id];
+  if (!r || !r.dismissed || r.status === "running") return null;
+  /* A successful scan already deleted its source; everything else that
+     still names one owes it — the cancelled queue entry whose upload
+     landed, the failed scan inside its retry window, the audition whose
+     follow-up scan is now never coming. Unless a live sibling needs it. */
+  const sourceGone = r.swept ||
+    (r.status === "done" && shouldDeleteSource(r));
+  return {
+    deleteSource: VIDEO_PATH.test(String(r.video || "")) && !sourceGone &&
+      !othersWantVideo(reqs, id),
+    /* An audition's harvest folder dies with its card; deleteFiles on a
+       prefix that never got written is a no-op. */
+    destPrefix: r.mode === "audition" &&
+      /^brand-exposure\/[a-z0-9-]+$/.test(String(r.dest || ""))
+      ? r.dest + "/" : null,
+  };
+}
+
+/* The RTDB matches/{id} key → the storage prefix its proxy and detections
+   live under, or null when the key does not look like a matchId. The refs
+   tree lives under the same top folder, so a cleanup must never be able
+   to name anything but a dated match. */
+function matchPrefixOf(id) {
+  return /^\d{4}-\d{2}-\d{2}-[a-z0-9-]+$/.test(String(id || ""))
+    ? "brand-exposure/" + id + "/" : null;
+}
+
 /* ---- Run Admin API ------------------------------------------------------- */
 
 let _auth = null;
@@ -364,6 +431,50 @@ exports.brandExposureScanPoll = onSchedule(SCHED_OPTS, async () => {
     const r = reqs[id];
     if (!r) continue;
 
+    /* Dismissed cards first: settle what the request owes, then the
+       record goes. A deferred source (a live sibling still wants it)
+       just leaves the record for a later tick. */
+    const plan = dismissalPlan(reqs, id);
+    if (plan) {
+      let deferred = false;
+      if (plan.deleteSource) {
+        try {
+          await admin.storage().bucket(BUCKET).file(r.video).delete();
+        } catch (err) {
+          /* Already gone is fine; anything else defers the whole
+             dismissal to a later tick — removing the record on a
+             transient failure would orphan the footage it names. */
+          if (!err || err.code !== 404) {
+            logger.warn("brandExposureScanPoll: dismissal source delete failed", {
+              id, message: err && err.message,
+            });
+            deferred = true;
+          }
+        }
+        if (!deferred) {
+          for (const sib of failedSharers(reqs, id)) {
+            await db.ref(ROOT + "/requests/" + sib).update({ swept: now });
+          }
+        }
+      }
+      if (!deferred && plan.destPrefix) {
+        try {
+          await admin.storage().bucket(BUCKET)
+            .deleteFiles({ prefix: plan.destPrefix });
+        } catch (err) {
+          logger.warn("brandExposureScanPoll: dest cleanup failed", {
+            id, message: err && err.message,
+          });
+          deferred = true;
+        }
+      }
+      if (!deferred) {
+        await db.ref(ROOT + "/requests/" + id).remove();
+        logger.info("brandExposureScanPoll: dismissed request cleared", { id });
+      }
+      continue;
+    }
+
     if (r.status === "running") {
       if (!r.execution) {
         /* Launched but the execution name never landed — a crash between the
@@ -390,14 +501,20 @@ exports.brandExposureScanPoll = onSchedule(SCHED_OPTS, async () => {
       const verdict = verdictOf(exec);
       if (verdict === "running") continue;
       if (verdict === "done") {
-        /* Source deletion is safe here and only here — see the header. */
-        if (shouldDeleteSource(r) && VIDEO_PATH.test(String(r.video || ""))) {
+        /* Source deletion is safe here and only here — see the header —
+           and only while no queued/running request still shares the video
+           (the last active sharer's own terminal transition cleans up). */
+        if (shouldDeleteSource(r) && VIDEO_PATH.test(String(r.video || "")) &&
+            !othersWantVideo(reqs, id)) {
           try {
             await admin.storage().bucket(BUCKET).file(r.video).delete();
           } catch (err) {
             logger.warn("brandExposureScanPoll: source delete failed", {
               id, message: err && err.message,
             });
+          }
+          for (const sib of failedSharers(reqs, id)) {
+            await db.ref(ROOT + "/requests/" + sib).update({ swept: now });
           }
         }
         await db.ref(ROOT + "/requests/" + id).update({
@@ -412,12 +529,16 @@ exports.brandExposureScanPoll = onSchedule(SCHED_OPTS, async () => {
     } else if (
       r.status === "failed" && !r.swept && shouldDeleteSource(r) &&
       VIDEO_PATH.test(String(r.video || "")) &&
-      (r.finishedAt || r.at || 0) < now - SWEEP_AFTER_MS
+      (r.finishedAt || r.at || 0) < now - SWEEP_AFTER_MS &&
+      !othersWantVideo(reqs, id)
     ) {
       /* The 48h ruling: one retry window with the source still in place,
          then the bucket stops accumulating dead footage. `swept` stays on
          the record so the tool can say "source cleared" rather than
-         offering a retry that would 404. */
+         offering a retry that would 404 — and lands on every failed
+         sharer of the video, not just this one. A queued or running
+         sharer defers the sweep to a later tick: its scan still needs
+         the file it points at. */
       try {
         await admin.storage().bucket(BUCKET).file(r.video).delete();
       } catch (err) {
@@ -425,6 +546,9 @@ exports.brandExposureScanPoll = onSchedule(SCHED_OPTS, async () => {
            same source object). Sweeping is best-effort either way. */
       }
       await db.ref(ROOT + "/requests/" + id).update({ swept: now });
+      for (const sib of failedSharers(reqs, id)) {
+        await db.ref(ROOT + "/requests/" + sib).update({ swept: now });
+      }
     }
   }
 
@@ -440,8 +564,36 @@ exports.brandExposureScanPoll = onSchedule(SCHED_OPTS, async () => {
   await pump(db);
 });
 
+/* ---- Match cleanup ------------------------------------------------------- */
+/* Removing a match in the tool deletes only the RTDB record — the browser
+   cannot delete the proxy and detections under brand-exposure/<id>/ (storage
+   rules deny it on purpose). This trigger finishes the job with Admin
+   credentials, so "Remove match" means the whole match, ~150MB proxy
+   included. The prefix guard is matchPrefixOf: only a dated matchId ever
+   names a prefix, so refs/ and the rest of the folder are unreachable. */
+exports.brandExposureMatchCleanup = onValueDeleted({
+  ref: "/" + ROOT + "/matches/{id}",
+  instance: "nl-tools-default-rtdb",
+  region: "europe-west1",
+  memory: "256MiB",
+  maxInstances: 5,
+  serviceAccount: SERVICE_ACCOUNT,
+}, async (event) => {
+  const prefix = matchPrefixOf(event.params.id);
+  if (!prefix) return;
+  try {
+    await admin.storage().bucket(BUCKET).deleteFiles({ prefix });
+    logger.info("brandExposureMatchCleanup: cleared", { prefix });
+  } catch (err) {
+    logger.error("brandExposureMatchCleanup failed", {
+      prefix, message: err && err.message,
+    });
+  }
+});
+
 /* Exported for tests. */
 exports._internals = {
   validRequest, buildEnv, verdictOf, oldestQueued, failureNote, VIDEO_PATH,
-  shouldDeleteSource, stageOnLaunch, stageOnDone,
+  shouldDeleteSource, stageOnLaunch, stageOnDone, othersWantVideo,
+  failedSharers, dismissalPlan, matchPrefixOf,
 };

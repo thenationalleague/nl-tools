@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Brand Exposure
-  Version: v0.20 (31/08/2026)
+  Version: v0.22 (31/08/2026)
   File: /brand-exposure/index.html
 
   Sponsor exposure measured from match video — seconds on screen, clarity and
@@ -35,6 +35,33 @@
   the original sin here; it must not come back in another shape.
 
   Changelog
+  v0.22 (31/08/2026) — Deleting a game now means the whole game. Remove
+  on a match page takes its playback video and detections with the
+  record (a new function trigger clears brand-exposure/<id>/ on RTDB
+  delete — the browser cannot, storage rules deny it on purpose). Every
+  terminal pipeline card — failed, ready-to-review, measured — gains
+  Remove, and Cancel on a queued card now clears its uploaded footage
+  instead of orphaning it. All card removal works the same way: the tool
+  stamps `dismissed` and the function's poller settles what the request
+  owes — source video (unless a live sibling still needs it, the v0.21
+  guard), an audition's harvest folder — then deletes the record. A
+  transient storage failure defers the whole dismissal rather than
+  orphaning footage. Kept references are never touched.
+  v0.21 (31/08/2026) — Two fixes from the first live evening on v0.20.
+  (1) The source-lifecycle bug that killed the Southend scan: a request's
+  source video is shared state (retries clone the path; an audition's
+  follow-up scan reuses its upload), but each request's lifecycle deleted
+  it as if it were its own — so a sibling's success-delete or 48h sweep
+  could strand a queued scan, and a failed card kept offering Retry on
+  footage that no longer existed. The queue function now defers any
+  source delete while a queued or running request still shares the video,
+  and when a video does go, stamps `swept` on every failed request that
+  shares it, so each such card says "source cleared — upload it again"
+  instead of offering a doomed button. (2) Reference library groups gain
+  "Delete all N" beside the group title — clearing a sponsor's pictures
+  at a ground (or their every-ground set) is one confirmed tap instead of
+  a file-by-file grind. Sequential deletes, be-ref-delete-all audit,
+  honest stop-count if one fails.
   v0.20 (31/08/2026) — The interface reset, from a planned grilling after
   Richard's verdict on the v0.17–v0.19 arc: "we're on clear v readable
   rather than an index and numbers. We've fixed the wrong things." The
@@ -306,6 +333,28 @@
     var NL_TOOL_KEY = 'ops-brand-exposure';
 
     window.NL_CHANGELOG = [
+      {
+        date: '31/08/2026',
+        version: 'v0.22',
+        items: [
+          'Removing a match now clears its playback video and detections ' +
+            'too — deleting a game means the whole game.',
+          'Every finished pipeline card has Remove, and Cancel clears the ' +
+            'uploaded footage instead of leaving it behind. Kept ' +
+            'references are never touched.'
+        ]
+      },
+      {
+        date: '31/08/2026',
+        version: 'v0.21',
+        items: [
+          'A queued or running scan now keeps its source video safe from ' +
+            'sibling clean-ups, and a failed card whose footage is gone ' +
+            'says so instead of offering a Retry that cannot work.',
+          'Reference library groups gain Delete all — clear a sponsor’s ' +
+            'pictures in one confirmed tap.'
+        ]
+      },
       {
         date: '31/08/2026',
         version: 'v0.20',
@@ -1026,6 +1075,8 @@
   .reflib__group { margin-top: 14px; }
   .reflib__group h3 { font-size: var(--text-sm, 13px); font-weight: 800;
                       color: var(--navy); margin: 0 0 8px; }
+  .reflib__delall { font-weight: 400; font-size: 12px; margin-left: 10px;
+                    color: var(--text-muted); }
   /* Compact stat tiles on a phone. CANON CANDIDATE (31/08/2026): the
      canon .stat is sized for desktop dashboards and four tiles eat two
      screens at 390px (ruling 13a of the interface reset) — a second tool
@@ -2453,7 +2504,8 @@
     if (!m) return;
     NL.confirm('Remove ' + m.meta.club + ' v ' + (m.meta.opponent || '—') + '?', {
       title: 'Remove match',
-      detail: 'The measurements go. The JSON on your machine does not, so it can be added again.',
+      detail: 'The measurements, the playback video and the detections all ' +
+        'go. The JSON on your machine does not, so it can be added again.',
       confirmText: 'Remove',
       variant: 'danger'
     }).then(function (ok) {
@@ -2646,8 +2698,37 @@
         if (!r.items.length) return;
         var wrap = document.createElement('div');
         wrap.className = 'reflib__group';
-        wrap.innerHTML = '<h3>' + esc(title) + '</h3><div class="refgrid"></div>';
+        wrap.innerHTML = '<h3>' + esc(title) +
+          (canScan && r.items.length > 1
+            ? '<a href="#" class="reflib__delall" data-delall>Delete all ' +
+              r.items.length + '</a>'
+            : '') +
+          '</h3><div class="refgrid"></div>';
         var grid = wrap.querySelector('.refgrid');
+        var da = wrap.querySelector('[data-delall]');
+        if (da) da.onclick = function (ev) {
+          ev.preventDefault();
+          NL.confirm('All ' + r.items.length + ' pictures under ' +
+            esc(title) + ' go for good, and scans there stop finding ' +
+            esc(partner) + ' until new ones land.', {
+            title: 'Delete all ' + r.items.length, confirmText: 'Delete all',
+            variant: 'danger'
+          }).then(function (ok) {
+            if (!ok) return;
+            var done = 0;
+            r.items.reduce(function (p, item) {
+              return p.then(function () { return item.delete(); })
+                .then(function () { done++; });
+            }, Promise.resolve()).then(function () {
+              NL.writeAudit('be-ref-delete-all', base + ' (' + done + ')');
+              NL.toast('Deleted ' + done + '.');
+              renderPartnerLibrary();
+            }).catch(function (e) {
+              NL.toast('Stopped after ' + done + ': ' + e.message, 'error');
+              renderPartnerLibrary();
+            });
+          });
+        };
         r.items.forEach(function (item) {
           var fig = document.createElement('div');
           fig.className = 'refcard';
@@ -4019,7 +4100,7 @@
     return copy;
   }
   var LIFECYCLE = ['status', 'stage', 'by', 'at', 'execution', 'startedAt',
-                   'finishedAt', 'error', 'swept'];
+                   'finishedAt', 'error', 'swept', 'dismissed'];
 
   function pipeDots(r) {
     var stage = stageOf(r);
@@ -4041,7 +4122,12 @@
   function renderPipeline() {
     var box = $('sReqs');
     if (!box) return;
-    var ids = Object.keys(SCAN.requests).sort(function (a, b) {
+    /* A dismissed card is already gone as far as this page is concerned —
+       the function's poller settles what it owes (source, harvest) and
+       removes the record within the minute. */
+    var ids = Object.keys(SCAN.requests).filter(function (k) {
+      return !SCAN.requests[k].dismissed;
+    }).sort(function (a, b) {
       return (SCAN.requests[b].at || 0) - (SCAN.requests[a].at || 0);
     });
     /* A running upload is a card too — it lives only in this browser tab,
@@ -4123,19 +4209,25 @@
       } else if (stage === 'review') {
         body = '<span class="pill pill--pending">Ready to review</span>' +
           '<button class="btn btn--primary btn--sm" data-review="' + esc(id) +
-          '">Review</button>';
+          '">Review</button>' +
+          '<button class="btn btn--ghost btn--sm" data-dismiss="' + esc(id) +
+          '">Remove</button>';
       } else if (stage === 'measured') {
         var mid = midOf(r);
         body = '<span class="pill pill--approved">Measured</span>' +
           '<button class="btn btn--ghost btn--sm" data-open="' + esc(mid) +
-          '">Open the match</button>';
+          '">Open the match</button>' +
+          '<button class="btn btn--ghost btn--sm" data-dismiss="' + esc(id) +
+          '">Remove</button>';
       } else if (stage === 'failed') {
         body = '<span class="pill pill--rejected">Failed</span>' +
           '<span class="pipe__meta">' + esc(r.error || 'No reason recorded.') +
           (r.swept ? ' The source video has been cleared — upload it again to retry.'
                    : '') + '</span>' +
           (!r.swept ? '<button class="btn btn--ghost btn--sm" data-retry="' +
-            esc(id) + '">Retry</button>' : '');
+            esc(id) + '">Retry</button>' : '') +
+          '<button class="btn btn--ghost btn--sm" data-dismiss="' + esc(id) +
+          '">Remove</button>';
       } else {
         body = '<span class="pill">' + esc(stage) + '</span>';
       }
@@ -4161,14 +4253,47 @@
     box.querySelectorAll('[data-cancel]').forEach(function (b) {
       b.onclick = function () {
         var id = b.getAttribute('data-cancel');
-        NL.confirm('Nothing has run or been billed yet.', {
+        NL.confirm('Nothing has run or been billed yet. The uploaded ' +
+          'footage is cleared too.', {
           title: 'Cancel this request', confirmText: 'Cancel it',
           variant: 'danger'
         }).then(function (ok) {
           if (!ok) return;
-          db.ref(REQ_ROOT + '/' + id).remove().then(function () {
+          /* A flag, not a delete: the browser cannot clear the footage
+             under uploads/, so the function's poller settles everything
+             this request owes and then removes the record (v0.22). */
+          db.ref(REQ_ROOT + '/' + id).update({
+            status: 'cancelled', dismissed: Date.now()
+          }).then(function () {
             NL.toast('Cancelled.');
           }).catch(function (e) { NL.toast(e.message, 'error'); });
+        });
+      };
+    });
+    box.querySelectorAll('[data-dismiss]').forEach(function (b) {
+      b.onclick = function () {
+        var id = b.getAttribute('data-dismiss');
+        var r = SCAN.requests[id];
+        if (!r) return;
+        var stage = stageOf(r);
+        var msg = stage === 'review'
+          ? 'Its footage and the audition’s cutouts are cleared — the ' +
+            'full scan can then never run from this upload. References you ' +
+            'already kept stay kept.'
+          : stage === 'measured'
+            ? 'Only this pipeline entry goes — the measured match itself ' +
+              'stays in Matches.'
+            : r.swept
+              ? 'Only this entry goes — its footage was already cleared.'
+              : 'Its footage is cleared with it — a retry would need a ' +
+                'fresh upload.';
+        NL.confirm(msg, {
+          title: 'Remove this entry', confirmText: 'Remove', variant: 'danger'
+        }).then(function (ok) {
+          if (!ok) return;
+          db.ref(REQ_ROOT + '/' + id).update({ dismissed: Date.now() })
+            .then(function () { NL.toast('Removed.'); })
+            .catch(function (e) { NL.toast(e.message, 'error'); });
         });
       };
     });
@@ -4185,6 +4310,7 @@
 
   function updateScanBadge() {
     var n = Object.keys(SCAN.requests || {}).filter(function (k) {
+      if (SCAN.requests[k].dismissed) return false;
       var s = stageOf(SCAN.requests[k]);
       return s === 'review' || s === 'failed';
     }).length;
