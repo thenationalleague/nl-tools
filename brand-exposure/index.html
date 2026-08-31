@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Brand Exposure
-  Version: v0.15 (31/08/2026)
+  Version: v0.16 (31/08/2026)
   File: /brand-exposure/index.html
 
   Sponsor exposure measured from match video — seconds on screen, clarity and
@@ -27,6 +27,24 @@
     staff              → off; granted per-user, like Commercial Compliance
 
   Changelog
+  v0.16 (31/08/2026) — The structural pass, from the from-scratch review
+  Richard commissioned ("tabbed sponsors is dreadful as we could have
+  literally hundreds"). The rule it applies: open sets get searchable
+  directories with detail pages; pills are only for closed sets. So —
+  Partners is a directory now (one row per sponsor: scope, grounds,
+  seconds, mean index, last measured; search-as-you-type; seconds-desc)
+  and the pill-per-sponsor row is gone; a row opens the partner page,
+  which gains a back link. Matches gains season pills and a ground
+  select, both built from the measured data only, with the stats strip
+  recomputing over the filtered set and an honest filtered-empty state.
+  Every screen is a URL (#/matches, #/match/<id>, #/partners,
+  #/partner/<name>, #/upload, #/review/<id>, #/how): back works, refresh
+  keeps your place, a match can be WhatsApped as a link; routes whose
+  data hasn't landed yet park and retry when it does. The pipeline
+  splits live from done — running/review/failed cards above, measured
+  ones under a canon disclosure fold. And the three data tables become
+  labelled card rows under 640px, because a nine-column table at 390px
+  is a horizontal-scroll ribbon nobody reads.
   v0.15 (31/08/2026) — Four fixes from Richard's first pass over v0.14.
   (1) References can change scope: the v0.13 audition tab promoted
   everything to the universal pool because club scoping didn't exist yet;
@@ -214,6 +232,22 @@
     var NL_TOOL_KEY = 'ops-brand-exposure';
 
     window.NL_CHANGELOG = [
+      {
+        date: '31/08/2026',
+        version: 'v0.16',
+        items: [
+          'Partners is a searchable directory — one row per sponsor with ' +
+            'grounds, time and index; a row opens the partner page. The ' +
+            'pill-per-sponsor strip is gone.',
+          'Matches filters by season and ground, and the tiles recount ' +
+            'to match.',
+          'Every screen has a link: back works, refresh keeps your ' +
+            'place, and a match URL can be shared.',
+          'Upload separates what is running from what is done; measured ' +
+            'jobs fold away.',
+          'Tables read as cards on a phone instead of scrolling sideways.'
+        ]
+      },
       {
         date: '31/08/2026',
         version: 'v0.15',
@@ -865,6 +899,25 @@
   .reflib__group { margin-top: 14px; }
   .reflib__group h3 { font-size: var(--text-sm, 13px); font-weight: 800;
                       color: var(--navy); margin: 0 0 8px; }
+  /* Data tables become card rows on a phone (v0.16): the screenshot said
+     it best — a nine-column table at 390px is a horizontal-scroll ribbon
+     nobody reads. The first cell is the card's title; every other cell
+     names itself with its data-l label. Row click handlers keep working
+     because the rows are still the same elements. */
+  @media (max-width: 640px) {
+    table.cards thead { display: none; }
+    table.cards, table.cards tbody, table.cards tr, table.cards td {
+      display: block; width: 100%; box-sizing: border-box; }
+    table.cards tr { border: 1px solid var(--border); border-radius: 8px;
+                     background: var(--white); margin: 0 0 10px;
+                     padding: 8px 12px; }
+    table.cards td { border: 0; padding: 2px 0; }
+    table.cards td.num { text-align: left; }
+    table.cards td[data-l]::before { content: attr(data-l);
+      display: inline-block; min-width: 108px; color: var(--text-muted);
+      font-size: 11px; }
+    #vTable tbody tr.is-sel { border-color: var(--primary); }
+  }
   @media (max-width: 640px) {
     .pipe__card .btn { flex: 1 1 auto; }
     .stepper { font-size: 12px; }
@@ -897,6 +950,11 @@
       <!-- .stats is a direct child, not nested in .toolbar__left: inside the
            toolbar it is width-constrained and the tiles stack into a column. -->
       <div class="stats" id="mStats"></div>
+      <!-- Filters are built from the measured data, not the roster: the only
+           useful options are the seasons and grounds that actually hold
+           measurements, and both lists rebuild as data lands. Stats above
+           recompute over the filtered set. -->
+      <div id="mFilters"></div>
       <div class="toolbar">
         <div class="toolbar__left"><div class="section-head"><h2>Matches measured</h2></div></div>
         <div class="toolbar__right">
@@ -908,19 +966,38 @@
         </div>
       </div>
       <div id="addPanel" hidden></div>
-      <div class="table-wrap"><table class="table" id="mTable"></table></div>
+      <div class="table-wrap"><table class="table cards" id="mTable"></table></div>
     </section>
 
     <!-- ── Partners ─────────────────────────────────────────────────── -->
+    <!-- Two surfaces, one URL each: the directory (#/partners) is a
+         searchable table of every sponsor ever measured — sponsors are an
+         open set, so they get a directory, never a pill per name — and the
+         detail (#/partner/<name>) is the page a row opens. -->
     <section id="viewPartners" hidden>
-      <div class="filter-pill-row" id="pPills"></div>
-      <div class="stats" id="pStats"></div>
-      <div class="toolbar">
-        <div class="toolbar__left"><div class="section-head"><h2 id="pHead">Every ground measured</h2></div></div>
-        <div class="toolbar__right"><button class="btn btn--ghost btn--sm" id="pCsv">Export CSV</button></div>
+      <div id="pDirWrap">
+        <div class="toolbar">
+          <div class="toolbar__left"><div class="section-head"><h2>Partners</h2></div></div>
+          <div class="toolbar__right">
+            <input class="modal__input" id="pSearch" type="search"
+                   placeholder="Find a partner" autocomplete="off"
+                   style="max-width:240px">
+          </div>
+        </div>
+        <div class="table-wrap"><table class="table cards" id="pDirTable"></table></div>
       </div>
-      <div class="table-wrap"><table class="table" id="pTable"></table></div>
-      <div id="pLib"></div>
+      <div id="pDetail" hidden>
+        <div class="toolbar">
+          <div class="toolbar__left">
+            <button class="btn btn--ghost btn--sm" id="pBack">All partners</button>
+            <div class="section-head"><h2 id="pHead">Every ground measured</h2></div>
+          </div>
+          <div class="toolbar__right"><button class="btn btn--ghost btn--sm" id="pCsv">Export CSV</button></div>
+        </div>
+        <div class="stats" id="pStats"></div>
+        <div class="table-wrap"><table class="table cards" id="pTable"></table></div>
+        <div id="pLib"></div>
+      </div>
     </section>
 
     <!-- ── One match, played back ───────────────────────────────────── -->
@@ -982,7 +1059,7 @@
         </aside>
       </div>
       <div class="table-wrap" style="margin-top:16px">
-        <table class="table table--compact" id="vTable"></table>
+        <table class="table table--compact cards" id="vTable"></table>
       </div>
     </section>
 
@@ -1518,9 +1595,74 @@
   }
 
   /* ── Matches ─────────────────────────────────────────────────────── */
+  /* Season and ground lenses over the pile (v0.16). Values come from the
+     measurements themselves — a filter offering all 72 clubs when three
+     grounds hold data is noise. */
+  var MF = { season: null, club: null };
+
+  function seasonOfMatch(m) {
+    var d = NL.parseDate(m.meta.date);
+    return d ? String(NL.season.fromDate(d)) : null;
+  }
+
+  function renderMatchFilters() {
+    var box = $('mFilters');
+    if (!box) return;
+    var seasons = {}, clubs = {};
+    list().forEach(function (m) {
+      var s = seasonOfMatch(m);
+      if (s) seasons[s] = (seasons[s] || 0) + 1;
+      if (m.meta.club) clubs[m.meta.club] = true;
+    });
+    var sKeys = Object.keys(seasons).sort().reverse();
+    var cNames = Object.keys(clubs).sort();
+    if (MF.season && !seasons[MF.season]) MF.season = null;
+    if (MF.club && !clubs[MF.club]) MF.club = null;
+    /* One lens each is enough to hide both controls behind. */
+    if (sKeys.length < 2 && cNames.length < 2) { box.innerHTML = ''; return; }
+    var meta = null;
+    try { meta = NL.clubs.meta(); } catch (e) {}
+    box.innerHTML =
+      (sKeys.length > 1
+        ? '<div class="filter-pill-row"><span class="filter-pill-row__label">Season</span>' +
+          '<button class="filter-pill' + (MF.season === null ? ' active' : '') +
+          '" data-mfs="*">All</button>' +
+          sKeys.map(function (k) {
+            return '<button class="filter-pill' + (k === MF.season ? ' active' : '') +
+              '" data-mfs="' + esc(k) + '">' + esc(NL.season.label(meta, k)) +
+              '</button>';
+          }).join('') + '</div>'
+        : '') +
+      (cNames.length > 1
+        ? '<div class="filter-row"><span class="filter-label">Ground</span>' +
+          '<select class="nl-select" id="mfClub" style="max-width:260px">' +
+          '<option value="">All grounds</option>' +
+          cNames.map(function (n) {
+            return '<option value="' + esc(n) + '"' +
+              (n === MF.club ? ' selected' : '') + '>' + esc(n) + '</option>';
+          }).join('') + '</select></div>'
+        : '');
+    box.onclick = function (ev) {
+      var b = ev.target.closest('[data-mfs]');
+      if (!b) return;
+      var v = b.getAttribute('data-mfs');
+      MF.season = v === '*' ? null : v;
+      renderMatches();
+    };
+    var sel = $('mfClub');
+    if (sel) sel.onchange = function () {
+      MF.club = this.value || null;
+      renderMatches();
+    };
+  }
+
   function renderMatches() {
+    renderMatchFilters();
     var all = list().filter(function (m) {
-      return !engineFilter || (m.meta.profile || 'unknown') === engineFilter;
+      if (engineFilter && (m.meta.profile || 'unknown') !== engineFilter) return false;
+      if (MF.season && seasonOfMatch(m) !== MF.season) return false;
+      if (MF.club && m.meta.club !== MF.club) return false;
+      return true;
     });
     var grounds = {}, sponsors = {}, footage = 0;
     all.forEach(function (m) {
@@ -1534,6 +1676,16 @@
       '<div class="stat"><div class="stat__num">' + Object.keys(sponsors).length + '</div><div class="stat__label">Sponsors seen</div></div>' +
       '<div class="stat"><div class="stat__num">' + secStr(footage) + '</div><div class="stat__label">Footage measured</div></div>';
 
+    if (!all.length && list().length) {
+      /* The pile has matches; the lenses hide them all. Different problem,
+         different words — "nothing measured yet" here would be a lie. */
+      $('mTable').innerHTML = '<tbody><tr><td>' + emptyState(
+        'Nothing under this filter',
+        'Clear the season or ground above — the pile holds ' +
+        list().length + ' measured match' + (list().length === 1 ? '' : 'es') +
+        '.') + '</td></tr></tbody>';
+      return;
+    }
     if (!all.length) {
       $('mTable').innerHTML = '<tbody><tr><td>' + emptyState(
         'Nothing measured yet',
@@ -1558,14 +1710,14 @@
       var found = sponsorsOf(m).filter(function (s) { return s.seconds > 0; }).length;
       var total = sponsorsOf(m).length;
       return '<tr data-id="' + esc(m._id) + '" style="cursor:pointer">' +
-        '<td>' + esc(NL.formatDateShort(m.meta.date)) + '</td>' +
         '<td>' + fixtureCell(m) + '</td>' +
-        '<td>' + (m.meta.sourceType === 'full'
+        '<td data-l="Date">' + esc(NL.formatDateShort(m.meta.date)) + '</td>' +
+        '<td data-l="Source">' + (m.meta.sourceType === 'full'
           ? '<span class="pill pill--approved">Full match</span>'
           : '<span class="pill pill--info">Highlights</span>') + '</td>' +
-        '<td class="num">' + secStr(m.meta.duration) + '</td>' +
-        '<td class="num">' + found + ' of ' + total + '</td>' +
-        '<td>' + (m.meta.referenceSetComplete
+        '<td class="num" data-l="Length">' + secStr(m.meta.duration) + '</td>' +
+        '<td class="num" data-l="Sponsors found">' + found + ' of ' + total + '</td>' +
+        '<td data-l="Reference set">' + (m.meta.referenceSetComplete
           ? '<span class="pill pill--approved">Complete</span>'
           : '<span class="pill pill--pending">Partial</span>') + '</td>' +
         (canWrite ? '<td class="num"><button class="btn btn--ghost btn--sm" data-del="' +
@@ -1574,7 +1726,7 @@
     }).join('');
 
     $('mTable').innerHTML =
-      '<thead><tr><th>Date</th><th>Fixture</th><th>Source</th><th class="num">Length</th>' +
+      '<thead><tr><th>Fixture</th><th>Date</th><th>Source</th><th class="num">Length</th>' +
       '<th class="num">Sponsors found</th><th>Reference set</th>' +
       (canWrite ? '<th></th>' : '') + '</tr></thead><tbody>' + rows + '</tbody>';
 
@@ -1582,7 +1734,7 @@
       var del = ev.target.closest('[data-del]');
       if (del) { ev.stopPropagation(); return removeMatch(del.getAttribute('data-del')); }
       var tr = ev.target.closest('tr[data-id]');
-      if (tr) openMatch(tr.getAttribute('data-id'));
+      if (tr) nav('match/' + encodeURIComponent(tr.getAttribute('data-id')));
     };
   }
 
@@ -2061,15 +2213,15 @@
           '<i class="swatch" style="background:' +
           ((M.cols || {})[x.name] || 'transparent') + '"></i>' + esc(x.name) +
           (x.scope === 'club' ? '<span class="scope-tag">' + esc(m.meta.club) + '</span>' : '') +
-          '</td><td class="num">' + (x.seconds ? secStr(x.seconds) : '—') +
-          '</td><td class="num">' + pctStr(x.pct) +
-          '</td><td class="num">' + meter(x.index, best, num(x.index, 1)) +
-          '</td><td class="num">' + num(x.clarity, 2) +
-          '</td><td class="num">' + num(x.area, 2) + '%' +
+          '</td><td class="num" data-l="On screen">' + (x.seconds ? secStr(x.seconds) : '—') +
+          '</td><td class="num" data-l="Share">' + pctStr(x.pct) +
+          '</td><td class="num" data-l="Index">' + meter(x.index, best, num(x.index, 1)) +
+          '</td><td class="num" data-l="Clarity">' + num(x.clarity, 2) +
+          '</td><td class="num" data-l="Board">' + num(x.area, 2) + '%' +
           /* null-safe on purpose: a match measured before visibility existed
              has no number here, and a dash is not the same claim as 0%. */
-          '</td><td class="num">' + (x.blockedPct == null ? '—' : pctStr(x.blockedPct)) +
-          '</td><td class="num">' + (sov == null
+          '</td><td class="num" data-l="Blocked">' + (x.blockedPct == null ? '—' : pctStr(x.blockedPct)) +
+          '</td><td class="num" data-l="Share of voice">' + (sov == null
             ? '<span class="sov-off">withheld</span>' : pctStr(sov)) + '</td></tr>';
       }).join('') + '</tbody>';
     $('vTable').onclick = function (ev) {
@@ -2087,7 +2239,7 @@
       var p = ev.target.closest('[data-s]');
       if (p) focusSponsor(p.getAttribute('data-s'));
     });
-    $('mBack').onclick = function () { v.pause(); show('matches'); };
+    $('mBack').onclick = function () { v.pause(); nav('matches'); };
     $('vPrev').onclick = function () { mStep(-1); };
     $('vNext').onclick = function () { mStep(1); };
     $('vPlay').onclick = function () { v.paused ? v.play() : v.pause(); };
@@ -2141,8 +2293,18 @@
     var seen = {};
     list().forEach(function (m) {
       sponsorsOf(m).forEach(function (s) {
-        if (!seen[s.name]) seen[s.name] = { name: s.name, scope: s.scope, n: 0 };
-        if (s.seconds > 0) seen[s.name].n++;
+        if (!seen[s.name]) seen[s.name] = { name: s.name, scope: s.scope, n: 0,
+          secs: 0, gN: 0, grounds: {}, idxSum: 0, idxN: 0, last: null, lastT: 0 };
+        var e = seen[s.name];
+        if (s.seconds > 0) {
+          e.n++;
+          e.secs += s.seconds;
+          if (m.meta.club && !e.grounds[m.meta.club]) { e.grounds[m.meta.club] = 1; e.gN++; }
+          if (s.index) { e.idxSum += s.index; e.idxN++; }
+          var t = NL.parseDate(m.meta.date);
+          t = t ? t.getTime() : 0;
+          if (t > e.lastT) { e.lastT = t; e.last = m.meta.date; }
+        }
         /* A sponsor found under partners/ at any ground is league-wide, even if
            some other ground filed it locally. */
         if (s.scope === 'partner') seen[s.name].scope = 'partner';
@@ -2164,28 +2326,58 @@
     }).filter(Boolean).sort(function (a, b) { return (b.s.index || 0) - (a.s.index || 0); });
   }
 
-  function renderPartners() {
-    var ss = allSponsors();
+  /* Directory search survives re-renders; the query is state, not DOM. */
+  var PDIR = { q: '' };
+
+  function renderPartnerDir(ss) {
     if (!ss.length) {
-      $('pPills').innerHTML = '';
-      $('pStats').innerHTML = '';
-      $('pTable').innerHTML = '<tbody><tr><td>' + emptyState(
+      $('pDirTable').innerHTML = '<tbody><tr><td>' + emptyState(
         'No sponsors yet', 'Add a measured match first.') + '</td></tr></tbody>';
       return;
     }
-    if (!partner || !ss.some(function (s) { return s.name === partner; })) {
-      partner = (ss.filter(function (s) { return s.n; })[0] || ss[0]).name;
-    }
-    $('pPills').innerHTML = '<span class="filter-pill-row__label">Sponsor</span>' +
-      ss.map(function (s) {
-        return '<button class="filter-pill' + (s.name === partner ? ' active' : '') +
-          '" data-s="' + esc(s.name) + '">' + esc(s.name) +
-          (s.scope === 'club' ? '<span class="scope-tag">club</span>' : '') + '</button>';
-      }).join('');
-    $('pPills').onclick = function (ev) {
-      var b = ev.target.closest('[data-s]');
-      if (b) { partner = b.getAttribute('data-s'); renderPartners(); }
+    var q = PDIR.q.trim().toLowerCase();
+    var rows = ss.filter(function (s) {
+      return !q || s.name.toLowerCase().indexOf(q) !== -1;
+    }).sort(function (a, b) {
+      return (b.secs - a.secs) || a.name.localeCompare(b.name);
+    });
+    $('pDirTable').innerHTML =
+      '<thead><tr><th>Partner</th><th class="num">Grounds</th>' +
+      '<th class="num">On screen</th><th class="num">Mean index</th>' +
+      '<th>Last measured</th></tr></thead><tbody>' +
+      (rows.length ? rows.map(function (s) {
+        return '<tr data-p="' + esc(s.name) + '" style="cursor:pointer"><td>' +
+          esc(s.name) +
+          (s.scope === 'club' ? '<span class="scope-tag">club</span>' : '') +
+          '</td>' +
+          '<td class="num" data-l="Grounds">' + s.gN + '</td>' +
+          '<td class="num" data-l="On screen">' + (s.secs ? secStr(s.secs) : '—') + '</td>' +
+          '<td class="num" data-l="Mean index">' + (s.idxN ? num(s.idxSum / s.idxN, 1) : '—') + '</td>' +
+          '<td data-l="Last measured">' + (s.last ? esc(NL.formatDateShort(s.last)) : '—') +
+          '</td></tr>';
+      }).join('')
+      : '<tr><td>' + emptyState('Nothing called “' + esc(PDIR.q) + '”', '') +
+        '</td></tr>') + '</tbody>';
+    $('pDirTable').onclick = function (ev) {
+      var tr = ev.target.closest('tr[data-p]');
+      if (tr) nav('partner/' + encodeURIComponent(tr.getAttribute('data-p')));
     };
+  }
+
+  function renderPartners() {
+    var ss = allSponsors();
+    /* A routed name the data (once present) does not know falls back to the
+       directory — a dead link should land somewhere useful, not on an
+       empty page named after a typo. */
+    if (partner && ss.length &&
+        !ss.some(function (s) { return s.name === partner; })) {
+      partner = null;
+      nav('partners');
+      return;
+    }
+    $('pDirWrap').hidden = !!partner;
+    $('pDetail').hidden = !partner;
+    if (!partner) return renderPartnerDir(ss);
 
     var rows = partnerRows();
     var totalSecs = rows.reduce(function (a, r) { return a + (r.s.seconds || 0); }, 0);
@@ -2220,14 +2412,14 @@
       '<th class="num">Board</th><th class="num">Share of voice</th></tr></thead><tbody>' +
       rows.map(function (r) {
         return '<tr><td>' + fixtureCell(r.m) + '</td>' +
-          '<td>' + esc(NL.formatDateShort(r.m.meta.date)) + '</td>' +
-          '<td>' + (r.m.meta.sourceType === 'full' ? 'Full match' : 'Highlights') + '</td>' +
-          '<td class="num">' + secStr(r.s.seconds) + '</td>' +
-          '<td class="num">' + pctStr(r.s.pct) + '</td>' +
-          '<td class="num">' + meter(r.s.index, best, num(r.s.index, 1)) + '</td>' +
-          '<td class="num">' + num(r.s.clarity, 2) + '</td>' +
-          '<td class="num">' + num(r.s.area, 2) + '%</td>' +
-          '<td class="num">' + (r.sov == null
+          '<td data-l="Date">' + esc(NL.formatDateShort(r.m.meta.date)) + '</td>' +
+          '<td data-l="Source">' + (r.m.meta.sourceType === 'full' ? 'Full match' : 'Highlights') + '</td>' +
+          '<td class="num" data-l="On screen">' + secStr(r.s.seconds) + '</td>' +
+          '<td class="num" data-l="Share of match">' + pctStr(r.s.pct) + '</td>' +
+          '<td class="num" data-l="Index">' + meter(r.s.index, best, num(r.s.index, 1)) + '</td>' +
+          '<td class="num" data-l="Clarity">' + num(r.s.clarity, 2) + '</td>' +
+          '<td class="num" data-l="Board">' + num(r.s.area, 2) + '%</td>' +
+          '<td class="num" data-l="Share of voice">' + (r.sov == null
             ? '<span class="sov-off">withheld</span>' : pctStr(r.sov)) + '</td></tr>';
       }).join('') + '</tbody>';
     renderPartnerLibrary();
@@ -2237,9 +2429,9 @@
      What the scan actually looks for, managed where the partner lives:
      the universal images every ground shares, then each ground's own
      harvested crops (Richard's model — Enterprise at Halifax is not
-     Enterprise at Sutton). View big, delete what misleads; nothing here
-     moves between scopes, because crops are local to their ground by
-     ruling. */
+     Enterprise at Sutton). View big, delete what misleads, and move a
+     stray every-ground crop down to the one ground it came from —
+     promotion is club-scoped now, so moves only ever narrow. */
   function renderPartnerLibrary() {
     var box = $('pLib');
     if (!box || !partner) { if (box) box.innerHTML = ''; return; }
@@ -3516,6 +3708,7 @@
       updateScanBadge();
       if (REV.id && !SCAN.requests[REV.id]) revClose();
       if (view === 'scan') renderPipeline();
+      retryRoute();
     }, function () { /* read refused — the panel just stays empty */ });
     /* The record only changes on status flips, so between them the elapsed
        figure and the estimate bar would sit frozen — which reads as dead
@@ -3595,7 +3788,31 @@
     }).sort(function (a, b) {
       return (SCAN.requests[a].at || 0) - (SCAN.requests[b].at || 0);
     });
-    box.innerHTML = '<div class="pipe">' + ids.slice(0, 10).map(function (id) {
+    /* Live above, done below a fold (v0.16): a running scan must never
+       share a strip with last week's finished cards. Measured requests
+       are the Matches tab's business — the fold holds their recent tail
+       for "where did my upload go", nothing more. */
+    var live = ids.filter(function (k) {
+      return stageOf(SCAN.requests[k]) !== 'measured';
+    });
+    var hist = ids.filter(function (k) {
+      return stageOf(SCAN.requests[k]) === 'measured';
+    });
+    box.innerHTML =
+      (live.length
+        ? '<div class="pipe">' + live.map(pipeCard).join('') + '</div>'
+        : '<p class="form-hint">Nothing in flight.</p>') +
+      (hist.length
+        ? '<details class="disclosure" id="pipeHist"' +
+          (SCAN.histOpen ? ' open' : '') + '><summary>Measured' +
+          '<span class="disclosure__meta">' + hist.length + ' recent</span>' +
+          '</summary><div class="pipe">' + hist.map(pipeCard).join('') +
+          '</div></details>'
+        : '');
+    var fold = $('pipeHist');
+    if (fold) fold.ontoggle = function () { SCAN.histOpen = fold.open; };
+
+    function pipeCard(id) {
       var r = SCAN.requests[id];
       var stage = stageOf(r);
       var fx = esc(r.match || '—') + ' · ' + esc(NL.formatDateShort(r.date)) +
@@ -3642,18 +3859,20 @@
       return '<div class="pipe__card' + (REV.id === id ? ' is-open' : '') +
         '"><span class="pipe__fx">' + fx + '</span>' + pipeDots(r) + body +
         '</div>';
-    }).join('') + '</div>';
+    }
 
     box.querySelectorAll('[data-open]').forEach(function (b) {
       b.onclick = function () {
         var mid = b.getAttribute('data-open');
-        if (matches[mid]) openMatch(mid);
+        if (matches[mid]) nav('match/' + encodeURIComponent(mid));
         else NL.toast('The measurement finished but its record has not landed ' +
           'yet — try again in a minute, and tell Richard if it never does.');
       };
     });
     box.querySelectorAll('[data-review]').forEach(function (b) {
-      b.onclick = function () { revOpen(b.getAttribute('data-review')); };
+      b.onclick = function () {
+        nav('review/' + encodeURIComponent(b.getAttribute('data-review')));
+      };
     });
     box.querySelectorAll('[data-cancel]').forEach(function (b) {
       b.onclick = function () {
@@ -3809,6 +4028,8 @@
     REV.id = REV.seg = REV.data = null; REV.ticked = {};
     $('sReviewPanel').hidden = true;
     renderPipeline();
+    /* The URL must not keep naming a review that is no longer open. */
+    if (/^#\/review\//.test(location.hash)) nav('upload');
   }
 
   function revUrl(crop) {
@@ -3994,6 +4215,53 @@
     render();
   }
 
+  /* ── Router (v0.16) ────────────────────────────────────────────────
+     Every screen is a URL: #/matches, #/match/<id>, #/partners,
+     #/partner/<name>, #/upload, #/review/<id>, #/how. What that buys on
+     a phone is the whole feature: back works, refresh keeps your place,
+     and a match or partner can be sent as a link instead of described
+     as taps. Data arrives after the URL on a cold open, so a route whose
+     target has not landed parks itself and re-dispatches when it does. */
+  var PENDING_ROUTE = null;
+  function nav(h) {
+    if (('#/' + h) === location.hash) route();   /* same hash: hashchange won't fire */
+    else location.hash = '/' + h;
+  }
+  function route() {
+    var p = location.hash.replace(/^#\/?/, '').split('/');
+    var head = p[0] || 'matches';
+    var arg = p.slice(1).join('/');
+    try { arg = decodeURIComponent(arg); } catch (e) {}
+    PENDING_ROUTE = null;
+    if (head === 'match' && arg) {
+      if (matches[arg]) return openMatch(arg);
+      PENDING_ROUTE = location.hash;
+      return show('matches');
+    }
+    if (head === 'partner' && arg) { partner = arg; return show('partners'); }
+    if (head === 'partners') { partner = null; return show('partners'); }
+    if (head === 'upload') {
+      if (!canScan) return nav('matches');
+      if (view !== 'scan') return openScan();
+      return renderPipeline();
+    }
+    if (head === 'review' && arg) {
+      if (!canScan) return nav('matches');
+      if (view !== 'scan') openScan();
+      if (SCAN.requests[arg]) revOpen(arg);
+      else PENDING_ROUTE = location.hash;
+      return;
+    }
+    if (head === 'how') return show('story');
+    show('matches');
+  }
+  /* A parked route retries whenever new data lands and the URL still asks
+     for it — route() clears or re-parks, so this cannot loop. */
+  function retryRoute() {
+    if (PENDING_ROUTE && PENDING_ROUTE === location.hash) route();
+  }
+  addEventListener('hashchange', route);
+
   /* v0.7: a stat explains itself — the title covers desktop hover, this
      covers a phone's tap. One copy of the words, on the element. */
   document.addEventListener('click', function (e) {
@@ -4035,15 +4303,21 @@
     /* Upload is a tab now (v0.14) — same audience as the uploader button. */
     $('tabScan').hidden = !canScan;
     $('pCsv').onclick = exportPartnerCsv;
+    $('pBack').onclick = function () { nav('partners'); };
+    $('pSearch').oninput = function () {
+      PDIR.q = this.value;
+      if (view === 'partners' && !partner) renderPartnerDir(allSponsors());
+    };
 
     document.querySelector('.tabs').addEventListener('click', function (ev) {
       var t = ev.target.closest('.tab');
       if (!t) return;
       var k = t.getAttribute('data-tab');
-      if (k === 'scan') openScan(); else show(k);
+      nav(k === 'scan' ? 'upload' : (k === 'story' ? 'how' : k));
     });
 
     wireViewer();
+    route();
 
     NL.ensureAuth().then(function () {
       try { NL.clubs.load(); } catch (e) {}
@@ -4054,6 +4328,7 @@
           matches[k].sponsors = matches[k].sponsors || {};
         });
         render();
+        retryRoute();
       }, function (err) {
         $('mixWarn').innerHTML = '<div class="banner banner--error">Could not read ' +
           'the measurements: ' + esc(err.message) + '</div>';
