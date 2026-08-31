@@ -67,7 +67,7 @@ function lift(relPath, fnNames, constNames = []) {
 const be = lift(
   'functions/brand-exposure-scan.js',
   ['validRequest', 'buildEnv', 'verdictOf', 'oldestQueued', 'failureNote',
-   'shouldDeleteSource'],
+   'shouldDeleteSource', 'stageOnLaunch', 'stageOnDone'],
   ['VIDEO_PATH']
 );
 
@@ -274,4 +274,11 @@ test('an audition never surrenders its source; everything else does', () => {
   assert.equal(be.shouldDeleteSource({ ...GOOD, mode: 'audition' }), false);
   assert.equal(be.shouldDeleteSource({ ...GOOD }), true);
   assert.equal(be.shouldDeleteSource({ ...GOOD, mode: 'scan' }), true);
+});
+
+test('the stage spine names each mode honestly', () => {
+  assert.equal(be.stageOnLaunch({ mode: 'audition' }), 'auditioning');
+  assert.equal(be.stageOnLaunch({}), 'scanning');
+  assert.equal(be.stageOnDone({ mode: 'audition' }), 'review');
+  assert.equal(be.stageOnDone({}), 'measured');
 });

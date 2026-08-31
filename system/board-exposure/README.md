@@ -900,7 +900,11 @@ attribution-bearing; and CAD is chased in parallel, never waited on.
    audition.json + audition-*.png flat into BE_DEST. Proven on
    synthetic footage end to end: fired counts, first/last times,
    starved counts and time-diverse whole-face crops all correct. The
-   TOOL HALF is BUILT the same night (tool v0.12): a superadmin
+   TOOL HALF is BUILT the same night (tool v0.12; rebuilt as the
+   Upload pipeline in v0.14 the next morning, on Richard's live-use
+   verdict — stepper, inline Review with a scan-readiness warning,
+   club-scoped promotion only by ruling, stacked player, reference
+   library under Partners): a superadmin
    Audition tab reads audition.json + crops from the match folder,
    shows each reference's verdict, and promotes ticked crops into
    refs/partners/<Sponsor>/ by browser re-upload, audited. Needs one
