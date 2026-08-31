@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Brand Exposure
-  Version: v0.17 (31/08/2026)
+  Version: v0.18 (31/08/2026)
   File: /brand-exposure/index.html
 
   Sponsor exposure measured from match video — seconds on screen, clarity and
@@ -27,6 +27,20 @@
     staff              → off; granted per-user, like Commercial Compliance
 
   Changelog
+  v0.18 (31/08/2026) — The vertical economy pass, from Richard's screenshot
+  of v0.17 ("honestly this looks as busy as ever"): the distill had thinned
+  columns and jargon but left the page's height alone, and as superadmin he
+  still saw every operator control — engine chips, a warning line, four
+  giant tiles, filters and three buttons before the first match, two and a
+  half screens down. Matches now opens with the answer: the tile grid is
+  one quiet line under the heading; the engine chips collapse to a
+  tap-to-expand sentence (expanded stays while a filter is live); Upload
+  Footage is gone from the toolbar (the badged tab is the button); Add a
+  match and Ingest keys wait behind one More; filters render only once the
+  pile reaches six; each match is a two-line card on a phone (fixture,
+  then date · most seen · n of m) via .mrow-sub instead of the labelled
+  five-row form; and Remove moved off the list onto the match page — you
+  delete the thing you are looking at.
   v0.17 (31/08/2026) — The simplicity pass, from Richard's verdict on the
   live tool ("if I can't use it then what hope for the commercial
   manager?"). Principle applied: progressive disclosure — the plain read
@@ -249,6 +263,17 @@
     var NL_TOOL_KEY = 'ops-brand-exposure';
 
     window.NL_CHANGELOG = [
+      {
+        date: '31/08/2026',
+        version: 'v0.18',
+        items: [
+          'Matches opens with the matches: tiles are one quiet line, ' +
+            'engine chips fold to a sentence, filters wait until the pile ' +
+            'needs them, and the toolbar is one More button.',
+          'Each match is two lines on a phone; Remove moved onto the ' +
+            'match page itself.'
+        ]
+      },
       {
         date: '31/08/2026',
         version: 'v0.17',
@@ -931,6 +956,21 @@
   .reflib__group { margin-top: 14px; }
   .reflib__group h3 { font-size: var(--text-sm, 13px); font-weight: 800;
                       color: var(--navy); margin: 0 0 8px; }
+  /* The matches list on a phone is two lines per match (v0.18): the
+     fixture, then one summary line. The labelled-card treatment made
+     each match a five-row form — a list is not a form. */
+  .mrow-sub { display: none; }
+  @media (max-width: 640px) {
+    #mTable thead { display: none; }
+    #mTable, #mTable tbody, #mTable tr, #mTable td:first-child {
+      display: block; width: 100%; box-sizing: border-box; }
+    #mTable td:not(:first-child) { display: none; }
+    #mTable tr { border: 1px solid var(--border); border-radius: 8px;
+                 background: var(--white); margin: 0 0 10px; padding: 10px 12px; }
+    #mTable td { border: 0; padding: 0; }
+    .mrow-sub { display: block; color: var(--text-muted);
+                font-size: var(--text-sm, 13px); margin-top: 3px; }
+  }
   /* Data tables become card rows on a phone (v0.16): the screenshot said
      it best — a nine-column table at 390px is a horizontal-scroll ribbon
      nobody reads. The first cell is the card's title; every other cell
@@ -981,24 +1021,23 @@
     <section id="viewMatches">
       <!-- .stats is a direct child, not nested in .toolbar__left: inside the
            toolbar it is width-constrained and the tiles stack into a column. -->
-      <div class="stats" id="mStats"></div>
-      <!-- Filters are built from the measured data, not the roster: the only
-           useful options are the seasons and grounds that actually hold
-           measurements, and both lists rebuild as data lands. Stats above
-           recompute over the filtered set. -->
-      <div id="mFilters"></div>
+      <!-- One quiet line, not four tiles: on a phone the tile grid pushed
+           the first match two screens down, and "how many matches have we
+           measured" is nobody's daily question (v0.18). -->
       <div class="toolbar">
-        <div class="toolbar__left"><div class="section-head"><h2>Matches measured</h2></div></div>
+        <div class="toolbar__left"><div class="section-head"><h2>Matches measured</h2>
+          <p class="side-lead" id="mStats" style="margin:2px 0 0"></p></div></div>
+        <!-- Uploading lives in its own tab one tap away; the rare doors
+             (laptop JSON, ingest keys) wait behind More. -->
         <div class="toolbar__right">
-          <button class="btn btn--ghost" id="btnKeys" hidden>Ingest keys</button>
-          <!-- Upload leads, Add trails: uploading is the everyday path now,
-               and dropping a laptop-measured JSON is the occasional one. -->
-          <button class="btn btn--ghost" id="btnAdd" hidden>Add a match</button>
-          <button class="btn btn--primary" id="btnScan" hidden>Upload footage</button>
+          <button class="btn btn--ghost btn--sm" id="btnMore" hidden>More</button>
         </div>
       </div>
+      <!-- Filters are built from the measured data, and only once the pile
+           is big enough to need a lens at all. -->
+      <div id="mFilters"></div>
       <div id="addPanel" hidden></div>
-      <div class="table-wrap"><table class="table cards" id="mTable"></table></div>
+      <div class="table-wrap"><table class="table" id="mTable"></table></div>
     </section>
 
     <!-- ── Partners ─────────────────────────────────────────────────── -->
@@ -1042,7 +1081,8 @@
           <button class="btn btn--ghost btn--sm" id="mBack">Back</button>
           <h2 class="match-title" id="mHead"></h2>
         </div>
-        <div class="toolbar__right"><span class="match-meta" id="mMetaLine"></span></div>
+        <div class="toolbar__right"><span class="match-meta" id="mMetaLine"></span>
+          <button class="btn btn--ghost btn--sm" id="mRemove" hidden>Remove</button></div>
       </div>
       <div class="cols">
         <section>
@@ -1611,6 +1651,8 @@
      digits matter to nobody until two of them disagree. */
   var engineFilter = null;                    /* null = all engines */
 
+  var MIX = { open: false };
+
   function renderMixWarn() {
     /* Engine chips are match-list context. On the upload and story views
        they are noise above the content — and on a phone they were the row
@@ -1629,6 +1671,18 @@
     var keys = Object.keys(counts);
     if (keys.length < 2) { engineFilter = null; $('mixWarn').innerHTML = ''; return; }
     if (engineFilter && !counts[engineFilter]) engineFilter = null;
+    /* Collapsed to one line until asked (v0.18): the chips filled a phone
+       screen before the first match. A live filter stays visible. */
+    if (!MIX.open && engineFilter === null) {
+      $('mixWarn').innerHTML = '<p class="form-hint" style="margin:0 0 10px">' +
+        keys.length + ' engine versions in the pile — ' +
+        '<a href="#" id="mixOpen">compare like for like</a></p>';
+      var op = $('mixOpen');
+      if (op) op.onclick = function (ev) {
+        ev.preventDefault(); MIX.open = true; renderMixWarn();
+      };
+      return;
+    }
     var chips = ['<button class="btn btn--ghost btn--sm" data-eng="" aria-pressed="' +
                  (engineFilter === null) + '">All (' + list().length + ')</button>']
       .concat(keys.sort().reverse().map(function (k) {
@@ -1666,6 +1720,13 @@
   function renderMatchFilters() {
     var box = $('mFilters');
     if (!box) return;
+    /* A lens over four matches is a row of chrome before the content.
+       Filters earn their screen space when scrolling stops working. */
+    if (list().length < 6) {
+      box.innerHTML = '';
+      MF.season = MF.club = null;
+      return;
+    }
     var seasons = {}, clubs = {};
     list().forEach(function (m) {
       var s = seasonOfMatch(m);
@@ -1728,11 +1789,12 @@
       footage += (m.meta.duration || 0);
       sponsorsOf(m).forEach(function (s) { sponsors[s.name] = true; });
     });
-    $('mStats').innerHTML =
-      '<div class="stat"><div class="stat__num">' + all.length + '</div><div class="stat__label">Matches</div></div>' +
-      '<div class="stat"><div class="stat__num">' + Object.keys(grounds).length + '</div><div class="stat__label">Grounds</div></div>' +
-      '<div class="stat"><div class="stat__num">' + Object.keys(sponsors).length + '</div><div class="stat__label">Sponsors seen</div></div>' +
-      '<div class="stat"><div class="stat__num">' + secStr(footage) + '</div><div class="stat__label">Footage measured</div></div>';
+    $('mStats').textContent = all.length
+      ? all.length + (all.length === 1 ? ' match' : ' matches') + ' · ' +
+        Object.keys(grounds).length + ' grounds · ' +
+        Object.keys(sponsors).length + ' sponsors · ' + secStr(footage) +
+        ' measured'
+      : '';
 
     if (!all.length && list().length) {
       /* The pile has matches; the lenses hide them all. Different problem,
@@ -1759,38 +1821,39 @@
       ) + '</td></tr></tbody>';
       var b2 = $('btnAdd2'), s2 = $('btnScan2');
       if (b2) b2.onclick = openAdd;
-      if (s2) s2.onclick = openScan;
+      if (s2) s2.onclick = function () { nav('upload'); };
       return;
     }
 
     /* The reader's row: who played, when, who got seen most. Source,
        length and reference-set state live on the match page (Full
-       numbers) — qualifiers are for the moment of doubt, not the list. */
+       numbers), and Remove lives there too — a destructive button has no
+       business sitting ambient on a list. On a phone the row is two
+       lines: the fixture, then a summary line the .mrow-sub carries. */
     var rows = all.map(function (m) {
       var ss = sponsorsOf(m);
       var found = ss.filter(function (s) { return s.seconds > 0; }).length;
       var top = ss.reduce(function (a, s) {
         return (s.seconds || 0) > ((a && a.seconds) || 0) ? s : a;
       }, null);
+      var mostSeen = top && top.seconds
+        ? esc(top.name) + ' — ' + secStr(top.seconds) : '—';
       return '<tr data-id="' + esc(m._id) + '" style="cursor:pointer">' +
-        '<td>' + fixtureCell(m) + '</td>' +
-        '<td data-l="Date">' + esc(NL.formatDateShort(m.meta.date)) + '</td>' +
-        '<td data-l="Most seen">' + (top && top.seconds
-          ? esc(top.name) + ' — ' + secStr(top.seconds) : '—') + '</td>' +
-        '<td class="num" data-l="Sponsors seen">' + found + ' of ' + ss.length + '</td>' +
-        (canWrite ? '<td class="num"><button class="btn btn--ghost btn--sm" data-del="' +
-          esc(m._id) + '">Remove</button></td>' : '') +
+        '<td>' + fixtureCell(m) +
+        '<span class="mrow-sub">' + esc(NL.formatDateShort(m.meta.date)) +
+        ' · ' + mostSeen + ' · ' + found + ' of ' + ss.length + ' seen' +
+        '</span></td>' +
+        '<td>' + esc(NL.formatDateShort(m.meta.date)) + '</td>' +
+        '<td>' + mostSeen + '</td>' +
+        '<td class="num">' + found + ' of ' + ss.length + '</td>' +
         '</tr>';
     }).join('');
 
     $('mTable').innerHTML =
       '<thead><tr><th>Fixture</th><th>Date</th><th>Most seen</th>' +
-      '<th class="num">Sponsors seen</th>' +
-      (canWrite ? '<th></th>' : '') + '</tr></thead><tbody>' + rows + '</tbody>';
+      '<th class="num">Sponsors seen</th></tr></thead><tbody>' + rows + '</tbody>';
 
     $('mTable').onclick = function (ev) {
-      var del = ev.target.closest('[data-del]');
-      if (del) { ev.stopPropagation(); return removeMatch(del.getAttribute('data-del')); }
       var tr = ev.target.closest('tr[data-id]');
       if (tr) nav('match/' + encodeURIComponent(tr.getAttribute('data-id')));
     };
@@ -1849,6 +1912,10 @@
           col: null, seams: [] };
     $('mHead').textContent = m.meta.club + ' v ' + (m.meta.opponent || '—');
     renderMetaLine(m);
+    /* Remove lives here, not on the list: you delete the thing you are
+       looking at (v0.18). */
+    $('mRemove').hidden = !canWrite;
+    $('mRemove').onclick = function () { removeMatch(id); };
 
     var vid = $('vid');
     vid.pause(); vid.removeAttribute('src'); vid.load();
@@ -2405,6 +2472,7 @@
       if (!ok) return;
       db.ref(ROOT + '/' + id).remove().then(function () {
         NL.toast('Match removed', 'success');
+        if (view === 'match') nav('matches');
       }).catch(function (e) { NL.toast('Could not remove: ' + e.message, 'error'); });
     });
   }
@@ -4460,18 +4528,30 @@
   window.TOOL = window.TOOL || {};
   window.TOOL.boot = function (session) {
     canWrite = (session && session.toolLevel === 'admin');
-    $('btnAdd').hidden = !canWrite;
-    $('btnAdd').onclick = openAdd;
-    /* Minting is superadmin-only in the function too — this only hides a button
-       whose action would be refused anyway. */
-    $('btnKeys').hidden = !(session && session.role === 'superadmin');
-    $('btnKeys').onclick = openKeys;
-    /* Uploading likewise: the rules refuse a non-superadmin request and the
-       function re-checks — hiding the button is a courtesy, not the gate. */
     canScan = !!(session && session.role === 'superadmin');
-    $('btnScan').hidden = !canScan;
-    $('btnScan').onclick = openScan;
-    /* Upload is a tab now (v0.14) — same audience as the uploader button. */
+    /* The rare doors — laptop JSON and ingest keys — wait behind one More
+       (v0.18). Everyday uploading is the Upload tab, not a third button.
+       Hiding is a courtesy, not the gate: rules and the function re-check. */
+    $('btnMore').hidden = !canWrite;
+    $('btnMore').onclick = function () {
+      var ctrl = NL.modal({
+        title: 'More',
+        buttons: [{ label: 'Close', className: 'btn btn--ghost',
+                    onClick: function (c) { c.close(); } }],
+        body:
+          '<p><a href="#" id="moreAdd">Add a laptop measurement</a><br>' +
+          '<span class="form-hint">Drop the -data.json a local run wrote.</span></p>' +
+          (canScan
+            ? '<p style="margin-top:12px"><a href="#" id="moreKeys">Ingest keys</a><br>' +
+              '<span class="form-hint">Mint an upload key for a machine with ' +
+              'no account.</span></p>'
+            : '')
+      });
+      var a = $('moreAdd'), k = $('moreKeys');
+      if (a) a.onclick = function (ev) { ev.preventDefault(); ctrl.close(); openAdd(); };
+      if (k) k.onclick = function (ev) { ev.preventDefault(); ctrl.close(); openKeys(); };
+    };
+    /* Upload is a tab (v0.14) — same audience as the old uploader button. */
     $('tabScan').hidden = !canScan;
     $('pCsv').onclick = exportPartnerCsv;
     $('pBack').onclick = function () { nav('partners'); };
