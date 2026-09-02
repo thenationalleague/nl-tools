@@ -805,6 +805,39 @@ small-object detector once the hand-counts amount to training data), and
 that is a project, not a tune. Until then the numbers are a floor, and the
 wide shot is where the floor sits lowest.
 
+**The hour, measured (audition 1.3 → 1.4, 02/09/2026).** The audition of
+this clip took ninety minutes on Cloud Run — 47 seconds a frame over 92
+frames, 21 references — and then failed on its upload with an hour-old
+token (CLOUD.md, "A run that outlives its token"). Audition 1.3 blamed the
+frame's SIFT being recomputed per reference and shipped without a
+measurement; profiled afterwards on a 1080p frame with the same 21
+references, the split is:
+
+| Where a detection's time goes | Share |
+|---|---|
+| `findHomography` — ~38 RANSAC fits per reference per frame, one per band pass whose ratio-test survivors clear the inlier floor | 72% |
+| descriptor matching | 23% |
+| the frame's SIFT features (what 1.3 saved) | under 5% |
+
+RANSAC is single-threaded, so the sequential frame loop ran the 8-vCPU job
+on one core. Audition 1.4 spreads the frames over a process pool, results
+identical frame for frame. End to end on a 169 s 1080p clip with the same
+21 references, three workers on a four-core machine:
+
+| | |
+|---|---|
+| Real pass, 84 frames | 674 s — 8.0 s a frame of wall time, 24 s per frame per worker |
+| Relaxed pass (one starved sponsor) | 60 s |
+| Whole audition, scoring and cutouts included | 12.9 min |
+| The same frames, one worker | 16.5 s a frame — the relaxed pass costs about as much again per reference it runs for |
+
+Expect the Harrogate clip in 15–20 minutes on the job's eight vCPU (they
+are hyperthreads, so seven workers are not seven cores), against ninety.
+The full scan gains nothing from this: it has always pooled its frames.
+Its lever is the homography cost itself — fewer fits per reference, or a
+cheaper estimator — and that changes numbers, so it ships only against the
+hand count.
+
 ## Roadmap — engine 1.7, the recall pair (agreed 30/08/2026, superseded by the build above)
 
 Precision's ladder is built and verified; recall (55-60% pooled, far-side
