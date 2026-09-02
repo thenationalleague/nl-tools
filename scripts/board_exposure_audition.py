@@ -42,6 +42,18 @@ video, the corner rule and the mask run per frame as hits arrive (so
 over the whole sample set once the loop is done. Everything stripped is
 counted in audition.json — a rule that deletes never acts silently.
 
+The wide-shot pick (audition 1.2, 02/09/2026). Harrogate v Gateshead, hand-
+counted: recall 21% at 98% precision, every miss in a frame where nothing
+anchored, and the misses as sharp as the finds — starvation, not blur. The
+tight opening shot was found 25 of 25; the two long wide-shot spans, 82 of
+143 labelled seconds, were found 15 samples in 158. And every cutout the
+audition had harvested for that ground came from the tight shot, because
+diverse_top ranks by strength and strength is a near board. So one more
+pick per reference: the smallest board among its real hits, offered only
+when it is materially smaller than anything already kept, and only if the
+crop carries enough features for the scan to load it. Marked wide in
+crop_meta so the tool can say what it is.
+
 Run (inside the scan container via BE_MODE=audition):
 
   python3 scripts/board_exposure_audition.py \
@@ -58,13 +70,14 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-AUDITION_VERSION = "1.1"
+AUDITION_VERSION = "1.2"
 WINDOWS = 300          # sharpest-in-window count (clamped for short footage)
 PER_WINDOW = 3         # spread frames scored per window
 RELAXED_FLOOR = 4      # candidate-only inlier floor for starved sponsors
 CROPS_PER_REF = 4      # best-hit crops kept per reference
 CANDIDATES_PER_SPONSOR = 12
 SPREAD_SECS = 10.0     # crops for one ref/sponsor must be this far apart
+WIDE_SHRINK = 0.5      # a wide pick must be this much smaller than the kept set's smallest board
 
 
 # ---------------------------------------------------------------- pure logic
@@ -112,6 +125,24 @@ def diverse_top(hits, keep, spread=SPREAD_SECS):
         if len(out) >= keep:
             break
     return sorted(out, key=lambda d: d["t"])
+
+
+def wide_pick(hits, chosen, shrink=WIDE_SHRINK):
+    """The far view, as a fifth pick. The smallest board (area, % of frame)
+    among a reference's real hits — offered only when it is under `shrink`
+    of the smallest board already kept, because a kept set that spans
+    scales needs no help, and never a hit already in the set. None when
+    there is nothing to add. Pure."""
+    if not hits:
+        return None
+    small = min(hits, key=lambda d: d.get("area") or 0.0)
+    if any(small["t"] == k["t"] for k in chosen):
+        return None
+    if chosen:
+        floor = min((k.get("area") or 0.0) for k in chosen)
+        if (small.get("area") or 0.0) > shrink * floor:
+            return None
+    return small
 
 
 def slug(text):
@@ -368,16 +399,34 @@ def run(a):
     # loop cost gigabytes on hit-rich footage, re-seeking costs seconds.
     keep_ref = {k: diverse_top(hs, CROPS_PER_REF)
                 for k, hs in ref_hits.items()}
+    # The wide-shot pick (1.2): one far view per reference, when the kept
+    # set is all near views.
+    wide_ref = {}
+    for k, hs in ref_hits.items():
+        w = wide_pick(hs, keep_ref[k])
+        if w is not None:
+            wide_ref[k] = w
     keep_rel = {s: diverse_top(rs, CANDIDATES_PER_SPONSOR)
                 for s, rs in relaxed_rows.items()}
     needed = sorted({r["t"] for rows in keep_ref.values() for r in rows} |
+                    {r["t"] for r in wide_ref.values()} |
                     {r["t"] for rows in keep_rel.values() for r in rows})
     crops, crop_meta = [], []
+    wide_unusable = 0
 
-    def save_crop(frame, prefix, sponsor, row, relaxed=False):
+    def save_crop(frame, prefix, sponsor, row, relaxed=False, wide=False):
+        nonlocal wide_unusable
         img = crop_board(frame, row)
         if img is None:
             return None
+        if wide:
+            # A far board is small: the crop must carry at least the
+            # features build_refs demands, or the scan would skip it at
+            # load and the tick would have been for nothing.
+            kp = sift.detect(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), None)
+            if len(kp) < C.MIN_INLIERS:
+                wide_unusable += 1
+                return None
         fn = (f"audition-{prefix}{slug(sponsor)}-{int(row['t'])}s-"
               f"{row['inliers']}i.png")
         cv2.imwrite(os.path.join(a.out_dir, fn), img)
@@ -386,7 +435,8 @@ def run(a):
         # sponsor and provenance is just a picture.
         crop_meta.append({"crop": fn, "sponsor": sponsor,
                           "t": row["t"], "inliers": row["inliers"],
-                          "relaxed": relaxed})
+                          "area": row.get("area"),
+                          "relaxed": relaxed, "wide": wide})
         return fn
 
     cap = cv2.VideoCapture(a.video)
@@ -399,12 +449,19 @@ def run(a):
             for row in rows:
                 if row["t"] == t:
                     row["crop"] = save_crop(frame, "", sponsor, row)
+        for (sponsor, _name), row in wide_ref.items():
+            if row["t"] == t:
+                row["wide_crop"] = save_crop(frame, "wide-", sponsor, row,
+                                             wide=True)
         for sponsor, rows in keep_rel.items():
             for row in rows:
                 if row["t"] == t:
                     row["crop"] = save_crop(frame, "relaxed-", sponsor, row,
                                             relaxed=True)
     cap.release()
+    wide_offered = sum(1 for r in wide_ref.values() if r.get("wide_crop"))
+    print(f"  wide-shot picks: {wide_offered} offered, {wide_unusable} "
+          f"too few features to load")
 
     candidates = [
         {"sponsor": sponsor, "t": row["t"], "inliers": row["inliers"],
@@ -433,6 +490,7 @@ def run(a):
         "crop_meta": crop_meta,
         "frame": {"w": frame_w, "h": frame_h},
         "furniture": furn,
+        "wide": {"offered": wide_offered, "unusable": wide_unusable},
     }
     path = os.path.join(a.out_dir, "audition.json")
     with open(path, "w", encoding="utf-8") as f:

@@ -71,6 +71,36 @@ class DiverseTop(unittest.TestCase):
                          [5.0, 90.0])
 
 
+class WidePick(unittest.TestCase):
+    """Audition 1.2: the far view as a fifth pick, only when the kept set is
+    all near views."""
+
+    def hit(self, t, n, area):
+        return {"t": t, "inliers": n, "area": area}
+
+    def test_far_board_offered_when_kept_set_is_all_near(self):
+        near = [self.hit(3.0, 40, 0.16), self.hit(14.0, 38, 0.15),
+                self.hit(35.0, 55, 0.19)]
+        far = self.hit(101.0, 8, 0.03)
+        chosen = A.diverse_top(near + [far], keep=3)
+        self.assertEqual([h["t"] for h in chosen], [3.0, 14.0, 35.0])
+        self.assertIs(A.wide_pick(near + [far], chosen), far)
+
+    def test_nothing_offered_when_kept_set_already_spans_scales(self):
+        hits = [self.hit(3.0, 40, 0.16), self.hit(60.0, 20, 0.04),
+                self.hit(101.0, 8, 0.03)]
+        chosen = hits[:2]
+        # 0.03 is not under half of 0.04 — the set already reaches far.
+        self.assertIsNone(A.wide_pick(hits, chosen))
+
+    def test_never_a_hit_already_kept(self):
+        hits = [self.hit(3.0, 40, 0.16), self.hit(60.0, 9, 0.02)]
+        self.assertIsNone(A.wide_pick(hits, hits))
+
+    def test_empty_hits(self):
+        self.assertIsNone(A.wide_pick([], []))
+
+
 class Verdicts(unittest.TestCase):
     ENTRIES = [("TIC Health", "/refs/partners/TIC Health/TIC Health.png",
                 "partner")]

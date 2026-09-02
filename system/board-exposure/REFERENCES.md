@@ -46,6 +46,44 @@ after the fact. If creative-level reporting is ever sold, stamping each hit
 with the matching reference's filename is a small engine change — flagged here
 rather than built, because nothing yet asks the question.
 
+## The printers' artwork (added 02/09/2026)
+
+Richard sent the print files the partner boards were made from — the
+roadmap's "needs the boards' CAD files" line, answered. What went into
+`assets/partners/` and why:
+
+| file | design | source |
+|---|---|---|
+| `Enterprise/Enterprise artwork 16x2ft.png` | green, logo + "Here for the National League" | `UK2015821_Enterprise_Hoarding_16x2ft` |
+| `Enterprise/Enterprise artwork 8x2ft.png` | green, logo only | `UK2015821_Enterprise_Hoarding_8x2ft` |
+| `DAZN/DAZN artwork Watch live matches.png` | yellow, "Watch live matches" | `DAZN Barrow and Harrogate`, 4320×562 |
+| `DAZN/DAZN artwork Watch every match.png` | yellow, "Watch every match" | `DAZN Barrow and Harrogate 20x2` |
+| `DAZN/DAZN artwork Watch National League.png` | yellow, "Watch National League", Enterprise lockup | `DAZN DR Brai Brack` |
+| `DAZN/DAZN artwork Follow your club.png` | black, "Follow your club all season", Enterprise + NLTV lockup | `National League Perimeter Board Dev5`, p1 |
+| `DAZN/DAZN artwork Follow your club no Enterprise.png` | black, same without the Enterprise lockup | `National League Perimeter Board Dev5`, p6 |
+
+How they were made: each PDF page rendered to its **TrimBox** (the printers'
+files carry bleed and crop marks; the trim box is the board as it hangs),
+2000px wide on a white ground, with PyMuPDF. No hand cropping.
+
+What was left out, deliberately: the four smaller sizes of each DAZN design
+(3888×431, 3456×648, 2160×648, 1728×432 — the same elements re-flowed for
+shorter boards; scan time is linear in reference count, so one size per
+design goes in and the audition says whether a ground needs another); the
+`Dev5_1v2` file, which differs from `Dev5` only by a "NTLTV" typo in the
+call-to-action and is presumably the one that was not printed; and a
+13-page demo deck that arrived in the same batch, which is a presentation,
+not artwork.
+
+The "National League" black boards are DAZN boards — the mark being sold is
+NLTV on DAZN — so they live under `DAZN/`, never under a new sponsor name:
+the folder name is the report name.
+
+The footage grabs already in these folders stay. A grab is the board as one
+camera saw it; the artwork is the board as printed. The audition's verdict
+rows say which of them fire at a given ground, and a reference that never
+fires anywhere can be retired from there.
+
 ## Where they live now
 
 | | |

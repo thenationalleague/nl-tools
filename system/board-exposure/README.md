@@ -557,8 +557,9 @@ target, not a threshold's.
 
 **The second ground — Horsham hand-labels, 30/08/2026.** Richard labelled
 the Horsham v Hampton & Richmond YouTube rip (a 1080p club stream, 4½
-min) from the ORIGINAL file — not the 640px proxy, which would have set a
-lower truth bar than the engine's own input — against the engine-1.6 scan
+min) from the ORIGINAL file — not the proxy (640px then, 1280px since
+02/09/2026), which would have set a lower truth bar than the engine's own
+input — against the engine-1.6 scan
 of the same footage. 63 appearances across three sponsors, his standard
 noted in the file: "very generous read of very zoomed out items".
 
@@ -761,6 +762,48 @@ harvest ledger so far: Enterprise centre 14→29 (two crops), TIC 3→30
 (one crop). Match-harvested references are the highest-yield lever yet
 measured on club footage — exactly what the audition pass exists to
 industrialise.
+
+## The third clip — Harrogate Town v Gateshead, DAZN highlights, 02/09/2026
+
+Richard hand-counted Enterprise over a 3:05 DAZN highlights clip (16 lines,
+143 labelled seconds) and the 1.7.1 cloud scan of the same file was scored
+against it, then run through the recall diagnostic on the playback proxy.
+Labels: `labels/2026-08-31-harrogate-town-v-gateshead.csv`.
+
+| | |
+|---|---|
+| Recall | 21% (51 of 251 labelled samples) |
+| Precision | 98% (1 phantom) |
+| Misses in frames where NO sponsor anchored | 199 of 199 (100%) |
+| Missed frames' sharpness vs found | 1.04× — as sharp |
+| Missed frames' blockiness vs found | 1.03× — as crunchy |
+
+**The blur premise is dead.** The frames the engine missed are as sharp
+and as cleanly encoded as the frames it found. Blur variants and
+compression variants would mostly re-find what sharpness never lost; the
+diagnostic's own reading is "starvation dominates — spend on references".
+
+**Where the seconds went.** The tight opening shot, a big near board: 25
+of 25 samples found. The two long wide-shot spans (1:34–2:16 and
+2:19–2:59, 82 of the 143 labelled seconds): 15 samples found of 158, every
+one a far board scraping the floor at 7–9 agreeing features. The engine
+never initiates on the wide shot — and the three cutouts the audition had
+harvested for this ground (3s, 14s, 35s) were all cut from the tight shot,
+because the harvest ranks by strength and strength is a near board.
+
+**Built from it (audition 1.2):** a wide-shot pick — one far-view cutout
+per reference, the smallest board among its real hits, offered only when
+the kept set is all near views and only if the crop carries enough
+features for the scan to load; ticked by default on the audition screen,
+labelled "far view". A far-looking reference is the one thing that reaches
+the wide shot with this detector. The honest ceiling: feature matching
+needs seven agreeing features, and a far board in a 1080p wide shot is
+80–100 px across — it yields that only sometimes, zoom pass included.
+Beyond references the next lever is a different detector for small boards
+(template correlation seeded from the far-view reference, or a trained
+small-object detector once the hand-counts amount to training data), and
+that is a project, not a tune. Until then the numbers are a floor, and the
+wide shot is where the floor sits lowest.
 
 ## Roadmap — engine 1.7, the recall pair (agreed 30/08/2026, superseded by the build above)
 
