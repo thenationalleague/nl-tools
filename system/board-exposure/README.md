@@ -838,6 +838,49 @@ Its lever is the homography cost itself — fewer fits per reference, or a
 cheaper estimator — and that changes numbers, so it ships only against the
 hand count.
 
+**The far side, measured to the floor (02/09/2026, evening).** Richard's
+clarity ladder — nine engine hits from this scan, clarity 0.52 to 0.86,
+board widths 78 to 133 px — came back all readable, and all end boards.
+So there is no honest visibility floor that puts the far touchline out of
+scope: his eye reads it, and the engine finds none of it. Every direct
+hit in this scan is under a tenth of the frame (median 80 px, max 182 px
+of 1920): DAZN's camera is high and wide, and the "big" opening-shot
+boards are 4–7% of the picture, the far touchline 5–8%. The far boards
+are not smaller than the ones we find. Four of his far-side frames, the
+Enterprise board at 90–160 px and legible, were then put through every
+cheap variant on the current 10-file CAD set:
+
+| Variant | Far-side Enterprise found |
+|---|---|
+| native detect | 0 of 4 |
+| the zoom pass (2×) | 0 of 4 |
+| CLAHE contrast equalisation, clip 2 and 4 | 0 of 4 (and 26 starved frames against 24 on the test clip — closed as #1133, not merged) |
+| SIFT uncapped (the crowd eating the 6,000-feature budget was the suspect: the far band already holds 2,500 of them) | 0 of 4 |
+| the far strip matched alone, no guards | "hits" that are degenerate homographies, 4–22 px wide — the guards are right to refuse them |
+| grayscale template correlation, 70–160 px, on the far strip | 1 of 4 on the board; the other three peak on envirovent, MYRINGS or a white board, at 0.40–0.52 against runners-up of 0.37–0.42 |
+
+The reading: at 1080p a 12 px wordmark does not yield descriptors that
+survive a ratio test against a stand full of texture, and no amount of
+contrast, zoom or budget changes that — the information is not in the
+pixels. Exposure was the plausible cause and is ruled out. A plain
+template is not discriminative enough either. What is left is a detector
+that uses what a far board still has at that size — its colour and its
+shape (a green rectangle with a light wordmark, for Enterprise) — scored
+against this clip's hand count, with a second wide-shot ground before it
+ships. Until it exists the report's caveat stands: the far side is not
+counted, and the numbers are a floor.
+
+**The CAD-only re-scan, same evening.** The set trimmed to ten CAD files
+(REFERENCES.md, "The set, trimmed") scored 13% recall at 97% precision on
+this clip against 21% at 98% for the first scan's logo-plus-cutouts set,
+found no labelled sample that set had not, and took 1,884 s against 884 s.
+Per span: the tight opening shot 25 → 18 samples, the second wide-shot
+span 14 → 8. The reading and the reversal are in REFERENCES.md: cost is
+per descriptor not per file, a board at 80 px matches the picture of
+itself better than a render of its design, and the ground's cutouts are
+what measures the match. The logo file is back; the cutouts come back on
+the next audition at this ground.
+
 ## Roadmap — engine 1.7, the recall pair (agreed 30/08/2026, superseded by the build above)
 
 Precision's ladder is built and verified; recall (55-60% pooled, far-side
