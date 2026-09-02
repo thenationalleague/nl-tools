@@ -171,6 +171,21 @@ re-mints once a token is 45 minutes old (`Token` in `run_job.py`, with a
 test that replays the failure). If a card ever reads FAILED after a long
 run again, open the run log before blaming the engine.
 
+## Progress on the card (02/09/2026)
+
+The tool's pipeline card used to estimate from the clip length, and on the
+same afternoon read "-1%" on one card and "21 min so far · past the ~15 min
+estimate" on the next. Now the number is the job's own. The scan and the
+audition keep one row current (`scripts/board_exposure_progress.py`:
+phase, done, total, and two timestamps), the runner relays it to
+`brand-exposure/progress/<requestId>.json` every twenty seconds while the
+script runs, the poller copies it onto the request record each minute and
+deletes the object when the run ends, and the card draws phase · percent ·
+time left from the job's own pace. Before the first row lands the card says
+Starting, never a number. The object lives outside every match folder, so
+nothing a dismissal clears can touch it, and it is keyed by the request
+rather than a match id, so nothing derives one.
+
 ## What is missing
 
 1. **A trigger.** Starting a scan is a `gcloud` command, so it needs Cloud

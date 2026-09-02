@@ -53,6 +53,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import board_exposure_core as C            # noqa: E402
+import board_exposure_progress as PG       # noqa: E402
 import board_exposure_report as R          # noqa: E402
 from board_exposure_eval import parse_clock as _parse_clock  # noqa: E402
 
@@ -71,6 +72,7 @@ PROGRESS_EVERY = 3.0        # seconds between progress updates
 PROXY_W = 1280
 PROXY_CRF = 30
 _ARGS = None                # parsed args, for the non-interactive confirm path
+_PROGRESS = PG.Progress(None)   # the run's progress row; --progress makes it real
 # Counted rather than raised, so a batch measures every video it was given and
 # still exits non-zero. "The job succeeded" must not mean "some of the matches
 # arrived" — the first cloud run exited clean having uploaded nothing.
@@ -969,6 +971,10 @@ def main():
                          "(needs refs/ingest-key.txt)")
     ap.add_argument("--ffmpeg", default="ffmpeg")
     ap.add_argument("--ffprobe", default="ffprobe")
+    ap.add_argument("--progress", default=None, metavar="FILE",
+                    help="keep a one-row JSON progress file current as the "
+                         "scan runs (phase, done, total) — the cloud job copies "
+                         "it up for the tool's cards")
     ap.add_argument("--init", action="store_true", help="create the refs folder tree and exit")
     ap.add_argument("--list", action="store_true", help="show references and exit")
     ap.add_argument("-y", "--yes", action="store_true",
@@ -976,8 +982,9 @@ def main():
     ap.add_argument("--stills", type=int, default=0, metavar="N",
                     help="write N full-size frames spread across the match, to crop boards from")
     a = ap.parse_args()
-    global _ARGS
+    global _ARGS, _PROGRESS
     _ARGS = a
+    _PROGRESS = PG.Progress(a.progress)
     if a.batch and a.out_dir is None:
         a.out_dir = "reports"
 
@@ -1168,6 +1175,7 @@ def run_one(a, video, club, title, date="", start=None, end=None, complete=None)
         print(f"  measuring {R.hhmm(start or 0)} to {R.hhmm(end or info['duration'])}"
               f" — {R.hhmm(span)} of match, {R.hhmm(info['duration'] - span)} skipped")
 
+    _PROGRESS.phase("extract")
     if len(windows) == 1:
         files, interval = extract(video, work, a.fps, a.ffmpeg,
                                   int(span * a.fps), a.limit,
@@ -1195,12 +1203,14 @@ def run_one(a, video, club, title, date="", start=None, end=None, complete=None)
     # where carriage returns would make an unreadable mess.
     line_end = "\r" if sys.stdout.isatty() else "\n"
     hits_by_index, t0, done, last = {}, time.time(), 0, 0.0
+    _PROGRESS.phase("scan", n_samples)
     with mp.get_context("spawn").Pool(jobs, initializer=_init_worker,
                                       initargs=(entries, C.NFEATURES)) as pool:
         for i, hit in pool.imap_unordered(_scan, list(enumerate(files)), chunksize=4):
             if hit:
                 hits_by_index[i] = hit
             done += 1
+            _PROGRESS.tick(done)
             # On a timer, not every Nth sample. Forty lines spread across a run
             # means one a minute on a full match, and a minute of silence reads
             # as a hung process — which is exactly how the first real run felt.
@@ -1222,6 +1232,7 @@ def run_one(a, video, club, title, date="", start=None, end=None, complete=None)
 
     scan_secs = time.time() - t0
     print(f"\n  scanned in {R.hhmm(scan_secs)} — {len(hits_by_index)} samples with a detection")
+    _PROGRESS.phase("finish")
 
     # Furniture first, tracking second, and the order is load-bearing: a
     # watermark's hits must be gone BEFORE gap-filling, or tracking would
@@ -1356,6 +1367,7 @@ def run_one(a, video, club, title, date="", start=None, end=None, complete=None)
 
     proxy = None
     if not a.no_proxy:
+        _PROGRESS.phase("proxy")
         proxy = make_proxy(video, f"{base}-proxy.mp4", a.ffmpeg, start, end,
                            windows=windows)
 
@@ -1368,11 +1380,13 @@ def run_one(a, video, club, title, date="", start=None, end=None, complete=None)
         # After the files are written and before the summary, so a failure here
         # is reported next to the files that still exist and can be uploaded by
         # hand.
+        _PROGRESS.phase("upload")
         uploaded = push_to_tool(a, base, head, payload["stats"], club, title,
                                 date, proxy, duration, complete)
         if not uploaded:
             global _UPLOAD_FAILURES
             _UPLOAD_FAILURES += 1
+    _PROGRESS.finish()
 
     print(f"\n  {html}  ({size/1e6:.1f} MB) — open this in a browser")
     print(f"  {base}-data.json — the numbers on their own")

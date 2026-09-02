@@ -162,10 +162,38 @@ function stageOnDone(req) {
   return req && req.mode === "audition" ? "review" : "measured";
 }
 
+/* Where the job leaves its progress row for a request (v0.34): one small
+   object per request, outside every match folder, so nothing a dismissal
+   clears can touch it and nothing derives a match id. Null for an id that
+   is not a plain RTDB key — a path is a delete primitive. */
+function progressPath(id) {
+  return /^[A-Za-z0-9_-]{1,64}$/.test(String(id || ""))
+    ? "brand-exposure/progress/" + id + ".json" : null;
+}
+
+/* The row as the job wrote it (board_exposure_progress.py), or null for
+   anything else — a half-written file, a shape this poller never learned. */
+function progressFrom(text) {
+  let d;
+  try {
+    d = JSON.parse(String(text || ""));
+  } catch (err) {
+    return null;
+  }
+  if (!d || typeof d !== "object" || typeof d.phase !== "string") return null;
+  const n = (v) => Number.isFinite(v) && v >= 0 ? Math.floor(v) : null;
+  const done = n(d.done);
+  const total = n(d.total);
+  if (done === null || total === null) return null;
+  if (!Number.isFinite(d.at) || !Number.isFinite(d.phase_at)) return null;
+  return { phase: d.phase, done, total, at: d.at, phase_at: d.phase_at };
+}
+
 /* The env contract is scan-job/run_job.py's docstring, name for name. The
    reference-set default is partial — the safe direction: partial withholds
-   share of voice, complete would invent it. */
-function buildEnv(req) {
+   share of voice, complete would invent it. `id` is the request's key; it
+   rides along so the job can leave its progress row where the poller looks. */
+function buildEnv(req, id) {
   const env = [
     ["BE_VIDEO", req.video],
     ["BE_CLUB", req.club],
@@ -174,6 +202,10 @@ function buildEnv(req) {
     ["BE_REFERENCE_SET",
       req.referenceSet === "complete" ? "complete" : "partial"],
   ];
+  if (id && progressPath(id)) {
+    env.push(["BE_REQUEST", id]);
+    env.push(["BE_PROGRESS", progressPath(id)]);
+  }
   if (Array.isArray(req.sponsors) && req.sponsors.length) {
     env.push(["BE_SPONSORS", req.sponsors.join(",")]);
   }
@@ -342,7 +374,7 @@ async function launch(db, id, req) {
      The overrides shape is the REST twin of `gcloud run jobs execute
      --update-env-vars`, which every hand-run of this job has used. */
   const op = await runApi("POST", RUN_JOB + ":run", {
-    overrides: { containerOverrides: [{ env: buildEnv(req) }] },
+    overrides: { containerOverrides: [{ env: buildEnv(req, id) }] },
   });
   const execution = (op && op.metadata && op.metadata.name) || null;
   await db.ref(ROOT + "/requests/" + id).update({
@@ -455,6 +487,27 @@ exports.brandExposureScanRequest = onValueCreated(TRIGGER_OPTS, async (event) =>
   }
 });
 
+async function readProgress(id) {
+  const p = progressPath(id);
+  if (!p) return null;
+  try {
+    const [buf] = await admin.storage().bucket(BUCKET).file(p).download();
+    return progressFrom(buf.toString("utf8"));
+  } catch (err) {
+    return null;
+  }
+}
+
+async function dropProgress(id) {
+  const p = progressPath(id);
+  if (!p) return;
+  try {
+    await admin.storage().bucket(BUCKET).file(p).delete();
+  } catch (err) {
+    /* never written, or already gone — either is fine */
+  }
+}
+
 /* ---- The poller ---------------------------------------------------------- */
 exports.brandExposureScanPoll = onSchedule(SCHED_OPTS, async () => {
   const db = admin.database();
@@ -539,7 +592,17 @@ exports.brandExposureScanPoll = onSchedule(SCHED_OPTS, async () => {
         continue; // transient — next minute tries again
       }
       const verdict = verdictOf(exec);
-      if (verdict === "running") continue;
+      if (verdict === "running") {
+        /* The job's own progress row onto the card (v0.34). Not written
+           yet is the common case in the first minute; anything unreadable
+           leaves the last row standing. */
+        const row = await readProgress(id);
+        if (row) {
+          await db.ref(ROOT + "/requests/" + id + "/progress").set(row);
+        }
+        continue;
+      }
+      await dropProgress(id);
       if (verdict === "done") {
         /* Source deletion is safe here and only here — see the header —
            and only while no queued/running request still shares the video
@@ -636,4 +699,5 @@ exports._internals = {
   validRequest, buildEnv, verdictOf, oldestQueued, failureNote, VIDEO_PATH,
   shouldDeleteSource, stageOnLaunch, stageOnDone, othersWantVideo,
   failedSharers, dismissalPlan, matchPrefixOf, othersOwnDest, auditionFiles,
+  progressPath, progressFrom,
 };

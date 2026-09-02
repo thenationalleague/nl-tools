@@ -69,7 +69,7 @@ const be = lift(
   ['validRequest', 'buildEnv', 'verdictOf', 'oldestQueued', 'failureNote',
    'shouldDeleteSource', 'stageOnLaunch', 'stageOnDone', 'othersWantVideo',
    'failedSharers', 'dismissalPlan', 'matchPrefixOf', 'othersOwnDest',
-   'auditionFiles'],
+   'auditionFiles', 'progressPath', 'progressFrom'],
   ['VIDEO_PATH']
 );
 
@@ -270,6 +270,34 @@ test('buildEnv sends BE_MODE and BE_DEST for auditions only', () => {
   assert.equal(aud.find((e) => e.name === 'BE_DEST').value, dest);
   const scan = be.buildEnv({ ...GOOD });
   assert.ok(!scan.some((e) => e.name === 'BE_MODE' || e.name === 'BE_DEST'));
+});
+
+/* ---- Real progress (v0.34): the job's row, relayed, copied, drawn ---------- */
+
+test('buildEnv hands the job its request id and a progress path, given an id', () => {
+  const m = Object.fromEntries(be.buildEnv(GOOD, '-Oabc_123').map((e) => [e.name, e.value]));
+  assert.equal(m.BE_REQUEST, '-Oabc_123');
+  assert.equal(m.BE_PROGRESS, 'brand-exposure/progress/-Oabc_123.json');
+  // no id, no progress envs — the old contract exactly
+  assert.ok(!be.buildEnv(GOOD).some((e) => e.name === 'BE_PROGRESS'));
+});
+
+test('progressPath is a delete primitive and accepts only a plain key', () => {
+  assert.equal(be.progressPath('-Oabc_123'), 'brand-exposure/progress/-Oabc_123.json');
+  for (const bad of ['', null, 'a/b', '../refs', 'x'.repeat(65), 'a b', 'refs/partners']) {
+    assert.equal(be.progressPath(bad), null, JSON.stringify(bad));
+  }
+});
+
+test('progressFrom takes the row the job writes and nothing else', () => {
+  const row = { phase: 'scan', done: 214, total: 370, at: 1756800000.5, phase_at: 1756799400 };
+  assert.deepEqual(be.progressFrom(JSON.stringify(row)), row);
+  assert.deepEqual(be.progressFrom(JSON.stringify({ ...row, done: 214.9 })).done, 214);
+  for (const bad of ['', '{', 'null', '[]', JSON.stringify({ ...row, phase: 3 }),
+    JSON.stringify({ ...row, done: -1 }), JSON.stringify({ ...row, total: 'many' }),
+    JSON.stringify({ ...row, at: null }), JSON.stringify({ phase: 'scan' })]) {
+    assert.equal(be.progressFrom(bad), null, bad);
+  }
 });
 
 test('an audition never surrenders its source; everything else does', () => {

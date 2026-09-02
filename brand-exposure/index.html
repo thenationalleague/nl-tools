@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Brand Exposure
-  Version: v0.33 (02/09/2026)
+  Version: v0.34 (02/09/2026)
   File: /brand-exposure/index.html
 
   Sponsor exposure measured from match video — seconds on screen, clarity and
@@ -41,6 +41,16 @@
   bare Matches stack among them — and was wrong.
 
   Changelog
+  v0.34 (02/09/2026) — The card's progress is the job's own. The scan and
+  the audition keep one row current (phase, done, total, timestamps —
+  scripts/board_exposure_progress.py), run_job relays it to Storage every
+  twenty seconds, the poller copies it onto the request each minute, and
+  the card draws phase · percent · time left from the job's own pace. The
+  estimate from the clip length is gone: "-1%" and "21 min so far · past
+  the ~15 min estimate" were both this card guessing (Richard's two
+  screenshots, 02/09: a percentage has to be a percentage of actual
+  progress). Before the first row lands the card says Starting over a
+  shimmer, never a number.
   v0.33 (02/09/2026) — Retry retires the card it retries. A retry cloned the
   failed request into a new card and left the old one offering Retry, so a
   second tap queued a second job against the same footage (Richard's
@@ -468,6 +478,14 @@
     var NL_TOOL_KEY = 'ops-brand-exposure';
 
     window.NL_CHANGELOG = [
+      {
+        date: '02/09/2026',
+        version: 'v0.34',
+        items: [
+          'Progress on the pipeline cards is the job’s own: phase, real ' +
+            'percent, and time left from its pace. The estimate is gone.'
+        ]
+      },
       {
         date: '02/09/2026',
         version: 'v0.33',
@@ -4744,6 +4762,45 @@
   var LIFECYCLE = ['status', 'stage', 'by', 'at', 'execution', 'startedAt',
                    'finishedAt', 'error', 'swept', 'dismissed'];
 
+  /* Real progress (v0.34). The job's row names its phase and how far
+     through it it is. Phases are weighted so one bar covers the whole run;
+     a phase with no countable steps (frame extraction, the playback copy)
+     holds the bar at its start. Time left is the pace of the phase in hand
+     from the job's own timestamps — never the clip length — and only once
+     3% of the phase is done, so a first frame cannot claim to know. */
+  var PHASES = {
+    scan: [['fetch', 3, 'Fetching the footage'], ['extract', 5, 'Preparing frames'],
+           ['scan', 82, 'Scanning'], ['finish', 3, 'Finishing'],
+           ['proxy', 5, 'Building the playback copy'], ['upload', 2, 'Uploading']],
+    audition: [['fetch', 5, 'Fetching the footage'], ['score', 10, 'Choosing frames'],
+               ['audit', 75, 'Auditioning'],
+               ['relaxed', 5, 'Looking again for the quiet sponsors'],
+               ['crops', 5, 'Cutting out boards']]
+  };
+  function progressView(mode, p) {
+    var phases = PHASES[mode] || PHASES.scan;
+    if (!p || typeof p.phase !== 'string') return { pct: null, words: 'Starting' };
+    if (p.phase === 'done') return { pct: 100, words: '100% · wrapping up' };
+    var before = 0, cur = null;
+    for (var i = 0; i < phases.length; i++) {
+      if (phases[i][0] === p.phase) { cur = phases[i]; break; }
+      before += phases[i][1];
+    }
+    if (!cur) return { pct: null, words: 'Starting' };
+    var total = Number(p.total) || 0;
+    var done = Math.min(Number(p.done) || 0, total);
+    var frac = total > 0 ? done / total : 0;
+    var pct = Math.min(99, Math.round(before + cur[1] * frac));
+    var words = cur[2] + ' · ' + pct + '%';
+    var el = (Number(p.at) || 0) - (Number(p.phase_at) || 0);
+    if (total > 0 && frac >= 0.03 && el > 0) {
+      var left = (total - done) / (done / el);
+      words += ' · about ' + (left < 90 ? 'a minute' : Math.round(left / 60) + ' min') +
+        ' left';
+    }
+    return { pct: pct, words: words };
+  }
+
   function pipeDots(r) {
     var stage = stageOf(r);
     var straight = r.mode !== 'audition';
@@ -4845,37 +4902,19 @@
         acts = '<button class="btn btn--ghost btn--sm" data-cancel="' + esc(id) +
           '">Cancel</button>';
       } else if (stage === 'auditioning' || stage === 'scanning') {
-        /* The audition samples one frame per window — the engine plans
-           min(300, seconds / 2) windows — at about 10 s a window on the
-           job (audition 1.4, measured 02/09). Ninety windows when the
-           length is unknown. Real progress from the job is queued
-           (issue #1126); until then this is an estimate and says so. */
-        var wins = r.durationSecs ? Math.min(300, r.durationSecs / 2) : 90;
-        var estMin = stage === 'auditioning'
-          ? Math.max(5, wins * 10 / 60)
-          : ((r.durationSecs || 0) / 60) * EST_WALL_X || 20;
-        /* Never negative: the server stamps startedAt, and a clock ahead
-           of this one read as "-1%" (Richard's screenshot, 02/09). */
-        var gone = Math.max(0, (Date.now() - (r.startedAt || Date.now())) / 60000);
-        /* A percent and the minutes left, not "9 of ~8 min" (Richard,
-           02/09: the total only matters as a count-up). Past the estimate
-           it counts up, and the bar holds at 96% — a full bar that has not
-           finished is a lie. Floor of 3%: a zero-width bar at minute
-           nought reads as a hang. */
-        var pct = Math.max(3, Math.min(96, Math.round(100 * gone / estMin)));
-        var left = estMin - gone;
-        var words = left >= 1
-          ? Math.min(99, Math.round(100 * gone / estMin)) + '% · about ' +
-            Math.round(left) + ' min left'
-          : (left > -1
-              ? 'Almost there · finishing any minute'
-              : Math.round(gone) + ' min so far · past the ~' +
-                Math.round(estMin) + ' min estimate');
+        /* The job's own row (v0.34): phase, done, total, timestamps —
+           written by the script, relayed by run_job, copied on by the
+           poller every minute. No estimate from the clip length any more:
+           "-1%" and "past the ~15 min estimate" were both this card
+           guessing (Richard's screenshots, 02/09). */
+        var view = progressView(r.mode === 'audition' ? 'audition' : 'scan',
+                                r.progress);
         state = '<span class="pill pill--info">' +
           (stage === 'auditioning' ? 'Auditioning' : 'Scanning') + '</span>';
-        detail = '<div class="scanreq__bar"><div class="prog prog--est">' +
-          '<i style="width:' + pct + '%"></i></div></div>' +
-          '<span>' + words + '</span>';
+        detail = '<div class="scanreq__bar"><div class="prog' +
+          (view.pct === null ? ' prog--est' : '') + '">' +
+          '<i style="width:' + (view.pct === null ? 100 : view.pct) + '%"></i>' +
+          '</div></div><span>' + esc(view.words) + '</span>';
       } else if (stage === 'review') {
         state = '<span class="pill pill--pending">Ready to review</span>';
         acts = '<button class="btn btn--primary btn--sm" data-review="' + esc(id) +
