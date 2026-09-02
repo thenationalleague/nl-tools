@@ -121,6 +121,37 @@ def access_token():
             f"This only runs on Cloud Run.")
 
 
+TOKEN_TTL = 45 * 60     # the metadata server's tokens live an hour; re-mint well inside it
+
+
+class Token:
+    """The runtime service account's access token, re-minted once it is
+    TOKEN_TTL old. Storage calls take one of these and ask for the string at
+    request time, never at the top of main().
+
+    This file used to fetch one token before the video download and hand the
+    same string to every call, including the uploads at the very end. A scan
+    never noticed: its results go up through the match script's own
+    ingest-key sign-in, minted at upload time. An audition and a diagnose
+    write through THIS file, and on 02/09/2026 the Harrogate audition ran
+    for ninety minutes on one core, finished, and died on its first upload
+    with a token that had expired half an hour earlier — every result thrown
+    away at the last step, the log ending in 401. Audition 1.4 makes that
+    run take minutes, which hides the fault; this removes it.
+    """
+
+    def __init__(self, mint=access_token, clock=time.time):
+        self._mint, self._clock = mint, clock
+        self._value, self._at = None, 0.0
+
+    def get(self):
+        now = self._clock()
+        if self._value is None or now - self._at >= TOKEN_TTL:
+            self._value = self._mint()
+            self._at = now
+        return self._value
+
+
 def storage_list(bucket, prefix, token):
     """Every object under a prefix. Paged, because a reference tree with a
     folder per sponsor per club goes past 1000 sooner than you would think."""
@@ -130,7 +161,7 @@ def storage_list(bucket, prefix, token):
         if page:
             q["pageToken"] = page
         url = STORAGE.format(bucket=bucket) + "?" + urllib.parse.urlencode(q)
-        req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token})
+        req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token.get()})
         try:
             with urllib.request.urlopen(req, timeout=60) as r:
                 d = json.loads(r.read().decode())
@@ -146,7 +177,7 @@ def storage_list(bucket, prefix, token):
 def storage_get(bucket, name, dest, token):
     url = (STORAGE.format(bucket=bucket) + "/" +
            urllib.parse.quote(name, safe="") + "?alt=media")
-    req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token})
+    req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token.get()})
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     try:
         with urllib.request.urlopen(req, timeout=1800) as r, open(dest, "wb") as f:
@@ -172,7 +203,7 @@ def storage_put(bucket, name, path, token):
     with open(path, "rb") as f:
         body = f.read()
     req = urllib.request.Request(url, data=body, method="POST", headers={
-        "Authorization": "Bearer " + token,
+        "Authorization": "Bearer " + token.get(),
         "Content-Type": ctype,
     })
     try:
@@ -223,7 +254,7 @@ def main():
     start, end = env("BE_START"), env("BE_END")
 
     os.makedirs(WORK, exist_ok=True)
-    token = access_token()
+    token = Token()
 
     # Diagnose reads an existing export instead of matching references, so
     # the reference tree (and the ingest key that lives in it) stays unfetched.
