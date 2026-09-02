@@ -240,6 +240,51 @@ class Furniture(unittest.TestCase):
         self.assertEqual(info_f, info_g)
 
 
+@unittest.skipIf(not HAVE_CV, "opencv-python-headless + numpy not installed")
+class FrameFeaturesOnce(unittest.TestCase):
+    """Audition 1.3: detect() handed precomputed frame features returns the
+    same hits as detect() computing its own — only the detector call is
+    saved. Proved on a synthetic frame that actually fires."""
+
+    def test_same_hits_with_and_without_feats(self):
+        import os
+        import tempfile
+
+        import cv2
+        import numpy as np
+        import board_exposure_core as C
+
+        rng = np.random.default_rng(11)
+        logo = np.full((120, 360, 3), 255, np.uint8)
+        cv2.rectangle(logo, (0, 0), (359, 119), (20, 90, 20), 6)
+        cv2.putText(logo, "ACME", (30, 85), cv2.FONT_HERSHEY_DUPLEX, 2.4, (20, 90, 20), 6)
+        cv2.circle(logo, (300, 60), 34, (0, 0, 200), -1)
+        cv2.putText(logo, "hire", (270, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+        d = tempfile.mkdtemp()
+        path = os.path.join(d, "acme.png")
+        cv2.imwrite(path, logo)
+
+        frame = np.zeros((720, 1280, 3), np.uint8)
+        frame[:, :] = (40, 120, 40)
+        noise = rng.integers(0, 30, (90, 160, 3), dtype=np.uint8)
+        frame = cv2.add(frame, cv2.resize(noise, (1280, 720)))
+        frame[0:200] = cv2.GaussianBlur(rng.integers(60, 140, (200, 1280, 3), dtype=np.uint8), (7, 7), 0)
+        frame[330:450, 400:760] = logo
+
+        sift = cv2.SIFT_create(nfeatures=C.NFEATURES)
+        matcher = cv2.BFMatcher()
+        refs, skipped = C.build_refs([("ACME", path, "partner")], sift)
+        self.assertTrue(refs and not skipped)
+
+        plain = C.detect(frame, refs, sift, matcher)
+        primed = C.detect(frame, refs, sift, matcher, feats=C.frame_features(frame, sift))
+        self.assertTrue(plain.get("ACME"), "the synthetic board must fire, or this proves nothing")
+        self.assertEqual(len(plain["ACME"]), len(primed.get("ACME", [])))
+        self.assertEqual([h["inliers"] for h in plain["ACME"]],
+                         [h["inliers"] for h in primed["ACME"]])
+        self.assertTrue(np.allclose(plain["ACME"][0]["quad"], primed["ACME"][0]["quad"]))
+
+
 @unittest.skipIf(NUMPY_STUBBED, "numpy not installed here; runs in the container")
 class CropBoard(unittest.TestCase):
     def test_board_box_clips_to_frame(self):
