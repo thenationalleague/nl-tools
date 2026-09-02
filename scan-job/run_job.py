@@ -124,17 +124,26 @@ def access_token():
     No key file and no google-cloud-storage dependency — the metadata server is
     always there on Cloud Run and this is twenty lines against a library that
     would be twenty megabytes.
+
+    Returns (token, seconds_left). The seconds matter: the metadata server
+    CACHES tokens and hands the same one back until it is nearly spent, so
+    "an hour" is what a token is born with, not what a re-mint receives. A
+    re-mint at 45 minutes can be given a token with fifteen left — which is
+    how the Harrogate scan of 02/09/2026 died at 63 minutes with a 401 from
+    a token that had been "refreshed" on schedule.
     """
     req = urllib.request.Request(METADATA, headers={"Metadata-Flavor": "Google"})
     try:
         with urllib.request.urlopen(req, timeout=15) as r:
-            return json.loads(r.read().decode())["access_token"]
+            d = json.loads(r.read().decode())
+            return d["access_token"], float(d.get("expires_in") or 0)
     except urllib.error.URLError as e:
         die(f"could not reach the metadata server for a token: {e.reason}. "
             f"This only runs on Cloud Run.")
 
 
-TOKEN_TTL = 45 * 60     # the metadata server's tokens live an hour; re-mint well inside it
+TOKEN_TTL = 45 * 60     # never trust a token past this, whatever it claims
+TOKEN_MARGIN = 5 * 60   # and never within this of what the server says is left
 
 
 class Token:
@@ -155,13 +164,22 @@ class Token:
 
     def __init__(self, mint=access_token, clock=time.time):
         self._mint, self._clock = mint, clock
-        self._value, self._at = None, 0.0
+        self._value, self._at, self._dies = None, 0.0, 0.0
 
     def get(self):
         now = self._clock()
-        if self._value is None or now - self._at >= TOKEN_TTL:
-            self._value = self._mint()
+        if (self._value is None or now - self._at >= TOKEN_TTL
+                or now >= self._dies - TOKEN_MARGIN):
+            minted = self._mint()
+            # (token, seconds_left) from access_token; a bare string from an
+            # older mint or a test double means "no lifetime reported".
+            self._value, left = (minted if isinstance(minted, tuple)
+                                 else (minted, 0.0))
             self._at = now
+            # A mint that reports no lifetime leaves the fixed cap to do the
+            # work, exactly as before; the margin applies only to a lifetime
+            # the server actually stated.
+            self._dies = now + left if left > 0 else float("inf")
         return self._value
 
 
@@ -223,23 +241,34 @@ def storage_put(bucket, name, path, token):
         with urllib.request.urlopen(req, timeout=300) as r:
             r.read()
     except urllib.error.HTTPError as e:
-        die(f"uploading {name} failed: {e.code} {e.reason}. The runtime "
-            f"service account needs roles/storage.objectAdmin on {bucket} "
-            f"(objectCreator alone cannot overwrite on a re-run) — the "
-            f"one-time grant is recorded in "
-            f"system/board-exposure/uploader-spec.md.")
+        # 401 and 403 are different faults and used to get the same advice.
+        why = (f"the token was refused — it has expired or was never minted; "
+               f"see Token above" if e.code == 401 else
+               f"the runtime service account needs roles/storage.objectAdmin "
+               f"on {bucket} (objectCreator alone cannot overwrite on a "
+               f"re-run) — the one-time grant is recorded in "
+               f"system/board-exposure/uploader-spec.md")
+        raise UploadError(f"uploading {name} failed: {e.code} {e.reason}. {why}.")
+
+
+class UploadError(Exception):
+    """storage_put could not put. Fatal for a result; survivable for a
+    progress row — the caller knows which, this function does not."""
 
 
 class ProgressRelay:
     """Copies the script's progress file to Storage when it has changed and
     at most once every `every` seconds — the poller only looks once a
     minute, so a per-frame upload would be waste. `put(path)` does the
-    upload; the relay never raises past it."""
+    upload; the relay never raises past it — a progress row is a courtesy
+    to the card, and the Harrogate scan of 02/09/2026 lost an hour of CPU
+    to one that failed with a stale token and took the job down with it."""
 
     def __init__(self, path, put, every=PROGRESS_EVERY):
         self.path, self.put, self.every = path, put, every
         self._seen = None
         self._last = 0.0
+        self.failed = 0
 
     def relay(self, now, force=False):
         """Upload if due and changed (always when forced). True when uploaded."""
@@ -253,7 +282,16 @@ class ProgressRelay:
         if not force and mtime == self._seen:
             return False
         self._seen = mtime
-        self.put(self.path)
+        try:
+            self.put(self.path)
+        except Exception as e:   # noqa: BLE001 — anything; the scan must outlive its status row
+            # Said once, so an outage does not fill the log; counted, so the
+            # end of the run can say how much of the card went dark.
+            self.failed += 1
+            if self.failed == 1:
+                log(f"progress upload failed and will not be retried this "
+                    f"interval; the scan carries on ({e})")
+            return False
         return True
 
 
@@ -290,6 +328,14 @@ def fetch_refs(bucket, prefix, token):
         storage_get(bucket, n, os.path.join(refs, rel), token)
     log(f"references: {len(names)} files under {prefix}")
     return refs
+
+
+def put_or_die(bucket, name, path, token):
+    """A result upload. Losing one is losing the run, so this is fatal."""
+    try:
+        storage_put(bucket, name, path, token)
+    except UploadError as e:
+        die(str(e))
 
 
 def main():
@@ -409,15 +455,19 @@ def main():
     if rc != 0:
         die(f"the scan exited {rc}. The log above is the scan's own output.", rc)
 
+    if relay and relay.failed:
+        log(f"note: {relay.failed} progress upload(s) failed during the run, "
+            f"so the card's percentage went stale; the results are unaffected")
+
     if mode == "diagnose":
-        storage_put(bucket, diagnose_obj, diagnose_out, token)
+        put_or_die(bucket, diagnose_obj, diagnose_out, token)
         log(f"diagnose.json -> {diagnose_obj} (download it from the match "
             f"folder, same as the export)")
     elif mode == "audition":
         names = sorted(os.listdir(audition_out))
         for n in names:
-            storage_put(bucket, f"{audition_dest}/{n}",
-                        os.path.join(audition_out, n), token)
+            put_or_die(bucket, f"{audition_dest}/{n}",
+                       os.path.join(audition_out, n), token)
         log(f"{len(names)} audition file(s) -> {audition_dest}/ — open the "
             f"tool's Audition view to tick candidates into references")
 
