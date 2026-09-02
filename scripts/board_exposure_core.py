@@ -149,6 +149,7 @@ MIN_RUN_SECS = 1.0          # shortest appearance that counts at all
 BRIDGE_SECS = 1.5           # longest blocked gap still inside one appearance
 MIN_RUN, BRIDGE = 2, 2      # the same thing in samples at the default 2/s
 DEDUPE_PX = 45              # two hits closer than this are the same board
+CLAHE_CLIP = 0.0            # >0 = equalise local contrast before SIFT (experiment, see frame_features)
 # Gap-tracking. SIFT needs sharp detail and a broadcast pan smears the whole
 # frame, so a board that is plainly on screen goes undetected until the camera
 # settles and its run fragments. When the SAME sponsor is detected on both
@@ -645,7 +646,15 @@ def frame_features(frame_bgr, sift):
     "Sizing"), and the audition's answer to those was a process pool (1.4).
     """
     gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
-    kp_f, des_f = sift.detectAndCompute(gray, None)
+    # EXPERIMENT (02/09/2026, off by default): local contrast normalisation
+    # before feature detection. Harrogate's far-touchline boards are 100-160px
+    # wide — bigger than the 80px end boards the engine finds — and lost to a
+    # sunlit, washed-out far stand, not to size. Features come from the
+    # equalised picture; the face checks still see the real one.
+    src = gray
+    if CLAHE_CLIP:
+        src = cv2.createCLAHE(clipLimit=CLAHE_CLIP, tileGridSize=(8, 8)).apply(gray)
+    kp_f, des_f = sift.detectAndCompute(src, None)
     return gray, kp_f, des_f
 
 

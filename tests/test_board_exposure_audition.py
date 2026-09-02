@@ -284,6 +284,29 @@ class FrameFeaturesOnce(unittest.TestCase):
                          [h["inliers"] for h in primed["ACME"]])
         self.assertTrue(np.allclose(plain["ACME"][0]["quad"], primed["ACME"][0]["quad"]))
 
+    def test_contrast_experiment_feeds_sift_and_nothing_else(self):
+        # CLAHE_CLIP > 0 equalises the picture the features come from; the
+        # gray handed back (which the face checks rectify from) is untouched,
+        # and the default of 0 leaves the features exactly as before.
+        import cv2
+        import numpy as np
+        import board_exposure_core as C
+
+        rng = np.random.default_rng(5)
+        frame = rng.integers(90, 140, (240, 320, 3), dtype=np.uint8)   # a flat, washed-out picture
+        cv2.putText(frame, "ACME", (40, 150), cv2.FONT_HERSHEY_DUPLEX, 2.0, (150, 150, 150), 4)
+        sift = cv2.SIFT_create(nfeatures=C.NFEATURES)
+        kept = C.CLAHE_CLIP
+        try:
+            C.CLAHE_CLIP = 0.0
+            gray0, kp0, _ = C.frame_features(frame, sift)
+            C.CLAHE_CLIP = 2.0
+            gray1, kp1, _ = C.frame_features(frame, sift)
+        finally:
+            C.CLAHE_CLIP = kept
+        self.assertTrue(np.array_equal(gray0, gray1), "the returned gray must be the real picture")
+        self.assertGreater(len(kp1), len(kp0), "equalising a washed-out picture must yield more features")
+
 
 class StarvedSponsors(unittest.TestCase):
     """Audition 1.4: the relaxed candidate pass is a second phase, for the

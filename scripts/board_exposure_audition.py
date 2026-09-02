@@ -307,13 +307,14 @@ def crop_board(frame, hit):
 _W = {}
 
 
-def _init_worker(refs_root, club, video, threads=1):
+def _init_worker(refs_root, club, video, threads=1, clahe=0.0):
     import cv2
 
     import board_exposure_core as C
 
     if threads is not None:
         cv2.setNumThreads(threads)   # OpenCV's own threads fight the pool
+    C.CLAHE_CLIP = clahe             # the contrast experiment, per worker
     sift = cv2.SIFT_create(nfeatures=C.NFEATURES)
     singles = []
     for e in C.load_tree(refs_root, club):
@@ -363,7 +364,8 @@ def _audit(job):
     return n, t, (w_, h_), row
 
 
-def run_pass(video, refs_root, club, jobs, workers, log=print, tick=None):
+def run_pass(video, refs_root, club, jobs, workers, log=print, tick=None,
+             clahe=0.0):
     """Every job through _audit, results yielded in job order.
 
     workers > 1 spreads the frames over a process pool — spawn, not fork:
@@ -387,7 +389,7 @@ def run_pass(video, refs_root, club, jobs, workers, log=print, tick=None):
             yield res
 
     if workers <= 1:
-        _init_worker(refs_root, club, video, threads=None)
+        _init_worker(refs_root, club, video, threads=None, clahe=clahe)
         try:
             yield from progress(map(_audit, jobs))
         finally:
@@ -395,7 +397,7 @@ def run_pass(video, refs_root, club, jobs, workers, log=print, tick=None):
         return
     with mp.get_context("spawn").Pool(
             workers, initializer=_init_worker,
-            initargs=(refs_root, club, video)) as pool:
+            initargs=(refs_root, club, video, 1, clahe)) as pool:
         yield from progress(pool.imap(_audit, jobs, chunksize=1))
 
 
@@ -471,7 +473,7 @@ def run(a):
     jobs = [(n, t, None, None) for n, t in enumerate(chosen)]
     prog.phase("audit", len(jobs))
     for n, t, wh, row in run_pass(a.video, a.refs, a.club, jobs, workers,
-                                  tick=prog.tick):
+                                  tick=prog.tick, clahe=getattr(a, "clahe", 0.0)):
         if wh is None:
             continue
         frame_w, frame_h = wh
@@ -498,7 +500,7 @@ def run(a):
                 for n, t in enumerate(chosen)]
         prog.phase("relaxed", len(jobs))
         for n, t, wh, rrow in run_pass(a.video, a.refs, a.club, jobs, workers,
-                                       tick=prog.tick):
+                                       tick=prog.tick, clahe=getattr(a, "clahe", 0.0)):
             if wh is None:
                 continue
             rrow, gone = furniture_row(C, n, rrow, wh[0], wh[1], furniture_mask)
@@ -660,6 +662,10 @@ def main(argv=None):
                     help="keep a one-row JSON progress file current as the "
                          "audition runs — the cloud job copies it up for the "
                          "tool's cards")
+    ap.add_argument("--clahe", type=float, default=0.0, metavar="CLIP",
+                    help="EXPERIMENT: equalise local contrast before feature "
+                         "detection (OpenCV CLAHE clip limit, 2-4 typical; 0 = "
+                         "off). For washed-out far stands, see core.frame_features")
     run(ap.parse_args(argv))
 
 
