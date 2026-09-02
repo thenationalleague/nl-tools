@@ -159,6 +159,18 @@ vCPU, while the audition ran a sequential loop on one core until audition
 the CPU, and retrying doubles the bill for a fault that is nearly always the
 input.
 
+**A run that outlives its token.** The runner mints its Storage token from
+the metadata server, and those live an hour. Until 02/09/2026 it minted one
+at the start and used it for everything, including the uploads at the end;
+a scan never noticed because its results go up through the match script's
+own ingest-key sign-in, minted at upload time, but an audition or a
+diagnose writes through the runner. The Harrogate audition ran ninety
+minutes on one core, finished, and died on its first upload — every result
+gone, the card reading FAILED, the log ending in 401. The runner now
+re-mints once a token is 45 minutes old (`Token` in `run_job.py`, with a
+test that replays the failure). If a card ever reads FAILED after a long
+run again, open the run log before blaming the engine.
+
 ## What is missing
 
 1. **A trigger.** Starting a scan is a `gcloud` command, so it needs Cloud
