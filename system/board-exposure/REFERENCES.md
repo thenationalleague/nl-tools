@@ -64,7 +64,54 @@ roadmap's "needs the boards' CAD files" line, answered. What went into
 
 How they were made: each PDF page rendered to its **TrimBox** (the printers'
 files carry bleed and crop marks; the trim box is the board as it hangs),
-2000px wide on a white ground, with PyMuPDF. No hand cropping.
+2000px wide on a white ground, with PyMuPDF. No hand cropping. **Since the
+same evening, 1000px wide** — see "The set, trimmed" below.
+
+## The set, trimmed (02/09/2026)
+
+Richard, having been told the artwork was free to add: "sounds like it's
+costing me 12x as much." It was not free. Every reference is matched
+against every frame, so cost is linear in file count, and the 2000px
+renders were the dearest files in the set — a render carries detail no
+camera sees, and every descriptor of it is matched anyway. CLOUD.md had
+said "reference count is linear" since the job was sized; the answer
+should have been that.
+
+The ruling that followed: **the CAD is the reference for a league partner,
+one file per design in circulation, rendered for the camera rather than
+the printer.** A board in frame is 400px wide at best, so the renders went
+to 1000px. The logo files and the board photographs were stand-ins from
+before the artwork existed, and they retire. Measured on a 169s 1080p
+clip, 84 audition frames, three workers:
+
+| | 15 files (2000px, stand-ins in) | 10 files (1000px, stand-ins out) |
+|---|---|---|
+| Real pass | 533 s | 341 s |
+| Frames with no sponsor at all | 23 of 84 | 24 of 84 |
+| Enterprise, best file | 8x2ft artwork 29, logo 30, board photo 26 | 8x2ft artwork 32 |
+| Enterprise 16x2ft artwork | 3 | 6 |
+| DAZN | NLTV photo 8, Follow-your-club 4 (+4 for the no-Enterprise twin) | 8, 4 (+1) |
+| TIC Health | 14 | 12 |
+
+The artwork fires *more* at 1000px than at 2000px — closer to match scale
+— and covers what the logo and the photograph covered. TIC Health and
+Utility Warehouse have no artwork, so their logo files stay at full size
+(TIC lost two frames at 1000px in a trial and was put back). The three
+DAZN designs that never fire on this clip are boards at other grounds and
+stay; the audition's verdict rows are the per-ground pruning tool.
+
+Retired from `assets/partners/`: `DAZN.png`, `DAZN/DAZN white on black.png`,
+`Enterprise.png`, `Enterprise/Enterprise board.png`,
+`Enterprise/Enterprise Here for the National League.png`. The seed
+workflow removes from the bucket what the repo no longer holds, so a
+retirement here is a retirement everywhere.
+
+Still to settle, with the Harrogate hand count: whether a ground's own
+cutouts add anything on top of the CAD. If they do not, cutouts and the
+audition stage go too.
+
+The `DAZN NLTV board.png` photograph stays until DAZN supplies that
+design's artwork — it is a design in circulation with no CAD on file.
 
 What was left out, deliberately: the four smaller sizes of each DAZN design
 (3888×431, 3456×648, 2160×648, 1728×432 — the same elements re-flowed for
