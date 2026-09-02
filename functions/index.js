@@ -6,10 +6,14 @@
  *   fanWidgetsAuth    — issues a superadmin a staff token for the separate
  *                       nl-widgets project, so the Fan Widgets tool can read
  *                       fan data live without mirroring it. See fan-widgets.js.
- *   programmeEnter / programmeClaim
- *                     — Programme Packs passcode → scoped `pClub` claim, so
+ *   programmeAuth     — Programme Packs passcode → scoped `pClub` claim, so
  *                       Storage/RTDB rules can enforce write-own for passcode
- *                       (non-portal) clubs. See programme.js.
+ *                       (non-portal) clubs. An RTDB trigger, not a callable:
+ *                       it began life as programmeEnter / programmeClaim,
+ *                       which deployed but could never be granted a public
+ *                       invoker (org policy, 03/08/2026). Every deploy since
+ *                       runs --force, which deletes functions absent from
+ *                       source, so those two are gone. See programme.js.
  *
  * NL Cup Footage retired 15/08/2026. makeProxy (360p preview proxies on upload)
  * and onFootageDeleted (mirroring Storage deletes back to the catalogue) went
@@ -39,9 +43,9 @@ setGlobalOptions({ region: "europe-west2" });
 // module; exported from here so `firebase deploy --only functions` sees them.
 Object.assign(exports, require("./account"));
 
-// Programme Packs passcode → scoped-claim callables (programmeEnter /
-// programmeClaim). Same reason as above: exported here so a plain
-// `firebase deploy --only functions` picks them up. See functions/programme.js.
+// Programme Packs passcode → scoped-claim trigger (programmeAuth). Exported
+// here so a plain `firebase deploy --only functions` picks it up. See
+// functions/programme.js.
 Object.assign(exports, require("./programme"));
 
 // Fan-widget staff access (fanWidgetsAuth) — RTDB-triggered for the same
