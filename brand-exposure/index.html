@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Brand Exposure
-  Version: v0.30 (02/09/2026)
+  Version: v0.31 (02/09/2026)
   File: /brand-exposure/index.html
 
   Sponsor exposure measured from match video — seconds on screen, clarity and
@@ -41,6 +41,12 @@
   bare Matches stack among them — and was wrong.
 
   Changelog
+  v0.31 (02/09/2026) — "Looking for": focus a sponsor on a match page and
+  the reference pictures behind its numbers sit under the lead line, each
+  opening at full size with Download. The list is the exact files that
+  scan searched for when the export names them, otherwise what is on file
+  today. Richard: "so we know what precisely we're looking for." One
+  lightbox helper now serves the three places that had grown their own.
   v0.30 (02/09/2026) — The audition's wide-shot pick (audition 1.2) shows
   as "far view" on its cutout and is ticked whatever its rank: the
   Harrogate hand-count put every miss on the wide shot, and a far-looking
@@ -440,6 +446,14 @@
     var NL_TOOL_KEY = 'ops-brand-exposure';
 
     window.NL_CHANGELOG = [
+      {
+        date: '02/09/2026',
+        version: 'v0.31',
+        items: [
+          'Focus a sponsor on a match and see the pictures the scan was ' +
+            'looking for, each opening at full size.'
+        ]
+      },
       {
         date: '02/09/2026',
         version: 'v0.30',
@@ -990,6 +1004,21 @@
   .match-title { font-size: clamp(17px, 0.8vw + 12px, 22px); font-weight: 900;
                  font-variation-settings: 'wght' 900; margin: 0; }
   .match-meta { font-size: var(--text-xs); color: var(--text-muted); }
+  /* "Looking for" (v0.31): the reference pictures behind the focused
+     sponsor's numbers — Richard: "so we know what precisely we're looking
+     for". Thumbnails in a row (references are an open set, so a strip,
+     never pills); each opens the full-size file in the lightbox. */
+  .lookfor { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap;
+             margin: -6px 0 14px; }
+  .lookfor__lbl { font-size: var(--text-xs); font-weight: 800; text-transform: uppercase;
+                  letter-spacing: var(--tracking-wide); color: var(--text-muted); }
+  .lookfor__row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .lookfor__btn { font-family: var(--font); padding: 0; border: 1px solid var(--border);
+                  border-radius: var(--radius-sm); background: var(--white);
+                  cursor: pointer; line-height: 0; }
+  .lookfor__btn:hover { border-color: var(--navy-300); }
+  .lookfor__img { width: 96px; height: 48px; object-fit: contain; display: block;
+                  border-radius: var(--radius-sm); }
   .side-lead { margin: -6px 0 14px; color: var(--text-muted); font-size: var(--text-sm);
                line-height: 1.45; }
   .track-key { padding: 7px 13px; border-top: 1px solid var(--navy-700);
@@ -1562,6 +1591,9 @@
           <div class="section-head bex-h"><h2 id="vSponHead">Time on screen</h2>
             <button class="btn btn--ghost btn--sm" id="vAllBtn" hidden>Show all</button></div>
           <p class="side-lead" id="vOf"></p>
+          <!-- What the scan was looking for (v0.31): the reference pictures
+               for the focused sponsor, each opening at full size. -->
+          <div class="lookfor" id="vLookFor" hidden></div>
           <!-- The numbers, all of them, always — index first (the ruling of
                31/08: this is a professional measurement product). -->
           <div class="stats bex-stats">
@@ -2388,7 +2420,9 @@
       storage.ref('brand-exposure/' + id + '/detections.json').getDownloadURL()
         .then(function (u) { return fetch(u); })
         .then(function (r) { return r.json(); })
-        .then(function (d) { setDetections(id, d.hits || {}, d.seams || []); })
+        .then(function (d) {
+          setDetections(id, d.hits || {}, d.seams || [], d.references || null);
+        })
         .catch(function () { setDetections(id, {}); });
     } else {
       setDetections(id, {});
@@ -2397,13 +2431,107 @@
 
   /* Guarded on id: the fetch is async and the user may already have gone back
      to the list and opened something else. */
-  function setDetections(id, hits, seams) {
+  function setDetections(id, hits, seams, refs) {
     if (M.id !== id) return;
     M.det = hits;
     M.seams = seams || [];
+    /* The exact reference files this scan searched for (the export carries
+       them, v0.31); null on older exports, and the strip falls back to the
+       library as it stands today. */
+    M.refsUsed = refs || null;
     buildStops();
     paintTrack();
     drawOverlay();
+    renderLookFor();
+  }
+
+  /* ── Looking for (v0.31) ─────────────────────────────────────────── */
+  var LOOK = { seq: 0 };
+
+  /* [{name, scope, path}] for one sponsor: what this scan searched for when
+     the export says, otherwise what is on file now — partner pictures at
+     every ground, plus this ground's own. */
+  function refPathsFor(spon, club) {
+    var partnerDir = REFS_PREFIX + '/partners/' + spon;
+    var clubDir = club ? REFS_PREFIX + '/clubs/' + club + '/' + spon : null;
+    if (M.refsUsed) {
+      return Promise.resolve(M.refsUsed.filter(function (r) {
+        return r.sponsor === spon && r.file;
+      }).map(function (r) {
+        var dir = r.scope === 'club' && clubDir ? clubDir : partnerDir;
+        return { name: r.file, scope: r.scope, path: dir + '/' + r.file };
+      }));
+    }
+    var dirs = [['partner', partnerDir]].concat(clubDir ? [['club', clubDir]] : []);
+    return Promise.all(dirs.map(function (d) {
+      return storage.ref(d[1]).listAll().then(function (r) {
+        return r.items.map(function (item) {
+          return { name: item.name, scope: d[0], path: d[1] + '/' + item.name };
+        });
+      }).catch(function () { return []; });
+    })).then(function (lists) {
+      return lists.reduce(function (a, b) { return a.concat(b); }, []);
+    });
+  }
+
+  function renderLookFor() {
+    var box = $('vLookFor');
+    var m = matches[M.id];
+    if (!box) return;
+    if (!m || M.spon === '*') { box.hidden = true; box.innerHTML = ''; return; }
+    var spon = M.spon, token = ++LOOK.seq;
+    box.hidden = false;
+    box.innerHTML = '<span class="lookfor__lbl">Looking for</span>' +
+      '<span class="form-hint">Loading…</span>';
+    refPathsFor(spon, m.meta.club).then(function (paths) {
+      if (token !== LOOK.seq) return;
+      if (!paths.length) {
+        box.innerHTML = '<span class="lookfor__lbl">Looking for</span>' +
+          '<span class="form-hint">No pictures on file for ' + esc(spon) +
+          ' — the scan had nothing to look for.</span>';
+        return;
+      }
+      box.innerHTML = '<span class="lookfor__lbl">Looking for</span>' +
+        '<span class="lookfor__row"></span>';
+      var row = box.querySelector('.lookfor__row');
+      paths.forEach(function (p) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'lookfor__btn';
+        b.title = p.name + (p.scope === 'club' ? ' · this ground only' : ' · every ground');
+        b.innerHTML = '<img class="lookfor__img" alt="">';
+        row.appendChild(b);
+        storage.ref(p.path).getDownloadURL().then(function (u) {
+          if (token !== LOOK.seq) return;
+          b.querySelector('img').src = u;
+          b.onclick = function () { lightbox(p.name, u, p.name); };
+        }).catch(function () { b.remove(); });
+      });
+    });
+  }
+
+  /* One lightbox for every reference picture (v0.31): the full-size file on
+     the off-white ground, Close and Download. Three call sites had grown
+     their own copies of this modal. */
+  function lightbox(title, url, downloadName) {
+    var buttons = [{ label: 'Close', className: 'btn btn--ghost',
+                     onClick: function (c) { c.close(); } }];
+    if (downloadName) {
+      buttons.push({ label: 'Download', className: 'btn btn--primary',
+        /* A download, not a new tab (v0.28): the canon helper saves the
+           blob under the file's own name; if the bucket refuses the fetch,
+           the tab is the fallback. */
+        onClick: function () {
+          fetch(url).then(function (r) { return r.blob(); })
+            .then(function (b) { NL.download(downloadName, b); })
+            .catch(function () { window.open(url, '_blank'); });
+        } });
+    }
+    NL.modal({
+      title: title, width: 'wide',
+      body: '<div class="lb"><img src="' + esc(url) + '" alt="" class="lb-img"></div>',
+      buttons: buttons
+    });
   }
 
   /* Hides the video, it does not replace it. Rewriting #mViewer's innerHTML
@@ -2794,6 +2922,7 @@
         : '—';
       $('vAllBtn').hidden = true;
       renderMatchTable(m);
+      renderLookFor();
       return;
     }
     var s = sponsorsOf(m).filter(function (x) { return x.name === M.spon; })[0];
@@ -2811,6 +2940,7 @@
       $('vAr').textContent = num(s.area, 1) + '%';
     }
     renderMatchTable(m);
+    renderLookFor();
   }
 
   function renderMatchTable(m) {
@@ -3147,27 +3277,7 @@
           item.getDownloadURL().then(function (u) {
             var img = fig.querySelector('img');
             img.src = u;
-            img.onclick = function () {
-              NL.modal({
-                title: item.name,
-                width: 'wide',
-                body: '<div class="lb"><img src="' + esc(u) +
-                  '" alt="" class="lb-img"></div>',
-                buttons: [
-                  { label: 'Close', className: 'btn btn--ghost',
-                    onClick: function (c) { c.close(); } },
-                  { label: 'Download', className: 'btn btn--primary',
-                    /* A download, not a new tab (v0.28): the canon helper
-                       saves the blob under the file's own name; if the
-                       bucket refuses the fetch, the tab is the fallback. */
-                    onClick: function () {
-                      fetch(u).then(function (r) { return r.blob(); })
-                        .then(function (b) { NL.download(item.name, b); })
-                        .catch(function () { window.open(u, '_blank'); });
-                    } }
-                ]
-              });
-            };
+            img.onclick = function () { lightbox(item.name, u, item.name); };
           }).catch(function () {});
           var mv = fig.querySelector('[data-move]');
           if (mv) mv.onclick = function (ev) {
@@ -4176,14 +4286,7 @@
               '<span class="refcard__cap">' + esc(f[1]) + ' · ' + esc(item.name) + '</span>';
             fig.querySelector('img').src = u;
             fig.onclick = function () {
-              NL.modal({
-                title: f[1] + ' — ' + item.name,
-                width: 'wide',
-                body: '<div class="lb"><img src="' + esc(u) +
-                  '" alt="" class="lb-img"></div>',
-                buttons: [{ label: 'Close', className: 'btn btn--ghost',
-                            onClick: function (c) { c.close(); } }]
-              });
+              lightbox(f[1] + ' — ' + item.name, u, item.name);
             };
             grid.appendChild(fig);
           }).catch(function () {});
