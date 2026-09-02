@@ -64,9 +64,11 @@ REPORT_FRAME_Q = 55
 DEFAULT_FRAME_BUDGET = 240
 SIZE_WARN_MB = 14
 PROGRESS_EVERY = 3.0        # seconds between progress updates
-# Playback only, never measurement. 640px wide keeps a 105-minute match around
-# 150 MB, which uploads in under a minute and streams without buffering.
-PROXY_W = 640
+# Playback only, never measurement. 1280px wide (was 640 until 02/09/2026 —
+# Richard: "super small, maybe too small", and boards are judged by eye on a
+# desktop) puts a 105-minute match around 600 MB: pennies to store, a few
+# minutes to upload, and a far-side board still legible in the player.
+PROXY_W = 1280
 PROXY_CRF = 30
 _ARGS = None                # parsed args, for the non-interactive confirm path
 # Counted rather than raised, so a batch measures every video it was given and

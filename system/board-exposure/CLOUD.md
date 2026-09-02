@@ -27,16 +27,17 @@ engine README, trimming to whistle-to-whistle halves shaves ~15 minutes of
 half-time adverts off either route.
 
 What the local route costs afterwards is almost nothing: uploading the proxy and
-detections is ingress, which is free, and storing a ~150 MB proxy is under half
-a penny a month. A season of full matches is pennies a month.
+detections is ingress, which is free, and storing a ~600 MB proxy (1280px wide
+since 02/09/2026; ~150 MB at the old 640) is around a penny a month. A season
+of full matches is pennies a month.
 
 Playback egress is smaller than the file size suggests, because the player never
 downloads the whole thing unless somebody sits and watches it. `preload` is
 metadata-only and `+faststart` puts the index at the front, so opening a match
 fetches a few hundred KB; jumping between appearances — which is what the player
 is *for* — pulls only the seconds around each one. A typical look at a match is
-10–30 MB, well under a penny. Watching all 95 minutes end to end is the 150 MB
-worst case, about 2p, and the browser caches it for the next visit.
+10–30 MB, well under a penny. Watching all 95 minutes end to end is the 600 MB
+worst case, about 8p, and the browser caches it for the next visit.
 
 Both run **the same `scripts/board-exposure-match.py`**. The cloud container
 does not reimplement the detector; it fetches the inputs, runs that script, and
