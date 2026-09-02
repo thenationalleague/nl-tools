@@ -30,6 +30,18 @@ recomputes frame features per reference, which detect()'s own docstring
 calls wasteful; at audition scale (hundreds of frames, not tens of
 thousands) the waste is minutes and the non-drift is worth it.
 
+Furniture (audition 1.1, 02/09/2026). The scan strips broadcast graphics by
+four rules — the top corners, the frame-stack mask, the static position and
+the permanent feature cell — and the audition ran none of them, so the DAZN
+corner watermark, a perfect match for the DAZN logo, won three of the four
+crop slots on Richard's screen; tick one and the scan inherits a picture of
+the overlay. Now the same strip functions run here, in the scan's order:
+the mask is built first from a spread of frames read straight off the
+video, the corner rule and the mask run per frame as hits arrive (so
+"fired" and "starved" are judged on real boards), and the static rules run
+over the whole sample set once the loop is done. Everything stripped is
+counted in audition.json — a rule that deletes never acts silently.
+
 Run (inside the scan container via BE_MODE=audition):
 
   python3 scripts/board_exposure_audition.py \
@@ -46,7 +58,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-AUDITION_VERSION = "1.0"
+AUDITION_VERSION = "1.1"
 WINDOWS = 300          # sharpest-in-window count (clamped for short footage)
 PER_WINDOW = 3         # spread frames scored per window
 RELAXED_FLOOR = 4      # candidate-only inlier floor for starved sponsors
@@ -124,7 +136,48 @@ def verdict_rows(ref_hits, entries):
     return rows
 
 
+def furniture_row(core, n, row, frame_w, frame_h, mask):
+    """
+    The per-frame furniture rules on one frame's {sponsor: [hits]} — the
+    graphics corners, then the frame-stack mask — through the scan's own
+    strip functions, so what the audition refuses is exactly what a scan
+    would. Returns (survivors, {"corner": {sponsor: n}, "mask": {sponsor: n}}).
+    Pure apart from the mask lookup: a None mask (probe stood down) strips
+    nothing, and the corner rule needs only the frame size.
+    """
+    hbi = {n: row}
+    gone_corner = core.strip_corner(hbi, frame_w, frame_h)
+    gone_mask = core.strip_masked(hbi, mask)
+    return hbi.get(n, {}), {"corner": gone_corner, "mask": gone_mask}
+
+
+def merge_counts(total, part):
+    """{sponsor: n} += {sponsor: n}, in place; returns total."""
+    for name, count in part.items():
+        total[name] = total.get(name, 0) + count
+    return total
+
+
 # ---------------------------------------------------------------- cv2 side
+
+def read_spread(video, duration, n_frames):
+    """`n_frames` evenly spread grayscale frames straight from the video, for
+    the furniture probe — the audition never extracts frame files, so the
+    scan's file-based path does not apply. Seeks by time, like every other
+    read in this pass."""
+    import cv2
+
+    cap = cv2.VideoCapture(video)
+    grays = []
+    for i in range(n_frames):
+        t = (i + 0.5) * duration / n_frames
+        cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000.0)
+        ok, frame = cap.read()
+        if ok:
+            grays.append(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
+    cap.release()
+    return grays
+
 
 @contextlib.contextmanager
 def relaxed_floor(core, floor):
@@ -214,11 +267,29 @@ def run(a):
           f"with {len(singles)} references…")
     chosen = pick_sharpest(planned, score_sharpness(a.video, planned))
 
+    # Furniture first (audition 1.1): the frame-stack mask needs no hits, so
+    # it is built before the loop from a spread read straight off the video.
+    furniture_mask, furn_info = C.furniture_mask_from_grays(
+        read_spread(a.video, duration, C.FURN_FRAMES))
+    if furniture_mask is None:
+        print(f"  furniture mask stood down: {furn_info.get('why', '?')} "
+              f"(motion {furn_info.get('motion', '—')})")
+    else:
+        print(f"  furniture mask: {100 * furn_info['coverage']:.1f}% of frame, "
+              f"motion {furn_info['motion']}")
+    furn = {"probe": furn_info, "corner": {}, "mask": {}, "static": {}}
+
     os.makedirs(a.out_dir, exist_ok=True)
-    ref_hits = {}                    # (sponsor, ref file) -> [hit rows]
+    hits_by_index = {}               # sample -> {sponsor: [full hits]}
+    relaxed_by_index = {}            # sample -> {sponsor: [full hits]}
     sponsor_frames = {}              # sponsor -> frames with any real hit
-    relaxed_rows = {}                # sponsor -> [candidate rows]
     starved = 0
+    frame_w = frame_h = 0
+
+    def trimmed(h, **extra):
+        return dict({"t": h["t"], "inliers": h["inliers"],
+                     "area": round(h["area"], 3),
+                     "board": h.get("board"), "quad": h["quad"]}, **extra)
 
     cap = cv2.VideoCapture(a.video)
     for n, t in enumerate(chosen):
@@ -226,20 +297,23 @@ def run(a):
         ok, frame = cap.read()
         if not ok:
             continue
-        any_hit = False
+        frame_h, frame_w = frame.shape[:2]
+        row = {}
         for (sponsor, path, scope), refs in singles:
             name = os.path.basename(path)
-            hits = C.detect(frame, refs, sift, matcher).get(sponsor) or []
-            for h in hits:
-                any_hit = True
+            for h in C.detect(frame, refs, sift, matcher).get(sponsor) or []:
+                row.setdefault(sponsor, []).append(dict(h, t=t, ref=name))
+        # The corner rule and the mask, per frame, before anything is
+        # counted as fired — so a sponsor whose only "hits" are the
+        # watermark is starved, and gets the candidate pass it deserves.
+        row, gone = furniture_row(C, n, row, frame_w, frame_h, furniture_mask)
+        merge_counts(furn["corner"], gone["corner"])
+        merge_counts(furn["mask"], gone["mask"])
+        if row:
+            hits_by_index[n] = row
+            for sponsor in row:
                 sponsor_frames.setdefault(sponsor, set()).add(t)
-                ref_hits.setdefault((sponsor, name), []).append({
-                    "t": t, "inliers": h["inliers"],
-                    "area": round(h["area"], 3),
-                    "clarity": round(h["clarity"], 2),
-                    "board": h.get("board"), "quad": h["quad"],
-                })
-        if not any_hit:
+        else:
             starved += 1
         if n % 50 == 0:
             print(f"  frames auditioned: {n}/{len(chosen)}")
@@ -248,6 +322,7 @@ def run(a):
         # Bounded: once a sponsor has fired properly on a few frames it has
         # proven its references and stops paying for this second pass — the
         # relaxed floor exists for the TIC case, a sponsor with nothing.
+        rrow = {}
         for (sponsor, path, scope), refs in singles:
             if len(sponsor_frames.get(sponsor, ())) >= 3:
                 continue
@@ -256,13 +331,37 @@ def run(a):
             for h in hits:
                 if h["inliers"] >= C.MIN_INLIERS:
                     continue          # a full-strength hit belongs above
-                relaxed_rows.setdefault(sponsor, []).append({
-                    "t": t, "inliers": h["inliers"],
-                    "area": round(h["area"], 3),
-                    "board": h.get("board"), "quad": h["quad"],
-                    "ref": os.path.basename(path),
-                })
+                rrow.setdefault(sponsor, []).append(
+                    dict(h, t=t, ref=os.path.basename(path)))
+        rrow, gone = furniture_row(C, n, rrow, frame_w, frame_h, furniture_mask)
+        merge_counts(furn["corner"], gone["corner"])
+        merge_counts(furn["mask"], gone["mask"])
+        if rrow:
+            relaxed_by_index[n] = rrow
     cap.release()
+
+    # The static rules need the whole sample set: a position or a feature
+    # cell that holds through the match is furniture whatever it matched.
+    merge_counts(furn["static"], C.strip_static(hits_by_index, len(chosen)))
+    merge_counts(furn["static"], C.strip_static(relaxed_by_index, len(chosen)))
+    furn["stripped"] = sum(sum(d.values()) for d in
+                           (furn["corner"], furn["mask"], furn["static"]))
+    for rule in ("corner", "mask", "static"):
+        for name, count in sorted(furn[rule].items()):
+            print(f"  furniture stripped ({rule}): {name} x{count}")
+
+    ref_hits = {}                    # (sponsor, ref file) -> [hit rows]
+    for n in sorted(hits_by_index):
+        for sponsor, hs in hits_by_index[n].items():
+            for h in hs:
+                ref_hits.setdefault((sponsor, h["ref"]), []).append(
+                    trimmed(h, clarity=round(h["clarity"], 2)))
+    relaxed_rows = {}                # sponsor -> [candidate rows]
+    for n in sorted(relaxed_by_index):
+        for sponsor, hs in relaxed_by_index[n].items():
+            for h in hs:
+                relaxed_rows.setdefault(sponsor, []).append(
+                    trimmed(h, ref=h["ref"]))
 
     # Crops, second pass: pick the rows worth cropping first, then decode
     # each needed frame exactly once — caching frames through the audition
@@ -318,7 +417,7 @@ def run(a):
         flag = "DEAD" if not r["fired"] else f"fired {r['fired']}x"
         print(f"  {r['sponsor']:<14} {r['file']:<44} {flag}")
     print(f"  starved frames: {starved}/{len(chosen)} | candidate crops: "
-          f"{len(candidates)}")
+          f"{len(candidates)} | furniture stripped: {furn['stripped']}")
 
     out = {
         "audition_version": AUDITION_VERSION,
@@ -332,6 +431,8 @@ def run(a):
         "frames_auditioned": len(chosen), "starved_frames": starved,
         "refs": rows, "candidates": candidates, "crops": crops,
         "crop_meta": crop_meta,
+        "frame": {"w": frame_w, "h": frame_h},
+        "furniture": furn,
     }
     path = os.path.join(a.out_dir, "audition.json")
     with open(path, "w", encoding="utf-8") as f:

@@ -103,6 +103,113 @@ class RelaxedFloorRestores(unittest.TestCase):
         self.assertEqual(core.MIN_INLIERS, 7)
 
 
+class Furniture(unittest.TestCase):
+    """Audition 1.1: the scan's furniture rules run before any crop is
+    harvested, through the scan's own strip functions. The pure paths use
+    the real core with plain lists — no OpenCV near them."""
+
+    def quad(self, cx, cy, w=60, h=30):
+        return [[cx - w / 2, cy - h / 2], [cx + w / 2, cy - h / 2],
+                [cx + w / 2, cy + h / 2], [cx - w / 2, cy + h / 2]]
+
+    def hit(self, cx, cy, inliers):
+        return {"quad": self.quad(cx, cy), "mc": [cx, cy], "inliers": inliers,
+                "t": 1.0, "ref": "DAZN.png"}
+
+    def test_corner_watermark_stripped_perimeter_board_kept(self):
+        import board_exposure_core as C
+
+        row = {"DAZN": [self.hit(90, 60, 30),      # top-left corner: the bug
+                        self.hit(960, 900, 12)]}   # low in frame: a board
+        kept, gone = A.furniture_row(C, 0, row, 1920, 1080, None)
+        self.assertEqual(gone["corner"], {"DAZN": 1})
+        self.assertEqual(gone["mask"], {})
+        self.assertEqual([h["inliers"] for h in kept["DAZN"]], [12])
+
+    def test_frame_with_only_furniture_reads_as_empty(self):
+        # The loop counts a frame starved when nothing real survives — a
+        # sponsor whose only hits are the watermark must not read as fired.
+        import board_exposure_core as C
+
+        row = {"DAZN": [self.hit(1850, 40, 40)]}
+        kept, gone = A.furniture_row(C, 3, row, 1920, 1080, None)
+        self.assertEqual(kept, {})
+        self.assertEqual(gone["corner"], {"DAZN": 1})
+
+    def test_static_rule_runs_over_the_whole_sample_set(self):
+        # The same sixteen pixels in most of the match's stretches is
+        # furniture at any share — the permanence tier, on audition samples.
+        import board_exposure_core as C
+
+        hits = {}
+        for n in range(0, 120, 3):
+            hits[n] = {"DAZN": [self.hit(700, 500, 20)]}     # bolted on
+        for n in (5, 40, 80):
+            hits[n] = {"DAZN": [self.hit(300 + 90 * n, 950, 15)]}  # moves
+        total = {}
+        A.merge_counts(total, C.strip_static(hits, 120))
+        self.assertEqual(total, {"DAZN": 40})
+        survivors = [h for row in hits.values() for h in row["DAZN"]]
+        self.assertEqual(sorted(h["inliers"] for h in survivors), [15, 15, 15])
+
+    def test_merge_counts_accumulates(self):
+        total = {"DAZN": 2}
+        A.merge_counts(total, {"DAZN": 3, "Enterprise": 1})
+        self.assertEqual(total, {"DAZN": 5, "Enterprise": 1})
+
+    @unittest.skipIf(NUMPY_STUBBED, "numpy not installed here; runs in the container")
+    def test_masked_hit_stripped(self):
+        import numpy as np
+        import board_exposure_core as C
+
+        # Mid-frame, where the corner rule cannot claim it: only the mask
+        # (a score bug, say, bolted to the centre-bottom) can.
+        mask = np.zeros((1080, 1920), bool)
+        mask[900:1000, 860:1060] = True
+        row = {"DAZN": [self.hit(960, 950, 30)]}
+        kept, gone = A.furniture_row(C, 0, row, 1920, 1080, mask)
+        self.assertEqual(gone["corner"], {})
+        self.assertEqual(gone["mask"], {"DAZN": 1})
+        self.assertEqual(kept, {})
+
+    @unittest.skipIf(not HAVE_CV, "opencv-python-headless + numpy not installed")
+    def test_mask_from_grays_matches_the_file_path(self):
+        # The audition reads its spread from the video; the scan from files.
+        # Same frames in, same mask out — or the two paths have drifted.
+        import tempfile
+
+        import cv2
+        import numpy as np
+        import board_exposure_core as C
+
+        rng = np.random.default_rng(7)
+        frames = []
+        for k in range(24):
+            f = rng.integers(40, 110, (360, 640), dtype=np.uint8)
+            f = cv2.GaussianBlur(f, (9, 9), 0)
+            x = 40 + 18 * k
+            cv2.rectangle(f, (x, 250), (x + 140, 290), 30, -1)
+            cv2.putText(f, "ACME", (x + 8, 280), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.9, 250, 3)
+            cv2.rectangle(f, (500, 20), (620, 70), 245, 2)
+            cv2.putText(f, "TV", (518, 60), cv2.FONT_HERSHEY_SIMPLEX,
+                        1.2, 245, 4)
+            frames.append(f)
+        d = tempfile.mkdtemp()
+        files = []
+        for i, f in enumerate(frames):
+            p = os.path.join(d, f"f{i:03d}.png")
+            cv2.imwrite(p, f)
+            files.append(p)
+        via_files, info_f = C.build_furniture_mask(files)
+        via_grays, info_g = C.furniture_mask_from_grays(frames)
+        self.assertIsNotNone(via_grays)
+        self.assertTrue(via_grays[45, 560])
+        self.assertFalse(via_grays[270, 300])
+        self.assertTrue(np.array_equal(via_files, via_grays))
+        self.assertEqual(info_f, info_g)
+
+
 @unittest.skipIf(NUMPY_STUBBED, "numpy not installed here; runs in the container")
 class CropBoard(unittest.TestCase):
     def test_board_box_clips_to_frame(self):

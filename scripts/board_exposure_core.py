@@ -1038,16 +1038,27 @@ def build_furniture_mask(files, n_frames=None, edge_t=None, agree=None):
     beats guessing).
     """
     n_frames = FURN_FRAMES if n_frames is None else n_frames
-    edge_t = FURN_EDGE_T if edge_t is None else edge_t
-    agree = FURN_AGREE if agree is None else agree
     if not files:
         return None, {"why": "no frames"}
     picks = sorted({int(i) for i in
                     np.linspace(0, len(files) - 1,
                                 min(n_frames, len(files)))})
+    grays = [cv2.imread(files[i], cv2.IMREAD_GRAYSCALE) for i in picks]
+    return furniture_mask_from_grays(grays, edge_t, agree)
+
+
+def furniture_mask_from_grays(grays, edge_t=None, agree=None):
+    """
+    The frame-stack probe on frames already in memory. The scan hands it the
+    files it extracted (build_furniture_mask above); the audition reads its
+    spread straight from the video (audition 1.1) — one stack, one set of
+    stand-downs, so the two cannot drift. Unreadable frames (None) are
+    skipped, and the same readable-frame floor applies.
+    """
+    edge_t = FURN_EDGE_T if edge_t is None else edge_t
+    agree = FURN_AGREE if agree is None else agree
     edges = []
-    for i in picks:
-        g = cv2.imread(files[i], cv2.IMREAD_GRAYSCALE)
+    for g in grays:
         if g is None:
             continue
         mag = cv2.magnitude(cv2.Sobel(g, cv2.CV_32F, 1, 0),
