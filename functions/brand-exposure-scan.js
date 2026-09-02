@@ -209,8 +209,10 @@ function verdictOf(exec) {
 
 function failureNote(exec) {
   const short = String((exec && exec.name) || "").split("/").pop();
-  return "The scan failed" + (short ? " (execution " + short + ")" : "") +
-    " — the execution log has the scan's own account of why.";
+  /* Plain words on the one card where the reader is already frustrated
+     (v0.25); the run's name stays so it can be looked up. */
+  return "The scan failed." +
+    (short ? " Its run log is named " + short + "." : "");
 }
 
 function oldestQueued(reqs) {
