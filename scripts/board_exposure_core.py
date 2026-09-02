@@ -639,9 +639,10 @@ def frame_features(frame_bgr, sift):
     this itself when not handed them; a caller that matches reference by
     reference — the audition, which wants a verdict per file — hands the
     same features to every call instead of paying the detector per
-    reference. Nineteen references cost nineteen full-frame detections a
-    frame before this (audition 1.3, 02/09/2026: an hour where eleven
-    minutes had been).
+    reference (audition 1.3, 02/09/2026). Measured afterwards: the
+    detector is under 5% of a detection, so this saves what it saves and no
+    more — the cost is the per-band homography fits (see CLOUD.md,
+    "Sizing"), and the audition's answer to those was a process pool (1.4).
     """
     gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
     kp_f, des_f = sift.detectAndCompute(gray, None)

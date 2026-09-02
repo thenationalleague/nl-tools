@@ -285,6 +285,130 @@ class FrameFeaturesOnce(unittest.TestCase):
         self.assertTrue(np.allclose(plain["ACME"][0]["quad"], primed["ACME"][0]["quad"]))
 
 
+class StarvedSponsors(unittest.TestCase):
+    """Audition 1.4: the relaxed candidate pass is a second phase, for the
+    sponsors that fired on fewer than three frames across the whole clip."""
+
+    ENTRIES = [("DAZN", "/r/partners/DAZN/a.png", "partner"),
+               ("DAZN", "/r/partners/DAZN/b.png", "partner"),
+               ("TIC Health", "/r/partners/TIC Health/t.png", "partner"),
+               ("Utility Warehouse", "/r/partners/Utility Warehouse/u.png",
+                "partner")]
+
+    def test_fewer_than_three_frames_is_starved(self):
+        frames = {"DAZN": {1.0, 5.0, 9.0}, "TIC Health": {4.0, 8.0}}
+        self.assertEqual(A.starved_sponsors(frames, self.ENTRIES),
+                         {"TIC Health", "Utility Warehouse"})
+
+    def test_a_sponsor_with_several_files_is_judged_once(self):
+        self.assertEqual(A.starved_sponsors({}, self.ENTRIES),
+                         {"DAZN", "TIC Health", "Utility Warehouse"})
+
+    def test_threshold_is_a_parameter(self):
+        frames = {"DAZN": {1.0, 5.0, 9.0}}
+        self.assertEqual(A.starved_sponsors(frames, self.ENTRIES[:1], below=4),
+                         {"DAZN"})
+        self.assertEqual(A.starved_sponsors(frames, self.ENTRIES[:1], below=3),
+                         set())
+
+
+def _acme(cv2, np):
+    """The FrameFeaturesOnce board: the one that fires."""
+    logo = np.full((120, 360, 3), 255, np.uint8)
+    cv2.rectangle(logo, (0, 0), (359, 119), (20, 90, 20), 6)
+    cv2.putText(logo, "ACME", (30, 85), cv2.FONT_HERSHEY_DUPLEX, 2.4, (20, 90, 20), 6)
+    cv2.circle(logo, (300, 60), 34, (0, 0, 200), -1)
+    cv2.putText(logo, "hire", (270, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.8,
+                (255, 255, 255), 2)
+    return logo
+
+
+def _zed(cv2, np):
+    """A board that is nowhere in the clip, sharing no element with ACME —
+    a first draft reused ACME's border, circle and small print with a
+    different word, and the engine matched it to the ACME board."""
+    logo = np.full((120, 360, 3), (30, 30, 30), np.uint8)
+    cv2.putText(logo, "ZED", (20, 95), cv2.FONT_HERSHEY_TRIPLEX, 3.2, (245, 245, 245), 7)
+    pts = np.array([[250, 20], [340, 20], [295, 100]], np.int32)
+    cv2.fillPoly(logo, [pts], (60, 200, 240))
+    cv2.line(logo, (0, 110), (359, 10), (200, 200, 200), 3)
+    return logo
+
+
+def _write_clip(cv2, np, path, logo, seconds=8, fps=25):
+    """A pitch with a crowd band and one board panning along it — the
+    FrameFeaturesOnce frame, in motion. Fresh noise every frame so the
+    furniture probe sees a live picture, and the board moves so the static
+    rules cannot claim it."""
+    rng = np.random.default_rng(3)
+    w = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (1280, 720))
+    if not w.isOpened():
+        raise unittest.SkipTest("no mp4v encoder in this OpenCV build")
+    n = seconds * fps
+    for i in range(n):
+        f = np.zeros((720, 1280, 3), np.uint8)
+        f[:, :] = (40, 120, 40)
+        noise = rng.integers(0, 30, (90, 160, 3), dtype=np.uint8)
+        f = cv2.add(f, cv2.resize(noise, (1280, 720)))
+        f[0:200] = cv2.GaussianBlur(
+            rng.integers(60, 140, (200, 1280, 3), dtype=np.uint8), (7, 7), 0)
+        x = 200 + int(500 * i / n)
+        f[330:450, x:x + 360] = logo
+        w.write(f)
+    w.release()
+
+
+@unittest.skipIf(not HAVE_CV, "opencv-python-headless + numpy not installed")
+class PoolMatchesSequential(unittest.TestCase):
+    """Audition 1.4: the frames through a process pool give the same
+    audition as the in-process loop — same frames, same hits, same
+    candidates, same crops — on a synthetic clip whose board fires, with a
+    second reference that never does so the relaxed phase runs too."""
+
+    def audition(self, video, refs, out_dir, workers):
+        import contextlib
+        import io
+        import json
+
+        a = types.SimpleNamespace(video=video, refs=refs, club="Testville",
+                                  match=None, date=None, out_dir=out_dir,
+                                  windows=A.WINDOWS,
+                                  relaxed_floor=A.RELAXED_FLOOR,
+                                  workers=workers)
+        with contextlib.redirect_stdout(io.StringIO()):
+            A.run(a)
+        with open(os.path.join(out_dir, "audition.json"), encoding="utf-8") as f:
+            return json.load(f)
+
+    def test_same_audition_across_workers(self):
+        import tempfile
+
+        import cv2
+        import numpy as np
+
+        d = tempfile.mkdtemp()
+        refs = os.path.join(d, "refs")
+        for word, logo in (("ACME", _acme(cv2, np)), ("ZED", _zed(cv2, np))):
+            os.makedirs(os.path.join(refs, "partners", word))
+            cv2.imwrite(os.path.join(refs, "partners", word, f"{word.lower()}.png"),
+                        logo)
+        video = os.path.join(d, "clip.mp4")
+        _write_clip(cv2, np, video, _acme(cv2, np))
+
+        one = self.audition(video, refs, os.path.join(d, "one"), workers=1)
+        two = self.audition(video, refs, os.path.join(d, "two"), workers=2)
+
+        acme = next(r for r in one["refs"] if r["sponsor"] == "ACME")
+        self.assertGreater(acme["fired"], 0,
+                           "the synthetic board must fire, or this proves nothing")
+        self.assertEqual(one["relaxed_for"], ["ZED"])
+        self.assertEqual(one.pop("workers"), 1)
+        self.assertEqual(two.pop("workers"), 2)
+        self.assertEqual(one, two)
+        self.assertEqual(sorted(os.listdir(os.path.join(d, "one"))),
+                         sorted(os.listdir(os.path.join(d, "two"))))
+
+
 @unittest.skipIf(NUMPY_STUBBED, "numpy not installed here; runs in the container")
 class CropBoard(unittest.TestCase):
     def test_board_box_clips_to_frame(self):
