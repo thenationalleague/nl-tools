@@ -28,9 +28,26 @@ Matching runs the CANONICAL detector one reference at a time — the same
 geometry, perimeter and face guards as a real scan, no forked logic. The
 frame's features are computed once per frame and handed to every call
 (audition 1.3, 02/09/2026): until then each reference paid its own
-full-frame detection, "minutes" at twelve references — and an hour at
-nineteen, once the printers' artwork landed and the furniture strip made
-the starved-sponsor pass honest enough to run for DAZN as well.
+full-frame detection.
+
+The frames in parallel (audition 1.4, 02/09/2026). 1.3 was measured after
+it shipped, on a 1080p frame with 21 references, and the frame's features
+turned out to be under 5% of a detection. Where the time goes: 72% in
+findHomography — 38 RANSAC fits per reference per frame, one for every band
+pass whose ratio-test survivors clear the inlier floor, which at the engine's
+loose ratio is nearly all of them — and 23% in descriptor matching. RANSAC
+runs single-threaded inside OpenCV, so the sequential loop was using one of
+the job's eight cores: an hour for a three-minute clip. The frames now go
+through a process pool in the scan's own pattern (spawn, references rebuilt
+per worker, one video handle per worker), and the per-frame result is
+identical — nothing in the detection changed. One rule did. The relaxed
+candidate pass used to run for a sponsor until its third firing frame, in
+time order, which a pool cannot know; it is now a second phase for the
+sponsors that fired on fewer than three frames across the whole clip. For a
+starved sponsor — the pass's whole reason to exist — that is the same set
+of frames as before. A sponsor that fires no longer collects relaxed
+candidates from the frames before its third hit; the tool never showed
+those as anything but noise.
 
 Furniture (audition 1.1, 02/09/2026). The scan strips broadcast graphics by
 four rules — the top corners, the frame-stack mask, the static position and
@@ -72,10 +89,11 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-AUDITION_VERSION = "1.3"
+AUDITION_VERSION = "1.4"
 WINDOWS = 300          # sharpest-in-window count (clamped for short footage)
 PER_WINDOW = 3         # spread frames scored per window
 RELAXED_FLOOR = 4      # candidate-only inlier floor for starved sponsors
+STARVED_BELOW = 3      # fired on fewer frames than this = starved, gets the relaxed pass
 CROPS_PER_REF = 4      # best-hit crops kept per reference
 CANDIDATES_PER_SPONSOR = 12
 SPREAD_SECS = 10.0     # crops for one ref/sponsor must be this far apart
@@ -191,6 +209,15 @@ def merge_counts(total, part):
     return total
 
 
+def starved_sponsors(sponsor_frames, entries, below=STARVED_BELOW):
+    """The sponsors the relaxed candidate pass runs for: fired on fewer than
+    `below` frames across the whole audition, judged by sponsor (a sponsor
+    with several files is one sponsor). Pure. `sponsor_frames` is
+    {sponsor: {t, ...}} from the real pass; `entries` the loaded tree."""
+    return {s for s, _path, _scope in entries
+            if len(sponsor_frames.get(s, ())) < below}
+
+
 # ---------------------------------------------------------------- cv2 side
 
 def read_spread(video, duration, n_frames):
@@ -270,7 +297,105 @@ def crop_board(frame, hit):
     return frame[y0:y1, x0:x1]
 
 
+# ---------------------------------------------------------------- workers
+# One process per core (audition 1.4). Built once per process: cv2.KeyPoint
+# does not pickle, so references are rebuilt inside each worker, and each
+# worker holds its own handle on the video, seeked per frame.
+_W = {}
+
+
+def _init_worker(refs_root, club, video, threads=1):
+    import cv2
+
+    import board_exposure_core as C
+
+    if threads is not None:
+        cv2.setNumThreads(threads)   # OpenCV's own threads fight the pool
+    sift = cv2.SIFT_create(nfeatures=C.NFEATURES)
+    singles = []
+    for e in C.load_tree(refs_root, club):
+        refs, _ = C.build_refs([e], sift)
+        if refs:
+            singles.append((e, refs))
+    _W.update(sift=sift, matcher=cv2.BFMatcher(), singles=singles,
+              cap=cv2.VideoCapture(video))
+
+
+def _audit(job):
+    """One frame, one pass. job = (n, t, floor, sponsors) ->
+    (n, t, (w, h) or None when the frame would not decode, {sponsor: [hit]}).
+
+    floor None is the real pass: every reference, the engine's own inlier
+    floor. A number is the relaxed candidate pass: only the named sponsors,
+    the floor lowered for the call and restored after it, and only hits
+    UNDER the engine's floor kept — a full-strength hit belongs to the real
+    pass, where it was already counted."""
+    import cv2
+
+    import board_exposure_core as C
+
+    n, t, floor, sponsors = job
+    cap = _W["cap"]
+    cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000.0)
+    ok, frame = cap.read()
+    if not ok:
+        return n, t, None, {}
+    sift, matcher = _W["sift"], _W["matcher"]
+    # The frame's features once, for every reference (audition 1.3).
+    feats = C.frame_features(frame, sift)
+    row = {}
+    for (sponsor, path, _scope), refs in _W["singles"]:
+        if sponsors is not None and sponsor not in sponsors:
+            continue
+        if floor is None:
+            hits = C.detect(frame, refs, sift, matcher, feats=feats).get(sponsor) or []
+        else:
+            with relaxed_floor(C, floor):
+                hits = C.detect(frame, refs, sift, matcher, feats=feats).get(sponsor) or []
+            hits = [h for h in hits if h["inliers"] < C.MIN_INLIERS]
+        for h in hits:
+            row.setdefault(sponsor, []).append(
+                dict(h, t=t, ref=os.path.basename(path)))
+    h_, w_ = frame.shape[:2]
+    return n, t, (w_, h_), row
+
+
+def run_pass(video, refs_root, club, jobs, workers, log=print):
+    """Every job through _audit, results yielded in job order.
+
+    workers > 1 spreads the frames over a process pool — spawn, not fork:
+    OpenCV starts a thread pool the first time it is used, and this process
+    has used it to build the references, so a fork would hand every child
+    that pool's locks without the threads holding them. workers == 1 runs
+    the same worker function in this process, thread count untouched."""
+    import multiprocessing as mp
+
+    total = len(jobs)
+    if not total:
+        return
+
+    def progress(results):
+        for done, res in enumerate(results, 1):
+            if done % 50 == 0 or done == total:
+                log(f"  frames auditioned: {done}/{total}")
+            yield res
+
+    if workers <= 1:
+        _init_worker(refs_root, club, video, threads=None)
+        try:
+            yield from progress(map(_audit, jobs))
+        finally:
+            _W["cap"].release()
+        return
+    with mp.get_context("spawn").Pool(
+            workers, initializer=_init_worker,
+            initargs=(refs_root, club, video)) as pool:
+        yield from progress(pool.imap(_audit, jobs, chunksize=1))
+
+
 def run(a):
+    import time
+
     import cv2
 
     import board_exposure_core as C
@@ -280,8 +405,10 @@ def run(a):
         raise SystemExit(f"no references for {a.club} under {a.refs} — an "
                          f"audition with nothing to audition is a scan of "
                          f"nothing.")
+    # This process keeps a detector only for the wide-pick usability check;
+    # the references it builds here are for the verdict order and the
+    # unusable-file warnings — the workers build their own.
     sift = cv2.SIFT_create(nfeatures=C.NFEATURES)
-    matcher = cv2.BFMatcher()
     singles = []
     for e in entries:
         refs, skipped = C.build_refs([e], sift)
@@ -295,9 +422,10 @@ def run(a):
                 (cap.get(cv2.CAP_PROP_FPS) or 25.0))
     cap.release()
 
+    workers = getattr(a, "workers", 0) or max(1, (os.cpu_count() or 2) - 1)
     planned = plan_windows(duration, a.windows, PER_WINDOW)
     print(f"  auditioning {len(planned)} windows over {duration:.0f}s "
-          f"with {len(singles)} references…")
+          f"with {len(singles)} references across {workers} core(s)…")
     chosen = pick_sharpest(planned, score_sharpness(a.video, planned))
 
     # Furniture first (audition 1.1): the frame-stack mask needs no hits, so
@@ -324,25 +452,17 @@ def run(a):
                      "area": round(h["area"], 3),
                      "board": h.get("board"), "quad": h["quad"]}, **extra)
 
-    cap = cv2.VideoCapture(a.video)
-    for n, t in enumerate(chosen):
-        cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000.0)
-        ok, frame = cap.read()
-        if not ok:
+    # Phase 1 — the real pass: every reference on every chosen frame, the
+    # frames spread over the pool. The corner rule and the mask run per
+    # frame before anything is counted as fired — so a sponsor whose only
+    # "hits" are the watermark is starved, and gets the candidate pass it
+    # deserves.
+    t1 = time.time()
+    jobs = [(n, t, None, None) for n, t in enumerate(chosen)]
+    for n, t, wh, row in run_pass(a.video, a.refs, a.club, jobs, workers):
+        if wh is None:
             continue
-        frame_h, frame_w = frame.shape[:2]
-        # The frame's features once, for every reference and both passes
-        # (audition 1.3): with nineteen references the per-reference
-        # detector call had turned an 11-minute audition into an hour.
-        feats = C.frame_features(frame, sift)
-        row = {}
-        for (sponsor, path, scope), refs in singles:
-            name = os.path.basename(path)
-            for h in C.detect(frame, refs, sift, matcher, feats=feats).get(sponsor) or []:
-                row.setdefault(sponsor, []).append(dict(h, t=t, ref=name))
-        # The corner rule and the mask, per frame, before anything is
-        # counted as fired — so a sponsor whose only "hits" are the
-        # watermark is starved, and gets the candidate pass it deserves.
+        frame_w, frame_h = wh
         row, gone = furniture_row(C, n, row, frame_w, frame_h, furniture_mask)
         merge_counts(furn["corner"], gone["corner"])
         merge_counts(furn["mask"], gone["mask"])
@@ -352,30 +472,31 @@ def run(a):
                 sponsor_frames.setdefault(sponsor, set()).add(t)
         else:
             starved += 1
-        if n % 50 == 0:
-            print(f"  frames auditioned: {n}/{len(chosen)}")
+    print(f"  real pass: {len(chosen)} frames in {time.time() - t1:.0f}s")
 
-        # Starved-sponsor candidate pass, relaxed floor, candidates only.
-        # Bounded: once a sponsor has fired properly on a few frames it has
-        # proven its references and stops paying for this second pass — the
-        # relaxed floor exists for the TIC case, a sponsor with nothing.
-        rrow = {}
-        for (sponsor, path, scope), refs in singles:
-            if len(sponsor_frames.get(sponsor, ())) >= 3:
+    # Phase 2 — the starved-sponsor candidate pass, relaxed floor,
+    # candidates only, for the sponsors that fired on fewer than
+    # STARVED_BELOW frames across the whole clip. A sponsor that fired has
+    # proven its references and does not pay for this — the relaxed floor
+    # exists for the TIC case, a sponsor with nothing.
+    relaxed_for = starved_sponsors(sponsor_frames, [e for e, _ in singles])
+    if relaxed_for:
+        t2 = time.time()
+        jobs = [(n, t, a.relaxed_floor, relaxed_for)
+                for n, t in enumerate(chosen)]
+        for n, t, wh, rrow in run_pass(a.video, a.refs, a.club, jobs, workers):
+            if wh is None:
                 continue
-            with relaxed_floor(C, a.relaxed_floor):
-                hits = C.detect(frame, refs, sift, matcher, feats=feats).get(sponsor) or []
-            for h in hits:
-                if h["inliers"] >= C.MIN_INLIERS:
-                    continue          # a full-strength hit belongs above
-                rrow.setdefault(sponsor, []).append(
-                    dict(h, t=t, ref=os.path.basename(path)))
-        rrow, gone = furniture_row(C, n, rrow, frame_w, frame_h, furniture_mask)
-        merge_counts(furn["corner"], gone["corner"])
-        merge_counts(furn["mask"], gone["mask"])
-        if rrow:
-            relaxed_by_index[n] = rrow
-    cap.release()
+            rrow, gone = furniture_row(C, n, rrow, wh[0], wh[1], furniture_mask)
+            merge_counts(furn["corner"], gone["corner"])
+            merge_counts(furn["mask"], gone["mask"])
+            if rrow:
+                relaxed_by_index[n] = rrow
+        print(f"  relaxed pass for {', '.join(sorted(relaxed_for))}: "
+              f"{len(chosen)} frames in {time.time() - t2:.0f}s")
+    else:
+        print(f"  relaxed pass: every sponsor fired on {STARVED_BELOW}+ "
+              f"frames — nothing to harvest")
 
     # The static rules need the whole sample set: a position or a feature
     # cell that holds through the match is furniture whatever it matched.
@@ -489,9 +610,11 @@ def run(a):
         "video": os.path.basename(a.video),
         "params": {"windows": len(planned), "per_window": PER_WINDOW,
                    "relaxed_floor": a.relaxed_floor,
+                   "starved_below": STARVED_BELOW,
                    "min_inliers": C.MIN_INLIERS},
         "duration": round(duration, 1),
         "frames_auditioned": len(chosen), "starved_frames": starved,
+        "relaxed_for": sorted(relaxed_for), "workers": workers,
         "refs": rows, "candidates": candidates, "crops": crops,
         "crop_meta": crop_meta,
         "frame": {"w": frame_w, "h": frame_h},
@@ -514,6 +637,8 @@ def main(argv=None):
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--windows", type=int, default=WINDOWS)
     ap.add_argument("--relaxed-floor", type=int, default=RELAXED_FLOOR)
+    ap.add_argument("--workers", type=int, default=0,
+                    help="processes for the frame loop; 0 = every core but one")
     run(ap.parse_args(argv))
 
 

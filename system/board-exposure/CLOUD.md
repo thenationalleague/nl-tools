@@ -136,7 +136,16 @@ tmpfs and therefore RAM: a 90-minute match is roughly 6 GB of source video plus
 4.5 GB of extracted frames. Highlights need a fraction of that, and the ceiling
 costs nothing extra — Cloud Run bills what is used, not what is reserved.
 
-Almost all of the money is SIFT burning CPU. That means:
+Almost all of the money is the detector burning CPU — and, profiled on
+02/09/2026 (a 1080p frame, 21 references), not the part everyone assumed.
+The frame's SIFT features are under 5% of a detection. 72% is
+`findHomography`: about 38 RANSAC fits per reference per frame, one for
+every band pass whose ratio-test survivors clear the inlier floor, which at
+the engine's loose ratio is nearly all of them. 23% is descriptor matching.
+RANSAC is single-threaded inside OpenCV, so a core does one fit at a time;
+the scan spreads frames across a process pool and has always used the eight
+vCPU, while the audition ran a sequential loop on one core until audition
+1.4 gave it the same pool. That means:
 
 - **Reference count is linear.** Ten sponsors cost roughly twice five.
 - **Sample rate is linear.** 5 fps costs 2.3× what 2 fps costs and, measured
