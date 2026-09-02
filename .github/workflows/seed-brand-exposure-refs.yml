@@ -16,8 +16,10 @@ name: Seed brand exposure references
 # repository is public. Those go up separately, under
 # brand-exposure/refs/clubs/<Club>/<Sponsor>/.
 #
-# Re-running is safe. It overwrites the same paths and touches nothing else,
-# so it is also the way to push an updated logo.
+# Re-running is safe. It overwrites the same paths, and (since 02/09/2026)
+# removes any partner file that is no longer in the repo — the repo tree IS
+# the partner set, so retiring a file here retires it from every scan. It
+# never touches refs/clubs/, which is not in the repo.
 
 on:
   workflow_dispatch:
@@ -89,10 +91,36 @@ jobs:
           fi
           echo "SEEDED=$n" >> "$GITHUB_ENV"
 
+      - name: Retire partner files the repo no longer holds
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          # The set the repo wants, in the bucket's own naming.
+          want="$(mktemp)"
+          for f in assets/partners/*.png assets/partners/*.jpg; do
+            base="$(basename "$f")"; echo "gs://$BUCKET/$PREFIX/${base%.*}/$base"
+          done >> "$want"
+          for f in assets/partners/*/*.png assets/partners/*/*.jpg; do
+            echo "gs://$BUCKET/$PREFIX/$(basename "$(dirname "$f")")/$(basename "$f")"
+          done >> "$want"
+          # Everything under partners/ that is not in that set goes. The prefix
+          # is the guard: nothing under refs/clubs/ can appear in this listing.
+          gone=0
+          while IFS= read -r obj; do
+            [ -n "$obj" ] || continue
+            case "$obj" in */) continue ;; esac
+            if ! grep -qxF "$obj" "$want"; then
+              gcloud storage rm "$obj"
+              echo "  retired  $obj"
+              gone=$((gone + 1))
+            fi
+          done < <(gcloud storage ls --recursive "gs://$BUCKET/$PREFIX/**" 2>/dev/null | grep '^gs://' || true)
+          echo "RETIRED=$gone" >> "$GITHUB_ENV"
+
       - name: Say what is now up there
         run: |
           {
-            echo "### Seeded $SEEDED partner reference(s)"
+            echo "### Seeded $SEEDED partner reference(s), retired $RETIRED"
             echo ""
             echo 'Into `gs://'"$BUCKET/$PREFIX"'/<Sponsor>/`'
             echo ""
