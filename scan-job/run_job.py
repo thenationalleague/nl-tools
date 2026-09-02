@@ -64,6 +64,12 @@ Environment (all set by the trigger, none baked into the image):
     BE_DEST            audition only: bucket folder the outputs land in,
                        e.g. brand-exposure/<match-id> — explicit like
                        BE_DETECTIONS, so nothing re-derives a match id
+    BE_REQUEST         the request record's id, for the log
+    BE_PROGRESS        optional object path, brand-exposure/progress/<id>.json:
+                       the scan's or audition's progress row (phase, done,
+                       total) is copied there every PROGRESS_EVERY seconds
+                       while the script runs, and the poller copies it onto
+                       the request so the tool's card shows real progress
 """
 import json
 import os
@@ -74,10 +80,17 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+# The progress module lives with the scripts: /app/scripts in the image,
+# ../scripts in the repo (the tests load this file from there).
+for _d in ("scripts", os.path.join("..", "scripts")):
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), _d))
+import board_exposure_progress as PG  # noqa: E402
+
 METADATA = ("http://metadata.google.internal/computeMetadata/v1/"
             "instance/service-accounts/default/token")
 STORAGE = "https://storage.googleapis.com/storage/v1/b/{bucket}/o"
 WORK = "/tmp/be"
+PROGRESS_EVERY = 20     # seconds between progress relays; the poller reads once a minute
 
 
 def log(msg):
@@ -217,6 +230,46 @@ def storage_put(bucket, name, path, token):
             f"system/board-exposure/uploader-spec.md.")
 
 
+class ProgressRelay:
+    """Copies the script's progress file to Storage when it has changed and
+    at most once every `every` seconds — the poller only looks once a
+    minute, so a per-frame upload would be waste. `put(path)` does the
+    upload; the relay never raises past it."""
+
+    def __init__(self, path, put, every=PROGRESS_EVERY):
+        self.path, self.put, self.every = path, put, every
+        self._seen = None
+        self._last = 0.0
+
+    def relay(self, now, force=False):
+        """Upload if due and changed (always when forced). True when uploaded."""
+        if not force and now - self._last < self.every:
+            return False
+        self._last = now
+        try:
+            mtime = os.path.getmtime(self.path)
+        except OSError:
+            return False
+        if not force and mtime == self._seen:
+            return False
+        self._seen = mtime
+        self.put(self.path)
+        return True
+
+
+def run_relaying(cmd, relay, poll=2.0):
+    """subprocess.call, with the progress relay ticking while it runs and one
+    forced relay once it has exited — so the 'done' row always lands."""
+    proc = subprocess.Popen(cmd)
+    while True:
+        rc = proc.poll()
+        if relay:
+            relay.relay(time.time(), force=rc is not None)
+        if rc is not None:
+            return rc
+        time.sleep(poll)
+
+
 def fetch_refs(bucket, prefix, token):
     """Mirror the reference tree out of Storage into the layout the scan expects.
 
@@ -255,6 +308,18 @@ def main():
 
     os.makedirs(WORK, exist_ok=True)
     token = Token()
+
+    # Real progress for the tool's card (02/09/2026): the script keeps one
+    # row current in WORK, the relay copies it up, the poller copies it on.
+    # The first row is ours — the video download is the card's first wait.
+    progress_file = os.path.join(WORK, "progress.json")
+    progress_obj = env("BE_PROGRESS")
+    relay = (ProgressRelay(progress_file,
+                           lambda p: storage_put(bucket, progress_obj, p, token))
+             if progress_obj else None)
+    PG.Progress(progress_file).phase("fetch")
+    if relay:
+        relay.relay(time.time(), force=True)
 
     # Diagnose reads an existing export instead of matching references, so
     # the reference tree (and the ingest key that lives in it) stays unfetched.
@@ -311,7 +376,7 @@ def main():
         audition_out = os.path.join(WORK, "audition")
         cmd = [sys.executable, "scripts/board_exposure_audition.py",
                "--video", video, "--refs", refs, "--club", club,
-               "--out-dir", audition_out]
+               "--out-dir", audition_out, "--progress", progress_file]
         if match:
             cmd += ["--match", match]
         if date:
@@ -322,7 +387,7 @@ def main():
                "--club", club, "--match", match, "--date", date,
                "--reference-set", ref_set,
                "--out-dir", os.path.join(WORK, "out"),
-               "--upload", "-y"]
+               "--upload", "-y", "--progress", progress_file]
         if start:
             cmd += ["--start", start]
         if end:
@@ -340,7 +405,7 @@ def main():
     # Streamed, not captured: Cloud Run's log tail is the only progress anyone
     # can see while this runs, and buffering it to the end would make a
     # forty-minute job look identical to a hung one.
-    rc = subprocess.call(cmd)
+    rc = run_relaying(cmd, relay)
     if rc != 0:
         die(f"the scan exited {rc}. The log above is the scan's own output.", rc)
 

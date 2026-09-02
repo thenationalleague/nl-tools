@@ -254,8 +254,9 @@ def relaxed_floor(core, floor):
         core.MIN_INLIERS = kept
 
 
-def score_sharpness(video, planned, log=print):
-    """{t: Laplacian variance at quarter scale} for every planned candidate."""
+def score_sharpness(video, planned, log=print, tick=None):
+    """{t: Laplacian variance at quarter scale} for every planned candidate.
+    `tick(n_done)` reports progress, when someone is counting."""
     import cv2
 
     cap = cv2.VideoCapture(video)
@@ -266,6 +267,8 @@ def score_sharpness(video, planned, log=print):
     for n, t in enumerate(todo):
         cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000.0)
         ok, frame = cap.read()
+        if tick:
+            tick(n + 1)
         if not ok:
             continue
         g = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -360,14 +363,15 @@ def _audit(job):
     return n, t, (w_, h_), row
 
 
-def run_pass(video, refs_root, club, jobs, workers, log=print):
+def run_pass(video, refs_root, club, jobs, workers, log=print, tick=None):
     """Every job through _audit, results yielded in job order.
 
     workers > 1 spreads the frames over a process pool — spawn, not fork:
     OpenCV starts a thread pool the first time it is used, and this process
     has used it to build the references, so a fork would hand every child
     that pool's locks without the threads holding them. workers == 1 runs
-    the same worker function in this process, thread count untouched."""
+    the same worker function in this process, thread count untouched.
+    `tick(n_done)` reports each result, when someone is counting."""
     import multiprocessing as mp
 
     total = len(jobs)
@@ -378,6 +382,8 @@ def run_pass(video, refs_root, club, jobs, workers, log=print):
         for done, res in enumerate(results, 1):
             if done % 50 == 0 or done == total:
                 log(f"  frames auditioned: {done}/{total}")
+            if tick:
+                tick(done)
             yield res
 
     if workers <= 1:
@@ -426,7 +432,11 @@ def run(a):
     planned = plan_windows(duration, a.windows, PER_WINDOW)
     print(f"  auditioning {len(planned)} windows over {duration:.0f}s "
           f"with {len(singles)} references across {workers} core(s)…")
-    chosen = pick_sharpest(planned, score_sharpness(a.video, planned))
+    # The one progress row the tool's card draws (see board_exposure_progress).
+    import board_exposure_progress as PG
+    prog = PG.Progress(getattr(a, "progress", None))
+    prog.phase("score", len(planned) * PER_WINDOW)
+    chosen = pick_sharpest(planned, score_sharpness(a.video, planned, tick=prog.tick))
 
     # Furniture first (audition 1.1): the frame-stack mask needs no hits, so
     # it is built before the loop from a spread read straight off the video.
@@ -459,7 +469,9 @@ def run(a):
     # deserves.
     t1 = time.time()
     jobs = [(n, t, None, None) for n, t in enumerate(chosen)]
-    for n, t, wh, row in run_pass(a.video, a.refs, a.club, jobs, workers):
+    prog.phase("audit", len(jobs))
+    for n, t, wh, row in run_pass(a.video, a.refs, a.club, jobs, workers,
+                                  tick=prog.tick):
         if wh is None:
             continue
         frame_w, frame_h = wh
@@ -484,7 +496,9 @@ def run(a):
         t2 = time.time()
         jobs = [(n, t, a.relaxed_floor, relaxed_for)
                 for n, t in enumerate(chosen)]
-        for n, t, wh, rrow in run_pass(a.video, a.refs, a.club, jobs, workers):
+        prog.phase("relaxed", len(jobs))
+        for n, t, wh, rrow in run_pass(a.video, a.refs, a.club, jobs, workers,
+                                       tick=prog.tick):
             if wh is None:
                 continue
             rrow, gone = furniture_row(C, n, rrow, wh[0], wh[1], furniture_mask)
@@ -567,9 +581,11 @@ def run(a):
         return fn
 
     cap = cv2.VideoCapture(a.video)
-    for t in needed:
+    prog.phase("crops", len(needed))
+    for k, t in enumerate(needed):
         cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000.0)
         ok, frame = cap.read()
+        prog.tick(k + 1)
         if not ok:
             continue
         for (sponsor, _name), rows in keep_ref.items():
@@ -625,6 +641,7 @@ def run(a):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(out, f, separators=(",", ":"), default=float)
     print(f"\n  wrote {path} + {len(crops)} crop(s)")
+    prog.finish()
 
 
 def main(argv=None):
@@ -639,6 +656,10 @@ def main(argv=None):
     ap.add_argument("--relaxed-floor", type=int, default=RELAXED_FLOOR)
     ap.add_argument("--workers", type=int, default=0,
                     help="processes for the frame loop; 0 = every core but one")
+    ap.add_argument("--progress", default=None, metavar="FILE",
+                    help="keep a one-row JSON progress file current as the "
+                         "audition runs — the cloud job copies it up for the "
+                         "tool's cards")
     run(ap.parse_args(argv))
 
 
