@@ -382,6 +382,11 @@ async function launch(db, id, req) {
     stage: stageOnLaunch(req),
     execution,
     startedAt: Date.now(),
+    /* A fresh launch owns a blank card. A Retry used to carry the retired
+       request's last progress row across, and the poller only overwrites it
+       once the new job has written one of its own — so for its first minute
+       or two the card claimed the dead run's 87% (02/09/2026). */
+    progress: null,
   });
   logger.info("brandExposureScan: launched", { id, execution });
 }
