@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Brand Exposure
-  Version: v0.31 (02/09/2026)
+  Version: v0.32 (02/09/2026)
   File: /brand-exposure/index.html
 
   Sponsor exposure measured from match video — seconds on screen, clarity and
@@ -41,6 +41,16 @@
   bare Matches stack among them — and was wrong.
 
   Changelog
+  v0.32 (02/09/2026) — The wizard's fixture rows take a tap again. v0.28
+  re-pointed the pipeline card handlers at the tab root with a
+  search-and-replace that also caught the fixture list's handler, which
+  then referenced a name that does not exist in that function; the
+  ReferenceError died inside the promise, so the rows rendered and never
+  selected. The render smoke now picks a fixture through a stubbed results
+  feed, so that path is guarded. And what Richard asked for alongside: a
+  fixture already on the pile shows a green Measured pill on its row (blue
+  In progress while a request for it is in flight), stays selectable, and
+  step 2 says a re-scan replaces the numbers, playback copy and detections.
   v0.31 (02/09/2026) — "Looking for": focus a sponsor on a match page and
   the reference pictures behind its numbers sit under the lead line, each
   opening at full size with Download. The list is the exact files that
@@ -446,6 +456,16 @@
     var NL_TOOL_KEY = 'ops-brand-exposure';
 
     window.NL_CHANGELOG = [
+      {
+        date: '02/09/2026',
+        version: 'v0.32',
+        items: [
+          'Fixture rows in the upload wizard take a tap again (broken ' +
+            'since v0.28).',
+          'A fixture already measured shows a green Measured pill, and the ' +
+            'wizard says a re-scan replaces it.'
+        ]
+      },
       {
         date: '02/09/2026',
         version: 'v0.31',
@@ -1059,6 +1079,7 @@
   .fxrow .fxrow__score { font-variant-numeric: tabular-nums; font-weight: 600;
                          flex: none; }
   .fxrow .fxrow__comp { margin-left: auto; flex: none; }
+  .fxrow .fxrow__tag { flex: none; }
   /* Reference thumbnails: the lightbox's index. */
   /* Cutouts big enough to judge sharpness on the screen where sharpness is
      judged (v0.26, desktop first): 180px minimum, so a 1400px panel shows
@@ -4053,11 +4074,18 @@
       var shown = SCAN.showAllFx ? mine : mine.slice(0, 12);
       box.innerHTML = '<div class="fxlist">' + shown.map(function (r) {
         var on = SCAN.fixture && SCAN.fixture.nlsId === r.id;
+        /* A fixture already on the pile, or already in the pipeline, says so
+           on its row (v0.32, Richard: "light up green if it was already
+           filled") — still selectable, because a re-scan is sometimes the
+           point, and step 2 spells out that it replaces. */
+        var state = fixtureState(r);
         return '<button class="fxrow" data-fx="' + esc(r.id) + '" aria-pressed="' +
           (on ? 'true' : 'false') + '">' +
           '<span class="fxrow__date">' + esc(NL.formatDateShort(r.date)) + '</span>' +
           '<span class="fxrow__teams">' + esc(r.homeName) + ' v ' + esc(r.awayName) + '</span>' +
           '<span class="fxrow__score">' + (r.hs == null ? '' : esc(r.hs + '–' + r.as)) + '</span>' +
+          (state === 'measured' ? '<span class="pill pill--approved fxrow__tag">Measured</span>'
+            : state === 'busy' ? '<span class="pill pill--info fxrow__tag">In progress</span>' : '') +
           '<span class="scope-tag fxrow__comp">' + esc(r.comp) + '</span></button>';
       }).join('') + '</div>' +
       (mine.length > shown.length
@@ -4067,10 +4095,36 @@
       wireManualBtn();
       var more = $('sMoreFx');
       if (more) more.onclick = function () { SCAN.showAllFx = true; renderFixtures(); };
-      cardsRoot.querySelectorAll('[data-fx]').forEach(function (b) {
+      /* `box`, not the pipeline's root: v0.28's re-pointing of the card
+         handlers caught this line too, and a ReferenceError inside the
+         promise meant the rows rendered but never took a tap (v0.32). */
+      box.querySelectorAll('[data-fx]').forEach(function (b) {
         b.onclick = function () { pickFixture(season, b.getAttribute('data-fx')); };
       });
     });
+  }
+
+  /* The match key a results row would land on — the same date-home-v-away
+     the scan writes — so the wizard can see what is already on the pile. */
+  function fixtureMid(r) {
+    var home = null, away = null;
+    try { home = NL.clubs.byOpta(r.homeId); away = NL.clubs.byOpta(r.awayId); } catch (e) {}
+    return midOf({ date: r.date, club: (home && home.name) || r.homeName,
+                   opponent: (away && away.name) || r.awayName });
+  }
+
+  /* 'measured' when the pile holds it, 'busy' while a request for it is in
+     flight (queued, auditioning, awaiting review, scanning), else ''. */
+  function fixtureState(r) {
+    var mid = fixtureMid(r);
+    if (matches[mid]) return 'measured';
+    var busy = Object.keys(SCAN.requests || {}).some(function (k) {
+      var q = SCAN.requests[k];
+      if (!q || q.dismissed) return false;
+      var st = stageOf(q);
+      return st !== 'measured' && st !== 'failed' && midOf(q) === mid;
+    });
+    return busy ? 'busy' : '';
   }
 
   function wireManualBtn() {
@@ -4455,10 +4509,18 @@
       lines.push('That is bigger than a typical full 90 — right file? ' +
         '(Uploading costs nothing either way.)');
     }
+    /* A fixture already on the pile is replaced by a re-scan — numbers,
+       playback copy and detections — and the person should know before
+       Go, not after (v0.32). */
+    var prior = f ? matches[midOf({ date: f.date, club: f.club, opponent: f.opponent })] : null;
     /* The estimate lines stay in the body; the button lives in the footer
        slot Next vacates on step 2 (v0.26), with its one-line reason for
        being disabled beside it. */
     info.innerHTML =
+      (prior ? '<div class="banner banner--amber">Already measured' +
+        (prior.meta && prior.meta.profile ? ' on engine ' +
+          esc(engineVersionOf(prior.meta.profile)) : '') +
+        ' — this scan replaces its numbers, playback copy and detections.</div>' : '') +
       lines.map(function (l) { return '<p class="form-hint">' + esc(l) + '</p>'; }).join('') +
       (half.ok ? '' : '<div class="banner banner--error">' +
         esc(half.err) + '</div>');
