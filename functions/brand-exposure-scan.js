@@ -13,9 +13,10 @@
  *                              done/failed from their execution's state,
  *                              deletes the source video on success, sweeps
  *                              failed sources after 48h, clears dismissed
- *                              request cards (their sources and audition
- *                              harvests with them), heals a stale launch
- *                              lock, pumps the queue.
+ *                              request cards (their sources and the
+ *                              audition's own files with them — never a
+ *                              match folder another request still owns),
+ *                              heals a stale launch lock, pumps the queue.
  *   brandExposureMatchCleanup — on matches/{id} delete: clears the match's
  *                              proxy + detections under brand-exposure/<id>/,
  *                              which storage rules deny the browser.
@@ -252,6 +253,35 @@ function failedSharers(reqs, id) {
   });
 }
 
+/* An audition's dest is the MATCH folder — brand-exposure/<matchId>/ —
+   which the measured match's proxy and detections live in too, and which
+   a retry of the same audition writes into again. So a dismissal may
+   clear only the audition's own files there (02/09/2026, found when a
+   failed Harrogate audition sat beside its measured scan with Remove on
+   offer: the old plan deleted the whole prefix), and never while another
+   undismissed request still names the same dest — that one's harvest is
+   not this one's to clear. */
+function othersOwnDest(reqs, id) {
+  const d = reqs && reqs[id] && reqs[id].dest;
+  if (!d) return false;
+  return Object.keys(reqs).some((k) => {
+    const r = k !== id && reqs[k];
+    return r && r.dest === d && !r.dismissed;
+  });
+}
+
+/* The audition's outputs, and nothing else, out of a folder listing:
+   audition.json and the audition-*.png cutouts (run_job.py writes exactly
+   those names). proxy.mp4, detections.json, diagnose.json and anything
+   nested stay. */
+function auditionFiles(names) {
+  return (names || []).filter((n) => {
+    const base = String(n).split("/").pop();
+    return String(n).split("/").length === 3 &&
+      (base === "audition.json" || /^audition-.+\.png$/.test(base));
+  });
+}
+
 /* Deleting a request card is a tool-side FLAG, function-side DELETION
    (v0.22): the browser cannot delete under uploads/ or a match's own
    folder (storage rules deny it on purpose), so the tool stamps
@@ -270,10 +300,12 @@ function dismissalPlan(reqs, id) {
   return {
     deleteSource: VIDEO_PATH.test(String(r.video || "")) && !sourceGone &&
       !othersWantVideo(reqs, id),
-    /* An audition's harvest folder dies with its card; deleteFiles on a
-       prefix that never got written is a no-op. */
+    /* An audition's harvest dies with its card — its own files only (see
+       auditionFiles), and not while another request owns the same dest.
+       A prefix that never got written lists nothing, and that is a no-op. */
     destPrefix: r.mode === "audition" &&
-      /^brand-exposure\/[a-z0-9-]+$/.test(String(r.dest || ""))
+      /^brand-exposure\/[a-z0-9-]+$/.test(String(r.dest || "")) &&
+      !othersOwnDest(reqs, id)
       ? r.dest + "/" : null,
   };
 }
@@ -461,8 +493,14 @@ exports.brandExposureScanPoll = onSchedule(SCHED_OPTS, async () => {
       }
       if (!deferred && plan.destPrefix) {
         try {
-          await admin.storage().bucket(BUCKET)
-            .deleteFiles({ prefix: plan.destPrefix });
+          /* The audition's own files, never the folder: the measured
+             match's proxy and detections share this prefix. */
+          const bucket = admin.storage().bucket(BUCKET);
+          const [files] = await bucket.getFiles({ prefix: plan.destPrefix });
+          const names = auditionFiles(files.map((f) => f.name));
+          for (const name of names) {
+            await bucket.file(name).delete();
+          }
         } catch (err) {
           logger.warn("brandExposureScanPoll: dest cleanup failed", {
             id, message: err && err.message,
@@ -597,5 +635,5 @@ exports.brandExposureMatchCleanup = onValueDeleted({
 exports._internals = {
   validRequest, buildEnv, verdictOf, oldestQueued, failureNote, VIDEO_PATH,
   shouldDeleteSource, stageOnLaunch, stageOnDone, othersWantVideo,
-  failedSharers, dismissalPlan, matchPrefixOf,
+  failedSharers, dismissalPlan, matchPrefixOf, othersOwnDest, auditionFiles,
 };
