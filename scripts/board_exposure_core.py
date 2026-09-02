@@ -633,7 +633,22 @@ def build_refs(entries, sift):
     return refs, skipped
 
 
-def detect(frame_bgr, refs, sift, matcher):
+def frame_features(frame_bgr, sift):
+    """
+    The frame's grayscale and SIFT features, computed once. detect() does
+    this itself when not handed them; a caller that matches reference by
+    reference — the audition, which wants a verdict per file — hands the
+    same features to every call instead of paying the detector per
+    reference. Nineteen references cost nineteen full-frame detections a
+    frame before this (audition 1.3, 02/09/2026: an hour where eleven
+    minutes had been).
+    """
+    gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+    kp_f, des_f = sift.detectAndCompute(gray, None)
+    return gray, kp_f, des_f
+
+
+def detect(frame_bgr, refs, sift, matcher, feats=None):
     """
     Every board of every sponsor in one frame.
 
@@ -644,12 +659,15 @@ def detect(frame_bgr, refs, sift, matcher):
     finds a spurious near-neighbour somewhere in shot and Lowe's ratio test
     throws the true correspondence away with the false one.
 
+    `feats` — (gray, keypoints, descriptors) from frame_features(), for a
+    caller matching the same frame more than once. Identical result either
+    way; only the detector call is saved.
+
     Returns {sponsor: [hit, ...]}.
     """
-    gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+    gray, kp_f, des_f = feats if feats is not None else frame_features(frame_bgr, sift)
     shape = gray.shape
     H, W = shape
-    kp_f, des_f = sift.detectAndCompute(gray, None)
     if des_f is None or len(kp_f) < MIN_INLIERS:
         return {}
 

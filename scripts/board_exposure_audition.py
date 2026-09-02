@@ -25,10 +25,12 @@ concentrate in soft frames, so auditioning on sharp ones shows each
 reference at its best.
 
 Matching runs the CANONICAL detector one reference at a time — the same
-geometry, perimeter and face guards as a real scan, no forked logic. That
-recomputes frame features per reference, which detect()'s own docstring
-calls wasteful; at audition scale (hundreds of frames, not tens of
-thousands) the waste is minutes and the non-drift is worth it.
+geometry, perimeter and face guards as a real scan, no forked logic. The
+frame's features are computed once per frame and handed to every call
+(audition 1.3, 02/09/2026): until then each reference paid its own
+full-frame detection, "minutes" at twelve references — and an hour at
+nineteen, once the printers' artwork landed and the furniture strip made
+the starved-sponsor pass honest enough to run for DAZN as well.
 
 Furniture (audition 1.1, 02/09/2026). The scan strips broadcast graphics by
 four rules — the top corners, the frame-stack mask, the static position and
@@ -70,7 +72,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-AUDITION_VERSION = "1.2"
+AUDITION_VERSION = "1.3"
 WINDOWS = 300          # sharpest-in-window count (clamped for short footage)
 PER_WINDOW = 3         # spread frames scored per window
 RELAXED_FLOOR = 4      # candidate-only inlier floor for starved sponsors
@@ -329,10 +331,14 @@ def run(a):
         if not ok:
             continue
         frame_h, frame_w = frame.shape[:2]
+        # The frame's features once, for every reference and both passes
+        # (audition 1.3): with nineteen references the per-reference
+        # detector call had turned an 11-minute audition into an hour.
+        feats = C.frame_features(frame, sift)
         row = {}
         for (sponsor, path, scope), refs in singles:
             name = os.path.basename(path)
-            for h in C.detect(frame, refs, sift, matcher).get(sponsor) or []:
+            for h in C.detect(frame, refs, sift, matcher, feats=feats).get(sponsor) or []:
                 row.setdefault(sponsor, []).append(dict(h, t=t, ref=name))
         # The corner rule and the mask, per frame, before anything is
         # counted as fired — so a sponsor whose only "hits" are the
@@ -358,7 +364,7 @@ def run(a):
             if len(sponsor_frames.get(sponsor, ())) >= 3:
                 continue
             with relaxed_floor(C, a.relaxed_floor):
-                hits = C.detect(frame, refs, sift, matcher).get(sponsor) or []
+                hits = C.detect(frame, refs, sift, matcher, feats=feats).get(sponsor) or []
             for h in hits:
                 if h["inliers"] >= C.MIN_INLIERS:
                     continue          # a full-strength hit belongs above
