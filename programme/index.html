@@ -3,7 +3,10 @@
 <head>
 <!--
   Programme Packs — club library (standalone, passcode; ?master=1 for admins)
-  Version: v1.19 (17/08/2026) — the eye reaches video, audio and Word.
+  Version: v1.20 (04/08/2026) - a download saves the file: the tile, the preview
+           and a single ticked file all fetch to a Blob rather than navigating to
+           the Storage URL, which opened a PDF as a page.
+           v1.19 (17/08/2026) — the eye reaches video, audio and Word.
            Video/audio go to the browser's native players (streamed on play,
            metadata only until then). Word documents render CLIENT-SIDE via
            vendored docx-preview + JSZip (programme/_vendor/, lazy-loaded on
@@ -911,11 +914,7 @@
       buttons: [
         { label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } },
         { label: 'Download', className: 'btn--primary', autofocus: true, onClick: function () {
-            /* The file already lives at a URL, so this opens it rather than
-               rebuilding it as a Blob — and it is audited like any other
-               download, because it is one. */
-            PP.audit('download', { club: code, detail: f.name });
-            window.open(f.url, '_blank');
+            downloadFile(code, f);
           } }
       ]
     });
@@ -1104,9 +1103,12 @@
       b.onclick = function (e) { e.stopPropagation(); preview(code, b.getAttribute('data-prev')); };
     });
     Array.prototype.forEach.call(root.querySelectorAll('[data-dl]'), function (a) {
-      a.addEventListener('click', function () {
-        var f = (FILES[code] || {})[a.getAttribute('data-dl')];
-        if (f) PP.audit('download', { club: code, detail: f.name });
+      a.addEventListener('click', function (e) {
+        /* A modified click — middle, ctrl, shift — is someone asking for a
+           tab, so leave it to the browser. A plain click means "save it". */
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        e.preventDefault();
+        downloadFile(code, (FILES[code] || {})[a.getAttribute('data-dl')]);
       });
     });
 
@@ -1329,8 +1331,13 @@
      way dragging a folder onto a desktop does. Picked loose files sit at the
      top of the archive. */
   function downloadSelected(code) {
-    var list = pickedFiles(code).map(function (f) { return { file: f, path: '' }; });
-    pickedDirs(code).forEach(function (d) {
+    var files = pickedFiles(code), dirs = pickedDirs(code);
+    /* One file ticked and nothing else is a file, not a zip containing one.
+       A folder is always a zip, however little is in it, because a folder is
+       the thing being asked for. */
+    if (files.length === 1 && !dirs.length) { downloadFile(code, files[0]); return; }
+    var list = files.map(function (f) { return { file: f, path: '' }; });
+    dirs.forEach(function (d) {
       list = list.concat(collectFiles(code, d.id, PP.safeName(d.name) + '/'));
     });
     if (!list.length) return;
@@ -1506,6 +1513,33 @@
   }
 
   /* list: [{ file, path }] — path is the folder prefix inside the archive. */
+  /* One file, saved with its own name. The tile used to be a bare
+     <a href download> pointing at the Storage URL — and a browser honours the
+     download attribute only on a same-origin, blob: or data: URL. A
+     firebasestorage.googleapis.com link is none of those, so the click
+     navigated instead, and a PDF opened in a new tab as a page rather than
+     saving as a file. Fetch the bytes into a Blob and the attribute is
+     honoured, which is exactly what the zip path has been doing all along.
+
+     If the fetch is refused — CORS, the one thing that can stop it — the old
+     behaviour is the fallback: open it in a tab, and say why. */
+  function downloadFile(code, f) {
+    if (!f || !f.url) return;
+    PP.audit('download', { club: code, detail: f.name });
+    fetch(f.url).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.blob();
+    }).then(function (blob) {
+      NL.download(f.name, blob, blob.type || f.contentType);
+    }).catch(function (e) {
+      console.error('[programme] download', e);
+      NL.toast(e instanceof TypeError
+        ? 'Saving is blocked by the bucket\u2019s CORS settings \u2014 opening it instead'
+        : 'Could not save ' + f.name + ': ' + (e.message || e), 'error');
+      window.open(f.url, '_blank');
+    });
+  }
+
   function zipFrom(list, label) {
     if (!list.length) { NL.toast('Nothing to download', 'info'); return; }
     var bytes = totalBytes(list);
