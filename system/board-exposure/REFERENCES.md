@@ -61,6 +61,7 @@ roadmap's "needs the boards' CAD files" line, answered. What went into
 | `DAZN/DAZN artwork Watch National League.png` | yellow, "Watch National League", Enterprise lockup | `DAZN DR Brai Brack` |
 | `DAZN/DAZN artwork Follow your club.png` | black, "Follow your club all season", Enterprise + NLTV lockup | `National League Perimeter Board Dev5`, p1 |
 | `DAZN/DAZN artwork Follow your club no Enterprise.png` | black, same without the Enterprise lockup | `National League Perimeter Board Dev5`, p6 |
+| `DAZN/DAZN artwork Follow your club short.png` | black, the same design re-flowed for a short board — logos stacked, call-to-action under the line | `National League Perimeter Board Dev5`, p5 (added the same evening; see below) |
 
 How they were made: each PDF page rendered to its **TrimBox** (the printers'
 files carry bleed and crop marks; the trim box is the board as it hangs),
@@ -110,13 +111,27 @@ Still to settle, with the Harrogate hand count: whether a ground's own
 cutouts add anything on top of the CAD. If they do not, cutouts and the
 audition stage go too.
 
-The `DAZN NLTV board.png` photograph stays until DAZN supplies that
-design's artwork — it is a design in circulation with no CAD on file.
+**The grab was the CAD all along.** The first cut of this ruling kept
+`DAZN NLTV board.png`, a grab from footage, as "a design in circulation
+with no CAD on file". Richard opened the Dev5 PDF and asked whether it
+was not simply page 5. It was: the same Follow-your-club design re-flowed
+for a short board, logos stacked and the call-to-action under the line,
+960×240 in the file, and the closest of the six pages to the grab's 4.5:1
+shape. The long layout I had kept (page 1, 7.7:1) fired 4 frames on the
+test clip; the grab, which is the short layout, fired 8 — the short
+layout is the board that actually hangs. So the grab retires and page 5
+goes in as `DAZN artwork Follow your club short.png`, rendered at 1000px
+like the rest. Measured before shipping, same clip and frames as the
+table above: the render fires 10 frames where the grab fired 8, with
+nothing else in the set moving. DAZN is now six CAD files and no
+photographs.
 
 What was left out, deliberately: the four smaller sizes of each DAZN design
 (3888×431, 3456×648, 2160×648, 1728×432 — the same elements re-flowed for
 shorter boards; scan time is linear in reference count, so one size per
-design goes in and the audition says whether a ground needs another); the
+design goes in and the audition says whether a ground needs another —
+and it did, the same evening: the Dev5 short layout is the board that
+actually hangs, see "The set, trimmed"); the
 `Dev5_1v2` file, which differs from `Dev5` only by a "NTLTV" typo in the
 call-to-action and is presumably the one that was not printed; and a
 13-page demo deck that arrived in the same batch, which is a presentation,
