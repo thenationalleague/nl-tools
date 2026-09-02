@@ -68,7 +68,8 @@ const be = lift(
   'functions/brand-exposure-scan.js',
   ['validRequest', 'buildEnv', 'verdictOf', 'oldestQueued', 'failureNote',
    'shouldDeleteSource', 'stageOnLaunch', 'stageOnDone', 'othersWantVideo',
-   'failedSharers', 'dismissalPlan', 'matchPrefixOf'],
+   'failedSharers', 'dismissalPlan', 'matchPrefixOf', 'othersOwnDest',
+   'auditionFiles'],
   ['VIDEO_PATH']
 );
 
@@ -368,6 +369,59 @@ test('a malformed audition dest never becomes a delete prefix', () => {
   const plan = be.dismissalPlan({ a: { video: V, status: 'done',
     mode: 'audition', dest: 'brand-exposure/x/../../refs', dismissed: 1 } }, 'a');
   assert.equal(plan.destPrefix, null);
+});
+
+/* ---- The shared match folder (02/09/2026) ---------------------------------
+   An audition's dest IS the match folder. A retry writes into it again and
+   the measured match's proxy and detections live there, so a dismissal
+   clears only the audition's own files, and not while another request
+   still owns the dest. Found with a failed Harrogate audition sitting
+   beside its measured scan, Remove on offer. */
+
+test('a retry that owns the same dest keeps the harvest folder off the plan', () => {
+  const reqs = {
+    a: { video: V, status: 'failed', mode: 'audition', dest: DEST, dismissed: 1 },
+    b: { video: V, status: 'queued', mode: 'audition', dest: DEST },  // the retry
+  };
+  assert.equal(be.othersOwnDest(reqs, 'a'), true);
+  const plan = be.dismissalPlan(reqs, 'a');
+  assert.equal(plan.deleteSource, false);   // the retry still needs the footage
+  assert.equal(plan.destPrefix, null);      // and its harvest is not a's to clear
+});
+
+test('a dismissed sibling does not own the dest; a dest-less one never did', () => {
+  assert.equal(be.othersOwnDest({
+    a: { dest: DEST, dismissed: 1 },
+    b: { dest: DEST, dismissed: 2 },
+  }, 'a'), false);
+  assert.equal(be.othersOwnDest({
+    a: { dest: DEST, dismissed: 1 },
+    b: { video: V, status: 'queued' },
+  }, 'a'), false);
+  assert.equal(be.othersOwnDest({ a: { dismissed: 1 } }, 'a'), false);
+  // the last owner standing still clears its own harvest
+  assert.equal(be.dismissalPlan({
+    a: { video: V, status: 'done', mode: 'audition', dest: DEST, dismissed: 1 },
+    b: { video: V, status: 'done', mode: 'audition', dest: DEST, dismissed: 2 },
+  }, 'a').destPrefix, DEST + '/');
+});
+
+test('auditionFiles keeps the audition’s own files and nothing the match owns', () => {
+  const names = [
+    DEST + '/audition.json',
+    DEST + '/audition-enterprise-14s-31i.png',
+    DEST + '/audition-wide-enterprise-101s-8i.png',
+    DEST + '/audition-relaxed-tic-health-40s-5i.png',
+    DEST + '/proxy.mp4',
+    DEST + '/detections.json',
+    DEST + '/diagnose.json',
+    DEST + '/audition.json.bak',
+    DEST + '/nested/audition.json',
+    'brand-exposure/refs/partners/DAZN/audition-lookalike.png',
+  ];
+  assert.deepEqual(be.auditionFiles(names), names.slice(0, 4));
+  assert.deepEqual(be.auditionFiles([]), []);
+  assert.deepEqual(be.auditionFiles(undefined), []);
 });
 
 /* ---- Match cleanup: the prefix guard -------------------------------------- */

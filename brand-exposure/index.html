@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Brand Exposure
-  Version: v0.32 (02/09/2026)
+  Version: v0.33 (02/09/2026)
   File: /brand-exposure/index.html
 
   Sponsor exposure measured from match video — seconds on screen, clarity and
@@ -41,6 +41,18 @@
   bare Matches stack among them — and was wrong.
 
   Changelog
+  v0.33 (02/09/2026) — Retry retires the card it retries. A retry cloned the
+  failed request into a new card and left the old one offering Retry, so a
+  second tap queued a second job against the same footage (Richard's
+  screenshot, 02/09). Now the failed record is dismissed as the clone is
+  queued — the poller keeps footage a queued or running sibling still
+  needs, and (same day, function side) no longer clears a match folder
+  another request still owns — and a failed card whose footage is already
+  queued or running again offers no Retry at all. The progress line can no
+  longer read "-1%" when the server's start stamp is ahead of this clock,
+  and the audition estimate follows the engine's window count (300 cap,
+  2 s a window, about 10 s each on the job as measured today) instead of
+  a flat eight minutes.
   v0.32 (02/09/2026) — The wizard's fixture rows take a tap again. v0.28
   re-pointed the pipeline card handlers at the tab root with a
   search-and-replace that also caught the fixture list's handler, which
@@ -456,6 +468,18 @@
     var NL_TOOL_KEY = 'ops-brand-exposure';
 
     window.NL_CHANGELOG = [
+      {
+        date: '02/09/2026',
+        version: 'v0.33',
+        items: [
+          'Retry retires the failed card it retries — one line per match, ' +
+            'no second Retry to tap by accident.',
+          'A failed card whose footage is already queued or running again ' +
+            'says so instead of offering Retry.',
+          'The audition estimate follows the clip length; the progress ' +
+            'line cannot read below 0%.'
+        ]
+      },
       {
         date: '02/09/2026',
         version: 'v0.32',
@@ -4685,6 +4709,23 @@
       String(r.match || '').replace(/^.*?\sv\s/i, ''))].join('-');
   }
 
+  /* A queued or running request that shares this one's footage — the
+     retry of a failed card, or an audition's follow-up scan. The poller
+     keeps the source for it; this page must not offer a second Retry
+     against it (v0.33). The id of the sibling, or null. */
+  function liveSharer(id) {
+    var r = SCAN.requests[id];
+    if (!r || !r.video) return null;
+    var hit = null;
+    Object.keys(SCAN.requests).forEach(function (k) {
+      var q = SCAN.requests[k];
+      if (hit || k === id || !q || q.dismissed || q.video !== r.video) return;
+      var st = stageOf(q);
+      if (st === 'queued' || st === 'auditioning' || st === 'scanning') hit = k;
+    });
+    return hit;
+  }
+
   /* Clone by exclusion, not inclusion: the old retry listed fields by name
      and silently dropped mode, dest, ht and restart — a retried audition
      became a full scan and a marked 90 lost its half-time skip. Everything
@@ -4804,10 +4845,18 @@
         acts = '<button class="btn btn--ghost btn--sm" data-cancel="' + esc(id) +
           '">Cancel</button>';
       } else if (stage === 'auditioning' || stage === 'scanning') {
+        /* The audition samples one frame per window — the engine plans
+           min(300, seconds / 2) windows — at about 10 s a window on the
+           job (audition 1.4, measured 02/09). Ninety windows when the
+           length is unknown. Real progress from the job is queued
+           (issue #1126); until then this is an estimate and says so. */
+        var wins = r.durationSecs ? Math.min(300, r.durationSecs / 2) : 90;
         var estMin = stage === 'auditioning'
-          ? Math.max(8, ((r.durationSecs || 0) / 60) * 0.3 || 12)
+          ? Math.max(5, wins * 10 / 60)
           : ((r.durationSecs || 0) / 60) * EST_WALL_X || 20;
-        var gone = (Date.now() - (r.startedAt || Date.now())) / 60000;
+        /* Never negative: the server stamps startedAt, and a clock ahead
+           of this one read as "-1%" (Richard's screenshot, 02/09). */
+        var gone = Math.max(0, (Date.now() - (r.startedAt || Date.now())) / 60000);
         /* A percent and the minutes left, not "9 of ~8 min" (Richard,
            02/09: the total only matters as a count-up). Past the estimate
            it counts up, and the bar holds at 96% — a full bar that has not
@@ -4837,11 +4886,14 @@
         acts = '<button class="btn btn--ghost btn--sm" data-open="' + esc(mid) +
           '">Open the match</button>' + removeBtn;
       } else if (stage === 'failed') {
+        /* Retried already (a queued or running sibling shares the footage):
+           no Retry — a second tap was queuing a second job (v0.33). */
+        var again = liveSharer(id);
         state = '<span class="pill pill--rejected">Failed</span>';
         detail = '<span class="pipe__meta">' + esc(r.error || 'No reason recorded.') +
           (r.swept ? ' The source video has been cleared — upload it again to retry.'
-                   : '') + '</span>';
-        acts = (!r.swept ? '<button class="btn btn--ghost btn--sm" data-retry="' +
+                   : again ? ' Retried — it is running above.' : '') + '</span>';
+        acts = (!r.swept && !again ? '<button class="btn btn--ghost btn--sm" data-retry="' +
             esc(id) + '">Retry</button>' : '') + removeBtn;
       } else {
         state = '<span class="pill">' + esc(stage) + '</span>';
@@ -4902,8 +4954,10 @@
               'stays in Matches.'
             : r.swept
               ? 'Only this entry goes — its footage was already cleared.'
-              : 'Its footage is cleared with it — a retry would need a ' +
-                'fresh upload.';
+              : liveSharer(id)
+                ? 'Only this entry goes — the retry above keeps the footage.'
+                : 'Its footage is cleared with it — a retry would need a ' +
+                  'fresh upload.';
         NL.confirm(msg, {
           title: 'Remove this entry', confirmText: 'Remove', variant: 'danger'
         }).then(function (ok) {
@@ -4916,9 +4970,20 @@
     });
     cardsRoot.querySelectorAll('[data-retry]').forEach(function (b) {
       b.onclick = function () {
-        var r = SCAN.requests[b.getAttribute('data-retry')];
+        var id = b.getAttribute('data-retry');
+        var r = SCAN.requests[id];
         if (!r) return;
+        if (liveSharer(id)) {
+          NL.toast('Already queued — it is the line above.');
+          return;
+        }
+        /* The clone is the request now; the failed card retires with it
+           (v0.33). Dismissing hands the poller a record that owes its
+           footage and its folder, and the poller keeps both while the
+           clone still needs them. */
         db.ref(REQ_ROOT).push(cloneRequest(r, LIFECYCLE)).then(function () {
+          return db.ref(REQ_ROOT + '/' + id).update({ dismissed: Date.now() });
+        }).then(function () {
           NL.toast('Queued again.', 'success');
         }).catch(function (e) { NL.toast(e.message, 'error'); });
       };
