@@ -276,13 +276,15 @@ Rules: `system/rtdb/rules.snapshot.json` (`app-data/media-programme`) and
 
 ## Deploying
 
-1. **Functions** — automatic. `.github/workflows/deploy-footage-proxy.yml` runs
-   on any push to `main` touching `functions/**` and deploys the whole codebase,
-   not just the footage proxy. Confirm the run is green.
+1. **Functions** — automatic. `.github/workflows/deploy-functions.yml` runs on
+   any push to `main` touching `functions/**` and deploys every function in the
+   directory, with `--force` so anything removed from source is deleted from
+   the project. Confirm the run is green.
 2. **Storage rules** — paste `system/storage/rules.snapshot.rules` into
    Firebase console → Storage → Rules
-3. **RTDB rules** — paste `system/rtdb/rules.snapshot.json` into
-   Firebase console → Realtime Database → Rules
+3. **RTDB rules** — Actions → **Deploy RTDB rules** → Run workflow → type
+   `publish`. It deploys `system/rtdb/rules.snapshot.json` in full; nothing is
+   pasted.
 4. **Tool registry** — paste the `media-programme` entry from
    `system/rtdb/tools-registry.snapshot.json` into RTDB `tools/`
 
@@ -322,21 +324,41 @@ once after deploy:
 
 ## Cutover
 
-`/programme-packs/` (Drive + Apps Script) is superseded. Retiring it is a
-separate, deliberate step and is **not** done in this change:
+Done. `/programme-packs/` (Drive + Apps Script) was deleted on 15/08/2026 —
+the directory, its `REBUILD.md`, all 17 `pp_*` routes in the shared Apps
+Script router, the `tools/media-programme-packs` registry record and the
+`app-data/media-programme-packs` rules block. The decision record is in
+`system/retired/README.md`. Nothing was migrated, because nothing was in it.
 
-- delete `programme-packs/` and its `pp_*` actions in the shared Apps Script
-  project's `doPost` router;
-- remove `tools/media-programme-packs` from RTDB (until then the portal shows
-  two Programme Packs cards) and from
-  `system/rtdb/tools-registry.snapshot.json`;
-- drop `app-data/media-programme-packs` and its rules block.
-
-There is nothing to migrate — the Drive tool is unused.
+The callables from this tool's first attempt, `programmeEnter` and
+`programmeClaim`, are gone too: `deploy-functions.yml` runs
+`firebase deploy --force`, which deletes any function absent from source, and
+several deploys have shipped since they left it. If either still shows in the
+Firebase console, that is the thing to check, not the code.
 
 ## Moving behind the portal
 
-The eventual move is a **deletion**, which is why it was built this way:
+**Settled direction (02/09/2026):** this is not a staff tool that clubs are
+let into. It is one tool with two faces, and the portal already knows how to
+do that — `NL.isClubUser` and the per-role `defaults` in the registry are the
+whole mechanism.
+
+- **One page, `/programme/`, under auth-guard.** A club-admin or club-staff
+  user lands in the library with their own club's folder writable and every
+  other folder readable — exactly today's passcode session, minus the passcode.
+  NL staff land in the same library with read-all. Admins get the console's
+  jobs (trash, audit, storage) folded in rather than a second page.
+- **The registry record moves**, it does not multiply: `url` becomes
+  `/programme/`, `label` loses "(admin)", `defaults` widen to
+  `club-admin: access`, `club-staff: access`, `staff: access`,
+  `admin: admin`, `superadmin: admin`, and `audience` widens from `league`
+  so club users can see the card at all.
+- **`toolKey` stays `media-programme`.** The `media-` prefix is filing, not
+  access — access is the `defaults` block above. Every Storage path and every
+  RTDB node is keyed on this string, so renaming it would mean physically
+  moving every object in the bucket for a cosmetic gain.
+
+The move itself is still a **deletion**, which is why it was built this way:
 
 - delete `functions/programme.js` and the gate in `index.html`;
 - swap `auth.token.pClub === $club` for the portal's
@@ -345,3 +367,5 @@ The eventual move is a **deletion**, which is why it was built this way:
 
 Storage paths, the RTDB shape, the upload code and the audit trail are
 unchanged, because the paths are already keyed on the code the portal uses.
+Passcodes stay live until every club has a portal login; the two can coexist,
+since both end in the same `pClub`-shaped authorisation.
