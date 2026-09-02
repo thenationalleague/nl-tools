@@ -870,6 +870,17 @@ against this clip's hand count, with a second wide-shot ground before it
 ships. Until it exists the report's caveat stands: the far side is not
 counted, and the numbers are a floor.
 
+**The CAD-only re-scan, same evening.** The set trimmed to ten CAD files
+(REFERENCES.md, "The set, trimmed") scored 13% recall at 97% precision on
+this clip against 21% at 98% for the first scan's logo-plus-cutouts set,
+found no labelled sample that set had not, and took 1,884 s against 884 s.
+Per span: the tight opening shot 25 → 18 samples, the second wide-shot
+span 14 → 8. The reading and the reversal are in REFERENCES.md: cost is
+per descriptor not per file, a board at 80 px matches the picture of
+itself better than a render of its design, and the ground's cutouts are
+what measures the match. The logo file is back; the cutouts come back on
+the next audition at this ground.
+
 ## Roadmap — engine 1.7, the recall pair (agreed 30/08/2026, superseded by the build above)
 
 Precision's ladder is built and verified; recall (55-60% pooled, far-side

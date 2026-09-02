@@ -107,9 +107,41 @@ Retired from `assets/partners/`: `DAZN.png`, `DAZN/DAZN white on black.png`,
 workflow removes from the bucket what the repo no longer holds, so a
 retirement here is a retirement everywhere.
 
-Still to settle, with the Harrogate hand count: whether a ground's own
-cutouts add anything on top of the CAD. If they do not, cutouts and the
-audition stage go too.
+**Settled the same evening, and not the way I expected.** The Harrogate
+re-scan on the CAD-only set, scored on the hand count beside the first
+scan (logo + the ground's cutouts, engine 1.7.1):
+
+| | logo + cutouts, 12 files | CAD only, 10 files |
+|---|---|---|
+| Enterprise recall | 21% | 13% |
+| Precision | 98% | 97% |
+| Enterprise on screen | 31 s | 23 s |
+| Scan time, 8 vCPU | 884 s | 1,884 s |
+| Labelled samples the other set did not find | — | none: the union is still 21% |
+
+The CAD found no second the cutouts and the logo had not, took twice as
+long, and missed a third of what they found. Two lessons, both measured:
+
+1. **Cost is per descriptor, not per file.** A 1000px artwork render
+   carries 470–800 descriptors (dense text); a logo file 120–250; a
+   harvested cutout 80–260. The six DAZN renders are 3,456 of the CAD
+   set's 4,489 descriptors, and three of them have never fired anywhere.
+   Twenty small files can be cheaper than ten big ones.
+2. **At DAZN's framing a board matches the picture of itself far better
+   than a render of its design.** At 80 px the cutout's descriptors are
+   the ones the frame actually has. The CAD is the seed for a ground the
+   engine has never seen and the validator for what gets harvested there;
+   the cutouts are what measures the match.
+
+So `Enterprise.png` comes back (253 descriptors, fired 30 frames on the
+test clip, present in the 21% scan) and the two Enterprise photographs
+stay retired — a ground's own cutouts do that job, per ground. The
+reference tiers the plan of record describes are the answer after all:
+CAD as parent, cutouts as children behind promotion guards, and a
+**retirement rule per ground** — a file that finds no frame at a ground
+that no other file finds is dropped there by the next audition. That rule
+is what makes "tick every cutout" safe: the ones that add nothing do not
+survive the next visit.
 
 **The grab was the CAD all along.** The first cut of this ruling kept
 `DAZN NLTV board.png`, a grab from footage, as "a design in circulation
