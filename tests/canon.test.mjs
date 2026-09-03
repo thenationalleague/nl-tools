@@ -9,7 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { NL, REPO } from './load-canon.mjs';
+import { NL, REPO, stubEl } from './load-canon.mjs';
 
 const meta = JSON.parse(readFileSync(join(REPO, 'assets/data/clubs-meta.json'), 'utf8'));
 
@@ -504,4 +504,137 @@ test('NL.codeGate cancels the slow notice on success and on failure alike', () =
   assert.match(fail, /clearSlow\(\)/, 'a refused code must not still say "still checking"');
   assert.match(gate, /clearSlow\(\);\s*\n\s*resolve\(session\)/,
     'a resolved gate must not leave a timer writing to a card the caller has hidden');
+});
+
+/* ── NL.sortable — the reorderable list (v1.43) ────────────────────────────
+   Render and the button route run fully under the element stub: the harness
+   records children, attributes and listeners, so these tests click the real
+   wired buttons and read the real resulting order. The pointer-drag route
+   needs layout (rects, midpoints, capture) and is covered by the PR's
+   browser smoke test, like every pointer surface in the canon. */
+
+function mountSortable(onOrder) {
+  const host = stubEl('div');
+  const api = NL.sortable(host, {
+    items: [
+      { id: 'chair', label: 'Chair', sub: 'Board' },
+      { id: 'ceo',   label: 'Chief Executive' },
+      { id: 'coo',   label: 'Chief Operating Officer' },
+      { id: 'fd',    label: 'Finance Director' },
+    ],
+    onOrder,
+  });
+  const ul = host.children[0];
+  const rowsOf = () => ul.children;
+  const rowIds = () => plain(rowsOf().map((r) => r.getAttribute('data-id')));
+  const btnsOf = (row) => row.children.filter((c) => c.tagName === 'BUTTON');
+  return { host, api, ul, rowsOf, rowIds, btnsOf };
+}
+
+test('sortable renders the canon .nl-sort markup in item order', () => {
+  assert.equal(typeof NL.sortable, 'function');
+  const { api, ul, rowsOf, rowIds } = mountSortable();
+
+  assert.equal(ul.tagName, 'UL');
+  assert.equal(ul.className, 'nl-sort');
+  assert.deepEqual(rowIds(), ['chair', 'ceo', 'coo', 'fd'], 'rows render in item order');
+  assert.deepEqual(plain(api.order()), ['chair', 'ceo', 'coo', 'fd'], 'order() agrees');
+
+  const first = rowsOf()[0];
+  assert.equal(first.tagName, 'LI');
+  assert.equal(first.className, 'nl-sort__row');
+  const [grip, main, sub] = first.children;
+  assert.equal(grip.className, 'nl-sort__grip');
+  assert.equal(grip.getAttribute('aria-hidden'), 'true', 'the grip is decoration to a reader');
+  assert.equal(main.className, 'nl-sort__main');
+  assert.equal(main.textContent, 'Chair');
+  assert.equal(sub.className, 'nl-sort__sub');
+  assert.equal(sub.textContent, 'Board');
+
+  // sub is optional — a row without one goes straight from label to buttons
+  const noSub = rowsOf()[1].children.filter((c) => c.className === 'nl-sort__sub');
+  assert.equal(noSub.length, 0, 'no sub span unless a sub was given');
+});
+
+test('sortable buttons: sprite glyphs, per-row aria-labels, only impossible moves disabled', () => {
+  const { rowsOf, btnsOf } = mountSortable();
+  const rows = rowsOf();
+
+  const [up, down] = btnsOf(rows[0]);
+  assert.equal(up.className, 'nl-sort__btn');
+  assert.equal(up.type, 'button', 'never submits a form the list happens to sit in');
+  assert.equal(up.getAttribute('aria-label'), 'Move Chair up');
+  assert.equal(down.getAttribute('aria-label'), 'Move Chair down');
+
+  // The glyphs are NL.icon's sprite <use>, not text arrows.
+  const svg = up.children[0];
+  assert.equal(svg.getAttribute('class'), 'icon icon--sm');
+  assert.equal(svg.children[0].getAttribute('href'), '/assets/icons/sprites.svg#icon-up');
+  assert.equal(down.children[0].children[0].getAttribute('href'), '/assets/icons/sprites.svg#icon-down');
+
+  // First row's up and last row's down are the impossible moves; nothing else.
+  assert.equal(up.disabled, true);
+  assert.equal(down.disabled, false);
+  const [mUp, mDown] = btnsOf(rows[1]);
+  assert.equal(mUp.disabled, false);
+  assert.equal(mDown.disabled, false);
+  const [lUp, lDown] = btnsOf(rows[3]);
+  assert.equal(lUp.disabled, false);
+  assert.equal(lDown.disabled, true);
+});
+
+test('sortable button move: DOM and order() agree, onOrder fires, ends re-disable', () => {
+  const calls = [];
+  const { api, rowsOf, rowIds, btnsOf } = mountSortable((ids) => calls.push(plain(ids)));
+
+  // Move Chief Executive up past Chair.
+  const [ceoUp] = btnsOf(rowsOf()[1]);
+  ceoUp.dispatchEvent({ type: 'click' });
+
+  assert.deepEqual(plain(api.order()), ['ceo', 'chair', 'coo', 'fd']);
+  assert.deepEqual(rowIds(), ['ceo', 'chair', 'coo', 'fd'], 'the DOM moved with the model');
+  assert.deepEqual(calls, [['ceo', 'chair', 'coo', 'fd']], 'onOrder fired once, with the new ids');
+
+  // The mover is now first: its up disables; the displaced row's re-enables.
+  assert.equal(btnsOf(rowsOf()[0])[0].disabled, true);
+  assert.equal(btnsOf(rowsOf()[1])[0].disabled, false);
+
+  /* A click reaching a top-row up moves nothing and commits nothing — the
+     browser swallows clicks on [disabled], and the guard holds if one
+     arrives anyway. */
+  ceoUp.dispatchEvent({ type: 'click' });
+  assert.deepEqual(plain(api.order()), ['ceo', 'chair', 'coo', 'fd']);
+  assert.equal(calls.length, 1);
+
+  // Down mirrors up.
+  const [, cooDown] = btnsOf(rowsOf()[2]);
+  cooDown.dispatchEvent({ type: 'click' });
+  assert.deepEqual(plain(api.order()), ['ceo', 'chair', 'fd', 'coo']);
+  assert.deepEqual(calls[1], ['ceo', 'chair', 'fd', 'coo']);
+  assert.equal(btnsOf(rowsOf()[3])[1].disabled, true, 'moved to last → its down disables');
+
+  // order() hands out a copy, not the backing array.
+  const leaked = api.order();
+  leaked.push('junk');
+  assert.deepEqual(plain(api.order()), ['ceo', 'chair', 'fd', 'coo']);
+});
+
+test('sortable writes labels as text, never markup', () => {
+  const host = stubEl('div');
+  const hostile = '<img src=x onerror=alert(1)>"FC';
+  NL.sortable(host, { items: [{ id: 'x', label: hostile }] });
+  const row = host.children[0].children[0];
+  const main = row.children[1];
+  assert.equal(main.textContent, hostile, 'the label survives verbatim as text');
+  assert.equal(main.innerHTML, undefined, 'built via textContent — no innerHTML sink to inject through');
+  assert.equal(row.children[2].getAttribute('aria-label'), 'Move ' + hostile + ' up',
+    'aria-label carries the raw string through the attribute API, which cannot open a tag');
+});
+
+test('sortable is defensive: no host / no items', () => {
+  assert.deepEqual(plain(NL.sortable(null).order()), [], 'no host → inert controller');
+  const host = stubEl('div');
+  const api = NL.sortable(host, {});
+  assert.deepEqual(plain(api.order()), [], 'no items → an empty list');
+  assert.equal(host.children[0].className, 'nl-sort', 'the shell still renders');
 });
