@@ -39,7 +39,9 @@ Stop here — leave clubs unseeded so the call opens with A1.
 | A2 | Scan the PIN column for duplicates or any PIN starting `0` | Every PIN is different, none starts with a zero | ☐ |
 | A3 | **Create UW access** | UW passcode chip (6 characters — UW is not a till) + Copy direct link / New passcode / New link buttons appear | ☐ |
 | A4 | Tap the UW passcode chip, then **Copy direct link**; paste both into meeting chat | "UW passcode copied" / "UW direct link copied" toasts; both land in chat | ☐ |
-| A5 | For two clubs of Nick's choice: tap PIN chip + **Copy direct link**; paste all four items into chat labelled Club 1 / Club 2 | Both clubs' credentials in chat | ☐ |
+| A5 | For two clubs of Nick's choice: tap PIN chip, **manager passcode** chip + **Copy direct link**; paste all six items into chat labelled Club 1 / Club 2 | Both clubs' PINs, manager passcodes and links in chat | ☐ |
+| A6 | Read the route ledger above the club table | "0 in-store · 0 online · 72 unassigned — switched off until they choose" | ☐ |
+| A7 | Set **Club 1 → In-store** and **Club 2 → In-store** in the Route column | Toasts confirm; ledger reads 2 in-store, 70 unassigned; both changes in the Audit tab as `route` | ☐ |
 
 ---
 
@@ -86,11 +88,25 @@ nowhere else.
 | # | Action | Expected | Pass |
 |---|--------|----------|------|
 | D1 | N signs into **Club 2** on the laptop (direct link + PIN from chat) | Second till open under a different crest | ☐ |
-| D2 | At the **Club 2** till, enter one of Club 1's unused `Demo day` codes → REDEEM | ❌ **"registered to [Club 1], so it can only be redeemed there"** — named, and refused | ☐ |
+| D2 | At the **Club 2** till, enter one of Club 1's unused `Demo day` codes → REDEEM | ❌ the **neutral** refusal — "This code can't be redeemed", UW contact + T&Cs link. It does **not** say whose code it is: till staff can't adjudicate (spec item 5) | ☐ |
 | D3 | Check U's screen | That code is **still unredeemed** and still shows Club 1 — the failed attempt changed nothing | ☐ |
-| D4 | At the **Club 1** till, enter one of Club 2's codes → REDEEM | Refused the same way, naming Club 2 — the rule runs both directions | ☐ |
-| D5 | R reads out one fresh **Club 2** code; N types it into **both** tills, then presses REDEEM on each as near-simultaneously as possible | Club 1's till refuses it as Club 2's code; Club 2's till redeems it once. (If both devices are on Club 2, exactly one ✅ and one ❌ naming the winner) | ☐ |
+| D4 | At the **Club 1** till, enter one of Club 2's codes → REDEEM | The same neutral refusal — indistinguishable from a fake, both directions | ☐ |
+| D5 | R reads out one fresh **Club 2** code; N types it into **both** tills, then presses REDEEM on each as near-simultaneously as possible | Club 1's till gives the neutral refusal; Club 2's till redeems it once. (If both devices are on Club 2, exactly one ✅ — the other gets the already-redeemed dialog, which still names club and time) | ☐ |
 | D6 | Check U's screen | One redemption recorded, attributed to Club 2 only | ☐ |
+
+---
+
+## Phase R — routes and expiry (R + N, ~6 min)
+
+| # | Action | Expected | Pass |
+|---|--------|----------|------|
+| R1 | N opens a third club's link and enters its correct PIN (that club is still unassigned) | **Holding screen**, not an error: "isn't activated on the voucher scheme yet". No till, no data | ☐ |
+| R2 | Same club, correct **manager passcode** | Same holding screen — unassigned switches off both doors | ☐ |
+| R3 | R sets that club → **Online**; N enters its **PIN** again | Holding screen: the club "redeems through its online store, so the till page isn't used" | ☐ |
+| R4 | N enters its **manager passcode** | Admin view: upload, code list, activity. **No redeem box, no PIN card, no till-card button anywhere** | ☐ |
+| R5 | R checks the route ledger | Counts moved with each change; every change listed in Audit under `route` | ☐ |
+| R6 | (Live-only check, note it now) Central codes older than 12 months | Show an **Expired** pill and count card in every panel, and the till refuses them with the expiry date — sandbox codes are too young, so this is asserted by the unit tests instead | ☐ |
+| R7 | R opens **Support & notifications**, sets a support email + a notify address | Saved; the neutral refusal (D2) now shows the support address to new sign-ins; an upload (Phase K) sends the alert email | ☐ |
 
 ---
 
@@ -98,10 +114,10 @@ nowhere else.
 
 | # | Action | Expected | Pass |
 |---|--------|----------|------|
-| J1 | Scroll to the foot of the **Club 1** till page | **Check a code** panel, saying 10 checks an hour and that checks are recorded | ☐ |
+| J1 | Sign in to Club 1 with the **manager passcode** and scroll down | **Check a code** panel (manager door only now — it is NOT on the till PIN view), saying 10 checks an hour and that checks are recorded | ☐ |
 | J2 | Check a Club 1 code that has **not** been redeemed | "Genuine, and not yet redeemed", registered to Club 1 — and it stays unredeemed (nothing is used up by checking) | ☐ |
 | J3 | Check the code redeemed in C6 | "Already redeemed at Club 1", with the date and time | ☐ |
-| J4 | Check a **Club 2** code | "Genuine and unused, but registered to [Club 2]" | ☐ |
+| J4 | Check a **Club 2** code | "Genuine and unused, but registered to [Club 2]" — the detail the till deliberately withholds lives here | ☐ |
 | J5 | Check obvious nonsense, e.g. `ZZZZZZ` | "This is not a Utility Warehouse promo code" | ☐ |
 | J6 | Keep checking until the 10th | Counter under the box counts down; the 11th is refused with a "try again in N minutes" | ☐ |
 | J7 | R opens the master Audit tab, filters action → **Code check** | Every one of Nick's checks is listed, against Club 1, with what each one found | ☐ |
@@ -112,7 +128,7 @@ nowhere else.
 
 | # | Action | Expected | Pass |
 |---|--------|----------|------|
-| K1 | At the foot of the **Club 1** till page, find **Upload your own codes** | Intro names Club 1; paste box, optional label, three tick-boxes, Upload button | ☐ |
+| K1 | R sets **Club 1 → Online**; N signs back in with Club 1's **manager passcode** | Admin view opens with **Upload your own codes** at the top — no redeem box, no PIN card, no till card (an online club has no till). Intro names Club 1; paste box, optional label, three tick-boxes | ☐ |
 | K2 | Paste three made-up codes, leave the tick-boxes **unticked**, press Upload | Refused — all three confirmations required; nothing added | ☐ |
 | K3 | Tick all three, press Upload | Second confirm dialog restating the three undertakings and naming Club 1 | ☐ |
 | K4 | Cancel it | Nothing added; the codes and ticks are still in the form | ☐ |

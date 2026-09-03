@@ -3,6 +3,23 @@
 <head>
 <!--
   UW Promo Codes — Club point-of-sale redemption page
+  Version: v5.0 (03/09/2026) — routes land (spec v42.0). Every club is
+           unassigned / instore / online; unassigned resolves both doors to a
+           holding screen with no token minted, and an online club's till PIN
+           does the same — an online club has no till here, and its manager
+           grant carries no PIN or link token, so a QR till card cannot exist
+           for it. Instore managers lose the upload module (their codes come
+           centrally from UW); online managers get upload + inventory +
+           activity only. Central codes now expire 12 months from generation,
+           refused at redemption with the date; club-uploaded codes never
+           expire here (the club's POS is the authority). The refusal model:
+           already-redeemed keeps club + date, expired states its date, and
+           everything else (not recognised / revoked / wrong club) shares ONE
+           neutral message with the UW support address and T&Cs link, so till
+           staff can't adjudicate — the detailed Check a code moves behind
+           the manager door for the same reason. The voucher value reads
+           UWP.VALUE everywhere (£40-vs-£50 unresolved upstream), and a
+           completed upload emails the NL via the GAS router.
   Version: v4.3 (15/08/2026) — the context header bar is canon now (.nl-idbar, nl-brand.css v2.37).
            Pure rename — the local .hbar was the same rules under a different
            name, and .hbar already meant a histogram bar in
@@ -247,6 +264,9 @@
   </div>
 
   <div class="wrap wrap--narrow">
+    <!-- Till section — instore-route clubs only. An online club never sees a
+         redeem box: its codes are redeemed on its own webstore. -->
+    <div id="tillSection">
     <div class="pos">
       <img class="pos__uw" src="/assets/partners/Utility%20Warehouse.png" alt="Utility Warehouse"
            onerror="this.onerror=null;this.style.display='none';">
@@ -256,40 +276,29 @@
              autocapitalize="characters" spellcheck="false" aria-label="Promo code">
       <div><button class="btn btn--primary pos__btn" id="posBtn">Redeem</button></div>
       <div class="pos__msg" id="posMsg" role="alert" aria-live="polite"></div>
-      <div class="pos__hint">Redeemed by mistake? Contact the National League — codes can be released back.</div>
+      <div class="pos__hint">Redeemed by mistake? Contact the National League — codes can be released back.
+        <a href="#" id="tcsLinkTill" target="_blank" rel="noopener">Utility Warehouse voucher terms</a></div>
     </div>
 
     <div class="stats" id="stats"></div>
 
     <div class="list-head">Redeemed at your club</div>
     <div id="list"></div>
-
-    <!-- Voucher checker — read-only lookup, rate-limited, audited. Sits at the
-         foot of the page deliberately: redeeming is the job, checking is the
-         occasional "is this thing real?". -->
-    <div class="list-head">Check a code</div>
-    <div class="checker">
-      <p class="checker__intro">Look a code up without redeeming it — whether it’s genuine, which club
-        it’s registered to, and whether it has already been used. Checks are limited to
-        <strong>10 an hour</strong> and are recorded for the National League.</p>
-      <div class="checker__row">
-        <input class="checker__input" id="chkInput" maxlength="64" placeholder="***" autocomplete="off"
-               autocapitalize="characters" spellcheck="false" aria-label="Code to check">
-        <button class="btn btn--ghost" id="chkBtn">Check code</button>
-      </div>
-      <div class="checker__out" id="chkOut" role="status" aria-live="polite"></div>
-      <div class="checker__quota" id="chkQuota"></div>
-    </div>
+    </div><!-- /#tillSection -->
 
     <!-- ── Club admin only ──────────────────────────────────────────────
          Everything below opens on the club's MANAGER passcode, not the
          4-digit till PIN. The PIN is printed on the till card and sits by a
          QR at a public kiosk, so it must not be the thing that lets someone
-         commit the club to £50 a code. Same URL, same QR — two doors. -->
+         commit the club to a voucher's value a time. Same URL, same QR —
+         two doors, and now two routes as well (spec v42.0). -->
     <div id="managerOnly" hidden>
 
-    <!-- Club-supplied codes. Registered to this club automatically — there is
-         no club to choose, because a club can only ever upload its own. -->
+    <!-- Club-supplied codes — ONLINE-route clubs only: in-store clubs get
+         their codes centrally from UW, so the module is hidden for them.
+         Registered to this club automatically — there is no club to choose,
+         because a club can only ever upload its own. -->
+    <div id="uploadSection">
     <div class="list-head">Upload your own codes</div>
     <div class="upload">
       <p class="upload__intro">Add your own promo codes whenever suits you. They are registered to
@@ -311,7 +320,7 @@
         </label>
         <label class="upload__term">
           <input type="checkbox" id="upT2">
-          <span>Each code applies the <strong>agreed £50 discount</strong>.</span>
+          <span>Each code applies the <strong>agreed <span class="uwVal"></span> discount</strong>.</span>
         </label>
         <label class="upload__term">
           <input type="checkbox" id="upT3">
@@ -320,6 +329,26 @@
       </div>
       <button class="btn btn--primary" id="upBtn">Upload codes</button>
       <div class="upload__out" id="upOut" role="status" aria-live="polite"></div>
+    </div>
+    </div><!-- /#uploadSection -->
+
+    <!-- Voucher checker — read-only lookup, rate-limited, audited. Behind the
+         manager door as of v5.0: the till's refusal screen is deliberately
+         neutral (spec v42.0 item 5 — till staff never adjudicate), and a
+         detailed lookup sitting next to it would hand the detail straight
+         back. Managers adjudicate; tills don't. -->
+    <div class="list-head">Check a code</div>
+    <div class="checker">
+      <p class="checker__intro">Look a code up without redeeming it — whether it’s genuine, which club
+        it’s registered to, and whether it has already been used. Checks are limited to
+        <strong>10 an hour</strong> and are recorded for the National League.</p>
+      <div class="checker__row">
+        <input class="checker__input" id="chkInput" maxlength="64" placeholder="***" autocomplete="off"
+               autocapitalize="characters" spellcheck="false" aria-label="Code to check">
+        <button class="btn btn--ghost" id="chkBtn">Check code</button>
+      </div>
+      <div class="checker__out" id="chkOut" role="status" aria-live="polite"></div>
+      <div class="checker__quota" id="chkQuota"></div>
     </div>
 
     <!-- Full inventory. Unlike the till view above, this DOES print unredeemed
@@ -360,6 +389,7 @@
     </div>
 
     <!-- Self-service on the till PIN so a walked card doesn't need an email. -->
+    <div id="pinSection">
     <div class="list-head">Your till PIN</div>
     <div class="inv">
       <p class="checker__meta" style="margin-bottom:10px">The 4-digit PIN your staff type at the till.
@@ -374,6 +404,11 @@
         carries your current PIN — change the PIN above, then print a new card.</p>
     </div>
 
+    </div><!-- /#pinSection -->
+
+    <p class="checker__meta" style="margin:18px 0 0">
+      Fan-facing voucher terms: <a href="#" id="tcsLinkMgr" target="_blank" rel="noopener">partner.uw.co.uk/national-league</a>
+      — supporters may quote this page at your staff.</p>
     </div><!-- /#managerOnly -->
   </div>
 </div>
@@ -384,7 +419,14 @@
 (function () {
   'use strict';
 
-  var CLUB = null, CREDS = null;       // CLUB from the grant; CREDS manager-only
+  /* Spec item 3: the voucher value appears nowhere as a literal — every
+     mention reads UWP.VALUE, so £40-vs-£50 resolves in one line of canon. */
+  Array.prototype.forEach.call(document.querySelectorAll('.uwVal'), function (el) {
+    el.textContent = UWP.VALUE;
+  });
+
+  var CLUB = null, CREDS = null;       // CLUB from the grant; CREDS instore-manager-only
+  var ROUTE = 'instore', SUPPORT = null;
   var MODE = 'till';                   // 'till' (4-digit PIN) | 'manager' (club passcode)
   var AUDIT = {}, auditQuery = null;
   var CODES = {}, codesLoaded = false, unlocked = false, codesQuery = null;
@@ -449,11 +491,20 @@
       btn.textContent = 'Checking…';
       var tok = new URLSearchParams(location.search).get('c');
       UWP.signIn(typed, tok).then(function (session) {
-        enter(session.club, session.role, session.creds);
+        enter(session);
       }).catch(function (e) {
         busyGate = false;
         btn.disabled = false;
         btn.textContent = 'Open';
+        /* A holding response means the credential was RIGHT but the club has
+           no active route (or a till PIN at an online club). Show it as
+           information, not failure — the person did nothing wrong. */
+        if (e.holding) {
+          document.getElementById('gateForm').style.display = 'none';
+          document.getElementById('gateSub').textContent = e.message;
+          err.textContent = '';
+          return;
+        }
         err.textContent = e.message || 'Not recognised.';
       });
     }
@@ -467,18 +518,32 @@
   });
 
   /* ── Enter: crest branding + live list of this club's redemptions ───── */
-  function enter(club, mode, creds) {
-    CLUB = club;
-    CREDS = creds || null;          // manager only: own PIN + link token
-    MODE = mode === 'manager' ? 'manager' : 'till';
+  function enter(session) {
+    CLUB = session.club;
+    CREDS = session.creds || null;  // instore managers only: own PIN + link token
+    MODE = session.role === 'manager' ? 'manager' : 'till';
+    ROUTE = session.route === 'online' ? 'online' : 'instore';
+    SUPPORT = session.support || null;
     unlocked = true;
     document.getElementById('gate').style.display = 'none';
     document.getElementById('app').style.display = 'block';
 
-    // Admin sections exist in the markup but stay hidden on a till PIN.
+    /* Route × door decides what exists (spec v42.0 item 2). Unassigned and
+       online-till never get past the gate, so only three shapes render:
+         instore till     → redeem + redeemed list
+         instore manager  → the above + checker, inventory, activity, PIN
+         online manager   → upload + checker, inventory, activity (no till
+                            anything — a QR card must never exist for a club
+                            with no till, and CREDS arrives null to match) */
+    document.getElementById('tillSection').hidden = (ROUTE !== 'instore');
     document.getElementById('managerOnly').hidden = (MODE !== 'manager');
+    document.getElementById('uploadSection').hidden = (ROUTE !== 'online');
+    document.getElementById('pinSection').hidden = !(MODE === 'manager' && ROUTE === 'instore' && CREDS);
+    document.getElementById('tcsLinkTill').href = UWP.TCS_URL;
+    document.getElementById('tcsLinkMgr').href = UWP.TCS_URL;
+
     var tag = document.getElementById('modeTag');
-    tag.textContent = MODE === 'manager' ? 'Club admin' : 'Till';
+    tag.textContent = (MODE === 'manager' ? 'Club admin' : 'Till') + (ROUTE === 'online' ? ' · online' : '');
     tag.classList.toggle('mode-tag--admin', MODE === 'manager');
     document.getElementById('signout').textContent = MODE === 'manager' ? 'Sign out' : 'Not you?';
 
@@ -532,19 +597,18 @@
       return UWP.ref('codes').orderByChild('norm').equalTo(norm).once('value');
     }).then(function (s) {
       var val = s.val();
-      if (!val) { busy = false; setMsg('❌ Code not recognised — check it and try again.', 'err'); return; }
+      if (!val) { busy = false; refused(); return; }
       var id = Object.keys(val)[0], rec = val[id];
-      if (rec.status === 'revoked') {
-        busy = false;
-        setMsg('❌ This code is no longer valid. Contact the National League if that seems wrong.', 'err');
-        return;
-      }
+      /* The refusal model (spec v42.0 items 4–5, owner ruling 03/09/2026):
+         two informative outcomes — already redeemed (with club and date) and
+         expired (with the date it expired) — and ONE neutral message for
+         everything else (not recognised / revoked / wrong club), so till
+         staff can't adjudicate the contested cases. The detail still exists
+         behind the manager door's checker. Enforcement is unchanged — the
+         transaction still refuses all of them — only the words differ. */
       if (rec.status === 'redeemed') { busy = false; alreadyRedeemed(rec); return; }
-      /* Registered to exactly one club since v3.0 — a code belonging to
-         another club is refused here by name, and refused again inside the
-         transaction if it somehow gets past this. Codes created before v3.0
-         carry no club and stay redeemable anywhere. */
-      if (rec.club && rec.club !== CLUB.code) { busy = false; wrongClub(rec); return; }
+      if (rec.status === 'active' && UWP.isExpired(rec)) { busy = false; expiredDialog(rec); return; }
+      if (rec.status === 'revoked' || (rec.club && rec.club !== CLUB.code)) { busy = false; refused(); return; }
       attemptRedeem(id, rec);
     }).catch(function (err) {
       busy = false;
@@ -556,19 +620,37 @@
     setMsg('', '');
     NL.alert('<span class="pos-result__icon">❌</span>' +
       'Code <span class="code-mono">' + esc(rec.code) + '</span> has already been redeemed at <strong>' +
-      esc(rec.clubName || 'another club') + '</strong> on ' + esc(UWP.fmt(rec.redeemedAt)) + '.', {
+      esc(rec.clubName || 'another club') + '</strong> on ' + esc(UWP.fmt(rec.redeemedAt)) + '.' +
+      supportLine(), {
       title: 'Already redeemed', html: true
     });
   }
 
-  function wrongClub(rec) {
+  function expiredDialog(rec) {
     setMsg('', '');
     NL.alert('<span class="pos-result__icon">❌</span>' +
-      'Code <span class="code-mono">' + esc(rec.code) + '</span> is registered to <strong>' +
-      esc(rec.clubName || 'another club') + '</strong>, so it can only be redeemed there. ' +
-      'It cannot be redeemed at ' + esc(CLUB.name) + '.', {
-      title: 'Wrong club', html: true
+      'Code <span class="code-mono">' + esc(rec.code) + '</span> expired on <strong>' +
+      esc(NL.formatDate(UWP.expiresAt(rec))) + '</strong>. Codes are valid for 12 months.' +
+      supportLine(), {
+      title: 'Code expired', html: true
     });
+  }
+
+  /* The neutral refusal: not recognised, revoked, or another club's code —
+     deliberately indistinguishable, so nothing can be argued at the till. */
+  function refused() {
+    setMsg('', '');
+    NL.alert('<span class="pos-result__icon">❌</span>' +
+      'This code can’t be redeemed.' + supportLine(true), {
+      title: 'Not redeemable', html: true
+    });
+  }
+
+  function supportLine(queue) {
+    return '<p class="pos-result__note">Please ask the supporter to contact Utility Warehouse' +
+      (SUPPORT ? ' at <strong>' + esc(SUPPORT) + '</strong>' : '') +
+      (queue ? '. Please don’t hold up the queue.' : '.') +
+      ' <a href="' + esc(UWP.TCS_URL) + '" target="_blank" rel="noopener">Voucher terms</a></p>';
   }
 
   /* Transaction so two tills can't claim the same code — whoever commits
@@ -582,8 +664,8 @@
       if (!res.committed) {
         var cur = res.snapshot && res.snapshot.val();
         if (cur && cur.status === 'redeemed') { alreadyRedeemed(cur); }
-        else if (cur && cur.club && cur.club !== CLUB.code) { wrongClub(cur); }
-        else { setMsg('This code is no longer valid.', 'err'); }
+        else if (cur && cur.status === 'active' && UWP.isExpired(cur)) { expiredDialog(cur); }
+        else { refused(); }
         return;
       }
       UWP.audit(actor(), CLUB.name, 'redeem', { club: CLUB.code, clubName: CLUB.name, codes: rec.code });
@@ -712,6 +794,9 @@
       if (rec.status === 'revoked') {
         chkCard(UWP.pillFor('revoked'), 'This code has been cancelled and can no longer be redeemed.',
           'Registered to ' + esc(where) + '. Contact the National League if that seems wrong.');
+      } else if (rec.status === 'active' && UWP.isExpired(rec)) {
+        chkCard(UWP.pillFor('expired'), 'This code expired on ' + esc(NL.formatDate(UWP.expiresAt(rec))) + '.',
+          'Central codes are valid for 12 months from generation. Registered to ' + esc(where) + '.');
       } else if (rec.status === 'redeemed') {
         chkCard(UWP.pillFor('redeemed'), 'Already redeemed at ' + esc(where) + '.',
           'Redeemed ' + esc(UWP.fmt(rec.redeemedAt)) + ' (' + esc(UWP.ago(rec.redeemedAt)) + ').');
@@ -722,7 +807,7 @@
         chkCard(UWP.pillFor('active'), 'Genuine and unused, but registered to ' + esc(where) + '.',
           'It can only be redeemed at ' + esc(where) + ', not at ' + esc(CLUB.name) + '.');
       }
-      logCheck(rec.code || typed, rec.status + (mine ? '' : ' · registered to ' + where));
+      logCheck(rec.code || typed, UWP.statusOf(rec) + (mine ? '' : ' · registered to ' + where));
     }).catch(function (err) {
       chkBusy = false;
       chkPlain('Could not check that code: ' + esc(err.message));
@@ -780,7 +865,7 @@
     tb.innerHTML = list.map(function (r) {
       return '<tr' + (r.status === 'revoked' ? ' class="is-revoked"' : '') + '>' +
         '<td><span class="code-mono">' + esc(r.code) + '</span></td>' +
-        '<td>' + UWP.pillFor(r.status) + '</td>' +
+        '<td>' + UWP.pillFor(UWP.statusOf(r)) + '</td>' +
         '<td>' + esc(r.status === 'redeemed' ? UWP.fmt(r.redeemedAt) : '—') + '</td>' +
         '<td title="' + esc(UWP.fmt(r.createdAt)) + '">' + esc(UWP.ago(r.createdAt)) + '</td>' +
         '<td>' + esc(r.batchLabel || '—') + '</td></tr>';
@@ -968,7 +1053,7 @@
     NL.confirm('Upload ' + list.length + ' code' + (list.length === 1 ? '' : 's') + ' for ' + CLUB.name + '?', {
       title: 'Confirm upload',
       detail: 'You are confirming these codes work in ' + CLUB.name + '’s own till system, apply the ' +
-        'agreed £50 discount, and stay valid for at least 12 months. This is recorded against your club ' +
+        'agreed ' + UWP.VALUE + ' discount, and stay valid for at least 12 months. This is recorded against your club ' +
         'and cannot be edited afterwards.',
       confirmText: 'Yes, upload them'
     }).then(function (ok) {
@@ -995,11 +1080,15 @@
           codes: list.slice(0, 10).map(function (c) { return c.code; }).join(', ') +
                  (list.length > 10 ? ' …' : ''),
           detail: 'Club upload' + (label ? ' “' + label + '”' : '') +
-            ' — confirmed: works in club till system; applies agreed £50 discount; valid 12 months+'
+            ' — confirmed: works in club till system; applies agreed ' + UWP.VALUE + ' discount; valid 12 months+'
         });
         upCodes.value = '';
         document.getElementById('upLabel').value = '';
         ['upT1', 'upT2', 'upT3'].forEach(function (id) { document.getElementById(id).checked = false; });
+        /* Tell the NL the codes are in (spec item 6) — otherwise an upload
+           can sit unnoticed until someone thinks to look. Fire-and-forget:
+           the upload already succeeded and is audited either way. */
+        UWP.notifyUpload(CLUB, list.length, label);
         upMsg('<strong>' + list.length + ' code' + (list.length === 1 ? '' : 's') + ' uploaded.</strong>' +
           '<div class="checker__meta" style="margin-top:5px">They’re live now and redeemable at ' +
           esc(CLUB.name) + '. Your confirmations have been recorded with the National League.</div>');

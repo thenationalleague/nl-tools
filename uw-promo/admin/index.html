@@ -24,6 +24,19 @@
            write config. That is the change that stops all 72 till PINs being
            world-readable. First run mints a bootstrap master token while no
            passcode exists; nothing subscribes to RTDB until the session does.
+  Version: v5.0 (03/09/2026) — routes land (spec v42.0). New Route column in
+           Clubs & access — unassigned / in-store / online per club, with the
+           at-a-glance ledger above the table (the unassigned number is the
+           chase list) and an audited toggle that is the system of record.
+           Seeding defaults new clubs to unassigned: switched off until they
+           choose. New Support & notifications card: the UW support address
+           fans are pointed at on a refused code, and the comma-separated
+           list the upload-complete email goes to — addresses live in RTDB,
+           never in this public repo. Central codes show a derived Expired
+           state (12 months from generation) in the pills, filter and count
+           cards; the add-codes dropdown marks online/unassigned clubs so a
+           central batch doesn't land where no shop will redeem it; the
+           access CSV carries Route; the till card carries the fan T&Cs URL.
   Version: v3.1 (10/08/2026) — clubs now get TWO credentials: the 4-digit till
            PIN (printed, kiosk-facing) and a 6-character manager passcode that
            opens the club admin view on the same page. Seeding issues both;
@@ -134,6 +147,18 @@
   /* One row for every access action. Wraps only when the window genuinely
      cannot fit them, rather than because one was parked in a paragraph. */
   .access-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .route-ledger { font-size: var(--text-sm); color: var(--text-muted); margin: 0 0 12px; }
+  .route-ledger__n { font-weight: 900; font-variation-settings: 'wght' 900; color: var(--navy); }
+  .route-ledger__n--due { color: var(--primary); }
+  .route-pick { font-family: var(--font); font-size: var(--text-sm); padding: 5px 6px;
+    border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); background: var(--white); }
+  .route-pick:focus-visible { outline: none; box-shadow: var(--focus-ring); border-color: var(--primary); }
+  .support-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+  .support-form label { display: block; font-size: var(--text-xs); font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.07em; color: var(--text-muted); margin-bottom: 5px; }
+  .support-form input { font-family: var(--font); font-size: var(--text-sm); padding: 8px 10px; min-width: 260px;
+    border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); }
+  .support-form input:focus-visible { outline: none; box-shadow: var(--focus-ring); border-color: var(--primary); }
   /* Redemptions-by-club breakdown */
   .byclub { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
     box-shadow: var(--shadow); padding: 14px 16px; margin-bottom: 18px; }
@@ -205,6 +230,7 @@
             <option value="active">Unredeemed</option>
             <option value="redeemed">Redeemed</option>
             <option value="revoked">Revoked</option>
+            <option value="expired">Expired</option>
           </select>
           <input class="toolbar__search" id="fSearch" type="search" placeholder="Search codes…" aria-label="Search codes">
         </div>
@@ -245,6 +271,20 @@
         <div class="access-card__row" id="uwAccessRow"></div>
       </div>
       <div class="access-card">
+        <div class="access-card__title">Support &amp; notifications</div>
+        <!-- Personal addresses live HERE, in RTDB, precisely because this
+             repo is public: nothing in git ever carries an email address.
+             The support address rides to clubs in their sign-in grant; the
+             notify list is read by the GAS mailer with its server credential. -->
+        <div class="support-form">
+          <div><label for="supEmail">UW support email — shown to fans on a refused code</label>
+            <input id="supEmail" type="email" placeholder="not set yet — refusal screens show only the T&amp;Cs link"></div>
+          <div><label for="supNotify">Upload alerts go to (comma-separated)</label>
+            <input id="supNotify" type="text" placeholder="e.g. Lucy&#8217;s and your addresses"></div>
+          <button class="btn btn--primary btn--sm" id="supSave">Save</button>
+        </div>
+      </div>
+      <div class="access-card">
         <div class="access-card__title">Club access <span id="clubCount" style="color:var(--text-muted);font-weight:700"></span></div>
         <div id="clubAccessBody"></div>
       </div>
@@ -267,6 +307,8 @@
             <option value="release">Release</option>
             <option value="revoke">Revoke</option>
             <option value="check">Code check</option>
+            <option value="route">Route change</option>
+            <option value="support">Support details</option>
             <option value="register">Register to club</option>
             <option value="delete">Delete</option>
             <option value="seed-clubs">Seed clubs</option>
@@ -430,11 +472,15 @@
   });
 
   /* ── Clubs helpers ──────────────────────────────────────────────────── */
+  var ROUTE_LABEL = { unassigned: 'Unassigned', instore: 'In-store', online: 'Online' };
+
   function clubList() {
     var clubs = (CONFIG && CONFIG.clubs) || {};
     return Object.keys(clubs).map(function (k) {
       var c = clubs[k];
-      return { code: k, name: c.name, division: c.division || '', passcode: c.passcode, managerPass: c.managerPass, token: c.token };
+      return { code: k, name: c.name, division: c.division || '', passcode: c.passcode,
+               managerPass: c.managerPass, token: c.token,
+               route: (c.route === 'instore' || c.route === 'online') ? c.route : 'unassigned' };
     }).sort(function (a, b) {
       return (a.division || '').localeCompare(b.division || '') || a.name.localeCompare(b.name);
     });
@@ -481,9 +527,13 @@
       if (!byDiv[c.division]) { byDiv[c.division] = []; order.push(c.division); }
       byDiv[c.division].push(c);
     });
+    /* Central codes are the IN-STORE route's supply. Adding them to an
+       online or unassigned club isn't blocked — NL may have its reasons —
+       but the dropdown says what you're doing. */
     return '<option value="">' + esc(placeholder) + '</option>' + order.map(function (d) {
       return '<optgroup label="' + esc(d || 'Clubs') + '">' + byDiv[d].map(function (c) {
-        return '<option value="' + esc(c.code) + '">' + esc(c.name) + '</option>';
+        var mark = c.route === 'instore' ? '' : ' — ' + ROUTE_LABEL[c.route].toLowerCase();
+        return '<option value="' + esc(c.code) + '">' + esc(c.name) + esc(mark) + '</option>';
       }).join('') + '</optgroup>';
     }).join('');
   }
@@ -517,7 +567,7 @@
     var q = (document.getElementById('fSearch').value || '').toUpperCase().trim();
     return codeRows().filter(function (r) {
       if (!matchesClub(r, club)) return false;
-      if (status && r.status !== status) return false;
+      if (status && UWP.statusOf(r) !== status) return false;
       if (q && (r.code || '').toUpperCase().indexOf(q) === -1) return false;
       return true;
     });
@@ -560,14 +610,15 @@
     if (!codesLoaded) return;
     var all = codeRows();
     var scope = clubFiltered(), label = clubFilterLabel();
-    var counts = { total: scope.length, active: 0, redeemed: 0, revoked: 0 };
-    scope.forEach(function (r) { if (counts[r.status] != null) counts[r.status]++; });
+    var counts = { total: scope.length, active: 0, redeemed: 0, revoked: 0, expired: 0 };
+    scope.forEach(function (r) { var st = UWP.statusOf(r); if (counts[st] != null) counts[st]++; });
     var suffix = label ? ' · ' + esc(label) : '';
     document.getElementById('stats').innerHTML =
       '<div class="stat"><div class="stat__num">' + counts.total + '</div><div class="stat__label">Codes in pool' + suffix + '</div></div>' +
       '<div class="stat stat--info"><div class="stat__num">' + counts.active + '</div><div class="stat__label">Unredeemed</div></div>' +
       '<div class="stat stat--approved"><div class="stat__num">' + counts.redeemed + '</div><div class="stat__label">Redeemed</div></div>' +
-      '<div class="stat stat--expired"><div class="stat__num">' + counts.revoked + '</div><div class="stat__label">Revoked</div></div>';
+      '<div class="stat stat--expired"><div class="stat__num">' + counts.revoked + '</div><div class="stat__label">Revoked</div></div>' +
+      '<div class="stat stat--expired"><div class="stat__num">' + counts.expired + '</div><div class="stat__label">Expired</div></div>';
 
     renderByClub(all);
 
@@ -600,7 +651,7 @@
       return '<tr' + (r.status === 'revoked' ? ' class="is-revoked"' : '') + '>' +
         '<td><span class="code-mono">' + esc(r.code) + '</span> ' +
           '<button class="code-copy" data-copy="' + esc(r.code) + '" title="Copy code" aria-label="Copy code">⧉</button></td>' +
-        '<td>' + UWP.pillFor(r.status) + '</td>' +
+        '<td>' + UWP.pillFor(UWP.statusOf(r)) + '</td>' +
         '<td>' + clubCell + '</td>' +
         '<td>' + esc(r.status === 'redeemed' ? UWP.fmt(r.redeemedAt) : '—') + '</td>' +
         '<td title="' + esc(UWP.fmt(r.createdAt)) + '">' + esc(UWP.ago(r.createdAt)) + '</td>' +
@@ -992,6 +1043,15 @@
     chip.onclick = function () { NL.copy(chip.textContent, { ok: 'Master passcode copied' }); };
     document.getElementById('btnMasterPass').onclick = changeMasterPass;
 
+    /* Support & notifications — refill only while the fields are idle, so a
+       half-typed address isn't clobbered by a config listener tick. */
+    var supEmail = document.getElementById('supEmail'), supNotify = document.getElementById('supNotify');
+    if (document.activeElement !== supEmail && document.activeElement !== supNotify) {
+      supEmail.value = (CONFIG.support && CONFIG.support.email) || '';
+      supNotify.value = (CONFIG.support && CONFIG.support.notify) || '';
+    }
+    document.getElementById('supSave').onclick = saveSupport;
+
     // UW access
     var uwRow = document.getElementById('uwAccessRow');
     if (CONFIG.uw && CONFIG.uw.passcode) {
@@ -1035,6 +1095,12 @@
     var legacy = clubs.filter(function (c) { return !/^\d{4}$/.test(String(c.passcode || '')); });
     // Clubs seeded before the two-door split have a PIN but no manager passcode.
     var noMgr = clubs.filter(function (c) { return !c.managerPass; });
+    /* The route ledger, at a glance (spec item 1: "the admin view should show
+       all 72 states so chasing is trivial"). The unassigned number is the
+       chase list — it should reach zero within Jon's two-week deadline. */
+    var byRoute = { unassigned: 0, instore: 0, online: 0 };
+    clubs.forEach(function (c) { byRoute[c.route]++; });
+
     /* Every action on one row — a button tucked into an explanatory paragraph
        reads as a footnote and lands on its own line, which is how "Issue
        missing manager passcodes" ended up separated from the rest. The notes
@@ -1050,6 +1116,13 @@
           ? '<button class="btn btn--navy btn--sm" id="btnIssueMgr">Issue missing manager passcodes</button>'
           : '') +
       '</div>' +
+      '<p class="route-ledger">' +
+        '<span class="route-ledger__n">' + byRoute.instore + '</span> in-store · ' +
+        '<span class="route-ledger__n">' + byRoute.online + '</span> online · ' +
+        '<span class="route-ledger__n' + (byRoute.unassigned ? ' route-ledger__n--due' : '') + '">' +
+          byRoute.unassigned + '</span> unassigned' +
+        (byRoute.unassigned ? ' — switched off until they choose; the chase list' : ' — every club has a route') +
+      '</p>' +
       (noMgr.length
         ? '<p class="code-note" style="margin:-4px 0 12px">' + noMgr.length + ' club' +
           (noMgr.length > 1 ? 's have' : ' has') + ' no manager passcode yet — their staff can use the ' +
@@ -1062,11 +1135,15 @@
           '“Reissue all club PINs” converts every club to a 4-digit PIN in one go.</p>'
         : '') +
       '<div class="table-wrap"><table class="table">' +
-      '<thead><tr><th>Club</th><th>Division</th><th>Till PIN</th><th>Manager passcode</th><th></th></tr></thead><tbody>' +
+      '<thead><tr><th>Club</th><th>Division</th><th>Route</th><th>Till PIN</th><th>Manager passcode</th><th></th></tr></thead><tbody>' +
       clubs.map(function (c) {
         return '<tr><td><span class="club-cell">' + NL.clubs.crestImgHtml(c.name, 'thumb') +
           '<span class="club-cell__name">' + esc(c.name) + '</span></span></td>' +
           '<td>' + esc(c.division) + '</td>' +
+          '<td><select class="route-pick" data-route="' + esc(c.code) + '" aria-label="Route for ' + esc(c.name) + '">' +
+            ['unassigned', 'instore', 'online'].map(function (r) {
+              return '<option value="' + r + '"' + (c.route === r ? ' selected' : '') + '>' + ROUTE_LABEL[r] + '</option>';
+            }).join('') + '</select></td>' +
           '<td><button class="pass-chip" data-copypass="' + esc(c.code) + '" title="Click to copy">' + esc(c.passcode) + '</button></td>' +
           '<td>' + (c.managerPass
             ? '<button class="pass-chip" data-copymgr="' + esc(c.code) + '" title="Click to copy">' + esc(c.managerPass) + '</button>'
@@ -1189,6 +1266,27 @@
     } catch (e) { toast(e.message, 'error'); }
   }
 
+  /* Route toggle — the system of record for who is on which route (spec
+     item 1). Change takes effect at each club's NEXT sign-in: sessions
+     already open keep their shape until they re-enter, which matches how
+     every other credential change here behaves. */
+  document.getElementById('clubAccessBody').addEventListener('change', function (e) {
+    var sel = e.target.closest('[data-route]');
+    if (!sel) return;
+    var code = sel.getAttribute('data-route');
+    var c = CONFIG.clubs && CONFIG.clubs[code];
+    var route = sel.value;
+    if (!c || ['unassigned', 'instore', 'online'].indexOf(route) === -1) return;
+    UWP.ensureAuth().then(function () {
+      return UWP.ref('config/clubs/' + code).update({ route: route, updatedAt: UWP.TS() });
+    }).then(function () {
+      UWP.audit(ACTOR, ACTOR_LABEL, 'route', {
+        club: code, clubName: c.name, detail: 'Route set to ' + ROUTE_LABEL[route].toLowerCase()
+      });
+      toast(c.name + ' → ' + ROUTE_LABEL[route], 'success');
+    }).catch(function (err) { toast('Route change failed: ' + err.message, 'error'); });
+  });
+
   document.getElementById('clubAccessBody').addEventListener('click', function (e) {
     var el;
     if ((el = e.target.closest('[data-printcard]'))) {
@@ -1257,6 +1355,17 @@
     });
   }
 
+  function saveSupport() {
+    var email = document.getElementById('supEmail').value.trim();
+    var notify = document.getElementById('supNotify').value.trim();
+    UWP.ensureAuth().then(function () {
+      return UWP.ref('config/support').set({ email: email || null, notify: notify || null, updatedAt: UWP.TS() });
+    }).then(function () {
+      UWP.audit(ACTOR, ACTOR_LABEL, 'support', { detail: 'Support/notification addresses updated' });
+      toast('Saved — clubs pick the support address up at their next sign-in', 'success');
+    }).catch(function (err) { toast('Save failed: ' + err.message, 'error'); });
+  }
+
   function changeMasterPass() {
     NL.prompt('New master passcode (exactly 6 characters):', {
       title: 'Change master passcode', placeholder: '••••••'
@@ -1290,6 +1399,7 @@
           updates[c.code] = {
             name: c.name, division: c.division || '',
             passcode: UWP.newPin(taken), managerPass: UWP.newPasscode(),
+            route: 'unassigned',        // switched off until the club chooses
             token: UWP.newToken(), addedAt: UWP.TS()
           };
         });
@@ -1305,9 +1415,9 @@
 
   function exportAccess() {
     var clubs = clubList();
-    var rows = [['Club', 'Division', 'Till PIN', 'Manager passcode', 'Direct link']];
-    clubs.forEach(function (c) { rows.push([c.name, c.division, c.passcode, c.managerPass || '', UWP.clubLink(c.token)]); });
-    if (CONFIG.uw && CONFIG.uw.passcode) rows.push(['Utility Warehouse', '', CONFIG.uw.passcode, '', UWP.uwLink(CONFIG.uw.token)]);
+    var rows = [['Club', 'Division', 'Route', 'Till PIN', 'Manager passcode', 'Direct link']];
+    clubs.forEach(function (c) { rows.push([c.name, c.division, ROUTE_LABEL[c.route], c.passcode, c.managerPass || '', UWP.clubLink(c.token)]); });
+    if (CONFIG.uw && CONFIG.uw.passcode) rows.push(['Utility Warehouse', '', '', CONFIG.uw.passcode, '', UWP.uwLink(CONFIG.uw.token)]);
     NL.download('uw-promo-access.csv', NL.csv(rows, { bom: true }), 'text/csv;charset=utf-8');
     toast('Access CSV exported — treat it like a password list', 'success');
   }

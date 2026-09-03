@@ -3,6 +3,10 @@
 <head>
 <!--
   UW Promo Codes — Utility Warehouse partner page
+  Version: v5.0 (03/09/2026) — routes (spec v42.0): the club dropdown marks
+           online and not-activated clubs so a central batch lands on the
+           in-store route it belongs to, and central codes past 12 months
+           show a derived Expired state in the pills, filter and count cards.
   Version: v4.5 (16/08/2026) — crest strings come from canon
            NL.clubs.crestImgHtml('thumb') with a NL.clubs.wireCrestImgs sweep
            after each render (UWP.crestImgHtml is gone — _shared.js v3.3).
@@ -147,6 +151,7 @@
           <option value="active">Unredeemed</option>
           <option value="redeemed">Redeemed</option>
           <option value="revoked">Revoked</option>
+          <option value="expired">Expired</option>
         </select>
         <input class="toolbar__search" id="fSearch" type="search" placeholder="Search codes…" aria-label="Search codes">
       </div>
@@ -309,7 +314,7 @@
     var q = (document.getElementById('fSearch').value || '').toUpperCase().trim();
     return codeRows().filter(function (r) {
       if (!matchesClub(r, club)) return false;
-      if (status && r.status !== status) return false;
+      if (status && UWP.statusOf(r) !== status) return false;
       if (q && (r.code || '').toUpperCase().indexOf(q) === -1) return false;
       return true;
     });
@@ -344,14 +349,15 @@
     if (!codesLoaded) return;
     var all = codeRows();
     var scope = clubFiltered(), label = clubFilterLabel();
-    var counts = { total: scope.length, active: 0, redeemed: 0, revoked: 0 };
-    scope.forEach(function (r) { if (counts[r.status] != null) counts[r.status]++; });
+    var counts = { total: scope.length, active: 0, redeemed: 0, revoked: 0, expired: 0 };
+    scope.forEach(function (r) { var st = UWP.statusOf(r); if (counts[st] != null) counts[st]++; });
     var suffix = label ? ' · ' + esc(label) : '';
     document.getElementById('stats').innerHTML =
       '<div class="stat"><div class="stat__num">' + counts.total + '</div><div class="stat__label">Codes in pool' + suffix + '</div></div>' +
       '<div class="stat stat--info"><div class="stat__num">' + counts.active + '</div><div class="stat__label">Unredeemed</div></div>' +
       '<div class="stat stat--approved"><div class="stat__num">' + counts.redeemed + '</div><div class="stat__label">Redeemed</div></div>' +
-      '<div class="stat stat--expired"><div class="stat__num">' + counts.revoked + '</div><div class="stat__label">Revoked</div></div>';
+      '<div class="stat stat--expired"><div class="stat__num">' + counts.revoked + '</div><div class="stat__label">Revoked</div></div>' +
+      '<div class="stat stat--expired"><div class="stat__num">' + counts.expired + '</div><div class="stat__label">Expired</div></div>';
 
     renderByClub(all);
 
@@ -378,7 +384,7 @@
       return '<tr' + (r.status === 'revoked' ? ' class="is-revoked"' : '') + '>' +
         '<td><span class="code-mono">' + esc(r.code) + '</span> ' +
           '<button class="code-copy" data-copy="' + esc(r.code) + '" title="Copy code" aria-label="Copy code">⧉</button></td>' +
-        '<td>' + UWP.pillFor(r.status) + '</td>' +
+        '<td>' + UWP.pillFor(UWP.statusOf(r)) + '</td>' +
         '<td>' + clubCell + '</td>' +
         '<td>' + esc(r.status === 'redeemed' ? UWP.fmt(r.redeemedAt) : '—') + '</td>' +
         '<td title="' + esc(UWP.fmt(r.createdAt)) + '">' + esc(UWP.ago(r.createdAt)) + '</td>' +
@@ -474,9 +480,13 @@
       if (!byDiv[c.division]) { byDiv[c.division] = []; order.push(c.division); }
       byDiv[c.division].push(c);
     });
+    /* Central codes are the in-store route's supply — an online or
+       unassigned club is marked so a batch doesn't land somewhere its codes
+       can never be redeemed in a shop. Not blocked: the NL may have reasons. */
     var clubOpts = '<option value="">Choose a club…</option>' + order.map(function (d) {
       return '<optgroup label="' + esc(d || 'Clubs') + '">' + byDiv[d].map(function (c) {
-        return '<option value="' + esc(c.code) + '">' + esc(c.name) + '</option>';
+        var mark = c.route === 'instore' || !c.route ? '' : ' — ' + esc(c.route === 'online' ? 'online route' : 'not activated');
+        return '<option value="' + esc(c.code) + '">' + esc(c.name) + mark + '</option>';
       }).join('') + '</optgroup>';
     }).join('');
 

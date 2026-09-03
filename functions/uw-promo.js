@@ -244,20 +244,51 @@ function makeTrigger(ROOT, name) {
 
         if (hit) {
           await db.ref(ROOT + "/rate/uid/" + uid).remove().catch(() => {});
+          const key = hit.c.key;
+          /* ---- Route gate (spec v42.0 items 1–2) ------------------------ */
+          /* The credential was RIGHT — the failure counters stay untouched —
+             but the club's route decides whether anything opens. No route
+             yet: nothing opens, either door, and no token is minted at all,
+             which is stronger than hiding screens. Online route: the till
+             PIN opens nothing (an online club has no till in this scheme),
+             but the manager passcode still works. */
+          const route = hit.c.rec.route === "instore" || hit.c.rec.route === "online"
+            ? hit.c.rec.route : "unassigned";
+          if (route === "unassigned") {
+            logger.info(name + ": holding — club unassigned", { club: key });
+            return grant({
+              ok: false, holding: true,
+              error: (hit.c.rec.name || "This club") + " isn’t activated on the voucher scheme yet. " +
+                "The National League will be in touch about choosing a route.",
+            });
+          }
+          if (route === "online" && hit.role === "till") {
+            logger.info(name + ": holding — till PIN at online club", { club: key });
+            return grant({
+              ok: false, holding: true,
+              error: (hit.c.rec.name || "This club") + " redeems vouchers through its online store, " +
+                "so the till page isn’t used. Ask your club manager if this seems wrong.",
+            });
+          }
+
           /* One uid per club per role, not per person: everyone at a club
              shares it. Attribution is at club level anyway — all a shared
              credential can honestly support — and it keeps the Auth user list
              small rather than one row per device. */
-          const key = hit.c.key;
           const customToken = await admin.auth().createCustomToken(
             "uw-" + key + "-" + hit.role,
             { uwRole: hit.role, uwClub: key }
           );
-          logger.info(name + ": club granted", { club: key, role: hit.role });
+          logger.info(name + ": club granted", { club: key, role: hit.role, route });
           return grant({
             ok: true,
             customToken,
             role: hit.role,
+            route,
+            /* The refused-code screen tells fans who to contact. The address
+               is master-set config (open item 1 in the spec), and config is
+               not client-readable, so it rides in on the grant. */
+            support: (cfg.support && cfg.support.email) || null,
             club: {
               code: key,
               name: hit.c.rec.name || key,
@@ -265,8 +296,10 @@ function makeTrigger(ROOT, name) {
             },
             /* A manager just proved it holds the manager passcode, so it may
                see its own till PIN and link — that is the PIN card and the
-               club's own till-card printing. A till session gets neither. */
-            creds: hit.role === "manager"
+               club's own till-card printing. A till session gets neither,
+               and an ONLINE club's manager gets neither either: a QR till
+               card must never exist for a club with no till. */
+            creds: hit.role === "manager" && route === "instore"
               ? { passcode: hit.c.rec.passcode || "", token: hit.c.rec.token || "" }
               : null,
           });
@@ -283,6 +316,8 @@ function makeTrigger(ROOT, name) {
                a credential, and must not be handed 72 of them. */
             clubs: Object.keys(clubs).map((k) => ({
               code: k, name: clubs[k].name || k, division: clubs[k].division || "",
+              route: clubs[k].route === "instore" || clubs[k].route === "online"
+                ? clubs[k].route : "unassigned",
             })),
           });
         }
