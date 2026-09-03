@@ -1,7 +1,13 @@
 /* =========================================================================
    NL Tools — Club Directory presentation
    File: /club-directory/_directory.js
-   Version: v1.12 (03/09/2026)
+   Version: v1.13 (03/09/2026)
+
+   v1.13 — bannerColours() carries the club's SECOND colour out as `stripe`
+   (unchecked against anything: it is a strip along the banner's foot, not
+   type), and renderClub sets --cd-stripe for _directory.css v1.8 to draw.
+   Orgs emit no stripe — the League and the Trust have no second colour, by
+   ruling — and neither does a club whose secondary does not parse.
 
    v1.12 — an org's banner is the League's own pairing: NL red under white
    type, as tokens (var(--primary) / var(--white)) because the brand owns
@@ -399,7 +405,10 @@
     if (lum(fg) === null) {
       fg = contrast(bg, '#FFFFFF') >= contrast(bg, '#0A1628') ? '#FFFFFF' : '#0A1628';
     }
-    return { bg: bg, fg: fg };
+    /* The SECOND colour rides along for the banner's foot stripe. No
+       contrast test: it is a strip, not type — the shirt's trim. */
+    var stripe = cols.secondary;
+    return { bg: bg, fg: fg, stripe: lum(stripe) === null ? '' : stripe };
   }
 
   /* An org has no clubs-meta entry, so its banner defaults to the League's
@@ -730,7 +739,8 @@
 
     return '' +
       '<div class="cd-banner"' + (pal ? ' style="--cd-bg:' + esc(pal.bg) +
-        ';--cd-fg:' + esc(pal.fg) + '"' : '') + '>' +
+        ';--cd-fg:' + esc(pal.fg) +
+        (pal.stripe ? ';--cd-stripe:' + esc(pal.stripe) : '') + '"' : '') + '>' +
         '<img class="nl-crest cd-banner__crest" id="cdCrest" alt="" hidden ' +
           'decoding="async">' +
         '<h1 class="cd-banner__name">' + esc(rec.club || '') + '</h1>' +
