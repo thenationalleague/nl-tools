@@ -110,5 +110,24 @@ class TokenReMints(unittest.TestCase):
             self.assertNotIn('"Bearer " + token,', src)
 
 
+class ExcludeLines(unittest.TestCase):
+    """BE_EXCLUDE (03/09/2026): one retired path per line, written to
+    refs/.exclude where load_tree looks."""
+
+    def setUp(self):
+        self.J = _load_run_job()
+
+    def test_lines_kept_in_order_without_blanks_or_repeats(self):
+        raw = "partners/DAZN/b.png\n\n  clubs/Harrogate Town/Enterprise/cutout 2.png \n" \
+              "partners/DAZN/b.png\n"
+        self.assertEqual(self.J.exclude_lines(raw),
+                         ["partners/DAZN/b.png",
+                          "clubs/Harrogate Town/Enterprise/cutout 2.png"])
+
+    def test_unset_means_nothing(self):
+        self.assertEqual(self.J.exclude_lines(None), [])
+        self.assertEqual(self.J.exclude_lines(""), [])
+
+
 if __name__ == "__main__":
     unittest.main()

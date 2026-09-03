@@ -101,6 +101,104 @@ class WidePick(unittest.TestCase):
         self.assertIsNone(A.wide_pick([], []))
 
 
+class UniqueFrames(unittest.TestCase):
+    """Audition 1.5: the frames only one file of a sponsor found — the
+    grade a reference earns at a ground. Pure."""
+
+    def hit(self, t):
+        # The trimmed row shape the audition keeps per hit.
+        return {"t": t, "inliers": 10, "area": 0.2, "clarity": 0.5, "crop": None}
+
+    def test_only_finder_of_a_frame_gets_the_credit(self):
+        ref_hits = {
+            ("Enterprise", "cad.png"): [self.hit(1.0), self.hit(2.0), self.hit(3.0)],
+            ("Enterprise", "cutout.png"): [self.hit(2.0), self.hit(3.0), self.hit(4.0)],
+        }
+        u = A.unique_frames(ref_hits)
+        self.assertEqual(u[("Enterprise", "cad.png")], 1)      # 1.0 only
+        self.assertEqual(u[("Enterprise", "cutout.png")], 1)   # 4.0 only
+
+    def test_sponsors_do_not_share_frames(self):
+        # DAZN firing on the same frame says nothing about Enterprise's files.
+        ref_hits = {
+            ("Enterprise", "cad.png"): [self.hit(1.0)],
+            ("DAZN", "fyc.png"): [self.hit(1.0)],
+        }
+        u = A.unique_frames(ref_hits)
+        self.assertEqual(u, {("Enterprise", "cad.png"): 1, ("DAZN", "fyc.png"): 1})
+
+    def test_a_file_that_never_fired_scores_zero(self):
+        ref_hits = {("Enterprise", "dead.png"): []}
+        self.assertEqual(A.unique_frames(ref_hits), {("Enterprise", "dead.png"): 0})
+
+    def test_verdict_rows_carry_unique(self):
+        entries = [("Enterprise", "/r/partners/Enterprise/cad.png", "partner"),
+                   ("Enterprise", "/r/clubs/X/Enterprise/cutout.png", "club")]
+        ref_hits = {
+            ("Enterprise", "cad.png"): [self.hit(1.0), self.hit(2.0)],
+            ("Enterprise", "cutout.png"): [self.hit(2.0)],
+        }
+        rows = A.verdict_rows(ref_hits, entries)
+        self.assertEqual([(r["file"], r["fired"], r["unique"]) for r in rows],
+                         [("cad.png", 2, 1), ("cutout.png", 1, 0)])
+
+
+class LoadTreeExclude(unittest.TestCase):
+    """Retired at this ground (03/09/2026): <root>/.exclude names the paths
+    a run must not load, relative to the root. Nothing is deleted."""
+
+    def tree(self):
+        import tempfile
+
+        root = tempfile.mkdtemp()
+        for rel in ("partners/DAZN/a.png", "partners/DAZN/b.png",
+                    "partners/Enterprise/cad.png",
+                    "clubs/Harrogate Town/Enterprise/cutout 1.png",
+                    "clubs/Harrogate Town/Enterprise/cutout 2.png"):
+            p = os.path.join(root, *rel.split("/"))
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "wb") as f:
+                f.write(b"x")
+        return root
+
+    def rel(self, entries, root):
+        return sorted(os.path.relpath(p, root).replace(os.sep, "/")
+                      for _s, p, _sc in entries)
+
+    def test_no_file_means_nothing_excluded(self):
+        import board_exposure_core as C
+
+        root = self.tree()
+        self.assertEqual(C.load_exclude(root), set())
+        self.assertEqual(len(C.load_tree(root, "Harrogate Town")), 5)
+
+    def test_listed_paths_are_not_loaded_and_the_files_remain(self):
+        import board_exposure_core as C
+
+        root = self.tree()
+        with open(os.path.join(root, ".exclude"), "w", encoding="utf-8") as f:
+            f.write("# retired at this ground\n\npartners/DAZN/b.png\n"
+                    "clubs/Harrogate Town/Enterprise/cutout 2.png\n")
+        got = self.rel(C.load_tree(root, "Harrogate Town"), root)
+        self.assertEqual(got, ["clubs/Harrogate Town/Enterprise/cutout 1.png",
+                               "partners/DAZN/a.png",
+                               "partners/Enterprise/cad.png"])
+        self.assertTrue(os.path.exists(os.path.join(root, "partners", "DAZN", "b.png")))
+
+    def test_a_partner_file_retired_here_stays_elsewhere(self):
+        # The list is per root — another ground's job gets its own or none.
+        import board_exposure_core as C
+
+        root = self.tree()
+        with open(os.path.join(root, ".exclude"), "w", encoding="utf-8") as f:
+            f.write("partners/Enterprise/cad.png\n")
+        self.assertNotIn("partners/Enterprise/cad.png",
+                         self.rel(C.load_tree(root, "Harrogate Town"), root))
+        other = self.tree()
+        self.assertIn("partners/Enterprise/cad.png",
+                      self.rel(C.load_tree(other, "Harrogate Town"), other))
+
+
 class Verdicts(unittest.TestCase):
     ENTRIES = [("TIC Health", "/refs/partners/TIC Health/TIC Health.png",
                 "partner")]
@@ -108,6 +206,7 @@ class Verdicts(unittest.TestCase):
     def test_dead_reference_reads_as_dead(self):
         rows = A.verdict_rows({}, self.ENTRIES)
         self.assertEqual(rows[0]["fired"], 0)
+        self.assertEqual(rows[0]["unique"], 0)
         self.assertIsNone(rows[0]["best"])
 
     def test_best_hit_carries_its_crop(self):
@@ -279,6 +378,8 @@ class FrameFeaturesOnce(unittest.TestCase):
         plain = C.detect(frame, refs, sift, matcher)
         primed = C.detect(frame, refs, sift, matcher, feats=C.frame_features(frame, sift))
         self.assertTrue(plain.get("ACME"), "the synthetic board must fire, or this proves nothing")
+        # Attribution (03/09/2026): the hit names the file that found it.
+        self.assertEqual(plain["ACME"][0]["ref"], "acme.png")
         self.assertEqual(len(plain["ACME"]), len(primed.get("ACME", [])))
         self.assertEqual([h["inliers"] for h in plain["ACME"]],
                          [h["inliers"] for h in primed["ACME"]])

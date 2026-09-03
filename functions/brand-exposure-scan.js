@@ -116,6 +116,168 @@ const SCHED_OPTS = {
    is the prefix and the single segment, not the alphabet. */
 const VIDEO_PATH = /^uploads\/[^/]+$/;
 
+/* A run's output folder: brand-exposure/<matchId>. Auditions have always
+   named it (BE_DEST); scans carry it too since 03/09/2026 so the poller can
+   find detections.json when the run ends. */
+const DEST_PATH = /^brand-exposure\/[a-z0-9-]+$/;
+
+/* ---- Reference records (03/09/2026) ------------------------------------- */
+/* app-data/ops-brand-exposure/refs/<clubKey>/<sponsorKey>/<fileKey> — one
+   record per reference file per ground: where it came from, how many runs
+   at that ground it was in the set for, how many it fired in, how many
+   frames only it found, and whether it is retired there. The retirement
+   rule lives in retirements(); the tool shows the record on the partner
+   page and can retire or restore by hand.
+
+   RTDB keys cannot carry . # $ [ ] /, so each segment percent-encodes
+   exactly those (and % itself, so decoding is unambiguous);
+   decodeURIComponent reverses it. The tool carries the same rule. */
+function refKey(s) {
+  return String(s).replace(/[.#$\[\]\/%]/g, (c) =>
+    "%" + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0"));
+}
+
+/* The path a record names, relative to the refs root — the same string
+   load_tree compares against .exclude. */
+function refPath(club, sponsor, scope, file) {
+  return scope === "club"
+    ? "clubs/" + club + "/" + sponsor + "/" + file
+    : "partners/" + sponsor + "/" + file;
+}
+
+/* A scan export -> {path: {sponsor, path, scope, runs: 1, fired, unique}}.
+   `references` lists what the run loaded (retired files are absent, so
+   they earn no run); each direct hit carries "r", the file that found it.
+   A frame counts as unique for a file when it was the only file of its
+   sponsor to fire there — tracked and minted hits carry no "r" and are
+   nobody's evidence. */
+function tallyScan(exp) {
+  const out = {};
+  const club = String((exp && exp.club) || "");
+  for (const ref of (exp && exp.references) || []) {
+    if (!ref || !ref.sponsor || !ref.file) continue;
+    const path = refPath(club, ref.sponsor, ref.scope, ref.file);
+    out[path] = { sponsor: ref.sponsor, path, scope: ref.scope === "club" ? "club" : "partner",
+      runs: 1, fired: 0, unique: 0, file: ref.file };
+  }
+  const byFile = {};
+  for (const rec of Object.values(out)) byFile[rec.sponsor + "/" + rec.file] = rec;
+  const fired = new Set();
+  for (const per of Object.values((exp && exp.hits) || {})) {
+    for (const [sponsor, hs] of Object.entries(per || {})) {
+      const files = new Set();
+      for (const h of hs || []) {
+        if (h && h.r && !h.t) files.add(String(h.r));
+      }
+      for (const f of files) fired.add(sponsor + "/" + f);
+      if (files.size === 1) {
+        const rec = byFile[sponsor + "/" + [...files][0]];
+        if (rec) rec.unique += 1;
+      }
+    }
+  }
+  for (const k of fired) if (byFile[k]) byFile[k].fired = 1;
+  return out;
+}
+
+/* An audition's audition.json -> the same shape. Its verdict rows already
+   carry fired and unique per file (audition 1.5). */
+function tallyAudition(aud) {
+  const out = {};
+  const club = String((aud && aud.club) || "");
+  for (const row of (aud && aud.refs) || []) {
+    if (!row || !row.sponsor || !row.file) continue;
+    const path = refPath(club, row.sponsor, row.scope, row.file);
+    out[path] = { sponsor: row.sponsor, path, scope: row.scope === "club" ? "club" : "partner",
+      runs: 1, fired: row.fired > 0 ? 1 : 0, unique: Number(row.unique) || 0, file: row.file };
+  }
+  return out;
+}
+
+/* One run's tally folded into a record. Keeps everything else the record
+   holds (from, added, retired). */
+function mergeTally(prev, t, runId, now) {
+  const p = prev || {};
+  return {
+    runs: (Number(p.runs) || 0) + (t.runs || 0),
+    fired: (Number(p.fired) || 0) + (t.fired || 0),
+    unique: (Number(p.unique) || 0) + (t.unique || 0),
+    lastRun: runId || p.lastRun || null,
+    lastAt: now || Date.now(),
+  };
+}
+
+/* The retirement rule, per sponsor at one ground: a file in the set for
+   MIN_RUNS runs or more that has found no frame no other file found is
+   retired there. Never all of a sponsor's files at once — when every
+   active file is a candidate, the one that fired most stays (a duplicate
+   pair has unique 0 each; one of them is still the way this sponsor is
+   found). Returns [[sponsorKey, fileKey], ...]. Pure. */
+const MIN_RUNS = 2;
+function retirements(clubRecords, minRuns = MIN_RUNS) {
+  const out = [];
+  for (const [sk, files] of Object.entries(clubRecords || {})) {
+    const active = Object.entries(files || {}).filter(([, r]) => r && !r.retired);
+    if (!active.length) continue;
+    const dead = active.filter(([, r]) =>
+      (Number(r.runs) || 0) >= minRuns && (Number(r.unique) || 0) === 0);
+    let keep = null;
+    if (dead.length === active.length) {
+      keep = active.slice().sort((a, b) =>
+        (Number(b[1].fired) || 0) - (Number(a[1].fired) || 0) ||
+        (Number(b[1].runs) || 0) - (Number(a[1].runs) || 0) ||
+        a[0].localeCompare(b[0]))[0][0];
+    }
+    for (const [fk] of dead) if (fk !== keep) out.push([sk, fk]);
+  }
+  return out;
+}
+
+/* The paths retired at a ground, for BE_EXCLUDE. */
+function excludeFor(clubRecords) {
+  const out = [];
+  for (const files of Object.values(clubRecords || {})) {
+    for (const r of Object.values(files || {})) {
+      if (r && r.retired && typeof r.path === "string" && r.path) out.push(r.path);
+    }
+  }
+  return out.sort();
+}
+
+/* The poller's tally on a finished run: read the run's own output from
+   its folder, fold it into the ground's records, apply the retirement
+   rule. Returns what it did, or null when the request names no folder
+   (requests from before 03/09/2026). */
+async function tallyRun(db, r) {
+  const dest = String((r && r.dest) || "");
+  if (!DEST_PATH.test(dest) || !r.club) return null;
+  const name = r.mode === "audition" ? "audition.json" : "detections.json";
+  const [buf] = await admin.storage().bucket(BUCKET).file(dest + "/" + name).download();
+  const doc = JSON.parse(buf.toString("utf8"));
+  const tally = r.mode === "audition" ? tallyAudition(doc) : tallyScan(doc);
+  const runId = dest.split("/")[1];
+  const base = ROOT + "/refs/" + refKey(r.club);
+  const snap = (await db.ref(base).once("value")).val() || {};
+  const now = Date.now();
+  const updates = {};
+  for (const t of Object.values(tally)) {
+    const sk = refKey(t.sponsor), fk = refKey(t.path);
+    const prev = (snap[sk] || {})[fk] || {};
+    const rec = Object.assign({ path: t.path, scope: t.scope, sponsor: t.sponsor }, prev,
+      mergeTally(prev, t, runId, now));
+    updates[sk + "/" + fk] = rec;
+    (snap[sk] = snap[sk] || {})[fk] = rec;
+  }
+  let retired = 0;
+  for (const [sk, fk] of retirements(snap)) {
+    const rec = Object.assign({}, snap[sk][fk], { retired: now, retiredWhy: "auto", retiredRun: runId });
+    updates[sk + "/" + fk] = rec;
+    retired += 1;
+  }
+  if (Object.keys(updates).length) await db.ref(base).update(updates);
+  return { files: Object.keys(tally).length, retired, run: runId };
+}
+
 /* ---- Pure helpers (exported for tests) ----------------------------------- */
 
 function validRequest(req) {
@@ -193,7 +355,7 @@ function progressFrom(text) {
    reference-set default is partial — the safe direction: partial withholds
    share of voice, complete would invent it. `id` is the request's key; it
    rides along so the job can leave its progress row where the poller looks. */
-function buildEnv(req, id) {
+function buildEnv(req, id, exclude) {
   const env = [
     ["BE_VIDEO", req.video],
     ["BE_CLUB", req.club],
@@ -205,6 +367,11 @@ function buildEnv(req, id) {
   if (id && progressPath(id)) {
     env.push(["BE_REQUEST", id]);
     env.push(["BE_PROGRESS", progressPath(id)]);
+  }
+  /* Retired at this ground (03/09/2026): one path per line, relative to
+     the refs root — run_job writes it to refs/.exclude for load_tree. */
+  if (Array.isArray(exclude) && exclude.length) {
+    env.push(["BE_EXCLUDE", exclude.join("\n")]);
   }
   if (Array.isArray(req.sponsors) && req.sponsors.length) {
     env.push(["BE_SPONSORS", req.sponsors.join(",")]);
@@ -334,10 +501,11 @@ function dismissalPlan(reqs, id) {
       !othersWantVideo(reqs, id),
     /* An audition's harvest dies with its card — its own files only (see
        auditionFiles), and not while another request owns the same dest.
-       A prefix that never got written lists nothing, and that is a no-op. */
-    destPrefix: r.mode === "audition" &&
-      /^brand-exposure\/[a-z0-9-]+$/.test(String(r.dest || "")) &&
-      !othersOwnDest(reqs, id)
+       Scans carry a dest too since 03/09/2026 and get the same sweep: the
+       audition files left in a match folder by the audition that preceded
+       the scan go when the scan's card goes. A prefix that never got
+       written lists nothing, and that is a no-op. */
+    destPrefix: DEST_PATH.test(String(r.dest || "")) && !othersOwnDest(reqs, id)
       ? r.dest + "/" : null,
   };
 }
@@ -373,8 +541,20 @@ async function launch(db, id, req) {
      https://cloud.google.com/run/docs/reference/rest/v2/projects.locations.jobs/run
      The overrides shape is the REST twin of `gcloud run jobs execute
      --update-env-vars`, which every hand-run of this job has used. */
+  /* Retired at this ground (03/09/2026): the ground's reference records
+     say which files the job must not load. Read at launch, so a retirement
+     or a restore made in the tool applies to the next run. */
+  let exclude = [];
+  try {
+    const recs = (await db.ref(ROOT + "/refs/" + refKey(req.club)).once("value")).val();
+    exclude = excludeFor(recs);
+  } catch (err) {
+    logger.warn("brandExposureScan: reference records unreadable, excluding nothing", {
+      id, message: err && err.message,
+    });
+  }
   const op = await runApi("POST", RUN_JOB + ":run", {
-    overrides: { containerOverrides: [{ env: buildEnv(req, id) }] },
+    overrides: { containerOverrides: [{ env: buildEnv(req, id, exclude) }] },
   });
   const execution = (op && op.metadata && op.metadata.name) || null;
   await db.ref(ROOT + "/requests/" + id).update({
@@ -623,6 +803,17 @@ exports.brandExposureScanPoll = onSchedule(SCHED_OPTS, async () => {
         await db.ref(ROOT + "/requests/" + id).update({
           status: "done", stage: stageOnDone(r), finishedAt: now,
         });
+        /* The run's references get their record (03/09/2026): runs, fired,
+           frames only they found, and the retirement rule. Best effort — a
+           tally that fails leaves the match measured and says so here. */
+        try {
+          const t = await tallyRun(db, r);
+          if (t) logger.info("brandExposureScanPoll: references tallied", Object.assign({ id }, t));
+        } catch (err) {
+          logger.warn("brandExposureScanPoll: reference tally failed", {
+            id, message: err && err.message,
+          });
+        }
       } else {
         await db.ref(ROOT + "/requests/" + id).update({
           status: "failed", stage: "failed", error: failureNote(exec),
@@ -699,5 +890,6 @@ exports._internals = {
   validRequest, buildEnv, verdictOf, oldestQueued, failureNote, VIDEO_PATH,
   shouldDeleteSource, stageOnLaunch, stageOnDone, othersWantVideo,
   failedSharers, dismissalPlan, matchPrefixOf, othersOwnDest, auditionFiles,
-  progressPath, progressFrom,
+  progressPath, progressFrom, DEST_PATH, refKey, refPath, tallyScan,
+  tallyAudition, mergeTally, retirements, excludeFor,
 };

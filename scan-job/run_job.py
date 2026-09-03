@@ -64,6 +64,12 @@ Environment (all set by the trigger, none baked into the image):
     BE_DEST            audition only: bucket folder the outputs land in,
                        e.g. brand-exposure/<match-id> — explicit like
                        BE_DETECTIONS, so nothing re-derives a match id
+    BE_EXCLUDE         optional: reference paths retired at this ground,
+                       relative to the refs root (partners/<Sponsor>/<file>
+                       or clubs/<Club>/<Sponsor>/<file>), one per line.
+                       Written to refs/.exclude, where load_tree looks; the
+                       files stay in the bucket, so a retirement is
+                       reversible from the tool
     BE_REQUEST         the request record's id, for the log
     BE_PROGRESS        optional object path, brand-exposure/progress/<id>.json:
                        the scan's or audition's progress row (phase, done,
@@ -308,6 +314,18 @@ def run_relaying(cmd, relay, poll=2.0):
         time.sleep(poll)
 
 
+def exclude_lines(raw):
+    """BE_EXCLUDE -> the paths it names: one per line, blanks dropped,
+    order kept, duplicates removed. Pure."""
+    seen, out = set(), []
+    for line in (raw or "").split("\n"):
+        p = line.strip()
+        if p and p not in seen:
+            seen.add(p)
+            out.append(p)
+    return out
+
+
 def fetch_refs(bucket, prefix, token):
     """Mirror the reference tree out of Storage into the layout the scan expects.
 
@@ -379,6 +397,14 @@ def main():
             with open(os.path.join(refs, "ingest-key.txt"), "w",
                       encoding="utf-8") as f:
                 f.write(key + "\n")
+        # Retired at this ground (03/09/2026): the trigger function builds
+        # BE_EXCLUDE from the tool's per-ground reference records. The list
+        # goes where load_tree looks; nothing is deleted.
+        excluded = exclude_lines(env("BE_EXCLUDE"))
+        if excluded:
+            with open(os.path.join(refs, ".exclude"), "w", encoding="utf-8") as f:
+                f.write("\n".join(excluded) + "\n")
+            log(f"references retired at this ground: {len(excluded)}")
 
     log(f"fetching {video_obj}")
     video = storage_get(bucket, video_obj,

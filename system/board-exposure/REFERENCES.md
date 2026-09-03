@@ -141,7 +141,11 @@ CAD as parent, cutouts as children behind promotion guards, and a
 **retirement rule per ground** — a file that finds no frame at a ground
 that no other file finds is dropped there by the next audition. That rule
 is what makes "tick every cutout" safe: the ones that add nothing do not
-survive the next visit.
+survive the next visit. **Built 03/09/2026** — README, "References that
+grade themselves": the record per file per ground, the tally from every
+run's export, the rule (two runs, nothing only it found, never a
+sponsor's last file), `BE_EXCLUDE`, and the partner page's retire and
+restore.
 
 **The grab was the CAD all along.** The first cut of this ruling kept
 `DAZN NLTV board.png`, a grab from footage, as "a design in circulation

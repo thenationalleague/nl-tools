@@ -388,7 +388,28 @@ def load_tree(root, club=None, only=None):
     scan(os.path.join(root, "partners"), "partner")
     if club:
         scan(os.path.join(root, "clubs", club), "club")
+    # Retired at this ground (03/09/2026): <root>/.exclude lists paths
+    # relative to the root, one per line, that this run must not load. The
+    # cloud job writes it from BE_EXCLUDE, which the trigger function builds
+    # from the tool's per-ground reference records — so a retirement is a
+    # record, never a deleted file, and reversible from the partner page.
+    excluded = load_exclude(root)
+    if excluded:
+        out = [e for e in out
+               if os.path.relpath(e[1], root).replace(os.sep, "/") not in excluded]
     return out
+
+
+def load_exclude(root):
+    """The set of reference paths (relative to `root`, forward slashes)
+    named in <root>/.exclude — blank lines and #-comments ignored. Empty
+    when there is no such file."""
+    path = os.path.join(root, ".exclude")
+    if not os.path.isfile(path):
+        return set()
+    with open(path, encoding="utf-8") as f:
+        return {line.strip() for line in f
+                if line.strip() and not line.lstrip().startswith("#")}
 
 
 def grow_to_board(frame_bgr, quad):
@@ -614,10 +635,13 @@ def build_refs(entries, sift):
     Turn [(sponsor, path, scope)] into matchable references.
 
     Returns [(sponsor, scope, keypoints, descriptors, corners, (w, h),
-    vis_ref)], one per image — several images for one sponsor stay separate
-    here and roll up under the sponsor name at aggregation time. vis_ref is
-    the reference squeezed onto the visibility canvas, kept because the
-    keypoints alone cannot say what the board's face LOOKS like.
+    vis_ref, file)], one per image — several images for one sponsor stay
+    separate here and roll up under the sponsor name at aggregation time.
+    vis_ref is the reference squeezed onto the visibility canvas, kept
+    because the keypoints alone cannot say what the board's face LOOKS like.
+    file is the image's basename, so every hit can say which reference
+    found it (03/09/2026): a reference earns its place at a ground by the
+    frames only it finds, and that is unmeasurable without attribution.
     """
     refs, skipped = [], []
     for sponsor, path, scope in entries:
@@ -629,7 +653,8 @@ def build_refs(entries, sift):
         h, w = g.shape[:2]
         refs.append((sponsor, scope, kp, des,
                      np.float32([[0, 0], [w, 0], [w, h], [0, h]]).reshape(-1, 1, 2),
-                     (w, h), cv2.resize(g, (VIS_W, VIS_H))))
+                     (w, h), cv2.resize(g, (VIS_W, VIS_H)),
+                     os.path.basename(path)))
     return refs, skipped
 
 
@@ -676,7 +701,7 @@ def detect(frame_bgr, refs, sift, matcher, feats=None):
     bh = H * BAND_FRAC
     by_sponsor = {}
 
-    for name, scope, kp_r, des_r, corners, ref_wh, vis_ref in refs:
+    for name, scope, kp_r, des_r, corners, ref_wh, vis_ref, ref_file in refs:
         hits = by_sponsor.setdefault(name, [])
         for y0 in np.arange(0, H - bh, H * BAND_STRIDE):
             sel = np.flatnonzero((ys >= y0) & (ys < y0 + bh))
@@ -736,6 +761,11 @@ def detect(frame_bgr, refs, sift, matcher, feats=None):
                             "clarity": clarity(board_pct, sh, ct, 0.1),
                             "visibility": vis,
                             "mc": mc,
+                            # Which reference found it (03/09/2026). The
+                            # dedupe below keeps the strongest hit per board,
+                            # so the file that survives is the one that
+                            # measured this board on this frame.
+                            "ref": ref_file,
                         })
                 used = [np.flatnonzero(sel == idx[m.trainIdx])[0]
                         for m, k in zip(good, mask.ravel()) if k]
