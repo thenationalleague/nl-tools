@@ -1,8 +1,13 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Commercial Compliance
-  Version: v2.1 (24/08/2026)
+  Version: v2.2 (24/08/2026)
   File: /commercial-compliance/index.html
+  v2.2 (24/08/2026): paste a screenshot straight into the evidence dialog
+    (Ctrl+V), drop an image on it, or pick a file — all three take the same
+    path to Storage compliance-proofs/ and fill the evidence URL. Image
+    proofs render as a thumbnail in the period row. Partner logo modal moves
+    onto the same helper, so paste works there too.
   v2.1 (24/08/2026): dashboard defaults to a "needs attention" triage — an
     asset strip (per-asset behind-count, tap to focus) over a worst-first
     table of only the clubs with something outstanding, state chips per
@@ -62,6 +67,7 @@
     tools/ops-commercial-compliance                              tool registration
   Storage (bucket):
     partner-logos/*                                              uploaded partner logos (staff accounts)
+    compliance-proofs/*                                          pasted/dropped proof screenshots
 
   Access (auth-guard registry):
     access → read-only dashboard; admin → record + edit; defaults keep staff
@@ -114,6 +120,15 @@
     var NL_TOOL_KEY = 'ops-commercial-compliance';
 
     window.NL_CHANGELOG = [
+      {
+        date: '24/08/2026',
+        version: 'v2.2',
+        items: [
+          'Paste a screenshot (Ctrl+V) into the evidence dialog, or drop an image on it.',
+          'Image proofs show as a thumbnail on the period row.',
+          'Partner logos can be pasted too.'
+        ]
+      },
       {
         date: '24/08/2026',
         version: 'v2.1',
@@ -233,6 +248,7 @@
   .cc-stateseg .active--fail   { background: var(--red); color: var(--white); }
   .cc-stateseg .active--out    { background: var(--navy); color: var(--white); }
   .cc-evidence { font-size: var(--text-xs); color: var(--text-muted); flex-basis: 100%; overflow-wrap: anywhere; }
+  .cc-proof-thumb { height: 54px; border-radius: var(--radius); border: 1px solid var(--border); vertical-align: middle; margin-right: 8px; }
   .cc-evidence a { color: var(--navy); }
 
   /* Escalation list */
@@ -262,6 +278,14 @@
   .cc-esc-chip { display: inline-block; background: var(--amber-light); color: var(--amber-deep, var(--amber)); border-radius: 4px; padding: 3px 9px; font-size: var(--text-xs); font-variation-settings: 'wght' 700; margin: 2px 6px 2px 0; white-space: nowrap; }
   .cc-esc-chip b { font-variation-settings: 'wght' 900; }
   .cc-esc-total { font-size: var(--text-md); font-variation-settings: 'wght' 900; color: var(--amber-deep, var(--amber)); }
+
+  /* Paste/drop target. Dashed edge is the one place a dashed border earns
+     its keep: it says "put something here" without a filled surface. */
+  .cc-dropzone { border: 2px dashed var(--navy-200); border-radius: var(--radius); background: var(--navy-50); padding: 18px 16px; text-align: center; transition: border-color .12s ease, background .12s ease; }
+  .cc-dropzone:focus-visible { outline: none; border-color: var(--navy); box-shadow: var(--focus-ring); }
+  .cc-dropzone.cc-drop-over { border-color: var(--navy); background: var(--navy-100); }
+  .cc-dropzone__hint { font-size: var(--text-sm); color: var(--text-muted); display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap; }
+  .cc-dropzone img { max-height: 190px; max-width: 100%; margin-top: 12px; border-radius: var(--radius); border: 1px solid var(--border); }
 
   .cc-modal-summary { font-size: var(--text-xs); color: var(--text-muted); margin-bottom: 8px; }
   .cc-version { font-size: var(--text-xs); color: var(--text-muted); }
@@ -457,6 +481,75 @@
     };
   }
   function today() { return new Date(); }
+
+  /* ── image upload (file, drop, or Ctrl+V paste) ─────────────────────────
+     A snipping-tool screenshot lives on the clipboard as an image blob with
+     no filename, which is exactly what a proof usually is: a screenshot of a
+     post, a page, an email. One helper serves the file input, the paste
+     handler and the drop target so all three produce the same Storage
+     object and the same URL. */
+  var MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+  function uploadImage(file, folder, opts) {
+    opts = opts || {};
+    if (!file) return Promise.reject(new Error('no file'));
+    if (!/^image\//.test(file.type)) return Promise.reject(new Error('not an image'));
+    var cap = opts.maxBytes || MAX_IMAGE_BYTES;
+    if (file.size > cap) {
+      return Promise.reject(new Error('image is ' + Math.ceil(file.size / 1024 / 1024) +
+        'MB — the limit is ' + Math.floor(cap / 1024 / 1024) + 'MB'));
+    }
+    /* A pasted blob has no name; give it one from its mime type. */
+    var ext = (file.type.split('/')[1] || 'png').replace(/[^a-z0-9]/gi, '').slice(0, 4);
+    var base = file.name ? file.name.replace(/[^a-z0-9._-]/gi, '_').slice(-40) : 'pasted.' + ext;
+    return firebase.storage().ref(folder + '/' + Date.now() + '-' + base)
+      .put(file, { contentType: file.type, cacheControl: 'public,max-age=86400' })
+      .then(function (snap) { return snap.ref.getDownloadURL(); });
+  }
+
+  /* Wire an element so an image pasted or dropped anywhere inside it uploads
+     and calls back with the URL. Returns the same handler it uses, so a
+     "choose a file" input can feed the identical path. */
+  function wireImageDrop(root, folder, onUrl, opts) {
+    opts = opts || {};
+    var busy = false;
+    function handle(file) {
+      if (busy || !file) return;
+      busy = true;
+      if (opts.onStart) opts.onStart();
+      uploadImage(file, folder, opts)
+        .then(function (url) { busy = false; onUrl(url); })
+        .catch(function (e) {
+          busy = false;
+          if (opts.onError) opts.onError(e);
+          NL.toast('Upload failed: ' + e.message, 'error');
+        });
+    }
+    root.addEventListener('paste', function (e) {
+      var items = (e.clipboardData && e.clipboardData.items) || [];
+      for (var i = 0; i < items.length; i++) {
+        if (items[i].kind === 'file' && /^image\//.test(items[i].type)) {
+          e.preventDefault();
+          handle(items[i].getAsFile());
+          return;
+        }
+      }
+    });
+    root.addEventListener('dragover', function (e) {
+      if (e.dataTransfer && e.dataTransfer.types && Array.prototype.indexOf.call(e.dataTransfer.types, 'Files') >= 0) {
+        e.preventDefault();
+        root.classList.add('cc-drop-over');
+      }
+    });
+    root.addEventListener('dragleave', function () { root.classList.remove('cc-drop-over'); });
+    root.addEventListener('drop', function (e) {
+      if (!(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length)) return;
+      e.preventDefault();
+      root.classList.remove('cc-drop-over');
+      handle(e.dataTransfer.files[0]);
+    });
+    return handle;
+  }
 
   /* ── data views ─────────────────────────────────────────────────────── */
 
@@ -1295,7 +1388,7 @@
       '<div class="form-group"><label>Logo</label>' +
       '<input id="pfLogo" placeholder="https://…/logo.png" value="' + esc(existing && existing.logoUrl || '') + '">' +
       '<input type="file" id="pfFile" accept="image/*" style="margin-top:8px">' +
-      '<div class="form-hint">Upload a file (≤1MB) or paste a URL — transparent PNG/SVG reads best</div></div>' +
+      '<div class="form-hint">Paste an image anywhere in this dialog, drop a file, or choose one (≤1MB). Transparent PNG or SVG reads best.</div></div>' +
       '<div class="form-group span2"><label>Preview</label>' +
       '<div class="cc-partner-card" style="max-width:250px">' +
       '<div class="cc-partner-card__bar" id="pvBar"></div>' +
@@ -1331,16 +1424,11 @@
 
     /* File → Firebase Storage partner-logos/ → download URL into the field.
        Needs the partner-logos block in system/storage/rules.snapshot.rules. */
+    var takeLogo = wireImageDrop(wrap, 'partner-logos', function (url) {
+      $('pfLogo').value = url; paint(); NL.toast('Logo uploaded', 'success');
+    }, { maxBytes: 1024 * 1024 });
     $('pfFile').addEventListener('change', function () {
-      var f = $('pfFile').files && $('pfFile').files[0];
-      if (!f) return;
-      if (f.size > 1024 * 1024) { NL.toast('Logo must be under 1MB', 'error'); $('pfFile').value = ''; return; }
-      var safe = f.name.replace(/[^a-z0-9._-]/gi, '_').slice(-40);
-      firebase.storage().ref('partner-logos/' + Date.now() + '-' + safe)
-        .put(f, { contentType: f.type, cacheControl: 'public,max-age=86400' })
-        .then(function (snap) { return snap.ref.getDownloadURL(); })
-        .then(function (url) { $('pfLogo').value = url; paint(); NL.toast('Logo uploaded', 'success'); })
-        .catch(function (e) { NL.toast('Upload failed: ' + e.message, 'error'); });
+      if ($('pfFile').files && $('pfFile').files[0]) takeLogo($('pfFile').files[0]);
     });
 
     NL.modal({
@@ -1448,8 +1536,11 @@
         }
         var evid = '';
         if (rec && (rec.evidence || rec.note)) {
+          var isImg = rec.evidence && /\.(png|jpe?g|gif|webp)(\?|$)/i.test(rec.evidence);
           evid = '<div class="cc-evidence">' +
-            (rec.evidence ? '<a href="' + esc(rec.evidence) + '" target="_blank" rel="noopener">' + esc(rec.evidence) + '</a> ' : '') +
+            (isImg ? '<a href="' + esc(rec.evidence) + '" target="_blank" rel="noopener">' +
+              '<img class="cc-proof-thumb" src="' + esc(rec.evidence) + '" alt="proof" loading="lazy" decoding="async"></a>'
+              : rec.evidence ? '<a href="' + esc(rec.evidence) + '" target="_blank" rel="noopener">' + esc(rec.evidence) + '</a> ' : '') +
             (rec.note ? esc(rec.note) : '') +
             (rec.by ? ' <span>— ' + esc(rec.by) + (rec.at ? ', ' + esc(NL.formatDateTime(rec.at)) : '') + '</span>' : '') +
             '</div>';
@@ -1557,13 +1648,42 @@
   function openEvidenceModal(oid, periodKey, clubCode, done) {
     var existing = (STATE.status[oid] && STATE.status[oid][periodKey] && STATE.status[oid][periodKey][clubCode]) || {};
     var wrap = document.createElement('div');
-    wrap.innerHTML = '<div class="form-group"><label>Evidence link</label>' +
-      '<input id="evUrl" placeholder="https://… (photo, email, drive folder)" value="' + esc(existing.evidence || '') + '"></div>' +
+    wrap.innerHTML =
+      '<div class="cc-dropzone" id="evDrop" tabindex="0">' +
+        '<div class="cc-dropzone__hint" id="evHint">Paste a screenshot here (Ctrl+V), drop an image, or ' +
+          '<button type="button" class="btn btn--ghost btn--sm" id="evPick">choose a file</button></div>' +
+        '<img id="evThumb" alt="" style="display:none">' +
+        '<input type="file" id="evFile" accept="image/*" hidden>' +
+      '</div>' +
+      '<div class="form-group" style="margin-top:14px"><label>Evidence link</label>' +
+      '<input id="evUrl" placeholder="https://… (or paste a screenshot above)" value="' + esc(existing.evidence || '') + '"></div>' +
       '<div class="form-group" style="margin-top:12px"><label>Note</label>' +
       '<textarea id="evNote" style="min-height:70px">' + esc(existing.note || '') + '</textarea></div>';
+
+    var drop = wrap.querySelector('#evDrop');
+    var hint = wrap.querySelector('#evHint');
+    var thumb = wrap.querySelector('#evThumb');
+    function showThumb(url) {
+      thumb.src = url;
+      thumb.style.display = '';
+      hint.textContent = 'Uploaded. Paste again to replace.';
+    }
+    if (existing.evidence && /\.(png|jpe?g|gif|webp)(\?|$)/i.test(existing.evidence)) showThumb(existing.evidence);
+    var takeImage = wireImageDrop(drop, 'compliance-proofs', function (url) {
+      wrap.querySelector('#evUrl').value = url;
+      showThumb(url);
+      NL.toast('Screenshot uploaded', 'success');
+    }, {
+      onStart: function () { hint.textContent = 'Uploading…'; },
+      onError: function () { hint.textContent = 'Paste a screenshot here (Ctrl+V) or drop an image'; }
+    });
+    wrap.querySelector('#evPick').addEventListener('click', function () { wrap.querySelector('#evFile').click(); });
+    wrap.querySelector('#evFile').addEventListener('change', function (e) {
+      if (e.target.files && e.target.files[0]) takeImage(e.target.files[0]);
+    });
+
     NL.modal({
       title: 'Evidence',
-      size: 'sm',
       body: wrap,
       buttons: [
         { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
