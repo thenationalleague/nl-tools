@@ -1,0 +1,131 @@
+name: Deploy scan job
+
+# Builds the Brand Exposure measuring container and updates the Cloud Run Job
+# that runs it. Manual only, and deliberately so: this image IS the measurement.
+# A rebuild can move every number the tool reports — not because anything here
+# changed, but because a base image or a wheel underneath did — and that must
+# never happen as a side effect of merging something unrelated.
+#
+# The requirements file is pinned for the same reason. If a rebuild ever needs
+# to change a pinned version, expect the engine profile string to change with
+# it, and expect matches measured either side of it to stop being comparable.
+# That is the system working, not a bug.
+#
+# What this does NOT do is run a scan. Building the image and measuring a match
+# are separate acts; see system/board-exposure/CLOUD.md for how one is started.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "publish" to confirm you have read the diff'
+        required: true
+        default: ''
+      tag:
+        description: 'Image tag (default: the short commit sha)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT: nl-tools
+  REGION: europe-west2
+  REPO: nl-tools
+  IMAGE: brand-exposure-scan
+  JOB: brand-exposure-scan
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse without the confirmation word
+        if: ${{ inputs.confirm != 'publish' }}
+        run: |
+          echo "::error::Type publish in the confirm box to run this."
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Work out the tag
+        id: tag
+        run: |
+          TAG="${{ inputs.tag }}"
+          [ -z "$TAG" ] && TAG="$(git rev-parse --short HEAD)"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Building $IMAGE:$TAG"
+
+      - name: Make sure the Artifact Registry repo exists
+        run: |
+          gcloud artifacts repositories describe "$REPO" \
+            --location="$REGION" --project="$PROJECT" >/dev/null 2>&1 || \
+          gcloud artifacts repositories create "$REPO" \
+            --repository-format=docker --location="$REGION" --project="$PROJECT" \
+            --description="NL Tools container images"
+
+      - name: Build and push
+        run: |
+          IMG="$REGION-docker.pkg.dev/$PROJECT/$REPO/$IMAGE:${{ steps.tag.outputs.tag }}"
+          # --config, not --tag: `gcloud builds submit --tag` only ever looks
+          # for a Dockerfile at the root of the build context and there is no
+          # flag to point it elsewhere. The context must stay the whole repo
+          # because the image copies scripts/, which the local route shares.
+          gcloud builds submit --config=scan-job/cloudbuild.yaml \
+            --substitutions=_IMG="$IMG" \
+            --project="$PROJECT" --region="$REGION" .
+          echo "IMG=$IMG" >> "$GITHUB_ENV"
+
+      - name: Create or update the Cloud Run Job
+        run: |
+          # Memory is sized for what /tmp has to hold, because Cloud Run's /tmp
+          # is tmpfs and therefore RAM. A 90-minute match is roughly 6 GB of
+          # source video plus 4.5 GB of extracted frames, so 16 GiB has real
+          # headroom and 8 GiB does not. A highlights package needs a fraction
+          # of that; it costs nothing extra to have the ceiling, because Cloud
+          # Run bills what is used, not what is reserved.
+          #
+          # The timeout is the honest ceiling on a long match, and it moved
+          # when the reference sets did: 2h was right for a handful of marks,
+          # but scan time is linear in reference images, and a full match
+          # against a club's 15-20 boards is legitimately 3-5 hours on 8 vCPU.
+          # 6h covers that with headroom; anything past it is stuck, not slow,
+          # and should stop costing money. (~60p/hour while it runs.)
+          COMMON=(
+            --image="$IMG"
+            --region="$REGION" --project="$PROJECT"
+            --cpu=8 --memory=16Gi
+            --task-timeout=21600s
+            --max-retries=0
+            --service-account="${{ secrets.GCP_SCAN_JOB_SA }}"
+            --set-secrets=BE_INGEST_KEY=brand-exposure-ingest-key:latest
+            --set-env-vars=BE_BUCKET=nl-tools.firebasestorage.app,BE_REFS_PREFIX=brand-exposure/refs
+          )
+          # max-retries 0 on purpose: a scan that failed halfway has already
+          # spent the CPU, and retrying it automatically doubles the bill for a
+          # fault that is nearly always the input rather than the run.
+          if gcloud run jobs describe "$JOB" --region="$REGION" \
+               --project="$PROJECT" >/dev/null 2>&1; then
+            gcloud run jobs update "$JOB" "${COMMON[@]}"
+          else
+            gcloud run jobs create "$JOB" "${COMMON[@]}"
+          fi
+
+      - name: Say what shipped
+        run: |
+          echo "### Scan job updated" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Image: \`$IMG\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Job: \`$JOB\` in \`$REGION\`, 8 vCPU / 16 GiB, no retries." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "This did not measure anything. Starting a scan is a separate act —" >> "$GITHUB_STEP_SUMMARY"
+          echo "see \`system/board-exposure/CLOUD.md\`." >> "$GITHUB_STEP_SUMMARY"

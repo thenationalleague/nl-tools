@@ -21,6 +21,13 @@
      blank (visibility:hidden keeps the header's spacing) and the export
      warning names it. */
   var SPONSOR_URL = "/assets/partners/TIC%20Health.png";
+
+  /* National League Services — the authoritative fixture/result feed. Public,
+     no auth, and already fetched straight from the browser by travel-planner
+     and the fan embeds, so no proxy is involved. competitionID values are firm
+     NLS codes; never derive them from a division name. */
+  var NLS_BASE = "https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2";
+  var COMPETITION_ID = { National: 89, North: 373, South: 372, Cup: 1275 };
   var ROSE_WHITE = (window.__resources && window.__resources.roseWhite) || "/assets/crests/National%20League%20rose%20white.png";
 
   var DIV_NAME = {
@@ -59,6 +66,15 @@
   function crestUrl(name) {
     return name ? CREST_BASE + encodeURIComponent(name) + ".png" : "";
   }
+  /* Guest sides — the PL2 teams that enter the National League Cup — live in
+     their own file and carry a crestName pointing at the parent club's badge,
+     so no crest is duplicated. "Birmingham City PL2" is drawn with the
+     Birmingham City crest; without this it asked for a file that isn't there
+     and rendered a gap. */
+  function crestKey(name) {
+    var guest = NL.clubs.guestByName && NL.clubs.guestByName(name);
+    return (guest && guest.crestName) || name;
+  }
 
   /* Any pasted spelling → the club's canonical name (used for crest lookup
      and club record lookup). Unknown names pass through untouched. */
@@ -82,6 +98,7 @@
     division: "National",
     format: "1x1",
     mode: "fixtures",          /* fixtures | results */
+    source: "feed",            /* feed | manual — which entry card is shown */
     matchday: "",              /* "" = MATCHDAY (no number) | "1".."46" */
     fit: "wrap",               /* wrap | short | truncate | scale | kern */
     rows: []                   /* {home, away, hs, as, ko} */
@@ -113,7 +130,8 @@
     var canon = canonicalName(name);
     /* short-name mode uses each club's short label from the DB */
     if (state.fit === "short") {
-      var club = NL.clubs.byName(canon);
+      var club = NL.clubs.byName(canon) ||
+                 (NL.clubs.guestByName && NL.clubs.guestByName(canon));
       if (club && club.short) return club.short.toUpperCase();
     }
     /* a few names always shorten on arrival, every mode */
@@ -126,7 +144,7 @@
     try {
       var d = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
       if (d && typeof d === "object") {
-        ["division", "format", "mode", "matchday", "fit"].forEach(function (k) {
+        ["division", "format", "mode", "matchday", "fit", "source"].forEach(function (k) {
           if (typeof d[k] === "string") state[k] = d[k];
         });
         if (Array.isArray(d.rows)) state.rows = d.rows;
@@ -212,15 +230,19 @@
         return;
       }
       var homeName = canonicalName(r.home), awayName = canonicalName(r.away);
-      var homeCrest = crestUrl(homeName);
-      var awayCrest = crestUrl(awayName);
+      var homeCrest = crestUrl(crestKey(homeName));
+      var awayCrest = crestUrl(crestKey(awayName));
       var hasScore = state.mode === "results" && r.hs !== "" && r.hs != null && r.as !== "" && r.as != null;
       var mid;
       if (hasScore) {
         mid = '<span class="score">' + escapeHtml(r.hs) + '&nbsp;-&nbsp;' + escapeHtml(r.as) + '</span>';
       } else {
         mid = '<span class="vs">v</span>';
-        if (state.mode !== "results" && r.ko) mid += '<span class="ko">' + escapeHtml(r.ko) + '</span>';
+        /* koOn undefined = show (how every pasted row has always behaved);
+           only an explicit false hides a time the row is carrying. */
+        if (state.mode !== "results" && r.ko && r.koOn !== false) {
+          mid += '<span class="ko">' + escapeHtml(r.ko) + '</span>';
+        }
       }
       var row = document.createElement("div");
       row.className = "fx";
@@ -349,8 +371,30 @@
     if (!gfx) return;
     var h = (state.format === "1x1" ? 1080 : state.format === "4x5" ? 1350 : 1920);
     var availW = stageWrap.clientWidth - 24;
-    var top = stageWrap.getBoundingClientRect().top;
-    var availH = window.innerHeight - top - 24;
+
+    /* The height budget must NOT be read from where the stage happens to sit.
+       .preview is sticky, so a taller graphic pushes the pinned panel further
+       up, which lowers stageWrap's top, which hands out more height, which
+       grows the graphic again. Once the page was scrolled the graphic gained
+       ~22px on EVERY re-render — pressing show/hide times a few times inflated
+       it off the screen, and it crept on keystrokes too.
+
+       Derive the budget instead from the sticky offset plus the preview's own
+       chrome. The first is fixed by CSS; the second is the height of the
+       preview header. Neither moves when the stage resizes, so the measurement
+       can't feed back into the thing it measures. */
+    var preview = stageWrap.closest ? stageWrap.closest(".preview") : stageWrap.parentNode;
+    var availH = window.innerHeight - 24;
+    if (preview) {
+      var pv = getComputedStyle(preview);
+      var pinned = (pv.position === "sticky" || pv.position === "fixed") ? parseFloat(pv.top) : NaN;
+      /* Not pinned (the single-column layout) — the stage scrolls with the
+         page, so the viewport is the only limit worth applying. */
+      if (!isNaN(pinned)) {
+        var chrome = stageWrap.getBoundingClientRect().top - preview.getBoundingClientRect().top;
+        availH = window.innerHeight - pinned - chrome - 24;
+      }
+    }
     var scale = Math.min(1, availW / 1080);
     if (availH > 160) scale = Math.min(scale, availH / h);
     gfx.style.transformOrigin = "top left";
@@ -374,14 +418,27 @@
           del;
       } else {
         tr.innerHTML = ins +
-          '<td><input class="g-team" data-i="' + i + '" data-k="home" list="teamList" value="' + escapeHtml(r.home) + '"></td>' +
+          '<td>' + teamSelect(i, "home", r.home) + '</td>' +
           '<td class="col-score"><input class="g-sc" data-i="' + i + '" data-k="hs" value="' + escapeHtml(r.hs) + '"></td>' +
           '<td class="col-score"><input class="g-sc" data-i="' + i + '" data-k="as" value="' + escapeHtml(r.as) + '"></td>' +
-          '<td><input class="g-team" data-i="' + i + '" data-k="away" list="teamList" value="' + escapeHtml(r.away) + '"></td>' +
-          '<td class="col-ko"><input class="g-ko" data-i="' + i + '" data-k="ko" value="' + escapeHtml(r.ko) + '"></td>' +
+          '<td>' + teamSelect(i, "away", r.away) + '</td>' +
+          '<td class="col-ko"><div class="kowrap">' +
+            '<input type="checkbox" class="g-koon" data-i="' + i + '" data-k="koOn" title="Print this kick-off time"' +
+              (r.ko && r.koOn !== false ? " checked" : "") + '>' +
+            '<input class="g-ko" data-i="' + i + '" data-k="ko" value="' + escapeHtml(r.ko) + '">' +
+          '</div></td>' +
           del;
       }
       gridBody.appendChild(tr);
+    });
+    /* Set the selection as a property rather than a `selected` attribute —
+       the value round-trips exactly, whatever punctuation the name carries. */
+    state.rows.slice(0, 26).forEach(function (r, i) {
+      if (r.divider != null) return;
+      ["home", "away"].forEach(function (k) {
+        var sel = gridBody.querySelector('select.g-team[data-i="' + i + '"][data-k="' + k + '"]');
+        if (sel) sel.value = r[k] || "";
+      });
     });
   }
   function gridChanged(e) {
@@ -389,9 +446,24 @@
     if (t.classList.contains("g-del") || t.classList.contains("g-ins")) return;
     var i = parseInt(t.getAttribute("data-i"), 10);
     if (isNaN(i) || !state.rows[i]) return;
-    state.rows[i][t.getAttribute("data-k")] = t.value;
-    if (t.getAttribute("data-k") !== "divider") syncPasteFromRows();
+    var k = t.getAttribute("data-k");
+    if (t.type === "checkbox") { state.rows[i][k] = t.checked; save(); render(); return; }
+    state.rows[i][k] = t.value;
+    /* typing a time means you want it printed; clearing it means you don't.
+       The tick follows, so the two controls never disagree. */
+    if (k === "ko") {
+      state.rows[i].koOn = !!String(t.value).trim();
+      var cb = gridBody.querySelector('.g-koon[data-i="' + i + '"]');
+      if (cb) cb.checked = state.rows[i].koOn;
+    }
+    if (k !== "divider") syncPasteFromRows();
     save(); render();
+  }
+  /* Show-all / hide-all for kick-off times. A row with no time can't show one,
+     so "all" leaves it untouched rather than ticking an empty box. */
+  function setAllKo(on) {
+    state.rows.forEach(function (r) { if (r.divider == null) r.koOn = !!(on && r.ko); });
+    buildGrid(); save(); render();
   }
   function moveRow(i, dir) {
     var j = i + dir;
@@ -450,24 +522,255 @@
     }).join("\n");
   }
 
-  /* ---------------- matchday options ---------------- */
-  function buildMatchdayOptions() {
-    var sel = $("matchdaySel");
-    var html = '<option value="">Matchday (no number)</option>';
-    for (var i = 1; i <= 46; i++) html += '<option value="' + i + '">Matchday ' + i + '</option>';
-    sel.innerHTML = html;
+  /* ---------------- National League Services ----------------
+     One request builds a card. The same response carries kick-off times and
+     scores, so switching Fixtures ⇄ Results after a load needs no refetch —
+     the mode only decides which of the two the graphic prints. */
+
+  var _pdCache = {};   /* division → meta.populatedDates for the season */
+
+  /* seasonID is the season's FIRST year ("2026" = 2026-27). clubs-meta is the
+     single source of truth for it; the clock-derived answer is the fallback
+     for the window between page load and clubs-meta arriving. */
+  function nlsSeason() {
+    var meta = NL.clubs.meta();
+    return String((NL.season && NL.season.current(meta)) || NL.season.fromDate(new Date()));
+  }
+  function nlsUrl(params) { return NLS_BASE + "/matches/?" + params.join("&"); }
+
+  /* NLS timestamps are UTC and arrive either as "2026-08-29 14:00:00" (list)
+     or with a T and a Z. Normalise both, then read them back in UK time —
+     a 19:45 BST kick-off is 18:45Z, and printing the Z time would be wrong. */
+  function nlsDate(s) {
+    if (!s) return null;
+    var d = new Date(String(s).trim().replace(" ", "T").replace(/Z?$/, "Z"));
+    return isNaN(d.getTime()) ? null : d;
+  }
+  function ymdUK(d) { return d.toLocaleDateString("en-CA", { timeZone: "Europe/London" }); }
+  function koTime(s) {
+    var d = nlsDate(s);
+    return d ? d.toLocaleTimeString("en-GB", { timeZone: "Europe/London", hour: "2-digit", minute: "2-digit", hour12: false }) : "";
+  }
+  function koDay(s) { var d = nlsDate(s); return d ? ymdUK(d) : ""; }
+  function dividerLabel(ymd) {
+    var d = new Date(ymd + "T12:00:00Z");   /* midday: no DST edge either way */
+    return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })
+            .replace(/,/g, "").toUpperCase();
+  }
+  /* clubs-meta optaID IS the NLS teamID, so a club resolves on its code rather
+     than on its name — which is what makes the crest lookup reliable. Cup
+     guest sides have no optaID and fall back to the name NLS supplies. */
+  function nlsTeamName(t) {
+    if (!t) return "";
+    var club = t.teamID && NL.clubs.byOpta(t.teamID);
+    return (club && club.name) || t.name || "";
+  }
+  function nlsScore(t) { return (t && t.score != null) ? String(t.score) : ""; }
+
+  function dateOptionLabel(ymd, info) {
+    var d = new Date(ymd + "T12:00:00Z");
+    var lab = d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }).replace(/,/g, "");
+    /* Kept short on purpose: "Sat 29 Aug · 12 matches" was being cut off
+       mid-word inside the select at the panel's width. */
+    var n = info && info.count;
+    return lab + (n ? " (" + n + ")" : "");
   }
 
-  /* ---------------- team datalist ---------------- */
-  /* Roster comes from the canon (NL.clubs, one clubs-meta fetch per session),
-     not a local mirror — current season only, which is what a matchday
-     graphic is ever built from. */
-  function buildTeamList() {
-    NL.clubs.forSeason().then(function (clubs) {
-      $("teamList").innerHTML = clubs.map(function (c) {
-        return '<option value="' + escapeHtml(c.name) + '">';
+  /* meta.populatedDates is the whole season's calendar and comes back whatever
+     window is asked for, so one narrow request fills both date pickers. */
+  function loadDates() {
+    var div = state.division, comp = COMPETITION_ID[div], from = $("nlsFrom");
+    if (!from || !comp) return;
+    if (_pdCache[div]) { fillDates(_pdCache[div]); return; }
+    from.innerHTML = '<option value="">Loading dates…</option>';
+    $("nlsTo").innerHTML = "";
+    var today = ymdUK(new Date());
+    fetch(nlsUrl([
+      "seasonID=" + encodeURIComponent(nlsSeason()),
+      "competitionID=" + comp,
+      "includePopulatedDates=true",
+      "from=" + encodeURIComponent(today + " 00:00:00Z"),
+      "to=" + encodeURIComponent(today + " 23:59:59Z"),
+      "page.number=1", "page.size=1"
+    ])).then(function (r) {
+      if (!r.ok) throw new Error("NLS " + r.status);
+      return r.json();
+    }).then(function (j) {
+      var pd = (j && j.meta && j.meta.populatedDates) || {};
+      _pdCache[div] = pd;
+      fillDates(pd);
+    }).catch(function (err) {
+      console.error(err);
+      from.innerHTML = '<option value="">Dates unavailable</option>';
+      setStatus("Couldn't reach National League Services.", 5000);
+    });
+  }
+
+  function fillDates(pd) {
+    var keys = Object.keys(pd).sort(), from = $("nlsFrom");
+    if (!keys.length) {
+      from.innerHTML = '<option value="">No dates listed</option>';
+      $("nlsTo").innerHTML = '<option value="">—</option>';
+      return;
+    }
+    var today = ymdUK(new Date()), def = keys[keys.length - 1];
+    for (var i = 0; i < keys.length; i++) { if (keys[i] >= today) { def = keys[i]; break; } }
+    from.innerHTML = keys.map(function (k) {
+      return '<option value="' + k + '"' + (k === def ? " selected" : "") + '>' +
+             escapeHtml(dateOptionLabel(k, pd[k])) + '</option>';
+    }).join("");
+    fillToDates();
+  }
+
+  /* "Through to" only ever offers dates at or after the one chosen, so the
+     range cannot be inverted. Capped at a week's worth of matchdays — beyond
+     that the card is past the 12-match ceiling anyway. */
+  function fillToDates() {
+    var pd = _pdCache[state.division] || {}, fromVal = $("nlsFrom").value;
+    var later = Object.keys(pd).sort().filter(function (k) { return k >= fromVal; }).slice(0, 8);
+    $("nlsTo").innerHTML = later.map(function (k, i) {
+      return '<option value="' + k + '"' + (i === 0 ? " selected" : "") + '>' +
+             escapeHtml(i === 0 ? "Same day" : dateOptionLabel(k, pd[k])) + '</option>';
+    }).join("");
+  }
+
+  function loadFromNLS() {
+    var comp = COMPETITION_ID[state.division];
+    var from = $("nlsFrom").value, to = $("nlsTo").value || from;
+    if (!comp || !from) { setStatus("Pick a date first."); return; }
+    if (to < from) to = from;
+    var btn = $("nlsLoadBtn");
+    btn.disabled = true;
+    setStatus("Loading from National League Services…", 20000);
+    fetch(nlsUrl([
+      "seasonID=" + encodeURIComponent(nlsSeason()),
+      "competitionID=" + comp,
+      "from=" + encodeURIComponent(from + " 00:00:00Z"),
+      "to=" + encodeURIComponent(to + " 23:59:59Z"),
+      "sort=kickOffDateUTC",
+      "page.number=1", "page.size=100"
+    ])).then(function (r) {
+      if (!r.ok) throw new Error("NLS " + r.status);
+      return r.json();
+    }).then(function (j) {
+      applyMatches((j && j.data) || []);
+    }).catch(function (err) {
+      console.error(err);
+      setStatus("Couldn't reach National League Services.", 5000);
+    }).then(function () { btn.disabled = false; });
+  }
+
+  function applyMatches(data) {
+    var postponed = 0;
+    var matches = data.filter(function (m) {
+      if ((m.attributes || {}).postponementReason) { postponed++; return false; }
+      return true;
+    }).map(function (m) {
+      var a = m.attributes || {};
+      return {
+        home: nlsTeamName(a.homeTeam),
+        away: nlsTeamName(a.awayTeam),
+        hs: nlsScore(a.homeTeam),
+        as: nlsScore(a.awayTeam),
+        ko: koTime(a.kickOffDateUTC),
+        day: koDay(a.kickOffDateUTC)
+      };
+    }).filter(function (r) { return r.home && r.away; })
+      .sort(function (a, b) {
+        if (a.day !== b.day) return a.day < b.day ? -1 : 1;
+        if (a.ko !== b.ko) return a.ko < b.ko ? -1 : 1;
+        return a.home.localeCompare(b.home);
+      });
+
+    var trimmed = matches.length > MAX_ROWS;
+    matches = matches.slice(0, MAX_ROWS);
+    if (!matches.length) {
+      setStatus(postponed
+        ? "Nothing to load — all " + postponed + " postponed."
+        : "No matches on that date.", 5000);
+      return;
+    }
+
+    /* Tick the kick-offs that are NOT the day's usual time. A card where every
+       game is at 15:00 prints no times at all; the 12:30 and the 19:45 print
+       theirs. Show all / Hide all override it. */
+    var counts = {}, usual = "", most = 0;
+    matches.forEach(function (r) {
+      if (!r.ko) return;
+      counts[r.ko] = (counts[r.ko] || 0) + 1;
+      if (counts[r.ko] > most) { most = counts[r.ko]; usual = r.ko; }
+    });
+    var odd = 0;
+    matches.forEach(function (r) { r.koOn = !!(r.ko && r.ko !== usual); if (r.koOn) odd++; });
+
+    /* A card spanning more than one day gets a divider above each day. */
+    var days = [];
+    matches.forEach(function (r) { if (days.indexOf(r.day) < 0) days.push(r.day); });
+    var rows = [], lastDay = null;
+    matches.forEach(function (r) {
+      if (days.length > 1 && r.day !== lastDay) { rows.push({ divider: dividerLabel(r.day) }); lastDay = r.day; }
+      rows.push({ home: r.home, away: r.away, hs: r.hs, as: r.as, ko: r.ko, koOn: r.koOn });
+    });
+
+    state.rows = rows;
+    syncPasteFromRows(); buildGrid(); save(); render();
+
+    var msg = "Loaded " + matches.length + " match" + (matches.length === 1 ? "" : "es");
+    if (postponed) msg += " · " + postponed + " postponed left out";
+    if (trimmed) msg += " · trimmed to " + MAX_ROWS;
+    if (state.mode === "results") {
+      var scored = matches.filter(function (r) { return r.hs !== "" && r.as !== ""; }).length;
+      if (!scored) msg += " · no scores yet";
+      else if (scored < matches.length) msg += " · " + (matches.length - scored) + " without a score";
+    } else if (odd) {
+      msg += " · " + odd + " kick-off" + (odd === 1 ? "" : "s") + " ticked";
+    }
+    setStatus(msg, 8000);
+  }
+
+  /* ---------------- team roster ----------------
+     The editor picks teams from a list rather than taking typed text: on a
+     phone that is the native picker instead of a text box the width of a
+     thumbnail. Both files come from the canon — clubs-meta for the three
+     divisions, cup-clubs-meta for the guest sides that enter the NL Cup, which
+     are deliberately kept out of clubs-meta because they were never members. */
+  var _teamOptions = "";     /* <optgroup> markup, built once */
+  var _teamNames = {};       /* lower-cased roster name → true */
+
+  function buildTeamOptions() {
+    return Promise.all([
+      NL.clubs.forSeason(),
+      NL.clubs.guests().catch(function () { return []; })
+    ]).then(function (res) {
+      var clubs = res[0] || [], guests = res[1] || [];
+      var byDiv = function (d) { return clubs.filter(function (c) { return c.division === d; }); };
+      var groups = [
+        ["National League", byDiv("National")],
+        ["National League North", byDiv("North")],
+        ["National League South", byDiv("South")],
+        ["National League Cup guests", guests]
+      ];
+      _teamNames = {};
+      _teamOptions = groups.filter(function (g) { return g[1].length; }).map(function (g) {
+        return '<optgroup label="' + escapeHtml(g[0]) + '">' + g[1].map(function (c) {
+          _teamNames[String(c.name).toLowerCase()] = true;
+          return '<option value="' + escapeHtml(c.name) + '">' + escapeHtml(c.name) + '</option>';
+        }).join("") + '</optgroup>';
       }).join("");
-    }).catch(function () { /* datalist stays empty — names are free text anyway */ });
+    });
+  }
+
+  /* A value the roster doesn't carry — a pasted one-off opponent, a name NLS
+     spells differently — is added as its own option rather than being silently
+     swapped for whichever club happens to sort first. */
+  function teamSelect(i, key, val) {
+    var v = String(val || ""), own = "";
+    if (v && !_teamNames[v.toLowerCase()]) {
+      own = '<option value="' + escapeHtml(v) + '">' + escapeHtml(v) + '</option>';
+    }
+    return '<select class="nl-select g-team" data-i="' + i + '" data-k="' + key + '">' +
+             '<option value="">—</option>' + own + _teamOptions +
+           '</select>';
   }
 
   /* ---------------- export ---------------- */
@@ -563,10 +866,23 @@
     return function () { restores.forEach(function (p) { p[0].setAttribute("src", p[1]); }); };
   }
   var statusT;
-  function setStatus(m) {
+  function setStatus(m, ms) {
     var el = $("status"); if (!el) return;
     el.textContent = m; clearTimeout(statusT);
-    statusT = setTimeout(function () { el.textContent = "Ready"; }, 2200);
+    statusT = setTimeout(function () { el.textContent = "Ready"; }, ms || 2200);
+  }
+
+  /* ---------------- source + mode toggles ----------------
+     Source picks which half of the tool is on screen: the feed loader or the
+     paste box. The editor underneath belongs to both, so a card loaded from
+     the feed stays editable by hand after switching. */
+  function setSource(src) {
+    state.source = (src === "manual") ? "manual" : "feed";
+    document.querySelectorAll(".src-btn").forEach(function (b) {
+      b.classList.toggle("active", b.getAttribute("data-src") === state.source);
+    });
+    document.body.setAttribute("data-source", state.source);
+    save();
   }
 
   /* ---------------- mode toggle ---------------- */
@@ -592,7 +908,6 @@
 
     load();
     if (["wrap", "short"].indexOf(state.fit) < 0) state.fit = "wrap";
-    buildTeamList();
     if (!state.rows.length) state.rows = parse(SAMPLE);
     syncPasteFromRows();
     buildGrid();
@@ -601,9 +916,17 @@
     syncSizeSeg();
     $("matchdayInput").value = state.matchday;
     if ($("fitSel")) $("fitSel").value = state.fit;
+    setSource(state.source);
     setMode(state.mode);
 
-    $("divisionSel").addEventListener("change", function () { state.division = this.value; save(); render(); });
+    $("divisionSel").addEventListener("change", function () {
+      state.division = this.value; save(); render();
+      loadDates();                       /* each competition has its own calendar */
+    });
+    $("nlsFrom").addEventListener("change", fillToDates);
+    $("nlsLoadBtn").addEventListener("click", loadFromNLS);
+    $("koAllBtn").addEventListener("click", function () { setAllKo(true); });
+    $("koNoneBtn").addEventListener("click", function () { setAllKo(false); });
     document.querySelectorAll(".size-btn").forEach(function (b) {
       b.addEventListener("click", function () {
         state.format = b.getAttribute("data-fmt"); syncSizeSeg(); save(); render();
@@ -613,6 +936,9 @@
     if ($("fitSel")) $("fitSel").addEventListener("change", function () { state.fit = this.value; save(); render(); });
     document.querySelectorAll(".mode-btn").forEach(function (b) {
       b.addEventListener("click", function () { setMode(b.getAttribute("data-mode")); });
+    });
+    document.querySelectorAll(".src-btn").forEach(function (b) {
+      b.addEventListener("click", function () { setSource(b.getAttribute("data-src")); fitStage(); });
     });
 
     var pt;
@@ -624,15 +950,21 @@
     $("resetBtn").addEventListener("click", function () {
       try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
       state.rows = parse(SAMPLE); state.division = "National"; state.format = "1x1";
-      state.mode = "fixtures"; state.matchday = "";
+      state.mode = "fixtures"; state.matchday = ""; state.source = "feed";
       $("divisionSel").value = "National"; syncSizeSeg(); $("matchdayInput").value = "";
-      syncPasteFromRows(); buildGrid(); setMode("fixtures"); setStatus("Reset");
+      syncPasteFromRows(); buildGrid(); setSource("feed"); setMode("fixtures"); setStatus("Reset");
     });
 
     window.addEventListener("resize", fitStage);
-    /* re-render once clubs-meta lands: short names and canonical-name
-       resolution both read NL.clubs, which is empty until then */
-    NL.clubs.load().then(render).catch(function () {});
+    /* re-render once clubs-meta lands: short names, canonical-name resolution
+       and the optaID → club index all read NL.clubs, which is empty until
+       then — and the NLS date list needs seasons.current from the same file. */
+    NL.clubs.load().then(function () { render(); loadDates(); })
+      .catch(function () { loadDates(); });
+    /* The grid is built before the roster arrives, so rebuild it once the
+       options exist — and re-render, since guest crests and short names both
+       read cup-clubs-meta. */
+    buildTeamOptions().then(function () { buildGrid(); render(); }).catch(function () {});
     render();
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(render);
     /* re-fit after layout settles (fixes tiny 9x16 on first paint / in an iframe) */

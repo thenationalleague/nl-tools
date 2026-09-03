@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- NOINDEX IS THE WHOLE OF THE "not on Google" REQUIREMENT, and it is a meta
+     tag rather than a robots.txt rule on purpose. A path disallowed in
+     robots.txt cannot be crawled, so the crawler never reads the noindex —
+     and Google will still list a disallowed URL as a bare link when something
+     else points at it. Blocking the crawler is what keeps a page IN the
+     index; letting it in and telling it not to keep the page is what takes it
+     out. _headers carries an X-Robots-Tag for this directory as well, which
+     covers anything served here that has no <head> to put a tag in. -->
+<meta name="robots" content="noindex, nofollow">
+<title>Club Directory — The National League</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+<!--
+  club-directory / public / index.html
+  v1.0 — (26/08/2026) The directory with no door on it.
+
+  WHAT THIS IS
+  ------------
+  club-directory/reader, entered by nobody. No auth-guard, no passcode, no
+  Firebase Auth of any kind — it opens cold, in a private window, on a phone
+  that has never been here. The League agreed to publish it, and the contact
+  details it shows are the ones the people in it agreed could be published.
+
+  WHAT IT SHOWS, AND WHAT IT CANNOT SHOW
+  --------------------------------------
+  It reads app-data/ops-club-directory/published, which is not the directory:
+  it is a second copy the editor builds to be handed over. Anything a club
+  asked to be kept back was REMOVED when that copy was built — not blanked,
+  not flagged, not there. So the guarantee is not that this page declines to
+  draw a withheld number; it is that the withheld number was never sent to it.
+  The editor's own note on publishablePerson() says it plainly: "There is
+  nothing in it that is not meant to be read."
+
+  On top of that, showQuiet is off, exactly as it is for a club looking at
+  another club. "Not published" and "None held" are a to-do list on your own
+  entry and a column of noise on somebody else's — and to a member of the
+  public they are worse than noise, because they announce that there is
+  something to go and ask for.
+
+  ONE CLUB PER REQUEST, AND NO BULK ENDPOINT
+  ------------------------------------------
+  The rules open published/clubs/$club, NOT published and NOT published/clubs.
+  A read of either parent still needs a code or an account, so there is no one
+  URL that returns 72 clubs' contact details as a single JSON file. That is a
+  speed bump and not a boundary — the club names are public, so anyone who
+  wants all 72 can ask 72 times — but a bulk export that anybody can take by
+  accident is a different kind of exposure from one that has to be built on
+  purpose, and removing it costs this page nothing: it draws the wall from
+  clubs-meta and asks the database only when somebody opens a club.
+
+  It is also why there is no people search here. Searching names and job
+  titles across the directory means holding the whole directory, which is the
+  one thing this page is built not to do. The search box filters the wall by
+  club name, which needs no database at all.
+
+  Not lint-covered: no auth-guard, by design.
+-->
+<link rel="stylesheet" href="/system/nl-brand.css?v=62">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=34">
+
+<!-- No firebase-auth-compat. This page never signs anybody in, and loading
+     the auth SDK on a page with no account is how an "ungated" page quietly
+     acquires an anonymous user apiece. -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script src="/system/nl-utils.js?v=46"></script>
+<script src="/club-directory/_directory.js?v=34"></script>
+<script>
+  firebase.initializeApp({
+    apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+    authDomain:        "nl-tools.firebaseapp.com",
+    databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId:         "nl-tools",
+    storageBucket:     "nl-tools.firebasestorage.app",
+    messagingSenderId: "801354670005",
+    appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+  });
+</script>
+<style>
+  /* NOTHING UNDER THE TITLE. The identity bar on the gated pages carries a
+     second line saying who you are; here there is no who, and a line
+     explaining that the page is public would be telling someone reading a
+     public page that they are reading a public page. The bar is the title
+     and the way back to the wall, and that is all it is. */
+  .pb-bar__back {
+    font-family: var(--font); font-size: var(--text-sm);
+    font-weight: 600; font-variation-settings: 'wght' 600;
+    padding: 6px 12px; border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--white); color: var(--text); cursor: pointer;
+  }
+  .pb-bar__back:hover { border-color: var(--navy); }
+  .pb-bar__back:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+  /* The search bar clears the sticky bar above it rather than the 72px topbar
+     this page does not have. */
+  .cd-search { top: 46px; }
+  @media (max-width: 560px) { .cd-search { top: 0; position: static; } }
+
+  /* One line, at the foot, under everything. When the League last published
+     is a fact about the page rather than a heading on it. */
+  .pb-stamp {
+    margin: 36px 0 0; padding-top: 16px; border-top: 1px solid var(--border);
+    font-size: var(--text-xs); color: var(--text-muted);
+  }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div class="nl-idbar">
+    <div class="nl-idbar__id">
+      <div class="nl-idbar__title">Club Directory</div>
+    </div>
+    <div class="nl-idbar__actions">
+      <button class="pb-bar__back" id="back" type="button" hidden>All clubs</button>
+    </div>
+  </div>
+  <div class="cd-wrap">
+    <div class="cd-search" id="searchWrap"><div class="cd-search__box">
+      <svg class="cd-search__icon" width="17" height="17" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>
+      <input class="cd-search__in" id="q" placeholder="Search clubs" aria-label="Search clubs">
+    </div></div>
+    <div id="out"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = NL.escHtml;
+  var ROSTER = [];
+  /* Fetched one at a time and kept, so going back to a club already opened
+     costs nothing. Also the cache that stops a double-click asking twice. */
+  var CACHE = {};
+  var ROOT = 'app-data/ops-club-directory';
+
+  function db() { return firebase.database(); }
+
+  NL.clubs.forSeason().then(function (roster) {
+    ROSTER = roster || [];
+    drawIndex();
+    $('q').addEventListener('input', drawIndex);
+    $('back').addEventListener('click', function () { location.hash = ''; });
+    window.addEventListener('hashchange', route);
+    /* The stamp is a leaf of its own in the rules — published/at is a number
+       and gives nothing away, where published/label is the edition name
+       somebody typed. Both are open; neither is the directory. */
+    db().ref(ROOT + '/published/at').once('value').then(function (s) {
+      var at = s.val();
+      if (!at) { return; }
+      var p = document.createElement('p');
+      p.className = 'pb-stamp';
+      p.textContent = 'Last updated ' + NL.formatDate(at) + '.';
+      $('out').parentNode.appendChild(p);
+    })['catch'](function () { /* a missing stamp is not worth a message */ });
+    route();
+  })['catch'](function (err) {
+    $('out').innerHTML = '<p class="cd-empty">' + esc((err && err.message) || String(err)) + '</p>';
+  });
+
+  /* A club per URL, so a link to one club is a link to that club. */
+  function fromHash() {
+    var h = decodeURIComponent((location.hash || '').replace(/^#/, '')).trim();
+    return h || '';
+  }
+
+  function route() {
+    var n = fromHash();
+    if (n) { drawClub(n); } else { drawIndex(); }
+  }
+
+  function drawIndex() {
+    var q = ($('q').value || '').trim().toLowerCase();
+    var roster = q
+      ? ROSTER.filter(function (c) { return c.name.toLowerCase().indexOf(q) > -1; })
+      : ROSTER;
+    $('back').hidden = true;
+    $('searchWrap').hidden = false;
+    /* No `own` and no `isReady`. This page never knows who is reading, and it
+       cannot know whether a club is in the published copy until it asks — so
+       every tile opens and drawClub says so if the answer comes back empty.
+       Greying a club here would mean fetching all 72 to find out, which is
+       the bulk read this page exists without. */
+    $('out').innerHTML = NLDirectory.renderIndex({ roster: roster });
+    if (q && !roster.length) {
+      $('out').innerHTML = '<p class="cd-empty">No club matches “' + esc(q) + '”.</p>';
+      return;
+    }
+    NLDirectory.wireIndex($('out'), function (n) { location.hash = encodeURIComponent(n); });
+  }
+
+  function drawClub(name) {
+    $('back').hidden = false;
+    $('searchWrap').hidden = true;
+    if (CACHE[name]) { paint(name, CACHE[name]); return; }
+    $('out').innerHTML = '<p class="cd-empty">Loading…</p>';
+    /* .child() WITH THE RAW NAME. This was
+       ref('.../clubs/' + encodeURIComponent(name)) and it broke 49 of the 72:
+       Firebase's Path constructor splits the string on '/' and decodes
+       NOTHING, so "Aldershot%20Town" is looked up as a key spelled exactly
+       that way, which does not exist. The 23 that worked were the ones whose
+       names survive encodeURIComponent unchanged — every single-word club,
+       Altrincham through Worthing. Encoding a URL segment and addressing a
+       database key look identical and are not the same job.
+
+       No club name contains any of . $ # [ ] / — the characters RTDB forbids
+       in a key — so the raw name is already a legal key and needs nothing
+       done to it. tests/public-pages.test.mjs holds that. */
+    db().ref(ROOT + '/published/clubs').child(name).once('value')
+      .then(function (snap) {
+        CACHE[name] = snap.val() || null;
+        paint(name, CACHE[name]);
+      })
+      ['catch'](function () {
+        /* A denied read and a club that is not in the published copy are the
+           same thing to a reader, and saying which would be telling somebody
+           where the edge of the rules is. */
+        paint(name, null);
+      });
+  }
+
+  function paint(name, rec) {
+    if (!rec) {
+      $('out').innerHTML = '<p class="cd-empty">' + esc(name) +
+        ' has not been published yet. The National League goes through each ' +
+        'club’s details before they appear here.</p>';
+      window.scrollTo(0, 0);
+      return;
+    }
+    /* showQuiet OFF — the same view a club gets of a club that is not theirs.
+       cards:false is the list view; there is no switcher on this page because
+       remembering a preference per person is a thing for somebody who comes
+       back, and the switcher is drawn by renderClub above the people anyway. */
+    $('out').innerHTML = NLDirectory.renderClub(rec, { showQuiet: false });
+    /* renderClub leaves the banner crest hidden and srcless for the caller to
+       fill — the record it renders carries no crest, the roster does. Order
+       matters: wire the thumb→full→rose fallback BEFORE setting src, or a
+       club with no medium tier yet loads nothing and the onerror that would
+       have rescued it was not attached when the load failed. */
+    var crest = $('cdCrest');
+    if (crest) {
+      crest.alt = name + ' crest';
+      crest.hidden = false;
+      NL.clubs.wireCrestImg(crest, name, true);
+      crest.src = NL.clubs.crestUrl(name, 'medium');
+    }
+    window.scrollTo(0, 0);
+  }
+}());
+</script>
+</body>
+</html>

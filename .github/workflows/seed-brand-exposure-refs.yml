@@ -1,0 +1,134 @@
+name: Seed brand exposure references
+
+# Copies the league partner logos that live in this repo up to Firebase Storage,
+# where the cloud scan job reads its references from.
+#
+# Why this exists rather than someone dragging files into a console: the folder
+# tree IS the configuration. refs/partners/<Sponsor>/ is searched at every
+# ground, and the sponsor name shown in every report is the folder name. Getting
+# that structure right by hand, once per sponsor, is exactly the sort of job
+# that goes wrong quietly — a typo in a folder name is a sponsor that silently
+# never appears.
+#
+# SCOPE: league partners only. assets/partners/ holds the marks that apply at
+# every ground. Club-specific boards — a ground's own local sponsors — are not
+# in this repo and must not be: they are somebody else's artwork and this
+# repository is public. Those go up separately, under
+# brand-exposure/refs/clubs/<Club>/<Sponsor>/.
+#
+# Re-running is safe. It overwrites the same paths, and (since 02/09/2026)
+# removes any partner file that is no longer in the repo — the repo tree IS
+# the partner set, so retiring a file here retires it from every scan. It
+# never touches refs/clubs/, which is not in the repo.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "seed" to copy the partner logos to Storage'
+        required: true
+        default: ''
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  BUCKET: nl-tools.firebasestorage.app
+  PREFIX: brand-exposure/refs/partners
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse without the confirmation word
+        if: ${{ inputs.confirm != 'seed' }}
+        run: |
+          echo "::error::Type seed in the confirm box to run this."
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Copy each logo into its own sponsor folder
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          n=0
+          for f in assets/partners/*.png assets/partners/*.jpg; do
+            base="$(basename "$f")"
+            sponsor="${base%.*}"
+            # One folder per sponsor, and the folder name is what appears in
+            # every report — so it is taken verbatim from the filename, spaces
+            # and all, rather than slugged. "TIC Health" must stay "TIC Health".
+            gcloud storage cp "$f" "gs://$BUCKET/$PREFIX/$sponsor/${base}"
+            echo "  $sponsor  <-  $base"
+            n=$((n + 1))
+          done
+          # A sponsor with several looks keeps ONE name: extra variants live in
+          # a subfolder named for the sponsor, and land in the same Storage
+          # folder as the flat file. DAZN is why — their boards are white on
+          # black, the brand file is black on transparent, and SIFT cannot
+          # match across a contrast inversion, so the board variant is a
+          # separate image under the same sponsor, never a second sponsor.
+          for f in assets/partners/*/*.png assets/partners/*/*.jpg; do
+            sponsor="$(basename "$(dirname "$f")")"
+            base="$(basename "$f")"
+            gcloud storage cp "$f" "gs://$BUCKET/$PREFIX/$sponsor/${base}"
+            echo "  $sponsor  <-  $sponsor/$base"
+            n=$((n + 1))
+          done
+          if [ "$n" -eq 0 ]; then
+            echo "::error::No images in assets/partners/. Nothing to seed."
+            exit 1
+          fi
+          echo "SEEDED=$n" >> "$GITHUB_ENV"
+
+      - name: Retire partner files the repo no longer holds
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          # The set the repo wants, in the bucket's own naming.
+          want="$(mktemp)"
+          for f in assets/partners/*.png assets/partners/*.jpg; do
+            base="$(basename "$f")"; echo "gs://$BUCKET/$PREFIX/${base%.*}/$base"
+          done >> "$want"
+          for f in assets/partners/*/*.png assets/partners/*/*.jpg; do
+            echo "gs://$BUCKET/$PREFIX/$(basename "$(dirname "$f")")/$(basename "$f")"
+          done >> "$want"
+          # Everything under partners/ that is not in that set goes. The prefix
+          # is the guard: nothing under refs/clubs/ can appear in this listing.
+          gone=0
+          while IFS= read -r obj; do
+            [ -n "$obj" ] || continue
+            case "$obj" in */) continue ;; esac
+            if ! grep -qxF "$obj" "$want"; then
+              gcloud storage rm "$obj"
+              echo "  retired  $obj"
+              gone=$((gone + 1))
+            fi
+          done < <(gcloud storage ls --recursive "gs://$BUCKET/$PREFIX/**" 2>/dev/null | grep '^gs://' || true)
+          echo "RETIRED=$gone" >> "$GITHUB_ENV"
+
+      - name: Say what is now up there
+        run: |
+          {
+            echo "### Seeded $SEEDED partner reference(s), retired $RETIRED"
+            echo ""
+            echo 'Into `gs://'"$BUCKET/$PREFIX"'/<Sponsor>/`'
+            echo ""
+            gcloud storage ls --recursive "gs://$BUCKET/$PREFIX/**" | sed 's/^/    /'
+            echo ""
+            echo "League partners only. A ground's own local sponsors are not in"
+            echo "this repo and go up separately under refs/clubs/<Club>/<Sponsor>/."
+            echo ""
+            echo "More references means a linearly longer scan, so add them"
+            echo "deliberately rather than in bulk."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,16 +1,35 @@
 /* =========================================================================
    NL Tools — Club Directory presentation
    File: /club-directory/_directory.js
-   Version: v1.9 (03/09/2026)
+   Version: v1.11 (03/09/2026)
 
-   v1.9 — organisation records. A record whose root carries org: true is the
+   v1.11 — organisation records. A record whose root carries org: true is the
    League or a related body, not a roster club: crestKeyOf() names the crest
    asset to draw (crestName on the record, else the record name), orgFirst()
-   pins orgs ahead of the clubs wherever both are listed, and the one fact
-   that rendered on an otherwise-empty card ("Stadium (sponsored): None")
-   stays club-only. An org's shared mailboxes (commercial@, media@) render as
-   facts rows via orgInboxRows() — a club's card is unchanged, because a
-   club's inboxes are an editor/list-builder concern and are not published.
+   pins orgs ahead of the clubs wherever both are listed, and renderIndex()
+   takes opts.orgs and draws them as their own first group on the wall —
+   crest by that key, no colour band, because an org has no strip. The one
+   fact that rendered on an otherwise-empty card ("Stadium (sponsored):
+   None") stays club-only. An org's shared mailboxes (commercial@, media@)
+   render as facts rows via orgInboxRows() — a club's card is unchanged,
+   because a club's inboxes are an editor/list-builder concern and are not
+   published.
+
+   v1.10 — the all-clubs WALL moves here: renderIndex(), wireIndex(),
+   tileStyle() and isWhiteGround(). It was written inline in the reader,
+   carrying a note that said to promote it on the second use — and
+   club-directory/public is the second use. Two copies would have agreed on
+   the day and disagreed about a club's colours by Christmas, which is the
+   one thing this file exists to answer once.
+
+   v1.9 — the club banner is the club's PRIMARY and its TERTIARY, with no
+   substitution. It read primary + secondary and threw the club's own type
+   away for white or near-black on any pair under 4.5:1, which fired on
+   twenty of the eighty-two. Tertiary is the field that holds the type
+   colour; the nine clubs whose tertiary disagreed with their strip were
+   corrected in clubs-meta the same day, and all 72 now clear 3:1 — the bar
+   for large text, which .cd-banner__name at --text-xl/900 is. The remaining
+   fallback answers MISSING data, not low contrast.
 
    v1.8 — viewSwitch(), and names set as their owners write them.
    · The List/Cards switcher is built here, above the people it acts on,
@@ -296,19 +315,27 @@
       return arr(p.roles).some(function (r) { return r.section === section; });
     }).sort(bySurname);
   }
-  /* Banner colours: the club's primary as the background, their secondary as
-     the type. That is the pairing the clubs use themselves, so Forest Green
-     read as lime on black rather than the white-on-black a contrast-first
-     rule picks.
+  /* BANNER COLOURS: THE CLUB'S PRIMARY AND ITS TERTIARY. Nothing else, and no
+     substitution — the record is trusted because the record is now correct.
 
-     It needs a floor, though. Twenty of the eighty-two pairs fall below 4.5:1
-     against each other — Carlisle's blue on red is 1.17:1, which is unreadable
-     rather than merely bold. Where the club's own pair fails, the background
-     is kept and the type falls to whichever of white or near-black actually
-     reads on it, so the club identity survives and the name stays legible.
+     It used to read primary + SECONDARY, with a rule that threw the club's
+     own type away for white or near-black whenever the pair fell under 4.5:1.
+     That fired on twenty of the eighty-two: Carlisle's blue on red is 1.17:1,
+     genuinely unreadable, so the guard was doing real work against the data
+     as it then stood.
 
-     Duplicated logic warning: club-kits/admin.html has its own luminance test.
-     Second use, so this belongs in NL.clubs as colours(name). Flagged. */
+     Tertiary is the field that actually holds the club's TYPE colour, and the
+     nine clubs whose tertiary disagreed with their strip were corrected in
+     clubs-meta on 26/08/2026 (Aldershot, Braintree, Chorley, Hornchurch,
+     Kidderminster, Scunthorpe, Walton & Hersham, Worthing, Yeovil), with
+     Scunthorpe's primary and secondary inverted at the same time — they play
+     in claret. Against primary, all 72 tertiaries clear 3:1, which is the
+     WCAG bar for large text; .cd-banner__name is --text-xl at weight 900 and
+     is emphatically that. Only 54 secondaries reached even 4.5:1.
+
+     So the fallback below is for MISSING data, not for low contrast: it fires
+     only when a club has no usable tertiary at all. None do today. A club
+     whose own two colours look bold is showing you the club. */
   function lum(hex) {
     var h = String(hex || '').replace('#', '');
     if (h.length === 3) { h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2]; }
@@ -327,9 +354,9 @@
   function bannerColours(clubName) {
     var meta = (window.NL && NL.clubs && NL.clubs.byName) ? NL.clubs.byName(clubName) : null;
     var cols = (meta && meta.colors) || {};
-    var bg = cols.primary, fg = cols.secondary;
+    var bg = cols.primary, fg = cols.tertiary;
     if (lum(bg) === null) { return null; }              /* no usable primary */
-    if (lum(fg) === null || contrast(bg, fg) < 4.5) {
+    if (lum(fg) === null) {
       fg = contrast(bg, '#FFFFFF') >= contrast(bg, '#0A1628') ? '#FFFFFF' : '#0A1628';
     }
     return { bg: bg, fg: fg };
@@ -755,11 +782,145 @@
     return out;
   }
 
+  /* ---------------------------------------------------------- the wall
+     Every club in the competition as a crest and a name, grouped by division.
+     Promoted here 26/08/2026 on its second use: the reader drew it inline,
+     and club-directory/public draws the same wall for anyone without a code.
+
+     TWO COPIES WOULD HAVE AGREED TODAY AND DRIFTED BY CHRISTMAS, and the
+     thing they would have disagreed about is a club's colours — which is the
+     one thing this file exists to answer once. bannerColours is already
+     shared with the club banner for exactly that reason.
+
+     It is built from the ROSTER (clubs-meta) rather than from the directory,
+     so a club nobody has checked yet is still on the wall. `isReady` decides
+     which tiles open; a page that cannot know until it asks — the public one
+     fetches a club at a time — passes a function that says yes and handles
+     the empty answer when it arrives. */
+
+  /* THE TRIM, NOT THE TILE. Canon NL.clubs.bandsHtml writes the club's
+     primary and secondary as .nl-club-bands along the base of the card
+     (nl-brand v2.63, nl-utils v1.42) — the treatment Programme Packs has
+     been running for weeks. It replaced painting the whole name band in the
+     club's own colours, which read as 72 blocks of colour rather than as a
+     directory, and it puts the name back on white where no club is bound by
+     a contrast floor. */
+  /* opts: { roster, extra, orgs, isReady, own, ownNote }
+       roster   [{ name, division }] — clubs-meta for the season.
+       extra    names in the directory that are not in the roster.
+       orgs     [{ name, crestName }] — organisation records (the League,
+                related bodies), pinned as their own first group and kept out
+                of "Also in the directory", which is for roster mismatches.
+                Passed only by pages that read the directory; the public wall
+                shows the competition, so it simply doesn't.
+       isReady  fn(name) -> can this tile be opened. Default: all of them.
+       own      the reading club's name, drawn as a wide row on top. Omitted
+                by any page that does not know who is reading. */
+  function renderIndex(opts) {
+    opts = opts || {};
+    var roster = arr(opts.roster);
+    var ready = typeof opts.isReady === 'function' ? opts.isReady : function () { return true; };
+    var seen = {}, groups = [], byDiv = {};
+    /* Orgs first — the League above the clubs it runs. Their crest is named
+       by the record, and they take no colour band: an org has no strip. */
+    var orgCrest = null;
+    arr(opts.orgs).forEach(function (o) {
+      if (!o || !o.name) { return; }
+      if (!orgCrest) {
+        orgCrest = {};
+        byDiv.Organisations = [];
+        groups.push('Organisations');
+      }
+      orgCrest[o.name] = o.crestName || o.name;
+      byDiv.Organisations.push(o.name);
+      seen[o.name.toLowerCase()] = true;
+    });
+    roster.forEach(function (c) {
+      if (!c || !c.name) { return; }
+      seen[c.name.toLowerCase()] = true;
+      var d = c.division || 'National League';
+      if (!byDiv[d]) { byDiv[d] = []; groups.push(d); }
+      byDiv[d].push(c.name);
+    });
+    var strays = arr(opts.extra).filter(function (n) { return !seen[n.toLowerCase()]; });
+    if (strays.length) {
+      var other = 'Also in the directory';
+      byDiv[other] = strays;
+      groups.push(other);
+    }
+
+    /* A club whose own entry is not published yet still gets its row, greyed
+       — the same reasoning as the tiles. Losing it would tell a club that its
+       own club is not in the competition. */
+    var own = opts.own;
+    var ownOk = own && ready(own);
+    var mine = own
+      ? '<section class="rd-mine">' +
+          '<h2 class="rd-div__h">Your club</h2>' +
+          (ownOk
+            ? '<button type="button" class="rd-mine__go" data-club="' + esc(own) + '">'
+            : '<span class="rd-mine__go" aria-disabled="true">') +
+            window.NL.clubs.crestImgHtml(own, 'medium',
+              { className: 'nl-crest rd-mine__crest', eager: true }) +
+            '<span class="rd-mine__text">' +
+              '<span class="rd-mine__name">' + esc(own) + '</span>' +
+              '<span class="rd-mine__note">' +
+                esc(ownOk ? (opts.ownNote || 'View your entry') : 'Not yet checked') +
+              '</span>' +
+            '</span>' +
+            /* The heavier trim, like programme's own-club row: this is the
+               card you act on, and the weight is what says so now that it is
+               not the only one wearing colour. */
+            window.NL.clubs.bandsHtml(own, { lg: true }) +
+          (ownOk ? '</button>' : '</span>') +
+        '</section>'
+      : '';
+
+    return '<div class="rd-index">' + mine + groups.map(function (d) {
+      return '<section class="rd-div">' +
+        '<h2 class="rd-div__h">' + esc(d) + '</h2>' +
+        '<ul class="rd-grid">' + byDiv[d].slice().sort().map(function (n) {
+          var ok = ready(n);
+          var org = orgCrest && orgCrest[n];
+          var inner =
+            '<span class="rd-tile__top">' +
+              window.NL.clubs.crestImgHtml(org || n, 'thumb', { className: 'nl-crest rd-tile__crest' }) +
+            '</span>' +
+            '<span class="rd-tile__name">' + esc(n) + '</span>' +
+            (org ? '' : window.NL.clubs.bandsHtml(n));
+          /* The state rides in the title, not in a third line. A line of text
+             saying so is what made the old rows different heights. */
+          var not = ok ? '' : ' title="Not yet checked"';
+          return '<li class="rd-tile' + (ok ? '' : ' is-pending') + '">' +
+            (ok ? '<button type="button" class="rd-tile__go" data-club="' + esc(n) + '">' +
+                    inner + '</button>'
+                : '<span class="rd-tile__go" aria-disabled="true"' + not + '>' + inner + '</span>') +
+            '</li>';
+        }).join('') + '</ul></section>';
+    }).join('') + '</div>';
+  }
+
+  /* Crests deferred by NL.clubs.crestImgHtml need wiring after insertion, and
+     every tile needs its click. One call so a caller cannot do half of it. */
+  function wireIndex(host, onPick) {
+    if (!host) { return; }
+    window.NL.clubs.wireCrestImgs(host);
+    Array.prototype.forEach.call(host.querySelectorAll('[data-club]'), function (b) {
+      b.addEventListener('click', function () { onPick(b.getAttribute('data-club')); });
+    });
+  }
+
   window.NLDirectory = {
     arr: arr,
     rolesOf: rolesOf,
+    renderIndex: renderIndex,
+    wireIndex: wireIndex,
     renderClub: renderClub,
     viewSwitch: viewSwitch,
+    /* EXPORTED so the index wall and the club banner ask one function for a
+       club's two colours. Two copies of this is how Carlisle ends up
+       readable in one place and 1.17:1 in the other. */
+    clubColours: bannerColours,
     personRow: personRow,
     personCard: personCard,
     allPeople: allPeople,

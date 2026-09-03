@@ -142,20 +142,61 @@ npm run fetch-ga-metrics    # node scripts/fetch-ga-metrics.js — GA4 Data API,
 ```
 
 ```bash
-npm test                    # node --test tests/*.test.mjs — 260 tests, gates every PR
+npm test                    # node --test tests/*.test.mjs — gates every PR; prints its own count
 bash system/lint-tools.sh --strict   # what CI runs; exit 1 on drift
 ```
 
-There **is** a test suite: 17 files under `tests/`, run by `canon-checks.yml` on
-every push and PR. (This section said "No test framework" until 15/08/2026,
-which is the kind of wrong that stops someone adding a test.) `tests/canon.test.mjs`
-covers the `NL.*` API thoroughly; `tests/brand-canon.test.mjs` covers the CSS
-canon with four tests about one button variant, so the design system is
-effectively untested — that gap is real and worth closing.
+There **is** a test suite under `tests/`, run by `canon-checks.yml` on every
+push and PR. `tests/canon.test.mjs` covers the `NL.*` API; `tests/brand-canon.test.mjs`
+covers the CSS canon.
+
+**Do not write test counts, file counts or coverage verdicts here.** This
+paragraph has now been wrong twice in opposite directions. It said "No test
+framework" until 15/08/2026, which is the kind of wrong that stops someone
+adding a test. It was then replaced by "260 tests, 17 files, brand-canon has
+four tests about one button variant, so the design system is effectively
+untested — that gap is real and worth closing", and by 28/08/2026 the real
+figures were 837 tests across 41 files with 63 in brand-canon. The gap it
+called worth closing had been closed, and the doc was still commissioning the
+work. A stale number is a nuisance; a stale *conclusion* sends someone off to
+build something that exists.
+
+`npm test` prints the count. That is the same fix the `?v=` table got below,
+and for the same reason: a measurement belongs where it is measured.
 
 Verification of UI changes is still manual (open the page in a browser). There
 is no page-render test, so a converted page that silently breaks will not be
 caught by CI.
+
+### When you stub a third party, say where the shape came from
+
+**A stub you wrote from memory tests only that you were consistent with
+yourself.** If a test doubles an external API — Firebase, Identity Toolkit, NLS,
+Storage, the Cloud Run API — the comment beside it must cite a doc URL or a live
+call. Not "this is what it returns"; *how you know* that.
+
+This is not hypothetical. `signInWithCustomToken` answers with `idToken`,
+`refreshToken`, `expiresIn` and `isNewUser` — and **no** `localId`, unlike
+`signUp`, which does. `board_exposure_upload.py` read `localId` from it, and the
+stub was written to return `localId`, because the same wrong belief produced
+both. Nineteen tests passed. The first real cloud run died on
+`KeyError: 'localId'` after four minutes of paid CPU, and it took an hour at
+midnight to find, because the failure was in the one place the tests could not
+see: the boundary where the code stops being ours.
+
+Verifying was cheap and available the whole time — one `urllib` call to the live
+endpoint, with a public API key. The rule is really: **look up the thing you are
+confident about**, because the thing you already doubt is the thing you check
+anyway.
+
+Two habits that follow:
+
+- **Prove a test can fail.** Put the bug back and watch it go red. A test that
+  has never failed has never been shown to test anything.
+- **A harness that dies on setup reads exactly like a pass.** The local server
+  for these tests bound a fixed port, so a leftover process from an earlier run
+  killed the suite on bind with no `FAIL` line anywhere — which briefly looked
+  like proof the bug did not exist. Bind port 0, and make failure loud.
 
 ## Plans and decisions — read before proposing one
 
@@ -164,6 +205,7 @@ which is why work gets re-planned from scratch. Check here first.
 
 | Document | What it decides |
 |---|---|
+| `system/RUNBOOK.md` | **How the system is operated**, for a human with a browser and no terminal: where every part lives, which Action ships what, which are automatic vs one-button, and what to do when a tool denies everyone / a `?v=` is stale / the registry drifts. Written 28/08/2026 because the deployment table below covers a third of the workflows and names none of the scheduled ones. (It said "18 Actions" for about four hours, until the nineteenth landed the same day. `ls .github/workflows/` counts them; this line does not.) |
 | `system/CONSOLIDATION.md` | The master plan. Every tool draws from one shared place. Seven workstreams, safety rails, order of attack. Drafted 12/07/2026 from a five-way audit + external review. |
 | `system/gas-to-functions-migration.md` | **Locked decision**: retire the public Apps Script web app entirely; Firebase for everything, one private GAS email shim. |
 | `system/tool-status-and-access.md` | Which tools are live vs parked, and the per-role access model for each. |
@@ -172,6 +214,7 @@ which is why work gets re-planned from scratch. Check here first.
 | `system/vip-access-spec.md` | **Spec, not built.** VIP Access Manager handover brief. Corrects an earlier draft that pointed at the wrong references, and surfaces that this tool existed before — read `system/retired/dazn-vip.md` alongside it. Two blocking questions at the foot. |
 | `system/guest-pass-plan.md` | **Scoping, not built.** A second door: a code that carries a tool list, for outsiders who should never have an account. Four open questions at the foot. Read before proposing anything about third-party or passcode access. |
 | `system/handbook-editor-plan.md` | **Plan, not built.** The handbook editor's per-clause toolbar, measured: 1,203 nodes × 11 controls. Why the obvious fix (re-render on selection) destroys the caret, and what to do instead. Also records that Appendices P, Q and R never imported. |
+| `system/deployer-migration.md` | **Parked.** Every deploy in this repo authenticates as `nl-archive-ga-reader` — named for the GA pipeline, and now the deployer for rules, functions, the registry, Apps Script and the scan container. The rename is cosmetic; the point is that nobody knows what roles it holds or why. Has the safe migration order, and the one zero-risk proof step. |
 | `system/brand-v3-scale-plan.md` | Parked type/scale pass. |
 | `system/rtdb/README.md` | The RTDB snapshot contract — which files are deployed vs reference. |
 | `system/retired/README.md` | **Tools that have been deleted, and why.** One file each, recording the concept and the settled decisions so a rebuild starts from the answered questions. Read before proposing to build something that already existed once. |
@@ -183,8 +226,11 @@ its own `claude/*` branch — the branch name is given in the session prompt, no
 here. (A specific branch name lived in this section and was months stale.)
 
 Branches are **squash-merged**, which means `git branch --merged` is worthless
-here: a squashed branch's commits never become ancestors of `main`, so it reports
-every one of 241 branches as unmerged. Use **Actions → Prune merged branches**
+here: a squashed branch's commits never become ancestors of `main`, so it
+reports every branch on the remote as unmerged, however long ago it landed.
+(This said "every one of 241 branches" until 28/08/2026; the prune tool below
+has since done its job and the remote is down to a couple of dozen. The point
+stands, the number was decoration.) Use **Actions → Prune merged branches**
 instead — report mode first, then `delete` with `prune` typed in. It runs three
 tests and spares anything that fails all of them; the two lists beside it,
 `.github/branch-prune-allow.txt` and `.github/branch-prune-keep.txt`, record the
@@ -341,6 +387,7 @@ and `scripts/backfill-ga-hourly-archive.js` went too, having run once in May
 
 - **Brand tokens, not hex.** `var(--primary)` (`#9e0000`), `var(--navy)`, `var(--red)`/`--green`/`--amber`/`--blue`/`--purple`, `var(--text-muted)`. Solid shade ladders `--primary-50/100/.../900` and `--navy-50/.../900` for hover states, idle borders, and anywhere you would have reached for an rgba() overlay — **the brand intentionally has no rgba-overlay tokens**, use the ladder. (As of v2.21 the retired aliases `--info`, `--info-light`, `--primary-dim`, `--navy-mid`, `--navy-light` no longer resolve — use `--blue` / `--blue-light` / `--primary-600` / `--navy-600` / `--navy-300` directly.) Identity palettes that a second tool might plausibly want now live in canon too: `--proj-1…--proj-8` (project identity — 1–6 alias `--navy`/`--primary`/`--green`/`--amber`/`--purple`/`--blue` directly, 7–8 are distinct slate shades; mirrored as `NL.projColours`), `--road-sign-*` (UK road signs, Highway Code spec), `--div-*` (division identity). NL competition position bands live as `NL.positionBands` in nl-utils.js **only** — no CSS tokens, by ruling (brand v2.44): every real consumer is a canvas exporter needing literal hex. Tool-domain state colours (holiday-lieu's "worked"/"rejected" calendar states) never become canon tokens — tools map their states onto the system hues. The Style Guide tool (`/style-guide/`, superadmin only) is the canonical visual reference — open it when wondering "is X already a token?". Genuine one-off identity palettes still stay tool-local (claudio personas, attendance comp tiers, GA channel palette, club crest LUT) — see the policy block at the top of `nl-brand.css`.
 - **Never repeat the tool title in the page.** `nl-topbar.js` already renders `window.NL_TOOL.title`, so a page-level `<h1>` of the tool's own name duplicates it — and a description paragraph under it describes something the user is already looking at. The template shipped both until 30/07/2026, which is why it spread to several tools; lint now fails any `<h1>` whose text equals the tool title. A heading above a group of controls belongs in `.section-head` as an `<h2>`.
+- **Tabs and pills are for closed sets only.** Before building any selector, name which kind its data is. A closed set that can never grow (a tool's four jobs; a couple of seasons) may be tabs or pills. Anything that can extend forever — sponsors, clubs, games, references, people — gets a scalable display: searchable list, dropdown, or stack. Adopted as law 31/08/2026 after brand-exposure shipped five sponsors as tabs ("dreadful — we could have literally hundreds at some point"); the full element audit that applied it surface-by-surface is in that tool's plan.
 - **No waffle.** The default failure of generated copy is explaining rather than asking. A line of user-facing text earns its place only if it **changes what the user does**, **warns of a consequence**, or **answers a question they would otherwise have to ask**. Cut it if it: restates a label, placeholder, heading or control already on screen; explains the product before asking the question; justifies or sells the ask ("it genuinely shapes what we cover"); reassures about something nobody was worried about ("No problem", "Nothing else to do for now"); is defensive boilerplate nobody requested (unasked-for privacy and data notices); or is a second sentence doing the first one's job. Two instructions for one action read as two actions. When in doubt, delete it and see whether the page still works — it usually does. `/dewaffle <path>` audits a page against this and proposes the cuts.
 - **`#pageWrap` is hidden by default** (rule in `nl-brand.css`). Auth-guard sets `style.display = 'block'` to reveal — never clear with `''`, that re-triggers the brand rule.
 - **`window.NL_TOOL` and `var NL_TOOL_KEY` must stay in sync.** Topbar reads the former, auth-guard reads the latter.

@@ -14,8 +14,11 @@
 // Paths in use:
 //   footage/**            retired tool, files not yet cleared (see below)
 //   newsletter/library/** shared image library, staff accounts only
+//   partner-logos/**      commercial-compliance partner logos, staff accounts
 //   programme/<CODE>/**   matchday programme packs, per-club
 //   data/**               the nightly pipeline's feeds, read-only to browsers
+//   brand-exposure/<id>/  per-match playback proxy + detections, staff accounts
+//   uploads/**            brand-exposure source footage, transient — see block
 
 rules_version = '2';
 service firebase.storage {
@@ -60,6 +63,99 @@ service firebase.storage {
       allow write: if request.auth != null && request.auth.token.email != null
         && request.resource.size < 5 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
+    }
+
+    // ── Commercial Compliance — partner logos ─────────────────────────────
+    // Uploaded from the tool's partner editor by staff accounts; same shape
+    // as the newsletter library. Anonymous capability tokens carry no email
+    // claim and are excluded. Referenced by download URL from the tool page.
+    match /partner-logos/{file} {
+      allow read:  if request.auth != null && request.auth.token.email != null;
+      allow write: if request.auth != null && request.auth.token.email != null
+        && request.resource.size < 1 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // ── Brand Exposure ────────────────────────────────────────────────────
+    // Per measured match: proxy.mp4 (a ~150 MB playback copy, never the source
+    // footage) and detections.json. The match video itself is deliberately not
+    // kept — it is scanned and discarded, so nothing here is rights-bearing
+    // material sitting in a bucket indefinitely.
+    //
+    // Read is any portal account with an email claim, matching the tool's own
+    // audience. Write is bounded by size and type rather than by role, because
+    // the RTDB record that makes a match visible is separately gated to admin —
+    // an upload nobody can point at is inert.
+    //
+    // Two ways to write here, and the second is the interesting one:
+    //   · a portal account, uploading by hand from the tool page;
+    //   · a `be` claim, minted by brandExposureIngest for board-exposure-match.py
+    //     running on a laptop with no Google account. That claim names ONE
+    //     matchId and is compared against the path, so a key lifted off that
+    //     machine can overwrite the match it was minted for and nothing else.
+    //     It carries no email claim, which is exactly why the catch-all at the
+    //     foot of this file does not quietly cover it.
+    match /brand-exposure/{matchId}/{file} {
+      allow read: if request.auth != null && request.auth.token.email != null;
+      allow write: if request.auth != null
+        && (request.auth.token.email != null || request.auth.token.be == matchId)
+        && request.resource.size < 600 * 1024 * 1024
+        && (request.resource.contentType.matches('video/mp4')
+            || request.resource.contentType.matches('application/json'));
+    }
+
+    // The reference tree the scan job matches against. The job READS it
+    // through the service account, which rules never bind — these blocks
+    // exist for the tool: the audition Review promotes crops in, and the
+    // Partners reference library lists, retires and re-scopes them. Staff
+    // sessions only, PNG only, small: a reference shapes every future
+    // measurement, and the tool gates both views to superadmin above this.
+    // Delete is granted separately on purpose — the combined write rule's
+    // contentType check silently denied deletes (request.resource is null
+    // on delete), which is right for uploads/ and wrong for a library.
+    // Two blocks because the tree has two depths, not one wildcard rule:
+    // partners/<Sponsor>/ is searched at every ground,
+    // clubs/<Club>/<Sponsor>/ only at that one (load_tree's contract).
+    match /brand-exposure/refs/partners/{sponsor}/{file} {
+      allow read: if request.auth != null && request.auth.token.email != null;
+      allow create, update: if request.auth != null
+        && request.auth.token.email != null
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/png');
+      allow delete: if request.auth != null && request.auth.token.email != null;
+    }
+    match /brand-exposure/refs/clubs/{club}/{sponsor}/{file} {
+      allow read: if request.auth != null && request.auth.token.email != null;
+      allow create, update: if request.auth != null
+        && request.auth.token.email != null
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/png');
+      allow delete: if request.auth != null && request.auth.token.email != null;
+    }
+
+    // ── Brand Exposure — source footage drop ──────────────────────────────
+    // Where the tool's New match view puts the video before a scan. Transient
+    // by design: the scan-request function deletes the source on a successful
+    // scan and sweeps failed ones after 48h, so nothing rights-bearing sits
+    // here indefinitely.
+    //
+    // Write is any portal (email-claim) account with a video content type —
+    // deliberately NOT role-gated, because Storage rules cannot read RTDB
+    // roles and the superadmin gate lives where it can be enforced: the
+    // request record under app-data/ops-brand-exposure/requests (rules-
+    // tested) and the function's own author check. Same philosophy as the
+    // brand-exposure block above: an upload nobody can point at is inert.
+    //
+    // No size cap, on a ruling (30/08/2026): GCS ingress is free and parked
+    // footage costs ~2p/GB/month pro-rata, so a cap defends no cost — and a
+    // full 90 is ~10GB, which any cap would have to clear anyway. The type
+    // check is mistake protection, and it also denies browser deletes
+    // (request.resource is null on delete), which is intended — cleanup is
+    // the function's job, through the Admin SDK.
+    match /uploads/{file} {
+      allow read:  if request.auth != null && request.auth.token.email != null;
+      allow write: if request.auth != null && request.auth.token.email != null
+        && request.resource.contentType.matches('video/.*');
     }
 
     // ── Programme Packs ───────────────────────────────────────────────────

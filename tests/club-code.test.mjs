@@ -107,8 +107,17 @@ const cfg = {
     'forest-green':  { name: 'Forest Green',  code: 'FG5678' },
     'old-town':      { name: 'Old Town',      code: 'OT9999', revoked: true },
     'blank-code':    { name: 'Blank Code',    code: '' },
+    'with-people':   { name: 'With People',   code: 'WP1111',
+      users: { u1: { name: 'A Person', code: 'WP2222' } } },
   },
-  nl: { name: 'National League', code: 'NL0000' },
+  /* The NL record has people too, and every name in this file is invented. */
+  nl: {
+    name: 'National League', code: 'NL0000',
+    users: {
+      n1: { name: 'An NL Person', code: 'NL1111' },
+      n2: { name: 'A Gone Person', code: 'NL2222', revoked: true },
+    },
+  },
 };
 
 test('pickClub returns the club whose code matches', () => {
@@ -143,6 +152,54 @@ test('pickClub resolves the NL record to the key the rules already speak', () =>
   const hit = cc.pickClub(cfg, 'NL0000');
   assert.equal(hit.key, 'NL');
 });
+
+/* THE NL RECORD IS A HOLDER LIKE ANY OTHER.
+
+   It was not. The club loop walked rec.users; the NL record was added by a
+   separate one-line branch that took the master code and stopped. A named
+   person created under National League in the club-codes console — written to
+   nl/users/<id>, the same shape a club's person is written to — matched
+   nothing, was rejected as an unrecognised code, and the gate asked again.
+   Reported live, 22/08/2026: "their code doesn't open club-directory/reader.
+   it loops back to Enter your six-digit code."
+
+   Both doors, because one credential that opens one gate and not the other is
+   worse than one that opens neither. */
+for (const [door, fns] of [['club-code', cc], ['programme', pp]]) {
+  test(`${door}: a named person under a CLUB opens it`, () => {
+    const hit = fns.pickClub(cfg, 'WP2222');
+    assert.equal(hit.key, 'with-people');
+    assert.equal(hit.userId, 'u1', 'and is attributable');
+    assert.equal(hit.who, 'A Person');
+  });
+
+  test(`${door}: a named person under NL opens it too`, () => {
+    const hit = fns.pickClub(cfg, 'NL1111');
+    assert.ok(hit, 'the NL record’s people are holders, not decoration');
+    assert.equal(hit.key, 'NL');
+    assert.equal(hit.userId, 'n1');
+    assert.equal(hit.who, 'An NL Person');
+  });
+
+  test(`${door}: a revoked NL person does not`, () => {
+    /* The per-entry flag, same as a club's. */
+    assert.equal(fns.pickClub(cfg, 'NL2222'), null);
+  });
+
+  test(`${door}: revoking NL revokes its people with it`, () => {
+    /* The holder record's flag is checked on every entry, not just its own —
+       otherwise pulling the record leaves its named codes live. */
+    const gone = JSON.parse(JSON.stringify(cfg));
+    gone.nl.revoked = true;
+    assert.equal(fns.pickClub(gone, 'NL1111'), null, 'the person');
+    assert.equal(fns.pickClub(gone, 'NL0000'), null, 'and the master code');
+  });
+
+  test(`${door}: an NL record with no people still works`, () => {
+    const bare = { clubs: {}, nl: { name: 'National League', code: 'NL0000' } };
+    assert.equal(fns.pickClub(bare, 'NL0000').key, 'NL');
+  });
+}
 
 test('pickClub survives an absent or empty config rather than throwing', () => {
   /* First deploy: config does not exist yet. The trigger reads `|| {}` and the

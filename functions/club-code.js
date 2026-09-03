@@ -41,8 +41,20 @@
  *
  * THE SHAPE OF THE RECORDS  (never client-readable except by an admin)
  * -------------------------------------------------------------------
- *   clubs/<clubKey> = { name, passcode | code, revoked?, rotatedAt? }
- *   nl              = { name, passcode | code }    → claim 'club: "*"'
+ *   clubs/<clubKey> = { name, passcode | code, revoked?, rotatedAt?,
+ *                       users?: { <id>: { name, code, revoked? } } }
+ *   nl              = the same shape, users and all → claim 'club: "NL"'
+ *
+ * THAT LAST LINE SAID 'club: "*"' AND THE CODE HAS NEVER MINTED IT. A code
+ * holder gets `club: <key>`, so the NL record's holders get `club: "NL"`.
+ * The wildcard is minted only on the staff path below, from a signed-in
+ * portal account whose role is checked server-side — which is the point:
+ * `pClub: "*"` is Programme Packs administration, and handing it to anyone
+ * holding a typed code would give a code the thing that door refuses to a
+ * staff account. `club: "NL"` reads everything gated on `club != null`
+ * (the handbook, the directory) and matches no club where a rule compares
+ * the claim to a club key, which is the correct answer for a viewer who is
+ * not a club. Left as it is, and now written down as it is.
  *
  * `passcode` is what the Programme console has always written and `code` is
  * the club-codes vocabulary; both are read. See readCodes() for where they
@@ -138,22 +150,34 @@ function pickClub(cfg, code) {
      PERMISSIONS needs an account (system/roles-and-access-plan.md).
 
      Revoking the CLUB revokes its people with it, which is why the club
-     record's flag is checked on every entry and not just its own. */
-  const clubs = (cfg && cfg.clubs) || {};
+     record's flag is checked on every entry and not just its own.
+
+     THE NL RECORD IS A HOLDER LIKE ANY OTHER, and until 22/08/2026 it was
+     not. The club loop walked `rec.users`; the NL record was added by a
+     separate one-line branch that added the master code and stopped. So a
+     named person created under National League in the club-codes console —
+     written to app-data/club-codes/nl/users/<id>, the same shape as a club's
+     — matched nothing here, was rejected as an unrecognised code, and the
+     gate simply asked again. Reported live: "their code doesn't open
+     club-directory/reader. it loops back to Enter your six-digit code."
+
+     Which is why the walk is a function called twice rather than a loop plus
+     a special case. The special case is what drifted. */
   const entries = [];
   const add = (key, rec, codeRec, who, userId) => {
     entries.push({ key, rec, codeRec, who: who || "", userId: userId || "" });
   };
-  Object.keys(clubs).forEach((k) => {
-    const rec = clubs[k];
+  const addHolder = (key, rec) => {
     if (!rec) return;
-    add(k, rec, rec, "");
+    add(key, rec, rec, "");
     const users = rec.users || {};
     Object.keys(users).forEach((id) => {
-      if (users[id]) add(k, rec, users[id], users[id].name, id);
+      if (users[id]) add(key, rec, users[id], users[id].name, id);
     });
-  });
-  if (cfg && cfg.nl) add("NL", cfg.nl, cfg.nl, "");
+  };
+  const clubs = (cfg && cfg.clubs) || {};
+  Object.keys(clubs).forEach((k) => addHolder(k, clubs[k]));
+  addHolder("NL", cfg && cfg.nl);
 
   return entries.find((e) =>
     !e.rec.revoked && !e.codeRec.revoked &&
@@ -376,7 +400,12 @@ exports.clubCodeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
     }
 
     const code = normCode(req.code);
-    if (code.length < 4) return grant({ ok: false, error: "Enter your club code." });
+    /* ACCESS CODE, not club code: the same six characters are held by the 72
+       clubs AND by named people at the League, and the League is not a club.
+       The cards were corrected on 22/08/2026 and this string was missed —
+       the server writes the message on every failed attempt, so the old
+       wording survived where it is most visible. */
+    if (code.length < 4) return grant({ ok: false, error: "Enter your access code." });
 
     /* Same records Programme reads — one credential, one home, two doors. */
     const cfg = await readCodes(db, "clubCodeAuth");

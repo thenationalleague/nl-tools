@@ -19,6 +19,13 @@
      warning names it. */
   var SPONSOR_URL = "/assets/partners/TIC%20Health.png";
 
+  /* National League Services — the authoritative standings. Public, no auth,
+     and fetched straight from the browser as travel-planner and the fan embeds
+     already do, so no proxy is involved. competitionID values are firm NLS
+     codes; never derive them from a division name. */
+  var NLS_BASE = "https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2";
+  var COMPETITION_ID = { National: 89, North: 373, South: 372 };
+
   var ROSE_WHITE = "/assets/crests/National%20League%20rose%20white.png";
 
   var DIV_EYEBROW = {
@@ -72,6 +79,7 @@
     division: "National",
     format: "1x1",
     matchday: "",            /* "" = Current Standings | "final" | "1".."46" */
+    source: "feed",          /* feed | manual — which entry card is shown */
     sub: "2026-27",
     rows: []
   };
@@ -105,7 +113,7 @@
     try {
       var d = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
       if (d && typeof d === "object") {
-        ["division", "format", "matchday", "sub"].forEach(function (k) {
+        ["division", "format", "matchday", "sub", "source"].forEach(function (k) {
           if (typeof d[k] === "string") state[k] = d[k];
         });
         if (Array.isArray(d.rows)) state.rows = d.rows;
@@ -234,10 +242,9 @@
     });
   }
 
-  function escapeHtml(s) {
-    return String(s == null ? "" : s)
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  }
+  /* Escaping is canon — NL.escHtml. The local copy this replaced was a fifth
+     independent implementation of the same five replacements. */
+  function escapeHtml(s) { return NL.escHtml(s); }
 
   /* scale stage to fit preview column */
   function fitStage() {
@@ -245,8 +252,26 @@
     if (!gfx) return;
     var h = (state.format === "1x1" ? 1080 : state.format === "4x5" ? 1350 : 1920);
     var availW = stageWrap.clientWidth - 24;
-    var top = stageWrap.getBoundingClientRect().top;
-    var availH = window.innerHeight - top - 24;
+
+    /* The height budget must NOT be read from where the stage happens to sit.
+       .preview is sticky, so a taller graphic pushes the pinned panel further
+       up, which lowers stageWrap's top, which hands out more height, which
+       grows the graphic again — it gained a little on every redraw once the
+       page was scrolled. Derive the budget from the sticky offset plus the
+       preview's own chrome: the first is fixed by CSS, the second is the
+       header's height, and neither moves when the stage resizes. */
+    var preview = stageWrap.closest ? stageWrap.closest(".preview") : stageWrap.parentNode;
+    var availH = window.innerHeight - 24;
+    if (preview) {
+      var pv = getComputedStyle(preview);
+      var pinned = (pv.position === "sticky" || pv.position === "fixed") ? parseFloat(pv.top) : NaN;
+      /* Not pinned (the single-column layout) — the stage scrolls with the
+         page, so the viewport is the only limit worth applying. */
+      if (!isNaN(pinned)) {
+        var chrome = stageWrap.getBoundingClientRect().top - preview.getBoundingClientRect().top;
+        availH = window.innerHeight - pinned - chrome - 24;
+      }
+    }
     var scale = Math.min(1, availW / 1080);
     if (availH > 160) scale = Math.min(scale, availH / h);
     gfx.style.transformOrigin = "top left";
@@ -263,14 +288,20 @@
       var tr = document.createElement("tr");
       tr.innerHTML =
         '<td class="g-pos">' + (i + 1) + '</td>' +
-        '<td><select class="g-flag" data-i="' + i + '">' +
+        '<td><select class="nl-select g-flag" data-i="' + i + '">' +
           flagOpt("-", r.flag) + flagOpt("C", r.flag) + flagOpt("SF", r.flag) +
           flagOpt("QF", r.flag) + flagOpt("R", r.flag) + '</select></td>' +
-        '<td><input class="g-team" data-i="' + i + '" list="teamList" value="' + escapeHtml(r.team) + '"></td>' +
+        '<td>' + teamSelect(i, r.team) + '</td>' +
         '<td><input class="g-num" data-i="' + i + '" data-k="p" value="' + escapeHtml(r.p) + '"></td>' +
         '<td><input class="g-num" data-i="' + i + '" data-k="gd" value="' + escapeHtml(r.gd) + '"></td>' +
         '<td><input class="g-num" data-i="' + i + '" data-k="pts" value="' + escapeHtml(r.pts) + '"></td>';
       gridBody.appendChild(tr);
+    });
+    /* Set the selection as a property, not a `selected` attribute — the value
+       round-trips exactly, whatever punctuation the club name carries. */
+    state.rows.forEach(function (r, i) {
+      var sel = gridBody.querySelector('select.g-team[data-i="' + i + '"]');
+      if (sel) sel.value = r.team || "";
     });
   }
   function flagOpt(v, cur) {
@@ -399,11 +430,11 @@
   }
 
   var statusT;
-  function setStatus(m) {
+  function setStatus(m, ms) {
     var el = $("status"); if (!el) return;
     el.textContent = m;
     clearTimeout(statusT);
-    statusT = setTimeout(function () { el.textContent = "Ready"; }, 2200);
+    statusT = setTimeout(function () { el.textContent = "Ready"; }, ms || 2200);
   }
 
   /* ---------------- size segmented control ---------------- */
@@ -411,6 +442,124 @@
     document.querySelectorAll(".size-btn").forEach(function (b) {
       b.classList.toggle("active", b.getAttribute("data-fmt") === state.format);
     });
+  }
+
+  /* ---------------- National League Services ----------------
+     There is no dated table endpoint and there does not need to be: a
+     standings graphic is either the table as it stands or last season's final
+     one, and the second is a paste job. So this loads current, or nothing.
+
+     NLS carries NO qualification zones — no champion, play-off or relegation
+     marker anywhere in the response. That stays the operator's call, which is
+     why a loaded table arrives with every mark cleared: mid-season nothing is
+     confirmed, and the positional bands down the left edge already show the
+     cut-offs without claiming anything. Mark by position fills them when the
+     season has actually decided. */
+
+  function nlsSeason() {
+    var meta = NL.clubs.meta();
+    return String((NL.season && NL.season.current(meta)) || NL.season.fromDate(new Date()));
+  }
+
+  /* clubs-meta optaID IS the NLS teamID, so a club resolves on its code rather
+     than on its name — which is what keeps the crest lookup reliable. */
+  function nlsTeamName(row) {
+    var a = row.attributes || {};
+    var club = row.id && NL.clubs.byOpta(row.id);
+    return (club && club.name) || a.teamName || a.teamShortName || "";
+  }
+
+  /* The graphic prints GD with its sign, the way a table does. */
+  function gdText(v) {
+    var n = Number(v);
+    if (v == null || v === "" || isNaN(n)) return "";
+    return n > 0 ? "+" + n : String(n);
+  }
+  function numText(v) { return (v == null || v === "") ? "" : String(v); }
+
+  function loadFromNLS() {
+    var comp = COMPETITION_ID[state.division];
+    if (!comp) { setStatus("No table for that competition."); return; }
+    var btn = $("nlsLoadBtn");
+    btn.disabled = true;
+    setStatus("Loading from National League Services…", 20000);
+
+    NL.clubs.load()
+      .catch(function () { /* fall back to the clock-derived season */ })
+      .then(function () {
+        return fetch(NLS_BASE + "/league-tables/?competitionID=" + comp +
+                     "&seasonID=" + encodeURIComponent(nlsSeason()));
+      })
+      .then(function (r) {
+        if (!r.ok) throw new Error("NLS " + r.status);
+        return r.json();
+      })
+      .then(function (j) { applyTable((j && j.data) || []); })
+      .catch(function (err) {
+        console.error(err);
+        setStatus("Couldn't reach National League Services.", 5000);
+      })
+      .then(function () { btn.disabled = false; });
+  }
+
+  function applyTable(data) {
+    var rows = data.filter(function (r) {
+      var a = (r && r.attributes) || {};
+      return r && r.id && (a.teamName || a.teamShortName) && a.position != null;
+    }).sort(function (x, y) {
+      return (x.attributes.position || 999) - (y.attributes.position || 999);
+    }).map(function (r) {
+      var a = r.attributes || {};
+      return {
+        team: nlsTeamName(r),
+        flag: E.FLAG_NONE,          /* the feed has no zones — see above */
+        p: numText(a.played), w: numText(a.won), d: numText(a.drawn), l: numText(a.lost),
+        f: numText(a.goalsFor), a: numText(a.goalsAgainst),
+        gd: gdText(a.goalDifference), pts: numText(a.points)
+      };
+    });
+
+    if (!rows.length) { setStatus("No table published yet.", 5000); return; }
+
+    state.rows = rows;
+    syncPasteFromRows(); buildGrid(); save(); render();
+    setStatus("Loaded " + rows.length + " clubs · marks are yours to set", 8000);
+  }
+
+  /* ---------------- zone marks ----------------
+     The graphic draws two independent layers: a positional rail that is always
+     on, and a confirmed band driven by these flags. Filling by position turns
+     the second into the first, which is what a final table wants and what a
+     January one does not — so it is a press, never automatic. */
+  function fillZonesByPosition() {
+    var n = state.rows.length;
+    state.rows.forEach(function (r, i) {
+      var pos = i + 1;
+      if (pos === 1) r.flag = "C";
+      else if (pos <= 3) r.flag = "SF";
+      else if (pos <= 7) r.flag = "QF";
+      else if (n > 11 && pos > n - 4) r.flag = "R";
+      else r.flag = E.FLAG_NONE;
+    });
+    syncPasteFromRows(); buildGrid(); save(); render();
+    setStatus("Marked from the standings");
+  }
+  function clearZones() {
+    state.rows.forEach(function (r) { r.flag = E.FLAG_NONE; });
+    syncPasteFromRows(); buildGrid(); save(); render();
+    setStatus("Marks cleared");
+  }
+
+  /* ---------------- source toggle ----------------
+     Picks which half of the tool is on screen. The grid editor underneath
+     belongs to both, so a table loaded from the feed stays editable by hand. */
+  function setSource(src) {
+    state.source = (src === "manual") ? "manual" : "feed";
+    document.querySelectorAll(".src-btn").forEach(function (b) {
+      b.classList.toggle("active", b.getAttribute("data-src") === state.source);
+    });
+    document.body.setAttribute("data-source", state.source);
+    save();
   }
 
   /* ---------------- matchday options ---------------- */
@@ -423,18 +572,43 @@
     sel.innerHTML = html;
   }
 
-  /* ---------------- team datalist ---------------- */
-  /* Names from the canon, async: the datalist appearing a beat after boot is
-     invisible in practice, and the alternative was the clubs-data.js mirror —
-     the last copy of club data outside clubs-meta, 29 colours adrift by the
-     time it was retired (nothing here ever read the colours; the drift was
-     the warning, not the damage). */
-  function buildTeamList() {
-    NL.clubs.all().then(function (clubs) {
-      $("teamList").innerHTML = clubs.map(function (c) {
-        return '<option value="' + escapeHtml(c.name) + '">';
+  /* ---------------- club roster ----------------
+     Clubs are chosen from a list rather than typed. A table row's club name is
+     also its crest lookup, so a typo is a missing badge — and on a phone the
+     alternative was a text box a couple of centimetres wide. Names come from
+     the canon (one clubs-meta fetch per session), current season only, which
+     is the only season a standings graphic is ever built from. */
+  var _teamOptions = "";     /* <optgroup> markup, built once */
+  var _teamNames = {};       /* lower-cased roster name → true */
+
+  function buildTeamOptions() {
+    return NL.clubs.forSeason().then(function (clubs) {
+      var byDiv = function (d) { return clubs.filter(function (c) { return c.division === d; }); };
+      _teamNames = {};
+      _teamOptions = [
+        ["National League", byDiv("National")],
+        ["National League North", byDiv("North")],
+        ["National League South", byDiv("South")]
+      ].filter(function (g) { return g[1].length; }).map(function (g) {
+        return '<optgroup label="' + escapeHtml(g[0]) + '">' + g[1].map(function (c) {
+          _teamNames[String(c.name).toLowerCase()] = true;
+          return '<option value="' + escapeHtml(c.name) + '">' + escapeHtml(c.name) + '</option>';
+        }).join("") + '</optgroup>';
       }).join("");
-    }).catch(function () { /* free-text entry still works without it */ });
+    });
+  }
+
+  /* A name the roster doesn't carry — a pasted table from another competition,
+     a spelling the feed uses and clubs-meta doesn't — becomes its own option
+     rather than being silently swapped for whichever club sorts first. */
+  function teamSelect(i, val) {
+    var v = String(val || ""), own = "";
+    if (v && !_teamNames[v.toLowerCase()]) {
+      own = '<option value="' + escapeHtml(v) + '">' + escapeHtml(v) + '</option>';
+    }
+    return '<select class="nl-select g-team" data-i="' + i + '">' +
+             '<option value="">—</option>' + own + _teamOptions +
+           '</select>';
   }
 
   /* ---------------- wire controls ---------------- */
@@ -448,7 +622,6 @@
 
   function init() {
     load();
-    buildTeamList();
 
     if (!state.rows.length) {
       state.rows = E.parse(SAMPLE);
@@ -461,6 +634,7 @@
     buildMatchdayOptions();
     $("matchdaySel").value = state.matchday;
     $("subIn").value = state.sub;
+    setSource(state.source);
 
     $("divisionSel").addEventListener("change", function () {
       state.division = this.value;
@@ -481,18 +655,29 @@
     gridBody.addEventListener("input", gridChanged);
     gridBody.addEventListener("change", gridChanged);
 
+    $("nlsLoadBtn").addEventListener("click", loadFromNLS);
+    $("zoneFillBtn").addEventListener("click", fillZonesByPosition);
+    $("zoneClearBtn").addEventListener("click", clearZones);
+    document.querySelectorAll(".src-btn").forEach(function (b) {
+      b.addEventListener("click", function () { setSource(b.getAttribute("data-src")); fitStage(); });
+    });
+
     $("downloadBtn").addEventListener("click", downloadPNG);
     $("resetBtn").addEventListener("click", function () {
       try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
       state.rows = E.parse(SAMPLE); state.matchday = ""; state.sub = "2026-27";
-      state.division = "National"; state.format = "1x1";
-      $("divisionSel").value = "National"; syncSizeSeg();
+      state.division = "National"; state.format = "1x1"; state.source = "feed";
+      $("divisionSel").value = "National"; syncSizeSeg(); setSource("feed");
       $("matchdaySel").value = ""; $("subIn").value = state.sub;
       syncPasteFromRows(); buildGrid(); save(); render();
       setStatus("Reset");
     });
 
     window.addEventListener("resize", fitStage);
+
+    /* The grid is built before the roster arrives, so rebuild it once the
+       options exist. */
+    buildTeamOptions().then(function () { buildGrid(); render(); }).catch(function () {});
 
     render();
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(render);

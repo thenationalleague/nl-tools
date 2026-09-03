@@ -338,12 +338,19 @@ test('an admin is allowed to read the edition they are diffing against', () => {
      act on it. Rules ship by a manual workflow, so this must be right in
      the snapshot before the button is pressed. */
   const hb = RULES.rules['app-data']['ops-handbook'];
-  for (const node of ['editions', 'publishedEditionId']) {
-    const read = hb[node]['.read'];
-    assert.match(read, /auth\.token\.club != null/, `${node}: clubs still read it`);
-    assert.match(read, /'admin'/, `${node}: an admin must be able to read it to diff against it`);
-    assert.match(read, /'superadmin'/);
-  }
+  const read = hb.editions['.read'];
+  assert.match(read, /auth\.token\.club != null/, 'editions: clubs still read it');
+  assert.match(read, /'admin'/, 'editions: an admin must be able to read it to diff against it');
+  assert.match(read, /'superadmin'/);
+
+  /* publishedEditionId IS PUBLIC as of 26/08/2026 — handbook/public needs the
+     pointer to find the edition to render, and `true` grants an admin the
+     read this test exists to protect rather than removing it.
+
+     It gives nothing away: the value is a Firebase push key, and the same key
+     is already published in handbook/pdf-meta.json, a file served from a
+     public repository beside the PDF it describes. */
+  assert.equal(hb.publishedEditionId['.read'], true);
 });
 
 test('writing an edition stays admin-only', () => {

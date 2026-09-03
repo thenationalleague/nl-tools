@@ -1,17 +1,22 @@
 <!DOCTYPE html>
 <!--
   Fixtures & Results Graphic — NL Tools (Graphics sub-tool)
-  Version: v1.8 (13/08/2026)
+  Version: v1.11 (28/08/2026)
   File: /graphics/fixtures-graphic/index.html
 
   On-brand fixtures/results social graphic. Fixtures ⇄ Results toggle,
   up to 12 matches, free-text matchday title, date dividers, wrap/short
-  name handling, KO times. Paste (home / [ignored middle] / away, or a
-  middle score in Results) → live preview → 1:1 / 4:5 / 9:16 PNG export.
+  name handling, per-match KO times. A card is built either by loading a
+  date straight from National League Services, or by pasting (home /
+  [ignored middle] / away, or a middle score in Results) → live preview →
+  1:1 / 4:5 / 9:16 PNG export.
 
   Storage:
     localStorage nl-fixtures-gfx-v1   (tool state only — no RTDB)
   Data:
+    NLS matches API (public, no auth) — the fixture/result card itself.
+      Clubs are matched on clubs-meta optaID, which is the NLS teamID, so
+      the crest and canonical name never depend on string-matching a name.
     NL.clubs (canon) → /assets/data/clubs-meta.json  (club list / short names)
     /assets/crests|divisions/*              (crests, Enterprise lockups)
   Access (auth-guard):
@@ -46,7 +51,7 @@
 </script>
 
 <!-- Portal brand + graphic tokens/fonts + the graphic artwork CSS -->
-<link rel="stylesheet" href="/system/nl-brand.css?v=59">
+<link rel="stylesheet" href="/system/nl-brand.css?v=62">
 <link rel="stylesheet" href="/graphics/_shared/brand-graphic.css">
 <link rel="stylesheet" href="fixtures-styles.css">
 <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js"></script>
@@ -60,6 +65,30 @@
   var NL_TOOL_KEY = 'staff-graphics';
 
   window.NL_CHANGELOG = [
+    {
+      date: '28/08/2026',
+      version: 'v1.11',
+      items: [
+        'Teams are picked from a list now instead of typed — every club in all three divisions, plus the PL2 sides that enter the National League Cup. On a phone that is the native picker rather than a 74px text box.',
+        'A name the list does not carry — a pasted one-off opponent — stays put and stays selectable.',
+        'Cup guest sides draw the parent club\'s crest, so a Birmingham City PL2 fixture is no longer a blank badge.',
+        'Fixed: the graphic grew a little every time the preview redrew, so repeatedly pressing Show all times / Hide all times inflated it off the screen.',
+        'Fixed on phones: the preview no longer sits pinned over the controls. Division, Matchday and half the editor were disappearing behind it as you scrolled.',
+        'Fixed on phones: the editor no longer squeezes team names into 74px — the row scrolls sideways at a width you can actually read and type in.',
+        'One toggle at the top now chooses where fixtures come from — the feed or typed in by hand — instead of both panels being on screen at once.',
+        'Dropped the paragraph under the editor explaining the editor.'
+      ]
+    },
+    {
+      date: '28/08/2026',
+      version: 'v1.9',
+      items: [
+        'Pick a date and load that division\'s card straight from National League Services — team names, kick-off times, and the scores once the matches have been played.',
+        'Loading a run of dates puts a date divider above each day.',
+        'Kick-off times now have a tick box per match, so a card can print only the games kicking off at an unusual time. Loading ticks those for you; Show all / Hide all override it.',
+        'Postponed matches are left out of a load, and the status line says how many.'
+      ]
+    },
     {
       date: '13/08/2026',
       version: 'v1.7',
@@ -137,7 +166,7 @@
   };
 </script>
 
-<script src="/system/nl-utils.js?v=44"></script>
+<script src="/system/nl-utils.js?v=46"></script>
 <script src="/system/nl-topbar.js?v=10"></script>
 <script src="/system/auth-guard.js?v=16"></script>
 
@@ -170,6 +199,13 @@
     border: 2px solid var(--nl-ink); border-radius: var(--radius-lg);
     padding: 20px; box-shadow: var(--shadow-md);
   }
+  /* Must stay BELOW the .preview rule above: same specificity, so source order
+     decides. Single column stacks the preview on top of the controls, and a
+     pinned preview then paints over whatever scrolls beneath it — Division,
+     Matchday, Long-name handling and half the editor were all disappearing
+     behind it. It scrolls with the page here. */
+  @media (max-width: 1100px) { .preview { position: static; } }
+
   .preview-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
   .preview-head .eyebrow { color: var(--nl-league-navy); font-family: var(--font-bold);
     font-size: var(--text-xs); letter-spacing: var(--tracking-wider); text-transform: uppercase; }
@@ -188,7 +224,14 @@
     text-transform: uppercase; color: var(--nl-grey-700); }
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   /* stack paired fields (incl. the Type + Size segmented controls) on phones */
-  @media (max-width: 560px) { .row2 { grid-template-columns: 1fr; } }
+  @media (max-width: 560px) {
+    .row2 { grid-template-columns: 1fr; }
+    /* Seven columns inside ~306px left the team inputs 74px wide — "Kidderminster
+       Harriers" rendered as "Kidde", and the kick-off as "15:0". Hold the table
+       at a width the fields are usable at and let the scroller carry it. */
+    .grid-scroller { overflow-x: auto; }
+    table.grid { min-width: 530px; }
+  }
   select, input[type="text"], textarea {
     width: 100%; padding: 9px 11px; border: 1px solid var(--nl-grey-300); border-radius: var(--radius-sm);
     background: var(--nl-white); font-family: var(--font-regular); font-size: var(--text-sm); color: var(--nl-ink);
@@ -213,9 +256,13 @@
   .grid .g-idx { text-align: center; font-family: var(--font-bold); color: var(--nl-grey-500); width: 22px; }
   .grid input { padding: 6px 7px; font-size: var(--text-sm); min-width: 0; }
   .grid .g-team { width: 100%; }
+  /* .nl-select sets everything but width — the canon leaves that to the tool. */
+  .grid select { min-width: 0; max-width: 100%; }
   .grid td { overflow: hidden; }
   .grid .g-sc { width: 34px; text-align: center; }
-  .grid .g-ko { width: 52px; text-align: center; }
+  .grid .g-ko { width: 58px; text-align: center; }
+  .grid .kowrap { display: flex; align-items: center; gap: 5px; }
+  .grid .kowrap input[type="checkbox"] { flex: 0 0 auto; width: 14px; height: 14px; margin: 0; accent-color: var(--nl-rose-red); cursor: pointer; }
   .grid .g-del { border: none; background: var(--nl-grey-100); color: var(--nl-grey-700); width: 24px; height: 24px;
     border-radius: var(--radius-sm); cursor: pointer; font-size: var(--text-sm); line-height: 1; }
   .grid .g-del:hover { background: var(--nl-red-100); color: var(--nl-rose-red); }
@@ -232,6 +279,11 @@
   /* hide score columns in fixtures mode, KO column in results mode */
   body[data-mode="fixtures"] .col-score { display: none; }
   body[data-mode="results"] .col-ko { display: none; }
+  /* show-all / hide-all only mean something where times are drawn */
+  body[data-mode="results"] .ko-bulk { display: none; }
+  /* one source at a time — the editor below is shared by both */
+  body[data-source="manual"] #nlsCard { display: none; }
+  body[data-source="feed"] #pasteCard { display: none; }
 
   footer.status { display: flex; justify-content: space-between; align-items: center;
     font-family: var(--font-bold); font-size: var(--text-xs); letter-spacing: var(--tracking-wide);
@@ -242,14 +294,12 @@
   .toollinks a:hover { color: var(--nl-rose-red); }
 </style>
 </head>
-<body data-mode="fixtures">
+<body data-mode="fixtures" data-source="feed">
 
 <div id="pageWrap">
 
 <!-- Standard NL topbar — auto-rendered by /system/nl-topbar.js -->
 <div id="nlTopbar"></div>
-
-<datalist id="teamList"></datalist>
 
 <div class="tool">
 
@@ -268,6 +318,13 @@
 
     <div class="card">
       <h2>Setup</h2>
+      <div class="field">
+        <label>Fixtures from</label>
+        <div class="seg" id="sourceSeg">
+          <button type="button" class="src-btn active" data-src="feed">The feed</button>
+          <button type="button" class="src-btn" data-src="manual">Typed in</button>
+        </div>
+      </div>
       <div class="row2">
         <div class="field">
           <label for="divisionSel">Division</label>
@@ -280,7 +337,7 @@
         </div>
         <div class="field">
           <label for="matchdayInput">Matchday / title</label>
-          <input type="text" id="matchdayInput" placeholder="Blank = MATCHDAY — or type e.g. 4, or Christmas Fixtures">
+          <input type="text" id="matchdayInput" placeholder="e.g. 4 — or Christmas Fixtures">
         </div>
       </div>
       <div class="field">
@@ -309,10 +366,27 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" id="nlsCard">
+      <h2>Load from National League Services</h2>
+      <div class="row2">
+        <div class="field">
+          <label for="nlsFrom">Date</label>
+          <select id="nlsFrom"><option value="">Loading dates…</option></select>
+        </div>
+        <div class="field">
+          <label for="nlsTo">Through to</label>
+          <select id="nlsTo"><option value="">Same day</option></select>
+        </div>
+      </div>
+      <div class="btns">
+        <button type="button" class="btn btn--primary" id="nlsLoadBtn">Load</button>
+      </div>
+    </div>
+
+    <div class="card" id="pasteCard">
       <h2>Paste fixtures</h2>
       <textarea id="pasteIn" rows="7" placeholder="One match per line:&#10;Home Team [tab] [tab] Away Team&#10;(any middle column is ignored)"></textarea>
-      <p class="note" style="margin:8px 0 0;">Home in column&nbsp;1, Away in the last column — <b>anything in between is ignored</b>. Up to 12 matches. Add scores &amp; kick-off times in the editor below.</p>
+      <p class="note" style="margin:8px 0 0;">Home in column&nbsp;1, Away in the last — anything between them is ignored.</p>
     </div>
 
     <div class="card">
@@ -323,12 +397,15 @@
             <th style="width:24px"></th>
             <th>Home</th>
             <th class="col-score">H</th><th class="col-score">A</th>
-            <th>Away</th><th class="col-ko">KO</th><th style="width:30px"></th>
+            <th>Away</th><th class="col-ko" style="width:96px">KO</th><th style="width:30px"></th>
           </tr></thead>
           <tbody id="gridBody"></tbody>
         </table>
       </div>
-      <p class="note" style="margin:8px 0 0;">H/A = score (Results). KO = kick-off time e.g. 15:00 (Fixtures). Use <b>＋</b> on any row to drop a date divider above it (e.g. TUE 19 AUG), then <b>▲▼</b> to move it.</p>
+      <div class="btns ko-bulk" style="margin-top:10px">
+        <button type="button" class="btn btn--ghost" id="koAllBtn">Show all times</button>
+        <button type="button" class="btn btn--ghost" id="koNoneBtn">Hide all times</button>
+      </div>
     </div>
 
     <div class="btns">
@@ -338,7 +415,6 @@
 
     <footer class="status">
       <span id="status">Ready</span>
-      <span>Screenshot the preview, or use Download PNG</span>
     </footer>
 
   </div>

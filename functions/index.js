@@ -6,10 +6,14 @@
  *   fanWidgetsAuth    — issues a superadmin a staff token for the separate
  *                       nl-widgets project, so the Fan Widgets tool can read
  *                       fan data live without mirroring it. See fan-widgets.js.
- *   programmeEnter / programmeClaim
- *                     — Programme Packs passcode → scoped `pClub` claim, so
+ *   programmeAuth     — Programme Packs passcode → scoped `pClub` claim, so
  *                       Storage/RTDB rules can enforce write-own for passcode
- *                       (non-portal) clubs. See programme.js.
+ *                       (non-portal) clubs. An RTDB trigger, not a callable:
+ *                       it began life as programmeEnter / programmeClaim,
+ *                       which deployed but could never be granted a public
+ *                       invoker (org policy, 03/08/2026). Every deploy since
+ *                       runs --force, which deletes functions absent from
+ *                       source, so those two are gone. See programme.js.
  *
  * NL Cup Footage retired 15/08/2026. makeProxy (360p preview proxies on upload)
  * and onFootageDeleted (mirroring Storage deletes back to the catalogue) went
@@ -39,9 +43,9 @@ setGlobalOptions({ region: "europe-west2" });
 // module; exported from here so `firebase deploy --only functions` sees them.
 Object.assign(exports, require("./account"));
 
-// Programme Packs passcode → scoped-claim callables (programmeEnter /
-// programmeClaim). Same reason as above: exported here so a plain
-// `firebase deploy --only functions` picks them up. See functions/programme.js.
+// Programme Packs passcode → scoped-claim trigger (programmeAuth). Exported
+// here so a plain `firebase deploy --only functions` picks it up. See
+// functions/programme.js.
 Object.assign(exports, require("./programme"));
 
 // Fan-widget staff access (fanWidgetsAuth) — RTDB-triggered for the same
@@ -68,6 +72,25 @@ Object.assign(exports, require("./uw-promo"));
 // second, Programme Packs migrated last. See functions/club-code.js and
 // system/club-code-plan.md.
 Object.assign(exports, require("./club-code"));
+
+// Brand Exposure ingest key → a `be: <matchId>` claim (brandExposureIngest).
+// Fifth instance of the same shape, and the first whose client is a Python
+// script on a laptop rather than a browser: board-exposure-match.py measures a
+// match and then needs to put three files somewhere, with no Google account and
+// no service-account key on the machine. The claim names one match, so a key
+// lifted off that laptop can overwrite that match and nothing else. See
+// functions/brand-exposure.js.
+Object.assign(exports, require("./brand-exposure"));
+
+// Brand Exposure scan requests (brandExposureScanRequest /
+// brandExposureScanPoll). The uploader's engine room: a request record
+// written by the tool becomes a Cloud Run job execution, watched to
+// done/failed by a minute poller that also deletes scanned source footage
+// and sweeps failed uploads after 48h. The trigger half is the same
+// org-policy-proof RTDB shape as brand-exposure.js above; the poller is
+// scheduled for the same no-console reason as nls-ingester.js below. See
+// functions/brand-exposure-scan.js for the two safety rails.
+Object.assign(exports, require("./brand-exposure-scan"));
 
 // NLS → RTDB live ingester (nlsIngestTick / nlsIngestHourly). Scheduled rather
 // than triggered, and it writes to the nl-widgets database rather than this

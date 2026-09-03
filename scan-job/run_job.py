@@ -1,0 +1,504 @@
+#!/usr/bin/env python3
+"""
+Brand Exposure — one match, measured on Cloud Run.
+
+Fetches the references and the uploaded video out of Firebase Storage, then
+runs scripts/board-exposure-match.py exactly as a person would on a laptop and
+lets it upload its own results. This file is plumbing; it contains no detection
+logic and must never grow any. Two implementations of the detector would drift
+inside a month and the drift would show up as a number, not an error.
+
+Two identities, on purpose
+--------------------------
+  · READS  use the runtime service account through the metadata server. It is
+    granted objectViewer and nothing more, so this job can fetch artwork and
+    footage and cannot write a byte.
+  · WRITES use an ingest key, from Secret Manager, exactly as the laptop does —
+    which buys a token scoped to the one match named in the environment. A
+    service-account key with write access would be a credential that could
+    overwrite every match in the tool; this one can overwrite the match it was
+    asked to measure and nothing else.
+
+The source video is not deleted here, for the same reason: this job cannot
+delete anything. Whoever started it clears up after a successful run.
+
+Environment (all set by the trigger, none baked into the image):
+    BE_BUCKET          nl-tools.firebasestorage.app
+    BE_VIDEO           object path of the uploaded source, under uploads/
+    BE_CLUB            home club, must match a refs/clubs/<name> folder
+    BE_MATCH           'Home v Away'
+    BE_DATE            YYYY-MM-DD
+    BE_START, BE_END   optional kick-off / final whistle, '18:30' style
+    BE_HT, BE_RESTART  optional half-time whistle / second-half kick-off, as
+                       a pair — the break between them is skipped entirely,
+                       so half-time adverts never count and its frames are
+                       never billed
+    BE_REFERENCE_SET   complete | partial
+    BE_SOURCE_TYPE     optional full | highlights — how the footage is
+                       recorded on the report. Absent = derived from
+                       duration (>45 min = full).
+    BE_SPONSORS        optional comma list of reference FOLDER names — scan
+                       only these. Empty means everything. A subset makes the
+                       scan reference-set partial whatever BE_REFERENCE_SET
+                       says (the match script enforces it).
+    BE_INGEST_KEY      the key, injected from Secret Manager
+    BE_REFS_PREFIX     default brand-exposure/refs
+    BE_FPS             optional sample rate override
+    BE_MODE            scan (default) | sweep | diagnose | audition — sweep
+                       trials the sensitivity grid against a labels file and
+                       uploads nothing; diagnose measures what a finished
+                       scan's missed frames look like (blur / compression /
+                       starvation) and writes diagnose.json beside the
+                       export; audition runs the per-reference casting call
+                       on a few hundred sharpest-in-window frames and writes
+                       audition.json + candidate crops to BE_DEST for the
+                       tool's tick/untick view
+    BE_LABELS          sweep + diagnose: a labels filename baked into the
+                       image under /app/labels (from
+                       system/board-exposure/labels/), or a bucket object
+                       path to download
+    BE_DETECTIONS      diagnose only: bucket object path of the finished
+                       scan's export, e.g.
+                       brand-exposure/<match-id>/detections.json — the
+                       diagnose output lands in the same folder
+    BE_DEST            audition only: bucket folder the outputs land in,
+                       e.g. brand-exposure/<match-id> — explicit like
+                       BE_DETECTIONS, so nothing re-derives a match id
+    BE_EXCLUDE         optional: reference paths retired at this ground,
+                       relative to the refs root (partners/<Sponsor>/<file>
+                       or clubs/<Club>/<Sponsor>/<file>), one per line.
+                       Written to refs/.exclude, where load_tree looks; the
+                       files stay in the bucket, so a retirement is
+                       reversible from the tool
+    BE_REQUEST         the request record's id, for the log
+    BE_PROGRESS        optional object path, brand-exposure/progress/<id>.json:
+                       the scan's or audition's progress row (phase, done,
+                       total) is copied there every PROGRESS_EVERY seconds
+                       while the script runs, and the poller copies it onto
+                       the request so the tool's card shows real progress
+"""
+import json
+import os
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+# The progress module lives with the scripts: /app/scripts in the image,
+# ../scripts in the repo (the tests load this file from there).
+for _d in ("scripts", os.path.join("..", "scripts")):
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), _d))
+import board_exposure_progress as PG  # noqa: E402
+
+METADATA = ("http://metadata.google.internal/computeMetadata/v1/"
+            "instance/service-accounts/default/token")
+STORAGE = "https://storage.googleapis.com/storage/v1/b/{bucket}/o"
+WORK = "/tmp/be"
+PROGRESS_EVERY = 20     # seconds between progress relays; the poller reads once a minute
+
+
+def log(msg):
+    print(f"[scan] {msg}", flush=True)
+
+
+def die(msg, code=2):
+    print(f"[scan] FAILED: {msg}", file=sys.stderr, flush=True)
+    sys.exit(code)
+
+
+def env(name, default=None, required=False):
+    v = os.environ.get(name, default)
+    if required and not v:
+        # Almost always a re-run typed short. The run parameters arrive as
+        # execution overrides — `execute --update-env-vars=…` — which apply to
+        # one execution and are never written to the job, so a bare `execute`
+        # starts a container with none of them and dies here in five seconds.
+        # Saying so is the whole point: the bare failure looks like a broken
+        # image, and once cost half an hour of blaming an innocent deploy.
+        die(f"{name} is not set. Every run must pass the full "
+            f"--update-env-vars=… list; it is a per-execution override and does "
+            f"not persist on the job, so a shortened re-run arrives with "
+            f"nothing set. See system/board-exposure/CLOUD.md.")
+    return v
+
+
+def access_token():
+    """A token for the runtime service account, from the metadata server.
+
+    No key file and no google-cloud-storage dependency — the metadata server is
+    always there on Cloud Run and this is twenty lines against a library that
+    would be twenty megabytes.
+
+    Returns (token, seconds_left). The seconds matter: the metadata server
+    CACHES tokens and hands the same one back until it is nearly spent, so
+    "an hour" is what a token is born with, not what a re-mint receives. A
+    re-mint at 45 minutes can be given a token with fifteen left — which is
+    how the Harrogate scan of 02/09/2026 died at 63 minutes with a 401 from
+    a token that had been "refreshed" on schedule.
+    """
+    req = urllib.request.Request(METADATA, headers={"Metadata-Flavor": "Google"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            d = json.loads(r.read().decode())
+            return d["access_token"], float(d.get("expires_in") or 0)
+    except urllib.error.URLError as e:
+        die(f"could not reach the metadata server for a token: {e.reason}. "
+            f"This only runs on Cloud Run.")
+
+
+TOKEN_TTL = 45 * 60     # never trust a token past this, whatever it claims
+TOKEN_MARGIN = 5 * 60   # and never within this of what the server says is left
+
+
+class Token:
+    """The runtime service account's access token, re-minted once it is
+    TOKEN_TTL old. Storage calls take one of these and ask for the string at
+    request time, never at the top of main().
+
+    This file used to fetch one token before the video download and hand the
+    same string to every call, including the uploads at the very end. A scan
+    never noticed: its results go up through the match script's own
+    ingest-key sign-in, minted at upload time. An audition and a diagnose
+    write through THIS file, and on 02/09/2026 the Harrogate audition ran
+    for ninety minutes on one core, finished, and died on its first upload
+    with a token that had expired half an hour earlier — every result thrown
+    away at the last step, the log ending in 401. Audition 1.4 makes that
+    run take minutes, which hides the fault; this removes it.
+    """
+
+    def __init__(self, mint=access_token, clock=time.time):
+        self._mint, self._clock = mint, clock
+        self._value, self._at, self._dies = None, 0.0, 0.0
+
+    def get(self):
+        now = self._clock()
+        if (self._value is None or now - self._at >= TOKEN_TTL
+                or now >= self._dies - TOKEN_MARGIN):
+            minted = self._mint()
+            # (token, seconds_left) from access_token; a bare string from an
+            # older mint or a test double means "no lifetime reported".
+            self._value, left = (minted if isinstance(minted, tuple)
+                                 else (minted, 0.0))
+            self._at = now
+            # A mint that reports no lifetime leaves the fixed cap to do the
+            # work, exactly as before; the margin applies only to a lifetime
+            # the server actually stated.
+            self._dies = now + left if left > 0 else float("inf")
+        return self._value
+
+
+def storage_list(bucket, prefix, token):
+    """Every object under a prefix. Paged, because a reference tree with a
+    folder per sponsor per club goes past 1000 sooner than you would think."""
+    out, page = [], None
+    while True:
+        q = {"prefix": prefix, "maxResults": "1000"}
+        if page:
+            q["pageToken"] = page
+        url = STORAGE.format(bucket=bucket) + "?" + urllib.parse.urlencode(q)
+        req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token.get()})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                d = json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            die(f"listing {prefix} failed: {e.code} {e.reason}. "
+                f"The runtime service account needs objectViewer on {bucket}.")
+        out += [o["name"] for o in d.get("items", []) if not o["name"].endswith("/")]
+        page = d.get("nextPageToken")
+        if not page:
+            return out
+
+
+def storage_get(bucket, name, dest, token):
+    url = (STORAGE.format(bucket=bucket) + "/" +
+           urllib.parse.quote(name, safe="") + "?alt=media")
+    req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token.get()})
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    try:
+        with urllib.request.urlopen(req, timeout=1800) as r, open(dest, "wb") as f:
+            while True:
+                chunk = r.read(1 << 20)
+                if not chunk:
+                    break
+                f.write(chunk)
+    except urllib.error.HTTPError as e:
+        die(f"downloading {name} failed: {e.code} {e.reason}")
+    return dest
+
+
+def storage_put(bucket, name, path, token):
+    """Upload one file. Same twenty-lines-not-twenty-megabytes reasoning as
+    the token fetch; the runtime service account already writes this bucket.
+    Content type follows the extension — a PNG stored as application/json
+    is a download the tool's <img> tags cannot show."""
+    ctype = ("image/png" if name.endswith(".png") else "application/json")
+    url = (STORAGE.format(bucket=bucket).replace(
+        "/storage/v1/", "/upload/storage/v1/") + "?" +
+        urllib.parse.urlencode({"uploadType": "media", "name": name}))
+    with open(path, "rb") as f:
+        body = f.read()
+    req = urllib.request.Request(url, data=body, method="POST", headers={
+        "Authorization": "Bearer " + token.get(),
+        "Content-Type": ctype,
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=300) as r:
+            r.read()
+    except urllib.error.HTTPError as e:
+        # 401 and 403 are different faults and used to get the same advice.
+        why = (f"the token was refused — it has expired or was never minted; "
+               f"see Token above" if e.code == 401 else
+               f"the runtime service account needs roles/storage.objectAdmin "
+               f"on {bucket} (objectCreator alone cannot overwrite on a "
+               f"re-run) — the one-time grant is recorded in "
+               f"system/board-exposure/uploader-spec.md")
+        raise UploadError(f"uploading {name} failed: {e.code} {e.reason}. {why}.")
+
+
+class UploadError(Exception):
+    """storage_put could not put. Fatal for a result; survivable for a
+    progress row — the caller knows which, this function does not."""
+
+
+class ProgressRelay:
+    """Copies the script's progress file to Storage when it has changed and
+    at most once every `every` seconds — the poller only looks once a
+    minute, so a per-frame upload would be waste. `put(path)` does the
+    upload; the relay never raises past it — a progress row is a courtesy
+    to the card, and the Harrogate scan of 02/09/2026 lost an hour of CPU
+    to one that failed with a stale token and took the job down with it."""
+
+    def __init__(self, path, put, every=PROGRESS_EVERY):
+        self.path, self.put, self.every = path, put, every
+        self._seen = None
+        self._last = 0.0
+        self.failed = 0
+
+    def relay(self, now, force=False):
+        """Upload if due and changed (always when forced). True when uploaded."""
+        if not force and now - self._last < self.every:
+            return False
+        self._last = now
+        try:
+            mtime = os.path.getmtime(self.path)
+        except OSError:
+            return False
+        if not force and mtime == self._seen:
+            return False
+        self._seen = mtime
+        try:
+            self.put(self.path)
+        except Exception as e:   # noqa: BLE001 — anything; the scan must outlive its status row
+            # Said once, so an outage does not fill the log; counted, so the
+            # end of the run can say how much of the card went dark.
+            self.failed += 1
+            if self.failed == 1:
+                log(f"progress upload failed and will not be retried this "
+                    f"interval; the scan carries on ({e})")
+            return False
+        return True
+
+
+def run_relaying(cmd, relay, poll=2.0):
+    """subprocess.call, with the progress relay ticking while it runs and one
+    forced relay once it has exited — so the 'done' row always lands."""
+    proc = subprocess.Popen(cmd)
+    while True:
+        rc = proc.poll()
+        if relay:
+            relay.relay(time.time(), force=rc is not None)
+        if rc is not None:
+            return rc
+        time.sleep(poll)
+
+
+def exclude_lines(raw):
+    """BE_EXCLUDE -> the paths it names: one per line, blanks dropped,
+    order kept, duplicates removed. Pure."""
+    seen, out = set(), []
+    for line in (raw or "").split("\n"):
+        p = line.strip()
+        if p and p not in seen:
+            seen.add(p)
+            out.append(p)
+    return out
+
+
+def fetch_refs(bucket, prefix, token):
+    """Mirror the reference tree out of Storage into the layout the scan expects.
+
+    Folder-as-configuration is the whole contract — refs/partners/<Sponsor>/ is
+    searched at every ground, refs/clubs/<Club>/<Sponsor>/ only at that one — so
+    the prefix is stripped and the rest of the path is kept exactly as stored.
+    """
+    prefix = prefix.rstrip("/") + "/"
+    names = storage_list(bucket, prefix, token)
+    if not names:
+        die(f"no references under {prefix}. Nothing to look for, so the scan "
+            f"would report every sponsor as absent — which is a lie, not a zero.")
+    refs = os.path.join(WORK, "refs")
+    for n in names:
+        rel = n[len(prefix):]
+        if not rel or rel.startswith("."):
+            continue
+        storage_get(bucket, n, os.path.join(refs, rel), token)
+    log(f"references: {len(names)} files under {prefix}")
+    return refs
+
+
+def put_or_die(bucket, name, path, token):
+    """A result upload. Losing one is losing the run, so this is fatal."""
+    try:
+        storage_put(bucket, name, path, token)
+    except UploadError as e:
+        die(str(e))
+
+
+def main():
+    t0 = time.time()
+    bucket = env("BE_BUCKET", "nl-tools.firebasestorage.app")
+    mode = env("BE_MODE", "scan")
+    video_obj = env("BE_VIDEO", required=True)
+    club = env("BE_CLUB", required=True)
+    # A sweep names no match and uploads nothing, so it needs neither the
+    # fixture nor the ingest key; a scan needs all of them.
+    match = env("BE_MATCH", required=mode == "scan")
+    date = env("BE_DATE", required=mode == "scan")
+    key = env("BE_INGEST_KEY", required=mode == "scan")
+    ref_set = env("BE_REFERENCE_SET", "partial")
+    start, end = env("BE_START"), env("BE_END")
+
+    os.makedirs(WORK, exist_ok=True)
+    token = Token()
+
+    # Real progress for the tool's card (02/09/2026): the script keeps one
+    # row current in WORK, the relay copies it up, the poller copies it on.
+    # The first row is ours — the video download is the card's first wait.
+    progress_file = os.path.join(WORK, "progress.json")
+    progress_obj = env("BE_PROGRESS")
+    relay = (ProgressRelay(progress_file,
+                           lambda p: storage_put(bucket, progress_obj, p, token))
+             if progress_obj else None)
+    PG.Progress(progress_file).phase("fetch")
+    if relay:
+        relay.relay(time.time(), force=True)
+
+    # Diagnose reads an existing export instead of matching references, so
+    # the reference tree (and the ingest key that lives in it) stays unfetched.
+    refs = None
+    if mode != "diagnose":
+        refs = fetch_refs(bucket, env("BE_REFS_PREFIX", "brand-exposure/refs"),
+                          token)
+        # The key goes where the scan already looks for it, rather than adding
+        # a second way of supplying one. One code path, already tested.
+        if key:
+            with open(os.path.join(refs, "ingest-key.txt"), "w",
+                      encoding="utf-8") as f:
+                f.write(key + "\n")
+        # Retired at this ground (03/09/2026): the trigger function builds
+        # BE_EXCLUDE from the tool's per-ground reference records. The list
+        # goes where load_tree looks; nothing is deleted.
+        excluded = exclude_lines(env("BE_EXCLUDE"))
+        if excluded:
+            with open(os.path.join(refs, ".exclude"), "w", encoding="utf-8") as f:
+                f.write("\n".join(excluded) + "\n")
+            log(f"references retired at this ground: {len(excluded)}")
+
+    log(f"fetching {video_obj}")
+    video = storage_get(bucket, video_obj,
+                        os.path.join(WORK, os.path.basename(video_obj)), token)
+    log(f"video: {os.path.getsize(video) / 1e6:.0f} MB in {time.time() - t0:.0f}s")
+
+    diagnose_out = diagnose_obj = None
+    if mode in ("sweep", "diagnose"):
+        name = env("BE_LABELS", required=True)
+        baked = os.path.join("labels", os.path.basename(name))
+        if os.path.exists(baked):
+            labels = baked
+        else:
+            labels = storage_get(bucket, name, os.path.join(WORK, "labels.csv"),
+                                 token)
+
+    if mode == "sweep":
+        # Trial run: same frames, a grid of sensitivities, scored against the
+        # hand-labelled answer sheet. Writes nothing to the tool — the table in
+        # this log IS the output.
+        cmd = [sys.executable, "scripts/board-exposure-sweep.py",
+               "--video", video, "--refs", refs, "--labels", labels,
+               "--club", club, "--out-dir", WORK]
+    elif mode == "diagnose":
+        # Post-mortem on a finished scan: what do the missed frames look like?
+        # Reads the export it names, writes diagnose.json into the same match
+        # folder, touches neither the tool nor the references.
+        det_obj = env("BE_DETECTIONS", required=True)
+        det = storage_get(bucket, det_obj, os.path.join(WORK, "detections.json"),
+                          token)
+        diagnose_out = os.path.join(WORK, "diagnose.json")
+        diagnose_obj = det_obj.rsplit("/", 1)[0] + "/diagnose.json"
+        cmd = [sys.executable, "scripts/board_exposure_diagnose.py",
+               "--detections", det, "--labels", labels,
+               "--video", video, "--out", diagnose_out]
+    elif mode == "audition":
+        # The casting call: which references earn their place on this footage,
+        # plus candidate crops for the tool's tick/untick view. Writes
+        # audition.json and audition-*.png into BE_DEST, bills nothing.
+        audition_dest = env("BE_DEST", required=True).strip("/")
+        audition_out = os.path.join(WORK, "audition")
+        cmd = [sys.executable, "scripts/board_exposure_audition.py",
+               "--video", video, "--refs", refs, "--club", club,
+               "--out-dir", audition_out, "--progress", progress_file]
+        if match:
+            cmd += ["--match", match]
+        if date:
+            cmd += ["--date", date]
+    else:
+        cmd = [sys.executable, "scripts/board-exposure-match.py",
+               "--video", video, "--refs", refs,
+               "--club", club, "--match", match, "--date", date,
+               "--reference-set", ref_set,
+               "--out-dir", os.path.join(WORK, "out"),
+               "--upload", "-y", "--progress", progress_file]
+        if start:
+            cmd += ["--start", start]
+        if end:
+            cmd += ["--end", end]
+        if env("BE_HT") and env("BE_RESTART"):
+            cmd += ["--ht", env("BE_HT"), "--restart", env("BE_RESTART")]
+        if env("BE_FPS"):
+            cmd += ["--fps", env("BE_FPS")]
+        if env("BE_SPONSORS"):
+            cmd += ["--sponsors", env("BE_SPONSORS")]
+        if env("BE_SOURCE_TYPE") in ("full", "highlights"):
+            cmd += ["--source-type", env("BE_SOURCE_TYPE")]
+
+    log("scanning — this is the long part")
+    # Streamed, not captured: Cloud Run's log tail is the only progress anyone
+    # can see while this runs, and buffering it to the end would make a
+    # forty-minute job look identical to a hung one.
+    rc = run_relaying(cmd, relay)
+    if rc != 0:
+        die(f"the scan exited {rc}. The log above is the scan's own output.", rc)
+
+    if relay and relay.failed:
+        log(f"note: {relay.failed} progress upload(s) failed during the run, "
+            f"so the card's percentage went stale; the results are unaffected")
+
+    if mode == "diagnose":
+        put_or_die(bucket, diagnose_obj, diagnose_out, token)
+        log(f"diagnose.json -> {diagnose_obj} (download it from the match "
+            f"folder, same as the export)")
+    elif mode == "audition":
+        names = sorted(os.listdir(audition_out))
+        for n in names:
+            put_or_die(bucket, f"{audition_dest}/{n}",
+                       os.path.join(audition_out, n), token)
+        log(f"{len(names)} audition file(s) -> {audition_dest}/ — open the "
+            f"tool's Audition view to tick candidates into references")
+
+    log(f"done in {(time.time() - t0) / 60:.1f} min")
+
+
+if __name__ == "__main__":
+    main()
