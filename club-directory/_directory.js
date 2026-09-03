@@ -1,7 +1,16 @@
 /* =========================================================================
    NL Tools — Club Directory presentation
    File: /club-directory/_directory.js
-   Version: v1.8 (22/08/2026)
+   Version: v1.9 (03/09/2026)
+
+   v1.9 — organisation records. A record whose root carries org: true is the
+   League or a related body, not a roster club: crestKeyOf() names the crest
+   asset to draw (crestName on the record, else the record name), orgFirst()
+   pins orgs ahead of the clubs wherever both are listed, and the one fact
+   that rendered on an otherwise-empty card ("Stadium (sponsored): None")
+   stays club-only. An org's shared mailboxes (commercial@, media@) render as
+   facts rows via orgInboxRows() — a club's card is unchanged, because a
+   club's inboxes are an editor/list-builder concern and are not published.
 
    v1.8 — viewSwitch(), and names set as their owners write them.
    · The List/Cards switcher is built here, above the people it acts on,
@@ -326,6 +335,43 @@
     return { bg: bg, fg: fg };
   }
 
+  /* Organisation records. The directory holds the League and related bodies
+     as ordinary records with org: true on the root, so everything
+     people-shaped works unchanged. Two things distinguish them: the crest is
+     named by the record itself (crestName — an /assets/crests/ filename
+     without .png; clubs-meta knows nothing about orgs, deliberately, for the
+     same reason cup guests stay out of it), and they list ahead of the clubs
+     wherever both appear. Colours stay the navy banner default: byName()
+     misses, bannerColours() returns null, and that fallback IS the brand. */
+  function isOrg(rec) { return !!(rec && rec.org); }
+  function crestKeyOf(rec) { return (rec && (rec.crestName || rec.club)) || ''; }
+  function orgFirst(names, recOf) {
+    var orgs = [], clubs = [];
+    names.forEach(function (n) { (isOrg(recOf(n)) ? orgs : clubs).push(n); });
+    return orgs.sort().concat(clubs.sort());
+  }
+  /* An organisation's shared mailboxes (commercial@, media@) belong on its
+     card: a club's live in the editor and the staff list-builder, but an
+     org's whole point in the directory is "who do I write to", so its card
+     says. Returns nothing for a club — their card is unchanged, and publish
+     only carries inboxes across on org records. */
+  function orgInboxRows(rec) {
+    if (!isOrg(rec)) { return []; }
+    var boxes = rec.inboxes || {};
+    return Object.keys(boxes).map(function (k) {
+      var b = boxes[k] || {};
+      var bits = [];
+      if (b.email) {
+        bits.push('<a href="mailto:' + esc(b.email) + '">' + esc(b.email) + '</a>');
+      }
+      if (b.phone) {
+        bits.push('<a href="tel:' + esc(tel(b.phone)) + '">' + esc(b.phone) + '</a>' +
+          (b.ext ? ' <span class="cd-f__sub">ext ' + esc(b.ext) + '</span>' : ''));
+      }
+      return [b.dept || k, bits.join(' &middot; ')];
+    }).sort(function (a, b) { return a[0].localeCompare(b[0]); });
+  }
+
   function tel(n) { return String(n || '').replace(/\s+/g, ''); }
   function url(u) { return /^https?:\/\//i.test(u) ? u : 'https://' + u; }
   function num(v) {
@@ -613,11 +659,13 @@
              flag in the submissions too, but it disagrees with the name on
              five clubs (Billericay, Forest Green, Maidstone, Scarborough,
              Sutton — the last reading "available"), so one source of truth
-             wins and it is the one someone typed. */
+             wins and it is the one someone typed. Orgs skip the None: for
+             them an empty sponsor is not information, and on an
+             otherwise-empty card it was the only fact drawn. */
           ['Stadium (official)', esc(info.stadium || '')],
           ['Stadium (sponsored)', (info.stadiumSponsor || '').trim()
             ? esc(info.stadiumSponsor)
-            : '<span class="cd-f__sub">None</span>'],
+            : (isOrg(rec) ? '' : '<span class="cd-f__sub">None</span>')],
           ['Address', addr],
           /* Bracketed. "3,500 669 seated" read as two numbers run together —
              the muted colour was carrying the whole distinction, and at a
@@ -639,14 +687,16 @@
           ['County FA', esc(info.countyFA || '')],
           ['Club sponsor', esc(info.spClub || '')],
           ['Shirt front', esc(info.spFront || '')],
-          ['Sleeve', esc(info.spSleeve || '')],
+          ['Sleeve', esc(info.spSleeve || '')]
+        ].concat(orgInboxRows(rec), [
           ['Website & social', social ? '<div class="cd-social">' + social + '</div>' : '', true]
-        ]) +
+        ])) +
       '</div>' +
       '</div>' +
 
       '<section class="cd-sec">' +
-        (depts || '<p class="cd-empty">No people held for this club yet.</p>') +
+        (depts || '<p class="cd-empty">No people held for this ' +
+          (isOrg(rec) ? 'organisation' : 'club') + ' yet.</p>') +
       '</section>';
   }
 
@@ -728,6 +778,9 @@
     glyph: glyph,
     strokeGlyph: strokeGlyph,
     listMembers: listMembers,
+    isOrg: isOrg,
+    crestKeyOf: crestKeyOf,
+    orgFirst: orgFirst,
     LIST_LABEL: LIST_LABEL,
     LIST_ORDER: LIST_ORDER,
     ORDER: ORDER

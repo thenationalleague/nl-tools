@@ -15,6 +15,16 @@
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
 <!--
   club-directory / editor / index.html
+  v1.36 — (03/09/2026) Organisation records. A master can add the League and
+          related bodies ("Add organisation", in the bar) as records carrying
+          org: true and an optional crestName. They draw their crest by that
+          name, sit above the clubs in the picker, skip the mailing-lists
+          block and both "rebuild from submission" offers (orgs are typed in —
+          there is no submission), and publish carries the two root markers so
+          the reader can pin and badge them. _directory.js v1.9 (?v=33)
+          supplies isOrg/crestKeyOf/orgFirst. Creation is journalled through
+          persist() like any other structural act.
+
   v1.35 — (15/08/2026) The bar is white with a red underline, not navy. Navy
           means nobody asked who you are; this page is entered with the same
           six-digit code as the reader, which was red. Same tool, same door,
@@ -600,7 +610,7 @@
 <script src="/system/nl-utils.js?v=44"></script>
 <script src="/club-directory/_tidy.js?v=30"></script>
 <script src="/club-directory/_gate.js?v=30"></script>
-<script src="/club-directory/_directory.js?v=32"></script>
+<script src="/club-directory/_directory.js?v=33"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -1047,6 +1057,7 @@
       <button class="nl-idbar__btn ed-out--go" id="publish" type="button" hidden>Publish</button>
       <button class="nl-idbar__btn" id="changes" type="button">My changes</button>
       <button class="nl-idbar__btn" id="recheck" type="button" hidden>Re-check all</button>
+      <button class="nl-idbar__btn" id="addOrg" type="button" hidden>Add organisation</button>
       <button class="nl-idbar__btn" id="signOut" type="button">Sign out</button>
     </div>
   </div>
@@ -1174,6 +1185,11 @@
     if (session.role === 'admin') {
       $('publish').hidden = false;
       $('publish').addEventListener('click', publishNow);
+      /* Master too, though the rules would let an editor: creating a record
+         puts a new page on every surface, and that is a release decision
+         like Publish, not a routine edit. */
+      $('addOrg').hidden = false;
+      $('addOrg').addEventListener('click', addOrganisation);
     }
     wireView();
     fillPicker();
@@ -1369,7 +1385,10 @@
      replacing the options clears it. */
   function fillPicker() {
     var was = $('pick').value;
-    $('pick').innerHTML = names.map(function (n) {
+    /* Orgs above the clubs; `names` itself stays alphabetical because
+       fromHash and the search grouping walk it. */
+    var order = NLDirectory.orgFirst(names, function (n) { return ALL[n]; });
+    $('pick').innerHTML = order.map(function (n) {
       var done = signedOffBy(ALL[n]);
       return '<option value="' + esc(n) + '">' + esc(n) +
         (done ? ' \u2014 COMPLETE' : '') + '</option>';
@@ -1399,9 +1418,10 @@
     $('out').innerHTML = NLDirectory.renderClub(rec, viewOpts());
     var crest = document.getElementById('cdCrest');
     if (crest) {
+      var ck = NLDirectory.crestKeyOf(rec);
       crest.alt = name + ' crest'; crest.hidden = false;
-      NL.clubs.wireCrestImg(crest, name, true);
-      crest.src = NL.clubs.crestUrl(name, 'medium');
+      NL.clubs.wireCrestImg(crest, ck, true);
+      crest.src = NL.clubs.crestUrl(ck, 'medium');
     }
     wireEditing(name);
     markProvenance(name);
@@ -1738,6 +1758,10 @@
   }
 
   function showLists(club, rec) {
+    /* Club-role lists — who is your secretary, your SLO. An organisation has
+       no answer to any of the eleven, and drawing the block would announce
+       "mail reaches nobody" eleven times over. */
+    if (NLDirectory.isOrg(rec)) { return; }
     var wrap = document.createElement('div');
     wrap.className = 'ed-block';
     var head = document.createElement('div');
@@ -2229,6 +2253,15 @@
       });
       var out = list.map(publishablePerson);
       clubs[name] = { club: name, info: clone(rec.info || {}), people: out };
+      /* The root markers survive publication: the reader pins organisations
+         above the clubs and picks their crest by these. Org inboxes go too —
+         renderClub puts them on an org's card, where a club's stay private
+         to the editor and the staff list-builder. */
+      if (rec.org) {
+        clubs[name].org = true;
+        if (rec.inboxes) { clubs[name].inboxes = clone(rec.inboxes); }
+      }
+      if (rec.crestName) { clubs[name].crestName = rec.crestName; }
       leaks = leaks.concat(escaped(name, list, out));
     });
     return { clubs: clubs, pending: pending, unchecked: unchecked, leaks: leaks,
@@ -3620,6 +3653,56 @@
     return ctrl;
   }
 
+  /* The League and related bodies as records of their own — org: true on the
+     root, an optional crestName for the badge. The name becomes the RTDB key
+     verbatim, exactly as the club records are keyed, so the characters RTDB
+     refuses in a key are refused here rather than thrown at save; a collision
+     would silently swallow a club record, so it is checked first. There is no
+     rename or delete afterwards — same as a club — which is why the name is
+     the whole form. */
+  function addOrganisation() {
+    var form = document.createElement('div');
+    form.className = 'form-grid';
+    form.innerHTML =
+      '<div class="form-group span2"><label>Name <span class="req">*</span></label>' +
+        '<input id="aoName" autocomplete="off" placeholder="e.g. The National League"></div>' +
+      '<div class="form-group span2"><label>Crest</label>' +
+        '<input id="aoCrest" autocomplete="off" placeholder="e.g. National League rose">' +
+        '<p class="form-hint">A filename in /assets/crests/ without the .png. ' +
+        'Left blank, the entry draws no banner crest.</p></div>';
+    var ctrl = NL.modal({
+      title: 'Add an organisation',
+      body: form,
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Add', className: 'btn--primary', onClick: function (c) {
+          var name = form.querySelector('#aoName').value.trim();
+          if (!name) { NL.toast('A name is needed', 'error'); return; }
+          if (/[.#$\/\[\]]/.test(name)) {
+            NL.toast('A name cannot contain . # $ / [ ]', 'error'); return;
+          }
+          if (ALL[name]) {
+            NL.toast(name + ' is already in the directory', 'error'); return;
+          }
+          var crestName = form.querySelector('#aoCrest').value.trim();
+          var rec = { club: name, org: true, info: {}, people: [] };
+          if (crestName) { rec.crestName = crestName; }
+          ALL[name] = rec;
+          names = Object.keys(ALL).sort();
+          /* Rebuilt before the selection is set: an option that does not
+             exist yet cannot be selected, and persist()'s own fillPicker
+             restores whatever is selected when it runs. */
+          fillPicker();
+          $('pick').value = name;
+          c.close();
+          persist(name, 'Organisation added');
+        } }
+      ]
+    });
+    setTimeout(function () { form.querySelector('#aoName').focus(); }, 30);
+    return ctrl;
+  }
+
   /* One pen per person. Pressing it turns that row's fields on and puts the
      cursor in the name; pressing it again, or clicking away, turns them off.
      Editing stays off until asked for, so a scroll on a phone cannot land in
@@ -4095,7 +4178,10 @@
      club has not sent us much" and "something has gone wrong here". */
   function markInfoMissing(club, rec) {
     var card = document.getElementById('cdCard');
-    if (!card || Object.keys((rec && rec.info) || {}).length) { return; }
+    /* Orgs are typed in, not rebuilt from a submission — an empty org card
+       is a blank page to fill, not a fault to announce. */
+    if (!card || NLDirectory.isOrg(rec) ||
+        Object.keys((rec && rec.info) || {}).length) { return; }
     var box = document.createElement('div');
     box.className = 'ed-infoflags';
     box.innerHTML = '<b>No club details are held for ' + esc(club) + '</b>' +
@@ -4537,9 +4623,10 @@
         { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
         /* Not only for an empty card. A field quietly lost, or a tidier fix
            that landed after the build, both want the same three steps. */
-        (session.role === 'admin' ? { label: 'Rebuild from submission\u2026',
-          className: 'btn--ghost',
-          onClick: function (c) { c.close(); rebuildInfo(club); } } : null),
+        (session.role === 'admin' && !NLDirectory.isOrg(rec)
+          ? { label: 'Rebuild from submission\u2026',
+              className: 'btn--ghost',
+              onClick: function (c) { c.close(); rebuildInfo(club); } } : null),
         { label: 'Save details', className: 'btn--primary', onClick: function (c) {
           var next = {}, changed = [];
           for (var k in info) { if (Object.prototype.hasOwnProperty.call(info, k)) { next[k] = info[k]; } }
