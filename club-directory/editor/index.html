@@ -15,6 +15,18 @@
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
 <!--
   club-directory / editor / index.html
+  v1.37 — (03/09/2026) Publish writes published/orgs — the public wall's
+          names-and-crest-keys leaf, no contacts in it — and carries an org's
+          colors {primary, tertiary} into its published record. The leaf's
+          public read arrives with the rules snapshot in the same PR (one
+          deploy-rtdb-rules run). _directory.* ?v=35.
+          And every department picker follows the record's taxonomy: an org
+          offers ORG_ORDER (the HQ list's own headings — Governance & legal,
+          Administration, …), a club offers ORDER, in the person editor, add
+          person, add role, and the shared-mailbox editor alike.
+          Add organisation takes a Banner crest too (bannerCrestName — the
+          on-colour mark; the crimson banner wants the white rose where the
+          tiles want the wordmark), and publish carries it.
   v1.36 — (03/09/2026) Organisation records. A master can add the League and
           related bodies ("Add organisation", in the bar) as records carrying
           org: true and an optional crestName. They draw their crest by that
@@ -602,7 +614,7 @@
   Not lint-covered: no auth-guard, by design.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=62">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=34">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=35">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
@@ -610,7 +622,7 @@
 <script src="/system/nl-utils.js?v=46"></script>
 <script src="/club-directory/_tidy.js?v=30"></script>
 <script src="/club-directory/_gate.js?v=30"></script>
-<script src="/club-directory/_directory.js?v=34"></script>
+<script src="/club-directory/_directory.js?v=35"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -1425,7 +1437,7 @@
     $('out').innerHTML = NLDirectory.renderClub(rec, viewOpts());
     var crest = document.getElementById('cdCrest');
     if (crest) {
-      var ck = NLDirectory.crestKeyOf(rec);
+      var ck = NLDirectory.bannerCrestOf(rec);
       crest.alt = name + ' crest'; crest.hidden = false;
       NL.clubs.wireCrestImg(crest, ck, true);
       crest.src = NL.clubs.crestUrl(ck, 'medium');
@@ -1605,6 +1617,7 @@
      the clubs did themselves: Careers, Retail, Club Office. */
   function editInboxes(club, rec) {
     var boxes = rec.inboxes || {};
+    var DEPTS = NLDirectory.isOrg(rec) ? NLDirectory.ORG_ORDER : NLDirectory.ORDER;
     var rows = Object.keys(boxes).sort().map(function (k) {
       var b = boxes[k] || {};
       return { key: k, dept: b.dept || k, email: b.email || '',
@@ -1629,17 +1642,17 @@
 
         var dept = document.createElement('select');
         dept.className = 'ed-dept';
-        dept.innerHTML = NLDirectory.ORDER.map(function (sec) {
+        dept.innerHTML = DEPTS.map(function (sec) {
           return '<option value="' + esc(sec) + '"' +
             (sec === r.dept ? ' selected' : '') + '>' + esc(sec) + '</option>';
         }).join('') +
           '<option value="__other"' +
-          (NLDirectory.ORDER.indexOf(r.dept) < 0 ? ' selected' : '') +
+          (DEPTS.indexOf(r.dept) < 0 ? ' selected' : '') +
           '>Something else…</option>';
 
         var other = document.createElement('input');
         other.className = 'ed-cval';
-        other.value = NLDirectory.ORDER.indexOf(r.dept) < 0 ? r.dept : '';
+        other.value = DEPTS.indexOf(r.dept) < 0 ? r.dept : '';
         other.placeholder = 'e.g. Retail';
         other.hidden = dept.value !== '__other';
         dept.addEventListener('change', function () {
@@ -1688,7 +1701,7 @@
       add.type = 'button';
       add.textContent = 'Add a shared mailbox';
       add.addEventListener('click', function () {
-        rows.push({ key: '', dept: NLDirectory.ORDER[0], email: '', phone: '',
+        rows.push({ key: '', dept: DEPTS[0], email: '', phone: '',
                     ext: '', gone: false });
         paint();
       });
@@ -2245,7 +2258,7 @@
      us to hold back is held back whether their club has been checked or not,
      because that is their decision and not a state of our work. */
   function buildPublished() {
-    var clubs = {}, pending = [], leaks = [], people = 0, held = 0, unchecked = 0;
+    var clubs = {}, orgs = {}, pending = [], leaks = [], people = 0, held = 0, unchecked = 0;
     Object.keys(ALL).sort().forEach(function (name) {
       var rec = ALL[name] || {};
       if (!signedOffBy(rec)) { unchecked++; }
@@ -2267,11 +2280,18 @@
       if (rec.org) {
         clubs[name].org = true;
         if (rec.inboxes) { clubs[name].inboxes = clone(rec.inboxes); }
+        if (rec.colors) { clubs[name].colors = clone(rec.colors); }
+        if (rec.bannerCrestName) { clubs[name].bannerCrestName = rec.bannerCrestName; }
+        /* The wall's public leaf: names and crest keys only, no contacts.
+           The doorless page cannot list published/clubs, so this is how it
+           knows an org tile exists to draw. Always a truthy crest key —
+           RTDB drops nulls, and a dropped value would drop the org. */
+        orgs[name] = { crestName: rec.crestName || name };
       }
       if (rec.crestName) { clubs[name].crestName = rec.crestName; }
       leaks = leaks.concat(escaped(name, list, out));
     });
-    return { clubs: clubs, pending: pending, unchecked: unchecked, leaks: leaks,
+    return { clubs: clubs, orgs: orgs, pending: pending, unchecked: unchecked, leaks: leaks,
              count: Object.keys(clubs).length, people: people, held: held };
   }
 
@@ -2402,7 +2422,7 @@
         clubs: clone(ALL) || {}, provenance: clone(PROV) || {} };
       var payload = { at: at, by: by, label: name, edition: edRef.key,
         count: built.count, people: built.people,
-        clubs: built.clubs, pending: built.pending };
+        clubs: built.clubs, orgs: built.orgs, pending: built.pending };
 
       NL.writeAudit('directory_publish', built.count + ' club(s), ' + built.people +
         ' people published as "' + name + '" by ' + by);
@@ -2981,10 +3001,10 @@
     return 'p' + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 5);
   }
 
-  function deptSelect(value, cls) {
+  function deptSelect(value, cls, forOrg) {
     var s = document.createElement('select');
     s.className = cls || 'ed-dept';
-    NLDirectory.ORDER.forEach(function (name) {
+    (forOrg ? NLDirectory.ORG_ORDER : NLDirectory.ORDER).forEach(function (name) {
       var o = document.createElement('option');
       o.value = name; o.textContent = name;
       if (name === value) { o.selected = true; }
@@ -3240,7 +3260,7 @@
       var grid = document.createElement('div');
       grid.className = 'form-grid';
       var t = textbox(r.title || '', 'Programme Editor');
-      var d = deptSelect(r.section, 'ed-dept');
+      var d = deptSelect(r.section, 'ed-dept', NLDirectory.isOrg(ALL[club]));
       grid.appendChild(field('Job title', t));
       grid.appendChild(field('Department', d));
       card.appendChild(grid);
@@ -3527,9 +3547,11 @@
       '<div class="form-group span2"><p class="form-hint">' +
         esc(name) + ' is already listed under ' + esc(held.join(', ')) +
         '. Their contact details carry across — this is one person, not a copy.</p></div>';
-    var sel = deptSelect(NLDirectory.ORDER.filter(function (d) {
+    var isOrg = NLDirectory.isOrg(ALL[club]);
+    var depts = isOrg ? NLDirectory.ORG_ORDER : NLDirectory.ORDER;
+    var sel = deptSelect(depts.filter(function (d) {
       return held.indexOf(d) < 0;
-    })[0] || 'Other');
+    })[0] || 'Other', null, isOrg);
     sel.id = 'arDeptSel';
     form.querySelector('#arDept').appendChild(sel);
 
@@ -3623,7 +3645,7 @@
         '<label><input type="checkbox" id="apHide"> Keep their contact details out of the ' +
         'published directory</label>' +
         '<p class="form-hint">We still hold them; the reader shows "Not published".</p></div>';
-    var sel = deptSelect('Other');
+    var sel = deptSelect('Other', null, NLDirectory.isOrg(ALL[club]));
     sel.id = 'apDeptSel';
     form.querySelector('#apDept').appendChild(sel);
 
@@ -3674,9 +3696,12 @@
       '<div class="form-group span2"><label>Name <span class="req">*</span></label>' +
         '<input id="aoName" autocomplete="off" placeholder="e.g. The National League"></div>' +
       '<div class="form-group span2"><label>Crest</label>' +
-        '<input id="aoCrest" autocomplete="off" placeholder="e.g. National League rose">' +
-        '<p class="form-hint">A filename in /assets/crests/ without the .png. ' +
-        'Left blank, the entry draws no banner crest.</p></div>';
+        '<input id="aoCrest" autocomplete="off" placeholder="e.g. The National League">' +
+        '<p class="form-hint">A filename in /assets/crests/ without the .png — the mark ' +
+        'shown on white: tiles and lists. Blank falls back to the name.</p></div>' +
+      '<div class="form-group span2"><label>Banner crest</label>' +
+        '<input id="aoBanner" autocomplete="off" placeholder="e.g. National League rose white">' +
+        '<p class="form-hint">The mark for the coloured banner. Blank uses the crest above.</p></div>';
     var ctrl = NL.modal({
       title: 'Add an organisation',
       body: form,
@@ -3692,8 +3717,10 @@
             NL.toast(name + ' is already in the directory', 'error'); return;
           }
           var crestName = form.querySelector('#aoCrest').value.trim();
+          var bannerCrest = form.querySelector('#aoBanner').value.trim();
           var rec = { club: name, org: true, info: {}, people: [] };
           if (crestName) { rec.crestName = crestName; }
+          if (bannerCrest) { rec.bannerCrestName = bannerCrest; }
           ALL[name] = rec;
           names = Object.keys(ALL).sort();
           /* Rebuilt before the selection is set: an option that does not

@@ -62,9 +62,13 @@ test('nothing but the published copy is opened', () => {
 });
 
 test('the stamp leaves are the only other thing open', () => {
+  /* `orgs` joined 03/09/2026, decided by Richard: the doorless wall draws
+     the League and related bodies, and this leaf is how it knows they exist
+     without listing published/clubs. It holds names and crest keys only —
+     the contacts stay one-club-per-request under clubs/$club. */
   const open = Object.keys(PUB).filter((k) => PUB[k] && PUB[k]['.read'] === true);
-  assert.deepEqual(open.sort(), ['at', 'label'],
-    'only the publish stamp; anything else here is a new decision');
+  assert.deepEqual(open.sort(), ['at', 'label', 'orgs'],
+    'the publish stamp and the org tile list; anything else here is a new decision');
 });
 
 test('the withheld details are removed at PUBLISH, not hidden at render', () => {
@@ -111,8 +115,10 @@ test('the public directory never asks for more than one club', () => {
      clubs-meta, with no database behind it. */
   assert.ok(!/NLDirectory\.search\(/.test(DIRCODE), 'no people search on the public page');
   const refs = [...DIRCODE.matchAll(/ref\(ROOT \+ '([^']+)'/g)].map((m) => m[1]);
-  assert.deepEqual(refs.sort(), ['/published/at', '/published/clubs'],
-    'the stamp and the clubs node — anything else is a wider read');
+  /* /published/orgs is a names-and-crest-keys list, not a wider read of the
+     directory — the contacts behind each name still cost one request each. */
+  assert.deepEqual(refs.sort(), ['/published/at', '/published/clubs', '/published/orgs'],
+    'the stamp, the clubs node and the org list — anything else is a wider read');
 });
 
 test('a club is addressed by its raw name, never a URL-encoded one', () => {
