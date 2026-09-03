@@ -19,6 +19,15 @@
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
 <!--
   club-directory / public / index.html
+  v1.1 — (03/09/2026) Organisations on the wall. Publish writes a public
+         names-and-crests leaf (published/orgs — no contacts in it) because
+         this page deliberately cannot list published/clubs; the wall draws
+         it as its own first group, the search filters it, and an org's
+         entry opens exactly as a club's does — published/clubs/$club was
+         already public per record. Until the rules ship the leaf, the read
+         fails quietly and the wall stays clubs-only. The entry banner takes
+         the crest the record names (crestKeyOf), and org colours are the
+         League's red and white (_directory.js v1.12).
   v1.0 — (26/08/2026) The directory with no door on it.
 
   WHAT THIS IS
@@ -63,7 +72,7 @@
   Not lint-covered: no auth-guard, by design.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=62">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=34">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=35">
 
 <!-- No firebase-auth-compat. This page never signs anybody in, and loading
      the auth SDK on a page with no account is how an "ungated" page quietly
@@ -71,7 +80,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/system/nl-utils.js?v=46"></script>
-<script src="/club-directory/_directory.js?v=34"></script>
+<script src="/club-directory/_directory.js?v=35"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -138,7 +147,7 @@
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
   var esc = NL.escHtml;
-  var ROSTER = [];
+  var ROSTER = [], ORGS = [];
   /* Fetched one at a time and kept, so going back to a club already opened
      costs nothing. Also the cache that stops a double-click asking twice. */
   var CACHE = {};
@@ -146,8 +155,20 @@
 
   function db() { return firebase.database(); }
 
-  NL.clubs.forSeason().then(function (roster) {
+  Promise.all([
+    NL.clubs.forSeason(),
+    /* The public leaf publish writes for this page: org names and crest
+       keys, nothing else. Until the rules ship it, the read fails and the
+       wall stays clubs-only — a missing group, not a broken page. */
+    db().ref(ROOT + '/published/orgs').once('value')
+      .then(function (s) { return s.val() || {}; })
+      ['catch'](function () { return {}; })
+  ]).then(function (res) {
+    var roster = res[0];
     ROSTER = roster || [];
+    ORGS = Object.keys(res[1] || {}).map(function (n) {
+      return { name: n, crestName: (res[1][n] && res[1][n].crestName) || n };
+    });
     drawIndex();
     $('q').addEventListener('input', drawIndex);
     $('back').addEventListener('click', function () { location.hash = ''; });
@@ -191,8 +212,11 @@
        every tile opens and drawClub says so if the answer comes back empty.
        Greying a club here would mean fetching all 72 to find out, which is
        the bulk read this page exists without. */
-    $('out').innerHTML = NLDirectory.renderIndex({ roster: roster });
-    if (q && !roster.length) {
+    var orgs = q
+      ? ORGS.filter(function (o) { return o.name.toLowerCase().indexOf(q) > -1; })
+      : ORGS;
+    $('out').innerHTML = NLDirectory.renderIndex({ roster: roster, orgs: orgs });
+    if (q && !roster.length && !orgs.length) {
       $('out').innerHTML = '<p class="cd-empty">No club matches “' + esc(q) + '”.</p>';
       return;
     }
@@ -249,10 +273,11 @@
        have rescued it was not attached when the load failed. */
     var crest = $('cdCrest');
     if (crest) {
+      var ck = NLDirectory.bannerCrestOf(rec) || name;
       crest.alt = name + ' crest';
       crest.hidden = false;
-      NL.clubs.wireCrestImg(crest, name, true);
-      crest.src = NL.clubs.crestUrl(name, 'medium');
+      NL.clubs.wireCrestImg(crest, ck, true);
+      crest.src = NL.clubs.crestUrl(ck, 'medium');
     }
     window.scrollTo(0, 0);
   }

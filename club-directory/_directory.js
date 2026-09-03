@@ -1,7 +1,23 @@
 /* =========================================================================
    NL Tools — Club Directory presentation
    File: /club-directory/_directory.js
-   Version: v1.11 (03/09/2026)
+   Version: v1.12 (03/09/2026)
+
+   v1.12 — an org's banner is the League's own pairing: NL red under white
+   type, as tokens (var(--primary) / var(--white)) because the brand owns
+   that pair — the navy fallback read as a missing club, and Richard called
+   it: crimson. A record carrying colors {primary, tertiary} overrides it
+   with the same missing-tertiary fallback a club gets, so a related body
+   with its own identity is data, not a code change. bannerCrestOf() splits
+   the on-colour mark from the on-white one — the white rose vanishes on a
+   tile, the wordmark vanishes on crimson, so the banner takes
+   bannerCrestName and everything on white keeps crestName.
+   And orgs get their own taxonomy: ORG_ORDER, the HQ contact list's own
+   headings in the list's own order — "Team operations" on the League's card
+   was a club's furniture in the wrong room. sectionOrderOf(rec) picks the
+   list per record and appends any heading found on a person that the list
+   does not carry, so nobody can be filed out of sight by a taxonomy
+   change.
 
    v1.11 — organisation records. A record whose root carries org: true is the
    League or a related body, not a roster club: crestKeyOf() names the crest
@@ -110,6 +126,14 @@
     'Matchday & safety', 'Safeguarding & welfare', 'Medical', 'Media & marketing',
     'Programme', 'Commercial', 'Ticketing', 'Finance', 'Community',
     'Team operations', 'Other'];
+
+  /* The org taxonomy. A club's departments on the League's own card read as
+     nonsense — "Club secretary", "Team operations" — so an org record files
+     its people under the headings the HQ contact list itself uses, in the
+     order that list introduces them. Not alphabetical for the same reason
+     ORDER is not. Other last, the same shrug. */
+  var ORG_ORDER = ['Governance & legal', 'Administration', 'Commercial',
+    'Communications', 'Finance', 'Youth development', 'Other'];
 
   var SOCIALS = [['website', 'Website'], ['x', 'X'], ['facebook', 'Facebook'],
     ['instagram', 'Instagram'], ['tiktok', 'TikTok'], ['youtube', 'YouTube'],
@@ -315,6 +339,22 @@
       return arr(p.roles).some(function (r) { return r.section === section; });
     }).sort(bySurname);
   }
+
+  /* Which taxonomy this record iterates — and any section that exists on a
+     person but not in the list is appended rather than dropped, because a
+     person filed under a retired or mistyped heading must never silently
+     vanish from the page. */
+  function sectionOrderOf(rec) {
+    var base = isOrg(rec) ? ORG_ORDER : ORDER;
+    var extra = [];
+    arr(rec && rec.people).forEach(function (p) {
+      arr(p && p.roles).forEach(function (r) {
+        var s = r && r.section;
+        if (s && base.indexOf(s) < 0 && extra.indexOf(s) < 0) { extra.push(s); }
+      });
+    });
+    return extra.length ? base.concat(extra) : base;
+  }
   /* BANNER COLOURS: THE CLUB'S PRIMARY AND ITS TERTIARY. Nothing else, and no
      substitution — the record is trusted because the record is now correct.
 
@@ -362,16 +402,38 @@
     return { bg: bg, fg: fg };
   }
 
+  /* An org has no clubs-meta entry, so its banner defaults to the League's
+     own pairing — NL red under white type, as tokens because the brand owns
+     that pair. A record carrying colors {primary, tertiary} overrides it,
+     with the same missing-tertiary fallback a club gets. */
+  function orgColours(rec) {
+    var cols = (rec && rec.colors) || {};
+    if (lum(cols.primary) === null) { return { bg: 'var(--primary)', fg: 'var(--white)' }; }
+    var fg = cols.tertiary;
+    if (lum(fg) === null) {
+      fg = contrast(cols.primary, '#FFFFFF') >= contrast(cols.primary, '#0A1628')
+        ? '#FFFFFF' : '#0A1628';
+    }
+    return { bg: cols.primary, fg: fg };
+  }
+
   /* Organisation records. The directory holds the League and related bodies
      as ordinary records with org: true on the root, so everything
      people-shaped works unchanged. Two things distinguish them: the crest is
      named by the record itself (crestName — an /assets/crests/ filename
      without .png; clubs-meta knows nothing about orgs, deliberately, for the
      same reason cup guests stay out of it), and they list ahead of the clubs
-     wherever both appear. Colours stay the navy banner default: byName()
-     misses, bannerColours() returns null, and that fallback IS the brand. */
+     wherever both appear. Colours come from orgColours() above — the
+     League's red-and-white by default, the record's own colors if set. */
   function isOrg(rec) { return !!(rec && rec.org); }
   function crestKeyOf(rec) { return (rec && (rec.crestName || rec.club)) || ''; }
+  /* The banner sits on colour, the tiles sit on white, and the League's
+     marks are ground-specific — the white rose vanishes on a tile and the
+     wordmark vanishes on crimson. bannerCrestName is the org's on-colour
+     mark; absent, the banner shows whatever the tiles show. */
+  function bannerCrestOf(rec) {
+    return (rec && rec.bannerCrestName) || crestKeyOf(rec);
+  }
   function orgFirst(names, recOf) {
     var orgs = [], clubs = [];
     names.forEach(function (n) { (isOrg(recOf(n)) ? orgs : clubs).push(n); });
@@ -654,7 +716,7 @@
       ? '<ul class="cd-cards">' + allPeople(rec).map(function (p) {
           return personCard(p, opts);
         }).join('') + '</ul>'
-      : ORDER.map(function (s) {
+      : sectionOrderOf(rec).map(function (s) {
           var who = sectionPeople(rec, s);
           if (!who.length) { return ''; }
           return '<div class="cd-dept"><h3 class="cd-dept__h">' + esc(s) + '</h3>' +
@@ -664,7 +726,7 @@
         }).filter(Boolean).join('');
     if (depts) { depts = switcher + depts; }
 
-    var pal = bannerColours(rec.club);
+    var pal = isOrg(rec) ? orgColours(rec) : bannerColours(rec.club);
 
     return '' +
       '<div class="cd-banner"' + (pal ? ' style="--cd-bg:' + esc(pal.bg) +
@@ -941,9 +1003,11 @@
     listMembers: listMembers,
     isOrg: isOrg,
     crestKeyOf: crestKeyOf,
+    bannerCrestOf: bannerCrestOf,
     orgFirst: orgFirst,
     LIST_LABEL: LIST_LABEL,
     LIST_ORDER: LIST_ORDER,
-    ORDER: ORDER
+    ORDER: ORDER,
+    ORG_ORDER: ORG_ORDER
   };
 }());
