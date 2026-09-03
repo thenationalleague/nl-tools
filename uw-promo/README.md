@@ -10,7 +10,7 @@ NO auth-guard/portal login), with a full audit trail.
 | Page | Who | Gets in via | Can do |
 |---|---|---|---|
 | `/uw-promo/` | **Utility Warehouse** (one shared login) | shared 6-character passcode or `?u=<token>` direct link | Add codes **for one club at a time** (club dropdown required; paste a list — the default — or generate plain 6-character codes; optional batch label; ≤500/batch), revoke **unredeemed** codes, release a redeemed code (required reason), see every code with the club it belongs to, redeemed-by-club breakdown, filters, search, CSV export. The big count cards follow the club filter |
-| `/uw-promo/club/` | **Each of the 72 clubs** | own `?c=<token>` direct link (the QR-code target for the point of sale) **plus a credential on every visit** — the 4-digit till PIN, or the club's manager passcode for the admin view; either alone also works without the link | **Till page**: big code entry → a valid unredeemed code *registered to this club* is redeemed here (RTDB transaction — two tills can't claim the same code) and joins the club's redeemed list. A code registered elsewhere is refused by name. Already-redeemed entry shows **which club and the exact date/time**. Revoked → "no longer valid". Clubs cannot undo — the page points them at NL. Below that: **Check a code** (read-only lookup, 10 an hour, audited). On the manager passcode only: **upload your own codes**, full code list, CSV export, the club's audit slice, and till-PIN self-service — see *Two doors, one page* |
+| `/uw-promo/club/` | **Each of the 72 clubs** | own `?c=<token>` direct link (the QR-code target for the point of sale) **plus a credential on every visit** — the 4-digit till PIN, or the club's manager passcode for the admin view; either alone also works without the link | **Till page**: big code entry → a valid unredeemed code *registered to this club* is redeemed here (RTDB transaction — two tills can't claim the same code) and joins the club's redeemed list. Refusals (spec item 5): already-redeemed shows **club + date/time**, expired shows **its expiry date**, and everything else — not recognised, revoked, another club's code — shares ONE neutral message with the UW support address and T&Cs link, so till staff can't adjudicate. Clubs cannot undo — the page points them at NL. On the manager passcode only: **Check a code** (full detail, 10/hr, audited), and per route: upload (online), inventory, CSV, audit slice, PIN self-service (in-store) — see *Routes* and *Two doors* |
 | `/uw-promo/admin/` | **NL master (Richard)** | master passcode only (no direct link, deliberately; first-run bootstrap sets it) | Everything UW can do, plus: redeem on behalf of a club (the club it is registered to, same race-safe transaction), **register** a pre-v3.0 code to a club, revoke **redeemed** codes (typed `REVOKE`), seed/sync the roster from clubs-meta, the **list of all 72 club URLs, PINs and manager passcodes** (copy/regenerate each, **Reissue all club PINs**, **Issue missing manager passcodes**, export access CSV), **Print till cards** (one A4 card per club: crest, QR of the club link, PIN + the till steps — print-to-PDF gives the 72-page hand-out pack), audit viewer + export, sandbox reset (test mode) |
 
 ## Which club a code belongs to
@@ -43,6 +43,14 @@ NL/UW (required reason, recorded; the club registration is kept). `revoked`
 ends a code either way (UW: unredeemed only; NL master: redeemed too, behind
 a typed confirm).
 
+**Central codes expire 12 months from generation** (spec item 4). Nothing is
+stored: `UWP.isExpired` derives it from `createdAt`, so it covers every
+central code already in the system, and `redeemTxn` refuses an expired one
+inside the transaction. Panels show a derived **Expired** pill/filter/count.
+Club-uploaded codes (`createdBy: club:*`) never expire here — the club's own
+POS is the authority, and the 12-month promise is an upload undertaking, not
+a field.
+
 Codes are matched on a stored, indexed `norm` field (uppercase, alphanumerics
 only) so a till entry matches however it's typed — `7f3 k9c` finds `7F3K9C`,
 and a UW-supplied code keeps whatever punctuation it arrived with. Generated
@@ -58,6 +66,43 @@ codes are 6 plain characters with no hyphen; the till entry box is free text
 | Each club — till | **4-digit numeric PIN** | Typed on a phone, at a till, by whoever is on shift |
 | Each club — admin | 6-character **manager passcode** | Named contact, on a laptop. Never printed |
 
+## Routes — unassigned / in-store / online (spec v42.0)
+
+Every club carries a `route` on its config record, defaulting to
+**unassigned**, and the route decides what its people can open at all:
+
+| Route | Till PIN opens | Manager passcode opens | Codes come from |
+|---|---|---|---|
+| `unassigned` | Holding screen, no token | Holding screen, no token | Nowhere — switched off |
+| `instore` | The till (redeem) | Till + admin view (no upload) | UW/NL centrally |
+| `online` | Holding screen, no token | Admin view: upload, list, activity | The club uploads its own |
+
+The route gate lives in the auth **function**, not the page: an unassigned
+club's correct PIN gets a holding response and no Firebase token is minted,
+so nothing is readable behind it. Correct-credential holding responses do not
+touch the failure throttles. An online club's manager grant deliberately
+carries **no PIN and no link token**, so a QR till card cannot exist for a
+club with no till — the print path has nothing to print.
+
+The admin console's Clubs & access tab is the system of record: a Route
+column per club (audited on change), and a ledger line — N in-store,
+N online, **N unassigned** — where the unassigned number is the chase list.
+Seeding new clubs sets `unassigned`, so a club is switched off until someone
+deliberately switches it on. A route change takes effect at the club's next
+sign-in; open sessions keep their shape until they re-enter.
+
+Central codes for online or unassigned clubs aren't blocked — the add-codes
+dropdowns mark those clubs instead, so a batch doesn't land where no shop
+will redeem it by accident.
+
+## The voucher's value is one constant
+
+Public marketing says £40; every internal document says £50 (open item in
+the spec). So the number exists in exactly one place — `UWP.VALUE` in
+`_shared.js`, currently **£50** — and every mention in copy, upload
+undertakings and confirmations reads it. When the question resolves, one
+line changes.
+
 ## Two doors, one page
 
 `/uw-promo/club/` serves two jobs with two credentials on the same URL and the
@@ -65,15 +110,15 @@ same QR:
 
 | | **Till mode** (4-digit PIN) | **Club admin** (manager passcode) |
 |---|---|---|
-| Redeem a code | ✅ | ✅ |
-| Check a code | ✅ | ✅ |
-| Redeemed list + counts | ✅ | ✅ |
-| Upload own codes | ✗ | ✅ |
+| Redeem a code (in-store route) | ✅ | ✅ |
+| Redeemed list + counts (in-store) | ✅ | ✅ |
+| Check a code | ✗ | ✅ |
+| Upload own codes (online route) | ✗ | ✅ |
 | Full code list, incl. unredeemed strings | ✗ | ✅ |
 | CSV export | ✗ | ✅ |
 | Club's slice of the audit trail | ✗ | ✅ |
-| See / rotate the till PIN | ✗ | ✅ |
-| Print their own till card | ✗ | ✅ |
+| See / rotate the till PIN (in-store) | ✗ | ✅ |
+| Print their own till card (in-store) | ✗ | ✅ |
 
 The reason is not tidiness. **The PIN is printed on the till card, next to a QR
 code, at a public kiosk** — realistically semi-public. It must not also be the
@@ -149,7 +194,9 @@ have to be reprinted and resent.
 
 ## Clubs uploading their own codes
 
-In the club admin view (manager passcode — **not** the till PIN). A club pastes its own
+In the club admin view (manager passcode — **not** the till PIN), and only
+on the **online route** — an in-store club's codes come centrally from UW,
+so its managers don't see the module. A club pastes its own
 codes, optionally labels the batch, and they go live immediately — registered
 to that club, because a club can only ever upload its own. There is no club
 to choose and therefore nothing to get wrong.
@@ -179,6 +226,14 @@ In the NL and UW panels these appear with **Club** in the "By" column
 (`createdBy` is `club:<CODE>`), so a club-supplied batch is always
 distinguishable from a UW or NL one.
 
+**A completed upload emails the NL** (spec item 6): the page fires
+`uwPromo_uploadNotify` at the GAS router, which reads its recipients from
+`config/support/notify` — set from the master console's **Support &
+notifications** card, held in RTDB because this repo is public and no
+personal address is ever committed. Fire-and-forget: the upload has already
+succeeded and been audited either way, and no recipients configured is a
+silent no-op, not an error at a club's screen.
+
 ## Till cards
 
 One A4 card per club: club crest and UW wordmark side by side, a QR of the
@@ -204,8 +259,12 @@ family would print a blank sheet.
 
 ## Checking a code without redeeming it
 
-At the foot of the club till page. Says whether a code is genuine, which club
-it belongs to, and whether/when it was redeemed — without changing anything.
+Behind the **manager door** as of v5.0, not on the till. The till's refusal
+screen is deliberately neutral so till staff can't adjudicate a contested
+code — a detailed lookup sitting next to it would hand the detail straight
+back. Managers get the full story: genuine or not, which club it belongs to,
+whether/when it was redeemed, and now whether it has expired — without
+changing anything.
 
 Two guards. **10 lookups an hour per browser** (`UWP.rateLimit`, sliding
 window in `localStorage`), and **every check is written to the audit trail**
@@ -229,7 +288,11 @@ are in the browser, and the RTDB path is world-readable anyway. Treat it as
 config/
   master            { passcode, updatedAt }                        # 6-char alphanumeric
   uw                { label, passcode, token, updatedAt }          # 6-char alphanumeric
-  clubs/<CODE>      { name, division, passcode, managerPass, token, addedAt }
+  support           { email, notify, updatedAt }   # fan support address +
+                                                   # upload-alert recipients.
+                                                   # In RTDB, never in git
+  clubs/<CODE>      { name, division, passcode, managerPass, token,
+                      route: unassigned|instore|online, addedAt }
                                                                    # passcode   = 4-digit till PIN
                                                                    # managerPass = club admin view
                                                                    # CODE = clubs-meta 3-letter code

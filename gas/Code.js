@@ -191,6 +191,8 @@ function doPost(e) {
     if (action === 'sendApproval')   return respond(sendApproval(body));
     if (action === 'sendRejection')  return respond(sendRejection(body));
     /* Vacancies */
+    if (action === 'uwPromo_uploadNotify')   return respond(uwPromoUploadNotify(body));
+
     if (action === 'vacancies_requestCode')  return vacRequestCode(body);
     if (action === 'vacancies_validateCode') return vacValidateCode(body);
     if (action === 'vacancies_submit')       return vacSubmit(body);
