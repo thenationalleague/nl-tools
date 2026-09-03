@@ -69,8 +69,9 @@ const be = lift(
   ['validRequest', 'buildEnv', 'verdictOf', 'oldestQueued', 'failureNote',
    'shouldDeleteSource', 'stageOnLaunch', 'stageOnDone', 'othersWantVideo',
    'failedSharers', 'dismissalPlan', 'matchPrefixOf', 'othersOwnDest',
-   'auditionFiles', 'progressPath', 'progressFrom'],
-  ['VIDEO_PATH']
+   'auditionFiles', 'progressPath', 'progressFrom', 'refKey', 'refPath',
+   'tallyScan', 'tallyAudition', 'mergeTally', 'retirements', 'excludeFor'],
+  ['VIDEO_PATH', 'DEST_PATH', 'MIN_RUNS']
 );
 
 const GOOD = {
@@ -432,6 +433,148 @@ test('a dismissed sibling does not own the dest; a dest-less one never did', () 
     a: { video: V, status: 'done', mode: 'audition', dest: DEST, dismissed: 1 },
     b: { video: V, status: 'done', mode: 'audition', dest: DEST, dismissed: 2 },
   }, 'a').destPrefix, DEST + '/');
+});
+
+test('a scan that names its dest gets the same audition-file sweep (03/09/2026)', () => {
+  // Scans carry dest now; the audition that preceded them left audition-*.png
+  // in the match folder, and auditionFiles keeps the match's own files safe.
+  const plan = be.dismissalPlan({
+    a: { video: V, status: 'done', mode: 'scan', dest: DEST, dismissed: 1 },
+  }, 'a');
+  assert.equal(plan.destPrefix, DEST + '/');
+  // no dest, no sweep — requests from before the change
+  assert.equal(be.dismissalPlan({ a: { video: V, status: 'done', dismissed: 1 } }, 'a').destPrefix, null);
+});
+
+/* ---- Reference records (03/09/2026) --------------------------------------
+   One record per reference file per ground: runs, fired, frames only it
+   found, retired. The tally comes from the run's own export; the
+   retirement rule prunes per ground; BE_EXCLUDE carries the result. */
+
+test('refKey encodes exactly the characters RTDB refuses, reversibly', () => {
+  for (const s of ['DAZN artwork Follow your club.png', 'A.F.C. Fylde',
+                   'clubs/Harrogate Town/Enterprise/cutout 1.png', '100% #1 [x] $y']) {
+    const k = be.refKey(s);
+    assert.ok(!/[.#$\[\]\/]/.test(k), 'still has a forbidden char: ' + k);
+    assert.equal(decodeURIComponent(k), s);
+  }
+  assert.equal(be.refKey('a.b'), 'a%2Eb');
+});
+
+test('refPath is the string load_tree compares against .exclude', () => {
+  assert.equal(be.refPath('Harrogate Town', 'Enterprise', 'partner', 'cad.png'),
+    'partners/Enterprise/cad.png');
+  assert.equal(be.refPath('Harrogate Town', 'Enterprise', 'club', 'cutout 1.png'),
+    'clubs/Harrogate Town/Enterprise/cutout 1.png');
+});
+
+const EXPORT = {
+  club: 'Harrogate Town',
+  references: [
+    { sponsor: 'Enterprise', scope: 'partner', file: 'cad.png' },
+    { sponsor: 'Enterprise', scope: 'club', file: 'cutout 1.png' },
+    { sponsor: 'DAZN', scope: 'partner', file: 'fyc.png' },
+  ],
+  hits: {
+    // 0: both Enterprise files find the board — nobody's unique frame
+    0: { Enterprise: [{ r: 'cad.png', n: 12 }, { r: 'cutout 1.png', n: 9 }] },
+    // 1: only the cutout
+    1: { Enterprise: [{ r: 'cutout 1.png', n: 8 }] },
+    // 2: only the cutout again, plus a tracked hit that names nobody
+    2: { Enterprise: [{ r: 'cutout 1.png', n: 8 }, { n: 0, t: 1 }] },
+    // 3: a tracked-only frame is no file's evidence
+    3: { Enterprise: [{ n: 0, t: 1 }] },
+  },
+};
+
+test('tallyScan: runs from the reference list, fired and unique from attributed hits', () => {
+  const t = be.tallyScan(EXPORT);
+  assert.deepEqual(Object.keys(t).sort(), [
+    'clubs/Harrogate Town/Enterprise/cutout 1.png',
+    'partners/DAZN/fyc.png',
+    'partners/Enterprise/cad.png',
+  ]);
+  assert.deepEqual(t['partners/Enterprise/cad.png'],
+    { sponsor: 'Enterprise', path: 'partners/Enterprise/cad.png', scope: 'partner',
+      runs: 1, fired: 1, unique: 0, file: 'cad.png' });
+  assert.deepEqual(t['clubs/Harrogate Town/Enterprise/cutout 1.png'],
+    { sponsor: 'Enterprise', path: 'clubs/Harrogate Town/Enterprise/cutout 1.png', scope: 'club',
+      runs: 1, fired: 1, unique: 2, file: 'cutout 1.png' });
+  // in the set, never fired: a run against it, nothing to its name
+  assert.deepEqual(t['partners/DAZN/fyc.png'],
+    { sponsor: 'DAZN', path: 'partners/DAZN/fyc.png', scope: 'partner',
+      runs: 1, fired: 0, unique: 0, file: 'fyc.png' });
+});
+
+test('tallyScan: a hit naming a file outside the reference list is ignored, not invented', () => {
+  const t = be.tallyScan({ club: 'X', references: [{ sponsor: 'E', scope: 'partner', file: 'a.png' }],
+    hits: { 0: { E: [{ r: 'ghost.png', n: 9 }] } } });
+  assert.deepEqual(Object.keys(t), ['partners/E/a.png']);
+  assert.equal(t['partners/E/a.png'].fired, 0);
+});
+
+test('tallyAudition: the verdict rows already carry fired and unique', () => {
+  const t = be.tallyAudition({ club: 'Harrogate Town', refs: [
+    { sponsor: 'Enterprise', scope: 'partner', file: 'cad.png', fired: 18, unique: 3 },
+    { sponsor: 'TIC Health', scope: 'partner', file: 'tic.png', fired: 0, unique: 0 },
+  ] });
+  assert.equal(t['partners/Enterprise/cad.png'].fired, 1);
+  assert.equal(t['partners/Enterprise/cad.png'].unique, 3);
+  assert.equal(t['partners/TIC Health/tic.png'].fired, 0);
+  assert.equal(t['partners/TIC Health/tic.png'].runs, 1);
+});
+
+test('mergeTally adds a run to a record and touches nothing else', () => {
+  const prev = { path: 'p', runs: 2, fired: 1, unique: 4, retired: 5, from: 'm1' };
+  const next = be.mergeTally(prev, { runs: 1, fired: 1, unique: 0 }, 'm2', 99);
+  assert.deepEqual(next, { runs: 3, fired: 2, unique: 4, lastRun: 'm2', lastAt: 99 });
+  assert.equal(Object.assign({}, prev, next).retired, 5);
+  assert.deepEqual(be.mergeTally(undefined, { runs: 1, fired: 0, unique: 0 }, 'm', 7),
+    { runs: 1, fired: 0, unique: 0, lastRun: 'm', lastAt: 7 });
+});
+
+const rec = (runs, fired, unique, extra) => Object.assign({ runs, fired, unique }, extra || {});
+
+test('retirements: two runs with nothing unique retires a file while another carries the sponsor', () => {
+  const recs = { Enterprise: { cad: rec(2, 2, 0), cutout: rec(2, 2, 11) } };
+  assert.deepEqual(be.retirements(recs), [['Enterprise', 'cad']]);
+});
+
+test('retirements: one run is not enough evidence; the floor is a parameter', () => {
+  const recs = { Enterprise: { cad: rec(1, 0, 0), cutout: rec(1, 1, 5) } };
+  assert.deepEqual(be.retirements(recs), []);
+  assert.deepEqual(be.retirements(recs, 1), [['Enterprise', 'cad']]);
+});
+
+test('retirements: never a sponsor’s last file — duplicates keep the one that fired most', () => {
+  const recs = { Enterprise: { a: rec(3, 3, 0), b: rec(3, 1, 0) } };
+  assert.deepEqual(be.retirements(recs), [['Enterprise', 'b']]);
+  // a lone dead file stays too: retiring it would leave the sponsor unmeasurable by design
+  assert.deepEqual(be.retirements({ TIC: { only: rec(4, 0, 0) } }), []);
+});
+
+test('retirements: an already retired file is out of the reckoning', () => {
+  const recs = { Enterprise: { a: rec(3, 3, 0, { retired: 1 }), b: rec(3, 1, 0) } };
+  assert.deepEqual(be.retirements(recs), []);   // b is the last active file
+});
+
+test('excludeFor lists the retired paths, sorted, and nothing else', () => {
+  const recs = {
+    Enterprise: { a: { path: 'partners/Enterprise/a.png', retired: 1 },
+                  b: { path: 'clubs/X/Enterprise/b.png' } },
+    DAZN: { c: { path: 'partners/DAZN/c.png', retired: 2 }, d: { retired: 3 } },
+  };
+  assert.deepEqual(be.excludeFor(recs), ['partners/DAZN/c.png', 'partners/Enterprise/a.png']);
+  assert.deepEqual(be.excludeFor(null), []);
+});
+
+test('buildEnv carries BE_EXCLUDE one path per line, and not at all when empty', () => {
+  const withIt = Object.fromEntries(be.buildEnv(GOOD, 'req1', ['partners/DAZN/c.png', 'clubs/X/E/b.png'])
+    .map((e) => [e.name, e.value]));
+  assert.equal(withIt.BE_EXCLUDE, 'partners/DAZN/c.png\nclubs/X/E/b.png');
+  const without = be.buildEnv(GOOD, 'req1', []).map((e) => e.name);
+  assert.ok(!without.includes('BE_EXCLUDE'));
+  assert.ok(!be.buildEnv(GOOD).some((e) => e.name === 'BE_EXCLUDE'));
 });
 
 test('auditionFiles keeps the audition’s own files and nothing the match owns', () => {

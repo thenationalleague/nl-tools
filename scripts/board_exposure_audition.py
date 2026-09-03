@@ -89,7 +89,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-AUDITION_VERSION = "1.4"
+AUDITION_VERSION = "1.5"   # 1.5 (03/09/2026): verdict rows carry `unique`, the frames only that file found
 WINDOWS = 300          # sharpest-in-window count (clamped for short footage)
 PER_WINDOW = 3         # spread frames scored per window
 RELAXED_FLOOR = 4      # candidate-only inlier floor for starved sponsors
@@ -169,8 +169,26 @@ def slug(text):
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
 
 
+def unique_frames(ref_hits):
+    """{(sponsor, file): n} — the frames where that file was the ONLY file
+    of its sponsor to fire. The grade a reference earns at a ground
+    (03/09/2026): a file whose every frame another file also found adds
+    nothing there, whatever its fired count says. Pure."""
+    by_sponsor = {}
+    for (sponsor, name), hs in ref_hits.items():
+        for h in hs:
+            by_sponsor.setdefault(sponsor, {}).setdefault(h["t"], set()).add(name)
+    return {
+        (sponsor, name): sum(1 for names in by_sponsor.get(sponsor, {}).values()
+                             if names == {name})
+        for (sponsor, name) in ref_hits
+    }
+
+
 def verdict_rows(ref_hits, entries):
-    """Per-reference verdict, in load order: fired count, best hit, spread."""
+    """Per-reference verdict, in load order: fired count, frames only it
+    found, best hit, spread."""
+    unique = unique_frames(ref_hits)
     rows = []
     for sponsor, path, scope in entries:
         name = os.path.basename(path)
@@ -179,6 +197,7 @@ def verdict_rows(ref_hits, entries):
         rows.append({
             "sponsor": sponsor, "file": name, "scope": scope,
             "fired": len(hs),
+            "unique": unique.get((sponsor, name), 0),
             "first_t": hs[0]["t"] if hs else None,
             "last_t": hs[-1]["t"] if hs else None,
             "best": ({k: best[k] for k in ("t", "inliers", "area", "clarity")}

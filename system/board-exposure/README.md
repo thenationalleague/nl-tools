@@ -881,6 +881,55 @@ itself better than a render of its design, and the ground's cutouts are
 what measures the match. The logo file is back; the cutouts come back on
 the next audition at this ground.
 
+## References that grade themselves (built 03/09/2026)
+
+The CAD-only re-scan settled it: at broadcast framing a ground's cutouts
+are what measures the match, and a reference set that grows by ticking
+cutouts needs to prune itself or cost creeps per ground. So every
+reference file now carries a record per ground, and the set at a ground
+retires what adds nothing there.
+
+**The record.** `app-data/ops-brand-exposure/refs/<club>/<sponsor>/<file>`
+(each segment percent-encoded for the six characters RTDB refuses):
+`path` (relative to the refs root — `partners/<S>/<f>` or
+`clubs/<C>/<S>/<f>`), `scope`, `from` (the match a cutout was cut from),
+`added`, `runs` (runs at that ground it was in the set for), `fired` (runs
+it found anything in), `unique` (frames only it found, summed), `lastRun`,
+`retired` / `retiredWhy` (`auto` or `manual`) / `retiredRun`.
+
+**Attribution.** Every detection names the file that found it — `ref` on
+the hit, `r` in the compact export; tracked and minted hits carry none,
+since no reference found them. The audition's verdict rows carry `unique`
+(audition 1.5). Numbers are unchanged; the engine version stays.
+
+**The tally.** When a run ends, the poller reads the run's own export from
+its folder (`detections.json` for a scan, `audition.json` for an
+audition — every request names its folder now), folds runs / fired /
+unique into the ground's records, and applies the rule. A frame is
+unique to a file when it was the only file of its sponsor to fire there.
+
+**The retirement rule.** A file in the set for two runs or more at a
+ground that has found no frame no other file found is retired there,
+automatically, recorded as such. Never a sponsor's last file: when every
+active file of a sponsor is a candidate, the one that fired most stays.
+Retired means excluded from the next run at that ground, not deleted —
+the trigger reads the ground's records at launch and passes `BE_EXCLUDE`
+(one path per line), the job writes it to `refs/.exclude`, and
+`load_tree` skips those paths. Restore on the partner page and the next
+run has it back.
+
+**The tool (v0.35).** The partner page's per-ground groups show each
+cutout's record with retire and restore, and the league files' records
+at that ground beneath — that is where a CAD that finds nothing unique at
+a ground retires. The wizard's audition tick starts ticked on a first
+visit to a ground (no cutouts on file) with the reason, unticked where a
+set exists; a first visit with it unticked is asked once at Go. A
+promoted cutout gets its record at once; the counts accrue from the next
+run.
+
+Counts start from the first run after this shipped: the records know
+nothing about the runs before them.
+
 ## Roadmap — engine 1.7, the recall pair (agreed 30/08/2026, superseded by the build above)
 
 Precision's ladder is built and verified; recall (55-60% pooled, far-side

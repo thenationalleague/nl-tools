@@ -148,6 +148,9 @@ def build(out_path, meta, hits_by_index, frame_files, sponsors_meta):
                 **({"t": 1} if h.get("tracked") else {}),
                 **({} if h.get("visibility") is None
                    else {"v": round(h["visibility"], 3)}),
+                # "r": the reference file that found it (03/09/2026); absent
+                # on tracked and minted hits, which no reference found.
+                **({"r": h["ref"]} if h.get("ref") else {}),
             ) for h in hs]
         if row:
             compact[str(i)] = row

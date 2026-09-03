@@ -496,6 +496,10 @@ def _scan(job):
                            else round(float(h["visibility"]), 3)),
             "mc": ([round(float(h["mc"][0]), 1), round(float(h["mc"][1]), 1)]
                    if h.get("mc") else None),
+            # The reference file that found it (03/09/2026) — the export
+            # carries it as "r", and the trigger function grades each
+            # reference at each ground from it.
+            "ref": h.get("ref"),
         } for h in hs]
     return i, out
 

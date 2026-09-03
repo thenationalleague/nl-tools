@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Brand Exposure
-  Version: v0.34 (02/09/2026)
+  Version: v0.35 (03/09/2026)
   File: /brand-exposure/index.html
 
   Sponsor exposure measured from match video — seconds on screen, clarity and
@@ -41,6 +41,23 @@
   bare Matches stack among them — and was wrong.
 
   Changelog
+  v0.35 (03/09/2026) — References that grade themselves. The CAD-only
+  Harrogate re-scan scored 13% against 21% for the ground's cutouts, so
+  the cutouts are the product at broadcast framing and each one now
+  carries a record: app-data/ops-brand-exposure/refs/<club>/<sponsor>/
+  <file> — where it was cut from, runs at that ground, runs it fired in,
+  frames only it found, retired or not. The poller writes the counts
+  from every run's own export (each hit names the file that found it
+  since today), applies the retirement rule (two runs, nothing only it
+  found, never a sponsor's last file), and the job skips what is retired
+  at that ground via BE_EXCLUDE. This page: every request names its
+  output folder so the poller can read it; a promoted cutout gets its
+  record; the partner page's per-ground groups show each cutout's record
+  with retire and restore, and the league files' records at that ground
+  beneath; the wizard's audition tick starts ticked on a first visit to a
+  ground (no cutouts on file) with the reason, unticked otherwise, and a
+  first visit with it unticked is asked once at Go. Rules gain the refs
+  node: one rules deploy.
   v0.34 (02/09/2026) — The card's progress is the job's own. The scan and
   the audition keep one row current (phase, done, total, timestamps —
   scripts/board_exposure_progress.py), run_job relays it to Storage every
@@ -478,6 +495,20 @@
     var NL_TOOL_KEY = 'ops-brand-exposure';
 
     window.NL_CHANGELOG = [
+      {
+        date: '03/09/2026',
+        version: 'v0.35',
+        items: [
+          'Every reference carries its record per ground: which match it ' +
+            'was cut from, runs, runs it fired in, frames only it found.',
+          'The retirement rule: two runs with nothing only it found and a ' +
+            'file is retired at that ground, never a sponsor’s last file. ' +
+            'Retire and restore by hand on the partner page.',
+          'The audition tick starts ticked on a first visit to a ground, ' +
+            'unticked where cutouts already exist; a first visit with it ' +
+            'unticked is asked once at Go.'
+        ]
+      },
       {
         date: '02/09/2026',
         version: 'v0.34',
@@ -1141,6 +1172,15 @@
   .refcard__cap { display: block; font-size: var(--text-xs); padding: 4px 6px;
                   color: var(--text-muted); white-space: nowrap; overflow: hidden;
                   text-overflow: ellipsis; }
+  /* The record under a cutout (v0.35): runs, fired, frames only it found. */
+  .refcard__rec { display: block; white-space: normal; color: var(--text-muted); }
+  .refcard--retired img { opacity: .35; }
+  .reflib__here { list-style: none; margin: 6px 0 0; padding: 0; font-size: var(--text-xs); }
+  .reflib__here li { display: flex; gap: 12px; align-items: baseline; padding: 4px 0;
+                     border-top: 1px solid var(--navy-100); }
+  .reflib__here-name { flex: 1 1 auto; min-width: 0; overflow: hidden;
+                       text-overflow: ellipsis; white-space: nowrap; }
+  .reflib__here-rec { color: var(--text-muted); white-space: nowrap; }
   /* Library cards split the caption: the name may truncate, the actions
      may not — a long filename was eating the delete link entirely. */
   .refcard__name { display: block; overflow: hidden; text-overflow: ellipsis; }
@@ -3291,7 +3331,81 @@
         });
     }
 
-    function addGroup(title, base, universal) {
+    /* The records (v0.35): each cutout's runs, fired and frames only it
+       found at this ground, with retire and restore; and the league files'
+       records at this ground below the cards — a CAD that finds nothing
+       only it finds here is retired here, and can be restored here. */
+    function decorateRecords(wrap, grid, club) {
+      db.ref(REF_ROOT + '/' + refKey(club) + '/' + refKey(partner)).once('value')
+        .then(function (s) {
+          var recs = s.val() || {};
+          function retiredLine(r) {
+            return 'Retired ' + NL.formatDateShort(r.retired) +
+              (r.retiredWhy === 'auto' ? ' · nothing only it found' : '');
+          }
+          grid.querySelectorAll('.refcard[data-file]').forEach(function (fig) {
+            var path = 'clubs/' + club + '/' + partner + '/' + fig.getAttribute('data-file');
+            var rec = recs[refKey(path)] || null;
+            var cap = fig.querySelector('.refcard__cap');
+            var line = document.createElement('span');
+            line.className = 'refcard__rec';
+            line.textContent = rec && rec.retired ? retiredLine(rec) : recordLine(rec);
+            cap.appendChild(line);
+            if (rec && rec.retired) fig.classList.add('refcard--retired');
+            if (canScan) {
+              var a = document.createElement('a');
+              a.href = '#'; a.className = 'bex-link';
+              a.textContent = rec && rec.retired ? 'restore' : 'retire';
+              a.onclick = function (ev) {
+                ev.preventDefault();
+                setRetired(club, path, 'club', !(rec && rec.retired));
+              };
+              (cap.querySelector('.refcard__acts') || cap).appendChild(a);
+            }
+          });
+          var league = Object.keys(recs).map(function (k) { return recs[k]; })
+            .filter(function (r) { return r && /^partners\//.test(r.path || ''); })
+            .sort(function (a, b) { return String(a.path).localeCompare(String(b.path)); });
+          if (!league.length) return;
+          var ul = document.createElement('ul');
+          ul.className = 'reflib__here';
+          league.forEach(function (r) {
+            var li = document.createElement('li');
+            li.innerHTML = '<span class="reflib__here-name">' +
+              esc(String(r.path).split('/').pop()) + '</span>' +
+              '<span class="reflib__here-rec">' +
+              esc(r.retired ? retiredLine(r) : recordLine(r)) + '</span>' +
+              (canScan ? '<a href="#" class="bex-link" data-flip>' +
+                (r.retired ? 'restore' : 'retire') + '</a>' : '');
+            var a = li.querySelector('[data-flip]');
+            if (a) a.onclick = function (ev) {
+              ev.preventDefault();
+              setRetired(club, r.path, 'partner', !r.retired);
+            };
+            ul.appendChild(li);
+          });
+          var head = document.createElement('p');
+          head.className = 'form-hint';
+          head.textContent = 'League files at this ground';
+          wrap.appendChild(head);
+          wrap.appendChild(ul);
+        }).catch(function () {});
+    }
+    function setRetired(club, path, scope, retire) {
+      var patch = retire
+        ? { path: path, scope: scope, sponsor: partner,
+            retired: Date.now(), retiredWhy: 'manual' }
+        : { path: path, scope: scope, sponsor: partner,
+            retired: null, retiredWhy: null, retiredRun: null };
+      db.ref(refRecordPath(club, partner, path)).update(patch).then(function () {
+        NL.writeAudit(retire ? 'be-ref-retire' : 'be-ref-restore', club + ' · ' + path);
+        NL.toast(retire ? 'Retired here — the next run at this ground skips it.'
+                        : 'Restored.');
+        renderPartnerLibrary();
+      }).catch(function (e) { NL.toast(e.message, 'error'); });
+    }
+
+    function addGroup(title, base, universal, club) {
       storage.ref(base).listAll().then(function (r) {
         if (!r.items.length) return;
         var wrap = document.createElement('div');
@@ -3330,6 +3444,7 @@
         r.items.forEach(function (item) {
           var fig = document.createElement('div');
           fig.className = 'refcard';
+          fig.setAttribute('data-file', item.name);
           fig.innerHTML = '<img loading="lazy" alt="">' +
             '<span class="refcard__cap"><span class="refcard__name">' + esc(item.name) +
             '</span>' +
@@ -3392,13 +3507,14 @@
           grid.appendChild(fig);
         });
         groups.appendChild(wrap);
+        if (club) decorateRecords(wrap, grid, club);
       }).catch(function () {});
     }
 
     addGroup('Every ground', REFS_PREFIX + '/partners/' + partner, true);
     storage.ref(REFS_PREFIX + '/clubs').listAll().then(function (r) {
       r.prefixes.forEach(function (p) {
-        addGroup(p.name + ' only', p.fullPath + '/' + partner);
+        addGroup(p.name + ' only', p.fullPath + '/' + partner, false, p.name);
       });
     }).catch(function () {});
   }
@@ -4269,12 +4385,15 @@
     if (club && SCAN.clubListFor !== club) {
       SCAN.clubListFor = club;
       SCAN.clubList = null;
+      SCAN.auditionTouched = false;   // a new ground gets its own default
       storage.ref(REFS_PREFIX + '/clubs/' + club).listAll().then(function (r) {
         if (SCAN.clubListFor !== club) return;
         SCAN.clubList = r.prefixes.map(function (p) { return p.name; });
-        renderScope(); renderRefs(); renderGo();
+        renderScope(); renderRefs(); renderAudTick(); renderGo();
       }).catch(function () {
-        if (SCAN.clubListFor === club) { SCAN.clubList = []; renderScope(); }
+        if (SCAN.clubListFor === club) {
+          SCAN.clubList = []; renderScope(); renderAudTick(); renderGo();
+        }
       });
     }
   }
@@ -4454,13 +4573,7 @@
         'half-time points on a full 90 and the break is skipped entirely — ' +
         'half-time adverts never count as boards, and its minutes are never ' +
         'billed.</p>';
-      $('sAudWrap').innerHTML =
-        '<label class="form-hint" style="display:flex;gap:8px;align-items:' +
-        'center;cursor:pointer;margin-top:12px"><input type="checkbox" ' +
-        'id="sAudition" checked> Audition first — a cheap pass that shows ' +
-        'what the scanner can actually see, reviewed before the full ' +
-        'scan spends anything</label>';
-      $('sAudition').onchange = renderGo;
+      renderAudTick();
       /* Guessed from the file’s length until the person says otherwise — a
          stated choice is never overwritten by a later file drop. */
       $('sSource').onchange = function () { SCAN.sourceTouched = true; };
@@ -4469,6 +4582,38 @@
         $(id).oninput = renderGo;
       });
     }
+  }
+
+  /* The audition tick (v0.35, Richard: "never run audition at ground
+     before? get prompted if left blank"). A ground the engine has never
+     seen — no cutouts on file — starts ticked, with the reason; a ground
+     with a set starts unticked, its audition's job done unless the footage
+     changed. Once touched the tick is the person's. Re-rendered when the
+     ground's folder list arrives, since step 2 can render first. */
+  function firstVisit() {
+    return !!(SCAN.fixture && SCAN.clubList !== null &&
+              !((SCAN.clubList || []).length));
+  }
+  function renderAudTick() {
+    var box = $('sAudWrap');
+    if (!box) return;
+    var was = $('sAudition');
+    var checked = (SCAN.auditionTouched && was) ? was.checked
+      : (SCAN.clubList === null ? true : firstVisit());
+    box.innerHTML =
+      '<label class="form-hint" style="display:flex;gap:8px;align-items:' +
+      'center;cursor:pointer;margin-top:12px"><input type="checkbox" ' +
+      'id="sAudition"' + (checked ? ' checked' : '') + '> ' +
+      (firstVisit()
+        ? 'First visit to this ground: the audition harvests its boards. ' +
+          'About 15 minutes.'
+        : 'Audition first — harvest new cutouts from this footage before ' +
+          'the scan.') +
+      '</label>';
+    $('sAudition').onchange = function () {
+      SCAN.auditionTouched = true;
+      renderGo();
+    };
   }
 
   function takeFile(f) {
@@ -4577,7 +4722,21 @@
     wizSync();
   }
 
+  /* The first-visit gate (v0.35): a ground with no cutouts on file and the
+     audition left unticked is asked once. Scan anyway is a real answer. */
   function startScan() {
+    if (firstVisit() && $('sAudition') && !$('sAudition').checked) {
+      NL.confirm('This ground has no cutouts yet. The scan can only find ' +
+        'what the league artwork finds here.', {
+        title: 'Run the audition first?', confirmText: 'Audition first',
+        cancelText: 'Scan anyway'
+      }).then(function (yes) { startScanNow(!!yes); });
+      return;
+    }
+    startScanNow(false);
+  }
+
+  function startScanNow(forceAudition) {
     var f = SCAN.fixture, file = SCAN.file;
     if (!f || !file) return;
     var subset = chosenSponsors();
@@ -4604,7 +4763,7 @@
       end: (($('sEnd') || {}).value || '').trim(),
       ht: (($('sHt') || {}).value || '').trim(),
       restart: (($('sRestart') || {}).value || '').trim(),
-      audition: !!(($('sAudition') || {}).checked),
+      audition: forceAudition || !!(($('sAudition') || {}).checked),
       halfSkip: half.skip
     };
     SCAN.upState = { label: (f.club + ' v ' + f.opponent), pct: 0,
@@ -4667,11 +4826,13 @@
     }
     req.stage = 'queued';
     var audition = snap.audition;
-    if (audition) {
-      req.mode = 'audition';
-      req.dest = 'brand-exposure/' + f.date + '-' + slug(f.club) + '-v-' +
-        slug(f.opponent);
-    }
+    /* Every request names its output folder (v0.35): the poller reads the
+       run's own export from it when the run ends, to grade this ground's
+       references. It was audition-only before. The folder is the match id
+       — midOf here, match_id_for in the engine — so a scan's export lands
+       where the poller looks. */
+    req.dest = 'brand-exposure/' + midOf(f);
+    if (audition) req.mode = 'audition';
 
     db.ref(REQ_ROOT).push(req).then(function () {
       NL.toast(audition
@@ -4725,6 +4886,28 @@
   function midOf(r) {
     return [r.date, slug(r.club), 'v', slug(r.opponent ||
       String(r.match || '').replace(/^.*?\sv\s/i, ''))].join('-');
+  }
+
+  /* Reference records (v0.35): app-data/ops-brand-exposure/refs/<club>/
+     <sponsor>/<file> — one per reference file per ground, written by the
+     poller after every run and by this page on promote, retire, restore.
+     RTDB keys cannot carry . # $ [ ] /, so each segment percent-encodes
+     exactly those (and %), the same rule as the function; decodeURIComponent
+     reverses it. Canon candidate (03/09/2026): an RTDB-safe key encoder is
+     the second time this repo has needed one. */
+  var REF_ROOT = 'app-data/ops-brand-exposure/refs';
+  function refKey(s) {
+    return String(s).replace(/[.#$\[\]\/%]/g, function (c) {
+      return '%' + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0');
+    });
+  }
+  function refRecordPath(club, sponsor, path) {
+    return REF_ROOT + '/' + refKey(club) + '/' + refKey(sponsor) + '/' + refKey(path);
+  }
+  function recordLine(rec) {
+    if (!rec || !rec.runs) return 'No runs yet';
+    return rec.runs + (rec.runs === 1 ? ' run' : ' runs') + ' · fired ' +
+      (rec.fired || 0) + ' · ' + (rec.unique || 0) + ' only it found';
   }
 
   /* A queued or running request that shares this one's footage — the
@@ -5381,6 +5564,14 @@
             .then(function (blob) {
               return storage.ref('brand-exposure/refs/clubs/' + r.club + '/' +
                 c.sponsor + '/' + name).put(blob, { contentType: 'image/png' });
+            }).then(function () {
+              /* Its record (v0.35): where it came from. Runs, fired and the
+                 frames only it found accrue from the poller's tally. */
+              var path = 'clubs/' + r.club + '/' + c.sponsor + '/' + name;
+              return db.ref(refRecordPath(r.club, c.sponsor, path)).update({
+                path: path, scope: 'club', sponsor: c.sponsor,
+                from: REV.seg, added: Date.now()
+              }).catch(function () {});
             }).then(function () { done++; });
         });
       }, NL.ensureAuth());
@@ -5391,7 +5582,9 @@
             crops: picks.map(function (c) { return c.sponsor + '@' + c.t; })
           });
         }
-        var req = cloneRequest(r, LIFECYCLE.concat(['mode', 'dest']));
+        /* The scan keeps the audition's dest (v0.35): same folder, and the
+           poller grades the references from the scan's export there. */
+        var req = cloneRequest(r, LIFECYCLE.concat(['mode']));
         req.referenceSet = 'partial';
         return db.ref(REQ_ROOT).push(req);
       }).then(function () {
