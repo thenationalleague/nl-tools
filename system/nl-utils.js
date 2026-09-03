@@ -1,14 +1,27 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.42 (26/08/2026)
+   Version: v1.43 (03/09/2026)
 
-   v1.42 — NL.clubs.bandsHtml: the club's colours as the canon .nl-club-bands
-   trim (nl-brand v2.63). Promoted with the component on its third use; the
-   hex validation lifted from programme/index.html, which was the only caller
-   doing it.
+   v1.43 — NL.sortable(host, {items, onOrder}): the reorderable list, paired
+   with .nl-sort in nl-brand v2.66. Promoted from the club-directory editor's
+   Reorder dialog (.ed-ord, editor v1.39) on Richard's review of that dialog:
+   the finished pattern is a grip that says "drag me", a row that lifts off
+   the page while held, swaps that glide instead of teleporting, and the
+   sprite's own up/down glyphs in place of text arrows. The drag is pointer
+   events, NOT the HTML5 draggable API — draggable has no touch support and
+   its browser-drawn ghost cannot do a real lift. The buttons stay: they are
+   the keyboard and assistive route, and the drag never replaces them.
+   Second caller: any tool with an ordered list.
+   Cache-bust ?v=46 -> ?v=47 in lockstep with nl-brand ?v=62 -> ?v=63.
 
    Changelog
+   v1.42 (26/08/2026)
+     - NL.clubs.bandsHtml: the club's colours as the canon .nl-club-bands
+       trim (nl-brand v2.63). Promoted with the component on its third use;
+       the hex validation lifted from programme/index.html, which was the
+       only caller doing it.
+
    v1.41 (21/08/2026)
      - NL.clubs.crestImgHtml emits loading="lazy" decoding="async". The helper
        exists for LISTS of clubs, and a list of clubs is 72 of them: the club
@@ -2509,6 +2522,305 @@
     loadRoster(); /* warm the cache */
 
     return controller;
+  };
+
+  /* ── Reorderable list ─────────────────────────────────────────────────── */
+  /* NL.sortable(host, opts) → { order() } — an ordered list the user can
+     rearrange. Renders the canon .nl-sort markup (nl-brand v2.66) into host
+     (emptied first) and wires both routes:
+
+       drag     Pointer events, NOT the HTML5 draggable API — draggable has
+                no touch support and its browser-drawn ghost cannot do a real
+                lift. The picked-up row takes .is-lifted and rides the
+                pointer on a translateY; when its centre crosses a
+                neighbour's midpoint the neighbour FLIP-slides into the
+                vacated slot. pointerup commits; pointercancel puts the
+                drag's starting order back and commits nothing.
+       buttons  Sprite up/down glyphs with per-row aria-labels; first row's
+                up and last row's down disabled. The keyboard and assistive
+                route — the drag never replaces it. Swaps FLIP the same way.
+
+     Promoted 03/09/2026 from the club-directory editor's Reorder dialog
+     (.ed-ord, editor v1.39); any tool with an ordered list is the second
+     caller.
+
+       host               element the list renders into (emptied first)
+       opts.items         [{ id, label, sub? }] — strings; sub is the muted
+                          right-hand note (a role, a count)
+       opts.onOrder(ids)  optional; called after every committed move
+       returns .order()   the current array of ids (a copy)
+
+     Labels go in as textContent, so a hostile string stays text. Motion
+     honours prefers-reduced-motion twice over: this skips the transform
+     work, and the brand's file-wide reduce block zeroes the CSS transition
+     underneath it. */
+  window.NL.sortable = function(host, opts) {
+    opts = opts || {};
+    var rows = [];        /* current order: { id, el, up, down } */
+    var drag = null;      /* one active drag per instance */
+    var ul;
+
+    function ids() {
+      return rows.map(function(r) { return r.id; });
+    }
+    if (!host) return { order: ids };
+
+    function reduced() {
+      try {
+        return !!(window.matchMedia &&
+                  window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+      } catch (e) { return false; }
+    }
+
+    function sameOrder(a, b) {
+      if (a.length !== b.length) return false;
+      for (var i = 0; i < a.length; i++) { if (a[i] !== b[i]) return false; }
+      return true;
+    }
+
+    /* FLIP an element from where it WAS (oldTop) to where it now sits:
+       start it at the inverted offset with the transition off, force a
+       reflow so that frame is real, then release — the .nl-sort__row CSS
+       transition (~.16s ease, transform only) carries it to identity. */
+    function flipFrom(el, oldTop) {
+      if (reduced()) return;
+      var dy = oldTop - el.getBoundingClientRect().top;
+      if (!dy) return;
+      el.style.transition = 'none';
+      el.style.transform = 'translateY(' + dy + 'px)';
+      void el.offsetHeight;
+      el.style.transition = '';
+      el.style.transform = '';
+    }
+
+    function setDisabled() {
+      for (var i = 0; i < rows.length; i++) {
+        rows[i].up.disabled = (i === 0);
+        rows[i].down.disabled = (i === rows.length - 1);
+      }
+    }
+
+    /* Every move here — a button press, or a drag crossing one neighbour —
+       is an adjacent swap, so one DOM operation covers all of it: put the
+       row that should now come first in front of the other. */
+    function swapDom(i, j) {
+      var top = Math.min(i, j), bottom = Math.max(i, j);
+      var upper = rows[top], lower = rows[bottom];
+      rows[top] = lower;
+      rows[bottom] = upper;
+      ul.insertBefore(lower.el, upper.el);
+      setDisabled();
+    }
+
+    function buttonMove(row, dir, btn) {
+      var i = rows.indexOf(row), j = i + dir;
+      if (i < 0 || j < 0 || j >= rows.length) return;
+      var other = rows[j];
+      var rowTop = row.el.getBoundingClientRect().top;
+      var otherTop = other.el.getBoundingClientRect().top;
+      swapDom(i, j);
+      flipFrom(row.el, rowTop);
+      flipFrom(other.el, otherTop);
+      /* A row moved to an end disables the button just pressed — hand focus
+         to its twin so a keyboard user can walk straight back. */
+      if (btn && btn.disabled) {
+        var twin = (btn === row.up) ? row.down : row.up;
+        if (twin && !twin.disabled && twin.focus) { try { twin.focus(); } catch (e) {} }
+      }
+      if (opts.onOrder) opts.onOrder(ids());
+    }
+
+    function onDown(row, e) {
+      /* A drag still open here means its pointerup never reached us (capture
+         refused) — revert it rather than deadlock the list. */
+      if (drag) onCancel(drag.row);
+      if (e.button != null && e.button !== 0) return;   /* primary only */
+      /* The buttons are their own control — a press there is not a drag. */
+      var t = e.target;
+      while (t && t !== row.el) {
+        if (t.tagName === 'BUTTON') return;
+        t = t.parentNode;
+      }
+      drag = {
+        row: row,
+        pointerId: e.pointerId,
+        startY: e.clientY,
+        startIds: ids(),
+        lifted: false,
+        originTop: 0,     /* viewport top where the row was picked up */
+        naturalTop: 0,    /* where the row would rest untransformed — kept
+                             arithmetically as swaps move it, because a
+                             neighbour mid-FLIP measures somewhere between
+                             its two slots */
+        gap: 0
+      };
+      if (row.el.setPointerCapture) {
+        try { row.el.setPointerCapture(e.pointerId); } catch (err) {}
+      }
+    }
+
+    function onMove(row, e) {
+      if (!drag || drag.row !== row) return;
+      var dy = e.clientY - drag.startY;
+      if (!drag.lifted) {
+        if (dy > -4 && dy < 4) return;                  /* click jitter */
+        if (e.preventDefault) e.preventDefault();       /* no text selection */
+        drag.lifted = true;
+        var rect = row.el.getBoundingClientRect();
+        drag.originTop = rect.top;
+        drag.naturalTop = rect.top;
+        row._h = rect.height;
+        for (var i = 0; i < rows.length; i++) {
+          if (rows[i] !== row) rows[i]._h = rows[i].el.getBoundingClientRect().height;
+        }
+        var k = rows.indexOf(row);
+        if (rows.length > 1) {
+          var nb = (k < rows.length - 1) ? rows[k + 1] : rows[k - 1];
+          var nbTop = nb.el.getBoundingClientRect().top;
+          drag.gap = (k < rows.length - 1)
+            ? nbTop - (rect.top + rect.height)
+            : rect.top - (nbTop + nb._h);
+          if (drag.gap < 0) drag.gap = 0;
+        }
+        row.el.classList.add('is-lifted');
+        row.el.style.transition = 'none';               /* ride the pointer 1:1 */
+      }
+
+      var targetTop = drag.originTop + dy;
+
+      /* Swap when the lifted row's centre crosses a neighbour's midpoint.
+         Fast pointers can cross several rows in one event, hence the loops. */
+      var centre = targetTop + row._h / 2;
+      var idx = rows.indexOf(row);
+      while (idx > 0) {
+        var prev = rows[idx - 1];
+        var prevTop = drag.naturalTop - drag.gap - prev._h;
+        if (centre >= prevTop + prev._h / 2) break;
+        var prevWas = prev.el.getBoundingClientRect().top;
+        swapDom(idx, idx - 1);
+        drag.naturalTop = prevTop;
+        flipFrom(prev.el, prevWas);
+        idx--;
+      }
+      while (idx < rows.length - 1) {
+        var next = rows[idx + 1];
+        var nextTop = drag.naturalTop + row._h + drag.gap;
+        if (centre <= nextTop + next._h / 2) break;
+        var nextWas = next.el.getBoundingClientRect().top;
+        swapDom(idx, idx + 1);
+        drag.naturalTop = drag.naturalTop + next._h + drag.gap;
+        flipFrom(next.el, nextWas);
+        idx++;
+      }
+
+      /* The slight scale is folded in here rather than written in the CSS
+         .is-lifted rule — this inline transform would override it. */
+      row.el.style.transform =
+        'translateY(' + (targetTop - drag.naturalTop) + 'px) scale(1.02)';
+    }
+
+    function settle(row) {
+      row.el.classList.remove('is-lifted');
+      row.el.style.transition = '';    /* CSS transition glides it home */
+      row.el.style.transform = '';
+      if (drag && row.el.releasePointerCapture) {
+        try { row.el.releasePointerCapture(drag.pointerId); } catch (e) {}
+      }
+      drag = null;
+    }
+
+    function onUp(row) {
+      if (!drag || drag.row !== row) return;
+      var changed = drag.lifted && !sameOrder(ids(), drag.startIds);
+      settle(row);
+      if (changed && opts.onOrder) opts.onOrder(ids());
+    }
+
+    /* A cancelled drag (focus steal, orientation change, the browser taking
+       the gesture back) reverts: the order goes back to what pointerdown
+       found, and nothing is committed. */
+    function onCancel(row) {
+      if (!drag || drag.row !== row) return;
+      var back = drag.startIds;
+      settle(row);
+      var byId = {};
+      for (var i = 0; i < rows.length; i++) byId[rows[i].id] = rows[i];
+      var restored = [];
+      for (var j = 0; j < back.length; j++) {
+        if (byId[back[j]]) restored.push(byId[back[j]]);
+      }
+      rows = restored;
+      for (var k = 0; k < rows.length; k++) ul.appendChild(rows[k].el);
+      setDisabled();
+    }
+
+    ul = document.createElement('ul');
+    ul.className = 'nl-sort';
+
+    var items = opts.items || [];
+    for (var n = 0; n < items.length; n++) {
+      (function(it) {
+        var id = (it && it.id != null) ? it.id : '';
+        var label = (it && it.label != null) ? String(it.label) : '';
+
+        var li = document.createElement('li');
+        li.className = 'nl-sort__row';
+        li.setAttribute('data-id', id);
+
+        var grip = document.createElement('span');
+        grip.className = 'nl-sort__grip';
+        grip.setAttribute('aria-hidden', 'true');
+        li.appendChild(grip);
+
+        var main = document.createElement('span');
+        main.className = 'nl-sort__main';
+        main.textContent = label;
+        li.appendChild(main);
+
+        if (it && it.sub != null && it.sub !== '') {
+          var sub = document.createElement('span');
+          sub.className = 'nl-sort__sub';
+          sub.textContent = String(it.sub);
+          li.appendChild(sub);
+        }
+
+        var row = { id: id, el: li, up: null, down: null };
+
+        var up = document.createElement('button');
+        up.type = 'button';
+        up.className = 'nl-sort__btn';
+        up.setAttribute('aria-label', 'Move ' + label + ' up');
+        up.appendChild(window.NL.icon('up', 'sm'));
+        up.addEventListener('click', function() { buttonMove(row, -1, up); });
+        li.appendChild(up);
+        row.up = up;
+
+        var down = document.createElement('button');
+        down.type = 'button';
+        down.className = 'nl-sort__btn';
+        down.setAttribute('aria-label', 'Move ' + label + ' down');
+        down.appendChild(window.NL.icon('down', 'sm'));
+        down.addEventListener('click', function() { buttonMove(row, 1, down); });
+        li.appendChild(down);
+        row.down = down;
+
+        li.addEventListener('pointerdown', function(e) { onDown(row, e); });
+        li.addEventListener('pointermove', function(e) { onMove(row, e); });
+        li.addEventListener('pointerup', function() { onUp(row); });
+        li.addEventListener('pointercancel', function() { onCancel(row); });
+
+        rows.push(row);
+        ul.appendChild(li);
+      })(items[n]);
+    }
+
+    setDisabled();
+    host.innerHTML = '';
+    host.appendChild(ul);
+
+    return {
+      order: function() { return ids(); }
+    };
   };
 
 })();

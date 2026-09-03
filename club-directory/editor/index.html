@@ -15,6 +15,12 @@
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
 <!--
   club-directory / editor / index.html
+  v1.40 — (03/09/2026) The Reorder dialog adopts canon NL.sortable
+          (nl-utils v1.43 / .nl-sort, nl-brand v2.66) — the three-bar grip,
+          the lift off the page while held, FLIP-animated moves, sprite
+          up/down glyphs — and retires the local .ed-ord CSS and hand-rolled
+          HTML5 drag it was promoted from. Same data, same Save: the dialog
+          hands back ctrl.order().
   v1.39 — (03/09/2026) Reorder, per department, on org records. The HQ list
           is a hierarchy, not an alphabet, so each org department bar takes a
           Reorder button (two or more people, record not signed off): drag
@@ -623,13 +629,13 @@
 
   Not lint-covered: no auth-guard, by design.
 -->
-<link rel="stylesheet" href="/system/nl-brand.css?v=62">
+<link rel="stylesheet" href="/system/nl-brand.css?v=63">
 <link rel="stylesheet" href="/club-directory/_directory.css?v=37">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
-<script src="/system/nl-utils.js?v=46"></script>
+<script src="/system/nl-utils.js?v=47"></script>
 <script src="/club-directory/_tidy.js?v=30"></script>
 <script src="/club-directory/_gate.js?v=30"></script>
 <script src="/club-directory/_directory.js?v=37"></script>
@@ -790,26 +796,6 @@
   }
   .ed-reorder:hover { background: var(--white); color: var(--navy); }
   .ed-reorder:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-
-  /* The reorder dialog's rows: drag them, or walk them with the arrows —
-     HTML5 drag does not exist on touch, so the arrows are not decoration. */
-  .ed-ord { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-  .ed-ord li {
-    display: flex; align-items: center; gap: 10px;
-    padding: 8px 10px; border: 1px solid var(--border);
-    border-radius: var(--radius); background: var(--white); cursor: grab;
-  }
-  .ed-ord li.is-dragging { opacity: 0.45; }
-  .ed-ord__name { flex: 1 1 auto; min-width: 0; font-weight: 700; font-variation-settings: 'wght' 700; }
-  .ed-ord__role { color: var(--text-muted); font-size: var(--text-xs); }
-  .ed-ord__btn {
-    font-family: var(--font); font-size: var(--text-sm); line-height: 1;
-    width: 28px; height: 28px; border: 1px solid var(--border);
-    border-radius: var(--radius-sm); background: var(--white); color: var(--text);
-    cursor: pointer;
-  }
-  .ed-ord__btn:hover { border-color: var(--navy); }
-  .ed-ord__btn:disabled { opacity: 0.35; cursor: default; }
 
   /* The department picker, in the update-details form. */
   .ed-dept {
@@ -3805,67 +3791,30 @@
 
   function reorderDept(club, section) {
     var rec = ALL[club];
-    var rows = NLDirectory.sectionPeople(rec, section).map(function (p) {
-      return { id: p.id, name: NLDirectory.fullName(p) || 'Name not given',
-               title: (NLDirectory.rolesOf(p).filter(function (r) {
-                 return r.section === section;
-               })[0] || {}).title || '' };
-    });
-    var ul = document.createElement('ul');
-    ul.className = 'ed-ord';
-    var paint = function () {
-      ul.innerHTML = '';
-      rows.forEach(function (r, i) {
-        var li = document.createElement('li');
-        li.draggable = true;
-        var name = document.createElement('span');
-        name.className = 'ed-ord__name';
-        name.textContent = r.name;
-        var role = document.createElement('span');
-        role.className = 'ed-ord__role';
-        role.textContent = r.title;
-        var up = document.createElement('button');
-        up.type = 'button'; up.className = 'ed-ord__btn';
-        up.textContent = '↑'; up.disabled = i === 0;
-        up.setAttribute('aria-label', 'Move ' + r.name + ' up');
-        up.addEventListener('click', function () {
-          rows.splice(i - 1, 0, rows.splice(i, 1)[0]); paint();
-        });
-        var down = document.createElement('button');
-        down.type = 'button'; down.className = 'ed-ord__btn';
-        down.textContent = '↓'; down.disabled = i === rows.length - 1;
-        down.setAttribute('aria-label', 'Move ' + r.name + ' down');
-        down.addEventListener('click', function () {
-          rows.splice(i + 1, 0, rows.splice(i, 1)[0]); paint();
-        });
-        li.appendChild(name); li.appendChild(role);
-        li.appendChild(up); li.appendChild(down);
-        li.addEventListener('dragstart', function (e) {
-          li.classList.add('is-dragging');
-          e.dataTransfer.setData('text/plain', String(i));
-        });
-        li.addEventListener('dragend', function () { li.classList.remove('is-dragging'); });
-        li.addEventListener('dragover', function (e) { e.preventDefault(); });
-        li.addEventListener('drop', function (e) {
-          e.preventDefault();
-          var from = Number(e.dataTransfer.getData('text/plain'));
-          if (isNaN(from) || from === i) { return; }
-          rows.splice(i, 0, rows.splice(from, 1)[0]);
-          paint();
-        });
-        ul.appendChild(li);
+    /* Canon NL.sortable (nl-utils v1.43, .nl-sort in nl-brand v2.66): the
+       grip, the lift, the FLIP moves and the sprite arrows. This dialog is
+       where the pattern was born (v1.39, hand-rolled) and the first to
+       adopt it back. A person with no id cannot be addressed by an order
+       list, so they are left to the surname rule rather than listed. */
+    var items = NLDirectory.sectionPeople(rec, section)
+      .filter(function (p) { return p.id; })
+      .map(function (p) {
+        return { id: p.id, label: NLDirectory.fullName(p) || 'Name not given',
+                 sub: (NLDirectory.rolesOf(p).filter(function (r) {
+                   return r.section === section;
+                 })[0] || {}).title || '' };
       });
-    };
-    paint();
+    var host = document.createElement('div');
+    var ctrl = NL.sortable(host, { items: items });
 
     NL.modal({
       title: 'Reorder ' + section,
-      body: ul,
+      body: host,
       buttons: [
         { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
         { label: 'Save order', className: 'btn--primary', onClick: function (c) {
           rec.order = rec.order || {};
-          rec.order[section] = rows.map(function (r) { return r.id; }).filter(Boolean);
+          rec.order[section] = ctrl.order();
           c.close();
           persist(club, section + ' reordered');
         } }

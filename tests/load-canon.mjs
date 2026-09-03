@@ -3,9 +3,13 @@
 
    nl-utils.js guards everything that needs Firebase/DOM (see the
    `if (window.firebase ...)` checks), so with light stubs for window/document/
-   storage it loads cleanly and exposes window.NL. Anything that genuinely needs
-   the DOM or a live roster fetch (clubPicker rendering, ensureAuth, writeAudit)
-   is out of scope here — this harness covers the string/data helpers only.
+   storage it loads cleanly and exposes window.NL. The element stub records
+   children, attributes and listeners (and rects measure zero), which is enough
+   to exercise a DOM-BUILDING helper's structure and wiring — NL.sortable's
+   render + button route are tested this way. Anything that genuinely needs
+   layout, focus or a live roster fetch (clubPicker rendering, pointer drags,
+   ensureAuth, writeAudit) stays out of scope — that is each PR's browser
+   smoke test.
 
    Zero dependencies: node:vm + node:fs only. */
 
@@ -27,12 +31,64 @@ function memStore() {
   };
 }
 
-const stubEl = () => ({
-  style: {},
-  classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
-  setAttribute() {}, removeAttribute() {}, appendChild() {}, addEventListener() {},
-  querySelector() { return null; }, querySelectorAll() { return []; },
-});
+/* An element stub that REMEMBERS: children as a real array, attributes in a
+   map, listeners fireable via dispatchEvent({ type }). Everything the old
+   forgetful stub answered, this still answers the same way (querySelector
+   null, querySelectorAll [], classList no-ops) — it just stops throwing the
+   evidence away, so a test can walk what a helper built and click what it
+   wired. Rects are all zeros: structure and wiring are testable here, layout
+   is not. Exported for tests that build their own hosts (NL.sortable). */
+export const stubEl = (tag) => {
+  const attrs = new Map();
+  const listeners = new Map();
+  const el = {
+    tagName: String(tag || '').toUpperCase(),
+    style: {},
+    children: [],
+    parentNode: null,
+    classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
+    setAttribute(k, v) { attrs.set(String(k), String(v)); },
+    removeAttribute(k) { attrs.delete(String(k)); },
+    getAttribute(k) { return attrs.has(String(k)) ? attrs.get(String(k)) : null; },
+    appendChild(c) {
+      if (c && c.parentNode) c.parentNode.removeChild(c);
+      el.children.push(c);
+      if (c && typeof c === 'object') c.parentNode = el;
+      return c;
+    },
+    insertBefore(c, ref) {
+      if (c && c.parentNode) c.parentNode.removeChild(c);
+      const i = ref ? el.children.indexOf(ref) : -1;
+      if (i === -1) el.children.push(c);
+      else el.children.splice(i, 0, c);
+      if (c && typeof c === 'object') c.parentNode = el;
+      return c;
+    },
+    removeChild(c) {
+      const i = el.children.indexOf(c);
+      if (i !== -1) el.children.splice(i, 1);
+      if (c && typeof c === 'object') c.parentNode = null;
+      return c;
+    },
+    addEventListener(type, fn) {
+      if (!listeners.has(type)) listeners.set(type, []);
+      listeners.get(type).push(fn);
+    },
+    removeEventListener(type, fn) {
+      const a = listeners.get(type) || [];
+      const i = a.indexOf(fn);
+      if (i !== -1) a.splice(i, 1);
+    },
+    dispatchEvent(ev) {
+      for (const fn of [...(listeners.get(ev && ev.type) || [])]) fn.call(el, ev);
+      return true;
+    },
+    getBoundingClientRect() { return { top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 }; },
+    focus() {}, blur() {},
+    querySelector() { return null; }, querySelectorAll() { return []; },
+  };
+  return el;
+};
 
 /* Inject the outer realm's intrinsics so any Date/Object the helpers return is
    the same realm the tests assert against (keeps `instanceof` honest).
@@ -51,6 +107,7 @@ const sandbox = {
   document: {
     addEventListener() {}, removeEventListener() {},
     createElement: stubEl, getElementById() { return null; },
+    createElementNS: (ns, tag) => stubEl(tag),   /* NL.icon builds SVG this way */
     querySelector() { return null; }, querySelectorAll() { return []; },
     documentElement: { style: {} }, head: stubEl(), body: stubEl(),
   },
