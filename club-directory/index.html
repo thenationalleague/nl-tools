@@ -1,7 +1,15 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Club Directory
-  Version: v1.4 (16/08/2026)
+  Version: v1.5 (03/09/2026)
+
+  v1.5 (03/09/2026) — organisation records. The directory can now hold the
+  League and related bodies as records with org: true (created in the editor,
+  master only). Here they sit above the clubs in the picker, draw their crest
+  from the record's crestName, and stay out of the mailing-list builder, its
+  warnings and its exports — those speak only for the eleven club-role lists,
+  which an org has no answer to. Overview: the lists column shows — for orgs,
+  the headline stat says "records". _directory.js v1.11 (?v=34).
 
   v1.3 (16/08/2026) — overview table scroll container repointed to the
   canon .table-wrap (brand v2.45); local .ov-tablewrap duplicate deleted.
@@ -99,7 +107,7 @@
   <title>Club Directory — NL Tools</title>
 
   <link rel="stylesheet" href="/system/nl-brand.css?v=62">
-  <link rel="stylesheet" href="/club-directory/_directory.css?v=33">
+  <link rel="stylesheet" href="/club-directory/_directory.css?v=34">
 
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
@@ -126,6 +134,14 @@
     var NL_TOOL_KEY = 'ops-club-directory';
 
     window.NL_CHANGELOG = [
+      {
+        date: '3 September 2026',
+        version: 'v1.5',
+        items: [
+          'The League and related organisations can now sit in the directory alongside the clubs — above them in the club picker, with their own crest.',
+          'Organisation entries stay out of the mailing-list builder and its coverage warnings, which only ever speak for club-role lists.'
+        ]
+      },
       {
         date: '16 August 2026',
         version: 'v1.3',
@@ -174,7 +190,7 @@
   <script src="/system/nl-utils.js?v=46"></script>
   <script src="/system/nl-topbar.js?v=10"></script>
   <script src="/system/auth-guard.js?v=16"></script>
-  <script src="/club-directory/_directory.js?v=33"></script>
+  <script src="/club-directory/_directory.js?v=34"></script>
   <script src="/club-directory/_tidy.js?v=30"></script>
 
 <style>
@@ -431,7 +447,7 @@ window.TOOL = (function () {
   var $ = function (id) { return document.getElementById(id); };
   var esc = NL.escHtml;
   var arr = function (v) { return NLDirectory.arr(v); };
-  var ALL = {}, names = [], AUDIT = {};
+  var ALL = {}, names = [], clubNames = [], AUDIT = {};
 
   var LIST_ORDER = NLDirectory.LIST_ORDER;
   var LIST_LABEL = NLDirectory.LIST_LABEL;
@@ -470,6 +486,9 @@ window.TOOL = (function () {
     ]).then(function (res) {
       ALL = res[1].val() || {};
       names = Object.keys(ALL).sort();
+      /* The mailing-list builder and its warnings speak only to clubs — an
+         org record (the League, the Trust) has no club-role lists to be on. */
+      clubNames = names.filter(function (n) { return !NLDirectory.isOrg(ALL[n]); });
       if (!names.length) {
         $('pane-overview').innerHTML = '<p class="cd-empty">The directory has not been ' +
           'built yet. The admin team builds it from the club submissions in the editor.</p>';
@@ -530,13 +549,16 @@ window.TOOL = (function () {
       return !NLDirectory.rolesOf(p).some(function (r) { return (r.title || '').trim(); });
     }).length;
     var noRoute = people.filter(function (p) { return !NLDirectory.reachable(p); }).length;
-    var gaps = LIST_ORDER.filter(function (k) {
+    /* An org has no answer to the eleven club lists; counting them as gaps
+       would pin a permanent 11 on every org row. */
+    var gaps = NLDirectory.isOrg(rec) ? [] : LIST_ORDER.filter(function (k) {
       return !NLDirectory.listMembers(rec, k).length;
     });
     var details = heldInfo(rec.info);
     var checked = !!((rec.signedOff || {}).at);
     return {
-      club: name, people: people.length, flags: flags.length,
+      club: name, org: NLDirectory.isOrg(rec), crest: NLDirectory.crestKeyOf(rec),
+      people: people.length, flags: flags.length,
       noTitle: noTitle, noRoute: noRoute, gaps: gaps.length, gapKeys: gaps,
       details: details, checked: checked,
       todo: flags.length + noTitle + noRoute + gaps.length + (details ? 0 : 1)
@@ -568,7 +590,7 @@ window.TOOL = (function () {
     }, { people: 0, todo: 0, checked: 0, clean: 0 });
 
     $('ovStats').innerHTML =
-      stat(rows.length, 'clubs') +
+      stat(rows.length, 'records') +
       stat(totals.people, 'people') +
       stat(totals.checked + ' / ' + rows.length, 'checked off') +
       stat(totals.clean, 'with nothing outstanding') +
@@ -595,7 +617,7 @@ window.TOOL = (function () {
 
     var body = rows.length ? rows.map(function (r) {
       return '<tr>' +
-        '<td><span class="ov-club"><img data-crest="' + esc(r.club) + '" alt="">' +
+        '<td><span class="ov-club"><img data-crest="' + esc(r.crest) + '" alt="">' +
           '<button type="button" data-goto="' + esc(r.club) + '">' + esc(r.club) +
           '</button></span></td>' +
         '<td><span class="pill pill--' + (r.checked ? 'approved' : 'pending') + '">' +
@@ -624,6 +646,7 @@ window.TOOL = (function () {
     return '<td class="' + cls + '">' + v + '</td>';
   }
   function gapCell(r) {
+    if (r.org) { return '<td class="ov-n ov-n--zero">—</td>'; }
     var title = r.gaps ? ' title="' + esc(r.gapKeys.map(function (k) {
       return LIST_LABEL[k] || k;
     }).join(', ')) + '"' : '';
@@ -668,7 +691,7 @@ window.TOOL = (function () {
   function recipients() {
     var picked = LIST_ORDER.filter(function (k) { return LB.lists[k]; });
     if (!picked.length) { return []; }
-    var clubs = names.filter(function (n) {
+    var clubs = clubNames.filter(function (n) {
       return anyClubPicked() ? LB.clubs[n] : true;
     });
     var out = [], index = {};
@@ -756,7 +779,7 @@ window.TOOL = (function () {
 
   function buildLists() {
     $('lbLists').innerHTML = LIST_ORDER.map(function (k) {
-      var n = names.reduce(function (a, c) {
+      var n = clubNames.reduce(function (a, c) {
         return a + NLDirectory.listMembers(ALL[c] || {}, k).length;
       }, 0);
       return '<button class="filter-pill" data-list="' + k + '">' +
@@ -764,7 +787,7 @@ window.TOOL = (function () {
     }).join('');
 
     var byDiv = { National: [], North: [], South: [], Other: [] };
-    names.forEach(function (n) {
+    clubNames.forEach(function (n) {
       var meta = NL.clubs.byName(n);
       var d = (meta && meta.division) || 'Other';
       (byDiv[d] || byDiv.Other).push(n);
@@ -794,7 +817,7 @@ window.TOOL = (function () {
       }
       if (e.target.id === 'lbListsAll') { return setAll(LB.lists, LIST_ORDER, true, '[data-list]'); }
       if (e.target.id === 'lbListsNone') { return setAll(LB.lists, LIST_ORDER, false, '[data-list]'); }
-      if (e.target.id === 'lbClubsNone') { return setAll(LB.clubs, names, false, '[data-club]'); }
+      if (e.target.id === 'lbClubsNone') { return setAll(LB.clubs, clubNames, false, '[data-club]'); }
       if (e.target.id === 'lbClubsToggle') {
         var box = $('lbClubs');
         box.hidden = !box.hidden;
@@ -832,10 +855,10 @@ window.TOOL = (function () {
     var heldIn = rows.filter(function (r) { return r.held; }).length;
     var boxes = rows.filter(function (r) { return r.kind === 'inbox'; }).length;
 
-    var picked = names.filter(function (n) { return LB.clubs[n]; });
+    var picked = clubNames.filter(function (n) { return LB.clubs[n]; });
     $('lbClubSum').textContent = picked.length
-      ? picked.length + ' of ' + names.length + ' selected'
-      : 'all ' + names.length;
+      ? picked.length + ' of ' + clubNames.length + ' selected'
+      : 'all ' + clubNames.length;
 
     $('lbInboxNote').textContent = boxes ? '(' + boxes + ' matched)' : '';
     $('lbHeldNote').textContent = LB.held
@@ -858,7 +881,7 @@ window.TOOL = (function () {
 
     if (!rows.length) {
       $('lbTable').innerHTML = '<tbody><tr class="empty-row"><td>' +
-        'Pick a mailing list above. Leave the clubs alone for all ' + names.length +
+        'Pick a mailing list above. Leave the clubs alone for all ' + clubNames.length +
         ' of them, or tick a few to narrow it.</td></tr></tbody>';
       return;
     }
@@ -895,7 +918,7 @@ window.TOOL = (function () {
      to say it. */
   function drawWarnings() {
     var picked = LIST_ORDER.filter(function (k) { return LB.lists[k]; });
-    var pool = names.filter(function (n) { return anyClubPicked() ? LB.clubs[n] : true; });
+    var pool = clubNames.filter(function (n) { return anyClubPicked() ? LB.clubs[n] : true; });
     var items = picked.map(function (k) {
       var missing = pool.filter(function (n) {
         return !NLDirectory.listMembers(ALL[n] || {}, k).length;
@@ -985,7 +1008,9 @@ window.TOOL = (function () {
   }
 
   function wireDirectory() {
-    $('pick').innerHTML = names.map(function (n) {
+    /* Orgs above the clubs; `names` itself stays alphabetical for fromHash. */
+    $('pick').innerHTML = NLDirectory.orgFirst(names, function (n) { return ALL[n]; })
+      .map(function (n) {
       return '<option value="' + esc(n) + '">' + esc(n) +
         (ready(n) ? '' : ' — not yet checked') + '</option>';
     }).join('');
@@ -1018,10 +1043,11 @@ window.TOOL = (function () {
     $('out').innerHTML = NLDirectory.renderClub(rec, { showGaps: true });
     var crest = document.getElementById('cdCrest');
     if (crest) {
+      var ck = NLDirectory.crestKeyOf(rec);
       crest.alt = name + ' crest';
       crest.hidden = false;
-      NL.clubs.wireCrestImg(crest, name, true);
-      crest.src = NL.clubs.crestUrl(name, 'medium');
+      NL.clubs.wireCrestImg(crest, ck, true);
+      crest.src = NL.clubs.crestUrl(ck, 'medium');
     }
   }
 

@@ -1,7 +1,19 @@
 /* =========================================================================
    NL Tools — Club Directory presentation
    File: /club-directory/_directory.js
-   Version: v1.10 (26/08/2026)
+   Version: v1.11 (03/09/2026)
+
+   v1.11 — organisation records. A record whose root carries org: true is the
+   League or a related body, not a roster club: crestKeyOf() names the crest
+   asset to draw (crestName on the record, else the record name), orgFirst()
+   pins orgs ahead of the clubs wherever both are listed, and renderIndex()
+   takes opts.orgs and draws them as their own first group on the wall —
+   crest by that key, no colour band, because an org has no strip. The one
+   fact that rendered on an otherwise-empty card ("Stadium (sponsored):
+   None") stays club-only. An org's shared mailboxes (commercial@, media@)
+   render as facts rows via orgInboxRows() — a club's card is unchanged,
+   because a club's inboxes are an editor/list-builder concern and are not
+   published.
 
    v1.10 — the all-clubs WALL moves here: renderIndex(), wireIndex(),
    tileStyle() and isWhiteGround(). It was written inline in the reader,
@@ -350,6 +362,43 @@
     return { bg: bg, fg: fg };
   }
 
+  /* Organisation records. The directory holds the League and related bodies
+     as ordinary records with org: true on the root, so everything
+     people-shaped works unchanged. Two things distinguish them: the crest is
+     named by the record itself (crestName — an /assets/crests/ filename
+     without .png; clubs-meta knows nothing about orgs, deliberately, for the
+     same reason cup guests stay out of it), and they list ahead of the clubs
+     wherever both appear. Colours stay the navy banner default: byName()
+     misses, bannerColours() returns null, and that fallback IS the brand. */
+  function isOrg(rec) { return !!(rec && rec.org); }
+  function crestKeyOf(rec) { return (rec && (rec.crestName || rec.club)) || ''; }
+  function orgFirst(names, recOf) {
+    var orgs = [], clubs = [];
+    names.forEach(function (n) { (isOrg(recOf(n)) ? orgs : clubs).push(n); });
+    return orgs.sort().concat(clubs.sort());
+  }
+  /* An organisation's shared mailboxes (commercial@, media@) belong on its
+     card: a club's live in the editor and the staff list-builder, but an
+     org's whole point in the directory is "who do I write to", so its card
+     says. Returns nothing for a club — their card is unchanged, and publish
+     only carries inboxes across on org records. */
+  function orgInboxRows(rec) {
+    if (!isOrg(rec)) { return []; }
+    var boxes = rec.inboxes || {};
+    return Object.keys(boxes).map(function (k) {
+      var b = boxes[k] || {};
+      var bits = [];
+      if (b.email) {
+        bits.push('<a href="mailto:' + esc(b.email) + '">' + esc(b.email) + '</a>');
+      }
+      if (b.phone) {
+        bits.push('<a href="tel:' + esc(tel(b.phone)) + '">' + esc(b.phone) + '</a>' +
+          (b.ext ? ' <span class="cd-f__sub">ext ' + esc(b.ext) + '</span>' : ''));
+      }
+      return [b.dept || k, bits.join(' &middot; ')];
+    }).sort(function (a, b) { return a[0].localeCompare(b[0]); });
+  }
+
   function tel(n) { return String(n || '').replace(/\s+/g, ''); }
   function url(u) { return /^https?:\/\//i.test(u) ? u : 'https://' + u; }
   function num(v) {
@@ -637,11 +686,13 @@
              flag in the submissions too, but it disagrees with the name on
              five clubs (Billericay, Forest Green, Maidstone, Scarborough,
              Sutton — the last reading "available"), so one source of truth
-             wins and it is the one someone typed. */
+             wins and it is the one someone typed. Orgs skip the None: for
+             them an empty sponsor is not information, and on an
+             otherwise-empty card it was the only fact drawn. */
           ['Stadium (official)', esc(info.stadium || '')],
           ['Stadium (sponsored)', (info.stadiumSponsor || '').trim()
             ? esc(info.stadiumSponsor)
-            : '<span class="cd-f__sub">None</span>'],
+            : (isOrg(rec) ? '' : '<span class="cd-f__sub">None</span>')],
           ['Address', addr],
           /* Bracketed. "3,500 669 seated" read as two numbers run together —
              the muted colour was carrying the whole distinction, and at a
@@ -663,14 +714,16 @@
           ['County FA', esc(info.countyFA || '')],
           ['Club sponsor', esc(info.spClub || '')],
           ['Shirt front', esc(info.spFront || '')],
-          ['Sleeve', esc(info.spSleeve || '')],
+          ['Sleeve', esc(info.spSleeve || '')]
+        ].concat(orgInboxRows(rec), [
           ['Website & social', social ? '<div class="cd-social">' + social + '</div>' : '', true]
-        ]) +
+        ])) +
       '</div>' +
       '</div>' +
 
       '<section class="cd-sec">' +
-        (depts || '<p class="cd-empty">No people held for this club yet.</p>') +
+        (depts || '<p class="cd-empty">No people held for this ' +
+          (isOrg(rec) ? 'organisation' : 'club') + ' yet.</p>') +
       '</section>';
   }
 
@@ -752,9 +805,14 @@
      club's own colours, which read as 72 blocks of colour rather than as a
      directory, and it puts the name back on white where no club is bound by
      a contrast floor. */
-  /* opts: { roster, extra, isReady, own, ownNote }
+  /* opts: { roster, extra, orgs, isReady, own, ownNote }
        roster   [{ name, division }] — clubs-meta for the season.
        extra    names in the directory that are not in the roster.
+       orgs     [{ name, crestName }] — organisation records (the League,
+                related bodies), pinned as their own first group and kept out
+                of "Also in the directory", which is for roster mismatches.
+                Passed only by pages that read the directory; the public wall
+                shows the competition, so it simply doesn't.
        isReady  fn(name) -> can this tile be opened. Default: all of them.
        own      the reading club's name, drawn as a wide row on top. Omitted
                 by any page that does not know who is reading. */
@@ -763,6 +821,20 @@
     var roster = arr(opts.roster);
     var ready = typeof opts.isReady === 'function' ? opts.isReady : function () { return true; };
     var seen = {}, groups = [], byDiv = {};
+    /* Orgs first — the League above the clubs it runs. Their crest is named
+       by the record, and they take no colour band: an org has no strip. */
+    var orgCrest = null;
+    arr(opts.orgs).forEach(function (o) {
+      if (!o || !o.name) { return; }
+      if (!orgCrest) {
+        orgCrest = {};
+        byDiv.Organisations = [];
+        groups.push('Organisations');
+      }
+      orgCrest[o.name] = o.crestName || o.name;
+      byDiv.Organisations.push(o.name);
+      seen[o.name.toLowerCase()] = true;
+    });
     roster.forEach(function (c) {
       if (!c || !c.name) { return; }
       seen[c.name.toLowerCase()] = true;
@@ -809,12 +881,13 @@
         '<h2 class="rd-div__h">' + esc(d) + '</h2>' +
         '<ul class="rd-grid">' + byDiv[d].slice().sort().map(function (n) {
           var ok = ready(n);
+          var org = orgCrest && orgCrest[n];
           var inner =
             '<span class="rd-tile__top">' +
-              window.NL.clubs.crestImgHtml(n, 'thumb', { className: 'nl-crest rd-tile__crest' }) +
+              window.NL.clubs.crestImgHtml(org || n, 'thumb', { className: 'nl-crest rd-tile__crest' }) +
             '</span>' +
             '<span class="rd-tile__name">' + esc(n) + '</span>' +
-            window.NL.clubs.bandsHtml(n);
+            (org ? '' : window.NL.clubs.bandsHtml(n));
           /* The state rides in the title, not in a third line. A line of text
              saying so is what made the old rows different heights. */
           var not = ok ? '' : ' title="Not yet checked"';
@@ -866,6 +939,9 @@
     glyph: glyph,
     strokeGlyph: strokeGlyph,
     listMembers: listMembers,
+    isOrg: isOrg,
+    crestKeyOf: crestKeyOf,
+    orgFirst: orgFirst,
     LIST_LABEL: LIST_LABEL,
     LIST_ORDER: LIST_ORDER,
     ORDER: ORDER
