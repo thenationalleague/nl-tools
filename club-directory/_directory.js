@@ -1,7 +1,13 @@
 /* =========================================================================
    NL Tools — Club Directory presentation
    File: /club-directory/_directory.js
-   Version: v1.13 (03/09/2026)
+   Version: v1.14 (03/09/2026)
+
+   v1.14 — a record can pin its own running order within a department:
+   rec.order = { '<section>': [personId, …] }, honoured by sectionPeople()
+   with surname order for anyone the list does not name. Written by the
+   editor's Reorder dialog (org records first — the HQ list is a hierarchy,
+   not an alphabet); the renderer honours it on any record that carries it.
 
    v1.13 — bannerColours() carries the club's SECOND colour out as `stripe`
    (unchecked against anything: it is a strip along the banner's foot, not
@@ -341,9 +347,25 @@
   }
 
   function sectionPeople(rec, section) {
-    return arr(rec.people).filter(function (p) {
+    var who = arr(rec.people).filter(function (p) {
       return arr(p.roles).some(function (r) { return r.section === section; });
-    }).sort(bySurname);
+    });
+    /* A record may pin its own running order per section —
+       rec.order = { '<section>': [personId, …] }, written by the editor's
+       Reorder dialog. Listed ids lead in that order; anyone not listed
+       (added since the order was set) follows by surname rather than
+       disappearing to the foot unordered. No order, surname throughout —
+       the directory's default, which reads down a department. */
+    var ord = arr((rec.order || {})[section]);
+    if (!ord.length) { return who.sort(bySurname); }
+    var idx = {};
+    ord.forEach(function (id, i) { idx[id] = i + 1; });
+    return who.sort(function (a, b) {
+      var ia = idx[a.id] || 0, ib = idx[b.id] || 0;
+      if (ia && ib) { return ia - ib; }
+      if (ia || ib) { return ia ? -1 : 1; }
+      return bySurname(a, b);
+    });
   }
 
   /* Which taxonomy this record iterates — and any section that exists on a
@@ -1005,6 +1027,7 @@
     phonesOf: phonesOf,
     contactsOf: contactsOf,
     sectionsOf: sectionsOf,
+    sectionPeople: sectionPeople,
     entryHidden: entryHidden,
     ownHide: ownHide,
     addrOf: addrOf,
