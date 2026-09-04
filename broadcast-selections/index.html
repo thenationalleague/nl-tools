@@ -2,7 +2,13 @@
 <!--
   NL Tools — Broadcast selections (public standalone page)
   File: /broadcast-selections/index.html
-  v1.5 (04/09/2026)
+  v1.6 (04/09/2026)
+
+  v1.6 (04/09/2026) — Touch. Hover wiring attaches only on hover-capable
+  devices; on narrow screens the map is sticky and compact (42vh) so a
+  tapped card's trek highlight stays in view; tapping a pill or the route
+  line itself (fat invisible hit area) selects the game and glides its
+  glowing card into view.
 
   v1.5 (04/09/2026) — Density. The intro line is gone; page and table
   padding tighten; the map column slims; cards run two columns on wide
@@ -62,6 +68,7 @@
   <script>
     window.NL_TOOL = { title: "Travel for broadcast fixtures", toolKey: "pub-broadcast-selections", kicker: "The National League", isPortal: true };
     window.NL_CHANGELOG = [
+      { version: "v1.6", date: "04/09/2026", changes: ["Touch: sticky compact map on phones, tappable route lines, tap-safe selection, card glides into view"] },
       { version: "v1.5", date: "04/09/2026", changes: ["Denser: intro line cut, tighter rhythm, two card columns on wide screens, taller week viewport"] },
       { version: "v1.4", date: "04/09/2026", changes: ["Canon .page container (1700px), map column scales, card selection tints in the division colour"] },
       { version: "v1.3", date: "04/09/2026", changes: ["Week by week gains a vs-round column — moved games' median against the weekend's full round"] },
@@ -110,7 +117,13 @@
   .gwbar button[aria-pressed="true"] small { color: var(--white); opacity: 0.75; }
 
   .stage { display: grid; grid-template-columns: clamp(380px, 34vw, 540px) minmax(0, 1fr); gap: clamp(16px, 1.5vw, 28px); align-items: start; }
-  @media (max-width: 840px) { .stage { grid-template-columns: 1fr; } }
+  @media (max-width: 840px) {
+    .stage { grid-template-columns: 1fr; }
+    /* Phone: the map rides sticky and compact so tapping a card shows its
+       trek highlight without scrolling away from the cards. */
+    .mapbox { position: sticky; top: 0; z-index: 2; }
+    .mapbox svg { height: 42vh; width: auto; max-width: 100%; margin: 0 auto; }
+  }
 
   .tbltop { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin: 0 0 8px; }
   .tbltop h2 { font-size: var(--text-xs); font-weight: 700; font-variation-settings: 'wght' 700; letter-spacing: var(--tracking-wider); text-transform: uppercase; color: var(--text-muted); margin: 0; }
@@ -338,6 +351,18 @@ const heat = (v, lo, hi) => {
 };
 const heatPct = d => heat(Math.min(50, Math.max(-50, d)), -50, 50);
 
+/* Touch: attach hover wiring only where hover exists — tap-emulated
+   mouseenter re-rendered the card mid-tap and made selection misfire. */
+const HOVERABLE = window.matchMedia("(hover: hover)").matches;
+function selectFx(i, fromMap) {
+  activeFx = (activeFx === i ? -1 : i);
+  render();
+  if (fromMap && activeFx >= 0 && window.matchMedia("(max-width: 840px)").matches) {
+    const a = document.querySelector(".row.active");
+    if (a) a.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+}
+
 function fmtNext(name, n) {
   const ab = CLUBS[name].i;
   if (!n) return "<div><b>" + ab + "</b> — no game in window</div>";
@@ -398,6 +423,14 @@ function render() {
     const t = el("text", { x: mx, y: my + 4, "text-anchor": "middle", "font-size": 12, fill: "var(--white)", class: "mchip" }, trekLayer);
     t.textContent = label;
   }
+  /* Every route gets a fat invisible hit line — the dotted trek itself is
+     tappable. Drawn below the marker layer so pills win where they overlap. */
+  fx.forEach((f, i) => {
+    const home = pos[i], away = proj(CLUBS[f.a].lat, CLUBS[f.a].lng);
+    const hit = el("line", { x1: home.x, y1: home.y, x2: away[0], y2: away[1],
+      stroke: "#000", "stroke-opacity": 0, "stroke-width": 16, "pointer-events": "stroke", cursor: "pointer" }, trekLayer);
+    hit.addEventListener("click", ev => { ev.stopPropagation(); selectFx(i, true); });
+  });
   fx.forEach((f, i) => {
     const p = pos[i], home = CLUBS[f.h], away = CLUBS[f.a];
     const dim = !(activeFx < 0 || activeFx === i);
@@ -416,8 +449,8 @@ function render() {
     const ta = el("text", { x: p.x + hw / 2, y: p.y + 2.8, "text-anchor": "middle", "font-size": 7.5, fill: textFor(away.c), class: "moniker" }, g);
     ta.textContent = away.i;
     el("title", {}, g).textContent = f.h + " v " + f.a + " — " + f.day + ", " + f.t + " (" + DIVS[f.div] + ")";
-    g.addEventListener("mouseenter", () => { if (activeFx !== i) { activeFx = i; render(); } });
-    g.addEventListener("click", ev => { ev.stopPropagation(); activeFx = (activeFx === i ? -1 : i); render(); });
+    if (HOVERABLE) g.addEventListener("mouseenter", () => { if (activeFx !== i) { activeFx = i; render(); } });
+    g.addEventListener("click", ev => { ev.stopPropagation(); selectFx(i, true); });
   });
 
   const rows = document.getElementById("rows");
@@ -432,8 +465,8 @@ function render() {
       '<div class="rbody"><div class="when"><b>' + f.day + "</b> · " + f.t + "</div>" +
       '<div class="tieline"><div class="tie">' + f.h + ' <span>v</span> ' + f.a + '</div><div class="mi">' + f.mi + " mi</div></div>" +
       '<div class="next"><span class="nlab">Next<br>up</span><div class="nlines">' + fmtNext(f.h, f.nh) + fmtNext(f.a, f.na) + "</div></div></div>";
-    d.addEventListener("mouseenter", () => { if (activeFx !== i) { activeFx = i; render(); } });
-    d.addEventListener("click", () => { activeFx = (activeFx === i ? -1 : i); render(); });
+    if (HOVERABLE) d.addEventListener("mouseenter", () => { if (activeFx !== i) { activeFx = i; render(); } });
+    d.addEventListener("click", () => selectFx(i, false));
     rows.appendChild(d);
   });
 
