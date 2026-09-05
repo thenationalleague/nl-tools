@@ -109,3 +109,7 @@ Object.assign(exports, require("./nls-ingester"));
 // that still works when this does not. First function here to use a Secret
 // Manager secret — see functions/handbook-pdf.js.
 Object.assign(exports, require("./handbook-pdf"));
+
+// The broadcast-selections access gate: a handful of audience codes for the
+// public travel page, same trigger shape as uw-promo/programme/club-code.
+Object.assign(exports, require("./broadcast-selections"));
