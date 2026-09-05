@@ -2,7 +2,16 @@
 <!--
   NL Tools — Broadcast selections (public standalone page)
   File: /broadcast-selections/index.html
-  v1.8 (04/09/2026)
+  v1.9 (05/09/2026)
+
+  v1.9 (05/09/2026) — Access gate. The hosted page sits behind the estate's
+  code gate: NL.codeGate.ensure with viaFunction against
+  app-data/pub-broadcast-selections, resumed on the bsel claim, codes held
+  server-side per audience (functions/broadcast-selections.js — the
+  uw-promo/programme/club-code family shape). The page renders hidden and
+  reveals on a grant, with an .nl-idbar naming the audience and a sign-out.
+  The artifact build stays ungated. Also: with All leagues selected, cards
+  group by division (PL, CH, L1, L2, NL), kick-off order within each.
 
   v1.8 (04/09/2026) — August corrected, per Richard: the NL round moved
   for broadcast (the one the fee was paid for) was the whole-division
@@ -77,9 +86,25 @@
   <meta name="robots" content="noindex">
   <title>Travel for broadcast fixtures — The National League</title>
   <link rel="stylesheet" href="/system/nl-brand.css?v=63">
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+  </script>
+  <script src="/system/nl-utils.js?v=47"></script>
   <script>
     window.NL_TOOL = { title: "Travel for broadcast fixtures", toolKey: "pub-broadcast-selections", kicker: "The National League", isPortal: true };
     window.NL_CHANGELOG = [
+      { version: "v1.9", date: "05/09/2026", changes: ["Access gate: audience codes via the estate's codeGate handshake; cards group by division when All leagues is on"] },
       { version: "v1.8", date: "04/09/2026", changes: ["August corrected: the paid NL broadcast round was w/e 22 Aug's 12:30, not the Thu/Fri of the 29th — NL stays 84"] },
       { version: "v1.7", date: "04/09/2026", changes: ["Table title line cut — the tabs already say what is shown"] },
       { version: "v1.6", date: "04/09/2026", changes: ["Touch: sticky compact map on phones, tappable route lines, tap-safe selection, card glides into view"] },
@@ -218,9 +243,33 @@
 
 <div id="nlTopbar"></div>
 <script>window.NL.renderTopbar(null);</script>
+<script>
+  NL.codeGate.ensure({
+    mount: document.getElementById("bselGate"),
+    title: "Travel for broadcast fixtures",
+    sub: "Enter your access code.",
+    numeric: false,
+    length: 6,
+    verify: NL.codeGate.viaFunction("app-data/pub-broadcast-selections"),
+    claim: "bsel"
+  }).then(function (s) {
+    document.getElementById("bselGate").remove();
+    var bar = document.createElement("div");
+    bar.className = "nl-idbar";
+    bar.innerHTML = "<span>Viewing as <b>" + NL.escHtml((s && s.name) || "code holder") + "</b></span>" +
+      '<button class="btn btn--ghost btn--sm" type="button">Sign out</button>';
+    bar.querySelector("button").addEventListener("click", function () {
+      NL.codeGate.signOut().then(function () { location.reload(); });
+    });
+    var page = document.querySelector(".page");
+    document.body.insertBefore(bar, page);
+    page.hidden = false;
+  });
+</script>
 </body>
 </html>
-<div class="page">
+<div id="bselGate"></div>
+<div class="page" hidden>
   <div class="avgs headline">
     <div class="tbltop">
       <div class="tabs" id="modebar" role="group" aria-label="Table mode">
@@ -280,7 +329,13 @@ const allWeekends = (() => {
   while (ms <= Date.parse(last + "T12:00Z")) { out.push(new Date(ms).toISOString().slice(0, 10)); ms += 7 * 86400000; }
   return out;
 })();
-const shownFx = we => FX.filter(f => f.we === we && (divSel === "ALL" || f.div === divSel));
+/* With every league on, cards read as division blocks — all PL, then CH,
+   L1, L2, NL — each block in kick-off order (stable sort keeps it). */
+const DIVORDER = { PL: 0, CH: 1, L1: 2, L2: 3, NL: 4 };
+const shownFx = we => {
+  const fx = FX.filter(f => f.we === we && (divSel === "ALL" || f.div === divSel));
+  return divSel === "ALL" ? fx.sort((a, b) => DIVORDER[a.div] - DIVORDER[b.div]) : fx;
+};
 
 /* Projection + coastline (identical to v1) */
 const BOUNDS = { latMin: 49.9, latMax: 55.55, lngMin: -5.8, lngMax: 1.95 };
