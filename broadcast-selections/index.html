@@ -2,7 +2,12 @@
 <!--
   NL Tools — Broadcast selections (public standalone page)
   File: /broadcast-selections/index.html
-  v3.8 (07/09/2026)
+  v3.9 (07/09/2026)
+
+  v3.9 (07/09/2026) — The rqst tab becomes Compare and gains the 4-game
+  Saturdays tier: picks outside the three 12-game full-round weekends,
+  where picking is wholesale. Ladder: Weekend fixtures → All picks →
+  4-game Saturdays → rqst; fourth strip lane to match.
 
   v3.8 (07/09/2026) — rqst becomes its own tab (26/27 only, mirroring
   Gates on 25/26): tier table (Every fixture / Broadcast picks / rqst,
@@ -280,6 +285,7 @@
   <script>
     window.NL_TOOL = { title: "Broadcast Travel", toolKey: "pub-broadcast-selections", kicker: "The National League", isPortal: true };
     window.NL_CHANGELOG = [
+      { version: "v3.9", date: "07/09/2026", changes: ["Compare tab: 4-game Saturdays join the ladder — picks outside the three full-round weekends, where choosing actually happens"] },
       { version: "v3.8", date: "07/09/2026", changes: ["rqst gets its own tab — baseline vs broadcast vs request, with a distance strip and the flagged treks on the map; Full season transposes to divisions-across-the-top and shares the desktop screen with the map"] },
       { version: "v3.7", date: "07/09/2026", changes: ["Proper chart axes; figures beside their graphs; dashed typical-visitor baseline on the Gate panel; canon select; tap the rqst row to see the 22 on the map; Gates totals footer"] },
       { version: "v3.6", date: "07/09/2026", changes: ["rqst: 22 flagged 26/27 fixtures — chip on their cards, subset row in Full season against the NL baseline"] },
@@ -595,7 +601,7 @@
         <button class="tab" id="mWeek">Week by week</button>
         <button class="tab" id="mClub">By club</button>
         <button class="tab" id="mGates" hidden>Gates</button>
-        <button class="tab" id="mRqst" hidden>rqst</button>
+        <button class="tab" id="mRqst" hidden>Compare</button>
       </div>
       <div id="seasonBar" role="group" aria-label="Season">
         <button type="button" data-season="2025-26">2025/26</button>
@@ -1171,13 +1177,19 @@ document.addEventListener("change", e => {
 function renderRqstPanel() {
   const nlAll = FX.concat(UPX).filter(f => f.div === "NL");
   const picks = FX.filter(f => f.div === "NL");
+  /* Discount the wholesale rounds, per Richard: on a 12-game weekend the
+     picks ARE the round, so they mirror its geography by construction.
+     What remains — the 4-game Saturdays — is where choosing happens. */
+  const perWe = {};
+  picks.forEach(f => { perWe[f.we] = (perWe[f.we] || 0) + 1; });
+  const sel = picks.filter(f => perWe[f.we] < 6);
   const rq = FX.filter(f => f.rq);
   const b = DATA.BASE.NL;
   const mk = (label, list, cls) => {
     const mi = list.map(f => f.mi);
     return { label, cls, list, n: list.length, md: Math.round(median(mi)), m: Math.round(mean(mi)) };
   };
-  const tiers = [mk("Weekend fixtures", nlAll), mk("Broadcast picks", picks), mk("rqst", rq, "rqcol")];
+  const tiers = [mk("Weekend fixtures", nlAll), mk("All picks", picks), mk("4-game Saturdays", sel), mk("rqst", rq, "rqcol")];
   const sign = d => (d >= 0 ? "+" : "") + d + "%";
   const pv = (v, base) => Math.round((v - base) / base * 100);
   let h = "<thead><tr><th></th>" + tiers.map(t => "<th" + (t.cls ? ' class="' + t.cls + '"' : "") + ">" + t.label + "</th>").join("") + "</tr></thead><tbody>";
@@ -1189,7 +1201,7 @@ function renderRqstPanel() {
   row("vs base (mean)", t => { const d = pv(t.m, b.mean); return '<td style="' + heatPct(d) + '">' + sign(d) + "</td>"; });
   document.getElementById("rqTable").innerHTML = h + "</tbody>";
   document.getElementById("rqStrip").innerHTML = rqStripSvg(tiers) +
-    '<div class="gxsub">each dot a game, by trip distance · vertical line = the tier\'s mean · tap a dot for the game</div>';
+    '<div class="gxsub">each dot a game, by trip distance · vertical line = the tier\'s mean · tap a dot for the game · 4-game Saturdays = picks outside the three full-round weekends</div>';
 }
 function rqStripSvg(tiers) {
   const W = window.matchMedia("(max-width: 840px)").matches ? 460 : 660, fs = 14;
@@ -1214,8 +1226,8 @@ function rqStripSvg(tiers) {
     s += '<text class="tick lanelab" x="' + L + '" y="' + (y0 + 14) + '">' + t.label + " · mean " + t.m + "mi</text>";
     t.list.forEach((f, i) => {
       const cy = y0 + 28 + ((i * 37) % 15);
-      const cls = t.cls ? "pt picked" : (li === 1 ? "pt" : "pt faint");
-      const r = t.cls ? 4 : (li === 1 ? 3.2 : 2.4);
+      const cls = t.cls ? "pt picked" : (li === 0 ? "pt faint" : "pt");
+      const r = t.cls ? 4 : (li === 0 ? 2.4 : 3.2);
       const tip = "<b>" + f.day + "</b> " + f.t + " · " + f.h + " v " + f.a + " · " + f.mi + "mi" + (f.rq ? " · rqst" : (f.u ? "" : " · pick"));
       s += '<circle class="' + cls + '" cx="' + X(f.mi) + '" cy="' + cy + '" r="' + r + '"/>' +
         '<circle class="hit" cx="' + X(f.mi) + '" cy="' + cy + '" r="11" data-tip="' + tip + '"/>';
