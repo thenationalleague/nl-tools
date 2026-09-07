@@ -2,7 +2,19 @@
 <!--
   NL Tools — Broadcast selections (public standalone page)
   File: /broadcast-selections/index.html
-  v3.1 (07/09/2026)
+  v3.2 (07/09/2026)
+
+  v3.2 (07/09/2026) — Gates v2: away attendance becomes its own sortable
+  "Away att" column, and tapping a fixture opens its expectation panel —
+  actual vs expected for away support and gate, with scatters of the two
+  clubs' real unpicked Saturday 3pms against distance and the fitted
+  curve for the pairing. The model: visitor's own level × one league-wide
+  distance-decay shape (~1.7× a club's norm at 20mi falling to ~0.7× at
+  350mi, fitted on every unpicked Sat 3pm), host home level × a
+  near-flat home shape; expected gate is the sum. Level per club, shape
+  shared — ~11 away datapoints per club fits a level, not a curve. The
+  point: derby picks stop reading as triumphs when their away number is
+  mostly proximity.
 
   v3.1 (07/09/2026) — Gates tab: every picked 25/26 NL game with its
   gate and three deltas against Saturday-3pm normals (host's home fans,
@@ -220,6 +232,7 @@
   <script>
     window.NL_TOOL = { title: "Broadcast Travel", toolKey: "pub-broadcast-selections", kicker: "The National League", isPortal: true };
     window.NL_CHANGELOG = [
+      { version: "v3.2", date: "07/09/2026", changes: ["Gates: away attendance in its own column; tap a fixture for its expected away and gate given the distance between the clubs, with the real Saturday-3pm scatter behind the curve"] },
       { version: "v3.1", date: "07/09/2026", changes: ["Gates tab: per-fixture attendance verdicts against Saturday-3pm normals; attendance colours now read down-red up-green"] },
       { version: "v3.0", date: "07/09/2026", changes: ["2025/26 joins the page with a season switcher; NL gates and away-fan figures appear after sign-in"] },
       { version: "v2.16", date: "06/09/2026", changes: ["Venue switcher simplified to Away / Both"] },
@@ -412,6 +425,26 @@
   #clubTable thead th.sorted, #gatesTable thead th.sorted { color: var(--text); }
   #gatesTable td:first-child { white-space: nowrap; }
   #gatesTable .dim { color: var(--text-muted); font-weight: 400; }
+  #gatesTable tbody tr.gpick { cursor: pointer; }
+  #gatesTable tbody tr.gopen td { background: color-mix(in srgb, var(--primary) 8%, var(--white)); }
+  #gatesTable tr.gxrow > td { padding: 4px 10px 14px; cursor: default; }
+  /* The expectation panel pins to the wrapper's left edge so it stays on
+     screen while the wide table scrolls sideways beneath it. */
+  .gx { position: sticky; left: 0; max-width: min(680px, calc(100vw - 56px)); }
+  .gx .gxheads { display: flex; gap: 6px 22px; flex-wrap: wrap; margin: 6px 0 4px; font-size: var(--text-sm); }
+  .gx .gxheads b { font-variant-numeric: tabular-nums; }
+  .gx .gxd { display: inline-block; padding: 0 6px; border-radius: var(--radius-sm); font-variant-numeric: tabular-nums; font-weight: 700; font-variation-settings: 'wght' 700; }
+  .gx .gxcharts { display: flex; gap: 4px 16px; flex-wrap: wrap; }
+  .gx figure { margin: 4px 0 0; flex: 1 1 250px; min-width: 235px; max-width: 340px; }
+  .gx figcaption { color: var(--text-muted); font-size: var(--text-xs); font-weight: 400; margin-top: 1px; white-space: normal; }
+  .gx svg { width: 100%; height: auto; display: block; }
+  .gx .axis { stroke: var(--border); stroke-width: 1; }
+  .gx .tick { fill: var(--text-muted); font-size: 9px; font-family: var(--font); }
+  .gx .pt { fill: var(--text-muted); opacity: .5; }
+  .gx .curve { fill: none; stroke: var(--primary); stroke-width: 2; opacity: .85; }
+  .gx .expmark { fill: var(--white); stroke: var(--primary); stroke-width: 2; }
+  .gx .actmark { fill: var(--text); stroke: var(--white); stroke-width: 1.5; }
+  .gx .drop { stroke: var(--text); stroke-dasharray: 3 3; opacity: .55; }
   #haBar, #seasonBar { display: flex; gap: 6px; }
   #haBar[hidden] { display: none; }
   #haBar button, #seasonBar button { appearance: none; background: var(--white); border: 1px solid var(--border); border-radius: 999px; color: var(--text-muted); font-family: var(--font); font-size: var(--text-xs); font-weight: 700; font-variation-settings: 'wght' 700; letter-spacing: var(--tracking-wide); text-transform: uppercase; padding: 5px 12px; cursor: pointer; }
@@ -508,7 +541,7 @@ try { const sk = localStorage.getItem("tbf-season"); if (SEASONS[sk]) SEASON_KEY
    Baselines are the Saturday counterfactual — a club's UNPICKED weekend
    home gates (hN) against its picked ones (hP), away fans brought
    likewise (aN/aP); midweek crowds stay out on purpose. */
-let GATES = null, gateStats = null;
+let GATES = null, gateStats = null, gateModel = null, gatesOpen = null;
 /* Baselines are strictly UNPICKED SATURDAY 3PM games (the 15:03 charity
    delay counts): a crowd is slot-dependent, so bank-holiday rounds,
    Boxing Day Fridays and Easter Mondays are no one's normal. Per club:
@@ -517,22 +550,68 @@ let GATES = null, gateStats = null;
    hP/aP keep the picked-game figures for the By-club aggregates. */
 const sat3 = f => f.u && f.day.startsWith("Sat") && f.t >= "15:00" && f.t <= "15:05";
 function buildGateStats() {
-  gateStats = null;
+  gateStats = null; gateModel = null;
   if (!GATES || SEASON_KEY !== "2025-26") return;
   const agg = {};
   const at = n => agg[n] || (agg[n] = { gN: [], hfN: [], arN: [], brN: [], hP: [], aP: [] });
+  const aRows = [], hRows = [], tRows = [];
   [...FX, ...UPX].forEach(f => {
     if (f.div !== "NL" || !f.gid || !GATES[f.gid]) return;
     const g = GATES[f.gid];
     const H = at(f.h), A = at(f.a);
     if (sat3(f)) {
       H.gN.push(g.t);
-      if (g.a != null) { H.hfN.push(g.t - g.a); H.arN.push(g.a); A.brN.push(g.a); }
+      tRows.push({ c: f.h, mi: f.mi, y: g.t });
+      if (g.a != null) {
+        H.hfN.push(g.t - g.a); H.arN.push(g.a); A.brN.push(g.a);
+        aRows.push({ c: f.a, mi: f.mi, y: g.a });
+        hRows.push({ c: f.h, mi: f.mi, y: g.t - g.a });
+      }
     }
     if (!f.u) { H.hP.push(g.t); if (g.a != null) A.aP.push(g.a); }
   });
   gateStats = agg;
+  gateModel = { away: fitDecay(aRows), home: fitDecay(hRows), tot: tRows };
 }
+/* The expectation model, per Richard: derby picks get bumped as great
+   successes when their strong away number is mostly proximity. Away
+   support ≈ the visitor's own level × ONE league-wide distance-decay
+   shape (fitted here: ~1.7× a club's norm at 20mi falling to ~0.7× at
+   350mi). The shape is shared because ~11 unpicked Saturday-3pm trips
+   per club can support a per-club level but not a per-club curve; the
+   level is the club's, so every fixture's curve is still anchored to
+   the clubs involved. Home fans get the same fit against how far the
+   opponent travelled — it comes out near-flat, itself a finding.
+   Expected gate = host home level × home shape + visitor away level ×
+   away shape. Fit: three rounds of alternating a Gaussian-kernel
+   smooth of the ratios with re-levelling each club against it. */
+function fitDecay(rows) {
+  if (!rows.length) return null;
+  const per = {}, S = {};
+  rows.forEach(r => (per[r.c] = per[r.c] || []).push(r));
+  for (const c in per) S[c] = mean(per[c].map(r => r.y));
+  const BW = 45;
+  let shape = () => 1;
+  for (let it = 0; it < 3; it++) {
+    const pts = rows.map(r => ({ mi: r.mi, q: r.y / S[r.c] }));
+    const raw = x => {
+      let sw = 0, sq = 0;
+      for (const p of pts) { const w = Math.exp(-(((x - p.mi) / BW) ** 2) / 2); sw += w; sq += w * p.q; }
+      return sq / sw;
+    };
+    const norm = mean(pts.map(p => raw(p.mi)));
+    shape = x => raw(x) / norm;
+    for (const c in per) S[c] = mean(per[c].map(r => r.y / shape(r.mi)));
+  }
+  const lo = rows.reduce((m, r) => Math.min(m, r.mi), Infinity), hi = rows.reduce((m, r) => Math.max(m, r.mi), 0);
+  /* Clamped: the shape is never extrapolated past distances it saw. */
+  return { S, D: x => shape(Math.min(hi, Math.max(lo, x))), lo, hi, per };
+}
+const expAway = f => { const m = gateModel && gateModel.away; return m && m.S[f.a] != null ? m.S[f.a] * m.D(f.mi) : null; };
+const expGate = f => {
+  const m = gateModel && gateModel.home, a = expAway(f);
+  return m && m.S[f.h] != null && a != null ? m.S[f.h] * m.D(f.mi) + a : null;
+};
 /* Attendance colours run the other way to miles: down is red, up green. */
 const heatPctUp = v => heatPct(-v);
 const pctOf = (v, arr) => arr && arr.length ? Math.round((v / mean(arr) - 1) * 100) : null;
@@ -546,7 +625,7 @@ function setSeason(k) {
   allWeekends = []; let ms = Date.parse(first + "T12:00Z");
   while (ms <= Date.parse(last + "T12:00Z")) { allWeekends.push(new Date(ms).toISOString().slice(0, 10)); ms += 7 * 86400000; }
   if (clubLens && !CLUBS[clubLens]) clubLens = null;
-  activeFx = -1;
+  activeFx = -1; gatesOpen = null;
   buildGateStats();
 }
 
@@ -736,7 +815,7 @@ function renderGatesTable() {
   const rows = FX.filter(f => f.div === "NL" && f.gid && GATES[f.gid]).map((f, i) => {
     const g = GATES[f.gid];
     const hf = g.a != null ? g.t - g.a : null;
-    return { ms: i, we: f.we, day: f.day, t: f.t, h: f.h, a: f.a, gate: g.t, away: g.a != null ? g.a : null,
+    return { ms: i, f, gid: f.gid, day: f.day, t: f.t, h: f.h, a: f.a, gate: g.t, away: g.a != null ? g.a : null,
       gD: pctOf(g.t, st[f.h] && st[f.h].gN),
       hD: hf === null ? null : pctOf(hf, st[f.h] && st[f.h].hfN),
       rD: g.a == null ? null : pctOf(g.a, st[f.h] && st[f.h].arN),
@@ -748,7 +827,8 @@ function renderGatesTable() {
     const c = (typeof x === "string") ? x.localeCompare(y) : x - y;
     return c ? c * gatesSort.d : a.ms - b.ms;
   });
-  const COLS = [["ms", "Game", ""], ["gate", "Gate", "Attendance"],
+  const COLS = [["ms", "Game", "Tap a game for its expected attendance"], ["gate", "Gate", "Total attendance"],
+    ["away", "Away att", "Away fans at the game"],
     ["gD", "Gate Δ", "Gate vs the host's Saturday-3pm average"],
     ["hD", "Home Δ", "Home fans vs the host's Saturday-3pm average"],
     ["rD", "Recv Δ", "Away fans vs what the host usually receives"],
@@ -759,11 +839,12 @@ function renderGatesTable() {
     '<th data-k="' + k + '"' + (tip ? ' title="' + tip + '"' : "") +
     (k === gatesSort.k ? ' class="sorted"' : "") + ">" + label + (k === gatesSort.k ? (gatesSort.d < 0 ? " ▾" : " ▴") : "") + "</th>"
   ).join("") + "</tr></thead><tbody>" + rows.map(r =>
-    '<tr><td><b>' + r.day + "</b> " + r.t + " · " + r.h + " v " + r.a +
-    (r.away === null ? "" : ' <span class="dim">(' + r.away.toLocaleString("en-GB") + " away)</span>") +
+    '<tr class="gpick' + (gatesOpen === r.gid ? " gopen" : "") + '" data-gid="' + r.gid + '"><td><b>' + r.day + "</b> " + r.t + " · " + r.h + " v " + r.a +
     "</td><td>" + r.gate.toLocaleString("en-GB") +
+    "</td><td>" + (r.away === null ? "—" : r.away.toLocaleString("en-GB")) +
     dCell(r.gD) + dCell(r.hD) + dCell(r.rD) + dCell(r.bD) +
-    "</td></tr>"
+    "</td></tr>" +
+    (gatesOpen === r.gid ? '<tr class="gxrow"><td colspan="7">' + gateDetail(r) + "</td></tr>" : "")
   ).join("") + "</tbody>";
   [...gt.querySelectorAll("thead th")].forEach(th => th.addEventListener("click", () => {
     const k = th.dataset.k;
@@ -771,6 +852,90 @@ function renderGatesTable() {
     else gatesSort = { k, d: k === "ms" || k === "h" ? 1 : -1 };
     renderGatesTable();
   }));
+  [...gt.querySelectorAll("tbody tr.gpick")].forEach(tr => tr.addEventListener("click", () => {
+    gatesOpen = gatesOpen === tr.dataset.gid ? null : tr.dataset.gid;
+    renderGatesTable();
+  }));
+}
+
+/* One fixture's expectation panel: actual vs modelled for away and gate,
+   then the two scatters — the clubs' own real Saturday 3pms against
+   distance, with the curve for THIS pairing and this game marked on it. */
+function gateDetail(r) {
+  const f = r.f, A = gateModel.away, H = gateModel.home;
+  const xa = expAway(f), xt = expGate(f);
+  const fmtN = v => Math.round(v).toLocaleString("en-GB");
+  const ex10 = v => (Math.round(v / 10) * 10).toLocaleString("en-GB");
+  const dl = (act, exp) => {
+    if (act == null || exp == null) return "";
+    const d = Math.round((act / exp - 1) * 100);
+    return ' <span class="gxd" style="' + heatPctUp(d) + '">' + (d >= 0 ? "+" : "") + d + "%</span>";
+  };
+  let heads = "", charts = "";
+  if (xa != null) {
+    heads += "<div>Away " + (r.away == null ? "not recorded" : "<b>" + fmtN(r.away) + "</b>") +
+      " · ~" + ex10(xa) + " expected for the " + f.mi + "mi trip" + dl(r.away, xa) + "</div>";
+    const pts = A.per[f.a];
+    charts += "<figure>" + svgScatter({
+      pts, lo: A.lo, hi: A.hi, curve: x => A.S[f.a] * A.D(x),
+      mark: { mi: f.mi, y: r.away, exp: xa }
+    }) + "<figcaption>" + f.a + " at away Saturday 3pms (" + pts.length +
+      " games) · line = their expected take by distance</figcaption></figure>";
+  } else {
+    heads += "<div>No away figures recorded for " + f.a + ", so no away expectation.</div>";
+  }
+  if (xt != null) {
+    heads += "<div>Gate <b>" + fmtN(r.gate) + "</b> · ~" + ex10(xt) + " expected" + dl(r.gate, xt) + "</div>";
+    const pts = gateModel.tot.filter(t => t.c === f.h);
+    charts += "<figure>" + svgScatter({
+      pts, lo: H.lo, hi: H.hi, curve: x => H.S[f.h] * H.D(x) + A.S[f.a] * A.D(x),
+      mark: { mi: f.mi, y: r.gate, exp: xt }
+    }) + "<figcaption>" + f.h + " home Saturday 3pms (" + pts.length +
+      ") by opponent distance · line = expected gate with " + f.a + " visiting</figcaption></figure>";
+  }
+  return '<div class="gx"><div class="gxheads">' + heads + '</div><div class="gxcharts">' + charts + "</div></div>";
+}
+
+const niceCeil = v => {
+  const p = 10 ** Math.floor(Math.log10(v));
+  for (const m of [1, 1.5, 2, 2.5, 3, 4, 5, 7.5]) if (m * p >= v) return m * p;
+  return 10 * p;
+};
+const kFmt = v => v >= 1000 ? (v / 1000) % 1 ? (v / 1000).toFixed(1) + "k" : (v / 1000) + "k" : String(v);
+/* Hand-rolled scatter: points {mi, y}, a curve sampled over the fitted
+   range (plus a clamped stub out to the marked game if it sits shorter
+   than any baseline trip — flat there because the model refuses to
+   extrapolate), hollow dot = expected at this distance, filled = actual,
+   dashed drop between them making the gap visible. */
+function svgScatter(o) {
+  const W = 300, Hh = 150, L = 34, R = 6, T = 8, B = 16;
+  const iw = W - L - R, ih = Hh - T - B;
+  const cp = [];
+  const a = Math.min(o.lo, o.mark.mi), b = Math.max(o.hi, o.mark.mi);
+  for (let i = 0; i <= 48; i++) { const x = a + (b - a) * i / 48; cp.push({ mi: x, y: o.curve(x) }); }
+  const xMax = Math.max(100, Math.ceil(Math.max(...o.pts.map(p => p.mi), o.mark.mi) / 50) * 50);
+  const ys = o.pts.map(p => p.y).concat(cp.map(p => p.y), o.mark.y != null ? [o.mark.y] : [], [o.mark.exp]);
+  const yTop = niceCeil(Math.max(...ys) * 1.05);
+  const X = mi => (L + mi / xMax * iw).toFixed(1), Y = v => (T + ih - v / yTop * ih).toFixed(1);
+  const xStep = xMax > 250 ? 100 : 50;
+  let s = '<svg viewBox="0 0 ' + W + " " + Hh + '" role="img">';
+  s += '<line class="axis" x1="' + L + '" y1="' + (T + ih) + '" x2="' + (W - R) + '" y2="' + (T + ih) + '"/>';
+  for (const yv of [yTop / 2, yTop]) {
+    s += '<line class="axis" opacity=".55" x1="' + L + '" y1="' + Y(yv) + '" x2="' + (W - R) + '" y2="' + Y(yv) + '"/>';
+    s += '<text class="tick" x="' + (L - 3) + '" y="' + (+Y(yv) + 3) + '" text-anchor="end">' + kFmt(yv) + "</text>";
+  }
+  for (let xv = xStep; xv <= xMax; xv += xStep) {
+    const last = xv + xStep > xMax; /* anchored inboard: "300mi" was clipping */
+    s += '<text class="tick" x="' + (last ? W : X(xv)) + '" y="' + (T + ih + 11) + '" text-anchor="' + (last ? "end" : "middle") + '">' + xv + (last ? "mi" : "") + "</text>";
+  }
+  for (const p of o.pts) s += '<circle class="pt" cx="' + X(p.mi) + '" cy="' + Y(p.y) + '" r="2.8"/>';
+  s += '<path class="curve" d="M' + cp.map(p => X(p.mi) + " " + Y(p.y)).join("L") + '"/>';
+  if (o.mark.y != null)
+    s += '<line class="drop" x1="' + X(o.mark.mi) + '" y1="' + Y(o.mark.exp) + '" x2="' + X(o.mark.mi) + '" y2="' + Y(o.mark.y) + '"/>';
+  s += '<circle class="expmark" cx="' + X(o.mark.mi) + '" cy="' + Y(o.mark.exp) + '" r="3.4"/>';
+  if (o.mark.y != null)
+    s += '<circle class="actmark" cx="' + X(o.mark.mi) + '" cy="' + Y(o.mark.y) + '" r="4.4"/>';
+  return s + "</svg>";
 }
 
 /* By club — who gets the brunt. One row per club of the toggled league(s),
