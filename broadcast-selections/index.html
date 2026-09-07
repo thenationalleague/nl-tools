@@ -4,6 +4,13 @@
   File: /broadcast-selections/index.html
   v3.11 (07/09/2026)
 
+  v3.20 (07/09/2026) — Distances gains the base table: each division's
+  base median/mean and how many picks sit above and at-or-below it,
+  counted against the base mean to match the 1× line.
+
+  v3.19 (07/09/2026) — Full season label column no longer spills under
+  the division columns (wider floor, wrap allowed).
+
   v3.18 (07/09/2026) — Distances end labels repaired: division colours
   and lit contrast now apply (inline style over the losing fill
   attribute), sized 12px so they stop looming.
@@ -325,6 +332,8 @@
   <script>
     window.NL_TOOL = { title: "Broadcast Travel", toolKey: "pub-broadcast-selections", kicker: "The National League", isPortal: true };
     window.NL_CHANGELOG = [
+      { version: "v3.20", date: "07/09/2026", changes: ["Distances: a base table under the curves — each division's base and the picks either side of it"] },
+      { version: "v3.19", date: "07/09/2026", changes: ["Full season row labels stay inside their column"] },
       { version: "v3.18", date: "07/09/2026", changes: ["Distances end labels now wear their division colours, colour in properly when lit, and drop to a sensible size"] },
       { version: "v3.17", date: "07/09/2026", changes: ["Distances loses its caption line — the chart speaks for itself"] },
       { version: "v3.16", date: "07/09/2026", changes: ["× base: lit areas split at the 1× crossing — pale under, vivid over, marker at the crossing game"] },
@@ -486,11 +495,18 @@
      column is pinned so the six data columns split the rest EQUALLY —
      auto layout sized each column to its header word. Logos stack above
      the names so a narrow column wraps cleanly. */
-  #divTable { table-layout: fixed; width: 100%; }
-  #divTable th:first-child { width: clamp(104px, 26%, 150px); }
-  #divTable thead th.band { text-align: center; padding-left: 3px; padding-right: 3px; line-height: 1.25; overflow-wrap: break-word; font-size: 11px; letter-spacing: 0.02em; }
-  #divTable .bandlogo { display: block; height: 16px; width: auto; margin: 0 auto 3px; }
-  #divTable .bandlogo--pl { filter: brightness(0) invert(1); }
+  #divTable, #distTable { table-layout: fixed; width: 100%; }
+  #distTable { max-width: 760px; margin-top: 14px; }
+  /* The label column width rides a <colgroup> (the one mechanism fixed
+     layout always honours), and the wrap override out-specifies the
+     freeze-pane nowrap, which sits LATER in this sheet and was winning
+     the tie — "Picked median mi" spilled under Premier League. */
+  /* Plain px: fixed layout would not honour clamp() on a col. */
+  #divTable col.labcol, #distTable col.labcol { width: 142px; }
+  #divTable tbody tr td:first-child, #distTable tbody tr td:first-child { white-space: normal; }
+  #divTable thead th.band, #distTable thead th.band { text-align: center; padding-left: 3px; padding-right: 3px; line-height: 1.25; overflow-wrap: break-word; font-size: 11px; letter-spacing: 0.02em; }
+  #divTable .bandlogo, #distTable .bandlogo { display: block; height: 16px; width: auto; margin: 0 auto 3px; }
+  #divTable .bandlogo--pl, #distTable .bandlogo--pl { filter: brightness(0) invert(1); }
   #divTable th.rqcol, #rqTable th.rqcol { color: var(--text-muted); cursor: pointer; }
   #divTable tr.sect td { border-top-color: color-mix(in srgb, var(--text-muted) 40%, var(--border)); }
   /* Season + rqst: the transposed table is narrow, so on desktop the map
@@ -692,7 +708,7 @@
     <div class="table-wrap scrollbox" id="clubWrap" hidden><table id="clubTable"></table></div>
     <div class="table-wrap scrollbox" id="gatesWrap" hidden><table id="gatesTable"></table></div>
     <div id="rqWrap" hidden><div class="table-wrap"><table id="rqTable"></table></div><div id="rqStrip"></div></div>
-    <div id="distWrap" hidden><div id="distChart"></div></div>
+    <div id="distWrap" hidden><div id="distChart"></div><div class="table-wrap"><table id="distTable"></table></div></div>
   </div>
   <div class="chip-group" id="divbar" role="group" aria-label="League shown on the map and cards"></div>
   <div class="gwbar" id="gwbar" role="tablist" aria-label="Weekend"></div>
@@ -1332,6 +1348,22 @@ function renderDistCurves() {
       '<text class="tick distlab" data-dk="' + sr.k + '" data-col="' + sr.col + '" data-tc="' + textFor(sr.col) + '" style="fill:' + sr.col + '" x="' + sr.lab.x + '" y="' + sr.lab.y + '">' + sr.k + "</text>";
   });
   svg += fills + lines + "</svg>";
+  /* The base, and who sits either side of it, per division — the two
+     facts the curves imply but never state. Counts run against the base
+     MEAN so they agree exactly with the × base view's 1× line. */
+  let bt = '<colgroup><col class="labcol">' + series.map(() => "<col>").join("") + "</colgroup>" +
+    "<thead><tr><th></th>" + series.map(sr =>
+      '<th class="band" style="background:' + sr.col + ';color:var(--white)">' +
+      dlogo(sr.k, "bandlogo" + (sr.k === "PL" ? " bandlogo--pl" : "")) + DIVS[sr.k].replace("Championship", "Champion\u00adship") + "</th>").join("") + "</tr></thead><tbody>";
+  const above = sr => sr.fx.filter(f => f.mi > sr.base.mean).length;
+  const shares = series.map(sr => Math.round(above(sr) / sr.fx.length * 100));
+  const btRow = (label, cell) => { bt += "<tr><td>" + label + "</td>" + series.map(cell).join("") + "</tr>"; };
+  btRow("Base median mi", sr => '<td class="dim">' + sr.base.med + "</td>");
+  btRow("Base mean mi", sr => '<td class="dim">' + sr.base.mean + "</td>");
+  btRow("Picks above base", sr => { const a = above(sr), sh = Math.round(a / sr.fx.length * 100);
+    return '<td style="' + heat(sh, Math.min(...shares), Math.max(...shares)) + '">' + a + " · " + sh + "%</td>"; });
+  btRow("At or below", sr => "<td>" + (sr.fx.length - above(sr)) + "</td>");
+  document.getElementById("distTable").innerHTML = bt + "</tbody>";
   document.getElementById("distChart").innerHTML =
     '<div class="dtop"><div class="dleg">' + series.map(sr =>
       '<span data-dk="' + sr.k + '" data-col="' + sr.col + '" data-tc="' + textFor(sr.col) + '" role="button" tabindex="0"><i style="background:' + sr.col + '"></i>' + DIVS[sr.k] + " · " + sr.fx.length + "</span>").join("") + "</div>" +
@@ -1894,7 +1926,8 @@ function render() {
     const perWs = tiers.map(c => c.perW);
     const pLo = Math.min(...perWs), pHi = Math.max(...perWs);
     const sign = d => (d >= 0 ? "+" : "") + d + "%";
-    let dh = "<thead><tr><th></th>" + tiers.map(c => c.rq
+    let dh = '<colgroup><col class="labcol">' + tiers.map(() => "<col>").join("") + "</colgroup>" +
+      "<thead><tr><th></th>" + tiers.map(c => c.rq
       ? '<th class="band rqcol" role="button" tabindex="0">rqst</th>'
       : '<th class="band" style="background:' + DIVMETA[c.k].col + ';color:var(--white)">' +
         dlogo(c.k, "bandlogo" + (c.k === "PL" ? " bandlogo--pl" : "")) + DIVS[c.k].replace("Championship", "Champion\u00adship") + "</th>").join("") + "</tr></thead><tbody>";
