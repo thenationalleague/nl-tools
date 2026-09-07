@@ -4,6 +4,10 @@
   File: /broadcast-selections/index.html
   v3.11 (07/09/2026)
 
+  v3.16 (07/09/2026) — × base: a lit division splits its shading at the
+  1× crossing (pale under, vivid over, dashed marker at the crossing
+  game); captions dewaffled.
+
   v3.15 (07/09/2026) — Lit divisions read as lit: legend chip and end
   label fill in the division colour, unlit curves dim while anything
   is lit. Grid densifies: labelled lines every 100mi / 0.5×.
@@ -314,6 +318,7 @@
   <script>
     window.NL_TOOL = { title: "Broadcast Travel", toolKey: "pub-broadcast-selections", kicker: "The National League", isPortal: true };
     window.NL_CHANGELOG = [
+      { version: "v3.16", date: "07/09/2026", changes: ["× base: lit areas split at the 1× crossing — pale under, vivid over, marker at the crossing game"] },
       { version: "v3.15", date: "07/09/2026", changes: ["Distances: lit divisions colour their legend chip and end label, and the other curves dim while anything is lit"] },
       { version: "v3.14", date: "07/09/2026", changes: ["Distances: tap a division to light its area, and a × base view that prices in each division's own geography"] },
       { version: "v3.13", date: "07/09/2026", changes: ["Distances tab: every division's picks sorted shortest to longest — the area under each curve is its total broadcast travel"] },
@@ -606,6 +611,10 @@
   #distWrap .dleg [data-dk] { padding: 2px 9px; border-radius: var(--radius-pill); transition: background .15s, color .15s; }
   #distWrap .dfill { opacity: 0; transition: opacity .15s; pointer-events: none; }
   #distWrap .dfill.prev, #distWrap .dfill.on { opacity: .22; }
+  #distWrap .dfill.h1.prev, #distWrap .dfill.h1.on { opacity: .12; }
+  #distWrap .dfill.h2.prev, #distWrap .dfill.h2.on { opacity: .34; }
+  #distWrap .dcross { opacity: 0; stroke-width: 2; stroke-dasharray: 5 4; transition: opacity .15s; }
+  #distWrap .dcross.prev, #distWrap .dcross.on { opacity: .85; }
   #distWrap .dser { transition: opacity .15s; }
   #distWrap .dser.dim { opacity: .3; }
   #distWrap .dlabbg { opacity: 0; transition: opacity .15s; }
@@ -1273,10 +1282,23 @@ function renderDistCurves() {
     svg += '<text class="tick" x="' + X(xv) + '" y="' + (T + ih + 20) + '" text-anchor="middle">' + xv + (xv + 20 > xMax ? " games" : "") + "</text>";
   }
   let fills = "", lines = "";
+  const baseY = T + ih;
   series.forEach(sr => {
     const pts = sr.fx.map((f, i) => ({ x: X(i + 1), y: Y(val(sr, f)), f }));
-    fills += '<path class="dfill' + (distFills.has(sr.k) ? " on" : "") + '" data-fk="' + sr.k + '" fill="' + sr.col + '" d="M' + X(1) + " " + (T + ih) +
-      "L" + pts.map(pt => pt.x + " " + pt.y).join("L") + "L" + pts[pts.length - 1].x + " " + (T + ih) + 'Z"/>';
+    const fillSeg = (arr, cls) => arr.length > 1 ? '<path class="dfill' + cls + '" data-fk="' + sr.k + '" fill="' + sr.col + '" d="M' + arr[0].x + " " + baseY +
+      "L" + arr.map(pt => pt.x + " " + pt.y).join("L") + "L" + arr[arr.length - 1].x + " " + baseY + 'Z"/>' : "";
+    if (rel) {
+      /* Split the lit area at the 1× crossing, per Richard: pale for the
+         games at or under the division's own typical trip, vivid after —
+         with a dashed marker at the crossing game. How much sits right
+         of the line is the picture. */
+      const ci = sr.fx.filter(f => val(sr, f) <= 1).length;
+      fills += fillSeg(pts.slice(0, Math.max(ci, 1)), " h1") + fillSeg(pts.slice(Math.max(ci - 1, 0)), " h2");
+      if (ci > 0 && ci < pts.length)
+        fills += '<line class="dcross" data-fk="' + sr.k + '" stroke="' + sr.col + '" x1="' + pts[ci - 1].x + '" y1="' + baseY + '" x2="' + pts[ci - 1].x + '" y2="' + Y(1) + '"/>';
+    } else {
+      fills += fillSeg(pts, "");
+    }
     lines += '<g class="dser" data-sk="' + sr.k + '"><path class="dcurve" stroke="' + sr.col + '" d="M' + pts.map(pt => pt.x + " " + pt.y).join("L") + '"/>';
     pts.forEach(pt => {
       lines += '<circle class="dpt" fill="' + sr.col + '" cx="' + pt.x + '" cy="' + pt.y + '" r="3"/>' +
@@ -1305,8 +1327,8 @@ function renderDistCurves() {
       '<button type="button" data-dm="mi" aria-pressed="' + !rel + '">Miles</button>' +
       '<button type="button" data-dm="rel" aria-pressed="' + rel + '">× base</button></div></div>' + svg +
     '<div class="gxsub">' + (rel
-      ? "every pick as a multiple of its division\'s own average possible pairing — geography priced in; above the 1× line is picking · tap a division to light its area · tap a dot for the game"
-      : "every pick, sorted shortest trip to longest · the area under each line is that division\'s total broadcast miles · tap a division to light its area · tap a dot for the game") + "</div>";
+      ? "each trip ÷ its division\'s average pairing — geography priced in; above 1× is picking"
+      : "picks sorted shortest to longest · area under a line = total broadcast miles") + "</div>";
   applyDistState();
 }
 /* One place owns the on/off look: lit divisions fill their legend chip
@@ -1315,7 +1337,7 @@ function renderDistCurves() {
 function applyDistState() {
   const dc = document.getElementById("distChart");
   const any = distFills.size > 0;
-  dc.querySelectorAll(".dfill").forEach(f => f.classList.toggle("on", distFills.has(f.getAttribute("data-fk"))));
+  dc.querySelectorAll(".dfill, .dcross").forEach(f => f.classList.toggle("on", distFills.has(f.getAttribute("data-fk"))));
   dc.querySelectorAll("g.dser").forEach(g => g.classList.toggle("dim", any && !distFills.has(g.getAttribute("data-sk"))));
   dc.querySelectorAll(".dlabbg").forEach(r => r.classList.toggle("on", distFills.has(r.getAttribute("data-dk"))));
   dc.querySelectorAll("text.distlab").forEach(t => {
@@ -1340,7 +1362,7 @@ function applyDistState() {
     distFills.has(k) ? distFills.delete(k) : distFills.add(k);
     applyDistState();
   });
-  const fillsOf = k => dc.querySelectorAll('.dfill[data-fk="' + k + '"]');
+  const fillsOf = k => dc.querySelectorAll('.dfill[data-fk="' + k + '"], .dcross[data-fk="' + k + '"]');
   dc.addEventListener("pointerover", e => { const t = e.target.closest("[data-dk]"); if (t) fillsOf(t.dataset.dk).forEach(f => f.classList.add("prev")); });
   dc.addEventListener("pointerout", e => { const t = e.target.closest("[data-dk]"); if (t) fillsOf(t.dataset.dk).forEach(f => f.classList.remove("prev")); });
 })();
