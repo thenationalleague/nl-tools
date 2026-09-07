@@ -2,7 +2,18 @@
 <!--
   NL Tools — Broadcast selections (public standalone page)
   File: /broadcast-selections/index.html
-  v3.3 (07/09/2026)
+  v3.4 (07/09/2026)
+
+  v3.4 (07/09/2026) — Gates stage v3: two anchors, one stage. Tap a table
+  row for the fixture view (Away support + Gate, this game marked — two
+  panels IS the full set: received-vs-expected and took-vs-expected are
+  the same number once distance is priced in), or pick a club from the
+  stage dropdown for the club view: Gate / Received / Taken, broadcast
+  games as red dots against the grey unpicked baseline. Panels side by
+  side on desktop, each with its own mile labels, titles and subtitles
+  above the chart; gates table capped at 32vh on desktop so table and
+  charts share one screen; mode tabs scroll in their bar on a phone
+  instead of spilling.
 
   v3.3 (07/09/2026) — Gates charts take the stage. The inline table panel
   goes; on the Gates tab the map, cards and league chips step aside and
@@ -243,6 +254,7 @@
   <script>
     window.NL_TOOL = { title: "Broadcast Travel", toolKey: "pub-broadcast-selections", kicker: "The National League", isPortal: true };
     window.NL_CHANGELOG = [
+      { version: "v3.4", date: "07/09/2026", changes: ["Gates side-by-side panels with per-chart mile labels and real titles; new club view (Gate / Received / Taken) from a dropdown, broadcast games in red; shorter table so charts fit a desktop screen; mobile tab bar no longer spills"] },
       { version: "v3.3", date: "07/09/2026", changes: ["Gates charts replace the map at full width — away and gate lanes on one distance axis, a league-wide landing curve, and hover/tap on any dot for the game behind it"] },
       { version: "v3.2", date: "07/09/2026", changes: ["Gates: away attendance in its own column; tap a fixture for its expected away and gate given the distance between the clubs, with the real Saturday-3pm scatter behind the curve"] },
       { version: "v3.1", date: "07/09/2026", changes: ["Gates tab: per-fixture attendance verdicts against Saturday-3pm normals; attendance colours now read down-red up-green"] },
@@ -343,8 +355,14 @@
   }
 
   .tbltop { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin: 0 0 8px; }
-  #modebar { margin-bottom: 0; }
-  #modebar > button { flex: 0 0 auto; }
+  /* Four tabs outgrow a phone: the bar scrolls inside itself instead of
+     spilling the layout, and tab padding tightens below 480px. (These
+     rules live in the shared section — the tab styles above are swapped
+     for canon .tabs on the hosted build.) */
+  #modebar { margin-bottom: 0; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  #modebar::-webkit-scrollbar { display: none; }
+  #modebar > button { flex: 0 0 auto; white-space: nowrap; }
+  @media (max-width: 480px) { #modebar > button { padding: 6px 8px; } }
   .headline { margin-bottom: 10px; }
 
   .mapbox { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 10px; }
@@ -415,6 +433,9 @@
   #divTable tbody td:nth-child(5), #divTable tbody td:nth-child(7), #divTable tbody td:nth-child(9) { border-left: 1px solid var(--border); }
   #divWrap, #weekWrap { border: 1px solid var(--border); border-radius: var(--radius-lg); }
   .avgs .scrollbox { max-height: clamp(320px, 46vh, 620px); overflow-y: auto; }
+  /* Gates alone runs shorter on desktop so table AND charts share a 16:9
+     screen without page scroll; the table scrolls inside itself. */
+  @media (min-width: 841px) { #gatesWrap.scrollbox { max-height: clamp(240px, 30vh, 430px); } }
   /* Freeze panes. Sticky sits on the CELLS — Chromium ignores position:
      sticky on thead/tr, which is why a sticky-thead rule did nothing on
      phones. The two header rows pin to the scrollbox top (the band row's
@@ -445,18 +466,33 @@
      chips. One card spanning both stage columns; panels stack full width
      and share the distance axis (labels on the bottom panel only). */
   #gatesStage { grid-column: 1 / -1; position: relative; background: var(--white); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 12px 16px 14px; }
-  #gatesStage .gxheads { display: flex; gap: 6px 26px; flex-wrap: wrap; margin: 0 0 4px; font-size: var(--text-sm); }
+  .gxtop { display: flex; align-items: center; justify-content: space-between; gap: 8px 14px; flex-wrap: wrap; margin: 0 0 2px; }
+  .gxwho { font-size: var(--text-base); font-weight: 800; font-variation-settings: 'wght' 800; }
+  #gxClub { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--text-muted); font-family: var(--font); font-size: var(--text-xs); font-weight: 700; font-variation-settings: 'wght' 700; letter-spacing: var(--tracking-wide); text-transform: uppercase; padding: 5px 10px; cursor: pointer; max-width: 46vw; }
+  #gxClub.on { background: var(--text); border-color: var(--text); color: var(--off-white); }
+  #gxClub:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  #gatesStage .gxheads { display: flex; gap: 6px 26px; flex-wrap: wrap; margin: 2px 0 4px; font-size: var(--text-sm); }
   #gatesStage .gxheads b { font-variant-numeric: tabular-nums; }
+  #gatesStage .gxred { color: var(--primary); }
   #gatesStage .gxd { display: inline-block; padding: 0 6px; border-radius: var(--radius-sm); font-variant-numeric: tabular-nums; font-weight: 700; font-variation-settings: 'wght' 700; }
-  #gatesStage figure { margin: 8px 0 0; }
-  #gatesStage figcaption { color: var(--text-muted); font-size: var(--text-xs); font-weight: 400; margin-top: 3px; }
+  /* Panels sit side by side on desktop (2-up fixture, 3-up club), each
+     with its OWN mile labels — a shared bottom axis dies the moment the
+     bottom panel scrolls below the fold. Stacks itself on a phone. */
+  #gatesStage .gxcharts { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 6px 22px; }
+  /* Width caps keep panel height in check so table + charts share a 16:9
+     screen; the single landing chart may run wider than the pairs. */
+  #gatesStage figure { margin: 8px 0 0; min-width: 0; max-width: 540px; }
+  #gatesStage .gx1 figure { max-width: 760px; }
+  #gatesStage .gxt { font-size: var(--text-sm); font-weight: 800; font-variation-settings: 'wght' 800; letter-spacing: var(--tracking-tight); text-transform: uppercase; }
+  #gatesStage .gxsub { color: var(--text-muted); font-size: var(--text-xs); margin: 1px 0 5px; }
   #gatesStage svg { width: 100%; height: auto; display: block; }
   #gatesStage .axis { stroke: var(--border); stroke-width: 1; }
-  #gatesStage .tick { fill: var(--text-muted); font-size: 11px; font-family: var(--font); }
+  #gatesStage .tick { fill: var(--text-muted); font-family: var(--font); }
   #gatesStage .pt { fill: var(--text-muted); opacity: .5; }
+  #gatesStage .pt.picked { fill: var(--primary); opacity: .85; }
   #gatesStage .pt.hot { fill: var(--primary); opacity: 1; }
   #gatesStage .hit { fill: transparent; }
-  #gatesStage .curve { fill: none; stroke: var(--primary); stroke-width: 2.25; opacity: .85; }
+  #gatesStage .curve { fill: none; stroke: var(--primary); stroke-width: 2; opacity: .85; }
   #gatesStage .refline { stroke: var(--text-muted); stroke-dasharray: 5 5; opacity: .5; }
   #gatesStage .expmark { fill: var(--white); stroke: var(--primary); stroke-width: 2.25; }
   #gatesStage .actmark { fill: var(--text); stroke: var(--white); stroke-width: 1.5; }
@@ -560,7 +596,7 @@ try { const sk = localStorage.getItem("tbf-season"); if (SEASONS[sk]) SEASON_KEY
    Baselines are the Saturday counterfactual — a club's UNPICKED weekend
    home gates (hN) against its picked ones (hP), away fans brought
    likewise (aN/aP); midweek crowds stay out on purpose. */
-let GATES = null, gateStats = null, gateModel = null, gatesOpen = null;
+let GATES = null, gateStats = null, gateModel = null, gatesOpen = null, gatesClub = null;
 /* Baselines are strictly UNPICKED SATURDAY 3PM games (the 15:03 charity
    delay counts): a crowd is slot-dependent, so bank-holiday rounds,
    Boxing Day Fridays and Easter Mondays are no one's normal. Per club:
@@ -593,7 +629,10 @@ function buildGateStats() {
     if (!f.u) { H.hP.push(g.t); if (g.a != null) A.aP.push(g.a); }
   });
   gateStats = agg;
-  gateModel = { away: fitDecay(aRows), home: fitDecay(hRows), tot: tRows };
+  /* aw is kept raw as well as fitted: the club view's Received panel needs
+     the same away rows regrouped by HOST, which the fit's per-visitor
+     grouping cannot answer. */
+  gateModel = { away: fitDecay(aRows), home: fitDecay(hRows), tot: tRows, aw: aRows };
 }
 /* The expectation model, per Richard: derby picks get bumped as great
    successes when their strong away number is mostly proximity. Away
@@ -647,7 +686,7 @@ function setSeason(k) {
   allWeekends = []; let ms = Date.parse(first + "T12:00Z");
   while (ms <= Date.parse(last + "T12:00Z")) { allWeekends.push(new Date(ms).toISOString().slice(0, 10)); ms += 7 * 86400000; }
   if (clubLens && !CLUBS[clubLens]) clubLens = null;
-  activeFx = -1; gatesOpen = null;
+  activeFx = -1; gatesOpen = null; gatesClub = null;
   buildGateStats();
 }
 
@@ -875,6 +914,7 @@ function renderGatesTable() {
   }));
   [...gt.querySelectorAll("tbody tr.gpick")].forEach(tr => tr.addEventListener("click", () => {
     gatesOpen = gatesOpen === tr.dataset.gid ? null : tr.dataset.gid;
+    gatesClub = null;
     render();
     if (gatesOpen && window.matchMedia("(max-width: 840px)").matches)
       document.getElementById("gatesStage").scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -895,16 +935,11 @@ function renderGatesStage() {
   const body = document.getElementById("gxBody");
   gxHideTip();
   const A = gateModel.away, H = gateModel.home;
-  const f = gatesOpen ? FX.find(x => x.div === "NL" && x.gid === gatesOpen) : null;
-  const g = f && GATES[f.gid];
-  if (!f || !g) {
-    const pts = [];
-    for (const c in A.per) for (const r of A.per[c]) pts.push({ mi: r.mi, y: r.y / A.S[c], tip: tipTxt(r) + " · " + (r.y / A.S[c]).toFixed(1) + "× usual" });
-    body.innerHTML = "<figure>" + svgScatter({ pts, lo: A.lo, hi: A.hi, curve: A.D, refY: 1, Hh: 320, yCap: 4, yFmt: v => (v % 1 ? v.toFixed(1) : v) + "×" }) +
-      "<figcaption>Every unpicked Saturday-3pm away crowd, as a multiple of the visiting club's usual take · the line is the league's distance effect · tap a game in the table for its own expectation</figcaption></figure>";
-    return;
-  }
-  const away = g.a != null ? g.a : null, xa = expAway(f), xt = expGate(f);
+  const clubs = Object.keys(A.S).sort();
+  const selHtml = '<select id="gxClub"' + (gatesClub ? ' class="on"' : "") + '><option value="">By club…</option>' +
+    clubs.map(c => '<option value="' + c + '"' + (c === gatesClub ? " selected" : "") + ">" + c + "</option>").join("") + "</select>";
+  const top = who => '<div class="gxtop"><div class="gxwho">' + who + "</div>" + selHtml + "</div>";
+  const panel = (t, sub, svg) => '<figure><div class="gxt">' + t + '</div><div class="gxsub">' + sub + "</div>" + svg + "</figure>";
   const fmtN = v => Math.round(v).toLocaleString("en-GB");
   const ex10 = v => (Math.round(v / 10) * 10).toLocaleString("en-GB");
   const dl = (act, exp) => {
@@ -912,34 +947,78 @@ function renderGatesStage() {
     const d = Math.round((act / exp - 1) * 100);
     return ' <span class="gxd" style="' + heatPctUp(d) + '">' + (d >= 0 ? "+" : "") + d + "%</span>";
   };
-  let heads = "<div><b>" + f.day + "</b> " + f.t + " · " + f.h + " v " + f.a + "</div>", charts = "";
-  const ptsA = (A.per[f.a] || []).map(r => ({ mi: r.mi, y: r.y, tip: tipTxt(r) }));
-  const ptsT = gateModel.tot.filter(t => t.c === f.h).map(r => ({ mi: r.mi, y: r.y, tip: tipTxt(r) }));
-  const xMax = Math.max(100, Math.ceil(Math.max(...ptsA.map(p => p.mi), ...ptsT.map(p => p.mi), f.mi) / 50) * 50);
-  if (xa != null) {
-    heads += "<div>Away " + (away == null ? "not recorded" : "<b>" + fmtN(away) + "</b>") +
-      " · ~" + ex10(xa) + " expected for the " + f.mi + "mi trip" + dl(away, xa) + "</div>";
-    charts += "<figure>" + svgScatter({
-      pts: ptsA, lo: A.lo, hi: A.hi, curve: x => A.S[f.a] * A.D(x), xMax, Hh: 235, xAxis: false,
-      mark: { mi: f.mi, y: away, exp: xa,
-        tip: "<b>This game</b> · away " + (away == null ? "—" : fmtN(away)) + " · " + f.mi + "mi",
-        expTip: "Expected ~" + ex10(xa) + " away at " + f.mi + "mi" }
-    }) + "<figcaption>" + f.a + " at away Saturday 3pms (" + ptsA.length +
-      " games) · line = their expected take by distance</figcaption></figure>";
-  } else {
-    heads += "<div>No away figures recorded for " + f.a + ", so no away expectation.</div>";
+
+  /* Club view — one club, three lenses, chosen from the dropdown. A club
+     plays both roles across a season, so Received and Taken are distinct
+     here (in the fixture view they collapse into one away number). Red
+     dots are the club's broadcast games against their grey baseline. */
+  if (gatesClub && A.S[gatesClub] != null) {
+    const C = gatesClub, medS = median(Object.values(A.S));
+    const picked = FX.filter(x => x.div === "NL" && x.gid && GATES[x.gid]);
+    const pRow = (x, y) => {
+      const gg = GATES[x.gid];
+      return { mi: x.mi, y, k: 1, tip: tipTxt({ day: x.day, h: x.h, a: x.a, t: gg.t, aa: gg.a != null ? gg.a : null, mi: x.mi }) + " · broadcast pick" };
+    };
+    const gPts = gateModel.tot.filter(r => r.c === C).map(r => ({ mi: r.mi, y: r.y, tip: tipTxt(r) }))
+      .concat(picked.filter(x => x.h === C).map(x => pRow(x, GATES[x.gid].t)));
+    const rPts = gateModel.aw.filter(r => r.h === C).map(r => ({ mi: r.mi, y: r.y, tip: tipTxt(r) }))
+      .concat(picked.filter(x => x.h === C && GATES[x.gid].a != null).map(x => pRow(x, GATES[x.gid].a)));
+    const tPts = (A.per[C] || []).map(r => ({ mi: r.mi, y: r.y, tip: tipTxt(r) }))
+      .concat(picked.filter(x => x.a === C && GATES[x.gid].a != null).map(x => pRow(x, GATES[x.gid].a)));
+    const xMax = Math.max(100, Math.ceil(Math.max(...gPts.map(p => p.mi), ...rPts.map(p => p.mi), ...tPts.map(p => p.mi)) / 50) * 50);
+    body.innerHTML = top(C) +
+      '<div class="gxheads"><div>Grey dots = unpicked Saturday 3pms · <b class="gxred">red dots</b> = broadcast picks</div></div>' +
+      '<div class="gxcharts">' +
+      panel("Gate", "home Saturday-3pm gates by opponent distance · line = expected with a typical visitor",
+        svgScatter({ pts: gPts, lo: H.lo, hi: H.hi, curve: H.S[C] != null ? x => H.S[C] * H.D(x) + medS * A.D(x) : null, xMax })) +
+      panel("Received", "away crowds arriving at " + C + " · line = a typical visitor's take by distance",
+        svgScatter({ pts: rPts, lo: A.lo, hi: A.hi, curve: x => medS * A.D(x), xMax })) +
+      panel("Taken", "away crowds " + C + " take on the road · line = their fitted curve",
+        svgScatter({ pts: tPts, lo: A.lo, hi: A.hi, curve: x => A.S[C] * A.D(x), xMax })) +
+      "</div>";
+    return;
   }
-  if (xt != null) {
-    heads += "<div>Gate <b>" + fmtN(g.t) + "</b> · ~" + ex10(xt) + " expected" + dl(g.t, xt) + "</div>";
-    charts += "<figure>" + svgScatter({
-      pts: ptsT, lo: H.lo, hi: H.hi, curve: x => H.S[f.h] * H.D(x) + A.S[f.a] * A.D(x), xMax, Hh: 235,
-      mark: { mi: f.mi, y: g.t, exp: xt,
-        tip: "<b>This game</b> · gate " + fmtN(g.t) + " · " + f.mi + "mi",
-        expTip: "Expected ~" + ex10(xt) + " gate at " + f.mi + "mi" }
-    }) + "<figcaption>" + f.h + " home Saturday 3pms (" + ptsT.length +
-      ") by opponent distance · line = expected gate with " + f.a + " visiting</figcaption></figure>";
+
+  /* Fixture view — was this pick good? Two panels, this game marked. */
+  const f = gatesOpen ? FX.find(x => x.div === "NL" && x.gid === gatesOpen) : null;
+  const g = f && GATES[f.gid];
+  if (f && g) {
+    const away = g.a != null ? g.a : null, xa = expAway(f), xt = expGate(f);
+    let heads = "", charts = "";
+    const ptsA = (A.per[f.a] || []).map(r => ({ mi: r.mi, y: r.y, tip: tipTxt(r) }));
+    const ptsT = gateModel.tot.filter(t => t.c === f.h).map(r => ({ mi: r.mi, y: r.y, tip: tipTxt(r) }));
+    const xMax = Math.max(100, Math.ceil(Math.max(...ptsA.map(p => p.mi), ...ptsT.map(p => p.mi), f.mi) / 50) * 50);
+    if (xa != null) {
+      heads += "<div>Away " + (away == null ? "not recorded" : "<b>" + fmtN(away) + "</b>") +
+        " · ~" + ex10(xa) + " expected for the " + f.mi + "mi trip" + dl(away, xa) + "</div>";
+      charts += panel("Away support", f.a + "'s away Saturday 3pms (" + ptsA.length + ") · line = their expected take by distance",
+        svgScatter({ pts: ptsA, lo: A.lo, hi: A.hi, curve: x => A.S[f.a] * A.D(x), xMax,
+          mark: { mi: f.mi, y: away, exp: xa,
+            tip: "<b>This game</b> · away " + (away == null ? "—" : fmtN(away)) + " · " + f.mi + "mi",
+            expTip: "Expected ~" + ex10(xa) + " away at " + f.mi + "mi" } }));
+    } else {
+      heads += "<div>No away figures recorded for " + f.a + ", so no away expectation.</div>";
+    }
+    if (xt != null) {
+      heads += "<div>Gate <b>" + fmtN(g.t) + "</b> · ~" + ex10(xt) + " expected" + dl(g.t, xt) + "</div>";
+      charts += panel("Gate", f.h + "'s home Saturday 3pms (" + ptsT.length + ") by opponent distance · line = expected with " + f.a + " visiting",
+        svgScatter({ pts: ptsT, lo: H.lo, hi: H.hi, curve: x => H.S[f.h] * H.D(x) + A.S[f.a] * A.D(x), xMax,
+          mark: { mi: f.mi, y: g.t, exp: xt,
+            tip: "<b>This game</b> · gate " + fmtN(g.t) + " · " + f.mi + "mi",
+            expTip: "Expected ~" + ex10(xt) + " gate at " + f.mi + "mi" } }));
+    }
+    body.innerHTML = top("<b>" + f.day + "</b> " + f.t + " · " + f.h + " v " + f.a) +
+      '<div class="gxheads">' + heads + "</div>" + '<div class="gxcharts">' + charts + "</div>";
+    return;
   }
-  body.innerHTML = '<div class="gxheads">' + heads + "</div>" + charts;
+
+  /* Landing — the league's distance effect itself. */
+  const pts = [];
+  for (const c in A.per) for (const r of A.per[c]) pts.push({ mi: r.mi, y: r.y / A.S[c], tip: tipTxt(r) + " · " + (r.y / A.S[c]).toFixed(1) + "× usual" });
+  body.innerHTML = top("The league's distance effect") + '<div class="gxcharts gx1">' +
+    panel("Away support by distance", "every unpicked Saturday-3pm away crowd, as a multiple of the visiting club's usual take · tap a game or pick a club",
+      svgScatter({ pts, lo: A.lo, hi: A.hi, curve: A.D, refY: 1, W: 980, Hh: 300, fs: 13, yCap: 4, yFmt: v => (v % 1 ? v.toFixed(1) : v) + "×" })) +
+    "</div>";
 }
 
 /* Dot tips: every plotted glyph pairs with an invisible r13 hit circle
@@ -967,6 +1046,14 @@ function gxHideTip() { gxTip.hidden = true; if (gxHot) { gxHot.classList.remove(
   gs.addEventListener("pointerover", e => { const h = e.target.closest("[data-tip]"); if (h) gxShowTip(h); });
   gs.addEventListener("pointerout", e => { if (e.target.closest("[data-tip]")) gxHideTip(); });
   gs.addEventListener("click", e => { const h = e.target.closest("[data-tip]"); if (h) gxShowTip(h); else gxHideTip(); });
+  /* The club dropdown is rebuilt with the stage, so its change handler is
+     delegated here too. Choosing a club clears any tapped fixture. */
+  gs.addEventListener("change", e => {
+    if (e.target.id !== "gxClub") return;
+    gatesClub = e.target.value || null;
+    gatesOpen = null;
+    render();
+  });
 })();
 
 const niceCeil = v => {
@@ -983,11 +1070,13 @@ const kFmt = v => v >= 1000 ? (v / 1000) % 1 ? (v / 1000).toFixed(1) + "k" : (v 
    visible. Pass xMax to align stacked panels on one distance axis;
    xAxis:false suppresses the tick labels on the upper panel. */
 function svgScatter(o) {
-  const W = 680, Hh = o.Hh || 260, L = 44, R = 10, T = 10, B = o.xAxis === false ? 8 : 22;
+  const W = o.W || 460, Hh = o.Hh || 260, L = 44, R = 10, T = 10, B = 24;
   const iw = W - L - R, ih = Hh - T - B;
   const cp = [];
-  const a = Math.min(o.lo, o.mark ? o.mark.mi : o.lo), b = Math.max(o.hi, o.mark ? o.mark.mi : o.hi);
-  for (let i = 0; i <= 64; i++) { const x = a + (b - a) * i / 64; cp.push({ mi: x, y: o.curve(x) }); }
+  if (o.curve) {
+    const a = Math.min(o.lo, o.mark ? o.mark.mi : o.lo), b = Math.max(o.hi, o.mark ? o.mark.mi : o.hi);
+    for (let i = 0; i <= 64; i++) { const x = a + (b - a) * i / 64; cp.push({ mi: x, y: o.curve(x) }); }
+  }
   const xMax = o.xMax || Math.max(100, Math.ceil(Math.max(...o.pts.map(p => p.mi), o.mark ? o.mark.mi : 0) / 50) * 50);
   const ys = o.pts.map(p => p.y).concat(cp.map(p => p.y), o.mark && o.mark.y != null ? [o.mark.y] : [], o.mark ? [o.mark.exp] : []);
   let yTop = niceCeil(Math.max(...ys) * 1.05);
@@ -997,7 +1086,9 @@ function svgScatter(o) {
   const fmt = o.yFmt || kFmt;
   const X = mi => (L + mi / xMax * iw).toFixed(1), Y = v => (T + ih - v / yTop * ih).toFixed(1);
   const hit = (cx, cy, tip) => tip ? '<circle class="hit" cx="' + cx + '" cy="' + cy + '" r="13" data-tip="' + tip + '"/>' : "";
-  let s = '<svg viewBox="0 0 ' + W + " " + Hh + '" role="img">';
+  /* Tick text inherits the svg's font-size, so it holds a readable size
+     whatever width the panel renders at for its viewBox. */
+  let s = '<svg viewBox="0 0 ' + W + " " + Hh + '" style="font-size:' + (o.fs || 14) + 'px" role="img">';
   s += '<line class="axis" x1="' + L + '" y1="' + (T + ih) + '" x2="' + (W - R) + '" y2="' + (T + ih) + '"/>';
   for (const yv of [yTop / 2, yTop]) {
     s += '<line class="axis" opacity=".55" x1="' + L + '" y1="' + Y(yv) + '" x2="' + (W - R) + '" y2="' + Y(yv) + '"/>';
@@ -1005,18 +1096,16 @@ function svgScatter(o) {
   }
   if (o.refY != null)
     s += '<line class="refline" x1="' + L + '" y1="' + Y(o.refY) + '" x2="' + (W - R) + '" y2="' + Y(o.refY) + '"/>';
-  if (o.xAxis !== false) {
-    const xStep = xMax > 250 ? 100 : 50;
-    for (let xv = xStep; xv <= xMax; xv += xStep) {
-      const last = xv + xStep > xMax; /* anchored inboard: "300mi" was clipping */
-      s += '<text class="tick" x="' + (last ? W - 2 : X(xv)) + '" y="' + (T + ih + 16) + '" text-anchor="' + (last ? "end" : "middle") + '">' + xv + (last ? "mi" : "") + "</text>";
-    }
+  const xStep = xMax > 250 ? 100 : 50;
+  for (let xv = xStep; xv <= xMax; xv += xStep) {
+    const last = xv + xStep > xMax; /* anchored inboard: "300mi" was clipping */
+    s += '<text class="tick" x="' + (last ? W - 2 : X(xv)) + '" y="' + (T + ih + 18) + '" text-anchor="' + (last ? "end" : "middle") + '">' + xv + (last ? "mi" : "") + "</text>";
   }
   for (const p of o.pts) {
     const cx = X(p.mi), cy = Y(Math.min(p.y, yTop));
-    s += '<circle class="pt" cx="' + cx + '" cy="' + cy + '" r="3.5"/>' + hit(cx, cy, p.tip);
+    s += '<circle class="' + (p.k ? "pt picked" : "pt") + '" cx="' + cx + '" cy="' + cy + '" r="' + (p.k ? 4.2 : 3.5) + '"/>' + hit(cx, cy, p.tip);
   }
-  s += '<path class="curve" d="M' + cp.map(p => X(p.mi) + " " + Y(p.y)).join("L") + '"/>';
+  if (cp.length) s += '<path class="curve" d="M' + cp.map(p => X(p.mi) + " " + Y(p.y)).join("L") + '"/>';
   if (o.mark) {
     const mx = X(o.mark.mi);
     if (o.mark.y != null)
