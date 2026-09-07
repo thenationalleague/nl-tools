@@ -2,7 +2,15 @@
 <!--
   NL Tools — Broadcast selections (public standalone page)
   File: /broadcast-selections/index.html
-  v3.0 (07/09/2026)
+  v3.1 (07/09/2026)
+
+  v3.1 (07/09/2026) — Gates tab: every picked 25/26 NL game with its
+  gate and three deltas against Saturday-3pm normals (host's home fans,
+  away fans received, away fans the visitor brings). Attendance colours
+  invert — down red, up green (the By-club columns shipped backwards
+  and are fixed) — and all gate baselines tighten to unpicked Sat 3pm
+  only. The tab appears once the gates node loads, so 26/27 and the
+  artifact never show it.
 
   v3.0 (07/09/2026) — Two seasons and gates. 2025/26 joins the page
   (PL compSeason 777, EFL by date, NLS seasonID 2025; BST 26 Oct 2025 /
@@ -212,6 +220,7 @@
   <script>
     window.NL_TOOL = { title: "Broadcast Travel", toolKey: "pub-broadcast-selections", kicker: "The National League", isPortal: true };
     window.NL_CHANGELOG = [
+      { version: "v3.1", date: "07/09/2026", changes: ["Gates tab: per-fixture attendance verdicts against Saturday-3pm normals; attendance colours now read down-red up-green"] },
       { version: "v3.0", date: "07/09/2026", changes: ["2025/26 joins the page with a season switcher; NL gates and away-fan figures appear after sign-in"] },
       { version: "v2.16", date: "06/09/2026", changes: ["Venue switcher simplified to Away / Both"] },
       { version: "v2.15", date: "06/09/2026", changes: ["Venue switcher moved to sit over the map"] },
@@ -399,8 +408,10 @@
   #weekTable thead tr:first-child th:first-child, #divTable thead tr:first-child th:first-child, #clubTable thead tr:first-child th:first-child {
     position: sticky; left: 0; z-index: 3; background: var(--white); box-shadow: 1px 0 0 var(--border);
   }
-  #clubTable thead th { position: sticky; top: 0; z-index: 2; background: var(--white); white-space: nowrap; cursor: pointer; user-select: none; }
-  #clubTable thead th.sorted { color: var(--text); }
+  #clubTable thead th, #gatesTable thead th { position: sticky; top: 0; z-index: 2; background: var(--white); white-space: nowrap; cursor: pointer; user-select: none; }
+  #clubTable thead th.sorted, #gatesTable thead th.sorted { color: var(--text); }
+  #gatesTable td:first-child { white-space: nowrap; }
+  #gatesTable .dim { color: var(--text-muted); font-weight: 400; }
   #haBar, #seasonBar { display: flex; gap: 6px; }
   #haBar[hidden] { display: none; }
   #haBar button, #seasonBar button { appearance: none; background: var(--white); border: 1px solid var(--border); border-radius: 999px; color: var(--text-muted); font-family: var(--font); font-size: var(--text-xs); font-weight: 700; font-variation-settings: 'wght' 700; letter-spacing: var(--tracking-wide); text-transform: uppercase; padding: 5px 12px; cursor: pointer; }
@@ -437,6 +448,7 @@
         <button class="tab" id="mSeason">Full season</button>
         <button class="tab" id="mWeek">Week by week</button>
         <button class="tab" id="mClub">By club</button>
+        <button class="tab" id="mGates" hidden>Gates</button>
       </div>
       <div id="seasonBar" role="group" aria-label="Season">
         <button type="button" data-season="2025-26">2025/26</button>
@@ -446,6 +458,7 @@
     <div class="table-wrap" id="divWrap"><table id="divTable"></table></div>
     <div class="table-wrap scrollbox" id="weekWrap" hidden><table id="weekTable"></table></div>
     <div class="table-wrap scrollbox" id="clubWrap" hidden><table id="clubTable"></table></div>
+    <div class="table-wrap scrollbox" id="gatesWrap" hidden><table id="gatesTable"></table></div>
   </div>
   <div class="chip-group" id="divbar" role="group" aria-label="League shown on the map and cards"></div>
   <div class="gwbar" id="gwbar" role="tablist" aria-label="Weekend"></div>
@@ -496,20 +509,33 @@ try { const sk = localStorage.getItem("tbf-season"); if (SEASONS[sk]) SEASON_KEY
    home gates (hN) against its picked ones (hP), away fans brought
    likewise (aN/aP); midweek crowds stay out on purpose. */
 let GATES = null, gateStats = null;
+/* Baselines are strictly UNPICKED SATURDAY 3PM games (the 15:03 charity
+   delay counts): a crowd is slot-dependent, so bank-holiday rounds,
+   Boxing Day Fridays and Easter Mondays are no one's normal. Per club:
+   gN gates, hfN home fans (gate minus away, where away is recorded),
+   arN away fans received at their ground, brN away fans they bring.
+   hP/aP keep the picked-game figures for the By-club aggregates. */
+const sat3 = f => f.u && f.day.startsWith("Sat") && f.t >= "15:00" && f.t <= "15:05";
 function buildGateStats() {
   gateStats = null;
   if (!GATES || SEASON_KEY !== "2025-26") return;
   const agg = {};
+  const at = n => agg[n] || (agg[n] = { gN: [], hfN: [], arN: [], brN: [], hP: [], aP: [] });
   [...FX, ...UPX].forEach(f => {
     if (f.div !== "NL" || !f.gid || !GATES[f.gid]) return;
     const g = GATES[f.gid];
-    const H = agg[f.h] || (agg[f.h] = { hN: [], hP: [], aN: [], aP: [] });
-    const A = agg[f.a] || (agg[f.a] = { hN: [], hP: [], aN: [], aP: [] });
-    (f.u ? H.hN : H.hP).push(g.t);
-    if (g.a != null) (f.u ? A.aN : A.aP).push(g.a);
+    const H = at(f.h), A = at(f.a);
+    if (sat3(f)) {
+      H.gN.push(g.t);
+      if (g.a != null) { H.hfN.push(g.t - g.a); H.arN.push(g.a); A.brN.push(g.a); }
+    }
+    if (!f.u) { H.hP.push(g.t); if (g.a != null) A.aP.push(g.a); }
   });
   gateStats = agg;
 }
+/* Attendance colours run the other way to miles: down is red, up green. */
+const heatPctUp = v => heatPct(-v);
+const pctOf = (v, arr) => arr && arr.length ? Math.round((v / mean(arr) - 1) * 100) : null;
 window.__setGates = function (g) { GATES = g || null; buildGateStats(); render(); };
 function setSeason(k) {
   SEASON_KEY = k; DATA = SEASONS[k]; CLUBS = DATA.CLUBS; FX = DATA.FX;
@@ -528,7 +554,7 @@ let divSel = "ALL", weIdx = null, activeFx = -1, mode = "season", showUp = false
 /* Fresh visitors land on Week by week: with the stage following the tab,
    season mode opens on the bare fabric — a poor first screen. */
 try { mode = localStorage.getItem("tbf-mode") || "week"; } catch (e) {}
-if (!["season", "week", "club"].includes(mode)) mode = "season";
+if (!["season", "week", "club", "gates"].includes(mode)) mode = "season";
 /* By-club sort: column key + direction, tap a header to change. */
 let clubSort = { k: "vsBase", d: -1 };
 /* Slot columns count one venue at a time; away is the pertinent lens and
@@ -643,6 +669,7 @@ let dragMoved = false;
 document.getElementById("mSeason").addEventListener("click", () => { mode = "season"; try { localStorage.setItem("tbf-mode", mode); } catch (e) {} render(); });
 document.getElementById("mWeek").addEventListener("click", () => { mode = "week"; try { localStorage.setItem("tbf-mode", mode); } catch (e) {} render(); });
 document.getElementById("mClub").addEventListener("click", () => { mode = "club"; try { localStorage.setItem("tbf-mode", mode); } catch (e) {} render(); });
+document.getElementById("mGates").addEventListener("click", () => { mode = "gates"; try { localStorage.setItem("tbf-mode", mode); } catch (e) {} render(); });
 [...document.querySelectorAll("#seasonBar button")].forEach(b => b.addEventListener("click", () => {
   if (SEASON_KEY === b.dataset.season) return;
   setSeason(b.dataset.season);
@@ -697,6 +724,55 @@ function fmtNext(name, n) {
 function mean(a) { return a.reduce((s, v) => s + v, 0) / a.length; }
 function median(a) { const s = [...a].sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
 
+/* Gates — the attendance verdict, fixture by fixture: every picked NL
+   game with its gate and three deltas against Saturday-3pm normals —
+   the host's home fans, the away fans the host usually receives, and
+   the away fans the visitor usually brings. All three down = the slot
+   cost everyone. Down is red here; up is green. */
+let gatesSort = { k: "ms", d: 1 };
+function renderGatesTable() {
+  const gt = document.getElementById("gatesTable");
+  const st = gateStats || {};
+  const rows = FX.filter(f => f.div === "NL" && f.gid && GATES[f.gid]).map((f, i) => {
+    const g = GATES[f.gid];
+    const hf = g.a != null ? g.t - g.a : null;
+    return { ms: i, we: f.we, day: f.day, t: f.t, h: f.h, a: f.a, gate: g.t, away: g.a != null ? g.a : null,
+      gD: pctOf(g.t, st[f.h] && st[f.h].gN),
+      hD: hf === null ? null : pctOf(hf, st[f.h] && st[f.h].hfN),
+      rD: g.a == null ? null : pctOf(g.a, st[f.h] && st[f.h].arN),
+      bD: g.a == null ? null : pctOf(g.a, st[f.a] && st[f.a].brN) };
+  });
+  const val = (r, k) => (k === "h" ? r.h : (r[k] === null ? -999 : r[k]));
+  rows.sort((a, b) => {
+    const x = val(a, gatesSort.k), y = val(b, gatesSort.k);
+    const c = (typeof x === "string") ? x.localeCompare(y) : x - y;
+    return c ? c * gatesSort.d : a.ms - b.ms;
+  });
+  const COLS = [["ms", "Game", ""], ["gate", "Gate", "Attendance"],
+    ["gD", "Gate Δ", "Gate vs the host's Saturday-3pm average"],
+    ["hD", "Home Δ", "Home fans vs the host's Saturday-3pm average"],
+    ["rD", "Recv Δ", "Away fans vs what the host usually receives"],
+    ["bD", "Took Δ", "Away fans vs what the visitor usually brings"]];
+  const sgn = v => (v >= 0 ? "+" : "") + v + "%";
+  const dCell = v => '</td><td style="' + (v === null ? "" : heatPctUp(v)) + '">' + (v === null ? "—" : sgn(v));
+  gt.innerHTML = "<thead><tr>" + COLS.map(([k, label, tip]) =>
+    '<th data-k="' + k + '"' + (tip ? ' title="' + tip + '"' : "") +
+    (k === gatesSort.k ? ' class="sorted"' : "") + ">" + label + (k === gatesSort.k ? (gatesSort.d < 0 ? " ▾" : " ▴") : "") + "</th>"
+  ).join("") + "</tr></thead><tbody>" + rows.map(r =>
+    '<tr><td><b>' + r.day + "</b> " + r.t + " · " + r.h + " v " + r.a +
+    (r.away === null ? "" : ' <span class="dim">(' + r.away.toLocaleString("en-GB") + " away)</span>") +
+    "</td><td>" + r.gate.toLocaleString("en-GB") +
+    dCell(r.gD) + dCell(r.hD) + dCell(r.rD) + dCell(r.bD) +
+    "</td></tr>"
+  ).join("") + "</tbody>";
+  [...gt.querySelectorAll("thead th")].forEach(th => th.addEventListener("click", () => {
+    const k = th.dataset.k;
+    if (gatesSort.k === k) gatesSort.d = -gatesSort.d;
+    else gatesSort = { k, d: k === "ms" || k === "h" ? 1 : -1 };
+    renderGatesTable();
+  }));
+}
+
 /* By club — who gets the brunt. One row per club of the toggled league(s),
    zero-pick clubs included (an untouched club is part of the spread). Miles
    land on the AWAY side only, and means throughout — per-club samples are a
@@ -746,8 +822,8 @@ function renderClubTable() {
     r.avgMi = r.trips.length ? Math.round(mean(r.trips)) : null;
     r.vsBase = r.avgMi === null ? null : Math.round((r.avgMi - r.base) / r.base * 100);
     const gs = gateStats && gateStats[r.name];
-    r.gateD = gs && gs.hP.length && gs.hN.length ? Math.round((mean(gs.hP) / mean(gs.hN) - 1) * 100) : null;
-    r.awayD = gs && gs.aP.length && gs.aN.length ? Math.round((mean(gs.aP) / mean(gs.aN) - 1) * 100) : null;
+    r.gateD = gs && gs.hP.length && gs.gN.length ? Math.round((mean(gs.hP) / mean(gs.gN) - 1) * 100) : null;
+    r.awayD = gs && gs.aP.length && gs.brN.length ? Math.round((mean(gs.aP) / mean(gs.brN) - 1) * 100) : null;
   });
   const slotKeys = new Set(SLOTS.map(s => s[0]));
   const slotOf = (r, k) => clubHA === "both" ? r["a_" + k] + r["h_" + k] : r["a_" + k];
@@ -788,8 +864,8 @@ function renderClubTable() {
     liveSlots.map(s => { const v = slotOf(r, s[0]);
       return '</td><td style="' + (v ? heat(v, 0, slotHi[s[0]]) : "") + '">' + (v || "—"); }).join("") +
     (gateStats ?
-      '</td><td style="' + (r.gateD === null ? "" : heatPct(r.gateD)) + '">' + (r.gateD === null ? "—" : sign(r.gateD)) +
-      '</td><td style="' + (r.awayD === null ? "" : heatPct(r.awayD)) + '">' + (r.awayD === null ? "—" : sign(r.awayD))
+      '</td><td style="' + (r.gateD === null ? "" : heatPctUp(r.gateD)) + '">' + (r.gateD === null ? "—" : sign(r.gateD)) +
+      '</td><td style="' + (r.awayD === null ? "" : heatPctUp(r.awayD)) + '">' + (r.awayD === null ? "—" : sign(r.awayD))
       : "") +
     "</td></tr>"
   ).join("") + "</tbody>";
@@ -849,8 +925,9 @@ function render() {
   let fx;
   if (mode === "week") fx = shownFx(weIdx).concat(showUp ? shownUp(weIdx) : []);
   else if (mode === "club" && clubLens) fx = lensGames(FX).concat(showUp ? lensGames(UPX) : []);
+  else if (mode === "gates") fx = FX.filter(f => f.div === "NL");
   else fx = FX.filter(inDiv);
-  const fabric = mode !== "week" && !(mode === "club" && clubLens);
+  const fabric = mode !== "week" && !(mode === "club" && clubLens);   // gates mode: NL fabric
   const pos = fx.map(f => { const c = CLUBS[f.h]; const [x, y] = proj(c.lat, c.lng); return { x, y }; });
   for (let pass = 0; pass < 4; pass++) {
     for (let i = 0; i < pos.length; i++) for (let j = i + 1; j < pos.length; j++) {
@@ -973,8 +1050,8 @@ function render() {
     let gline = "";
     if (g) {
       const st = gateStats || {};
-      const hp = !f.u && st[f.h] && st[f.h].hN.length ? Math.round((g.t / mean(st[f.h].hN) - 1) * 100) : null;
-      const ap = !f.u && g.a != null && st[f.a] && st[f.a].aN.length ? Math.round((g.a / mean(st[f.a].aN) - 1) * 100) : null;
+      const hp = !f.u && st[f.h] && st[f.h].gN.length ? Math.round((g.t / mean(st[f.h].gN) - 1) * 100) : null;
+      const ap = !f.u && g.a != null && st[f.a] && st[f.a].brN.length ? Math.round((g.a / mean(st[f.a].brN) - 1) * 100) : null;
       const sgn = v => (v >= 0 ? "+" : "") + v + "%";
       gline = '<div class="gline">Gate <b>' + g.t.toLocaleString("en-GB") + "</b>" +
         (hp === null ? "" : " (" + sgn(hp) + " vs usual)") +
@@ -1000,7 +1077,7 @@ function render() {
   /* The strip above the map holds every stage control: unpicked toggle,
      venue switcher (club mode — it scopes the table's slot columns AND the
      lensed stage), and the Viewing chip. */
-  document.getElementById("upbar").hidden = mode === "season";
+  document.getElementById("upbar").hidden = mode === "season" || mode === "gates";
   upTog.hidden = mode === "club" && !clubLens;
   const chip = document.getElementById("lensChip");
   chip.hidden = !(mode === "club" && clubLens);
@@ -1008,17 +1085,24 @@ function render() {
 
   /* Picks vs the division season baseline — the whole season's picks,
      every division, whatever is toggled: this is the headline comparison. */
+  const mG = document.getElementById("mGates");
+  mG.hidden = !gateStats;
+  if (mode === "gates" && !gateStats) mode = "week";
   const mS = document.getElementById("mSeason"), mW = document.getElementById("mWeek"), mC = document.getElementById("mClub");
   mS.setAttribute("aria-pressed", String(mode === "season")); mS.classList.toggle("active", mode === "season");
   mW.setAttribute("aria-pressed", String(mode === "week")); mW.classList.toggle("active", mode === "week");
   mC.setAttribute("aria-pressed", String(mode === "club")); mC.classList.toggle("active", mode === "club");
+  mG.setAttribute("aria-pressed", String(mode === "gates")); mG.classList.toggle("active", mode === "gates");
   document.getElementById("divWrap").hidden = mode !== "season";
   document.getElementById("weekWrap").hidden = mode !== "week";
   document.getElementById("clubWrap").hidden = mode !== "club";
+  document.getElementById("gatesWrap").hidden = mode !== "gates";
   document.getElementById("haBar").hidden = mode !== "club";
   [...document.querySelectorAll("#haBar button")].forEach(b => b.setAttribute("aria-pressed", String(b.dataset.ha === clubHA)));
   [...document.querySelectorAll("#seasonBar button")].forEach(b => b.setAttribute("aria-pressed", String(b.dataset.season === SEASON_KEY)));
-  if (mode === "club") {
+  if (mode === "gates") {
+    renderGatesTable();
+  } else if (mode === "club") {
     renderClubTable();
   } else if (mode === "season") {
     const dt = document.getElementById("divTable");
