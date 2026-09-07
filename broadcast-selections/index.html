@@ -4,6 +4,11 @@
   File: /broadcast-selections/index.html
   v3.11 (07/09/2026)
 
+  v3.13 (07/09/2026) — Distances tab: every division's picks sorted
+  shortest to longest, dots climbing, area under each line = that
+  division's total broadcast travel. Five division-coloured curves,
+  end labels, legend with counts, tips, both seasons.
+
   v3.12 (07/09/2026) — Version badge in the topbar per canon (injected
   canon-styled, since the real badge is role-gated and this page is
   sessionless). Split-layout repair: the stage runs single-column
@@ -300,6 +305,7 @@
   <script>
     window.NL_TOOL = { title: "Broadcast Travel", toolKey: "pub-broadcast-selections", kicker: "The National League", isPortal: true };
     window.NL_CHANGELOG = [
+      { version: "v3.13", date: "07/09/2026", changes: ["Distances tab: every division's picks sorted shortest to longest — the area under each curve is its total broadcast travel"] },
       { version: "v3.12", date: "07/09/2026", changes: ["Version badge joins the title bar; season and Compare layout repaired — the map fills the right-hand column and division headers stay inside them"] },
       { version: "v3.11", date: "07/09/2026", changes: ["Full season columns sized equally, and Compare splits the 4-game Saturdays into rqst and Not rqst tiers"] },
       { version: "v3.10", date: "07/09/2026", changes: ["The build number now shows at the foot of the page"] },
@@ -571,15 +577,20 @@
   #gatesStage .gxfig b { font-variant-numeric: tabular-nums; }
   #gatesStage .gxsub, #rqWrap .gxsub { color: var(--text-muted); font-size: var(--text-xs); margin: 1px 0 5px; }
   /* Chart primitives are shared by the gates stage and the rqst strip. */
-  #gatesStage .notch, #rqStrip .notch { stroke: var(--text-muted); stroke-width: 1; opacity: .7; }
-  #gatesStage svg, #rqStrip svg { width: 100%; height: auto; display: block; }
-  #gatesStage .axis, #rqStrip .axis { stroke: var(--border); stroke-width: 1; }
-  #gatesStage .tick, #rqStrip .tick { fill: var(--text-muted); font-family: var(--font); }
+  #gatesStage .notch, #rqStrip .notch, #distWrap .notch { stroke: var(--text-muted); stroke-width: 1; opacity: .7; }
+  #gatesStage svg, #rqStrip svg, #distWrap svg { width: 100%; height: auto; display: block; }
+  #gatesStage .axis, #rqStrip .axis, #distWrap .axis { stroke: var(--border); stroke-width: 1; }
+  #gatesStage .tick, #rqStrip .tick, #distWrap .tick { fill: var(--text-muted); font-family: var(--font); }
   #gatesStage .pt, #rqStrip .pt { fill: var(--text-muted); opacity: .5; }
   #rqStrip .pt.faint { opacity: .28; }
   #gatesStage .pt.picked, #rqStrip .pt.picked { fill: var(--primary); opacity: .85; }
   #gatesStage .pt.hot, #rqStrip .pt.hot { fill: var(--primary); opacity: 1; }
-  #gatesStage .hit, #rqStrip .hit { fill: transparent; }
+  #gatesStage .hit, #rqStrip .hit, #distWrap .hit { fill: transparent; }
+  #distWrap .dcurve { fill: none; stroke-width: 2; opacity: .8; }
+  #distWrap .dpt { opacity: .75; }
+  #distWrap .distlab { font-weight: 800; }
+  #distWrap .dleg { display: flex; gap: 6px 18px; flex-wrap: wrap; margin: 2px 0 6px; font-size: var(--text-xs); font-weight: 700; font-variation-settings: 'wght' 700; }
+  #distWrap .dleg i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; font-style: normal; }
   #rqStrip .lanelab { font-weight: 700; fill: var(--text); }
   #rqStrip .meantick { stroke: var(--text); stroke-width: 2; opacity: .8; }
   #rqStrip { max-width: 700px; margin-top: 10px; }
@@ -631,6 +642,7 @@
         <button class="tab" id="mClub">By club</button>
         <button class="tab" id="mGates" hidden>Gates</button>
         <button class="tab" id="mRqst" hidden>Compare</button>
+        <button class="tab" id="mDist">Distances</button>
       </div>
       <div id="seasonBar" role="group" aria-label="Season">
         <button type="button" data-season="2025-26">2025/26</button>
@@ -642,6 +654,7 @@
     <div class="table-wrap scrollbox" id="clubWrap" hidden><table id="clubTable"></table></div>
     <div class="table-wrap scrollbox" id="gatesWrap" hidden><table id="gatesTable"></table></div>
     <div id="rqWrap" hidden><div class="table-wrap"><table id="rqTable"></table></div><div id="rqStrip"></div></div>
+    <div id="distWrap" hidden><div id="distChart"></div></div>
   </div>
   <div class="chip-group" id="divbar" role="group" aria-label="League shown on the map and cards"></div>
   <div class="gwbar" id="gwbar" role="tablist" aria-label="Weekend"></div>
@@ -804,7 +817,7 @@ let divSel = "ALL", weIdx = null, activeFx = -1, mode = "season", showUp = false
 /* Fresh visitors land on Week by week: with the stage following the tab,
    season mode opens on the bare fabric — a poor first screen. */
 try { mode = localStorage.getItem("tbf-mode") || "week"; } catch (e) {}
-if (!["season", "week", "club", "gates", "rqst"].includes(mode)) mode = "season";
+if (!["season", "week", "club", "gates", "rqst", "dist"].includes(mode)) mode = "season";
 /* By-club sort: column key + direction, tap a header to change. */
 let clubSort = { k: "vsBase", d: -1 };
 /* Slot columns count one venue at a time; away is the pertinent lens and
@@ -921,6 +934,7 @@ document.getElementById("mWeek").addEventListener("click", () => { mode = "week"
 document.getElementById("mClub").addEventListener("click", () => { mode = "club"; try { localStorage.setItem("tbf-mode", mode); } catch (e) {} render(); });
 document.getElementById("mGates").addEventListener("click", () => { mode = "gates"; try { localStorage.setItem("tbf-mode", mode); } catch (e) {} render(); });
 document.getElementById("mRqst").addEventListener("click", () => { mode = "rqst"; try { localStorage.setItem("tbf-mode", mode); } catch (e) {} render(); });
+document.getElementById("mDist").addEventListener("click", () => { mode = "dist"; try { localStorage.setItem("tbf-mode", mode); } catch (e) {} render(); });
 [...document.querySelectorAll("#seasonBar button")].forEach(b => b.addEventListener("click", () => {
   if (SEASON_KEY === b.dataset.season) return;
   setSeason(b.dataset.season);
@@ -1195,6 +1209,48 @@ document.addEventListener("change", e => {
   gatesOpen = null;
   render();
 });
+
+/* Distances — every division's picks sorted shortest to longest, dots
+   climbing left to right. x is the game count and y the trip, so the
+   area under each line IS that division's total broadcast travel, per
+   Richard: L1's derbies hug the floor for forty games; the NL leaves
+   the floor almost immediately and ends in the three hundreds. */
+function renderDistCurves() {
+  const small = window.matchMedia("(max-width: 840px)").matches;
+  const W = small ? 460 : 1200, Hh = small ? 400 : 480, L = 46, R = 36, T = 14, B = 32;
+  const iw = W - L - R, ih = Hh - T - B;
+  const series = Object.keys(DIVS).map(k => ({ k, col: DIVMETA[k].col,
+    fx: FX.filter(f => f.div === k).slice().sort((a, b) => a.mi - b.mi) })).filter(sr => sr.fx.length);
+  const xMax = Math.max(...series.map(sr => sr.fx.length));
+  const yTop = niceCeil(Math.max(...series.map(sr => sr.fx[sr.fx.length - 1].mi)) * 1.05);
+  const X = i => +(L + i / xMax * iw).toFixed(1), Y = v => +(T + ih - v / yTop * ih).toFixed(1);
+  let svg = '<svg viewBox="0 0 ' + W + " " + Hh + '" style="font-size:' + (small ? 13 : 14) + 'px" role="img">';
+  svg += '<line class="axis" x1="' + L + '" y1="' + (T + ih) + '" x2="' + (W - R) + '" y2="' + (T + ih) + '"/>';
+  svg += '<line class="axis" x1="' + L + '" y1="' + T + '" x2="' + L + '" y2="' + (T + ih) + '"/>';
+  for (const yv of [yTop / 2, yTop]) {
+    svg += '<line class="axis" opacity=".55" x1="' + L + '" y1="' + Y(yv) + '" x2="' + (W - R) + '" y2="' + Y(yv) + '"/>';
+    svg += '<text class="tick" x="' + (L - 6) + '" y="' + (Y(yv) + 4) + '" text-anchor="end">' + yv + "mi</text>";
+  }
+  svg += '<text class="tick" x="' + L + '" y="' + (T + ih + 20) + '" text-anchor="middle">0</text>';
+  for (let xv = 20; xv <= xMax; xv += 20) {
+    svg += '<line class="notch" x1="' + X(xv) + '" y1="' + (T + ih) + '" x2="' + X(xv) + '" y2="' + (T + ih + 4) + '"/>';
+    svg += '<text class="tick" x="' + X(xv) + '" y="' + (T + ih + 20) + '" text-anchor="middle">' + xv + (xv + 20 > xMax ? " games" : "") + "</text>";
+  }
+  series.forEach(sr => {
+    const pts = sr.fx.map((f, i) => ({ x: X(i + 1), y: Y(f.mi), f }));
+    svg += '<path class="dcurve" stroke="' + sr.col + '" d="M' + pts.map(pt => pt.x + " " + pt.y).join("L") + '"/>';
+    pts.forEach(pt => {
+      svg += '<circle class="dpt" fill="' + sr.col + '" cx="' + pt.x + '" cy="' + pt.y + '" r="3"/>' +
+        '<circle class="hit" cx="' + pt.x + '" cy="' + pt.y + '" r="8" data-tip="<b>' + pt.f.day + "</b> " + pt.f.t + " · " + pt.f.h + " v " + pt.f.a + " · " + pt.f.mi + "mi · " + DIVS[sr.k] + '"/>';
+    });
+    const last = pts[pts.length - 1];
+    svg += '<text class="tick distlab" fill="' + sr.col + '" x="' + (last.x + 6) + '" y="' + (last.y - 8) + '">' + sr.k + "</text>";
+  });
+  svg += "</svg>";
+  document.getElementById("distChart").innerHTML =
+    '<div class="dleg">' + series.map(sr => '<span><i style="background:' + sr.col + '"></i>' + DIVS[sr.k] + " · " + sr.fx.length + "</span>").join("") + "</div>" + svg +
+    '<div class="gxsub">every pick, sorted shortest trip to longest · the area under each line is that division\'s total broadcast miles · tap a dot for the game</div>';
+}
 
 /* The rqst tab: baseline vs broadcast vs request, per Richard. Three
    tiers, one mile axis. Weekend fixtures is every weekend league game in
@@ -1641,7 +1697,7 @@ function render() {
   /* The strip above the map holds every stage control: unpicked toggle,
      venue switcher (club mode — it scopes the table's slot columns AND the
      lensed stage), and the Viewing chip. */
-  document.getElementById("upbar").hidden = mode === "season" || mode === "gates" || mode === "rqst";
+  document.getElementById("upbar").hidden = mode === "season" || mode === "gates" || mode === "rqst" || mode === "dist";
   upTog.hidden = mode === "club" && !clubLens;
   const chip = document.getElementById("lensChip");
   chip.hidden = !(mode === "club" && clubLens);
@@ -1657,6 +1713,8 @@ function render() {
   mR.hidden = !hasRq;
   if (mode === "rqst" && !hasRq) mode = "week";
   mR.setAttribute("aria-pressed", String(mode === "rqst")); mR.classList.toggle("active", mode === "rqst");
+  const mD = document.getElementById("mDist");
+  mD.setAttribute("aria-pressed", String(mode === "dist")); mD.classList.toggle("active", mode === "dist");
   document.querySelector(".page").classList.toggle("page--split", mode === "season" || mode === "rqst");
   const mS = document.getElementById("mSeason"), mW = document.getElementById("mWeek"), mC = document.getElementById("mClub");
   mS.setAttribute("aria-pressed", String(mode === "season")); mS.classList.toggle("active", mode === "season");
@@ -1668,13 +1726,14 @@ function render() {
   document.getElementById("clubWrap").hidden = mode !== "club";
   document.getElementById("gatesWrap").hidden = mode !== "gates";
   document.getElementById("rqWrap").hidden = mode !== "rqst";
+  document.getElementById("distWrap").hidden = mode !== "dist";
   document.getElementById("haBar").hidden = mode !== "club";
   /* Gates mode swaps the whole stage: the chart card replaces the map,
      cards and league chips (this tab is NL-only, the chips do nothing). */
   document.getElementById("gatesStage").hidden = mode !== "gates";
-  document.querySelector(".mapbox").hidden = mode === "gates";
-  document.querySelector(".sched").hidden = mode === "gates";
-  divbar.hidden = mode === "gates" || mode === "rqst";
+  document.querySelector(".mapbox").hidden = mode === "gates" || mode === "dist";
+  document.querySelector(".sched").hidden = mode === "gates" || mode === "dist";
+  divbar.hidden = mode === "gates" || mode === "rqst" || mode === "dist";
   [...document.querySelectorAll("#haBar button")].forEach(b => b.setAttribute("aria-pressed", String(b.dataset.ha === clubHA)));
   [...document.querySelectorAll("#seasonBar button")].forEach(b => b.setAttribute("aria-pressed", String(b.dataset.season === SEASON_KEY)));
   if (mode === "gates") {
@@ -1682,6 +1741,8 @@ function render() {
     renderGatesStage();
   } else if (mode === "rqst") {
     renderRqstPanel();
+  } else if (mode === "dist") {
+    renderDistCurves();
   } else if (mode === "club") {
     renderClubTable();
   } else if (mode === "season") {
