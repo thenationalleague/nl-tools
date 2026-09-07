@@ -4,6 +4,10 @@
   File: /broadcast-selections/index.html
   v3.11 (07/09/2026)
 
+  v3.15 (07/09/2026) — Lit divisions read as lit: legend chip and end
+  label fill in the division colour, unlit curves dim while anything
+  is lit. Grid densifies: labelled lines every 100mi / 0.5×.
+
   v3.14 (07/09/2026) — Distances: tap a division to light the area
   under its curve (persistent, stackable, hover previews), and a
   Miles / × base switcher that divides every trip by the division's
@@ -310,6 +314,7 @@
   <script>
     window.NL_TOOL = { title: "Broadcast Travel", toolKey: "pub-broadcast-selections", kicker: "The National League", isPortal: true };
     window.NL_CHANGELOG = [
+      { version: "v3.15", date: "07/09/2026", changes: ["Distances: lit divisions colour their legend chip and end label, and the other curves dim while anything is lit"] },
       { version: "v3.14", date: "07/09/2026", changes: ["Distances: tap a division to light its area, and a × base view that prices in each division's own geography"] },
       { version: "v3.13", date: "07/09/2026", changes: ["Distances tab: every division's picks sorted shortest to longest — the area under each curve is its total broadcast travel"] },
       { version: "v3.12", date: "07/09/2026", changes: ["Version badge joins the title bar; season and Compare layout repaired — the map fills the right-hand column and division headers stay inside them"] },
@@ -598,8 +603,13 @@
   #distWrap .dtop { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; margin: 2px 0 6px; }
   #distWrap .dleg { display: flex; gap: 6px 18px; flex-wrap: wrap; font-size: var(--text-xs); font-weight: 700; font-variation-settings: 'wght' 700; }
   #distWrap .dleg [data-dk], #distWrap .distlab { cursor: pointer; }
+  #distWrap .dleg [data-dk] { padding: 2px 9px; border-radius: var(--radius-pill); transition: background .15s, color .15s; }
   #distWrap .dfill { opacity: 0; transition: opacity .15s; pointer-events: none; }
   #distWrap .dfill.prev, #distWrap .dfill.on { opacity: .22; }
+  #distWrap .dser { transition: opacity .15s; }
+  #distWrap .dser.dim { opacity: .3; }
+  #distWrap .dlabbg { opacity: 0; transition: opacity .15s; }
+  #distWrap .dlabbg.on { opacity: 1; }
   #distWrap .dleg i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; font-style: normal; }
   #rqStrip .lanelab { font-weight: 700; fill: var(--text); }
   #rqStrip .meantick { stroke: var(--text); stroke-width: 2; opacity: .8; }
@@ -1249,7 +1259,10 @@ function renderDistCurves() {
   let svg = '<svg viewBox="0 0 ' + W + " " + Hh + '" style="font-size:' + (small ? 13 : 14) + 'px" role="img">';
   svg += '<line class="axis" x1="' + L + '" y1="' + (T + ih) + '" x2="' + (W - R) + '" y2="' + (T + ih) + '"/>';
   svg += '<line class="axis" x1="' + L + '" y1="' + T + '" x2="' + L + '" y2="' + (T + ih) + '"/>';
-  for (const yv of [yTop / 2, yTop]) {
+  /* Dense labelled grid, per Richard: every 100 miles, every 0.5× — so
+     the 1× floor is always a named line, not an anonymous dash. */
+  const yStep = rel ? 0.5 : 100;
+  for (let yv = yStep; yv <= yTop + 1e-9; yv += yStep) {
     svg += '<line class="axis" opacity=".55" x1="' + L + '" y1="' + Y(yv) + '" x2="' + (W - R) + '" y2="' + Y(yv) + '"/>';
     svg += '<text class="tick" x="' + (L - 6) + '" y="' + (Y(yv) + 4) + '" text-anchor="end">' + yFmt(yv) + "</text>";
   }
@@ -1264,12 +1277,13 @@ function renderDistCurves() {
     const pts = sr.fx.map((f, i) => ({ x: X(i + 1), y: Y(val(sr, f)), f }));
     fills += '<path class="dfill' + (distFills.has(sr.k) ? " on" : "") + '" data-fk="' + sr.k + '" fill="' + sr.col + '" d="M' + X(1) + " " + (T + ih) +
       "L" + pts.map(pt => pt.x + " " + pt.y).join("L") + "L" + pts[pts.length - 1].x + " " + (T + ih) + 'Z"/>';
-    lines += '<path class="dcurve" stroke="' + sr.col + '" d="M' + pts.map(pt => pt.x + " " + pt.y).join("L") + '"/>';
+    lines += '<g class="dser" data-sk="' + sr.k + '"><path class="dcurve" stroke="' + sr.col + '" d="M' + pts.map(pt => pt.x + " " + pt.y).join("L") + '"/>';
     pts.forEach(pt => {
       lines += '<circle class="dpt" fill="' + sr.col + '" cx="' + pt.x + '" cy="' + pt.y + '" r="3"/>' +
         '<circle class="hit" cx="' + pt.x + '" cy="' + pt.y + '" r="8" data-tip="<b>' + pt.f.day + "</b> " + pt.f.t + " · " + pt.f.h + " v " + pt.f.a + " · " + pt.f.mi + "mi" +
         (rel ? " · " + (pt.f.mi / sr.base.mean).toFixed(1) + "× base" : "") + " · " + DIVS[sr.k] + '"/>';
     });
+    lines += "</g>";
     const last = pts[pts.length - 1];
     sr.lab = { x: last.x + 6, y: last.y - 8 };
   });
@@ -1280,22 +1294,43 @@ function renderDistCurves() {
     return sr.lab;
   }, null);
   series.forEach(sr => {
-    lines += '<text class="tick distlab" data-dk="' + sr.k + '" fill="' + sr.col + '" x="' + sr.lab.x + '" y="' + sr.lab.y + '">' + sr.k + "</text>";
+    lines += '<rect class="dlabbg" data-dk="' + sr.k + '" x="' + (sr.lab.x - 5) + '" y="' + (sr.lab.y - 14) + '" width="' + (sr.k.length * 9 + 10) + '" height="19" rx="4" fill="' + sr.col + '"/>' +
+      '<text class="tick distlab" data-dk="' + sr.k + '" data-col="' + sr.col + '" data-tc="' + textFor(sr.col) + '" fill="' + sr.col + '" x="' + sr.lab.x + '" y="' + sr.lab.y + '">' + sr.k + "</text>";
   });
   svg += fills + lines + "</svg>";
   document.getElementById("distChart").innerHTML =
     '<div class="dtop"><div class="dleg">' + series.map(sr =>
-      '<span data-dk="' + sr.k + '" role="button" tabindex="0"><i style="background:' + sr.col + '"></i>' + DIVS[sr.k] + " · " + sr.fx.length + "</span>").join("") + "</div>" +
+      '<span data-dk="' + sr.k + '" data-col="' + sr.col + '" data-tc="' + textFor(sr.col) + '" role="button" tabindex="0"><i style="background:' + sr.col + '"></i>' + DIVS[sr.k] + " · " + sr.fx.length + "</span>").join("") + "</div>" +
     '<div id="distModeBar" role="group" aria-label="Scale">' +
       '<button type="button" data-dm="mi" aria-pressed="' + !rel + '">Miles</button>' +
       '<button type="button" data-dm="rel" aria-pressed="' + rel + '">× base</button></div></div>' + svg +
     '<div class="gxsub">' + (rel
       ? "every pick as a multiple of its division\'s own average possible pairing — geography priced in; above the 1× line is picking · tap a division to light its area · tap a dot for the game"
       : "every pick, sorted shortest trip to longest · the area under each line is that division\'s total broadcast miles · tap a division to light its area · tap a dot for the game") + "</div>";
+  applyDistState();
+}
+/* One place owns the on/off look: lit divisions fill their legend chip
+   and end label in their colour, unlit curves dim while anything is lit
+   — so what is on and off reads at a glance, per Richard. */
+function applyDistState() {
+  const dc = document.getElementById("distChart");
+  const any = distFills.size > 0;
+  dc.querySelectorAll(".dfill").forEach(f => f.classList.toggle("on", distFills.has(f.getAttribute("data-fk"))));
+  dc.querySelectorAll("g.dser").forEach(g => g.classList.toggle("dim", any && !distFills.has(g.getAttribute("data-sk"))));
+  dc.querySelectorAll(".dlabbg").forEach(r => r.classList.toggle("on", distFills.has(r.getAttribute("data-dk"))));
+  dc.querySelectorAll("text.distlab").forEach(t => {
+    const on = distFills.has(t.getAttribute("data-dk"));
+    t.setAttribute("fill", on ? t.getAttribute("data-tc") : t.getAttribute("data-col"));
+  });
+  dc.querySelectorAll(".dleg [data-dk]").forEach(sp => {
+    const on = distFills.has(sp.dataset.dk);
+    sp.classList.toggle("on", on);
+    sp.style.background = on ? sp.dataset.col : "";
+    sp.style.color = on ? sp.dataset.tc : "";
+  });
 }
 (function () {
   const dc = document.getElementById("distChart");
-  const fillsOf = k => dc.querySelectorAll('.dfill[data-fk="' + k + '"]');
   dc.addEventListener("click", e => {
     const dm = e.target.closest("[data-dm]");
     if (dm) { distMode = dm.dataset.dm; try { localStorage.setItem("tbf-dm", distMode); } catch (err) {} render(); return; }
@@ -1303,8 +1338,9 @@ function renderDistCurves() {
     if (!t) return;
     const k = t.dataset.dk;
     distFills.has(k) ? distFills.delete(k) : distFills.add(k);
-    fillsOf(k).forEach(f => f.classList.toggle("on", distFills.has(k)));
+    applyDistState();
   });
+  const fillsOf = k => dc.querySelectorAll('.dfill[data-fk="' + k + '"]');
   dc.addEventListener("pointerover", e => { const t = e.target.closest("[data-dk]"); if (t) fillsOf(t.dataset.dk).forEach(f => f.classList.add("prev")); });
   dc.addEventListener("pointerout", e => { const t = e.target.closest("[data-dk]"); if (t) fillsOf(t.dataset.dk).forEach(f => f.classList.remove("prev")); });
 })();
