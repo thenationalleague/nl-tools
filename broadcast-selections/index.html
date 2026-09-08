@@ -4,6 +4,10 @@
   File: /broadcast-selections/index.html
   v3.11 (07/09/2026)
 
+  v3.25 (08/09/2026) — Chart audit: Gates landing fills its card with
+  true-size text, its 1× line is labelled, panel subtitles get a
+  two-line floor so side-by-side plots start level.
+
   v3.24 (08/09/2026) — Distances y margin computed from the widest tick
   label so × base ticks clear the rotated axis name.
 
@@ -348,6 +352,7 @@
   <script>
     window.NL_TOOL = { title: "Broadcast Travel", toolKey: "pub-broadcast-selections", kicker: "The National League", isPortal: true };
     window.NL_CHANGELOG = [
+      { version: "v3.25", date: "08/09/2026", changes: ["Gates landing chart fills its card, its 1× line is named, and side-by-side panels start level"] },
       { version: "v3.24", date: "08/09/2026", changes: ["Distances y-axis labels no longer touch the axis name — the margin now fits the widest label"] },
       { version: "v3.23", date: "07/09/2026", changes: ["Distances chart tidied: centred title, controls under the chart, vertical y name, centred x name, labels sitting in their pills, lit chips keep their colour dot"] },
       { version: "v3.22", date: "07/09/2026", changes: ["Distances chart titled and its axes named; shorter above the base table", "Base pills match the table's row order and At-or-below shows its share"] },
@@ -638,7 +643,14 @@
   /* Width caps keep panel height in check so table + charts share a 16:9
      screen; the single landing chart may run wider than the pairs. */
   #gatesStage figure { margin: 8px 0 0; min-width: 0; max-width: 540px; }
-  #gatesStage .gx1 figure { max-width: 760px; }
+  /* The landing is the card's only content and its viewBox tracks the
+     stage width — the 540px panel cap must not apply to it. */
+  #gatesStage .gx1 figure { max-width: none; }
+  /* Landing figure fills the card — a 760px cap left half the stage
+     empty at desktop (audit, 08/09). Panel subs get a two-line floor in
+     the side-by-side grid so sibling plots start level whether their
+     subtitle wraps or not. */
+  @media (min-width: 841px) { #gatesStage .gxcharts .gxsub { min-height: 3em; } }
   #gatesStage .gxt, #distWrap .gxt { font-size: var(--text-sm); font-weight: 800; font-variation-settings: 'wght' 800; letter-spacing: var(--tracking-tight); text-transform: uppercase; }
   #gatesStage .gxfig { font-size: var(--text-base); margin: 2px 0 0; }
   #gatesStage .gxfig b { font-variant-numeric: tabular-nums; }
@@ -1279,7 +1291,12 @@ function renderGatesStage() {
   for (const c in A.per) for (const r of A.per[c]) pts.push({ mi: r.mi, y: r.y / A.S[c], tip: tipTxt(r) + " · " + (r.y / A.S[c]).toFixed(1) + "× usual" });
   body.innerHTML = top("The league's distance effect") + '<div class="gxcharts gx1">' +
     panel("Away support by distance", "", "every unpicked Saturday-3pm away crowd, as a multiple of the visiting club's usual take · tap a game or pick a club",
-      svgScatter({ pts, lo: A.lo, hi: A.hi, curve: A.D, refY: 1, W: window.matchMedia("(max-width: 840px)").matches ? 460 : 980, Hh: 300, fs: 13, yCap: 4, yFmt: v => (v % 1 ? v.toFixed(1) : v) + "×" })) +
+      svgScatter({ pts, lo: A.lo, hi: A.hi, curve: A.D, refY: 1,
+        /* viewBox width tracks the stage so the chart renders ~1:1 and
+           tick text stays true-size — a fixed 980 stretched fat once
+           the 760px figure cap went. */
+        W: window.matchMedia("(max-width: 840px)").matches ? 460 : Math.min(1500, Math.max(760, body.clientWidth - 4)),
+        Hh: 300, fs: 13, yCap: 4, yFmt: v => (v % 1 ? v.toFixed(1) : v) + "×" })) +
     "</div>";
 }
 
@@ -1624,8 +1641,11 @@ function svgScatter(o) {
     s += '<line class="axis" opacity=".55" x1="' + L + '" y1="' + Y(yv) + '" x2="' + (W - R) + '" y2="' + Y(yv) + '"/>';
     s += '<text class="tick" x="' + (L - 6) + '" y="' + (+Y(yv) + 4) + '" text-anchor="end">' + fmt(yv) + "</text>";
   }
-  if (o.refY != null)
+  if (o.refY != null) {
     s += '<line class="refline" x1="' + L + '" y1="' + Y(o.refY) + '" x2="' + (W - R) + '" y2="' + Y(o.refY) + '"/>';
+    /* The reference is a named line, same rule as the Distances 1×. */
+    s += '<text class="tick" x="' + (L - 6) + '" y="' + (+Y(o.refY) + 4) + '" text-anchor="end">' + fmt(o.refY) + "</text>";
+  }
   const xStep = xMax > 250 ? 100 : 50;
   s += '<text class="tick" x="' + L + '" y="' + (T + ih + 18) + '" text-anchor="middle">0</text>';
   for (let xv = xStep; xv <= xMax; xv += xStep) {
