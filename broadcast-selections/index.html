@@ -4,6 +4,9 @@
   File: /broadcast-selections/index.html
   v3.11 (07/09/2026)
 
+  v3.24 (08/09/2026) — Distances y margin computed from the widest tick
+  label so × base ticks clear the rotated axis name.
+
   v3.23 (07/09/2026) — Distances chart furniture rebuilt: title centred,
   controls below the chart, y name vertical, x name centred, end-label
   pills measured not estimated, lit chip keeps its colour dot.
@@ -345,6 +348,7 @@
   <script>
     window.NL_TOOL = { title: "Broadcast Travel", toolKey: "pub-broadcast-selections", kicker: "The National League", isPortal: true };
     window.NL_CHANGELOG = [
+      { version: "v3.24", date: "08/09/2026", changes: ["Distances y-axis labels no longer touch the axis name — the margin now fits the widest label"] },
       { version: "v3.23", date: "07/09/2026", changes: ["Distances chart tidied: centred title, controls under the chart, vertical y name, centred x name, labels sitting in their pills, lit chips keep their colour dot"] },
       { version: "v3.22", date: "07/09/2026", changes: ["Distances chart titled and its axes named; shorter above the base table", "Base pills match the table's row order and At-or-below shows its share"] },
       { version: "v3.21", date: "07/09/2026", changes: ["Distances: choose the base — mean (default) or median — and the 1× line, shading and counts all follow"] },
@@ -1325,8 +1329,7 @@ function renderDistCurves() {
   const small = window.matchMedia("(max-width: 840px)").matches;
   /* Shorter now the base table sits beneath; T and B hold the named
      axes — a y title top-left, "games" under the right of the x. */
-  const W = small ? 460 : 1200, Hh = small ? 340 : 360, L = 46, R = 36, T = 28, B = 42;
-  const iw = W - L - R, ih = Hh - T - B;
+  const W = small ? 460 : 1200, Hh = small ? 340 : 360, R = 36, T = 28, B = 42;
   const rel = distMode === "rel";
   const series = Object.keys(DIVS).map(k => ({ k, col: DIVMETA[k].col, base: DATA.BASE[k],
     fx: FX.filter(f => f.div === k).slice().sort((a, b) => a.mi - b.mi) }))
@@ -1335,8 +1338,16 @@ function renderDistCurves() {
   const val = (sr, f) => rel ? f.mi / bOf(sr) : f.mi;
   const xMax = Math.max(...series.map(sr => sr.fx.length));
   const yTop = niceCeil(Math.max(...series.map(sr => val(sr, sr.fx[sr.fx.length - 1]))) * 1.05);
-  const X = i => +(L + i / xMax * iw).toFixed(1), Y = v => +(T + ih - v / yTop * ih).toFixed(1);
   const yFmt = v => rel ? (v % 1 ? v.toFixed(1) : v) + "×" : String(v);
+  /* The left margin is a computed lane, not a constant: 17 for the
+     rotated axis name, then the WIDEST tick label at 8px/char, then
+     air. A hardcoded 46 was what let "0.5×" run into the axis name. */
+  const yStep = rel ? 0.5 : 100;
+  let tickChars = 1;
+  for (let yv = yStep; yv <= yTop + 1e-9; yv += yStep) tickChars = Math.max(tickChars, String(yFmt(yv)).length);
+  const L = 17 + tickChars * 8 + 8;
+  const iw = W - L - R, ih = Hh - T - B;
+  const X = i => +(L + i / xMax * iw).toFixed(1), Y = v => +(T + ih - v / yTop * ih).toFixed(1);
   let svg = '<svg viewBox="0 0 ' + W + " " + Hh + '" style="font-size:' + (small ? 13 : 14) + 'px" role="img">';
   /* Axis names where a reader expects them: the y name rotated down the
      side, centred on the plot; the x name centred under the axis. */
@@ -1347,7 +1358,6 @@ function renderDistCurves() {
   svg += '<line class="axis" x1="' + L + '" y1="' + T + '" x2="' + L + '" y2="' + (T + ih) + '"/>';
   /* Dense labelled grid, per Richard: every 100 miles, every 0.5× — so
      the 1× floor is always a named line, not an anonymous dash. */
-  const yStep = rel ? 0.5 : 100;
   for (let yv = yStep; yv <= yTop + 1e-9; yv += yStep) {
     svg += '<line class="axis" opacity=".55" x1="' + L + '" y1="' + Y(yv) + '" x2="' + (W - R) + '" y2="' + Y(yv) + '"/>';
     svg += '<text class="tick" x="' + (L - 6) + '" y="' + (Y(yv) + 4) + '" text-anchor="end">' + yFmt(yv) + "</text>";
