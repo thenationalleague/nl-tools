@@ -3,6 +3,8 @@
 <head>
 <!--
   UW Promo Codes — Club point-of-sale redemption page
+  Version: v6.6 (09/09/2026) — resume falls back to the gate on any
+           failure; /uw-promo/* joins _headers no-cache.
   Version: v6.5 (09/09/2026) — the MANAGER door remembers its session
            (resume on load; Sign out / "Not you?" forgets, so a shared
            device never resumes as the manager). The till PIN is demanded
@@ -629,11 +631,14 @@
        the till asks on every visit — nothing is ever stored for it — but
        the manager view is a laptop surface and keeps its session). */
     document.getElementById('gateSub').textContent = 'Signing you back in…';
-    UWP.resume('club').then(function (session) {
-      if (unlocked) return;
-      if (session && session.role === 'manager') { enter(session); return; }
-      showGateForm(linkClubName());
-    });
+    /* Worst case must be the gate, never a page stuck mid-sentence. */
+    Promise.resolve().then(function () { return UWP.resume('club'); })
+      .then(function (session) {
+        if (unlocked) return;
+        if (session && session.role === 'manager') { enter(session); return; }
+        showGateForm(linkClubName());
+      })
+      .catch(function () { if (!unlocked) showGateForm(linkClubName()); });
   }
   /* clubs-meta only decides the crest, so a failure to load it must still
      open the gate — hence the same handler on both paths. */
