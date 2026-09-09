@@ -209,6 +209,61 @@ function makeTrigger(ROOT, name) {
           return grant({ ok: true, passcode: pin });
         }
 
+        /* ---- Manager choosing the club's route (spec v43 §1–3) ---------- */
+        /* Same authorisation model as rotatePin: the request path is keyed on
+           the caller's uid and `uw-<CODE>-manager` is a uid only this function
+           mints. The route LOCKS on save — after that, only the NL master or
+           UW consoles can change it (§4), so a repeat request is refused.
+           The tick-boxes are the gate, not the description: all of the
+           route's undertakings must arrive true, and at least one complete
+           scheme contact with them. Evidence goes to the append-only audit. */
+        if (req.chooseRoute) {
+          const m = /^uw-(.+)-manager$/.exec(uid);
+          if (!m) return grant({ ok: false, error: "Sign in with the manager passcode first." });
+          const key = m[1];
+          const rec = clubs[key];
+          if (!rec) return grant({ ok: false, error: "Club not recognised." });
+          const cur = rec.route === "instore" || rec.route === "online" ? rec.route : "unassigned";
+          if (cur !== "unassigned") {
+            return grant({ ok: false, error: "Your route is already set. Contact the National League to change it." });
+          }
+          const route = req.chooseRoute;
+          if (route !== "instore" && route !== "online") {
+            return grant({ ok: false, error: "Choose a route." });
+          }
+          const ticks = req.ticks || {};
+          const REQUIRED = 5;                       // §2: five undertakings per route
+          const ticked = Object.keys(ticks).filter((k) => ticks[k] === true).length;
+          if (ticked < REQUIRED) {
+            return grant({ ok: false, error: "Please confirm every requirement for this route." });
+          }
+          const contacts = Array.isArray(req.contacts) ? req.contacts.filter((c) =>
+            c && String(c.name || "").trim() && String(c.role || "").trim() &&
+            /.+@.+\..+/.test(String(c.email || ""))) : [];
+          if (!contacts.length) {
+            return grant({ ok: false, error: "Add at least one scheme contact — name, role and email." });
+          }
+          await db.ref(ROOT + "/config/clubs/" + key).update({ route, updatedAt: Date.now() });
+          await db.ref(ROOT + "/contacts/" + key).set(contacts.map((c) => ({
+            name: String(c.name).trim().slice(0, 80),
+            role: String(c.role).trim().slice(0, 80),
+            email: String(c.email).trim().slice(0, 120),
+            addedAt: Date.now(),
+          })));
+          await db.ref(ROOT + "/audit").push({
+            ts: Date.now(), actor: "club:" + key, actorLabel: rec.name || key, action: "route",
+            club: key, clubName: rec.name || key,
+            detail: "Club chose " + (route === "instore" ? "in-store" : "online") +
+              " and confirmed all " + REQUIRED + " requirements; " + contacts.length +
+              " scheme contact" + (contacts.length === 1 ? "" : "s") + " recorded",
+          });
+          logger.info(name + ": route chosen in-app", { club: key, route });
+          return grant({
+            ok: true, route,
+            creds: route === "instore" ? { passcode: rec.passcode || "", token: rec.token || "" } : null,
+          });
+        }
+
         const code = normCode(req.code);
         if (code.length < 4) return grant({ ok: false, error: "Enter your PIN or passcode." });
 
@@ -244,31 +299,82 @@ function makeTrigger(ROOT, name) {
 
         if (hit) {
           await db.ref(ROOT + "/rate/uid/" + uid).remove().catch(() => {});
+          const key = hit.c.key;
+          /* ---- Route gate (spec v42.0 items 1–2) ------------------------ */
+          /* The credential was RIGHT — the failure counters stay untouched —
+             but the club's route decides whether anything opens. No route
+             yet: nothing opens, either door, and no token is minted at all,
+             which is stronger than hiding screens. Online route: the till
+             PIN opens nothing (an online club has no till in this scheme),
+             but the manager passcode still works. */
+          const route = hit.c.rec.route === "instore" || hit.c.rec.route === "online"
+            ? hit.c.rec.route : "unassigned";
+          /* v43 §1: an unassigned club's MANAGER gets in — to the setup
+             screen, where the club chooses its own route. The till PIN stays
+             a holding page: route choice binds the club to the scheme's
+             requirements, and the printed-card credential must not be able
+             to do that (owner ruling 09/09/2026). */
+          if (route === "unassigned" && hit.role === "till") {
+            logger.info(name + ": holding — till PIN, club not set up", { club: key });
+            return grant({
+              ok: false, holding: true,
+              error: (hit.c.rec.name || "This club") + " hasn’t completed voucher-scheme setup yet. " +
+                "Whoever holds the club manager passcode can finish it on this page.",
+            });
+          }
+          /* v43 §4: creation follows the current route, validation honours
+             whatever exists. A club moved off in-store keeps a working till
+             while cards in the wild point at it — so the PIN opens the till
+             if the club has ever been issued central codes, and only a club
+             with no in-store history gets the holding page. */
+          let hasCentral = false;
+          if (route === "online") {
+            const owned = (await db.ref(ROOT + "/codes").orderByChild("club")
+              .equalTo(key).once("value")).val() || {};
+            hasCentral = Object.keys(owned).some((k) =>
+              String((owned[k] && owned[k].createdBy) || "").indexOf("club:") !== 0);
+          }
+          if (route === "online" && hit.role === "till" && !hasCentral) {
+            logger.info(name + ": holding — till PIN at online club", { club: key });
+            return grant({
+              ok: false, holding: true,
+              error: (hit.c.rec.name || "This club") + " redeems vouchers through its online store, " +
+                "so the till page isn’t used. Ask your club manager if this seems wrong.",
+            });
+          }
+
           /* One uid per club per role, not per person: everyone at a club
              shares it. Attribution is at club level anyway — all a shared
              credential can honestly support — and it keeps the Auth user list
              small rather than one row per device. */
-          const key = hit.c.key;
           const customToken = await admin.auth().createCustomToken(
             "uw-" + key + "-" + hit.role,
             { uwRole: hit.role, uwClub: key }
           );
-          logger.info(name + ": club granted", { club: key, role: hit.role });
+          logger.info(name + ": club granted", { club: key, role: hit.role, route });
           return grant({
             ok: true,
             customToken,
             role: hit.role,
+            route,
+            /* The refused-code screen tells fans who to contact. The address
+               is master-set config (open item 1 in the spec), and config is
+               not client-readable, so it rides in on the grant. */
+            support: (cfg.support && cfg.support.email) || null,
             club: {
               code: key,
               name: hit.c.rec.name || key,
               division: hit.c.rec.division || "",
             },
             /* A manager just proved it holds the manager passcode, so it may
-               see its own till PIN and link — that is the PIN card and the
-               club's own till-card printing. A till session gets neither. */
-            creds: hit.role === "manager"
+               see its own till PIN and link. A purely-online club's manager
+               still gets neither — a QR till card must never exist for a
+               club with no till — but one with in-store history keeps them,
+               because its live legacy till still needs a PIN (§4). */
+            creds: hit.role === "manager" && (route === "instore" || hasCentral)
               ? { passcode: hit.c.rec.passcode || "", token: hit.c.rec.token || "" }
               : null,
+            hasCentral,
           });
         }
 
@@ -283,6 +389,8 @@ function makeTrigger(ROOT, name) {
                a credential, and must not be handed 72 of them. */
             clubs: Object.keys(clubs).map((k) => ({
               code: k, name: clubs[k].name || k, division: clubs[k].division || "",
+              route: clubs[k].route === "instore" || clubs[k].route === "online"
+                ? clubs[k].route : "unassigned",
             })),
           });
         }
@@ -308,6 +416,49 @@ function makeTrigger(ROOT, name) {
     }
   );
 }
+
+/* ── Overdue-request digest (spec v43 §7) ──────────────────────────────
+   Daily look at open requests past their due date; when there are any, poke
+   the GAS mailer, which composes and sends the digest itself. GAS reads the
+   requests and the recipient list with its own server credential, so this
+   poke carries no content and cannot be made to send anything else — the
+   same reason uwPromo_uploadNotify takes no recipients. Internal only, per
+   the owner ruling 09/09/2026: clubs get chased by a person.
+
+   The lint rule about inline script.google.com URLs guards TOOL PAGES, which
+   must all rotate through NL.endpoints.gas together; a function cannot read
+   nl-utils, so the deployment URL is repeated here deliberately. */
+const { onSchedule } = require("firebase-functions/v2/scheduler");
+const GAS_EXEC = "https://script.google.com/macros/s/AKfycbyHutd1esz1kykMR5aLXBkgXY2LPC-CzhUWOLBAFjhN-6XCPlxocQ1N9BAoCpE6cdof/exec";
+
+exports.uwPromoOverdue = onSchedule(
+  {
+    schedule: "every day 08:30",
+    timeZone: "Europe/London",
+    region: "europe-west2",
+    memory: "256MiB",
+    serviceAccount: "firebase-adminsdk-fbsvc@nl-tools.iam.gserviceaccount.com",
+  },
+  async () => {
+    const db = admin.database();
+    const reqs = (await db.ref("app-data/uw-promo/requests").once("value")).val() || {};
+    const now = Date.now();
+    const overdue = Object.keys(reqs).filter((k) => {
+      const r = reqs[k] || {};
+      return r.status === "open" && typeof r.due === "number" && now > r.due;
+    });
+    if (!overdue.length) {
+      logger.info("uwPromoOverdue: nothing overdue");
+      return;
+    }
+    const resp = await fetch(GAS_EXEC, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ action: "uwPromo_overdueDigest" }),
+    });
+    logger.info("uwPromoOverdue: digest poked", { overdue: overdue.length, status: resp.status });
+  }
+);
 
 exports.uwPromoAuth = makeTrigger("app-data/uw-promo", "uwPromoAuth");
 exports.uwPromoAuthTest = makeTrigger("app-data/uw-promo-test", "uwPromoAuthTest");

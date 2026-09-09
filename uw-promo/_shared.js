@@ -1,5 +1,24 @@
 /*
   UW Promo Codes — shared runtime for the three standalone pages
+  Version: v5.0 (09/09/2026) — spec v43.0. chooseRoute() carries a manager's
+           in-app route choice (route, undertakings, scheme contacts) through
+           the auth trigger and folds the grant back into the session.
+           faceOf() derives the presentation ladder over statusOf() — an
+           active central code reads issued until dispatchedAt is set, then
+           dispatched; expired/redeemed/revoked still win — and STATUS gains
+           pills for the two new faces. Sessions carry hasCentral so a club
+           that left the in-store route keeps a working till while its
+           central codes remain in the wild.
+  Version: v4.0 (03/09/2026) — spec v42.0 lands. UWP.VALUE is the one place
+           the voucher's worth exists (£40-vs-£50 is unresolved upstream; one
+           line changes it everywhere) and UWP.TCS_URL the fan-facing terms.
+           Central codes expire 12 months from createdAt — isExpired/
+           expiresAt/statusOf derive it (nothing stored, so it covers every
+           central code already in the system) and redeemTxn refuses an
+           expired central code; club-uploaded codes never expire here, their
+           POS is the authority. Sessions carry route + support address from
+           the grant, holding responses render as information not error, and
+           notifyUpload posts the upload-complete email via the GAS router.
   Version: v3.3 (16/08/2026) — the follow-up convergence flagged in v3.2:
            local crestImgHtml(name, px) deleted. Every crest string in the
            family now comes from canon NL.clubs.crestImgHtml('thumb'), with a
@@ -140,8 +159,13 @@
           ]);
           finish(function () {
             cleanup.then(function () {
-              if (g.ok) resolve(g);
-              else reject(new Error(g.error || 'Not recognised.'));
+              if (g.ok) { resolve(g); return; }
+              var e = new Error(g.error || 'Not recognised.');
+              /* A correct credential for a club that is not yet activated, or
+                 a till PIN at an online-route club. The gate shows a holding
+                 state, not an error — the person did nothing wrong. */
+              if (g.holding) e.holding = true;
+              reject(e);
             });
           });
         }, function (err) { finish(function () { reject(err); }); });
@@ -165,12 +189,64 @@
         return app.auth().signInWithCustomToken(g.customToken).then(function () {
           SESSION = {
             role: g.role, club: g.club || null,
+            route: g.route || 'unassigned',
+            support: g.support || null,
+            /* §4: a club moved off in-store keeps a live till for the cards
+               already in the wild — this flag is how the page knows. */
+            hasCentral: g.hasCentral === true,
             creds: g.creds || null, clubs: g.clubs || null
           };
           window.UWP.session = SESSION;
           return SESSION;
         });
       });
+  }
+
+  /* ── The one voucher value, and the fan-facing terms ─────────────────
+     Spec v42.0 item 3: public marketing says £40, every internal document
+     says £50, and until that resolves nothing may hardcode a number — every
+     piece of copy, confirmation and export reads this constant, so the answer
+     is one line here when it lands. £50 is the standing internal figure
+     (owner call, 03/09/2026). */
+  var VALUE = '£50';
+  var TCS_URL = 'https://partner.uw.co.uk/national-league';
+
+  /* Fire-and-forget email when an online club completes an upload — closes
+     the gap where codes sat uploaded for up to a month with nobody told
+     (spec item 6). Recipients live in RTDB config/support (set from the
+     master console, read by GAS with its server credential) — NEVER in this
+     public repo. Failure is swallowed: the upload itself already succeeded
+     and is audited, and the admin console shows club uploads regardless. */
+  function notifyUpload(club, count, batchLabel) {
+    try {
+      return fetch(NL.endpoints.gas + '?cb=' + Date.now(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({
+          action: 'uwPromo_uploadNotify',
+          clubName: club.name, clubCode: club.code,
+          count: count, batchLabel: batchLabel || '',
+          test: IS_TEST
+        })
+      }).catch(function () {});
+    } catch (e) { return Promise.resolve(); }
+  }
+
+  /* The club choosing its own route (spec v43 §1–3) — manager session only,
+     authorised like rotatePin by the minted uid. `ticks` is the route's five
+     undertakings, `contacts` at least one {name, role, email}. On success the
+     route is locked server-side and the grant carries the new route (plus
+     till credentials when in-store), so the dashboard unlocks without a
+     second sign-in. */
+  function chooseRoute(route, ticks, contacts) {
+    return requestGrant({ chooseRoute: route, ticks: ticks, contacts: contacts }).then(function (g) {
+      if (SESSION) {
+        SESSION.route = g.route;
+        SESSION.creds = g.creds || null;
+        if (g.route === 'instore') SESSION.hasCentral = SESSION.hasCentral || false;
+      }
+      return g;
+    });
   }
 
   /* A club manager rotating its own till PIN. Carries no credential — the
@@ -261,7 +337,10 @@
   var STATUS = {
     active:   { label: 'Unredeemed', pill: 'pill--info' },
     redeemed: { label: 'Redeemed',   pill: 'pill--approved' },
-    revoked:  { label: 'Revoked',    pill: 'pill--rejected' }
+    revoked:  { label: 'Revoked',    pill: 'pill--rejected' },
+    expired:  { label: 'Expired',    pill: 'pill--expired' },  // derived, never stored — see statusOf
+    issued:     { label: 'Issued',     pill: 'pill--info' },    // derived — faceOf: active, not dispatched
+    dispatched: { label: 'Dispatched', pill: 'pill--soon' }     // derived — faceOf: active + dispatchedAt
   };
 
   /* Pure transaction updater for a till redemption, factored out so
@@ -280,16 +359,56 @@
      (local cache miss — the SDK retries with server data). `ts` is injectable
      for tests; live callers omit it and get the server timestamp
      placeholder. */
-  function redeemTxn(cur, club, actorId, ts) {
+  function redeemTxn(cur, club, actorId, ts, now) {
     if (cur === null) return cur;
     if (cur.status !== 'active') return;
     if (cur.club && cur.club !== club.code) return;
+    if (isExpired(cur, now)) return;
     cur.status = 'redeemed';
     cur.club = club.code;
     cur.clubName = club.name;
     cur.redeemedAt = ts || firebase.database.ServerValue.TIMESTAMP;
     cur.redeemedBy = actorId || ('club:' + club.code);
     return cur;
+  }
+
+  /* ── Expiry — central codes only (spec v42.0 item 4) ─────────────────
+     A code UW or NL generated goes invalid 12 months after creation, because
+     creation is the date this platform reliably knows. A club-uploaded code
+     (createdBy 'club:*') is NEVER expired here: the club's own till system is
+     the authority on its codes, and the 12-month promise is one of the
+     undertakings ticked at upload, not a field we police. Nothing is stored —
+     expiry is derived from createdAt, so it applies to every central code
+     already in the system. `now` is injectable for tests. */
+  var CODE_TTL_MS = 365 * 24 * 60 * 60 * 1000;
+
+  function isCentral(rec) {
+    return String((rec && rec.createdBy) || '').indexOf('club:') !== 0;
+  }
+  function expiresAt(rec) {
+    if (!rec || !isCentral(rec) || typeof rec.createdAt !== 'number') return null;
+    return rec.createdAt + CODE_TTL_MS;
+  }
+  function isExpired(rec, now) {
+    var at = expiresAt(rec);
+    return at != null && (now || Date.now()) > at;
+  }
+  /* Display status: the stored three-state lifecycle, plus the derived
+     'expired' face an unredeemed central code past its date shows. */
+  function statusOf(rec, now) {
+    if (rec && rec.status === 'active' && isExpired(rec, now)) return 'expired';
+    return (rec && rec.status) || 'active';
+  }
+
+  /* The lifecycle face a code shows in scheme terms (spec v43 §5):
+     issued → dispatched → redeemed, with expired/revoked overriding.
+     'dispatched' is a flag on an active code, never a stored status —
+     exactly the pattern 'expired' set. */
+  function faceOf(rec, now) {
+    var st = statusOf(rec, now);
+    if (st === 'active' && rec && rec.dispatchedAt) return 'dispatched';
+    if (st === 'active') return 'issued';
+    return st;
   }
 
   /* Sliding-window gate, per browser, for the till-side voucher checker —
@@ -388,6 +507,7 @@
           'code with <strong>Check a code</strong> at the foot of the page.</li>' +
       '</ol>' +
       '<div class="print-card__url">' + esc(link) + '</div>' +
+      '<div class="print-card__url">Full voucher terms: ' + esc(TCS_URL) + '</div>' +
     '</div>';
   }
 
@@ -457,6 +577,7 @@
     TS: function () { return firebase.database.ServerValue.TIMESTAMP; },
     signIn: signIn,
     rotateOwnPin: rotateOwnPin,
+    chooseRoute: chooseRoute,
     bootstrapMaster: bootstrapMaster,
     session: null,
     newPasscode: function () { return randFrom(CODE_ALPHA, 6); },
@@ -468,6 +589,15 @@
     rateLimit: rateLimit,
     STATUS: STATUS,
     redeemTxn: redeemTxn,
+    VALUE: VALUE,
+    TCS_URL: TCS_URL,
+    CODE_TTL_MS: CODE_TTL_MS,
+    isCentral: isCentral,
+    isExpired: isExpired,
+    expiresAt: expiresAt,
+    statusOf: statusOf,
+    faceOf: faceOf,
+    notifyUpload: notifyUpload,
     pillFor: function (status) {
       var s = STATUS[status] || STATUS.active;
       return '<span class="pill ' + s.pill + '">' + s.label + '</span>';
