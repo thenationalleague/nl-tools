@@ -1,5 +1,12 @@
 /*
   UW Promo Codes — shared runtime for the three standalone pages
+  Version: v6.4 (09/09/2026) — editMethodModal fixed and refined: it called
+           a bare ref() that never existed inside this file (the pages'
+           copies had used UWP.ref / their own scope — a runtime name no
+           syntax check catches), so every method change failed. The commit
+           button now lives in the modal FOOTER beside Cancel (owner
+           ruling), appearing only once a different method is picked, with
+           the consequences banner in the body above it.
   Version: v6.3 (09/09/2026) — canon pass: editMethodModal is the ONE
            method-change modal (the consoles' sibling copies had drifted —
            admin stamped updatedAt via a master-only full-record update, UW
@@ -560,6 +567,7 @@
   function editMethodModal(opts) {
     var esc = window.NL.escHtml;
     var cur = ['instore', 'online'].indexOf(opts.route) !== -1 ? opts.route : 'unassigned';
+    var pending = null;
     var wrap = document.createElement('div');
     wrap.innerHTML =
       '<p class="confirm-text">' + esc(opts.name) + ' is currently ' + methodPill(cur) + '</p>' +
@@ -571,11 +579,17 @@
       '<div data-mconseq></div>';
     var ctrl = window.NL.modal({
       title: 'Change redemption method', body: wrap,
-      buttons: [{ label: 'Cancel', className: 'btn--ghost', onClick: function (x) { x.close(); } }]
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (x) { x.close(); } },
+        /* The commit sits in the footer beside Cancel (owner ruling
+           09/09/2026) and only exists once a DIFFERENT method is picked —
+           the consequences render in the body above it first. */
+        { label: 'Change method', className: 'btn--danger', onClick: function () { commit(); } }
+      ]
     });
+    var goBtn = ctrl.el.querySelector('.modal__footer .btn--danger');
+    goBtn.hidden = true;
     wrap.addEventListener('click', function (e) {
-      var go = e.target.closest('[data-mgo]');
-      if (go) { commit(go.getAttribute('data-mgo')); return; }
       var b = e.target.closest('[data-mpick]');
       if (!b) return;
       var route = b.getAttribute('data-mpick');
@@ -583,24 +597,32 @@
         x.classList.toggle('active', x === b);
       });
       var panel = wrap.querySelector('[data-mconseq]');
-      if (route === cur) { panel.innerHTML = ''; return; }
+      if (route === cur) {
+        pending = null;
+        panel.innerHTML = '';
+        goBtn.hidden = true;
+        return;
+      }
+      pending = route;
       panel.innerHTML =
-        '<div class="banner banner--amber" style="margin-bottom:12px"><strong>What this does</strong>' +
+        '<div class="banner banner--amber"><strong>What this does</strong>' +
         '<ul style="margin:6px 0 0 18px;padding:0">' +
         methodConsequences(cur, route).map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') +
-        '</ul></div>' +
-        '<button class="btn btn--danger" data-mgo="' + route + '">Move ' + esc(opts.name) +
-        ' to ' + METHOD[route].label + '</button>';
+        '</ul></div>';
+      goBtn.hidden = false;
+      goBtn.textContent = 'Move ' + opts.name + ' to ' + METHOD[route].label;
     });
-    function commit(route) {
+    function commit() {
+      if (!pending) return;
+      var route = pending;
       ensureAuth().then(function () {
-        return ref('config/clubs/' + opts.code + '/route').set(route);
+        return window.UWP.ref('config/clubs/' + opts.code + '/route').set(route);
       }).then(function () {
         audit(opts.actor, opts.actorLabel, 'route', {
           club: opts.code, clubName: opts.name,
           detail: 'Redemption method set to ' + METHOD[route].label.toLowerCase()
         });
-        window.NL.toast(opts.name + ' → ' + METHOD[route].label, 'success');
+        window.NL.toast(opts.name + ' \u2192 ' + METHOD[route].label, 'success');
         if (opts.onDone) opts.onDone(route);
         ctrl.close();
       }).catch(function (err) {
