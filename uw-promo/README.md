@@ -10,7 +10,7 @@ NO auth-guard/portal login), with a full audit trail.
 | Page | Who | Gets in via | Can do |
 |---|---|---|---|
 | `/uw-promo/` | **Utility Warehouse** (one shared login) | shared 6-character passcode or `?u=<token>` direct link | The code list splits into **In-store / Online tabs** — stats, breakdown, filters and export follow the tab, and each tab carries only its own verbs. In-store: add codes **for one club at a time** (club dropdown required; paste a list — the default — or generate plain 6-character codes; ≤500 per add), revoke **unredeemed** codes. Online: raise/see requests, dispatch, **no revoke — club-uploaded codes are never revoked by anyone**. Both: release a redeemed code (required reason), bulk dispatch, search, CSV export. The big count cards follow the club filter |
-| `/uw-promo/club/` | **Each of the 72 clubs** | own `?c=<token>` direct link (the QR-code target for the point of sale) **plus a credential on every visit** — the 4-digit till PIN, or the club's manager passcode for the admin view; either alone also works without the link | **Till page**: big code entry → a valid unredeemed code *registered to this club* is redeemed here (RTDB transaction — two tills can't claim the same code) and joins the club's redeemed list. Refusals (spec item 5): already-redeemed shows **club + date/time**, expired shows **its expiry date**, and everything else — not recognised, revoked, another club's code — shares ONE neutral message with the UW support address and T&Cs link, so till staff can't adjudicate. Clubs cannot undo — the page points them at NL. On the manager passcode only: **Check a code** (full detail, 10/hr, audited), and per route: upload (online), inventory, CSV, audit slice, PIN self-service (in-store) — see *Routes* and *Two doors* |
+| `/uw-promo/club/` | **Each of the 72 clubs** | own `?c=<token>` direct link (the QR-code target for the point of sale) plus a credential — the 4-digit till PIN (**demanded on every visit**, never stored), or the club's manager passcode (**remembered on that browser** until Sign out); either alone also works without the link | **Till page**: big code entry → a valid unredeemed code *registered to this club* is redeemed here (RTDB transaction — two tills can't claim the same code) and joins the club's redeemed list. Refusals (spec item 5): already-redeemed shows **club + date/time**, expired shows **its expiry date**, and everything else — not recognised, revoked, another club's code — shares ONE neutral message with the UW support address and T&Cs link, so till staff can't adjudicate. Clubs cannot undo — the page points them at NL. On the manager passcode only: **Check a code** (full detail, 10/hr, audited), and per route: upload (online), inventory, CSV, audit slice, PIN self-service (in-store) — see *Routes* and *Two doors* |
 | `/uw-promo/admin/` | **NL master (Richard)** | master passcode only (no direct link, deliberately; first-run bootstrap sets it) | Everything UW can do, plus: redeem on behalf of a club (the club it is registered to, same race-safe transaction), **register** a pre-v3.0 code to a club, revoke **redeemed** codes (typed `REVOKE`), seed/sync the roster from clubs-meta, the **list of all 72 club URLs, PINs and manager passcodes** (copy/regenerate each, **Reissue all club PINs**, **Issue missing manager passcodes**, export access CSV), **Print till cards** (one A4 card per club: crest, QR of the club link, PIN + the till steps — print-to-PDF gives the 72-page hand-out pack), audit viewer + export, sandbox reset (test mode) |
 
 ## Which club a code belongs to
@@ -58,6 +58,17 @@ codes are 6 plain characters with no hyphen; the till entry box is free text
 (64 characters) because UW's own codes are whatever length they are.
 
 ## Credentials
+
+**Sessions** (owner ruling 09/09/2026): the till asks for its PIN on every
+visit — that URL sits behind a QR on public display, and nothing about a
+till sign-in is ever stored. The three laptop surfaces (UW dashboard,
+master console, club manager view) remember the **credential** in that
+browser's localStorage and silently re-run the server handshake on load,
+so each tab still mints its own scoped token (no shared live session
+between tabs) and a rotated credential fails once, forgets itself and
+shows the gate. Every surface has a **Sign out** that forgets; the club
+page's "Not you?" clears any remembered manager credential too, so a
+shared device never resumes as the manager.
 
 | Who | Credential | Why |
 |---|---|---|

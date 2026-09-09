@@ -1,5 +1,11 @@
 /*
   UW Promo Codes — shared runtime for the three standalone pages
+  Version: v6.2 (09/09/2026) — remembered sessions for the laptop surfaces
+           (owner ruling: the till asks every visit; everything else keeps a
+           proper session with Sign out). remember/forget/resume store the
+           CREDENTIAL, not the session, and resume re-runs the handshake —
+           each tab still mints its own token (v5.1 stands) and a rotated
+           credential fails once, forgets itself and shows the gate.
   Version: v6.1 (09/09/2026) — method identity is shared: METHOD/methodPill
            (in-store green, online blue, unassigned amber) and
            methodConsequences(from, to) — the one place the consequences of
@@ -240,6 +246,33 @@
           return SESSION;
         });
       });
+  }
+
+  /* ── Remembered sessions (owner ruling 09/09/2026) ───────────────────
+     The till demands its PIN on every visit — that URL sits behind a QR on
+     public display. The three laptop surfaces (UW dashboard, master
+     console, club manager view) instead remember the CREDENTIAL in
+     localStorage and silently re-run the server handshake on load. The
+     credential, deliberately not the session: each tab mints its own
+     scoped token, so tabs still never share live auth state (v5.1's fix
+     stands), and a rotated or reissued credential simply fails the
+     handshake once, forgets itself, and shows the gate. Sign out =
+     forget + reload. */
+  function credKey(kind) { return 'uwPromoCred:' + kind + (IS_TEST ? ':test' : ''); }
+  function remember(kind, code, token) {
+    try { window.localStorage.setItem(credKey(kind), JSON.stringify({ code: code, token: token || null })); } catch (e) {}
+  }
+  function forget(kind) {
+    try { window.localStorage.removeItem(credKey(kind)); } catch (e) {}
+  }
+  function resume(kind) {
+    var saved = null;
+    try { saved = JSON.parse(window.localStorage.getItem(credKey(kind)) || 'null'); } catch (e) {}
+    if (!saved || !saved.code) return Promise.resolve(null);
+    return signIn(saved.code, saved.token).catch(function () {
+      forget(kind);
+      return null;
+    });
   }
 
   /* ── The one voucher value, and the fan-facing terms ─────────────────
@@ -687,6 +720,9 @@
     ensureAuth: ensureAuth,
     TS: function () { return firebase.database.ServerValue.TIMESTAMP; },
     signIn: signIn,
+    remember: remember,
+    forget: forget,
+    resume: resume,
     rotateOwnPin: rotateOwnPin,
     chooseRoute: chooseRoute,
     bootstrapMaster: bootstrapMaster,

@@ -24,6 +24,10 @@
            write config. That is the change that stops all 72 till PINs being
            world-readable. First run mints a bootstrap master token while no
            passcode exists; nothing subscribes to RTDB until the session does.
+  Version: v6.3 (09/09/2026) — the console remembers its session (resume
+           on load, Sign out forgets — the button was labelled Lock and
+           merely reloaded; now it means it). Bootstrap remembers the
+           passcode it just set.
   Version: v6.2 (09/09/2026) — methods editor redesigned (owner feedback,
            mid-walkthrough): pill designation, glyph Edit, and a
            consequences banner (UWP.methodConsequences) with one danger
@@ -222,7 +226,7 @@
       <div class="nl-idbar__title">Promo Codes — Master</div>
       <div class="nl-idbar__sub">Utility Warehouse partnership · NL control</div>
     </div>
-    <button class="nl-idbar__btn" id="signout">Lock</button>
+    <button class="nl-idbar__btn" id="signout">Sign out</button>
   </div>
 
   <div class="wrap">
@@ -402,6 +406,16 @@
      request only while config/master is genuinely absent, so the door closes
      the moment a passcode is chosen. */
   function boot() {
+    /* A remembered credential signs itself back in (owner ruling: the till
+       asks every visit, the laptop consoles do not). */
+    document.getElementById('gateSub').textContent = 'Signing you back in…';
+    UWP.resume('master').then(function (session) {
+      if (session && session.role === 'master') { unlock(); return; }
+      showGate();
+    });
+  }
+
+  function showGate() {
     document.getElementById('gateSub').textContent = 'Enter the master passcode.';
     document.getElementById('gateForm').style.display = 'block';
     var inp = document.getElementById('gateInput'), err = document.getElementById('gateErr'),
@@ -423,6 +437,7 @@
           err.textContent = 'That passcode is not the master passcode.';
           return;
         }
+        UWP.remember('master', typed);
         unlock();
       }).catch(function (e) {
         busyGate = false;
@@ -461,6 +476,7 @@
         return UWP.ref('config/master').set({ passcode: a, updatedAt: UWP.TS() });
       }).then(function () {
         UWP.audit(ACTOR, ACTOR_LABEL, 'bootstrap', { detail: 'Master passcode set (first run)' });
+        UWP.remember('master', a);
         document.getElementById('bootstrapForm').style.display = 'none';
         unlock();
       }).catch(function (e2) {
@@ -481,6 +497,7 @@
   }
 
   document.getElementById('signout').addEventListener('click', function () {
+    UWP.forget('master');
     location.reload();
   });
 

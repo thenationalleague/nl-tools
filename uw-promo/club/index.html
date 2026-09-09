@@ -3,6 +3,11 @@
 <head>
 <!--
   UW Promo Codes — Club point-of-sale redemption page
+  Version: v6.5 (09/09/2026) — the MANAGER door remembers its session
+           (resume on load; Sign out / "Not you?" forgets, so a shared
+           device never resumes as the manager). The till PIN is demanded
+           on every visit, as ever — nothing about a till sign-in is
+           stored.
   Version: v6.4 (09/09/2026) — feedback round 2: request rows use the
            derived reqFace ladder (waiting/overdue/fulfilled/dispatched —
            Upload offered while short of the ask), the inventory drops its
@@ -620,7 +625,15 @@
 
   function boot() {
     if (unlocked) return;
-    showGateForm(linkClubName());
+    /* A remembered MANAGER credential signs itself back in (owner ruling:
+       the till asks on every visit — nothing is ever stored for it — but
+       the manager view is a laptop surface and keeps its session). */
+    document.getElementById('gateSub').textContent = 'Signing you back in…';
+    UWP.resume('club').then(function (session) {
+      if (unlocked) return;
+      if (session && session.role === 'manager') { enter(session); return; }
+      showGateForm(linkClubName());
+    });
   }
   /* clubs-meta only decides the crest, so a failure to load it must still
      open the gate — hence the same handler on both paths. */
@@ -653,6 +666,8 @@
       btn.textContent = 'Checking…';
       var tok = new URLSearchParams(location.search).get('c');
       UWP.signIn(typed, tok).then(function (session) {
+        /* Only the manager door is remembered — a till PIN is never stored. */
+        if (session.role === 'manager') UWP.remember('club', typed, tok);
         enter(session);
       }).catch(function (e) {
         busyGate = false;
@@ -675,6 +690,10 @@
   }
 
   document.getElementById('signout').addEventListener('click', function () {
+    /* "Not you?" and "Sign out" both mean it: clear any remembered manager
+       credential on this browser, so a shared device never resumes as the
+       manager after the till hand pressed this. */
+    UWP.forget('club');
     history.replaceState({}, '', location.pathname + (UWP.isTest ? '?env=test' : ''));
     location.reload();
   });
