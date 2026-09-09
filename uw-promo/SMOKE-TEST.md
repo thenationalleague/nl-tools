@@ -25,7 +25,7 @@ credentials are destroyed by the reset in Phase I, so there is no cleanup.
 |---|--------|----------|------|
 | P1 | Open the sandbox console. If old test data exists: Clubs & access → **Reset sandbox** → type `RESET` | Page reloads to the first-run screen | ☐ |
 | P2 | Set a sandbox master passcode (6 chars, twice) | Console opens; Codes tab shows an empty pool | ☐ |
-| P3 | Refresh the page | Passcode is demanded again before the console opens | ☐ |
+| P3 | Refresh the page | "Signing you back in…" then the console reopens with no typing — the session is remembered. Press **Sign out** (top right) → the gate returns and demands the passcode; sign back in | ☐ |
 
 Stop here — leave clubs unseeded so the call opens with A1.
 
@@ -236,7 +236,7 @@ console can edit or prune it.*
 
 | Capability | Tests |
 |---|---|
-| Gates: master / UW / club, wrong-credential rejection, link ≠ login | P2–P3, B1–B3, C1–C3 |
+| Gates: master / UW / club, wrong-credential rejection, link ≠ login; laptop surfaces remember, Sign out forgets, the till never remembers | P2–P3, B1–B3, C1–C3 |
 | Club credential is a unique 4-digit PIN; bulk reissue | A1–A2, C3, H1, H4 |
 | **A code belongs to one club, chosen at creation, one club per add** | B4–B6, B8–B9 |
 | **A code is refused at any other club, both directions, changing nothing** | D2–D5 |
