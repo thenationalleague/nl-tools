@@ -24,6 +24,8 @@
            write config. That is the change that stops all 72 till PINs being
            world-readable. First run mints a bootstrap master token while no
            passcode exists; nothing subscribes to RTDB until the session does.
+  Version: v6.4 (09/09/2026) — resume falls back to the gate on any
+           failure; /uw-promo/* joins _headers no-cache.
   Version: v6.3 (09/09/2026) — the console remembers its session (resume
            on load, Sign out forgets — the button was labelled Lock and
            merely reloaded; now it means it). Bootstrap remembers the
@@ -409,10 +411,14 @@
     /* A remembered credential signs itself back in (owner ruling: the till
        asks every visit, the laptop consoles do not). */
     document.getElementById('gateSub').textContent = 'Signing you back in…';
-    UWP.resume('master').then(function (session) {
-      if (session && session.role === 'master') { unlock(); return; }
-      showGate();
-    });
+    /* Worst case must be the gate, never a page stuck mid-sentence (a
+       cached _shared.js without resume did exactly that on 09/09/2026). */
+    Promise.resolve().then(function () { return UWP.resume('master'); })
+      .then(function (session) {
+        if (session && session.role === 'master') { unlock(); return; }
+        showGate();
+      })
+      .catch(function () { showGate(); });
   }
 
   function showGate() {
