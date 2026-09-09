@@ -1,5 +1,12 @@
 /*
   UW Promo Codes — shared runtime for the three standalone pages
+  Version: v6.3 (09/09/2026) — canon pass: editMethodModal is the ONE
+           method-change modal (the consoles' sibling copies had drifted —
+           admin stamped updatedAt via a master-only full-record update, UW
+           wrote the route node; one write path now, the route node the
+           deeper rules grant covers, with the audit entry as the timestamp
+           record). dateStamp() replaces three byte-identical filename
+           stamps (canon candidate for NL.dateStamp).
   Version: v6.2 (09/09/2026) — remembered sessions for the laptop surfaces
            (owner ruling: the till asks every visit; everything else keeps a
            proper session with Sign out). remember/forget/resume store the
@@ -544,6 +551,72 @@
     return lines;
   }
 
+  /* One method-change modal for both consoles. The two pages carried
+     sibling copies that had already drifted — the admin one stamped
+     updatedAt via a full-record update only a master token may write, the
+     UW one wrote the route node the deeper rules grant covers. One
+     implementation, one write path (the route node — the audit entry is
+     the timestamp record), one set of consequences. */
+  function editMethodModal(opts) {
+    var esc = window.NL.escHtml;
+    var cur = ['instore', 'online'].indexOf(opts.route) !== -1 ? opts.route : 'unassigned';
+    var wrap = document.createElement('div');
+    wrap.innerHTML =
+      '<p class="confirm-text">' + esc(opts.name) + ' is currently ' + methodPill(cur) + '</p>' +
+      '<div class="chip-group" style="margin-bottom:12px">' +
+      ['online', 'unassigned', 'instore'].map(function (r) {
+        return '<button class="chip' + (cur === r ? ' active' : '') +
+          '" data-mpick="' + r + '">' + METHOD[r].label + '</button>';
+      }).join('') + '</div>' +
+      '<div data-mconseq></div>';
+    var ctrl = window.NL.modal({
+      title: 'Change redemption method', body: wrap,
+      buttons: [{ label: 'Cancel', className: 'btn--ghost', onClick: function (x) { x.close(); } }]
+    });
+    wrap.addEventListener('click', function (e) {
+      var go = e.target.closest('[data-mgo]');
+      if (go) { commit(go.getAttribute('data-mgo')); return; }
+      var b = e.target.closest('[data-mpick]');
+      if (!b) return;
+      var route = b.getAttribute('data-mpick');
+      Array.prototype.forEach.call(wrap.querySelectorAll('[data-mpick]'), function (x) {
+        x.classList.toggle('active', x === b);
+      });
+      var panel = wrap.querySelector('[data-mconseq]');
+      if (route === cur) { panel.innerHTML = ''; return; }
+      panel.innerHTML =
+        '<div class="banner banner--amber" style="margin-bottom:12px"><strong>What this does</strong>' +
+        '<ul style="margin:6px 0 0 18px;padding:0">' +
+        methodConsequences(cur, route).map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') +
+        '</ul></div>' +
+        '<button class="btn btn--danger" data-mgo="' + route + '">Move ' + esc(opts.name) +
+        ' to ' + METHOD[route].label + '</button>';
+    });
+    function commit(route) {
+      ensureAuth().then(function () {
+        return ref('config/clubs/' + opts.code + '/route').set(route);
+      }).then(function () {
+        audit(opts.actor, opts.actorLabel, 'route', {
+          club: opts.code, clubName: opts.name,
+          detail: 'Redemption method set to ' + METHOD[route].label.toLowerCase()
+        });
+        window.NL.toast(opts.name + ' → ' + METHOD[route].label, 'success');
+        if (opts.onDone) opts.onDone(route);
+        ctrl.close();
+      }).catch(function (err) {
+        window.NL.toast('Method change failed: ' + err.message, 'error');
+      });
+    }
+  }
+
+  /* Filename date stamp (uw-promo-YYYYMMDD.csv) — was written byte-identical
+     in all three pages. Canon candidate (09/09/2026): first family to need
+     it; a second family makes it NL.dateStamp. */
+  function dateStamp(d) {
+    d = d || new Date();
+    return d.getFullYear() + ('0' + (d.getMonth() + 1)).slice(-2) + ('0' + d.getDate()).slice(-2);
+  }
+
   var REQ_STATUS = {
     waiting:    { label: 'Waiting',    pill: 'pill--pending' },
     overdue:    { label: 'Overdue',    pill: 'pill--rejected' },
@@ -750,6 +823,8 @@
     METHOD: METHOD,
     methodPill: methodPill,
     methodConsequences: methodConsequences,
+    editMethodModal: editMethodModal,
+    dateStamp: dateStamp,
     notifyUpload: notifyUpload,
     pillFor: function (status) {
       var s = STATUS[status] || STATUS.active;
