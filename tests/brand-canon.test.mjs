@@ -927,6 +927,22 @@ test('the sprite carries indent and outdent, and they are not the chevrons', () 
     'and differs only in which way the chevron points');
 });
 
+/* ── icon-shop (09/09/2026) ───────────────────────────────────────────────
+   A storefront glyph for anywhere a physical shop needs distinguishing from
+   an online one (first user: the uw-promo route cards, paired with
+   icon-website). The pair only reads as a pair if both are the same drawing
+   style, so shop must be filled like website, not stroked like the UI set. */
+test('the sprite carries a shop glyph, filled to pair with the website globe', () => {
+  const sprite = readFileSync(join(REPO, 'assets/icons/sprites.svg'), 'utf8');
+  const grab = (n) => new RegExp(`<symbol id="icon-${n}"[\\s\\S]*?</symbol>`).exec(sprite);
+  const shop = grab('shop'), website = grab('website');
+  assert.ok(shop, '#icon-shop is in the sprite');
+  for (const s of [shop[0], website[0]]) {
+    assert.ok(s.includes('fill="currentColor"') && s.includes('stroke="none"'),
+      'both halves of the pair are filled, so they read as one style');
+  }
+});
+
 test('the handbook toolbar uses them rather than HTML entities', () => {
   const hb = readFileSync(join(REPO, 'handbook/index.html'), 'utf8');
   /* HTML comments stripped first. The markup carries a comment naming the
