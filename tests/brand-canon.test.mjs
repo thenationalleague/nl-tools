@@ -927,6 +927,16 @@ test('the sprite carries indent and outdent, and they are not the chevrons', () 
     'and differs only in which way the chevron points');
 });
 
+/* ── .toolbar__right wraps (09/09/2026) ───────────────────────────────────
+   flex-shrink: 0 with no wrap let a 3+ action toolbar force the page wider
+   than a phone — the sticky idbar stayed viewport-wide while content panned
+   out from under it. Found on uw-promo's five-action toolbar. */
+test('the toolbar action strip wraps instead of propping the page open', () => {
+  const css = readFileSync(join(REPO, 'system/nl-brand.css'), 'utf8');
+  const block = /\.toolbar__right\s*\{[^}]*\}/.exec(css)[0];
+  assert.match(block, /flex-wrap:\s*wrap/, '.toolbar__right declares flex-wrap: wrap');
+});
+
 /* ── icon-shop (09/09/2026) ───────────────────────────────────────────────
    A storefront glyph for anywhere a physical shop needs distinguishing from
    an online one (first user: the uw-promo route cards, paired with
