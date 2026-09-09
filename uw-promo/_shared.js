@@ -1,5 +1,12 @@
 /*
   UW Promo Codes — shared runtime for the three standalone pages
+  Version: v6.0 (09/09/2026) — the two methods part ways cleanly (owner
+           feedback round 2). faceOf names the pre-dispatch stage for who
+           acted: 'Created' for a central code, 'Issued' for a club upload.
+           New reqFace/reqPill: a request's state is DERIVED from the
+           uploads that answer it — waiting → overdue → fulfilled →
+           dispatched — nothing on a request is ever pressed after raising
+           it, and only a request still short of its ask can be overdue.
   Version: v5.1 (09/09/2026) — auth is per-tab now (persistence NONE).
            Firebase's default persistence shares one current user across
            same-origin tabs, and the handshake's anonymous first step (or a
@@ -368,7 +375,11 @@
     redeemed: { label: 'Redeemed',   pill: 'pill--approved' },
     revoked:  { label: 'Revoked',    pill: 'pill--rejected' },
     expired:  { label: 'Expired',    pill: 'pill--expired' },  // derived, never stored — see statusOf
-    issued:     { label: 'Issued',     pill: 'pill--info' },    // derived — faceOf: active, not dispatched
+    /* Both derived by faceOf for an active undispatched code. 'Issued' is a
+       club act (an upload); 'Created' is ours — same lifecycle stage, named
+       for who did it (owner ruling 09/09/2026). */
+    created:    { label: 'Created',    pill: 'pill--info' },
+    issued:     { label: 'Issued',     pill: 'pill--info' },
     dispatched: { label: 'Dispatched', pill: 'pill--soon' }     // derived — faceOf: active + dispatchedAt
   };
 
@@ -436,8 +447,46 @@
   function faceOf(rec, now) {
     var st = statusOf(rec, now);
     if (st === 'active' && rec && rec.dispatchedAt) return 'dispatched';
-    if (st === 'active') return 'issued';
+    if (st === 'active') {
+      return String((rec && rec.createdBy) || '').indexOf('club:') === 0 ? 'issued' : 'created';
+    }
     return st;
+  }
+
+  /* Derived request ladder — nothing on a request is ever pressed or
+     written after it is raised (owner ruling 09/09/2026: "them sending the
+     codes is enough"). Uploads carry the request id they answer, so the
+     state falls out of the codes themselves:
+       waiting    open, uploads short of the ask
+       overdue    waiting, past the due date
+       fulfilled  uploads meet the ask
+       dispatched fulfilled, and every one of its codes marked dispatched
+     Returns { key, got, qty }. `now` injectable for tests. */
+  function reqFace(req, codesMap, now) {
+    now = now || Date.now();
+    var qty = parseInt(req && req.qty, 10) || 0;
+    var mine = Object.keys(codesMap || {}).filter(function (k) {
+      return codesMap[k] && codesMap[k].request === (req && req._id);
+    });
+    var got = mine.length;
+    var key;
+    if (qty && got >= qty) {
+      key = mine.every(function (k) { return codesMap[k].dispatchedAt; }) ? 'dispatched' : 'fulfilled';
+    } else {
+      key = (req && req.due && now > req.due) ? 'overdue' : 'waiting';
+    }
+    return { key: key, got: got, qty: qty };
+  }
+
+  var REQ_STATUS = {
+    waiting:    { label: 'Waiting',    pill: 'pill--pending' },
+    overdue:    { label: 'Overdue',    pill: 'pill--rejected' },
+    fulfilled:  { label: 'Fulfilled',  pill: 'pill--approved' },
+    dispatched: { label: 'Dispatched', pill: 'pill--soon' }
+  };
+  function reqPill(key) {
+    var s = REQ_STATUS[key] || REQ_STATUS.waiting;
+    return '<span class="pill ' + s.pill + '">' + s.label + '</span>';
   }
 
   /* Sliding-window gate, per browser, for the till-side voucher checker —
@@ -626,6 +675,9 @@
     expiresAt: expiresAt,
     statusOf: statusOf,
     faceOf: faceOf,
+    reqFace: reqFace,
+    reqPill: reqPill,
+    REQ_STATUS: REQ_STATUS,
     notifyUpload: notifyUpload,
     pillFor: function (status) {
       var s = STATUS[status] || STATUS.active;

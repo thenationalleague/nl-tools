@@ -78,22 +78,33 @@ function uwPromoOverdueDigest() {
 
   var reqs = rtdbRead(config.rtdbUrl + '/' + root + '/requests.json', config.rtdbSecret);
   var clubs = rtdbRead(config.rtdbUrl + '/' + root + '/config/clubs.json', config.rtdbSecret);
+  var codes = rtdbRead(config.rtdbUrl + '/' + root + '/codes.json', config.rtdbSecret);
   var now = Date.now();
   var lines = [];
   Object.keys((reqs.ok && reqs.data) || {}).forEach(function (k) {
     var r = reqs.data[k] || {};
     if (r.status !== 'open' || typeof r.due !== 'number' || now <= r.due) return;
+    /* Fulfilment is derived: uploads carry the id of the request they
+       answer, so a request whose uploads meet the ask is satisfied and is
+       never chased — only the shortfall is worth an email. Mirrors
+       UWP.reqFace and the uwPromoOverdue counter. */
+    var got = Object.keys((codes.ok && codes.data) || {}).filter(function (ck) {
+      return (codes.data[ck] || {}).request === k;
+    }).length;
+    var qty = parseInt(r.qty, 10) || 0;
+    if (got >= qty) return;
     var name = (clubs.ok && clubs.data && clubs.data[r.club] && clubs.data[r.club].name) || r.club;
     var days = Math.floor((now - r.due) / 86400000);
-    lines.push(name + ' — ' + r.qty + ' code' + (r.qty === 1 ? '' : 's') + ', ' +
+    lines.push(name + ' — ' + (qty - got) + ' of ' + qty + ' code' + (qty === 1 ? '' : 's') +
+      ' still to come, ' +
       (days < 1 ? 'due today' : days + ' day' + (days === 1 ? '' : 's') + ' overdue'));
   });
   if (!lines.length) return { ok: true, sent: 0 };
 
   lines.sort();
   var subject = '[UW Vouchers] ' + lines.length + ' overdue code request' + (lines.length === 1 ? '' : 's');
-  var bodyText = 'Open code requests past their due date:\n\n' + lines.join('\n') +
-    '\n\nRaise, chase or mark fulfilled from the consoles:\n' +
+  var bodyText = 'Code requests past their due date and still short:\n\n' + lines.join('\n') +
+    '\n\nRaise or chase from the consoles:\n' +
     'https://nl.tools/uw-promo/ (UW) · https://nl.tools/uw-promo/admin/ (NL)\n\n' +
     'This is the daily automated digest — it only sends on days something is overdue.';
 

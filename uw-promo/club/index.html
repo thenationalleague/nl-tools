@@ -3,6 +3,12 @@
 <head>
 <!--
   UW Promo Codes — Club point-of-sale redemption page
+  Version: v6.4 (09/09/2026) — feedback round 2: request rows use the
+           derived reqFace ladder (waiting/overdue/fulfilled/dispatched —
+           Upload offered while short of the ask), the inventory drops its
+           Batch column (the date stamp is the grouping now), and uploads
+           no longer write a batch field. Central codes read Created in the
+           pills; a club's own read Issued.
   Version: v6.3 (09/09/2026) — first-use feedback round (owner, online
            walkthrough). One "Your codes" card replaces the three separate
            sections: lifecycle counts as four small stat cards, the requests
@@ -490,7 +496,7 @@
       </div>
       <div class="table-wrap">
         <table class="table">
-          <thead><tr><th>Code</th><th>Status</th><th>Redeemed</th><th>Added</th><th>Batch</th></tr></thead>
+          <thead><tr><th>Code</th><th>Status</th><th>Redeemed</th><th>Added</th></tr></thead>
           <tbody id="invRows"></tbody>
         </table>
       </div>
@@ -1077,7 +1083,7 @@
     if (MODE !== 'manager') return;
     var list = invFiltered(), tb = document.getElementById('invRows');
     if (!list.length) {
-      tb.innerHTML = '<tr class="empty-row"><td colspan="5">' +
+      tb.innerHTML = '<tr class="empty-row"><td colspan="4">' +
         (invRows().length ? 'Nothing matches those filters.' : 'No codes registered to your club yet.') +
         '</td></tr>';
       return;
@@ -1087,20 +1093,18 @@
         '<td><span class="code-mono">' + esc(r.code) + '</span></td>' +
         '<td>' + UWP.pillFor(UWP.faceOf(r)) + '</td>' +
         '<td>' + esc(r.status === 'redeemed' ? UWP.fmt(r.redeemedAt) : '—') + '</td>' +
-        '<td title="' + esc(UWP.fmt(r.createdAt)) + '">' + esc(UWP.ago(r.createdAt)) + '</td>' +
-        '<td>' + esc(r.batchLabel || '—') + '</td></tr>';
+        '<td title="' + esc(UWP.fmt(r.createdAt)) + '">' + esc(UWP.ago(r.createdAt)) + '</td></tr>';
     }).join('');
   }
 
   function exportInventory() {
     var list = invFiltered();
     if (!list.length) { toast('Nothing to export with those filters.', 'error'); return; }
-    var rows = [['Code', 'Status', 'Redeemed', 'Added', 'Added by', 'Batch']];
+    var rows = [['Code', 'Status', 'Redeemed', 'Added', 'Added by']];
     list.forEach(function (r) {
       rows.push([r.code, (UWP.STATUS[r.status] || {}).label || r.status,
         r.redeemedAt ? UWP.fmt(r.redeemedAt) : '', UWP.fmt(r.createdAt),
-        String(r.createdBy || '').indexOf('club:') === 0 ? 'Club' : (r.createdBy === 'uw' ? 'UW' : 'NL'),
-        r.batchLabel || '']);
+        String(r.createdBy || '').indexOf('club:') === 0 ? 'Club' : (r.createdBy === 'uw' ? 'UW' : 'NL')]);
     });
     var d = new Date(), stamp = d.getFullYear() + ('0' + (d.getMonth() + 1)).slice(-2) + ('0' + d.getDate()).slice(-2);
     NL.download('uw-promo-' + CLUB.code.toLowerCase() + '-' + stamp + '.csv',
@@ -1313,14 +1317,13 @@
       confirmText: 'Yes, upload them'
     }).then(function (ok) {
       if (!ok) return;
-      var batch = UWP.ref('codes').push().key;
       var forReq = UP_REQ;
       var updates = {};
       list.forEach(function (c) {
         updates[UWP.ref('codes').push().key] = {
           code: c.code, norm: c.norm, status: 'active',
           club: CLUB.code, clubName: CLUB.name,
-          batch: batch, request: forReq || null,
+          request: forReq || null,
           createdAt: UWP.TS(), createdBy: actor()
         };
       });
@@ -1331,7 +1334,7 @@
       }).then(function () {
         upBusy = false;
         UWP.audit(actor(), CLUB.name, 'add-codes', {
-          club: CLUB.code, clubName: CLUB.name, count: list.length, batch: batch,
+          club: CLUB.code, clubName: CLUB.name, count: list.length,
           request: forReq || null,
           codes: list.slice(0, 10).map(function (c) { return c.code; }).join(', ') +
                  (list.length > 10 ? ' …' : ''),
@@ -1561,15 +1564,14 @@
       return;
     }
     tb.innerHTML = list.map(function (r) {
-      var overdue = r.status === 'open' && r.due && Date.now() > r.due;
-      var got = uploadedFor(r._id), qty = parseInt(r.qty, 10) || 0;
-      var canUpload = ROUTE === 'online' && r.status === 'open';
+      /* Derived, never pressed: waiting → overdue → fulfilled → dispatched
+         falls out of the uploads that answer the request. */
+      var f = UWP.reqFace(r, CODES);
+      var canUpload = ROUTE === 'online' && (f.key === 'waiting' || f.key === 'overdue');
       return '<tr><td title="' + esc(UWP.fmt(r.raisedAt)) + '">' + esc(UWP.ago(r.raisedAt)) + '</td>' +
-        '<td>' + (got ? got + ' of ' + qty : esc(String(r.qty || ''))) + '</td>' +
+        '<td>' + (f.got ? f.got + ' of ' + f.qty : esc(String(r.qty || ''))) + '</td>' +
         '<td>' + (r.due ? esc(NL.formatDate(r.due)) : '—') + '</td>' +
-        '<td>' + (r.status === 'open'
-          ? (overdue ? '<span class="pill pill--rejected">Overdue</span>' : '<span class="pill pill--pending">Open</span>')
-          : '<span class="pill pill--approved">Fulfilled</span>') + '</td>' +
+        '<td>' + UWP.reqPill(f.key) + '</td>' +
         '<td>' + (canUpload
           ? '<button class="btn btn--ghost btn--sm" data-upreq="' + esc(r._id) + '">Upload</button>'
           : '') + '</td></tr>';

@@ -41,7 +41,7 @@ Stop here — leave clubs unseeded so the call opens with A1.
 | A4 | Tap the UW passcode chip, then **Copy direct link**; paste both into meeting chat | "UW passcode copied" / "UW direct link copied" toasts; both land in chat | ☐ |
 | A5 | For two clubs of Nick's choice: tap PIN chip, **manager passcode** chip + **Copy direct link**; paste all six items into chat labelled Club 1 / Club 2 | Both clubs' PINs, manager passcodes and links in chat | ☐ |
 | A6 | Read the route ledger above the club table | "0 in-store · 0 online · 72 unassigned — switched off until they choose" | ☐ |
-| A7 | Set **Club 1 → In-store** and **Club 2 → In-store** in the Route column | Toasts confirm; ledger reads 2 in-store, 70 unassigned; both changes in the Audit tab as `route` | ☐ |
+| A7 | For Club 1 then Club 2: **Edit** in the Method column → pick **In-store** → warning modal → **Change method** | The method is read-only until Edit; the warning says existing codes are untouched; toasts confirm; ledger reads 2 in-store, 70 unassigned; both changes in the Audit tab as `route` | ☐ |
 
 ---
 
@@ -51,14 +51,14 @@ Stop here — leave clubs unseeded so the call opens with A1.
 |---|--------|----------|------|
 | B1 | Open the UW **direct link** from chat | UW wordmark + passcode gate — link alone does not open the dashboard | ☐ |
 | B2 | Enter a **wrong** passcode | "Passcode not recognised" | ☐ |
-| B3 | Enter the correct passcode | Dashboard opens: stats all zero, empty pool | ☐ |
+| B3 | Enter the correct passcode | Dashboard opens on the **In-store codes** tab (an **Online codes** tab sits beside it); stats all zero, empty pool. **Add codes** shows on In-store only; **Requests** on Online only | ☐ |
 | B4 | **Add codes** — look at the dialog before touching it | **Paste a list of codes** is already selected (generating is second), and there's a **required club dropdown** at the top | ☐ |
 | B5 | Leave the club unset, paste three made-up codes, press **Add codes** | Refused: "Choose the club these codes are for" — nothing is added | ☐ |
-| B6 | Pick **Club 1**, paste three made-up codes (e.g. `SUMMER01`, `SUMMER02`, `SUMMER03`), batch label `UW supplied` → confirm | Confirm names Club 1 and says they can only be redeemed there; all three land, Club column = Club 1 | ☐ |
-| B7 | **Add codes** → Club 1 → switch to *Generate codes for me* → **25**, batch label `Demo day` | 25 codes listed, each **6 plain characters, no hyphen**; **Copy all** → paste into meeting chat | ☐ |
-| B8 | **Add codes** → **Club 2** → generate **10**, label `Club 2 batch` | Registered to Club 2, not Club 1 | ☐ |
-| B9 | Look for any way to add one batch to two clubs at once | **There isn't one** — one club per batch, by design | ☐ |
-| B10 | Re-paste one of the `UW supplied` codes as a new batch | Rejected: "Already in the system" | ☐ |
+| B6 | Pick **Club 1**, paste three made-up codes (e.g. `SUMMER01`, `SUMMER02`, `SUMMER03`) → confirm | Confirm names Club 1 and says they can only be redeemed there; all three land, Club column = Club 1. **No batch-label field anywhere** — the date stamp is the record | ☐ |
+| B7 | **Add codes** → Club 1 → switch to *Generate codes for me* → **25** | 25 codes listed, each **6 plain characters, no hyphen**; **Copy all** → paste into meeting chat | ☐ |
+| B8 | **Add codes** → **Club 2** → generate **10** | Registered to Club 2, not Club 1 | ☐ |
+| B9 | Look for any way to add one set of codes to two clubs at once | **There isn't one** — one club per add, by design | ☐ |
+| B10 | Re-paste one of the B6 codes as a new add | Rejected: "Already in the system" | ☐ |
 | B11 | Set the **club filter to Club 2** | The big count cards drop to Club 2's numbers only (10 in pool) and name Club 2; table matches | ☐ |
 | B12 | Club filter back to **All clubs**; filter Status → Unredeemed; search one specific code | Cards return to the full totals; table narrows correctly both times | ☐ |
 | B13 | **Export CSV** | File downloads; the third column is **Club** and is filled in for every row, redeemed or not | ☐ |
@@ -71,9 +71,9 @@ Stop here — leave clubs unseeded so the call opens with A1.
 |---|--------|----------|------|
 | C1 | Open Club 1's direct link on the phone (this simulates scanning the printed QR) | **Crest-branded gate for Club 1** — not a working till | ☐ |
 | C2 | Enter a wrong PIN | Rejected: "PIN not recognised" | ☐ |
-| C3 | Enter Club 1's **4-digit PIN** | Till opens: UW wordmark, big entry box showing `***`, empty "Redeemed at your club" list, and a **Still to be redeemed** count matching Club 1's batches | ☐ |
+| C3 | Enter Club 1's **4-digit PIN** | Till opens: UW wordmark, big entry box showing `***`, empty "Redeemed at your club" list, and a **Still to be redeemed** count matching Club 1's codes | ☐ |
 | C4 | Check the stats and the page for any list of Club 1's *unredeemed* codes | Only a **count** — the unredeemed codes are never printed on screen | ☐ |
-| C5 | Type a `Demo day` code **sloppily** — lowercase, with a space in the middle | Input uppercases; **no dash is inserted**; it still matches | ☐ |
+| C5 | Type one of the 25 generated Club 1 codes **sloppily** — lowercase, with a space in the middle | Input uppercases; **no dash is inserted**; it still matches | ☐ |
 | C6 | Press **REDEEM** | ✅ dialog naming the code + Club 1, with the "apply the relevant discount on your club system" note; code appears in the club's redeemed list | ☐ |
 | C7 | Enter the **same code** again → REDEEM | ❌ "already redeemed **at** [Club 1] on [today's date/time]" | ☐ |
 | C8 | Everyone checks U's screen (no refresh) | The redemption shows against Club 1 with a timestamp; "Redeemed by club" reads 1 / [Club 1's total] | ☐ |
@@ -88,7 +88,7 @@ nowhere else.
 | # | Action | Expected | Pass |
 |---|--------|----------|------|
 | D1 | N signs into **Club 2** on the laptop (direct link + PIN from chat) | Second till open under a different crest | ☐ |
-| D2 | At the **Club 2** till, enter one of Club 1's unused `Demo day` codes → REDEEM | ❌ the **neutral** refusal — "This code can't be redeemed", UW contact + T&Cs link. It does **not** say whose code it is: till staff can't adjudicate (spec item 5) | ☐ |
+| D2 | At the **Club 2** till, enter one of Club 1's unused generated codes → REDEEM | ❌ the **neutral** refusal — "This code can't be redeemed", UW contact + T&Cs link. It does **not** say whose code it is: till staff can't adjudicate (spec item 5) | ☐ |
 | D3 | Check U's screen | That code is **still unredeemed** and still shows Club 1 — the failed attempt changed nothing | ☐ |
 | D4 | At the **Club 1** till, enter one of Club 2's codes → REDEEM | The same neutral refusal — indistinguishable from a fake, both directions | ☐ |
 | D5 | R reads out one fresh **Club 2** code; N types it into **both** tills, then presses REDEEM on each as near-simultaneously as possible | Club 1's till gives the neutral refusal; Club 2's till redeems it once. (If both devices are on Club 2, exactly one ✅ — the other gets the already-redeemed dialog, which still names club and time) | ☐ |
@@ -111,7 +111,7 @@ club** that nobody has touched, so it is still unassigned.
 | R6 | N hunts for a way to change the route from the club side | **There isn't one** — reversal is an NL or UW admin act only | ☐ |
 | R7 | N edits the scheme contact (change the role, add a second person) | Saves; card updates; the change is in Audit as `contact`, actor = the club | ☐ |
 | R8 | R checks the admin console | Ledger moved (one more in-store); the club's own setup choice is in Audit as `route` with the **club** as the actor; the contact appears in the new *Scheme contact* column in Clubs & access | ☐ |
-| R9 | R flips that club → **Online** from the Route column, N signs in again with the manager passcode | Admin view with upload. This club has **no central codes**, so no till and no PIN card — compare with Phase K, where a club *with* central codes keeps its till | ☐ |
+| R9 | R flips that club → **Online** (Method column → Edit → Online → warning → confirm), N signs in again with the manager passcode | Admin view with upload. This club has **no central codes**, so no till and no PIN card — compare with Phase K, where a club *with* central codes keeps its till | ☐ |
 | R10 | (Live-only check, note it now) Central codes older than 12 months | Show an **Expired** pill and count card in every panel, and the till refuses them with the expiry date — sandbox codes are too young, so this is asserted by the unit tests instead | ☐ |
 | R11 | R opens **Support & notifications**, sets a support email + a notify address | Saved; the neutral refusal (D2) now shows the support address to new sign-ins; an upload (Phase K) sends the alert email | ☐ |
 
@@ -145,7 +145,7 @@ club** that nobody has touched, so it is still unassigned.
 | K7 | Try another of them at the **Club 2** till | ❌ refused, naming Club 1 — self-uploaded codes obey the same one-club rule | ☐ |
 | K8 | Paste a code that already exists (one of UW's from Phase B) and upload | Refused, naming the clash; **nothing** is added, not even the valid ones alongside it | ☐ |
 | K9 | R checks the master Codes tab | The three codes are there against Club 1, **By = Club** (not UW or NL) | ☐ |
-| K10 | R checks the Audit tab | One `add-codes` entry from Club 1, with the count, the batch, and the three undertakings recorded in the detail | ☐ |
+| K10 | R checks the Audit tab | One `add-codes` entry from Club 1, with the count, the request it answered (if any), and the three undertakings recorded in the detail | ☐ |
 
 Line to land with the club: *this is your record as much as ours — the audit
 trail is append-only, so what you confirmed can't be edited afterwards by
@@ -163,12 +163,12 @@ Issued and Dispatched are derived faces on the pills, never a stored status.
 |---|--------|----------|------|
 | L1 | U opens **Requests** | Dialog: "Ask a club for codes" — the club dropdown lists **online-route clubs only** (Club 1 and Phase R's club), quantity, and a due date **prefilled a week out and editable** | ☐ |
 | L2 | U raises a request: Club 1, 25 codes, due date moved to **yesterday** | Request appears in the open list; audit records `request` | ☐ |
-| L3 | N refreshes Club 1's admin view | **Requests & history** card: lifecycle counts line, the request in the table, and a banner — the yesterday due date reads **overdue** | ☐ |
-| L4 | (Mention, don't run) The overdue digest | A daily job (08:30 UK) emails the `notify` list from R11 when open requests are past due — internal only, clubs are never emailed. Live-only; nothing to press | ☐ |
-| L5 | U ticks the tick-boxes on a few of Club 1's **unredeemed uploaded** codes → **Dispatch** | Confirm names the count; those pills flip **Issued → Dispatched** everywhere (UW, admin, and the club's own list); one `dispatch` audit entry | ☐ |
-| L6 | U looks for a tick-box on a redeemed or revoked code | There isn't one — only active, undispatched, unexpired codes can be dispatched | ☐ |
-| L7 | U marks the request **fulfilled** | Moves to fulfilled in the list; the club's banner clears. Fulfilment is a deliberate human act — nothing auto-fulfils | ☐ |
-| L8 | R opens the admin console's **Requests** | Same dialog plus a **Raised by** column (both Lucy and Richard can raise); the fulfilled request shows there too | ☐ |
+| L3 | N refreshes Club 1's admin view | The **Your codes** card: lifecycle count cards, the request in the table reading **Overdue** (yesterday's due date), and a banner netting off anything already supplied | ☐ |
+| L4 | (Mention, don't run) The overdue digest | A daily job (08:30 UK) emails the `notify` list from R11 when requests are past due **and still short** — a fully supplied one is never chased; internal only, clubs are never emailed. Live-only; nothing to press | ☐ |
+| L5 | On the **Online codes** tab, U ticks a few of Club 1's **unredeemed uploaded** codes → **Dispatch** | Confirm names the count; those pills flip **Issued → Dispatched** everywhere (UW, admin, and the club's own list); one `dispatch` audit entry | ☐ |
+| L6 | U looks for a tick-box on a redeemed code, and a **Revoke** button anywhere on the Online tab | Neither exists — only active undispatched codes can be dispatched, and **club-uploaded codes are never revoked by anyone** | ☐ |
+| L7 | N uploads enough codes against the request to meet its quantity (Upload button on the request row) | The request reads **Fulfilled** on every panel and the club's banner clears — **nobody pressed anything**; fulfilment is derived from the uploads. There is no Mark fulfilled button to find | ☐ |
+| L8 | R opens the admin console's **Requests** | Same dialog plus a **Raised by** column (both Lucy and Richard can raise); the fulfilled request shows there too. U dispatches its codes → the request reads **Dispatched** | ☐ |
 
 ---
 
@@ -193,7 +193,7 @@ Issued and Dispatched are derived faces on the pills, never a stored status.
 | F2 | Set the club filter to **Club 1** and read the big cards | Cards show Club 1's numbers and say so; clearing the filter restores the totals | ☐ |
 | F3 | **Revoke** a redeemed code | Demands typing `REVOKE`; wrong text refuses | ☐ |
 | F4 | **Delete** a single code | Demands typing `DELETE`; code vanishes from every panel incl. U's screen | ☐ |
-| F5 | **Batches** | Each batch row names its **club**; `Demo day` → **Delete unused (N)** confirm states how many **redeemed codes will be kept**; after typing `DELETE`, unused ones go, redeemed ones remain | ☐ |
+| F5 | **Code adds** | Each row is one add — club, date stamp, who; no labels anywhere. Pick the 25-code add → **Delete unused (N)** confirm states how many **redeemed codes will be kept**; after typing `DELETE`, unused ones go, redeemed ones remain | ☐ |
 
 ---
 
@@ -238,9 +238,9 @@ console can edit or prune it.*
 |---|---|
 | Gates: master / UW / club, wrong-credential rejection, link ≠ login | P2–P3, B1–B3, C1–C3 |
 | Club credential is a unique 4-digit PIN; bulk reissue | A1–A2, C3, H1, H4 |
-| **A code belongs to one club, chosen at creation, one club per batch** | B4–B6, B8–B9 |
+| **A code belongs to one club, chosen at creation, one club per add** | B4–B6, B8–B9 |
 | **A code is refused at any other club, both directions, changing nothing** | D2–D5 |
-| Code creation: paste-first default, 6-char no-hyphen generation, batch labels, duplicate rejection | B4, B7, B10 |
+| Code creation: paste-first default, 6-char no-hyphen generation, duplicate rejection; no batch/label concept | B4, B6–B7, B10 |
 | Redemption: free-text entry, no dash formatting, ✅ + discount note | C5–C6 |
 | Duplicate + race protection ("redeemed **at**") | C7, D5–D6 |
 | **Count cards follow the club filter** | B11–B12, F2 |
@@ -250,14 +250,14 @@ console can edit or prune it.*
 | Club's unredeemed codes counted but never displayed | C4 |
 | Live cross-panel updates | C8, D3, D6, F4 |
 | Revoke / release (keeps the registration) / re-redemption at the right club | E1–E5 |
-| NL-only powers: redeem-on-behalf (no picker), revoke-redeemed, delete, batch delete (keeps redeemed) | E6, F1, F3–F5 |
+| NL-only powers: redeem-on-behalf (no picker), revoke-redeemed, delete, delete-an-add (keeps redeemed) | E6, F1, F3–F5 |
 | Audit: completeness, attribution, checks logged, deletions traced, export | G1–G5, J7 |
 | Filters, search, CSV exports (Club column) | B11–B13, G2–G5 |
 | Print cards + QR round-trip | H1–H3 |
 | **Routes: holding screens, self-serve setup (five undertakings + contact as the gate), locking, admin-only reversal** | R1–R6, R8–R9 |
 | **Scheme contacts: required at setup, editable, surfaced to NL, audited** | R4–R5, R7–R8 |
 | **A route change never touches existing codes — till survives on central codes, previous-scheme block** | K1, K1a, R9 |
-| **Requests: online clubs only, due date prefilled +7 editable, overdue banner, manual fulfilment, raised-by attribution** | L1–L3, L7–L8 |
-| **Dispatch: bulk tick on eligible codes only, Issued→Dispatched faces, audited** | L5–L6 |
-| Support address + notify list; overdue digest is internal-only | R11, L4 |
+| **Requests: online clubs only, due +7 editable, overdue banner, DERIVED fulfilment/dispatch (nothing pressed), raised-by attribution** | L1–L3, L7–L8 |
+| **Dispatch: bulk tick on eligible codes only, Created/Issued→Dispatched faces, no revoke on club codes** | L5–L6 |
+| Support address + notify list; digest is internal-only and chases shortfalls only | R11, L4 |
 | Sandbox isolation + reset | P1, I1 |

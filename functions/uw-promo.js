@@ -443,9 +443,17 @@ exports.uwPromoOverdue = onSchedule(
     const db = admin.database();
     const reqs = (await db.ref("app-data/uw-promo/requests").once("value")).val() || {};
     const now = Date.now();
+    /* Fulfilment is derived, never pressed (v43 feedback): a request is
+       satisfied when uploads carrying its id meet the quantity, so only
+       requests still SHORT of their ask can be overdue. Mirrors
+       UWP.reqFace and the GAS digest — three places, one rule. */
+    const codes = (await db.ref("app-data/uw-promo/codes").once("value")).val() || {};
+    const uploadedFor = (id) =>
+      Object.keys(codes).filter((k) => (codes[k] || {}).request === id).length;
     const overdue = Object.keys(reqs).filter((k) => {
       const r = reqs[k] || {};
-      return r.status === "open" && typeof r.due === "number" && now > r.due;
+      if (r.status !== "open" || typeof r.due !== "number" || now <= r.due) return false;
+      return uploadedFor(k) < (parseInt(r.qty, 10) || 0);
     });
     if (!overdue.length) {
       logger.info("uwPromoOverdue: nothing overdue");

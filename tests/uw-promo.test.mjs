@@ -193,10 +193,14 @@ test('redeemTxn: refuses an expired central code, redeems an old uploaded one', 
   assert.equal(out.status, 'redeemed', 'uploaded code redeems at any age');
 });
 
-test('faceOf: the scheme lifecycle — issued, dispatched, redeemed — with expiry overriding', () => {
+test('faceOf: the scheme lifecycle, named for who acted, with expiry overriding', () => {
   const born = 1_000_000;
   const up = { status: 'active', createdBy: 'club:ALT', createdAt: born };
+  // 'Issued' is a club act (an upload); a central code at the same stage
+  // reads 'Created' — same lifecycle stage, named for who did it.
   assert.equal(UWP.faceOf(up, born + 1), 'issued', 'uploaded and waiting');
+  assert.equal(UWP.faceOf({ status: 'active', createdBy: 'uw', createdAt: born }, born + 1), 'created');
+  assert.equal(UWP.faceOf({ status: 'active', createdBy: 'master', createdAt: born }, born + 1), 'created');
   assert.equal(UWP.faceOf({ ...up, dispatchedAt: born + 2 }, born + 3), 'dispatched');
   assert.equal(UWP.faceOf({ ...up, status: 'redeemed', dispatchedAt: born + 2 }, born + 3), 'redeemed');
   assert.equal(UWP.faceOf({ ...up, status: 'revoked' }, born + 3), 'revoked');
@@ -205,6 +209,28 @@ test('faceOf: the scheme lifecycle — issued, dispatched, redeemed — with exp
   const central = { status: 'active', createdBy: 'uw', createdAt: born, dispatchedAt: born + 2 };
   assert.equal(UWP.faceOf(central, born + YEAR + 1), 'expired');
   assert.equal(UWP.faceOf(central, born + 3), 'dispatched');
+});
+
+test('reqFace: a request is never pressed — its state falls out of the uploads', () => {
+  const req = { _id: 'r1', qty: 3, due: 5_000 };
+  const code = (n, extra) => ({ status: 'active', request: 'r1', createdBy: 'club:ALT', ...extra });
+  // The result object is born in the VM realm, so compare fields, not shapes.
+  const face = (r, codes, now) => { const f = UWP.reqFace(r, codes, now); return [f.key, f.got, f.qty]; };
+  // Nothing uploaded, before the due date: waiting. After it: overdue.
+  assert.deepEqual(face(req, {}, 4_000), ['waiting', 0, 3]);
+  assert.deepEqual(face(req, {}, 6_000), ['overdue', 0, 3]);
+  // Short of the ask stays waiting/overdue, with the progress countable.
+  const two = { a: code(1), b: code(2), z: { status: 'active', request: 'other' } };
+  assert.deepEqual(face(req, two, 4_000), ['waiting', 2, 3]);
+  assert.equal(UWP.reqFace(req, two, 6_000).key, 'overdue', 'partial past due still chases');
+  // Meeting the ask fulfils it — even past the due date; nobody marks it.
+  const three = { ...two, c: code(3) };
+  assert.equal(UWP.reqFace(req, three, 6_000).key, 'fulfilled');
+  // Every one of its codes dispatched moves it on to dispatched.
+  const sent = { a: code(1, { dispatchedAt: 9 }), b: code(2, { dispatchedAt: 9 }), c: code(3, { dispatchedAt: 9 }) };
+  assert.equal(UWP.reqFace(req, sent, 6_000).key, 'dispatched');
+  // A request with no due date never reads overdue.
+  assert.equal(UWP.reqFace({ _id: 'r2', qty: 5 }, {}, 9_000).key, 'waiting');
 });
 
 test('redeemTxn: passes a local-cache null through so the SDK retries', () => {
@@ -297,6 +323,6 @@ test('status metadata covers the full lifecycle', () => {
   /* issued and dispatched are derived faces from faceOf(), never stored on a
      record — statusOf() still only ever returns the other four. */
   assert.deepEqual(Object.keys(UWP.STATUS).sort(),
-    ['active', 'dispatched', 'expired', 'issued', 'redeemed', 'revoked']);
+    ['active', 'created', 'dispatched', 'expired', 'issued', 'redeemed', 'revoked']);
   assert.equal(UWP.STATUS.active.label, 'Unredeemed');
 });

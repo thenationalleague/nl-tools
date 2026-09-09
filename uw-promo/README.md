@@ -9,14 +9,14 @@ NO auth-guard/portal login), with a full audit trail.
 
 | Page | Who | Gets in via | Can do |
 |---|---|---|---|
-| `/uw-promo/` | **Utility Warehouse** (one shared login) | shared 6-character passcode or `?u=<token>` direct link | Add codes **for one club at a time** (club dropdown required; paste a list — the default — or generate plain 6-character codes; optional batch label; ≤500/batch), revoke **unredeemed** codes, release a redeemed code (required reason), see every code with the club it belongs to, redeemed-by-club breakdown, filters, search, CSV export. The big count cards follow the club filter |
+| `/uw-promo/` | **Utility Warehouse** (one shared login) | shared 6-character passcode or `?u=<token>` direct link | The code list splits into **In-store / Online tabs** — stats, breakdown, filters and export follow the tab, and each tab carries only its own verbs. In-store: add codes **for one club at a time** (club dropdown required; paste a list — the default — or generate plain 6-character codes; ≤500 per add), revoke **unredeemed** codes. Online: raise/see requests, dispatch, **no revoke — club-uploaded codes are never revoked by anyone**. Both: release a redeemed code (required reason), bulk dispatch, search, CSV export. The big count cards follow the club filter |
 | `/uw-promo/club/` | **Each of the 72 clubs** | own `?c=<token>` direct link (the QR-code target for the point of sale) **plus a credential on every visit** — the 4-digit till PIN, or the club's manager passcode for the admin view; either alone also works without the link | **Till page**: big code entry → a valid unredeemed code *registered to this club* is redeemed here (RTDB transaction — two tills can't claim the same code) and joins the club's redeemed list. Refusals (spec item 5): already-redeemed shows **club + date/time**, expired shows **its expiry date**, and everything else — not recognised, revoked, another club's code — shares ONE neutral message with the UW support address and T&Cs link, so till staff can't adjudicate. Clubs cannot undo — the page points them at NL. On the manager passcode only: **Check a code** (full detail, 10/hr, audited), and per route: upload (online), inventory, CSV, audit slice, PIN self-service (in-store) — see *Routes* and *Two doors* |
 | `/uw-promo/admin/` | **NL master (Richard)** | master passcode only (no direct link, deliberately; first-run bootstrap sets it) | Everything UW can do, plus: redeem on behalf of a club (the club it is registered to, same race-safe transaction), **register** a pre-v3.0 code to a club, revoke **redeemed** codes (typed `REVOKE`), seed/sync the roster from clubs-meta, the **list of all 72 club URLs, PINs and manager passcodes** (copy/regenerate each, **Reissue all club PINs**, **Issue missing manager passcodes**, export access CSV), **Print till cards** (one A4 card per club: crest, QR of the club link, PIN + the till steps — print-to-PDF gives the 72-page hand-out pack), audit viewer + export, sandbox reset (test mode) |
 
 ## Which club a code belongs to
 
 Chosen from a required dropdown when the codes are created, **one club per
-batch** — 25 for Hartlepool, then 25 for Sutton, never both at once. There is
+add** — 25 for Hartlepool, then 25 for Sutton, never both at once. There is
 deliberately no "any club" option: a code redeemable anywhere and a code
 registered to one club cannot both be true, and the club is what the whole
 model turns on. A code registered to Hartlepool and presented at Sutton is
@@ -33,7 +33,7 @@ Enforcement is in two places: the till checks before it writes, and
 **Codes created before v3.0 belong to no club** and stay redeemable anywhere,
 which is the old pool behaviour. Filter to *Not yet registered to a club* in
 either panel to find them; the master console's per-row **Register…** puts
-each one right without losing its batch history.
+each one right without deleting it.
 
 ## Status model
 
@@ -66,7 +66,12 @@ codes are 6 plain characters with no hyphen; the till entry box is free text
 | Each club — till | **4-digit numeric PIN** | Typed on a phone, at a till, by whoever is on shift |
 | Each club — admin | 6-character **manager passcode** | Named contact, on a laptop. Never printed |
 
-## Routes — unassigned / in-store / online (spec v42.0, self-serve v43.0)
+## Redemption methods — unassigned / in-store / online (spec v42.0, self-serve v43.0)
+
+("Route" in the data — `config/clubs/<CODE>/route` — and "redemption
+method" everywhere a person reads it. Changing one is deliberately
+ceremonial in both consoles: read-only until Edit, explicit choices, and a
+warning confirm before anything is written.)
 
 Every club carries a `route` on its config record, defaulting to
 **unassigned**, and the route decides what its people can open at all:
@@ -86,8 +91,9 @@ Saving locks the route. The till PIN deliberately cannot reach setup:
 choosing a route binds the club to undertakings, and that is a manager
 decision, not a till-shift one.
 
-**Locked means locked** (§4). Reversal is an NL or UW admin act — the Club
-routes control on the UW page, or the Route column on the admin console —
+**Locked means locked** (§4). Reversal is an NL or UW admin act — the
+Redemption methods control on the UW page, or the Method column on the
+admin console —
 and a route change **never touches existing codes**. Creation follows the
 current route; validation honours whatever exists: a club that leaves the
 in-store route keeps a working till for as long as its central codes are in
@@ -125,27 +131,39 @@ club in Clubs & access. Multiple contacts are allowed.
 
 ## The request → dispatch lifecycle (spec v43.0 §5)
 
-Central (in-store) codes now carry a visible pipeline:
+Every code carries a visible pipeline, and the pre-dispatch stage is named
+for **who acted**: a centrally created code reads **Created**, a
+club-uploaded one reads **Issued** — issuing is a club act.
 
 | Face | Meaning | Set by |
 |---|---|---|
-| **Requested** | An open request: club, quantity, due date | Lucy (UW page) or Richard (admin console) — both can raise |
-| **Issued** | Codes exist in the system, not yet sent out | Creation (any active undispatched central code reads Issued) |
-| **Dispatched** | Physically sent to the club | UW page bulk flow: tick codes → confirm → `dispatchedAt`/`dispatchedBy` in one multi-update, audited |
-| **Redeemed** | Used at the club's till | The till, as ever |
+| **Created / Issued** | Code exists, not yet sent out | Creation (UW/NL → Created; club upload → Issued) |
+| **Dispatched** | Physically sent out | UW page bulk flow: tick codes → confirm → `dispatchedAt`/`dispatchedBy` in one multi-update, audited |
+| **Redeemed** | Used | The till, as ever |
 
-Issued and Dispatched are **derived faces** (`UWP.faceOf` over
-`statusOf` + the `dispatchedAt` flag), never a stored status —
-expired/redeemed/revoked always win. Requests live at `requests/<pushId>`
-(club, qty, due, status open|fulfilled); the due date prefills a week out
-and is editable. **Marking fulfilled is deliberately manual** — a human
-closing the loop beats a heuristic. The club admin view shows its own
-history: lifecycle counts, the request table, and an outstanding/overdue
-banner.
+These are **derived faces** (`UWP.faceOf` over `statusOf` + the
+`dispatchedAt` flag), never a stored status — expired/redeemed/revoked
+always win.
+
+**Requests are logged, never operated.** Lucy (UW page) or Richard (admin
+console) raises one against an online club — quantity plus a due date that
+prefills a week out and stays editable — and from then on **nothing on the
+request is ever pressed**. Uploads carry the id of the request they answer,
+so its state falls out of the codes themselves (`UWP.reqFace`):
+
+- **Waiting** — open, uploads short of the ask (progress shown as "2 of 5")
+- **Overdue** — waiting, past the due date
+- **Fulfilled** — uploads meet the quantity; nobody marks anything
+- **Dispatched** — fulfilled, and every one of its codes marked dispatched
+
+The club admin view shows its own history — lifecycle count cards, the
+request table with per-request Upload buttons, and a banner that nets off
+what has already been supplied.
 
 **Overdue chasing is internal only** (§7): a scheduled Cloud Function
-(`uwPromoOverdue`, daily 08:30 UK) pokes the GAS router when open requests
-are past due; the GAS side reads the requests, club names and recipients
+(`uwPromoOverdue`, daily 08:30 UK) pokes the GAS router when requests are
+past due **and still short of their quantity** — a fully supplied request
+can never be chased; the GAS side reads the requests, codes, club names and recipients
 itself with the server credential and emails the digest to the
 `config/support/notify` list. The poke carries no content, so an outside
 caller can only make it send the true digest to the configured people.
@@ -259,10 +277,13 @@ have to be reprinted and resent.
 
 In the club admin view (manager passcode — **not** the till PIN), and only
 on the **online route** — an in-store club's codes come centrally from UW,
-so its managers don't see the module. A club pastes its own
-codes, optionally labels the batch, and they go live immediately — registered
-to that club, because a club can only ever upload its own. There is no club
-to choose and therefore nothing to get wrong.
+so its managers don't see the module. Uploads live **inside the request
+they answer** (each open request has an Upload button; an unsolicited
+upload stays possible via a small link). A club pastes its own codes, one
+per line, and they go live immediately — registered to that club, because a
+club can only ever upload its own. There is no club to choose and therefore
+nothing to get wrong, and no batch labels — codes added together share one
+server timestamp, and that date stamp is the grouping.
 
 Three undertakings must be ticked, then a second confirm dialog restates them:
 
@@ -274,7 +295,7 @@ Three undertakings must be ticked, then a second confirm dialog restates them:
 **Expiry is an undertaking, not a field.** Nothing stores an expiry date and
 nothing enforces one at the till — the club commits to 12 months and that
 commitment is what we keep. The record lives in the audit trail: the entry
-names the club, the batch, the count and each undertaking, and the trail is
+names the club, the count, the request answered and each undertaking, and the trail is
 append-only, so not even the master console can alter it afterwards. That is
 deliberately stronger evidence than a flag on the code would be.
 
@@ -363,7 +384,14 @@ codes/<pushId>      { code, norm, status: active|redeemed|revoked,
                       club, clubName,                              # set at CREATION — the one club
                                                                    # this code can be redeemed at.
                                                                    # Absent on pre-v3.0 codes only
-                      batch, batchLabel?, createdAt,
+                      request?,                                    # id of the request an upload
+                                                                   # answers — drives the derived
+                                                                   # request ladder
+                      createdAt,                                   # identical across one add —
+                                                                   # the date stamp IS the group
+                                                                   # (batch/batchLabel retired
+                                                                   # 09/09/2026; old codes still
+                                                                   # carry them, ignored)
                       createdBy: uw|master|club:<CODE>,            # club = self-upload
                       dispatchedAt?, dispatchedBy?,                # v43 — set by the UW bulk
                                                                    # dispatch flow; drives the
@@ -371,10 +399,12 @@ codes/<pushId>      { code, norm, status: active|redeemed|revoked,
                       redeemedAt?, redeemedBy?,                    # redeemedBy: club:<CODE>|master
                       releasedAt?, releasedBy?, releaseReason?, releasedFrom?,
                       revokedAt?, revokedBy? }
-requests/<pushId>   { club, clubName, qty, due, status: open|fulfilled,
-                      raisedAt, raisedBy: uw|master,
-                      fulfilledAt?, fulfilledBy? }                 # v43 — NL/UW write, any
-                                                                   # session reads
+requests/<pushId>   { club, clubName, qty, due, status: 'open',
+                      raisedAt, raisedBy: uw|master }              # NL/UW write, any session
+                                                                   # reads. Waiting/overdue/
+                                                                   # fulfilled/dispatched are all
+                                                                   # DERIVED (UWP.reqFace) — the
+                                                                   # stored status never changes
 contacts/<CODE>     [ { name, role, email, addedAt } ]             # v43 scheme contacts —
                                                                    # personal data, RTDB only,
                                                                    # club manager + NL/UW write
@@ -382,7 +412,7 @@ audit/<pushId>      { ts (server), actor: master|uw|club:<CODE>, actorLabel,
                       action: add-codes|redeem|check|release|revoke|register|
                               delete|seed-clubs|regen-passcode|regen-link|
                               bootstrap|route|support|request|dispatch|contact,
-                      club?, clubName?, count?, batch?, codes?, detail? }
+                      club?, clubName?, count?, request?, codes?, detail? }
 ```
 
 No rules change: `club` was already an indexed field on `codes`, and `check` /
