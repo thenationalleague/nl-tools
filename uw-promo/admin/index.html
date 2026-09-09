@@ -24,6 +24,13 @@
            write config. That is the change that stops all 72 till PINs being
            world-readable. First run mints a bootstrap master token while no
            passcode exists; nothing subscribes to RTDB until the session does.
+  Version: v6.1 (09/09/2026) — feedback round 2. Requests show the derived
+           reqFace ladder and lose "Mark fulfilled". Batches become "Code
+           adds", grouped by the shared server timestamp of each add —
+           labels are gone from the dialog, table, exports and audit. The
+           Route column becomes Method: read-only with an Edit ceremony
+           (explicit choices, warning, confirm). Revoke never appears on a
+           club-uploaded code; typed DELETE remains for genuine mistakes.
   Version: v6.0 (09/09/2026) — spec v43.0: the NL side of the request
            lifecycle. Requests modal mirrors the UW one (raise, due a week
            out by default, mark fulfilled) with a Raised-by column since both
@@ -241,7 +248,7 @@
           <input class="toolbar__search" id="fSearch" type="search" placeholder="Search codes…" aria-label="Search codes">
         </div>
         <div class="toolbar__right">
-          <button class="btn btn--ghost" id="btnRequests">Requests</button> <button class="btn btn--ghost" id="btnBatches">Batches</button>
+          <button class="btn btn--ghost" id="btnRequests">Requests</button> <button class="btn btn--ghost" id="btnBatches">Code adds</button>
           <button class="btn btn--ghost" id="btnExport">Export CSV</button>
           <button class="btn btn--primary" id="btnAdd">Add codes</button>
         </div>
@@ -249,9 +256,9 @@
       <div class="table-wrap">
         <table class="table">
           <thead><tr>
-            <th>Code</th><th>Status</th><th>Club</th><th>Redeemed</th><th>Added</th><th>By</th><th>Batch</th><th></th>
+            <th>Code</th><th>Status</th><th>Club</th><th>Redeemed</th><th>Added</th><th>By</th><th></th>
           </tr></thead>
-          <tbody id="rows"><tr class="loading-row"><td colspan="8">Loading codes…</td></tr></tbody>
+          <tbody id="rows"><tr class="loading-row"><td colspan="7">Loading codes…</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -313,7 +320,7 @@
             <option value="release">Release</option>
             <option value="revoke">Revoke</option>
             <option value="check">Code check</option>
-            <option value="route">Route change</option>
+            <option value="route">Method change</option>
             <option value="request">Code request</option>
             <option value="dispatch">Dispatch</option>
             <option value="contact">Scheme contact</option>
@@ -514,19 +521,17 @@
         '<span style="flex:1"><label for="rqDue">Due</label><input id="rqDue" type="date"></span></div>' +
       '<button class="btn btn--primary btn--sm" id="rqRaise">Raise request</button>' +
       '<div class="table-wrap" style="margin-top:16px"><table class="table">' +
-      '<thead><tr><th>Club</th><th>Codes</th><th>Due</th><th>Raised by</th><th>Status</th><th></th></tr></thead><tbody>' +
+      '<thead><tr><th>Club</th><th>Codes</th><th>Due</th><th>Raised by</th><th>Status</th></tr></thead><tbody>' +
       (list.length ? list.map(function (r) {
-        var overdue = r.status === 'open' && r.due && Date.now() > r.due;
-        return '<tr><td>' + esc(nameOf(r.club)) + '</td><td>' + esc(String(r.qty)) + '</td>' +
+        /* Derived, never pressed: uploads carrying the request id decide
+           waiting → overdue → fulfilled → dispatched. */
+        var f = UWP.reqFace(r, CODES);
+        return '<tr><td>' + esc(nameOf(r.club)) + '</td>' +
+          '<td>' + (f.got ? f.got + ' of ' + f.qty + ' uploaded' : esc(String(r.qty))) + '</td>' +
           '<td>' + (r.due ? esc(NL.formatDate(r.due)) : '—') + '</td>' +
           '<td>' + esc(r.raisedBy === 'uw' ? 'UW' : 'NL') + '</td>' +
-          '<td>' + (r.status === 'open'
-            ? (overdue ? '<span class="pill pill--rejected">Overdue</span>' : '<span class="pill pill--pending">Open</span>')
-            : '<span class="pill pill--approved">Fulfilled</span>') + '</td>' +
-          '<td style="text-align:right">' + (r.status === 'open'
-            ? '<button class="btn btn--ghost btn--sm" data-fulfil="' + esc(r._id) + '">Mark fulfilled</button>'
-            : '') + '</td></tr>';
-      }).join('') : '<tr class="empty-row"><td colspan="6">No requests yet.</td></tr>') +
+          '<td>' + UWP.reqPill(f.key) + '</td></tr>';
+      }).join('') : '<tr class="empty-row"><td colspan="5">No requests yet.</td></tr>') +
       '</tbody></table></div>';
     wrap.querySelector('#rqDue').value = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
     var ctrl = NL.modal({
@@ -550,18 +555,6 @@
           detail: 'Requested ' + qty + ' codes' + (dueRaw ? ', due ' + dueRaw : '')
         });
         toast('Request raised', 'success');
-        ctrl.close();
-      }).catch(function (err) { toast('Failed: ' + err.message, 'error'); });
-    });
-    ctrl.body.addEventListener('click', function (e) {
-      var el = e.target.closest('[data-fulfil]');
-      if (!el) return;
-      var id = el.getAttribute('data-fulfil');
-      UWP.ensureAuth().then(function () {
-        return UWP.ref('requests/' + id).update({ status: 'fulfilled', fulfilledAt: UWP.TS() });
-      }).then(function () {
-        UWP.audit(ACTOR, ACTOR_LABEL, 'request', { club: (REQS[id] || {}).club, detail: 'Request marked fulfilled' });
-        toast('Marked fulfilled', 'success');
         ctrl.close();
       }).catch(function (err) { toast('Failed: ' + err.message, 'error'); });
     });
@@ -718,23 +711,29 @@
     var list = filtered();
     var tbody = document.getElementById('rows');
     if (!list.length) {
-      tbody.innerHTML = '<tr class="empty-row"><td colspan="8">' +
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="7">' +
         (all.length ? 'No codes match the current filters.' : 'No codes in the pool yet.') + '</td></tr>';
       return;
     }
     tbody.innerHTML = list.map(function (r) {
       var del = '<button class="btn btn--ghost btn--sm" data-delete="' + esc(r._id) + '">Delete</button>';
       var acts = del;
+      /* Club-uploaded codes are never revoked, by anyone (owner ruling
+         09/09/2026): the club's own POS is the authority on them. Typed
+         DELETE remains for genuine mistakes — removal, not revocation. */
+      var clubOwned = String(r.createdBy || '').indexOf('club:') === 0;
+      var revokeBtn = clubOwned ? '' :
+        '<button class="btn btn--danger btn--sm" data-revoke="' + esc(r._id) + '">Revoke</button> ';
       if (r.status === 'active') {
         // Pre-v3.0 codes have no club — register one before it can be redeemed
         // on anybody's behalf.
         acts = (r.club
                  ? '<button class="btn btn--ghost btn--sm" data-redeem="' + esc(r._id) + '">Redeem…</button> '
                  : '<button class="btn btn--navy btn--sm" data-register="' + esc(r._id) + '">Register…</button> ') +
-               '<button class="btn btn--danger btn--sm" data-revoke="' + esc(r._id) + '">Revoke</button> ' + del;
+               revokeBtn + del;
       } else if (r.status === 'redeemed') {
         acts = '<button class="btn btn--restore btn--sm" data-release="' + esc(r._id) + '">Release</button> ' +
-               '<button class="btn btn--danger btn--sm" data-revoke="' + esc(r._id) + '">Revoke</button> ' + del;
+               revokeBtn + del;
       }
       // The club a code is REGISTERED to, redeemed or not.
       var clubCell = r.clubName
@@ -750,7 +749,6 @@
         '<td>' + esc(r.status === 'redeemed' ? UWP.fmt(r.redeemedAt) : '—') + '</td>' +
         '<td title="' + esc(UWP.fmt(r.createdAt)) + '">' + esc(UWP.ago(r.createdAt)) + '</td>' +
         '<td>' + esc(addedBy(r.createdBy)) + '</td>' +
-        '<td>' + esc(r.batchLabel || '—') + '</td>' +
         '<td style="text-align:right;white-space:nowrap">' + acts + '</td></tr>';
     }).join('');
     NL.clubs.wireCrestImgs(tbody);   // thumb → full → rose, same tick as insertion
@@ -945,8 +943,6 @@
         '<textarea id="alPaste" rows="6" placeholder="CODEONE&#10;CODETWO"></textarea></div>' +
       '<div class="alloc-row" id="alQtyRow" style="display:none"><label for="alQty">How many</label>' +
         '<input id="alQty" type="number" min="1" max="500" value="25"></div>' +
-      '<div class="alloc-row"><label for="alLabel">Batch label (optional)</label>' +
-        '<input id="alLabel" maxlength="40" placeholder="e.g. March mailout"></div>' +
       '<div class="alloc-preview" id="alPreview"></div>';
 
     var ctrl = NL.modal({
@@ -959,8 +955,7 @@
     });
 
     var elClub = wrap.querySelector('#alClub'), elStyle = wrap.querySelector('#alStyle'),
-        elQty = wrap.querySelector('#alQty'), elPaste = wrap.querySelector('#alPaste'),
-        elLabel = wrap.querySelector('#alLabel');
+        elQty = wrap.querySelector('#alQty'), elPaste = wrap.querySelector('#alPaste');
     function refresh() {
       var paste = elStyle.value === 'paste';
       wrap.querySelector('#alQtyRow').style.display = paste ? 'none' : 'block';
@@ -996,28 +991,27 @@
         try { codes = UWP.genCodes(qty, '', existing); }
         catch (e) { toast(e.message, 'error'); return; }
       }
-      var label = (elLabel.value || '').trim();
-
       NL.confirm('Add ' + codes.length + ' code' + (codes.length > 1 ? 's' : '') +
-        ' for ' + club.name + '?\nThey can only be redeemed at ' + club.name + '.' +
-        (label ? '\nBatch: ' + label : ''), {
+        ' for ' + club.name + '?\nThey can only be redeemed at ' + club.name + '.', {
         title: 'Confirm', confirmText: 'Add codes'
       }).then(function (ok) {
         if (!ok) return;
-        var batch = UWP.ref('codes').push().key;
+        /* No batch concept (owner ruling 09/09/2026): every code in one add
+           shares an identical server createdAt — the date stamp is the
+           grouping. */
         var updates = {};
         codes.forEach(function (code) {
           updates[UWP.ref('codes').push().key] = {
             code: code, norm: UWP.normCode(code), status: 'active',
             club: club.code, clubName: club.name,
-            batch: batch, batchLabel: label || null, createdAt: UWP.TS(), createdBy: ACTOR
+            createdAt: UWP.TS(), createdBy: ACTOR
           };
         });
         UWP.ensureAuth().then(function () {
           return UWP.ref('codes').update(updates);
         }).then(function () {
           UWP.audit(ACTOR, ACTOR_LABEL, 'add-codes', {
-            count: codes.length, batch: batch, club: club.code, clubName: club.name, detail: label,
+            count: codes.length, club: club.code, clubName: club.name,
             codes: codes.slice(0, 10).join(', ') + (codes.length > 10 ? ' …' : '')
           });
           ctrl.close();
@@ -1042,17 +1036,20 @@
      handle those individually. Audited as one 'delete' entry. */
   document.getElementById('btnBatches').addEventListener('click', openBatches);
 
+  /* Group by the moment of the add: every code written in one multi-update
+     carries an identical server createdAt, so the date stamp IS the group
+     (the batch field it replaces is ignored even where old codes carry it —
+     owner ruling 09/09/2026: batches and labels are gone). */
   function batchSummary() {
     var by = {}, order = [];
     codeRows().forEach(function (r) {
-      var k = r.batch || '(none)';
-      if (!by[k]) { by[k] = { batch: k, label: r.batchLabel || '', clubName: r.clubName || '', createdAt: r.createdAt || 0, createdBy: r.createdBy || '', total: 0, active: 0, redeemed: 0, revoked: 0, ids: [] }; order.push(k); }
+      var k = (r.createdAt || 0) + '|' + (r.club || '') + '|' + (r.createdBy || '');
+      if (!by[k]) { by[k] = { batch: k, clubName: r.clubName || '', createdAt: r.createdAt || 0, createdBy: r.createdBy || '', total: 0, active: 0, redeemed: 0, revoked: 0, ids: [] }; order.push(k); }
       var b = by[k];
       if (!b.clubName && r.clubName) b.clubName = r.clubName;
       b.total++;
       if (b[r.status] != null) b[r.status]++;
       if (r.status !== 'redeemed') b.ids.push(r._id);
-      if ((r.createdAt || 0) < b.createdAt) b.createdAt = r.createdAt || 0;
     });
     return order.map(function (k) { return by[k]; })
       .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
@@ -1062,11 +1059,10 @@
     var batches = batchSummary();
     if (!batches.length) { toast('No codes in the pool yet.', 'info'); return; }
     var html = '<div class="table-wrap"><table class="table">' +
-      '<thead><tr><th>Batch</th><th>Club</th><th>Added</th><th>By</th><th>Codes</th><th>Redeemed</th><th></th></tr></thead><tbody>' +
+      '<thead><tr><th>Club</th><th>Added</th><th>By</th><th>Codes</th><th>Redeemed</th><th></th></tr></thead><tbody>' +
       batches.map(function (b) {
         var deletable = b.ids.length;
-        return '<tr><td>' + esc(b.label || '—') + '</td>' +
-          '<td>' + esc(b.clubName || 'Not registered') + '</td>' +
+        return '<tr><td>' + esc(b.clubName || 'Not registered') + '</td>' +
           '<td title="' + esc(UWP.fmt(b.createdAt)) + '">' + esc(UWP.ago(b.createdAt)) + '</td>' +
           '<td>' + esc(addedBy(b.createdBy)) + '</td>' +
           '<td>' + b.total + '</td>' +
@@ -1075,8 +1071,8 @@
             ? '<button class="btn btn--danger btn--sm" data-delbatch="' + esc(b.batch) + '">Delete unused (' + deletable + ')</button>'
             : '<span class="code-note">all redeemed</span>') + '</td></tr>';
       }).join('') + '</tbody></table></div>' +
-      '<p class="code-note" style="margin-top:10px">Deleting a batch removes its unredeemed and revoked codes only — codes a club has redeemed are always kept.</p>';
-    var ctrl = NL.modal({ title: 'Batches', width: 'wide', body: html,
+      '<p class="code-note" style="margin-top:10px">Deleting an add removes its unredeemed and revoked codes only — codes a club has redeemed are always kept.</p>';
+    var ctrl = NL.modal({ title: 'Code adds', width: 'wide', body: html,
       buttons: [{ label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } }] });
     ctrl.body.addEventListener('click', function (e) {
       var el = e.target.closest('[data-delbatch]');
@@ -1087,8 +1083,8 @@
   function deleteBatch(batchKey, ctrl) {
     var b = batchSummary().filter(function (x) { return x.batch === batchKey; })[0];
     if (!b || !b.ids.length) return;
-    var name = b.label || 'unlabelled batch';
-    NL.prompt('Delete ' + b.ids.length + ' unused code' + (b.ids.length > 1 ? 's' : '') + ' from “' + name + '”?' +
+    var name = (b.clubName || 'unregistered') + ', added ' + UWP.fmt(b.createdAt);
+    NL.prompt('Delete ' + b.ids.length + ' unused code' + (b.ids.length > 1 ? 's' : '') + ' from the add (' + name + ')?' +
       (b.redeemed ? ' ' + b.redeemed + ' redeemed code' + (b.redeemed > 1 ? 's' : '') + ' will be kept.' : '') +
       ' This cannot be undone. Type DELETE to confirm.', {
       title: 'Delete batch', placeholder: 'DELETE'
@@ -1101,8 +1097,8 @@
         return UWP.ref('codes').update(updates);
       }).then(function () {
         UWP.audit(ACTOR, ACTOR_LABEL, 'delete', {
-          count: b.ids.length, batch: b.batch,
-          detail: 'Batch delete “' + name + '”' + (b.redeemed ? ' — kept ' + b.redeemed + ' redeemed' : '')
+          count: b.ids.length,
+          detail: 'Deleted an add (' + name + ')' + (b.redeemed ? ' — kept ' + b.redeemed + ' redeemed' : '')
         });
         toast(b.ids.length + ' codes deleted' + (b.redeemed ? ' (' + b.redeemed + ' redeemed kept)' : ''), 'success');
         if (ctrl) ctrl.close();
@@ -1114,13 +1110,13 @@
   document.getElementById('btnExport').addEventListener('click', function () {
     var list = filtered();
     if (!list.length) { toast('Nothing to export with the current filters.', 'error'); return; }
-    var rows = [['Code', 'Status', 'Club', 'Redeemed', 'Redeemed via', 'Added', 'Added by', 'Revoked', 'Last release reason', 'Batch label', 'Batch']];
+    var rows = [['Code', 'Status', 'Club', 'Redeemed', 'Redeemed via', 'Added', 'Added by', 'Revoked', 'Last release reason']];
     list.forEach(function (r) {
       rows.push([r.code, (UWP.STATUS[r.status] || {}).label || r.status,
         r.clubName || r.club || '',
         r.redeemedAt ? UWP.fmt(r.redeemedAt) : '', r.redeemedBy || '',
         UWP.fmt(r.createdAt), r.createdBy || '',
-        r.revokedAt ? UWP.fmt(r.revokedAt) : '', r.releaseReason || '', r.batchLabel || '', r.batch || '']);
+        r.revokedAt ? UWP.fmt(r.revokedAt) : '', r.releaseReason || '']);
     });
     var d = new Date(), stamp = d.getFullYear() + ('0' + (d.getMonth() + 1)).slice(-2) + ('0' + d.getDate()).slice(-2);
     NL.download('uw-promo-codes-' + stamp + '.csv', NL.csv(rows, { bom: true }), 'text/csv;charset=utf-8');
@@ -1215,7 +1211,7 @@
         '<span class="route-ledger__n">' + byRoute.online + '</span> online · ' +
         '<span class="route-ledger__n' + (byRoute.unassigned ? ' route-ledger__n--due' : '') + '">' +
           byRoute.unassigned + '</span> unassigned' +
-        (byRoute.unassigned ? ' — switched off until they choose; the chase list' : ' — every club has a route') +
+        (byRoute.unassigned ? ' — switched off until they choose; the chase list' : ' — every club has a method') +
       '</p>' +
       (noMgr.length
         ? '<p class="code-note" style="margin:-4px 0 12px">' + noMgr.length + ' club' +
@@ -1229,15 +1225,13 @@
           '“Reissue all club PINs” converts every club to a 4-digit PIN in one go.</p>'
         : '') +
       '<div class="table-wrap"><table class="table">' +
-      '<thead><tr><th>Club</th><th>Division</th><th>Route</th><th>Scheme contact</th><th>Till PIN</th><th>Manager passcode</th><th></th></tr></thead><tbody>' +
+      '<thead><tr><th>Club</th><th>Division</th><th>Method</th><th>Scheme contact</th><th>Till PIN</th><th>Manager passcode</th><th></th></tr></thead><tbody>' +
       clubs.map(function (c) {
         return '<tr><td><span class="club-cell">' + NL.clubs.crestImgHtml(c.name, 'thumb') +
           '<span class="club-cell__name">' + esc(c.name) + '</span></span></td>' +
           '<td>' + esc(c.division) + '</td>' +
-          '<td><select class="route-pick" data-route="' + esc(c.code) + '" aria-label="Route for ' + esc(c.name) + '">' +
-            ['unassigned', 'instore', 'online'].map(function (r) {
-              return '<option value="' + r + '"' + (c.route === r ? ' selected' : '') + '>' + ROUTE_LABEL[r] + '</option>';
-            }).join('') + '</select></td>' +
+          '<td style="white-space:nowrap">' + esc(ROUTE_LABEL[c.route] || 'Unassigned') +
+            ' <button class="btn btn--ghost btn--sm" data-medit="' + esc(c.code) + '" aria-label="Change redemption method for ' + esc(c.name) + '">Edit</button></td>' +
           '<td>' + contactCell(c.code) + '</td>' +
           '<td><button class="pass-chip" data-copypass="' + esc(c.code) + '" title="Click to copy">' + esc(c.passcode) + '</button></td>' +
           '<td>' + (c.managerPass
@@ -1361,30 +1355,61 @@
     } catch (e) { toast(e.message, 'error'); }
   }
 
-  /* Route toggle — the system of record for who is on which route (spec
+  /* Method change — the system of record for who redeems how (spec
      item 1). Change takes effect at each club's NEXT sign-in: sessions
      already open keep their shape until they re-enter, which matches how
      every other credential change here behaves. */
-  document.getElementById('clubAccessBody').addEventListener('change', function (e) {
-    var sel = e.target.closest('[data-route]');
-    if (!sel) return;
-    var code = sel.getAttribute('data-route');
+  /* A method change is rare and consequential, so it gets ceremony instead
+     of a live dropdown (owner ruling 09/09/2026): explicit choices, a
+     warning stating what carries over, and a confirm before anything is
+     written. */
+  function editMethod(code) {
     var c = CONFIG.clubs && CONFIG.clubs[code];
-    var route = sel.value;
-    if (!c || ['unassigned', 'instore', 'online'].indexOf(route) === -1) return;
-    UWP.ensureAuth().then(function () {
-      return UWP.ref('config/clubs/' + code).update({ route: route, updatedAt: UWP.TS() });
-    }).then(function () {
-      UWP.audit(ACTOR, ACTOR_LABEL, 'route', {
-        club: code, clubName: c.name, detail: 'Route set to ' + ROUTE_LABEL[route].toLowerCase()
+    if (!c) return;
+    var cur = ['instore', 'online'].indexOf(c.route) !== -1 ? c.route : 'unassigned';
+    var wrap = document.createElement('div');
+    wrap.innerHTML =
+      '<p class="confirm-text">' + esc(c.name) + ' is currently <strong>' + ROUTE_LABEL[cur] + '</strong>.</p>' +
+      '<div class="checker__row" style="margin-bottom:12px">' +
+      ['online', 'unassigned', 'instore'].map(function (r) {
+        return '<button class="btn ' + (cur === r ? 'btn--navy' : 'btn--ghost') +
+          '" data-mpick="' + r + '">' + ROUTE_LABEL[r] + '</button>';
+      }).join(' ') + '</div>' +
+      '<p class="code-note">Existing codes are untouched and stay valid as they are' +
+      (cur === 'instore' ? ' — the till keeps working for cards already in the wild' : '') +
+      '. New codes follow the new method, and the club sees its new tools at its next sign-in.' +
+      ' Unassigned switches the club off until it completes setup again.</p>';
+    var ctrl = NL.modal({
+      title: 'Change redemption method', body: wrap,
+      buttons: [{ label: 'Cancel', className: 'btn--ghost', onClick: function (x) { x.close(); } }]
+    });
+    wrap.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-mpick]');
+      if (!b) return;
+      var route = b.getAttribute('data-mpick');
+      if (route === cur) { ctrl.close(); return; }
+      NL.confirm('Move ' + c.name + ' to ' + ROUTE_LABEL[route] + '?', {
+        title: 'Confirm method change', variant: 'danger', confirmText: 'Change method'
+      }).then(function (ok) {
+        if (!ok) return;
+        UWP.ensureAuth().then(function () {
+          return UWP.ref('config/clubs/' + code).update({ route: route, updatedAt: UWP.TS() });
+        }).then(function () {
+          UWP.audit(ACTOR, ACTOR_LABEL, 'route', {
+            club: code, clubName: c.name, detail: 'Redemption method set to ' + ROUTE_LABEL[route].toLowerCase()
+          });
+          toast(c.name + ' → ' + ROUTE_LABEL[route], 'success');
+          ctrl.close();
+        }).catch(function (err) { toast('Method change failed: ' + err.message, 'error'); });
       });
-      toast(c.name + ' → ' + ROUTE_LABEL[route], 'success');
-    }).catch(function (err) { toast('Route change failed: ' + err.message, 'error'); });
-  });
+    });
+  }
 
   document.getElementById('clubAccessBody').addEventListener('click', function (e) {
     var el;
-    if ((el = e.target.closest('[data-printcard]'))) {
+    if ((el = e.target.closest('[data-medit]'))) {
+      editMethod(el.getAttribute('data-medit'));
+    } else if ((el = e.target.closest('[data-printcard]'))) {
       var code = el.getAttribute('data-printcard');
       var one = clubList().filter(function (c) { return c.code === code; });
       // The browser print dialog's "Save as PDF" is the per-club download.
@@ -1510,7 +1535,7 @@
 
   function exportAccess() {
     var clubs = clubList();
-    var rows = [['Club', 'Division', 'Route', 'Till PIN', 'Manager passcode', 'Direct link']];
+    var rows = [['Club', 'Division', 'Method', 'Till PIN', 'Manager passcode', 'Direct link']];
     clubs.forEach(function (c) { rows.push([c.name, c.division, ROUTE_LABEL[c.route], c.passcode, c.managerPass || '', UWP.clubLink(c.token)]); });
     if (CONFIG.uw && CONFIG.uw.passcode) rows.push(['Utility Warehouse', '', '', CONFIG.uw.passcode, '', UWP.uwLink(CONFIG.uw.token)]);
     NL.download('uw-promo-access.csv', NL.csv(rows, { bom: true }), 'text/csv;charset=utf-8');

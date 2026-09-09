@@ -3,6 +3,17 @@
 <head>
 <!--
   UW Promo Codes — Utility Warehouse partner page
+  Version: v7.0 (09/09/2026) — the two redemption methods part ways (owner
+           feedback round 2). The code list splits into In-store / Online
+           tabs — stats, breakdown, filters and export all follow, and each
+           tab carries only its own verbs (Add codes is central, Requests
+           chase online clubs, Revoke never appears on a club-uploaded
+           code). "Mark fulfilled" is gone: request state is derived from
+           the uploads answering it (UWP.reqFace). Batches and labels are
+           gone everywhere — codes added together share one server
+           timestamp, and that date stamp is the grouping. "Club routes"
+           becomes "Redemption methods" with ceremony: read-only until
+           Edit, explicit choices, and a warning confirm before a change.
   Version: v6.1 (09/09/2026) — the requests list shows upload progress
            ("3 of 5 uploaded"): club uploads now carry the id of the request
            they answer, so Lucy can see how a request is going before
@@ -149,6 +160,11 @@
   </div>
 
   <div class="wrap">
+    <div class="tabs" id="methodTabs">
+      <button class="tab active" data-mtab="instore">In-store codes</button>
+      <button class="tab" data-mtab="online">Online codes</button>
+    </div>
+
     <div class="stats" id="stats"></div>
 
     <div class="byclub">
@@ -169,8 +185,8 @@
         <input class="toolbar__search" id="fSearch" type="search" placeholder="Search codes…" aria-label="Search codes">
       </div>
       <div class="toolbar__right">
-        <button class="btn btn--ghost" id="btnRequests">Requests</button>
-        <button class="btn btn--ghost" id="btnRoutes">Club routes</button>
+        <button class="btn btn--ghost" id="btnRequests" hidden>Requests</button>
+        <button class="btn btn--ghost" id="btnRoutes">Redemption methods</button>
         <button class="btn btn--navy" id="btnDispatch" hidden>Mark dispatched (<span id="dispN">0</span>)</button>
         <button class="btn btn--ghost" id="btnExport">Export CSV</button>
         <button class="btn btn--primary" id="btnAdd">Add codes</button>
@@ -180,9 +196,9 @@
     <div class="table-wrap">
       <table class="table">
         <thead><tr>
-          <th></th><th>Code</th><th>Status</th><th>Club</th><th>Redeemed</th><th>Added</th><th>Batch</th><th></th>
+          <th></th><th>Code</th><th>Status</th><th>Club</th><th>Redeemed</th><th>Added</th><th></th>
         </tr></thead>
-        <tbody id="rows"><tr class="loading-row"><td colspan="8">Loading codes…</td></tr></tbody>
+        <tbody id="rows"><tr class="loading-row"><td colspan="7">Loading codes…</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -320,10 +336,19 @@
   }
 
   /* ── Render ─────────────────────────────────────────────────────────── */
+  /* Which redemption method a code belongs to falls out of who made it:
+     clubs upload their own (online), UW/NL create centrally (in-store).
+     The whole page views the pool through one method tab at a time — mixed
+     rows meant mixed verbs (revoke exists for central codes only, "issued"
+     is a club act) and nobody could read the table cleanly. */
+  var TAB = 'instore';
+  function isOnlineCode(r) { return String((r && r.createdBy) || '').indexOf('club:') === 0; }
+
   function codeRows() {
     return Object.keys(CODES).map(function (k) {
       var r = CODES[k]; r._id = k; return r;
-    }).sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+    }).filter(function (r) { return isOnlineCode(r) === (TAB === 'online'); })
+      .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
   }
 
   function filtered() {
@@ -382,13 +407,17 @@
     var list = filtered();
     var tbody = document.getElementById('rows');
     if (!list.length) {
-      tbody.innerHTML = '<tr class="empty-row"><td colspan="8">' +
-        (all.length ? 'No codes match the current filters.' : 'No codes in the pool yet — use “Add codes” to get started.') + '</td></tr>';
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="7">' +
+        (all.length ? 'No codes match the current filters.' : TAB === 'online' ? 'No club-uploaded codes yet.' : 'No codes in the pool yet — use “Add codes” to get started.') + '</td></tr>';
       return;
     }
     tbody.innerHTML = list.map(function (r) {
       var acts = '';
-      if (r.status === 'active') {
+      /* Club-uploaded codes are never revoked (owner ruling 09/09/2026):
+         the club's own POS is the authority on whether they work. NL master
+         keeps typed-DELETE for genuine mistakes; that is removal, not
+         revocation. */
+      if (r.status === 'active' && !isOnlineCode(r)) {
         acts = '<button class="btn btn--danger btn--sm" data-revoke="' + esc(r._id) + '">Revoke</button>';
       } else if (r.status === 'redeemed') {
         acts = '<button class="btn btn--restore btn--sm" data-release="' + esc(r._id) + '">Release</button>';
@@ -413,11 +442,25 @@
         '<td>' + clubCell + '</td>' +
         '<td>' + esc(r.status === 'redeemed' ? UWP.fmt(r.redeemedAt) : '—') + '</td>' +
         '<td title="' + esc(UWP.fmt(r.createdAt)) + '">' + esc(UWP.ago(r.createdAt)) + '</td>' +
-        '<td>' + esc(r.batchLabel || '—') + '</td>' +
         '<td style="text-align:right">' + acts + '</td></tr>';
     }).join('');
     NL.clubs.wireCrestImgs(tbody);   // thumb → full → rose, same tick as insertion
   }
+
+  /* Tab switch: Add codes is a central (in-store) act, Requests chase
+     online clubs — each button lives on its own tab. */
+  document.getElementById('methodTabs').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-mtab]');
+    if (!b) return;
+    TAB = b.getAttribute('data-mtab');
+    Array.prototype.forEach.call(document.querySelectorAll('#methodTabs .tab'), function (t) {
+      t.classList.toggle('active', t === b);
+    });
+    document.getElementById('btnAdd').hidden = TAB !== 'instore';
+    document.getElementById('btnRequests').hidden = TAB !== 'online';
+    render();
+    refreshDispatchBtn();   // ticked rows left with the other tab's render
+  });
 
   ['fClub', 'fStatus'].forEach(function (id) {
     document.getElementById(id).addEventListener('change', render);
@@ -527,8 +570,6 @@
         '<textarea id="alPaste" rows="6" placeholder="CODEONE&#10;CODETWO"></textarea></div>' +
       '<div class="alloc-row" id="alQtyRow" style="display:none"><label for="alQty">How many</label>' +
         '<input id="alQty" type="number" min="1" max="500" value="25"></div>' +
-      '<div class="alloc-row"><label for="alLabel">Batch label (optional)</label>' +
-        '<input id="alLabel" maxlength="40" placeholder="e.g. March mailout"></div>' +
       '<div class="alloc-preview" id="alPreview"></div>';
 
     var ctrl = NL.modal({
@@ -541,8 +582,7 @@
     });
 
     var elClub = wrap.querySelector('#alClub'), elStyle = wrap.querySelector('#alStyle'),
-        elQty = wrap.querySelector('#alQty'), elPaste = wrap.querySelector('#alPaste'),
-        elLabel = wrap.querySelector('#alLabel');
+        elQty = wrap.querySelector('#alQty'), elPaste = wrap.querySelector('#alPaste');
 
     function refresh() {
       var paste = elStyle.value === 'paste';
@@ -580,28 +620,27 @@
         try { codes = UWP.genCodes(qty, '', existing); }
         catch (e) { toast(e.message, 'error'); return; }
       }
-      var label = (elLabel.value || '').trim();
-
       NL.confirm('Add ' + codes.length + ' code' + (codes.length > 1 ? 's' : '') +
-        ' for ' + club.name + '?\nThey can only be redeemed at ' + club.name + '.' +
-        (label ? '\nBatch: ' + label : ''), {
+        ' for ' + club.name + '?\nThey can only be redeemed at ' + club.name + '.', {
         title: 'Confirm', confirmText: 'Add codes'
       }).then(function (ok) {
         if (!ok) return;
-        var batch = UWP.ref('codes').push().key;
+        /* No batch concept any more (owner ruling 09/09/2026): every code in
+           one add shares an identical server createdAt, so the date stamp IS
+           the grouping. */
         var updates = {};
         codes.forEach(function (code) {
           updates[UWP.ref('codes').push().key] = {
             code: code, norm: UWP.normCode(code), status: 'active',
             club: club.code, clubName: club.name,
-            batch: batch, batchLabel: label || null, createdAt: UWP.TS(), createdBy: ACTOR
+            createdAt: UWP.TS(), createdBy: ACTOR
           };
         });
         UWP.ensureAuth().then(function () {
           return UWP.ref('codes').update(updates);
         }).then(function () {
           UWP.audit(ACTOR, ACTOR_LABEL, 'add-codes', {
-            count: codes.length, batch: batch, club: club.code, clubName: club.name, detail: label,
+            count: codes.length, club: club.code, clubName: club.name,
             codes: codes.slice(0, 10).join(', ') + (codes.length > 10 ? ' …' : '')
           });
           ctrl.close();
@@ -630,13 +669,13 @@
   document.getElementById('btnExport').addEventListener('click', function () {
     var list = filtered();
     if (!list.length) { toast('Nothing to export with the current filters.', 'error'); return; }
-    var rows = [['Code', 'Status', 'Club', 'Redeemed', 'Added', 'Added by', 'Revoked', 'Batch label', 'Batch']];
+    var rows = [['Code', 'Status', 'Club', 'Redeemed', 'Added', 'Added by', 'Revoked']];
     list.forEach(function (r) {
       rows.push([r.code, (UWP.STATUS[r.status] || {}).label || r.status,
         r.clubName || r.club || '',
         r.redeemedAt ? UWP.fmt(r.redeemedAt) : '',
         UWP.fmt(r.createdAt), r.createdBy || '',
-        r.revokedAt ? UWP.fmt(r.revokedAt) : '', r.batchLabel || '', r.batch || '']);
+        r.revokedAt ? UWP.fmt(r.revokedAt) : '']);
     });
     var d = new Date(), stamp = d.getFullYear() + ('0' + (d.getMonth() + 1)).slice(-2) + ('0' + d.getDate()).slice(-2);
     NL.download('uw-promo-codes-' + stamp + '.csv', NL.csv(rows, { bom: true }), 'text/csv;charset=utf-8');
@@ -678,22 +717,17 @@
         '<span style="flex:1"><label for="rqDue">Due</label><input id="rqDue" type="date"></span></div>' +
       '<button class="btn btn--primary btn--sm" id="rqRaise">Raise request</button>' +
       '<div class="table-wrap" style="margin-top:16px"><table class="table">' +
-      '<thead><tr><th>Club</th><th>Codes</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>' +
+      '<thead><tr><th>Club</th><th>Codes</th><th>Due</th><th>Status</th></tr></thead><tbody>' +
       (list.length ? list.map(function (r) {
-        var overdue = r.status === 'open' && r.due && Date.now() > r.due;
-        /* Club uploads carry the request id they answer, so Lucy can see
-           progress before deciding a request is fulfilled. */
-        var got = Object.keys(CODES).filter(function (k) { return CODES[k].request === r._id; }).length;
+        /* Nothing on a request is pressed after raising it: the state falls
+           out of the uploads that answer it (they carry the request id) —
+           waiting → overdue → fulfilled → dispatched. */
+        var f = UWP.reqFace(r, CODES);
         return '<tr><td>' + esc(clubName(r.club)) + '</td>' +
-          '<td>' + (got ? got + ' of ' + esc(String(r.qty)) + ' uploaded' : esc(String(r.qty))) + '</td>' +
+          '<td>' + (f.got ? f.got + ' of ' + f.qty + ' uploaded' : esc(String(r.qty))) + '</td>' +
           '<td>' + (r.due ? esc(NL.formatDate(r.due)) : '—') + '</td>' +
-          '<td>' + (r.status === 'open'
-            ? (overdue ? '<span class="pill pill--rejected">Overdue</span>' : '<span class="pill pill--pending">Open</span>')
-            : '<span class="pill pill--approved">Fulfilled</span>') + '</td>' +
-          '<td style="text-align:right">' + (r.status === 'open'
-            ? '<button class="btn btn--ghost btn--sm" data-fulfil="' + esc(r._id) + '">Mark fulfilled</button>'
-            : '') + '</td></tr>';
-      }).join('') : '<tr class="empty-row"><td colspan="5">No requests yet.</td></tr>') +
+          '<td>' + UWP.reqPill(f.key) + '</td></tr>';
+      }).join('') : '<tr class="empty-row"><td colspan="4">No requests yet.</td></tr>') +
       '</tbody></table></div>';
 
     // Owner ruling: due date prefilled a week out, editable.
@@ -727,20 +761,6 @@
       }).catch(function (err) { toast('Failed: ' + err.message, 'error'); });
     });
 
-    ctrl.body.addEventListener('click', function (e) {
-      var el = e.target.closest('[data-fulfil]');
-      if (!el) return;
-      var id = el.getAttribute('data-fulfil');
-      UWP.ensureAuth().then(function () {
-        return UWP.ref('requests/' + id).update({ status: 'fulfilled', fulfilledAt: UWP.TS() });
-      }).then(function () {
-        UWP.audit(UW_ACTOR.actor, UW_ACTOR.label, 'request', {
-          club: (REQS[id] || {}).club, detail: 'Request marked fulfilled'
-        });
-        toast('Marked fulfilled', 'success');
-        ctrl.close();
-      }).catch(function (err) { toast('Failed: ' + err.message, 'error'); });
-    });
   }
 
   /* ── Bulk dispatch (spec v43 §5.2) ──────────────────────────────────
@@ -786,38 +806,78 @@
     });
   });
 
-  /* ── Club routes (spec v43 §4: reversal is NL or UW admin) ──────────── */
+  /* ── Redemption methods (spec v43 §4: reversal is NL or UW admin) ────── */
+  /* A method change is rare and consequential, so it gets ceremony instead
+     of a live dropdown (owner ruling 09/09/2026): the method reads as text
+     until Edit is pressed, the three states are explicit buttons, and a
+     different choice must survive a warning confirm before anything is
+     written. */
+  var METHOD_LABEL = { unassigned: 'Unassigned', instore: 'In-store', online: 'Online' };
+
+  function methodCellHtml(c) {
+    return esc(METHOD_LABEL[c.route] || 'Unassigned') +
+      ' <button class="btn btn--ghost btn--sm" data-medit="' + esc(c.code) + '">Edit</button>';
+  }
+  function methodEditHtml(c) {
+    return ['online', 'unassigned', 'instore'].map(function (r) {
+      return '<button class="btn btn--sm ' + (c.route === r ? 'btn--navy' : 'btn--ghost') +
+        '" data-mpick="' + r + '" data-mclub="' + esc(c.code) + '">' + METHOD_LABEL[r] + '</button>';
+    }).join(' ') +
+    ' <button class="btn btn--ghost btn--sm" data-mcancel="' + esc(c.code) + '">Cancel</button>';
+  }
+
   document.getElementById('btnRoutes').addEventListener('click', function () {
     var wrap = document.createElement('div');
-    wrap.innerHTML = '<p class="alloc-preview" style="margin-bottom:12px">A route change never touches ' +
-      'existing codes — they stay valid under the rules they were created with. The club sees its new ' +
-      'tools at its next sign-in.</p>' +
-      '<div class="table-wrap"><table class="table"><thead><tr><th>Club</th><th>Route</th></tr></thead><tbody>' +
+    wrap.innerHTML = '<p class="alloc-preview" style="margin-bottom:12px">How each club redeems ' +
+      'vouchers. Changing a method never touches existing codes — they stay valid under the rules ' +
+      'they were created with, and a club moved off in-store keeps a working till while its printed ' +
+      'cards are out there.</p>' +
+      '<div class="table-wrap"><table class="table"><thead><tr><th>Club</th><th>Method</th></tr></thead><tbody>' +
       clubList().map(function (c) {
-        return '<tr><td>' + esc(c.name) + '</td><td><select data-rt="' + esc(c.code) + '">' +
-          ['unassigned', 'instore', 'online'].map(function (r) {
-            var label = r === 'instore' ? 'In-store' : r === 'online' ? 'Online' : 'Unassigned';
-            return '<option value="' + r + '"' + (c.route === r ? ' selected' : '') + '>' + label + '</option>';
-          }).join('') + '</select></td></tr>';
+        return '<tr><td>' + esc(c.name) + '</td><td data-mcell="' + esc(c.code) + '">' +
+          methodCellHtml(c) + '</td></tr>';
       }).join('') + '</tbody></table></div>';
     var ctrl = NL.modal({
-      title: 'Club routes', width: 'wide', body: wrap,
+      title: 'Redemption methods', width: 'wide', body: wrap,
       buttons: [{ label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } }]
     });
-    ctrl.body.addEventListener('change', function (e) {
-      var sel = e.target.closest('[data-rt]');
-      if (!sel) return;
-      var code = sel.getAttribute('data-rt'), route = sel.value;
-      UWP.ensureAuth().then(function () {
-        return UWP.ref('config/clubs/' + code + '/route').set(route);
-      }).then(function () {
-        UWP.audit(UW_ACTOR.actor, UW_ACTOR.label, 'route', {
-          club: code, clubName: clubName(code),
-          detail: 'Route set to ' + (route === 'instore' ? 'in-store' : route)
+    function clubOf(code) { return CLUBS.filter(function (c) { return c.code === code; })[0]; }
+    function cellOf(code) { return ctrl.body.querySelector('[data-mcell="' + code + '"]'); }
+
+    ctrl.body.addEventListener('click', function (e) {
+      var ed = e.target.closest('[data-medit]');
+      if (ed) { var c1 = clubOf(ed.getAttribute('data-medit')); cellOf(c1.code).innerHTML = methodEditHtml(c1); return; }
+      var cx = e.target.closest('[data-mcancel]');
+      if (cx) { var c2 = clubOf(cx.getAttribute('data-mcancel')); cellOf(c2.code).innerHTML = methodCellHtml(c2); return; }
+      var pk = e.target.closest('[data-mpick]');
+      if (!pk) return;
+      var code = pk.getAttribute('data-mclub'), route = pk.getAttribute('data-mpick');
+      var club = clubOf(code);
+      if (club.route === route) { cellOf(code).innerHTML = methodCellHtml(club); return; }
+      NL.confirm('Move ' + clubName(code) + ' to ' + METHOD_LABEL[route] + '?', {
+        title: 'Change redemption method',
+        detail: 'Existing codes are untouched and stay valid as they are' +
+          (club.route === 'instore' ? ' — the till keeps working for cards already in the wild' : '') +
+          '. New codes follow the new method, and the club sees its new tools at its next sign-in.' +
+          (route === 'unassigned' ? ' Unassigned switches the club off until it completes setup again.' : ''),
+        variant: 'danger', confirmText: 'Change method'
+      }).then(function (ok) {
+        if (!ok) { cellOf(code).innerHTML = methodCellHtml(club); return; }
+        UWP.ensureAuth().then(function () {
+          return UWP.ref('config/clubs/' + code + '/route').set(route);
+        }).then(function () {
+          UWP.audit(UW_ACTOR.actor, UW_ACTOR.label, 'route', {
+            club: code, clubName: clubName(code),
+            detail: 'Redemption method set to ' + METHOD_LABEL[route]
+          });
+          club.route = route;
+          cellOf(code).innerHTML = methodCellHtml(club);
+          toast(clubName(code) + ' → ' + METHOD_LABEL[route], 'success');
+        }).catch(function (err) {
+          cellOf(code).innerHTML = methodCellHtml(club);
+          toast('Method change failed: ' + err.message, 'error');
         });
-        CLUBS.forEach(function (c) { if (c.code === code) c.route = route; });
-        toast(clubName(code) + ' → ' + (route === 'instore' ? 'In-store' : route === 'online' ? 'Online' : 'Unassigned'), 'success');
-      }).catch(function (err) { toast('Route change failed: ' + err.message, 'error'); });
+      });
     });
   });
 
