@@ -3,6 +3,12 @@
 <head>
 <!--
   UW Promo Codes — Utility Warehouse partner page
+  Version: v7.1 (09/09/2026) — methods editor redesigned (owner feedback,
+           mid-walkthrough): the method reads as a semantic pill, Edit is
+           the standard glyph, and picking a different method lays out the
+           consequences (shared UWP.methodConsequences) in an amber banner
+           with the single danger button beneath — the inline row editor
+           and the thin confirm are gone.
   Version: v7.0 (09/09/2026) — the two redemption methods part ways (owner
            feedback round 2). The code list splits into In-store / Online
            tabs — stats, breakdown, filters and export all follow, and each
@@ -815,68 +821,86 @@
   var METHOD_LABEL = { unassigned: 'Unassigned', instore: 'In-store', online: 'Online' };
 
   function methodCellHtml(c) {
-    return esc(METHOD_LABEL[c.route] || 'Unassigned') +
-      ' <button class="btn btn--ghost btn--sm" data-medit="' + esc(c.code) + '">Edit</button>';
+    return UWP.methodPill(c.route) +
+      ' <button class="code-copy" data-medit="' + esc(c.code) + '" title="Change redemption method"' +
+      ' aria-label="Change redemption method for ' + esc(c.name) + '">' +
+      '<svg class="icon icon--sm"><use href="/assets/icons/sprites.svg#icon-edit"></use></svg></button>';
   }
-  function methodEditHtml(c) {
-    return ['online', 'unassigned', 'instore'].map(function (r) {
-      return '<button class="btn btn--sm ' + (c.route === r ? 'btn--navy' : 'btn--ghost') +
-        '" data-mpick="' + r + '" data-mclub="' + esc(c.code) + '">' + METHOD_LABEL[r] + '</button>';
-    }).join(' ') +
-    ' <button class="btn btn--ghost btn--sm" data-mcancel="' + esc(c.code) + '">Cancel</button>';
+
+  /* Picking a different method never writes: the consequences render first,
+     and only the danger button under them writes (same shape as the master
+     console's editor — the wording comes from UWP.methodConsequences). */
+  function editMethod(code, refreshCell) {
+    var club = CLUBS.filter(function (c) { return c.code === code; })[0];
+    if (!club) return;
+    var cur = ['instore', 'online'].indexOf(club.route) !== -1 ? club.route : 'unassigned';
+    var wrap = document.createElement('div');
+    wrap.innerHTML =
+      '<p class="confirm-text">' + esc(club.name) + ' is currently ' + UWP.methodPill(cur) + '</p>' +
+      '<div class="checker__row" style="margin-bottom:12px">' +
+      ['online', 'unassigned', 'instore'].map(function (r) {
+        return '<button class="btn ' + (cur === r ? 'btn--navy' : 'btn--ghost') +
+          '" data-mpick="' + r + '">' + METHOD_LABEL[r] + '</button>';
+      }).join(' ') + '</div>' +
+      '<div id="mConseq"></div>';
+    var ctrl = NL.modal({
+      title: 'Change redemption method', body: wrap,
+      buttons: [{ label: 'Cancel', className: 'btn--ghost', onClick: function (x) { x.close(); } }]
+    });
+    wrap.addEventListener('click', function (e) {
+      var go = e.target.closest('[data-mgo]');
+      if (go) { commit(go.getAttribute('data-mgo')); return; }
+      var b = e.target.closest('[data-mpick]');
+      if (!b) return;
+      var route = b.getAttribute('data-mpick');
+      Array.prototype.forEach.call(wrap.querySelectorAll('[data-mpick]'), function (x) {
+        x.className = 'btn ' + (x === b ? 'btn--navy' : 'btn--ghost');
+      });
+      var panel = wrap.querySelector('#mConseq');
+      if (route === cur) { panel.innerHTML = ''; return; }
+      panel.innerHTML =
+        '<div class="banner banner--amber" style="margin-bottom:12px"><strong>What this does</strong><ul style="margin:6px 0 0 18px;padding:0">' +
+        UWP.methodConsequences(cur, route).map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') +
+        '</ul></div>' +
+        '<button class="btn btn--danger" data-mgo="' + route + '">Move ' + esc(club.name) + ' to ' + METHOD_LABEL[route] + '</button>';
+    });
+    function commit(route) {
+      UWP.ensureAuth().then(function () {
+        return UWP.ref('config/clubs/' + code + '/route').set(route);
+      }).then(function () {
+        UWP.audit(UW_ACTOR.actor, UW_ACTOR.label, 'route', {
+          club: code, clubName: clubName(code),
+          detail: 'Redemption method set to ' + METHOD_LABEL[route]
+        });
+        club.route = route;
+        if (refreshCell) refreshCell();
+        toast(clubName(code) + ' → ' + METHOD_LABEL[route], 'success');
+        ctrl.close();
+      }).catch(function (err) { toast('Method change failed: ' + err.message, 'error'); });
+    }
   }
 
   document.getElementById('btnRoutes').addEventListener('click', function () {
     var wrap = document.createElement('div');
     wrap.innerHTML = '<p class="alloc-preview" style="margin-bottom:12px">How each club redeems ' +
-      'vouchers. Changing a method never touches existing codes — they stay valid under the rules ' +
-      'they were created with, and a club moved off in-store keeps a working till while its printed ' +
-      'cards are out there.</p>' +
+      'vouchers. Changing a method never touches existing codes.</p>' +
       '<div class="table-wrap"><table class="table"><thead><tr><th>Club</th><th>Method</th></tr></thead><tbody>' +
       clubList().map(function (c) {
-        return '<tr><td>' + esc(c.name) + '</td><td data-mcell="' + esc(c.code) + '">' +
+        return '<tr><td>' + esc(c.name) + '</td><td data-mcell="' + esc(c.code) + '" style="white-space:nowrap">' +
           methodCellHtml(c) + '</td></tr>';
       }).join('') + '</tbody></table></div>';
     var ctrl = NL.modal({
       title: 'Redemption methods', width: 'wide', body: wrap,
       buttons: [{ label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } }]
     });
-    function clubOf(code) { return CLUBS.filter(function (c) { return c.code === code; })[0]; }
-    function cellOf(code) { return ctrl.body.querySelector('[data-mcell="' + code + '"]'); }
-
     ctrl.body.addEventListener('click', function (e) {
       var ed = e.target.closest('[data-medit]');
-      if (ed) { var c1 = clubOf(ed.getAttribute('data-medit')); cellOf(c1.code).innerHTML = methodEditHtml(c1); return; }
-      var cx = e.target.closest('[data-mcancel]');
-      if (cx) { var c2 = clubOf(cx.getAttribute('data-mcancel')); cellOf(c2.code).innerHTML = methodCellHtml(c2); return; }
-      var pk = e.target.closest('[data-mpick]');
-      if (!pk) return;
-      var code = pk.getAttribute('data-mclub'), route = pk.getAttribute('data-mpick');
-      var club = clubOf(code);
-      if (club.route === route) { cellOf(code).innerHTML = methodCellHtml(club); return; }
-      NL.confirm('Move ' + clubName(code) + ' to ' + METHOD_LABEL[route] + '?', {
-        title: 'Change redemption method',
-        detail: 'Existing codes are untouched and stay valid as they are' +
-          (club.route === 'instore' ? ' — the till keeps working for cards already in the wild' : '') +
-          '. New codes follow the new method, and the club sees its new tools at its next sign-in.' +
-          (route === 'unassigned' ? ' Unassigned switches the club off until it completes setup again.' : ''),
-        variant: 'danger', confirmText: 'Change method'
-      }).then(function (ok) {
-        if (!ok) { cellOf(code).innerHTML = methodCellHtml(club); return; }
-        UWP.ensureAuth().then(function () {
-          return UWP.ref('config/clubs/' + code + '/route').set(route);
-        }).then(function () {
-          UWP.audit(UW_ACTOR.actor, UW_ACTOR.label, 'route', {
-            club: code, clubName: clubName(code),
-            detail: 'Redemption method set to ' + METHOD_LABEL[route]
-          });
-          club.route = route;
-          cellOf(code).innerHTML = methodCellHtml(club);
-          toast(clubName(code) + ' → ' + METHOD_LABEL[route], 'success');
-        }).catch(function (err) {
-          cellOf(code).innerHTML = methodCellHtml(club);
-          toast('Method change failed: ' + err.message, 'error');
-        });
+      if (!ed) return;
+      var code = ed.getAttribute('data-medit');
+      editMethod(code, function () {
+        var club = CLUBS.filter(function (c) { return c.code === code; })[0];
+        var cell = ctrl.body.querySelector('[data-mcell="' + code + '"]');
+        if (club && cell) cell.innerHTML = methodCellHtml(club);
       });
     });
   });

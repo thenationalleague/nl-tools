@@ -24,6 +24,10 @@
            write config. That is the change that stops all 72 till PINs being
            world-readable. First run mints a bootstrap master token while no
            passcode exists; nothing subscribes to RTDB until the session does.
+  Version: v6.2 (09/09/2026) — methods editor redesigned (owner feedback,
+           mid-walkthrough): pill designation, glyph Edit, and a
+           consequences banner (UWP.methodConsequences) with one danger
+           button in place of the pick-then-thin-confirm flow.
   Version: v6.1 (09/09/2026) — feedback round 2. Requests show the derived
            reqFace ladder and lose "Mark fulfilled". Batches become "Code
            adds", grouped by the shared server timestamp of each add —
@@ -1230,8 +1234,10 @@
         return '<tr><td><span class="club-cell">' + NL.clubs.crestImgHtml(c.name, 'thumb') +
           '<span class="club-cell__name">' + esc(c.name) + '</span></span></td>' +
           '<td>' + esc(c.division) + '</td>' +
-          '<td style="white-space:nowrap">' + esc(ROUTE_LABEL[c.route] || 'Unassigned') +
-            ' <button class="btn btn--ghost btn--sm" data-medit="' + esc(c.code) + '" aria-label="Change redemption method for ' + esc(c.name) + '">Edit</button></td>' +
+          '<td style="white-space:nowrap">' + UWP.methodPill(c.route) +
+            ' <button class="code-copy" data-medit="' + esc(c.code) + '" title="Change redemption method"' +
+            ' aria-label="Change redemption method for ' + esc(c.name) + '">' +
+            '<svg class="icon icon--sm"><use href="/assets/icons/sprites.svg#icon-edit"></use></svg></button></td>' +
           '<td>' + contactCell(c.code) + '</td>' +
           '<td><button class="pass-chip" data-copypass="' + esc(c.code) + '" title="Click to copy">' + esc(c.passcode) + '</button></td>' +
           '<td>' + (c.managerPass
@@ -1369,40 +1375,47 @@
     var cur = ['instore', 'online'].indexOf(c.route) !== -1 ? c.route : 'unassigned';
     var wrap = document.createElement('div');
     wrap.innerHTML =
-      '<p class="confirm-text">' + esc(c.name) + ' is currently <strong>' + ROUTE_LABEL[cur] + '</strong>.</p>' +
+      '<p class="confirm-text">' + esc(c.name) + ' is currently ' + UWP.methodPill(cur) + '</p>' +
       '<div class="checker__row" style="margin-bottom:12px">' +
       ['online', 'unassigned', 'instore'].map(function (r) {
         return '<button class="btn ' + (cur === r ? 'btn--navy' : 'btn--ghost') +
           '" data-mpick="' + r + '">' + ROUTE_LABEL[r] + '</button>';
       }).join(' ') + '</div>' +
-      '<p class="code-note">Existing codes are untouched and stay valid as they are' +
-      (cur === 'instore' ? ' — the till keeps working for cards already in the wild' : '') +
-      '. New codes follow the new method, and the club sees its new tools at its next sign-in.' +
-      ' Unassigned switches the club off until it completes setup again.</p>';
+      '<div id="mConseq"></div>';
     var ctrl = NL.modal({
       title: 'Change redemption method', body: wrap,
       buttons: [{ label: 'Cancel', className: 'btn--ghost', onClick: function (x) { x.close(); } }]
     });
+    /* Picking a different method never writes: it lays out exactly what the
+       change does, and only the danger button under that list writes. */
     wrap.addEventListener('click', function (e) {
+      var go = e.target.closest('[data-mgo]');
+      if (go) { commit(go.getAttribute('data-mgo')); return; }
       var b = e.target.closest('[data-mpick]');
       if (!b) return;
       var route = b.getAttribute('data-mpick');
-      if (route === cur) { ctrl.close(); return; }
-      NL.confirm('Move ' + c.name + ' to ' + ROUTE_LABEL[route] + '?', {
-        title: 'Confirm method change', variant: 'danger', confirmText: 'Change method'
-      }).then(function (ok) {
-        if (!ok) return;
-        UWP.ensureAuth().then(function () {
-          return UWP.ref('config/clubs/' + code).update({ route: route, updatedAt: UWP.TS() });
-        }).then(function () {
-          UWP.audit(ACTOR, ACTOR_LABEL, 'route', {
-            club: code, clubName: c.name, detail: 'Redemption method set to ' + ROUTE_LABEL[route].toLowerCase()
-          });
-          toast(c.name + ' → ' + ROUTE_LABEL[route], 'success');
-          ctrl.close();
-        }).catch(function (err) { toast('Method change failed: ' + err.message, 'error'); });
+      Array.prototype.forEach.call(wrap.querySelectorAll('[data-mpick]'), function (x) {
+        x.className = 'btn ' + (x === b ? 'btn--navy' : 'btn--ghost');
       });
+      var panel = wrap.querySelector('#mConseq');
+      if (route === cur) { panel.innerHTML = ''; return; }
+      panel.innerHTML =
+        '<div class="banner banner--amber" style="margin-bottom:12px"><strong>What this does</strong><ul style="margin:6px 0 0 18px;padding:0">' +
+        UWP.methodConsequences(cur, route).map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') +
+        '</ul></div>' +
+        '<button class="btn btn--danger" data-mgo="' + route + '">Move ' + esc(c.name) + ' to ' + ROUTE_LABEL[route] + '</button>';
     });
+    function commit(route) {
+      UWP.ensureAuth().then(function () {
+        return UWP.ref('config/clubs/' + code).update({ route: route, updatedAt: UWP.TS() });
+      }).then(function () {
+        UWP.audit(ACTOR, ACTOR_LABEL, 'route', {
+          club: code, clubName: c.name, detail: 'Redemption method set to ' + ROUTE_LABEL[route].toLowerCase()
+        });
+        toast(c.name + ' → ' + ROUTE_LABEL[route], 'success');
+        ctrl.close();
+      }).catch(function (err) { toast('Method change failed: ' + err.message, 'error'); });
+    }
   }
 
   document.getElementById('clubAccessBody').addEventListener('click', function (e) {

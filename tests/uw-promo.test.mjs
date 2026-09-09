@@ -319,6 +319,19 @@ test('links: club/UW direct links point at the family pages', () => {
   assert.equal(UWP.uwLink('xyz789'), 'https://nl.tools/uw-promo/?u=xyz789');
 });
 
+test('method identity: pills for the three states, consequences for a change', () => {
+  assert.match(UWP.methodPill('instore'), /pill--approved/, 'a live till is green');
+  assert.match(UWP.methodPill('online'), /pill--info/);
+  assert.match(UWP.methodPill('unassigned'), /pill--pending/, 'the chase list is amber');
+  assert.match(UWP.methodPill('garbage'), /Unassigned/, 'unknown reads as unassigned');
+  // The two consequences that must never be lost from the change warning:
+  const offSwitch = UWP.methodConsequences('online', 'unassigned').join(' ');
+  assert.match(offSwitch, /switched OFF/i, 'unassigned says the club goes dark');
+  const leaving = UWP.methodConsequences('instore', 'online').join(' ');
+  assert.match(leaving, /till.*keep working/i, 'leaving in-store says the till survives');
+  assert.match(leaving, /untouched/, 'every change says existing codes are untouched');
+});
+
 test('status metadata covers the full lifecycle', () => {
   /* issued and dispatched are derived faces from faceOf(), never stored on a
      record — statusOf() still only ever returns the other four. */

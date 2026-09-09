@@ -1,5 +1,9 @@
 /*
   UW Promo Codes — shared runtime for the three standalone pages
+  Version: v6.1 (09/09/2026) — method identity is shared: METHOD/methodPill
+           (in-store green, online blue, unassigned amber) and
+           methodConsequences(from, to) — the one place the consequences of
+           a method change are written, so both consoles warn identically.
   Version: v6.0 (09/09/2026) — the two methods part ways cleanly (owner
            feedback round 2). faceOf names the pre-dispatch stage for who
            acted: 'Created' for a central code, 'Issued' for a club upload.
@@ -478,6 +482,35 @@
     return { key: key, got: got, qty: qty };
   }
 
+  /* Redemption-method identity — shared by both consoles so the pill, the
+     wording and the consequences of a change are the same everywhere.
+     Semantic hues: in-store green (a live till), online blue, unassigned
+     amber (the chase list — it needs an action). */
+  var METHOD = {
+    unassigned: { label: 'Unassigned', pill: 'pill--pending' },
+    instore:    { label: 'In-store',   pill: 'pill--approved' },
+    online:     { label: 'Online',     pill: 'pill--info' }
+  };
+  function methodPill(route) {
+    var m = METHOD[route] || METHOD.unassigned;
+    return '<span class="pill ' + m.pill + '">' + m.label + '</span>';
+  }
+  /* What a from→to change actually does, as lines a person reads before
+     confirming. Owner ruling 09/09/2026: the change modal must be clear on
+     consequence — this is the one place the consequences are written. */
+  function methodConsequences(from, to) {
+    var lines = ['Every existing code is untouched and stays valid exactly as it is.'];
+    if (from === 'instore') {
+      lines.push('The till and any printed cards keep working for as long as the club’s ' +
+        'central codes are in the wild — but no new till cards can be printed.');
+    }
+    if (to === 'online') lines.push('New codes will come from the club’s own uploads, raised against requests.');
+    if (to === 'instore') lines.push('New codes will be created centrally and redeemed at the club’s till — it will need a till card with its PIN.');
+    if (to === 'unassigned') lines.push('The club is switched OFF: both sign-in doors show a holding screen until its manager completes setup again.');
+    lines.push('The club sees the change at its next sign-in; anyone already signed in keeps their current screen until then.');
+    return lines;
+  }
+
   var REQ_STATUS = {
     waiting:    { label: 'Waiting',    pill: 'pill--pending' },
     overdue:    { label: 'Overdue',    pill: 'pill--rejected' },
@@ -678,6 +711,9 @@
     reqFace: reqFace,
     reqPill: reqPill,
     REQ_STATUS: REQ_STATUS,
+    METHOD: METHOD,
+    methodPill: methodPill,
+    methodConsequences: methodConsequences,
     notifyUpload: notifyUpload,
     pillFor: function (status) {
       var s = STATUS[status] || STATUS.active;
