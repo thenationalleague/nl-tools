@@ -3,6 +3,14 @@
 <head>
 <!--
   UW Promo Codes — Utility Warehouse partner page
+  Version: v7.6 (09/09/2026) — the two tab actions get their proper names
+           and equal weight: ADD IN-STORE CODES and REQUEST CLUB CODES,
+           both primary red. Raised requests render IN PLACE on the Online
+           tab ("Requests to clubs" card above the code list, live) — an
+           in-store add appears in the list instantly, so a raised request
+           must too, not vanish into a modal until the club uploads. The
+           requests modal slims to just the raise form, commit in the
+           footer.
   Version: v7.5 (09/09/2026) — canon pass (audit + owner). Phone blowout
            fixed at the ROOT: canon .toolbar__right now wraps (nl-brand
            v2.67, ?v=64 lockstep) — this page's five-action strip was
@@ -190,12 +198,23 @@
         <input class="toolbar__search" id="fSearch" type="search" placeholder="Search codes…" aria-label="Search codes">
       </div>
       <div class="toolbar__right">
-        <button class="btn btn--ghost" id="btnRequests" hidden>Requests</button>
+        <button class="btn btn--primary" id="btnRequests" hidden>Request club codes</button>
         <button class="btn btn--ghost" id="btnRoutes">Redemption methods</button>
         <button class="btn btn--navy" id="btnDispatch" hidden>Mark dispatched (<span id="dispN">0</span>)</button>
         <button class="btn btn--ghost" id="btnExport">Export CSV</button>
-        <button class="btn btn--primary" id="btnAdd">Add codes</button>
+        <button class="btn btn--primary" id="btnAdd">Add in-store codes</button>
       </div>
+    </div>
+
+    <!-- Raised requests, visible in place (owner, 09/09/2026): adding
+         in-store codes shows in the list instantly, so raising a request
+         must too — not vanish into a modal until the club uploads. -->
+    <div class="byclub" id="reqPanel" hidden>
+      <div class="byclub__title">Requests to clubs</div>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Club</th><th>Codes</th><th>Due</th><th>Status</th></tr></thead>
+        <tbody id="reqPanelRows"></tbody>
+      </table></div>
     </div>
 
     <div class="table-wrap">
@@ -305,7 +324,7 @@
       codesLoaded = true;
       render();
     });
-    UWP.ref('requests').on('value', function (s) { REQS = s.val() || {}; });
+    UWP.ref('requests').on('value', function (s) { REQS = s.val() || {}; render(); });
     buildClubFilter();
     render();
   }
@@ -430,6 +449,7 @@
       '<div class="stat stat--expired"><div class="stat__num">' + counts.expired + '</div><div class="stat__label">Expired</div></div>';
 
     renderByClub(all);
+    renderRequestPanel();
 
     var list = filtered();
     var tbody = document.getElementById('rows');
@@ -734,11 +754,25 @@
 
   document.getElementById('btnRequests').addEventListener('click', openRequests);
 
-  /* Family-promotion candidate (09/09/2026, audit): this modal and admin's
-     are sibling copies already drifting (admin grew a Raised-by column).
-     Second divergence promotes it to _shared.js, like editMethodModal. */
-  function openRequests() {
+  /* The requests LIST lives on the Online tab itself (renderRequestPanel);
+     this modal is only the raise form. */
+  function renderRequestPanel() {
+    var panel = document.getElementById('reqPanel');
     var list = reqList();
+    if (TAB !== 'online' || !list.length) { panel.hidden = true; return; }
+    panel.hidden = false;
+    document.getElementById('reqPanelRows').innerHTML = list.map(function (r) {
+      /* Nothing on a request is pressed after raising it: the state falls
+         out of the uploads that answer it (they carry the request id). */
+      var f = UWP.reqFace(r, CODES);
+      return '<tr><td>' + esc(clubName(r.club)) + '</td>' +
+        '<td>' + (f.got ? f.got + ' of ' + f.qty + ' uploaded' : esc(String(r.qty))) + '</td>' +
+        '<td>' + (r.due ? esc(NL.formatDate(r.due)) : '—') + '</td>' +
+        '<td>' + UWP.reqPill(f.key) + '</td></tr>';
+    }).join('');
+  }
+
+  function openRequests() {
     var wrap = document.createElement('div');
     wrap.innerHTML =
       '<div class="alloc-row"><label for="rqClub">Ask a club for codes</label>' +
@@ -748,32 +782,20 @@
         }).join('') + '</select></div>' +
       '<div class="alloc-row" style="display:flex;gap:10px">' +
         '<span style="flex:1"><label for="rqQty">How many</label><input id="rqQty" type="number" min="1" max="500" value="5"></span>' +
-        '<span style="flex:1"><label for="rqDue">Due</label><input id="rqDue" type="date"></span></div>' +
-      '<button class="btn btn--primary btn--sm" id="rqRaise">Raise request</button>' +
-      '<div class="table-wrap" style="margin-top:16px"><table class="table">' +
-      '<thead><tr><th>Club</th><th>Codes</th><th>Due</th><th>Status</th></tr></thead><tbody>' +
-      (list.length ? list.map(function (r) {
-        /* Nothing on a request is pressed after raising it: the state falls
-           out of the uploads that answer it (they carry the request id) —
-           waiting → overdue → fulfilled → dispatched. */
-        var f = UWP.reqFace(r, CODES);
-        return '<tr><td>' + esc(clubName(r.club)) + '</td>' +
-          '<td>' + (f.got ? f.got + ' of ' + f.qty + ' uploaded' : esc(String(r.qty))) + '</td>' +
-          '<td>' + (r.due ? esc(NL.formatDate(r.due)) : '—') + '</td>' +
-          '<td>' + UWP.reqPill(f.key) + '</td></tr>';
-      }).join('') : '<tr class="empty-row"><td colspan="4">No requests yet.</td></tr>') +
-      '</tbody></table></div>';
+        '<span style="flex:1"><label for="rqDue">Due</label><input id="rqDue" type="date"></span></div>';
 
     // Owner ruling: due date prefilled a week out, editable.
-    var d = new Date(Date.now() + 7 * 864e5);
-    wrap.querySelector('#rqDue').value = d.toISOString().slice(0, 10);
+    wrap.querySelector('#rqDue').value = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
 
     var ctrl = NL.modal({
-      title: 'Code requests', width: 'wide', body: wrap,
-      buttons: [{ label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } }]
+      title: 'Request club codes', body: wrap,
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Raise request', className: 'btn--primary', onClick: function () { raise(); } }
+      ]
     });
 
-    wrap.querySelector('#rqRaise').addEventListener('click', function () {
+    function raise() {
       var code = wrap.querySelector('#rqClub').value;
       var qty = parseInt(wrap.querySelector('#rqQty').value, 10);
       var dueRaw = wrap.querySelector('#rqDue').value;
@@ -793,8 +815,7 @@
         toast('Request raised — ' + clubName(code) + ' will see it on their dashboard', 'success');
         ctrl.close();
       }).catch(function (err) { toast('Failed: ' + err.message, 'error'); });
-    });
-
+    }
   }
 
   /* ── Bulk dispatch (spec v43 §5.2) ──────────────────────────────────
