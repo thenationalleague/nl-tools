@@ -3,6 +3,20 @@
 <head>
 <!--
   UW Promo Codes — Club point-of-sale redemption page
+  Version: v6.3 (09/09/2026) — first-use feedback round (owner, online
+           walkthrough). One "Your codes" card replaces the three separate
+           sections: lifecycle counts as four small stat cards, the requests
+           table, the upload form and the full code list in one flow. Uploads
+           open INSIDE the request they answer (each open request grows an
+           Upload button; codes written carry the request id) so progress is
+           countable — the banner now nets off what has been supplied instead
+           of repeating the full ask, and shows "x of y". An unsolicited
+           upload stays possible via a small link. Batch label dropped from
+           club uploads; success is a plain toast (the live-and-recorded
+           sentence was waffle). Gate copy is "Enter your passcode or PIN"
+           (an online club has no PIN to lead with). Scheme-contact rows
+           drop the code-chip styling for the email. The mode pill moved up
+           beside the club name so the sub-line left-aligns.
   Version: v6.2 (09/09/2026) — the codes subscription reports a denial on
            screen instead of dying silently (pairs with _shared v5.1's
            per-tab auth, which removes the cause).
@@ -257,9 +271,19 @@
   .setup__contact input { font-family: var(--font); font-size: var(--text-sm); padding: 8px 10px;
     border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); }
   .setup__contact input:focus-visible { outline: none; box-shadow: var(--focus-ring); border-color: var(--primary); }
-  .contact-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; padding: 6px 0; }
-  .contact-row__name { font-weight: 800; font-variation-settings: 'wght' 800; }
+  .contact-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; padding: 5px 0;
+    font-size: var(--text-sm); }
+  .contact-row__name { font-weight: 700; font-variation-settings: 'wght' 700; }
   .contact-row__role { color: var(--text-muted); }
+  .contact-row__email { color: var(--text-muted); }
+  .life-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
+  @media (max-width: 560px) { .life-cards { grid-template-columns: repeat(2, 1fr); } }
+  .life-card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--off-white);
+    padding: 8px 6px; text-align: center; }
+  .life-card b { display: block; font-size: var(--text-lg); font-weight: 900;
+    font-variation-settings: 'wght' 900; color: var(--navy); line-height: 1.2; }
+  .life-card span { font-size: var(--text-xs); color: var(--text-muted); text-transform: uppercase;
+    letter-spacing: 0.06em; }
   .req-banner { border: 1px solid var(--border); border-radius: var(--radius); background: var(--off-white);
     padding: 12px 14px; margin-bottom: 10px; font-size: var(--text-sm); line-height: 1.5; }
   .req-banner--due { border-color: var(--primary-600); background: var(--primary-50); }
@@ -279,7 +303,8 @@
      and a till user is never left wondering where the upload form went. */
   .mode-tag { font-size: var(--text-xs); font-weight: 800; font-variation-settings: 'wght' 800;
     text-transform: uppercase; letter-spacing: 0.09em; padding: 3px 8px; border-radius: var(--radius-pill);
-    background: var(--navy-100); color: var(--navy); white-space: nowrap; }
+    background: var(--navy-100); color: var(--navy); white-space: nowrap;
+    vertical-align: middle; margin-left: 4px; }
   .mode-tag--admin { background: var(--primary-100); color: var(--primary-700); }
 </style>
 </head>
@@ -306,8 +331,8 @@
   <div class="nl-idbar">
     <span id="idbarCrest"></span>
     <div class="nl-idbar__id">
-      <div class="nl-idbar__title" id="idbarClub"></div>
-      <div class="nl-idbar__sub"><span id="modeTag" class="mode-tag"></span> Utility Warehouse promo codes</div>
+      <div class="nl-idbar__title"><span id="idbarClub"></span> <span id="modeTag" class="mode-tag"></span></div>
+      <div class="nl-idbar__sub">Utility Warehouse promo codes</div>
     </div>
     <button class="nl-idbar__btn" id="signout">Not you?</button>
   </div>
@@ -405,30 +430,25 @@
       </div>
     </div>
 
-    <!-- The outstanding ask + history (§5.1, §6): what UW have requested,
-         what the club has supplied, where each code has got to. -->
-    <div class="list-head">Requests &amp; history</div>
+    <!-- One card for the whole code story (§5.1, §6): what UW have asked
+         for, what the club has supplied against each ask, and every code the
+         club holds. Uploading lives inside the request that prompted it —
+         two separate sections made the club join them up by eye. -->
+    <div class="list-head">Your codes</div>
     <div class="inv" id="historyCard">
+      <div class="life-cards" id="lifeCounts"></div>
       <div id="requestBanner"></div>
-      <div class="checker__meta" id="lifeCounts" style="margin:8px 0 10px"></div>
       <div class="table-wrap"><table class="table">
-        <thead><tr><th>Requested</th><th>Codes</th><th>Due</th><th>Status</th></tr></thead>
+        <thead><tr><th>Requested</th><th>Codes</th><th>Due</th><th>Status</th><th></th></tr></thead>
         <tbody id="reqRows"></tbody>
       </table></div>
-    </div>
 
-    <div id="uploadSection">
-    <div class="list-head">Upload your own codes</div>
+    <div id="uploadSection" hidden>
     <div class="upload">
-      <p class="upload__intro">Add your own promo codes whenever suits you. They are registered to
-        <strong id="upClubName"></strong> and can only be redeemed here.</p>
+      <p class="upload__intro" id="upIntro"></p>
       <div class="upload__field">
         <label for="upCodes">Codes — one per line</label>
-        <textarea id="upCodes" rows="6" placeholder="CODEONE&#10;CODETWO&#10;CODETHREE"></textarea>
-      </div>
-      <div class="upload__field">
-        <label for="upLabel">Batch label (optional)</label>
-        <input id="upLabel" maxlength="40" placeholder="e.g. Autumn mailout">
+        <textarea id="upCodes" rows="4" placeholder="CODEONE&#10;CODETWO&#10;CODETHREE"></textarea>
       </div>
       <div class="upload__terms">
         <div class="upload__terms-head">Before you upload, please confirm</div>
@@ -446,10 +466,35 @@
           <span>These codes stay valid for <strong>at least 12 months</strong> from today.</span>
         </label>
       </div>
-      <button class="btn btn--primary" id="upBtn">Upload codes</button>
+      <div class="checker__row">
+        <button class="btn btn--primary" id="upBtn">Upload codes</button>
+        <button class="btn btn--ghost" id="upCancel" type="button">Cancel</button>
+      </div>
       <div class="upload__out" id="upOut" role="status" aria-live="polite"></div>
     </div>
     </div><!-- /#uploadSection -->
+
+      <div class="checker__row" id="upOpenRow" hidden style="margin-bottom:12px">
+        <button class="btn btn--ghost btn--sm" id="upOpen" type="button">Add codes without a request</button>
+      </div>
+
+      <div class="inv__bar">
+        <select class="toolbar__filter" id="invStatus" aria-label="Filter by status">
+          <option value="">All statuses</option>
+          <option value="active">Unredeemed</option>
+          <option value="redeemed">Redeemed</option>
+          <option value="revoked">Revoked</option>
+        </select>
+        <input class="toolbar__search" id="invSearch" type="search" placeholder="Search codes…" aria-label="Search your codes">
+        <button class="btn btn--ghost btn--sm" id="invExport">Export CSV</button>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Code</th><th>Status</th><th>Redeemed</th><th>Added</th><th>Batch</th></tr></thead>
+          <tbody id="invRows"></tbody>
+        </table>
+      </div>
+    </div><!-- /#historyCard -->
 
     <!-- Voucher checker — read-only lookup, rate-limited, audited. Behind the
          manager door as of v5.0: the till's refusal screen is deliberately
@@ -468,29 +513,6 @@
       </div>
       <div class="checker__out" id="chkOut" role="status" aria-live="polite"></div>
       <div class="checker__quota" id="chkQuota"></div>
-    </div>
-
-    <!-- Full inventory. Unlike the till view above, this DOES print unredeemed
-         code strings: it is the club's own stock list, opened on the manager
-         passcode, on a laptop — not a screen facing a queue. -->
-    <div class="list-head">All your codes</div>
-    <div class="inv">
-      <div class="inv__bar">
-        <select class="toolbar__filter" id="invStatus" aria-label="Filter by status">
-          <option value="">All statuses</option>
-          <option value="active">Unredeemed</option>
-          <option value="redeemed">Redeemed</option>
-          <option value="revoked">Revoked</option>
-        </select>
-        <input class="toolbar__search" id="invSearch" type="search" placeholder="Search codes…" aria-label="Search your codes">
-        <button class="btn btn--ghost btn--sm" id="invExport">Export CSV</button>
-      </div>
-      <div class="table-wrap">
-        <table class="table">
-          <thead><tr><th>Code</th><th>Status</th><th>Redeemed</th><th>Added</th><th>Batch</th></tr></thead>
-          <tbody id="invRows"></tbody>
-        </table>
-      </div>
     </div>
 
     <!-- §4: codes from a scheme this club has since left — a list, not a
@@ -606,7 +628,7 @@
       document.getElementById('gateTitle').textContent = clubName;
     }
     document.getElementById('gateSub').textContent =
-      'Enter your 4-digit till PIN — or your club manager passcode for the admin view.';
+      'Enter your passcode or PIN.';
     document.getElementById('gateForm').style.display = 'block';
     var inp = document.getElementById('gateInput'), err = document.getElementById('gateErr'),
         btn = document.getElementById('gateBtn');
@@ -673,7 +695,6 @@
     NL.clubs.wireCrestImg(crest, CLUB.name);
     document.getElementById('idbarCrest').replaceChildren(crest);
     document.getElementById('idbarClub').textContent = CLUB.name;
-    document.getElementById('upClubName').textContent = CLUB.name;
     document.getElementById('tcsLinkTill').href = UWP.TCS_URL;
     document.getElementById('tcsLinkMgr').href = UWP.TCS_URL;
 
@@ -702,7 +723,10 @@
     document.getElementById('setupSection').hidden = !setup;
     document.getElementById('tillSection').hidden = setup || !(ROUTE === 'instore' || HASCENTRAL);
     document.getElementById('managerOnly').hidden = setup || MODE !== 'manager';
-    document.getElementById('uploadSection').hidden = ROUTE !== 'online';
+    /* The upload form lives inside the codes card and opens on demand —
+       from a request's Upload button, or the no-request link (online only). */
+    closeUpload();
+    document.getElementById('upOpenRow').hidden = !(MODE === 'manager' && ROUTE === 'online');
     document.getElementById('pinSection').hidden = !(MODE === 'manager' && CREDS);
     document.getElementById('pinCard').hidden = ROUTE !== 'instore';
 
@@ -1166,12 +1190,47 @@
      even the master console can quietly alter it later. */
   var UPLOAD_MAX = 200;      // one indexed lookup per code — see checkExisting
   var upBusy = false;
+  var UP_REQ = null;         // request id this upload answers; null = unsolicited
   var upCodes = document.getElementById('upCodes'),
       upOut = document.getElementById('upOut');
 
   function upMsg(html) { upOut.innerHTML = '<div class="checker__card">' + html + '</div>'; }
 
+  /* The form opens inside the request it answers, or bare via the
+     no-request link. Either way it is the same form — what differs is
+     whether the codes it writes carry a request id. */
+  function openUpload(reqId) {
+    UP_REQ = reqId || null;
+    var intro;
+    if (UP_REQ && REQS[UP_REQ]) {
+      var r = REQS[UP_REQ], qty = parseInt(r.qty, 10) || 0, got = uploadedFor(UP_REQ);
+      intro = 'Uploading against Utility Warehouse’s request for <strong>' + qty +
+        ' code' + (qty === 1 ? '' : 's') + '</strong>' +
+        (r.due ? ', due ' + esc(NL.formatDate(r.due)) : '') +
+        (got ? ' — ' + got + ' supplied so far' : '') + '.';
+    } else {
+      intro = 'These codes are registered to <strong>' + esc(CLUB.name) + '</strong> and can only be redeemed here.';
+    }
+    document.getElementById('upIntro').innerHTML = intro;
+    var sec = document.getElementById('uploadSection');
+    sec.hidden = false;
+    sec.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    upCodes.focus();
+  }
+  function closeUpload() {
+    UP_REQ = null;
+    var sec = document.getElementById('uploadSection');
+    if (sec) sec.hidden = true;
+    if (upOut) upOut.innerHTML = '';
+  }
+
   document.getElementById('upBtn').addEventListener('click', runUpload);
+  document.getElementById('upCancel').addEventListener('click', closeUpload);
+  document.getElementById('upOpen').addEventListener('click', function () { openUpload(null); });
+  document.getElementById('reqRows').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-upreq]');
+    if (b) openUpload(b.getAttribute('data-upreq'));
+  });
 
   function parseUploaded() {
     var seen = {}, out = [];
@@ -1255,13 +1314,13 @@
     }).then(function (ok) {
       if (!ok) return;
       var batch = UWP.ref('codes').push().key;
-      var label = (document.getElementById('upLabel').value || '').trim();
+      var forReq = UP_REQ;
       var updates = {};
       list.forEach(function (c) {
         updates[UWP.ref('codes').push().key] = {
           code: c.code, norm: c.norm, status: 'active',
           club: CLUB.code, clubName: CLUB.name,
-          batch: batch, batchLabel: label || null,
+          batch: batch, request: forReq || null,
           createdAt: UWP.TS(), createdBy: actor()
         };
       });
@@ -1273,21 +1332,20 @@
         upBusy = false;
         UWP.audit(actor(), CLUB.name, 'add-codes', {
           club: CLUB.code, clubName: CLUB.name, count: list.length, batch: batch,
+          request: forReq || null,
           codes: list.slice(0, 10).map(function (c) { return c.code; }).join(', ') +
                  (list.length > 10 ? ' …' : ''),
-          detail: 'Club upload' + (label ? ' “' + label + '”' : '') +
+          detail: 'Club upload' + (forReq ? ' against a UW request' : '') +
             ' — confirmed: works in club till system; applies agreed ' + UWP.VALUE + ' discount; valid 12 months+'
         });
         upCodes.value = '';
-        document.getElementById('upLabel').value = '';
         ['upT1', 'upT2', 'upT3'].forEach(function (id) { document.getElementById(id).checked = false; });
         /* Tell the NL the codes are in (spec item 6) — otherwise an upload
            can sit unnoticed until someone thinks to look. Fire-and-forget:
            the upload already succeeded and is audited either way. */
-        UWP.notifyUpload(CLUB, list.length, label);
-        upMsg('<strong>' + list.length + ' code' + (list.length === 1 ? '' : 's') + ' uploaded.</strong>' +
-          '<div class="checker__meta" style="margin-top:5px">They’re live now and redeemable at ' +
-          esc(CLUB.name) + '. Your confirmations have been recorded with the National League.</div>');
+        UWP.notifyUpload(CLUB, list.length, '');
+        closeUpload();
+        toast(list.length + ' code' + (list.length === 1 ? '' : 's') + ' uploaded', 'success');
       }).catch(function (err) {
         upBusy = false;
         upMsg('Upload failed: ' + esc(err.message) + ' — nothing was added, please try again.');
@@ -1405,7 +1463,7 @@
     el.innerHTML = CONTACTS.map(function (c) {
       return '<div class="contact-row"><span class="contact-row__name">' + esc(c.name) + '</span>' +
         '<span class="contact-row__role">' + esc(c.role) + '</span>' +
-        '<span class="code-mono">' + esc(c.email) + '</span></div>';
+        '<span class="contact-row__email">' + esc(c.email) + '</span></div>';
     }).join('');
   }
 
@@ -1451,6 +1509,13 @@
       .sort(function (a, b) { return (b.raisedAt || 0) - (a.raisedAt || 0); });
   }
 
+  /* Codes uploaded against a request carry its id, so progress is countable
+     on both sides — this is what lets the banner net off what the club has
+     already supplied instead of repeating the full ask. */
+  function uploadedFor(reqId) {
+    return Object.keys(CODES).filter(function (k) { return CODES[k].request === reqId; }).length;
+  }
+
   function renderRequests() {
     if (MODE !== 'manager') return;
     var list = reqList();
@@ -1463,40 +1528,51 @@
       dispatched: issuedPool.filter(function (r) { return r.dispatchedAt; }).length,
       redeemed: issuedPool.filter(function (r) { return r.status === 'redeemed'; }).length
     };
-    /* The spec's own sentence, as the club reads it: 5 requested, 5 issued,
-       3 dispatched, 1 redeemed. */
-    document.getElementById('lifeCounts').textContent =
-      counts.requested + ' requested · ' + counts.issued + ' issued · ' +
-      counts.dispatched + ' dispatched · ' + counts.redeemed + ' redeemed';
+    /* The spec's own sentence — requested / issued / dispatched / redeemed —
+       as four small cards. */
+    document.getElementById('lifeCounts').innerHTML =
+      ['requested', 'issued', 'dispatched', 'redeemed'].map(function (k) {
+        return '<div class="life-card"><b>' + counts[k] + '</b><span>' + k + '</span></div>';
+      }).join('');
 
     var open = list.filter(function (r) { return r.status === 'open'; });
     var banner = document.getElementById('requestBanner');
+    var remaining = open.reduce(function (n, r) {
+      return n + Math.max(0, (parseInt(r.qty, 10) || 0) - uploadedFor(r._id));
+    }, 0);
     if (!open.length) {
       banner.innerHTML = '';
+    } else if (!remaining) {
+      banner.innerHTML = '<div class="req-banner">Everything requested has been uploaded — ' +
+        'Utility Warehouse will confirm and close the request' + (open.length === 1 ? '' : 's') + '.</div>';
     } else {
       var due = open.filter(function (r) { return r.due && Date.now() > r.due; });
       var next = open[0];
       banner.innerHTML = '<div class="req-banner' + (due.length ? ' req-banner--due' : '') + '">' +
         '<strong>' + (due.length ? 'Overdue: ' : 'Outstanding: ') + '</strong>' +
-        open.reduce(function (n, r) { return n + (parseInt(r.qty, 10) || 0); }, 0) +
-        ' code' + (open.length ? 's' : '') + ' requested by Utility Warehouse' +
+        remaining + ' code' + (remaining === 1 ? '' : 's') + ' still to supply to Utility Warehouse' +
         (next.due ? ', due ' + esc(NL.formatDate(next.due)) : '') +
-        (ROUTE === 'online' ? ' — upload them below.' : '.') + '</div>';
+        (ROUTE === 'online' ? ' — use Upload on the request.' : '.') + '</div>';
     }
 
     var tb = document.getElementById('reqRows');
     if (!list.length) {
-      tb.innerHTML = '<tr class="empty-row"><td colspan="4">No requests yet.</td></tr>';
+      tb.innerHTML = '<tr class="empty-row"><td colspan="5">No requests yet.</td></tr>';
       return;
     }
     tb.innerHTML = list.map(function (r) {
       var overdue = r.status === 'open' && r.due && Date.now() > r.due;
+      var got = uploadedFor(r._id), qty = parseInt(r.qty, 10) || 0;
+      var canUpload = ROUTE === 'online' && r.status === 'open';
       return '<tr><td title="' + esc(UWP.fmt(r.raisedAt)) + '">' + esc(UWP.ago(r.raisedAt)) + '</td>' +
-        '<td>' + esc(String(r.qty || '')) + '</td>' +
+        '<td>' + (got ? got + ' of ' + qty : esc(String(r.qty || ''))) + '</td>' +
         '<td>' + (r.due ? esc(NL.formatDate(r.due)) : '—') + '</td>' +
         '<td>' + (r.status === 'open'
           ? (overdue ? '<span class="pill pill--rejected">Overdue</span>' : '<span class="pill pill--pending">Open</span>')
-          : '<span class="pill pill--approved">Fulfilled</span>') + '</td></tr>';
+          : '<span class="pill pill--approved">Fulfilled</span>') + '</td>' +
+        '<td>' + (canUpload
+          ? '<button class="btn btn--ghost btn--sm" data-upreq="' + esc(r._id) + '">Upload</button>'
+          : '') + '</td></tr>';
     }).join('');
   }
 
