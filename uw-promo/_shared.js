@@ -120,9 +120,16 @@
      next read died on permission_denied at codes. Every page here demands a
      credential on every visit, so nothing is lost by keeping the session in
      memory — and a till stays the till you signed into, whatever happens in
-     the tab next door. */
-  var persistenceReady = app.auth().setPersistence(firebase.auth.Auth.Persistence.NONE)
-    .catch(function () { /* worst case is the old shared behaviour */ });
+     the tab next door.
+
+     'none' is the compat SDK's Persistence.NONE constant, used directly so
+     an environment without the constants object (the unit tests' stub) still
+     loads this file; a failed call degrades to the old shared behaviour. */
+  var persistenceReady = Promise.resolve();
+  try {
+    persistenceReady = Promise.resolve(app.auth().setPersistence('none'))
+      .catch(function () {});
+  } catch (e) {}
 
   function ensureAuth() {
     try {
