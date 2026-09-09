@@ -1,5 +1,13 @@
 /*
   UW Promo Codes — shared runtime for the three standalone pages
+  Version: v5.1 (09/09/2026) — auth is per-tab now (persistence NONE).
+           Firebase's default persistence shares one current user across
+           same-origin tabs, and the handshake's anonymous first step (or a
+           holding response, which never upgrades past it) downgraded the
+           session in every other open UW tab — an open till then died on
+           permission_denied at codes. Found on the first real sandbox
+           multi-tab walkthrough. Every page re-gates on every visit, so
+           in-memory auth costs nothing.
   Version: v5.0 (09/09/2026) — spec v43.0. chooseRoute() carries a manager's
            in-app route choice (route, undertakings, scheme contacts) through
            the auth trigger and folds the grant back into the session.
@@ -104,11 +112,25 @@
     appId: "1:801354670005:web:05d8ebad3e7e63610d03fc"
   }, 'nlUwPromo');
 
+  /* Auth lives in THIS TAB ONLY. Firebase's default persistence shares one
+     current user across every same-origin tab, and the handshake below signs
+     in anonymously before upgrading to a role-carrying custom token — so a
+     gate in one tab (worst case a holding response, which never upgrades)
+     silently downgraded the session in an already-open till tab, and its
+     next read died on permission_denied at codes. Every page here demands a
+     credential on every visit, so nothing is lost by keeping the session in
+     memory — and a till stays the till you signed into, whatever happens in
+     the tab next door. */
+  var persistenceReady = app.auth().setPersistence(firebase.auth.Auth.Persistence.NONE)
+    .catch(function () { /* worst case is the old shared behaviour */ });
+
   function ensureAuth() {
     try {
-      var u = app.auth().currentUser;
-      if (u) return Promise.resolve(u);
-      return app.auth().signInAnonymously().then(function (c) { return c.user; });
+      return persistenceReady.then(function () {
+        var u = app.auth().currentUser;
+        if (u) return u;
+        return app.auth().signInAnonymously().then(function (c) { return c.user; });
+      });
     } catch (e) { return Promise.reject(e); }
   }
 
