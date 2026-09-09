@@ -66,34 +66,94 @@ codes are 6 plain characters with no hyphen; the till entry box is free text
 | Each club — till | **4-digit numeric PIN** | Typed on a phone, at a till, by whoever is on shift |
 | Each club — admin | 6-character **manager passcode** | Named contact, on a laptop. Never printed |
 
-## Routes — unassigned / in-store / online (spec v42.0)
+## Routes — unassigned / in-store / online (spec v42.0, self-serve v43.0)
 
 Every club carries a `route` on its config record, defaulting to
 **unassigned**, and the route decides what its people can open at all:
 
 | Route | Till PIN opens | Manager passcode opens | Codes come from |
 |---|---|---|---|
-| `unassigned` | Holding screen, no token | Holding screen, no token | Nowhere — switched off |
+| `unassigned` | Holding screen, no token | **The setup screen** (v43) | Nowhere yet — route not chosen |
 | `instore` | The till (redeem) | Till + admin view (no upload) | UW/NL centrally |
-| `online` | Holding screen, no token | Admin view: upload, list, activity | The club uploads its own |
+| `online` | Holding screen, no token* | Admin view: upload, list, activity | The club uploads its own |
+
+**Clubs choose their own route** (spec v43.0 §1). An unassigned club's
+manager passcode mints a session scoped to a setup screen: pick in-store or
+online (each card says what it means), tick the five route-specific
+undertakings — the tick boxes *are* the gate; nothing saves without all
+five — and give at least one **scheme contact** (name, role, email).
+Saving locks the route. The till PIN deliberately cannot reach setup:
+choosing a route binds the club to undertakings, and that is a manager
+decision, not a till-shift one.
+
+**Locked means locked** (§4). Reversal is an NL or UW admin act — the Club
+routes control on the UW page, or the Route column on the admin console —
+and a route change **never touches existing codes**. Creation follows the
+current route; validation honours whatever exists: a club that leaves the
+in-store route keeps a working till for as long as its central codes are in
+the wild (the session carries `hasCentral`, computed server-side at
+sign-in), because printed cards in shops must keep working.
 
 The route gate lives in the auth **function**, not the page: an unassigned
-club's correct PIN gets a holding response and no Firebase token is minted,
-so nothing is readable behind it. Correct-credential holding responses do not
-touch the failure throttles. An online club's manager grant deliberately
-carries **no PIN and no link token**, so a QR till card cannot exist for a
-club with no till — the print path has nothing to print.
+club's correct till PIN gets a holding response and no Firebase token is
+minted, so nothing is readable behind it. Correct-credential holding
+responses do not touch the failure throttles. *An online club's grant
+carries no PIN and no link token **unless** central codes exist for it
+(the `hasCentral` case above) — a QR till card cannot exist for a club with
+no till, and the print path has nothing to print.
 
 The admin console's Clubs & access tab is the system of record: a Route
 column per club (audited on change), and a ledger line — N in-store,
 N online, **N unassigned** — where the unassigned number is the chase list.
-Seeding new clubs sets `unassigned`, so a club is switched off until someone
-deliberately switches it on. A route change takes effect at the club's next
+Seeding new clubs sets `unassigned`, so a club is switched off until it
+completes its own setup. A route change takes effect at the club's next
 sign-in; open sessions keep their shape until they re-enter.
 
 Central codes for online or unassigned clubs aren't blocked — the add-codes
 dropdowns mark those clubs instead, so a batch doesn't land where no shop
 will redeem it by accident.
+
+## Scheme contacts (spec v43.0 §3)
+
+Every club names at least one scheme contact at setup — who NL and UW
+actually ring when a batch is overdue or an upload looks wrong. Stored at
+`contacts/<CODE>` in RTDB (name, role, email — **never in git**; this repo
+is public), readable and editable by that club's manager and by NL/UW.
+The club admin view shows the contacts in their own card with an Edit flow
+(audited as `contact`); the master console surfaces the first contact per
+club in Clubs & access. Multiple contacts are allowed.
+
+## The request → dispatch lifecycle (spec v43.0 §5)
+
+Central (in-store) codes now carry a visible pipeline:
+
+| Face | Meaning | Set by |
+|---|---|---|
+| **Requested** | An open request: club, quantity, due date | Lucy (UW page) or Richard (admin console) — both can raise |
+| **Issued** | Codes exist in the system, not yet sent out | Creation (any active undispatched central code reads Issued) |
+| **Dispatched** | Physically sent to the club | UW page bulk flow: tick codes → confirm → `dispatchedAt`/`dispatchedBy` in one multi-update, audited |
+| **Redeemed** | Used at the club's till | The till, as ever |
+
+Issued and Dispatched are **derived faces** (`UWP.faceOf` over
+`statusOf` + the `dispatchedAt` flag), never a stored status —
+expired/redeemed/revoked always win. Requests live at `requests/<pushId>`
+(club, qty, due, status open|fulfilled); the due date prefills a week out
+and is editable. **Marking fulfilled is deliberately manual** — a human
+closing the loop beats a heuristic. The club admin view shows its own
+history: lifecycle counts, the request table, and an outstanding/overdue
+banner.
+
+**Overdue chasing is internal only** (§7): a scheduled Cloud Function
+(`uwPromoOverdue`, daily 08:30 UK) pokes the GAS router when open requests
+are past due; the GAS side reads the requests, club names and recipients
+itself with the server credential and emails the digest to the
+`config/support/notify` list. The poke carries no content, so an outside
+caller can only make it send the true digest to the configured people.
+Clubs are never emailed by the platform — that would need fan/club personal
+data flows the spec explicitly rejected.
+
+Codes left behind by a route change appear in the club admin view as a
+read-only **previous scheme** block — visible history, no actions.
 
 ## The voucher's value is one constant
 
@@ -113,6 +173,9 @@ same QR:
 | Redeem a code (in-store route) | ✅ | ✅ |
 | Redeemed list + counts (in-store) | ✅ | ✅ |
 | Check a code | ✗ | ✅ |
+| Route setup / first sign-in (unassigned) | ✗ | ✅ |
+| Scheme contacts — view and edit | ✗ | ✅ |
+| Requests & history (counts, overdue banner) | ✗ | ✅ |
 | Upload own codes (online route) | ✗ | ✅ |
 | Full code list, incl. unredeemed strings | ✗ | ✅ |
 | CSV export | ✗ | ✅ |
@@ -302,22 +365,35 @@ codes/<pushId>      { code, norm, status: active|redeemed|revoked,
                                                                    # Absent on pre-v3.0 codes only
                       batch, batchLabel?, createdAt,
                       createdBy: uw|master|club:<CODE>,            # club = self-upload
+                      dispatchedAt?, dispatchedBy?,                # v43 — set by the UW bulk
+                                                                   # dispatch flow; drives the
+                                                                   # Issued/Dispatched faces
                       redeemedAt?, redeemedBy?,                    # redeemedBy: club:<CODE>|master
                       releasedAt?, releasedBy?, releaseReason?, releasedFrom?,
                       revokedAt?, revokedBy? }
+requests/<pushId>   { club, clubName, qty, due, status: open|fulfilled,
+                      raisedAt, raisedBy: uw|master,
+                      fulfilledAt?, fulfilledBy? }                 # v43 — NL/UW write, any
+                                                                   # session reads
+contacts/<CODE>     [ { name, role, email, addedAt } ]             # v43 scheme contacts —
+                                                                   # personal data, RTDB only,
+                                                                   # club manager + NL/UW write
 audit/<pushId>      { ts (server), actor: master|uw|club:<CODE>, actorLabel,
                       action: add-codes|redeem|check|release|revoke|register|
                               delete|seed-clubs|regen-passcode|regen-link|
-                              bootstrap,
+                              bootstrap|route|support|request|dispatch|contact,
                       club?, clubName?, count?, batch?, codes?, detail? }
 ```
 
 No rules change: `club` was already an indexed field on `codes`, and `check` /
 `register` are just new values in the audit `action` string.
 
-Rules (in `system/rtdb/rules.snapshot.json`): public read (same trust level as
-`media-footage/data` — passcodes are validated client-side), writes require
-(anonymous) auth, and the **audit trail is append-only** (`!data.exists()`) —
+Rules (in `system/rtdb/rules.snapshot.json`): since v4.0 `config` is
+readable/writable only by a minted **master** token (with a deeper NL/UW
+grant on each club's `route` for the v43 reversal flow); `codes` and `audit`
+need any minted session; `requests` are written by NL/UW and readable by any
+session; `contacts/<CODE>` is readable/writable by that club's manager and
+NL/UW. The **audit trail is append-only** (`!data.exists()`) —
 it cannot be edited or pruned from any of these pages, master included.
 Codes can be **hard-deleted from the master console only** (typed `DELETE`
 confirm, audited as `delete`); the UW panel has no delete. With anonymous
@@ -377,11 +453,11 @@ Two layers:
    tab, test mode only) wipes the sandbox clean; sandbox rules allow deletes,
    live rules don't.
 
-## Go-live checklist (all Firebase console — repo carries snapshots only)
+## Go-live checklist (browser only — nothing needs a terminal)
 
-1. **Deploy RTDB rules** — paste the whole of
-   `system/rtdb/rules.snapshot.json` into Firebase console → Realtime
-   Database → Rules.
+1. **Deploy RTDB rules** — Actions → *Deploy RTDB rules* → type `publish`.
+   The workflow ships `system/rtdb/rules.snapshot.json`; nothing is ever
+   pasted into the Firebase console.
 2. **Anonymous auth** must be enabled (Authentication → Sign-in method).
    The footage pages use it too, so it may already be on — verify, don't assume.
 3. Dry-run the whole flow in **sandbox mode** (above).

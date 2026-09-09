@@ -24,6 +24,12 @@
            write config. That is the change that stops all 72 till PINs being
            world-readable. First run mints a bootstrap master token while no
            passcode exists; nothing subscribes to RTDB until the session does.
+  Version: v6.0 (09/09/2026) — spec v43.0: the NL side of the request
+           lifecycle. Requests modal mirrors the UW one (raise, due a week
+           out by default, mark fulfilled) with a Raised-by column since both
+           Lucy and Richard can raise. Clubs & access grows a Scheme contact
+           column fed from contacts/<club>; the audit filter learns request/
+           dispatch/contact; code pills show the issued/dispatched faces.
   Version: v5.0 (03/09/2026) — routes land (spec v42.0). New Route column in
            Clubs & access — unassigned / in-store / online per club, with the
            at-a-glance ledger above the table (the unassigned number is the
@@ -235,7 +241,7 @@
           <input class="toolbar__search" id="fSearch" type="search" placeholder="Search codes…" aria-label="Search codes">
         </div>
         <div class="toolbar__right">
-          <button class="btn btn--ghost" id="btnBatches">Batches</button>
+          <button class="btn btn--ghost" id="btnRequests">Requests</button> <button class="btn btn--ghost" id="btnBatches">Batches</button>
           <button class="btn btn--ghost" id="btnExport">Export CSV</button>
           <button class="btn btn--primary" id="btnAdd">Add codes</button>
         </div>
@@ -308,6 +314,9 @@
             <option value="revoke">Revoke</option>
             <option value="check">Code check</option>
             <option value="route">Route change</option>
+            <option value="request">Code request</option>
+            <option value="dispatch">Dispatch</option>
+            <option value="contact">Scheme contact</option>
             <option value="support">Support details</option>
             <option value="register">Register to club</option>
             <option value="delete">Delete</option>
@@ -342,7 +351,7 @@
 
   var ACTOR = 'master', ACTOR_LABEL = 'NL master';
 
-  var CONFIG = null, CODES = {}, AUDIT = {};
+  var CONFIG = null, CODES = {}, AUDIT = {}, REQS = {}, CONTACTS_ALL = {};
   var configLoaded = false, codesLoaded = false, auditLoaded = false, unlocked = false;
 
   function esc(s) { return NL.escHtml(s); }
@@ -369,6 +378,11 @@
     UWP.ref('audit').orderByChild('ts').limitToLast(500).on('value', function (s) {
       AUDIT = s.val() || {}; auditLoaded = true;
       if (unlocked) renderAudit();
+    });
+    UWP.ref('requests').on('value', function (s) { REQS = s.val() || {}; });
+    UWP.ref('contacts').on('value', function (s) {
+      CONTACTS_ALL = s.val() || {};
+      if (unlocked) renderAccess();
     });
   }
 
@@ -473,6 +487,85 @@
 
   /* ── Clubs helpers ──────────────────────────────────────────────────── */
   var ROUTE_LABEL = { unassigned: 'Unassigned', instore: 'In-store', online: 'Online' };
+
+  /* First scheme contact per club, email on hover — enough to see at a
+     glance who owns it and whether anyone does (spec v43 §3). */
+  function contactCell(code) {
+    var list = CONTACTS_ALL[code];
+    if (list && !Array.isArray(list)) list = Object.keys(list).map(function (k) { return list[k]; });
+    if (!list || !list.length) return '<span class="code-note">none</span>';
+    var first = list[0];
+    return '<span title="' + esc(first.email || '') + '">' + esc(first.name || '') +
+      (list.length > 1 ? ' <span class="code-note">+' + (list.length - 1) + '</span>' : '') + '</span>';
+  }
+
+  /* Requests — same feature as the UW panel's; Richard can raise them too
+     (owner ruling 09/09/2026), recorded as the master rather than as UW. */
+  document.getElementById('btnRequests').addEventListener('click', function () {
+    var list = Object.keys(REQS).map(function (k) { var r = REQS[k]; r._id = k; return r; })
+      .sort(function (a, b) { return (b.raisedAt || 0) - (a.raisedAt || 0); });
+    function nameOf(code) { var c = (CONFIG.clubs || {})[code]; return c ? c.name : code; }
+    var wrap = document.createElement('div');
+    wrap.innerHTML =
+      '<div class="alloc-row"><label for="rqClub">Ask a club for codes</label>' +
+        '<select id="rqClub">' + clubOptionsHtml('Choose a club…') + '</select></div>' +
+      '<div class="alloc-row" style="display:flex;gap:10px">' +
+        '<span style="flex:1"><label for="rqQty">How many</label><input id="rqQty" type="number" min="1" max="500" value="5"></span>' +
+        '<span style="flex:1"><label for="rqDue">Due</label><input id="rqDue" type="date"></span></div>' +
+      '<button class="btn btn--primary btn--sm" id="rqRaise">Raise request</button>' +
+      '<div class="table-wrap" style="margin-top:16px"><table class="table">' +
+      '<thead><tr><th>Club</th><th>Codes</th><th>Due</th><th>Raised by</th><th>Status</th><th></th></tr></thead><tbody>' +
+      (list.length ? list.map(function (r) {
+        var overdue = r.status === 'open' && r.due && Date.now() > r.due;
+        return '<tr><td>' + esc(nameOf(r.club)) + '</td><td>' + esc(String(r.qty)) + '</td>' +
+          '<td>' + (r.due ? esc(NL.formatDate(r.due)) : '—') + '</td>' +
+          '<td>' + esc(r.raisedBy === 'uw' ? 'UW' : 'NL') + '</td>' +
+          '<td>' + (r.status === 'open'
+            ? (overdue ? '<span class="pill pill--rejected">Overdue</span>' : '<span class="pill pill--pending">Open</span>')
+            : '<span class="pill pill--approved">Fulfilled</span>') + '</td>' +
+          '<td style="text-align:right">' + (r.status === 'open'
+            ? '<button class="btn btn--ghost btn--sm" data-fulfil="' + esc(r._id) + '">Mark fulfilled</button>'
+            : '') + '</td></tr>';
+      }).join('') : '<tr class="empty-row"><td colspan="6">No requests yet.</td></tr>') +
+      '</tbody></table></div>';
+    wrap.querySelector('#rqDue').value = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
+    var ctrl = NL.modal({
+      title: 'Code requests', width: 'wide', body: wrap,
+      buttons: [{ label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } }]
+    });
+    wrap.querySelector('#rqRaise').addEventListener('click', function () {
+      var code = wrap.querySelector('#rqClub').value;
+      var qty = parseInt(wrap.querySelector('#rqQty').value, 10);
+      var dueRaw = wrap.querySelector('#rqDue').value;
+      if (!code) { toast('Choose a club.', 'error'); return; }
+      if (!(qty >= 1 && qty <= 500)) { toast('Quantity must be 1–500.', 'error'); return; }
+      UWP.ensureAuth().then(function () {
+        return UWP.ref('requests').push({
+          club: code, qty: qty, due: dueRaw ? new Date(dueRaw + 'T23:59:59').getTime() : null,
+          status: 'open', raisedAt: UWP.TS(), raisedBy: ACTOR
+        });
+      }).then(function () {
+        UWP.audit(ACTOR, ACTOR_LABEL, 'request', {
+          club: code, clubName: nameOf(code), count: qty,
+          detail: 'Requested ' + qty + ' codes' + (dueRaw ? ', due ' + dueRaw : '')
+        });
+        toast('Request raised', 'success');
+        ctrl.close();
+      }).catch(function (err) { toast('Failed: ' + err.message, 'error'); });
+    });
+    ctrl.body.addEventListener('click', function (e) {
+      var el = e.target.closest('[data-fulfil]');
+      if (!el) return;
+      var id = el.getAttribute('data-fulfil');
+      UWP.ensureAuth().then(function () {
+        return UWP.ref('requests/' + id).update({ status: 'fulfilled', fulfilledAt: UWP.TS() });
+      }).then(function () {
+        UWP.audit(ACTOR, ACTOR_LABEL, 'request', { club: (REQS[id] || {}).club, detail: 'Request marked fulfilled' });
+        toast('Marked fulfilled', 'success');
+        ctrl.close();
+      }).catch(function (err) { toast('Failed: ' + err.message, 'error'); });
+    });
+  });
 
   function clubList() {
     var clubs = (CONFIG && CONFIG.clubs) || {};
@@ -651,7 +744,8 @@
       return '<tr' + (r.status === 'revoked' ? ' class="is-revoked"' : '') + '>' +
         '<td><span class="code-mono">' + esc(r.code) + '</span> ' +
           '<button class="code-copy" data-copy="' + esc(r.code) + '" title="Copy code" aria-label="Copy code">⧉</button></td>' +
-        '<td>' + UWP.pillFor(UWP.statusOf(r)) + '</td>' +
+        '<td' + (r.dispatchedAt ? ' title="Dispatched ' + esc(UWP.fmt(r.dispatchedAt)) + '"' : '') + '>' +
+          UWP.pillFor(UWP.faceOf(r)) + '</td>' +
         '<td>' + clubCell + '</td>' +
         '<td>' + esc(r.status === 'redeemed' ? UWP.fmt(r.redeemedAt) : '—') + '</td>' +
         '<td title="' + esc(UWP.fmt(r.createdAt)) + '">' + esc(UWP.ago(r.createdAt)) + '</td>' +
@@ -1135,7 +1229,7 @@
           '“Reissue all club PINs” converts every club to a 4-digit PIN in one go.</p>'
         : '') +
       '<div class="table-wrap"><table class="table">' +
-      '<thead><tr><th>Club</th><th>Division</th><th>Route</th><th>Till PIN</th><th>Manager passcode</th><th></th></tr></thead><tbody>' +
+      '<thead><tr><th>Club</th><th>Division</th><th>Route</th><th>Scheme contact</th><th>Till PIN</th><th>Manager passcode</th><th></th></tr></thead><tbody>' +
       clubs.map(function (c) {
         return '<tr><td><span class="club-cell">' + NL.clubs.crestImgHtml(c.name, 'thumb') +
           '<span class="club-cell__name">' + esc(c.name) + '</span></span></td>' +
@@ -1144,6 +1238,7 @@
             ['unassigned', 'instore', 'online'].map(function (r) {
               return '<option value="' + r + '"' + (c.route === r ? ' selected' : '') + '>' + ROUTE_LABEL[r] + '</option>';
             }).join('') + '</select></td>' +
+          '<td>' + contactCell(c.code) + '</td>' +
           '<td><button class="pass-chip" data-copypass="' + esc(c.code) + '" title="Click to copy">' + esc(c.passcode) + '</button></td>' +
           '<td>' + (c.managerPass
             ? '<button class="pass-chip" data-copymgr="' + esc(c.code) + '" title="Click to copy">' + esc(c.managerPass) + '</button>'

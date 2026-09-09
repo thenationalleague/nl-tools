@@ -3,6 +3,15 @@
 <head>
 <!--
   UW Promo Codes — Utility Warehouse partner page
+  Version: v6.0 (09/09/2026) — spec v43.0: the request/dispatch lifecycle.
+           New Requests modal (raise against online-route clubs, qty + due
+           date prefilled a week out, mark fulfilled by hand — a human
+           closing the loop beats a heuristic) and a bulk Dispatch flow: tick
+           active undispatched codes, confirm, and dispatchedAt/dispatchedBy
+           land in one multi-update with an audit entry. Pills show the
+           issued/dispatched faces. Club routes modal can now change a set
+           route (spec §4: reversal is an NL/UW admin act; existing codes are
+           never touched).
   Version: v5.0 (03/09/2026) — routes (spec v42.0): the club dropdown marks
            online and not-activated clubs so a central batch lands on the
            in-store route it belongs to, and central codes past 12 months
@@ -156,6 +165,9 @@
         <input class="toolbar__search" id="fSearch" type="search" placeholder="Search codes…" aria-label="Search codes">
       </div>
       <div class="toolbar__right">
+        <button class="btn btn--ghost" id="btnRequests">Requests</button>
+        <button class="btn btn--ghost" id="btnRoutes">Club routes</button>
+        <button class="btn btn--navy" id="btnDispatch" hidden>Mark dispatched (<span id="dispN">0</span>)</button>
         <button class="btn btn--ghost" id="btnExport">Export CSV</button>
         <button class="btn btn--primary" id="btnAdd">Add codes</button>
       </div>
@@ -164,9 +176,9 @@
     <div class="table-wrap">
       <table class="table">
         <thead><tr>
-          <th>Code</th><th>Status</th><th>Club</th><th>Redeemed</th><th>Added</th><th>Batch</th><th></th>
+          <th></th><th>Code</th><th>Status</th><th>Club</th><th>Redeemed</th><th>Added</th><th>Batch</th><th></th>
         </tr></thead>
-        <tbody id="rows"><tr class="loading-row"><td colspan="7">Loading codes…</td></tr></tbody>
+        <tbody id="rows"><tr class="loading-row"><td colspan="8">Loading codes…</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -181,7 +193,8 @@
   var ACTOR = 'uw', ACTOR_LABEL = 'Utility Warehouse';
   var SS_KEY = 'uwPromoUwPass' + (UWP.isTest ? ':test' : '');
 
-  var CLUBS = [];             // from the grant — code/name/division, no credentials
+  var CLUBS = [];             // from the grant — code/name/division/route, no credentials
+  var REQS = {};              // code requests (spec v43 §5.1)
   var CODES = {};             // id -> record
   var codesLoaded = false, unlocked = false;
 
@@ -246,6 +259,7 @@
       codesLoaded = true;
       render();
     });
+    UWP.ref('requests').on('value', function (s) { REQS = s.val() || {}; });
     buildClubFilter();
     render();
   }
@@ -364,7 +378,7 @@
     var list = filtered();
     var tbody = document.getElementById('rows');
     if (!list.length) {
-      tbody.innerHTML = '<tr class="empty-row"><td colspan="7">' +
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="8">' +
         (all.length ? 'No codes match the current filters.' : 'No codes in the pool yet — use “Add codes” to get started.') + '</td></tr>';
       return;
     }
@@ -381,10 +395,17 @@
         ? '<span class="club-cell">' + NL.clubs.crestImgHtml(r.clubName, 'thumb') +
           '<span class="club-cell__name">' + esc(r.clubName) + '</span></span>'
         : '<span class="code-note">Not registered</span>';
+      /* §5.2: Lucy works a monthly batch — dispatch is a bulk tick, offered
+         only where it means something (an undispatched, unredeemed code). */
+      var canDispatch = r.status === 'active' && !r.dispatchedAt && !UWP.isExpired(r);
       return '<tr' + (r.status === 'revoked' ? ' class="is-revoked"' : '') + '>' +
+        '<td>' + (canDispatch
+          ? '<input type="checkbox" class="disp-tick" data-disp="' + esc(r._id) + '" aria-label="Select for dispatch">'
+          : '') + '</td>' +
         '<td><span class="code-mono">' + esc(r.code) + '</span> ' +
           '<button class="code-copy" data-copy="' + esc(r.code) + '" title="Copy code" aria-label="Copy code">⧉</button></td>' +
-        '<td>' + UWP.pillFor(UWP.statusOf(r)) + '</td>' +
+        '<td' + (r.dispatchedAt ? ' title="Dispatched ' + esc(UWP.fmt(r.dispatchedAt)) + '"' : '') + '>' +
+          UWP.pillFor(UWP.faceOf(r)) + '</td>' +
         '<td>' + clubCell + '</td>' +
         '<td>' + esc(r.status === 'redeemed' ? UWP.fmt(r.redeemedAt) : '—') + '</td>' +
         '<td title="' + esc(UWP.fmt(r.createdAt)) + '">' + esc(UWP.ago(r.createdAt)) + '</td>' +
@@ -617,6 +638,181 @@
     NL.download('uw-promo-codes-' + stamp + '.csv', NL.csv(rows, { bom: true }), 'text/csv;charset=utf-8');
     toast('CSV exported', 'success');
   });
+
+  /* ── Requests (spec v43 §5.1) ───────────────────────────────────────
+     Lucy raises an ask against a club — a quantity and a due date — and the
+     club's dashboard shows it until fulfilled. Owner rulings 09/09/2026:
+     Richard can raise them too (from the master console), the due date
+     prefills a week out but is editable, and overdue chasing stays internal.
+     Fulfilment is marked by hand: the upload-complete email is the prompt,
+     and a human closing the loop beats a heuristic guessing that codes
+     uploaded the same week were these codes. */
+  var UW_ACTOR = { actor: 'uw', label: 'Utility Warehouse' };
+
+  function reqList() {
+    return Object.keys(REQS).map(function (k) { var r = REQS[k]; r._id = k; return r; })
+      .sort(function (a, b) { return (b.raisedAt || 0) - (a.raisedAt || 0); });
+  }
+  function clubName(code) {
+    var hit = CLUBS.filter(function (c) { return c.code === code; })[0];
+    return hit ? hit.name : code;
+  }
+
+  document.getElementById('btnRequests').addEventListener('click', openRequests);
+
+  function openRequests() {
+    var list = reqList();
+    var wrap = document.createElement('div');
+    wrap.innerHTML =
+      '<div class="alloc-row"><label for="rqClub">Ask a club for codes</label>' +
+        '<select id="rqClub"><option value="">Choose a club…</option>' +
+        clubList().filter(function (c) { return c.route === 'online'; }).map(function (c) {
+          return '<option value="' + esc(c.code) + '">' + esc(c.name) + '</option>';
+        }).join('') + '</select></div>' +
+      '<div class="alloc-row" style="display:flex;gap:10px">' +
+        '<span style="flex:1"><label for="rqQty">How many</label><input id="rqQty" type="number" min="1" max="500" value="5"></span>' +
+        '<span style="flex:1"><label for="rqDue">Due</label><input id="rqDue" type="date"></span></div>' +
+      '<button class="btn btn--primary btn--sm" id="rqRaise">Raise request</button>' +
+      '<div class="table-wrap" style="margin-top:16px"><table class="table">' +
+      '<thead><tr><th>Club</th><th>Codes</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>' +
+      (list.length ? list.map(function (r) {
+        var overdue = r.status === 'open' && r.due && Date.now() > r.due;
+        return '<tr><td>' + esc(clubName(r.club)) + '</td><td>' + esc(String(r.qty)) + '</td>' +
+          '<td>' + (r.due ? esc(NL.formatDate(r.due)) : '—') + '</td>' +
+          '<td>' + (r.status === 'open'
+            ? (overdue ? '<span class="pill pill--rejected">Overdue</span>' : '<span class="pill pill--pending">Open</span>')
+            : '<span class="pill pill--approved">Fulfilled</span>') + '</td>' +
+          '<td style="text-align:right">' + (r.status === 'open'
+            ? '<button class="btn btn--ghost btn--sm" data-fulfil="' + esc(r._id) + '">Mark fulfilled</button>'
+            : '') + '</td></tr>';
+      }).join('') : '<tr class="empty-row"><td colspan="5">No requests yet.</td></tr>') +
+      '</tbody></table></div>';
+
+    // Owner ruling: due date prefilled a week out, editable.
+    var d = new Date(Date.now() + 7 * 864e5);
+    wrap.querySelector('#rqDue').value = d.toISOString().slice(0, 10);
+
+    var ctrl = NL.modal({
+      title: 'Code requests', width: 'wide', body: wrap,
+      buttons: [{ label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } }]
+    });
+
+    wrap.querySelector('#rqRaise').addEventListener('click', function () {
+      var code = wrap.querySelector('#rqClub').value;
+      var qty = parseInt(wrap.querySelector('#rqQty').value, 10);
+      var dueRaw = wrap.querySelector('#rqDue').value;
+      if (!code) { toast('Choose a club.', 'error'); return; }
+      if (!(qty >= 1 && qty <= 500)) { toast('Quantity must be 1–500.', 'error'); return; }
+      var due = dueRaw ? new Date(dueRaw + 'T23:59:59').getTime() : null;
+      UWP.ensureAuth().then(function () {
+        return UWP.ref('requests').push({
+          club: code, qty: qty, due: due, status: 'open',
+          raisedAt: UWP.TS(), raisedBy: UW_ACTOR.actor
+        });
+      }).then(function () {
+        UWP.audit(UW_ACTOR.actor, UW_ACTOR.label, 'request', {
+          club: code, clubName: clubName(code), count: qty,
+          detail: 'Requested ' + qty + ' codes' + (dueRaw ? ', due ' + dueRaw : '')
+        });
+        toast('Request raised — ' + clubName(code) + ' will see it on their dashboard', 'success');
+        ctrl.close();
+      }).catch(function (err) { toast('Failed: ' + err.message, 'error'); });
+    });
+
+    ctrl.body.addEventListener('click', function (e) {
+      var el = e.target.closest('[data-fulfil]');
+      if (!el) return;
+      var id = el.getAttribute('data-fulfil');
+      UWP.ensureAuth().then(function () {
+        return UWP.ref('requests/' + id).update({ status: 'fulfilled', fulfilledAt: UWP.TS() });
+      }).then(function () {
+        UWP.audit(UW_ACTOR.actor, UW_ACTOR.label, 'request', {
+          club: (REQS[id] || {}).club, detail: 'Request marked fulfilled'
+        });
+        toast('Marked fulfilled', 'success');
+        ctrl.close();
+      }).catch(function (err) { toast('Failed: ' + err.message, 'error'); });
+    });
+  }
+
+  /* ── Bulk dispatch (spec v43 §5.2) ──────────────────────────────────
+     Distinguishes a code sitting in stock from one already in a supporter's
+     inbox, and settles "I never received it". Timestamp written on marking;
+     nothing manual. */
+  document.getElementById('rows').addEventListener('change', function (e) {
+    if (e.target.classList.contains('disp-tick')) refreshDispatchBtn();
+  });
+  function selectedDispatch() {
+    return Array.prototype.map.call(document.querySelectorAll('.disp-tick:checked'), function (el) {
+      return el.getAttribute('data-disp');
+    });
+  }
+  function refreshDispatchBtn() {
+    var n = selectedDispatch().length;
+    document.getElementById('dispN').textContent = n;
+    document.getElementById('btnDispatch').hidden = !n;
+  }
+  document.getElementById('btnDispatch').addEventListener('click', function () {
+    var ids = selectedDispatch();
+    if (!ids.length) return;
+    NL.confirm('Mark ' + ids.length + ' code' + (ids.length === 1 ? '' : 's') + ' as dispatched?', {
+      title: 'Mark dispatched',
+      detail: 'Records that these codes have gone out to supporters, with today’s date. This is the audit trail for “I never received it” — it doesn’t send anything.',
+      confirmText: 'Mark dispatched'
+    }).then(function (ok) {
+      if (!ok) return;
+      var updates = {};
+      ids.forEach(function (id) {
+        updates[id + '/dispatchedAt'] = Date.now();
+        updates[id + '/dispatchedBy'] = UW_ACTOR.actor;
+      });
+      UWP.ensureAuth().then(function () {
+        return UWP.ref('codes').update(updates);
+      }).then(function () {
+        UWP.audit(UW_ACTOR.actor, UW_ACTOR.label, 'dispatch', {
+          count: ids.length, detail: 'Marked dispatched (bulk)'
+        });
+        toast(ids.length + ' marked dispatched', 'success');
+        refreshDispatchBtn();
+      }).catch(function (err) { toast('Failed: ' + err.message, 'error'); });
+    });
+  });
+
+  /* ── Club routes (spec v43 §4: reversal is NL or UW admin) ──────────── */
+  document.getElementById('btnRoutes').addEventListener('click', function () {
+    var wrap = document.createElement('div');
+    wrap.innerHTML = '<p class="alloc-preview" style="margin-bottom:12px">A route change never touches ' +
+      'existing codes — they stay valid under the rules they were created with. The club sees its new ' +
+      'tools at its next sign-in.</p>' +
+      '<div class="table-wrap"><table class="table"><thead><tr><th>Club</th><th>Route</th></tr></thead><tbody>' +
+      clubList().map(function (c) {
+        return '<tr><td>' + esc(c.name) + '</td><td><select data-rt="' + esc(c.code) + '">' +
+          ['unassigned', 'instore', 'online'].map(function (r) {
+            var label = r === 'instore' ? 'In-store' : r === 'online' ? 'Online' : 'Unassigned';
+            return '<option value="' + r + '"' + (c.route === r ? ' selected' : '') + '>' + label + '</option>';
+          }).join('') + '</select></td></tr>';
+      }).join('') + '</tbody></table></div>';
+    var ctrl = NL.modal({
+      title: 'Club routes', width: 'wide', body: wrap,
+      buttons: [{ label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } }]
+    });
+    ctrl.body.addEventListener('change', function (e) {
+      var sel = e.target.closest('[data-rt]');
+      if (!sel) return;
+      var code = sel.getAttribute('data-rt'), route = sel.value;
+      UWP.ensureAuth().then(function () {
+        return UWP.ref('config/clubs/' + code + '/route').set(route);
+      }).then(function () {
+        UWP.audit(UW_ACTOR.actor, UW_ACTOR.label, 'route', {
+          club: code, clubName: clubName(code),
+          detail: 'Route set to ' + (route === 'instore' ? 'in-store' : route)
+        });
+        CLUBS.forEach(function (c) { if (c.code === code) c.route = route; });
+        toast(clubName(code) + ' → ' + (route === 'instore' ? 'In-store' : route === 'online' ? 'Online' : 'Unassigned'), 'success');
+      }).catch(function (err) { toast('Route change failed: ' + err.message, 'error'); });
+    });
+  });
+
 })();
 </script>
 </body>

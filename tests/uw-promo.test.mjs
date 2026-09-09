@@ -193,6 +193,20 @@ test('redeemTxn: refuses an expired central code, redeems an old uploaded one', 
   assert.equal(out.status, 'redeemed', 'uploaded code redeems at any age');
 });
 
+test('faceOf: the scheme lifecycle — issued, dispatched, redeemed — with expiry overriding', () => {
+  const born = 1_000_000;
+  const up = { status: 'active', createdBy: 'club:ALT', createdAt: born };
+  assert.equal(UWP.faceOf(up, born + 1), 'issued', 'uploaded and waiting');
+  assert.equal(UWP.faceOf({ ...up, dispatchedAt: born + 2 }, born + 3), 'dispatched');
+  assert.equal(UWP.faceOf({ ...up, status: 'redeemed', dispatchedAt: born + 2 }, born + 3), 'redeemed');
+  assert.equal(UWP.faceOf({ ...up, status: 'revoked' }, born + 3), 'revoked');
+  // A central code past its date shows expired even if marked dispatched —
+  // it cannot be redeemed, and the panels must not pretend otherwise.
+  const central = { status: 'active', createdBy: 'uw', createdAt: born, dispatchedAt: born + 2 };
+  assert.equal(UWP.faceOf(central, born + YEAR + 1), 'expired');
+  assert.equal(UWP.faceOf(central, born + 3), 'dispatched');
+});
+
 test('redeemTxn: passes a local-cache null through so the SDK retries', () => {
   assert.equal(UWP.redeemTxn(null, CLUB), null);
 });
@@ -280,6 +294,9 @@ test('links: club/UW direct links point at the family pages', () => {
 });
 
 test('status metadata covers the full lifecycle', () => {
-  assert.deepEqual(Object.keys(UWP.STATUS).sort(), ['active', 'expired', 'redeemed', 'revoked']);
+  /* issued and dispatched are derived faces from faceOf(), never stored on a
+     record — statusOf() still only ever returns the other four. */
+  assert.deepEqual(Object.keys(UWP.STATUS).sort(),
+    ['active', 'dispatched', 'expired', 'issued', 'redeemed', 'revoked']);
   assert.equal(UWP.STATUS.active.label, 'Unredeemed');
 });

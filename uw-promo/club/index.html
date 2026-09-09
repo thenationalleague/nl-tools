@@ -3,6 +3,18 @@
 <head>
 <!--
   UW Promo Codes — Club point-of-sale redemption page
+  Version: v6.0 (09/09/2026) — spec v43.0: route selection moves in-app. An
+           unassigned club's manager passcode now mints a session scoped to a
+           setup screen (route cards, the five route-specific undertakings as
+           the gate, at least one scheme contact) and locks on save; the till
+           PIN still resolves to holding — setup is a manager decision. New
+           scheme-contact card (view/edit, written to contacts/<club>),
+           requests & history card (lifecycle counts, outstanding/overdue
+           banner, request table) and a read-only previous-scheme block for
+           codes left behind by a route change. Inventory pills show the
+           issued/dispatched faces via UWP.faceOf. A once-instore club that
+           switched online keeps a live till while central codes exist
+           (session hasCentral) — cards in the wild must keep working.
   Version: v5.0 (03/09/2026) — routes land (spec v42.0). Every club is
            unassigned / instore / online; unassigned resolves both doors to a
            holding screen with no token minted, and an online club's till PIN
@@ -214,6 +226,34 @@
   .upload__term:last-child { margin-bottom: 0; }
   .upload__term input { margin-top: 2px; width: 16px; height: 16px; flex-shrink: 0; accent-color: var(--primary); }
   .upload__out { margin-top: 12px; font-size: var(--text-sm); line-height: 1.55; }
+
+  /* First-run setup: the two routes side by side (v43 §1). Buttons, not
+     cards-with-a-button — the whole surface is the choice. */
+  .setup__head { margin-bottom: 16px; text-align: left; }
+  .setup__routes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+  @media (max-width: 560px) { .setup__routes { grid-template-columns: 1fr; } }
+  .setup__route { text-align: left; font-family: var(--font); cursor: pointer;
+    background: var(--white); border: 2px solid var(--border); border-radius: var(--radius-lg);
+    box-shadow: var(--shadow); padding: 16px 18px; }
+  .setup__route:hover { border-color: var(--navy-300); }
+  .setup__route:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .setup__route.is-picked { border-color: var(--primary); }
+  .setup__route-name { display: block; font-size: var(--text-lg); font-weight: 900;
+    font-variation-settings: 'wght' 900; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--navy); margin-bottom: 6px; }
+  .setup__route.is-picked .setup__route-name { color: var(--primary); }
+  .setup__route-desc { display: block; font-size: var(--text-sm); color: var(--text-muted); line-height: 1.5; }
+  .setup__contact { display: grid; grid-template-columns: 1fr 1fr 1.4fr auto; gap: 8px; margin-bottom: 8px; }
+  @media (max-width: 640px) { .setup__contact { grid-template-columns: 1fr; } }
+  .setup__contact input { font-family: var(--font); font-size: var(--text-sm); padding: 8px 10px;
+    border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); }
+  .setup__contact input:focus-visible { outline: none; box-shadow: var(--focus-ring); border-color: var(--primary); }
+  .contact-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; padding: 6px 0; }
+  .contact-row__name { font-weight: 800; font-variation-settings: 'wght' 800; }
+  .contact-row__role { color: var(--text-muted); }
+  .req-banner { border: 1px solid var(--border); border-radius: var(--radius); background: var(--off-white);
+    padding: 12px 14px; margin-bottom: 10px; font-size: var(--text-sm); line-height: 1.5; }
+  .req-banner--due { border-color: var(--primary-600); background: var(--primary-50); }
   .upload__out:empty { margin-top: 0; }
 
   /* Manager-mode panels (inventory, activity, PIN) */
@@ -264,8 +304,55 @@
   </div>
 
   <div class="wrap wrap--narrow">
-    <!-- Till section — instore-route clubs only. An online club never sees a
-         redeem box: its codes are redeemed on its own webstore. -->
+
+    <!-- ── First-run setup (spec v43 §1–3) ────────────────────────────
+         Shown to the MANAGER of a club with no route yet. The club chooses
+         its own route here; the requirements are the gate, not the
+         descriptions — a club that can't tick every box for a route cannot
+         complete it, which is the mechanism that stops clubs picking wrong.
+         The till PIN never sees this screen: route choice binds the club,
+         and the printed-card credential must not be able to do that. -->
+    <div id="setupSection" hidden>
+      <div class="setup__head">
+        <div class="pos__title">Choose how your club takes part</div>
+        <p class="checker__intro">Pick the route that matches how supporters will use their
+          <span class="uwVal"></span> voucher at your club. Your choice locks on save —
+          the National League can change it later if circumstances change.</p>
+      </div>
+      <div class="setup__routes">
+        <button class="setup__route" id="routeOnline" data-pick="online">
+          <span class="setup__route-name">Online</span>
+          <span class="setup__route-desc">For clubs with an online shop, or who trade primarily
+            online, and can generate voucher codes in their own retail system.</span>
+        </button>
+        <button class="setup__route" id="routeInstore" data-pick="instore">
+          <span class="setup__route-name">In-store</span>
+          <span class="setup__route-desc">For clubs whose supporters redeem at a physical shop
+            or ticket office till.</span>
+        </button>
+      </div>
+
+      <div id="setupDetail" hidden>
+        <div class="upload__terms">
+          <div class="upload__terms-head" id="setupTicksHead">Before this saves, confirm</div>
+          <div id="setupTicks"></div>
+        </div>
+        <div class="upload__terms">
+          <div class="upload__terms-head">Scheme contact — who runs this at your club</div>
+          <p class="checker__intro" style="margin-bottom:10px">Retail and ticketing aren’t always
+            the same person; name whoever owns this <em>shop discount</em>. Add a second contact so
+            one leaver doesn’t orphan the scheme.</p>
+          <div id="setupContacts"></div>
+          <button class="btn btn--ghost btn--sm" id="setupAddContact">Add another contact</button>
+        </div>
+        <button class="btn btn--primary" id="setupSave">Save and open the dashboard</button>
+        <div class="upload__out" id="setupOut" role="status" aria-live="polite"></div>
+      </div>
+    </div>
+
+    <!-- Till section — in-store clubs, plus clubs moved off in-store whose
+         printed cards are still in the wild (spec v43 §4: creation follows
+         the current route, validation honours whatever exists). -->
     <div id="tillSection">
     <div class="pos">
       <img class="pos__uw" src="/assets/partners/Utility%20Warehouse.png" alt="Utility Warehouse"
@@ -298,6 +385,27 @@
          their codes centrally from UW, so the module is hidden for them.
          Registered to this club automatically — there is no club to choose,
          because a club can only ever upload its own. -->
+    <!-- Scheme contact — prominent, so a stale one is obvious (§3). -->
+    <div class="list-head">Scheme contact</div>
+    <div class="inv" id="contactCard">
+      <div id="contactList"></div>
+      <div class="checker__row" style="margin-top:10px">
+        <button class="btn btn--ghost btn--sm" id="contactEdit">Edit contacts</button>
+      </div>
+    </div>
+
+    <!-- The outstanding ask + history (§5.1, §6): what UW have requested,
+         what the club has supplied, where each code has got to. -->
+    <div class="list-head">Requests &amp; history</div>
+    <div class="inv" id="historyCard">
+      <div id="requestBanner"></div>
+      <div class="checker__meta" id="lifeCounts" style="margin:8px 0 10px"></div>
+      <div class="table-wrap"><table class="table">
+        <thead><tr><th>Requested</th><th>Codes</th><th>Due</th><th>Status</th></tr></thead>
+        <tbody id="reqRows"></tbody>
+      </table></div>
+    </div>
+
     <div id="uploadSection">
     <div class="list-head">Upload your own codes</div>
     <div class="upload">
@@ -374,6 +482,20 @@
       </div>
     </div>
 
+    <!-- §4: codes from a scheme this club has since left — a list, not a
+         second set of controls. They stay valid and redeemable under the
+         rules they were created with; they just aren't the current tools. -->
+    <div id="legacyBlock" hidden>
+      <div class="list-head">Previous scheme</div>
+      <div class="inv">
+        <p class="checker__meta" style="margin-bottom:10px" id="legacyIntro"></p>
+        <div class="table-wrap"><table class="table">
+          <thead><tr><th>Code</th><th>Status</th><th>Redeemed</th><th>Added</th></tr></thead>
+          <tbody id="legacyRows"></tbody>
+        </table></div>
+      </div>
+    </div>
+
     <!-- The club's own slice of the append-only trail. Same record the NL sees. -->
     <div class="list-head">Your club’s activity</div>
     <div class="inv">
@@ -426,7 +548,8 @@
   });
 
   var CLUB = null, CREDS = null;       // CLUB from the grant; CREDS instore-manager-only
-  var ROUTE = 'instore', SUPPORT = null;
+  var ROUTE = 'instore', SUPPORT = null, HASCENTRAL = false;
+  var CONTACTS = [], REQS = {};
   var MODE = 'till';                   // 'till' (4-digit PIN) | 'manager' (club passcode)
   var AUDIT = {}, auditQuery = null;
   var CODES = {}, codesLoaded = false, unlocked = false, codesQuery = null;
@@ -520,52 +643,73 @@
   /* ── Enter: crest branding + live list of this club's redemptions ───── */
   function enter(session) {
     CLUB = session.club;
-    CREDS = session.creds || null;  // instore managers only: own PIN + link token
+    CREDS = session.creds || null;   // null unless in-store or in-store history
     MODE = session.role === 'manager' ? 'manager' : 'till';
-    ROUTE = session.route === 'online' ? 'online' : 'instore';
+    ROUTE = session.route === 'instore' || session.route === 'online' ? session.route : 'unassigned';
+    HASCENTRAL = session.hasCentral === true;
     SUPPORT = session.support || null;
     unlocked = true;
     document.getElementById('gate').style.display = 'none';
     document.getElementById('app').style.display = 'block';
 
-    /* Route × door decides what exists (spec v42.0 item 2). Unassigned and
-       online-till never get past the gate, so only three shapes render:
-         instore till     → redeem + redeemed list
-         instore manager  → the above + checker, inventory, activity, PIN
-         online manager   → upload + checker, inventory, activity (no till
-                            anything — a QR card must never exist for a club
-                            with no till, and CREDS arrives null to match) */
-    document.getElementById('tillSection').hidden = (ROUTE !== 'instore');
-    document.getElementById('managerOnly').hidden = (MODE !== 'manager');
-    document.getElementById('uploadSection').hidden = (ROUTE !== 'online');
-    document.getElementById('pinSection').hidden = !(MODE === 'manager' && ROUTE === 'instore' && CREDS);
+    /* v42 note: this block once read `club.name` after the signature changed
+       to enter(session) — a crash on every sign-in that only a sandbox run
+       would have caught. The smoke test exists for a reason. */
+    var crest = document.createElement('img');
+    crest.className = 'nl-idbar__crest';
+    crest.src = NL.clubs.crestUrl(CLUB.name, 'medium');
+    crest.alt = '';
+    NL.clubs.wireCrestImg(crest, CLUB.name);
+    document.getElementById('idbarCrest').replaceChildren(crest);
+    document.getElementById('idbarClub').textContent = CLUB.name;
+    document.getElementById('upClubName').textContent = CLUB.name;
     document.getElementById('tcsLinkTill').href = UWP.TCS_URL;
     document.getElementById('tcsLinkMgr').href = UWP.TCS_URL;
 
+    applyView();
+    if (MODE === 'manager') startManager();
+    if (ROUTE === 'unassigned') { renderSetup(); return; }   // no data behind setup yet
+
+    subscribeCodes();
+    var pos = document.getElementById('posInput');
+    if (!document.getElementById('tillSection').hidden) pos.focus();
+    render();
+  }
+
+  /* Route × door decides what exists (spec v43 §§1–4). The shapes:
+       unassigned manager → the SETUP screen and nothing else (v43 §1 —
+                            the club chooses its own route here)
+       instore till       → redeem + redeemed list
+       instore manager    → the above + checker, inventory, activity, PIN
+       online manager     → upload + checker, inventory, activity
+       online + history   → the till stays LIVE for cards already in the
+                            wild (§4: validation honours whatever exists),
+                            but the card GENERATOR is gone — creation
+                            follows the current route. */
+  function applyView() {
+    var setup = ROUTE === 'unassigned';
+    document.getElementById('setupSection').hidden = !setup;
+    document.getElementById('tillSection').hidden = setup || !(ROUTE === 'instore' || HASCENTRAL);
+    document.getElementById('managerOnly').hidden = setup || MODE !== 'manager';
+    document.getElementById('uploadSection').hidden = ROUTE !== 'online';
+    document.getElementById('pinSection').hidden = !(MODE === 'manager' && CREDS);
+    document.getElementById('pinCard').hidden = ROUTE !== 'instore';
+
     var tag = document.getElementById('modeTag');
-    tag.textContent = (MODE === 'manager' ? 'Club admin' : 'Till') + (ROUTE === 'online' ? ' · online' : '');
+    tag.textContent = setup ? 'Setup'
+      : (MODE === 'manager' ? 'Club admin' : 'Till') + (ROUTE === 'online' ? ' · Online' : ' · In-store');
     tag.classList.toggle('mode-tag--admin', MODE === 'manager');
     document.getElementById('signout').textContent = MODE === 'manager' ? 'Sign out' : 'Not you?';
+  }
 
-    var crest = document.createElement('img');
-    crest.className = 'nl-idbar__crest';
-    crest.src = NL.clubs.crestUrl(club.name, 'medium');
-    crest.alt = '';
-    NL.clubs.wireCrestImg(crest, club.name);
-    document.getElementById('idbarCrest').replaceChildren(crest);
-    document.getElementById('idbarClub').textContent = club.name;
-    document.getElementById('upClubName').textContent = club.name;
-
+  function subscribeCodes() {
     if (codesQuery) codesQuery.off();
-    codesQuery = UWP.ref('codes').orderByChild('club').equalTo(club.code);
+    codesQuery = UWP.ref('codes').orderByChild('club').equalTo(CLUB.code);
     codesQuery.on('value', function (s) {
       CODES = s.val() || {};
       codesLoaded = true;
       render();
     });
-    if (MODE === 'manager') startManager();
-    document.getElementById('posInput').focus();
-    render();
   }
 
   /* ── Redemption ─────────────────────────────────────────────────────── */
@@ -723,7 +867,7 @@
         '<div>' + UWP.pillFor(r.status) + '</div></div>';
     }).join('');
 
-    if (MODE === 'manager') renderInventory();
+    if (MODE === 'manager') { renderInventory(); renderRequests(); renderLegacy(); }
   }
 
   /* ── Voucher checker ────────────────────────────────────────────────── */
@@ -828,6 +972,17 @@
     auditQuery = UWP.ref('audit').orderByChild('club').equalTo(CLUB.code).limitToLast(100);
     auditQuery.on('value', function (s) { AUDIT = s.val() || {}; renderAudit(); });
 
+    UWP.ref('contacts/' + CLUB.code).on('value', function (s) {
+      CONTACTS = s.val() || [];
+      if (!Array.isArray(CONTACTS)) CONTACTS = Object.keys(CONTACTS).map(function (k) { return CONTACTS[k]; });
+      renderContacts();
+    });
+    UWP.ref('requests').orderByChild('club').equalTo(CLUB.code).on('value', function (s) {
+      REQS = s.val() || {};
+      renderRequests();
+    });
+    document.getElementById('contactEdit').addEventListener('click', editContacts);
+
     ['invStatus', 'invSearch'].forEach(function (id) {
       var el = document.getElementById(id);
       el.addEventListener(id === 'invSearch' ? 'input' : 'change', renderInventory);
@@ -840,9 +995,35 @@
     renderPin();
   }
 
+  /* §4: the inventory is the CURRENT scheme's codes; anything from a scheme
+     the club has since left renders in the read-only legacy block instead. */
+  function isCurrentScheme(r) {
+    var uploaded = String(r.createdBy || '').indexOf('club:') === 0;
+    return ROUTE === 'online' ? uploaded : !uploaded;
+  }
   function invRows() {
     return Object.keys(CODES).map(function (k) { var r = CODES[k]; r._id = k; return r; })
+      .filter(isCurrentScheme)
       .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+  }
+  function renderLegacy() {
+    var list = Object.keys(CODES).map(function (k) { return CODES[k]; })
+      .filter(function (r) { return !isCurrentScheme(r); })
+      .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+    var block = document.getElementById('legacyBlock');
+    block.hidden = !list.length || MODE !== 'manager';
+    if (block.hidden) return;
+    document.getElementById('legacyIntro').textContent =
+      'Codes from your previous ' + (ROUTE === 'online' ? 'in-store' : 'online') +
+      ' scheme. They stay valid and redeemable under the rules they were created with — ' +
+      'this is a record, not a set of controls.';
+    document.getElementById('legacyRows').innerHTML = list.map(function (r) {
+      return '<tr' + (r.status === 'revoked' ? ' class="is-revoked"' : '') + '>' +
+        '<td><span class="code-mono">' + esc(r.code) + '</span></td>' +
+        '<td>' + UWP.pillFor(UWP.faceOf(r)) + '</td>' +
+        '<td>' + esc(r.status === 'redeemed' ? UWP.fmt(r.redeemedAt) : '—') + '</td>' +
+        '<td title="' + esc(UWP.fmt(r.createdAt)) + '">' + esc(UWP.ago(r.createdAt)) + '</td></tr>';
+    }).join('');
   }
   function invFiltered() {
     var st = document.getElementById('invStatus').value;
@@ -865,7 +1046,7 @@
     tb.innerHTML = list.map(function (r) {
       return '<tr' + (r.status === 'revoked' ? ' class="is-revoked"' : '') + '>' +
         '<td><span class="code-mono">' + esc(r.code) + '</span></td>' +
-        '<td>' + UWP.pillFor(UWP.statusOf(r)) + '</td>' +
+        '<td>' + UWP.pillFor(UWP.faceOf(r)) + '</td>' +
         '<td>' + esc(r.status === 'redeemed' ? UWP.fmt(r.redeemedAt) : '—') + '</td>' +
         '<td title="' + esc(UWP.fmt(r.createdAt)) + '">' + esc(UWP.ago(r.createdAt)) + '</td>' +
         '<td>' + esc(r.batchLabel || '—') + '</td></tr>';
@@ -1098,6 +1279,212 @@
       });
     });
   }
+
+  /* ── First-run setup (spec v43 §1–3) ────────────────────────────────── */
+  var TICKS = {
+    online: [
+      'We can generate voucher codes in our own retail system.',
+      'Each code carries {V}.',
+      'Codes do not expire for at least 12 months.',
+      'Codes work without the supporter being present in store.',
+      'A named person will upload codes and respond to requests.'
+    ],
+    instore: [
+      'Our POS allows a manual discount of up to {V}.',
+      'Retail staff are briefed on the redemption process.',
+      'We can print and display the till card.',
+      'Someone is contactable on matchdays if a supporter disputes a refusal.',
+      'A named person is responsible for the scheme.'
+    ]
+  };
+  var pickedRoute = null;
+
+  function renderSetup() {
+    Array.prototype.forEach.call(document.querySelectorAll('.setup__route'), function (b) {
+      b.onclick = function () { pickRoute(b.getAttribute('data-pick')); };
+    });
+    addContactRow();   // start with one empty contact
+  }
+
+  function pickRoute(route) {
+    pickedRoute = route;
+    document.getElementById('routeOnline').classList.toggle('is-picked', route === 'online');
+    document.getElementById('routeInstore').classList.toggle('is-picked', route === 'instore');
+    document.getElementById('setupDetail').hidden = false;
+    document.getElementById('setupTicksHead').textContent =
+      'To take the ' + (route === 'instore' ? 'In-store' : 'Online') + ' route, confirm all of these';
+    document.getElementById('setupTicks').innerHTML = TICKS[route].map(function (t, i) {
+      return '<label class="upload__term"><input type="checkbox" id="st' + i + '">' +
+        '<span>' + esc(t.replace('{V}', UWP.VALUE)) + '</span></label>';
+    }).join('');
+    document.getElementById('setupOut').innerHTML = '';
+  }
+
+  function contactRowHtml(c) {
+    c = c || {};
+    return '<div class="setup__contact">' +
+      '<input placeholder="Name" maxlength="80" data-cf="name" value="' + esc(c.name || '') + '">' +
+      '<input placeholder="Role" maxlength="80" data-cf="role" value="' + esc(c.role || '') + '">' +
+      '<input placeholder="Email" type="email" maxlength="120" data-cf="email" value="' + esc(c.email || '') + '">' +
+      '<button class="btn btn--ghost btn--sm" data-crm type="button">Remove</button></div>';
+  }
+  function addContactRow(host) {
+    var el = document.createElement('div');
+    el.innerHTML = contactRowHtml();
+    (host || document.getElementById('setupContacts')).appendChild(el.firstChild);
+  }
+  document.getElementById('setupAddContact').addEventListener('click', function () { addContactRow(); });
+  document.getElementById('setupContacts').addEventListener('click', function (e) {
+    var rm = e.target.closest('[data-crm]');
+    if (rm) rm.closest('.setup__contact').remove();
+  });
+  function readContacts(host) {
+    return Array.prototype.map.call(host.querySelectorAll('.setup__contact'), function (row) {
+      var get = function (f) { return (row.querySelector('[data-cf="' + f + '"]').value || '').trim(); };
+      return { name: get('name'), role: get('role'), email: get('email') };
+    }).filter(function (c) { return c.name || c.role || c.email; });
+  }
+
+  document.getElementById('setupSave').addEventListener('click', function () {
+    var out = document.getElementById('setupOut');
+    function msg(t) { out.innerHTML = '<div class="checker__card">' + t + '</div>'; }
+    if (!pickedRoute) { msg('Pick a route first.'); return; }
+    var ticks = {}, all = true;
+    TICKS[pickedRoute].forEach(function (_, i) {
+      var on = document.getElementById('st' + i).checked;
+      ticks['t' + i] = on;
+      if (!on) all = false;
+    });
+    if (!all) { msg('Every box must be ticked — the requirements are the gate. If one doesn’t hold, the other route may fit better.'); return; }
+    var contacts = readContacts(document.getElementById('setupContacts'))
+      .filter(function (c) { return c.name && c.role && /.+@.+\..+/.test(c.email); });
+    if (!contacts.length) { msg('Add at least one scheme contact — name, role and a working email.'); return; }
+
+    var btn = document.getElementById('setupSave');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    UWP.chooseRoute(pickedRoute, ticks, contacts).then(function (g) {
+      ROUTE = g.route;
+      CREDS = g.creds || null;
+      HASCENTRAL = false;
+      applyView();
+      subscribeCodes();
+      renderPin();
+      if (!document.getElementById('tillSection').hidden) document.getElementById('posInput').focus();
+      toast('You’re set up on the ' + (ROUTE === 'instore' ? 'In-store' : 'Online') + ' route', 'success');
+    }).catch(function (e) {
+      btn.disabled = false;
+      btn.textContent = 'Save and open the dashboard';
+      msg(esc(e.message || 'Could not save — try again.'));
+    });
+  });
+
+  /* ── Scheme contact card (§3) ───────────────────────────────────────── */
+  function renderContacts() {
+    if (MODE !== 'manager') return;
+    var el = document.getElementById('contactList');
+    if (!CONTACTS.length) {
+      el.innerHTML = '<span class="checker__meta">No scheme contact recorded — add one, or UW and the NL have nobody to talk to.</span>';
+      return;
+    }
+    el.innerHTML = CONTACTS.map(function (c) {
+      return '<div class="contact-row"><span class="contact-row__name">' + esc(c.name) + '</span>' +
+        '<span class="contact-row__role">' + esc(c.role) + '</span>' +
+        '<span class="code-mono">' + esc(c.email) + '</span></div>';
+    }).join('');
+  }
+
+  function editContacts() {
+    var wrap = document.createElement('div');
+    wrap.innerHTML = '<div id="mcHost">' +
+      (CONTACTS.length ? CONTACTS.map(contactRowHtml).join('') : contactRowHtml()) + '</div>' +
+      '<button class="btn btn--ghost btn--sm" id="mcAdd" type="button">Add another contact</button>';
+    wrap.addEventListener('click', function (e) {
+      if (e.target.closest('#mcAdd')) { addContactRow(wrap.querySelector('#mcHost')); return; }
+      var rm = e.target.closest('[data-crm]');
+      if (rm) rm.closest('.setup__contact').remove();
+    });
+    NL.modal({
+      title: 'Scheme contacts',
+      body: wrap,
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Save', className: 'btn--primary', onClick: function (c) {
+            var list = readContacts(wrap.querySelector('#mcHost'))
+              .filter(function (x) { return x.name && x.role && /.+@.+\..+/.test(x.email); });
+            if (!list.length) { toast('At least one complete contact is required.', 'error'); return; }
+            UWP.ensureAuth().then(function () {
+              return UWP.ref('contacts/' + CLUB.code).set(list.map(function (x) {
+                return { name: x.name, role: x.role, email: x.email, addedAt: Date.now() };
+              }));
+            }).then(function () {
+              UWP.audit(actor(), CLUB.name, 'contact', {
+                club: CLUB.code, clubName: CLUB.name,
+                detail: 'Scheme contacts updated (' + list.length + ')'
+              });
+              toast('Contacts saved', 'success');
+              c.close();
+            }).catch(function (err) { toast('Save failed: ' + err.message, 'error'); });
+          } }
+      ]
+    });
+  }
+
+  /* ── Requests & history (§5.1, §6) ──────────────────────────────────── */
+  function reqList() {
+    return Object.keys(REQS).map(function (k) { var r = REQS[k]; r._id = k; return r; })
+      .sort(function (a, b) { return (b.raisedAt || 0) - (a.raisedAt || 0); });
+  }
+
+  function renderRequests() {
+    if (MODE !== 'manager') return;
+    var list = reqList();
+    var rows = Object.keys(CODES).map(function (k) { return CODES[k]; });
+    var uploaded = rows.filter(function (r) { return String(r.createdBy || '').indexOf('club:') === 0; });
+    var issuedPool = ROUTE === 'online' ? uploaded : rows;
+    var counts = {
+      requested: list.reduce(function (n, r) { return n + (parseInt(r.qty, 10) || 0); }, 0),
+      issued: issuedPool.length,
+      dispatched: issuedPool.filter(function (r) { return r.dispatchedAt; }).length,
+      redeemed: issuedPool.filter(function (r) { return r.status === 'redeemed'; }).length
+    };
+    /* The spec's own sentence, as the club reads it: 5 requested, 5 issued,
+       3 dispatched, 1 redeemed. */
+    document.getElementById('lifeCounts').textContent =
+      counts.requested + ' requested · ' + counts.issued + ' issued · ' +
+      counts.dispatched + ' dispatched · ' + counts.redeemed + ' redeemed';
+
+    var open = list.filter(function (r) { return r.status === 'open'; });
+    var banner = document.getElementById('requestBanner');
+    if (!open.length) {
+      banner.innerHTML = '';
+    } else {
+      var due = open.filter(function (r) { return r.due && Date.now() > r.due; });
+      var next = open[0];
+      banner.innerHTML = '<div class="req-banner' + (due.length ? ' req-banner--due' : '') + '">' +
+        '<strong>' + (due.length ? 'Overdue: ' : 'Outstanding: ') + '</strong>' +
+        open.reduce(function (n, r) { return n + (parseInt(r.qty, 10) || 0); }, 0) +
+        ' code' + (open.length ? 's' : '') + ' requested by Utility Warehouse' +
+        (next.due ? ', due ' + esc(NL.formatDate(next.due)) : '') +
+        (ROUTE === 'online' ? ' — upload them below.' : '.') + '</div>';
+    }
+
+    var tb = document.getElementById('reqRows');
+    if (!list.length) {
+      tb.innerHTML = '<tr class="empty-row"><td colspan="4">No requests yet.</td></tr>';
+      return;
+    }
+    tb.innerHTML = list.map(function (r) {
+      var overdue = r.status === 'open' && r.due && Date.now() > r.due;
+      return '<tr><td title="' + esc(UWP.fmt(r.raisedAt)) + '">' + esc(UWP.ago(r.raisedAt)) + '</td>' +
+        '<td>' + esc(String(r.qty || '')) + '</td>' +
+        '<td>' + (r.due ? esc(NL.formatDate(r.due)) : '—') + '</td>' +
+        '<td>' + (r.status === 'open'
+          ? (overdue ? '<span class="pill pill--rejected">Overdue</span>' : '<span class="pill pill--pending">Open</span>')
+          : '<span class="pill pill--approved">Fulfilled</span>') + '</td></tr>';
+    }).join('');
+  }
+
 })();
 </script>
 </body>

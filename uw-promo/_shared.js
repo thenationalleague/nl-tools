@@ -1,5 +1,14 @@
 /*
   UW Promo Codes — shared runtime for the three standalone pages
+  Version: v5.0 (09/09/2026) — spec v43.0. chooseRoute() carries a manager's
+           in-app route choice (route, undertakings, scheme contacts) through
+           the auth trigger and folds the grant back into the session.
+           faceOf() derives the presentation ladder over statusOf() — an
+           active central code reads issued until dispatchedAt is set, then
+           dispatched; expired/redeemed/revoked still win — and STATUS gains
+           pills for the two new faces. Sessions carry hasCentral so a club
+           that left the in-store route keeps a working till while its
+           central codes remain in the wild.
   Version: v4.0 (03/09/2026) — spec v42.0 lands. UWP.VALUE is the one place
            the voucher's worth exists (£40-vs-£50 is unresolved upstream; one
            line changes it everywhere) and UWP.TCS_URL the fan-facing terms.
@@ -182,6 +191,9 @@
             role: g.role, club: g.club || null,
             route: g.route || 'unassigned',
             support: g.support || null,
+            /* §4: a club moved off in-store keeps a live till for the cards
+               already in the wild — this flag is how the page knows. */
+            hasCentral: g.hasCentral === true,
             creds: g.creds || null, clubs: g.clubs || null
           };
           window.UWP.session = SESSION;
@@ -218,6 +230,23 @@
         })
       }).catch(function () {});
     } catch (e) { return Promise.resolve(); }
+  }
+
+  /* The club choosing its own route (spec v43 §1–3) — manager session only,
+     authorised like rotatePin by the minted uid. `ticks` is the route's five
+     undertakings, `contacts` at least one {name, role, email}. On success the
+     route is locked server-side and the grant carries the new route (plus
+     till credentials when in-store), so the dashboard unlocks without a
+     second sign-in. */
+  function chooseRoute(route, ticks, contacts) {
+    return requestGrant({ chooseRoute: route, ticks: ticks, contacts: contacts }).then(function (g) {
+      if (SESSION) {
+        SESSION.route = g.route;
+        SESSION.creds = g.creds || null;
+        if (g.route === 'instore') SESSION.hasCentral = SESSION.hasCentral || false;
+      }
+      return g;
+    });
   }
 
   /* A club manager rotating its own till PIN. Carries no credential — the
@@ -309,7 +338,9 @@
     active:   { label: 'Unredeemed', pill: 'pill--info' },
     redeemed: { label: 'Redeemed',   pill: 'pill--approved' },
     revoked:  { label: 'Revoked',    pill: 'pill--rejected' },
-    expired:  { label: 'Expired',    pill: 'pill--expired' }   // derived, never stored — see statusOf
+    expired:  { label: 'Expired',    pill: 'pill--expired' },  // derived, never stored — see statusOf
+    issued:     { label: 'Issued',     pill: 'pill--info' },    // derived — faceOf: active, not dispatched
+    dispatched: { label: 'Dispatched', pill: 'pill--soon' }     // derived — faceOf: active + dispatchedAt
   };
 
   /* Pure transaction updater for a till redemption, factored out so
@@ -367,6 +398,17 @@
   function statusOf(rec, now) {
     if (rec && rec.status === 'active' && isExpired(rec, now)) return 'expired';
     return (rec && rec.status) || 'active';
+  }
+
+  /* The lifecycle face a code shows in scheme terms (spec v43 §5):
+     issued → dispatched → redeemed, with expired/revoked overriding.
+     'dispatched' is a flag on an active code, never a stored status —
+     exactly the pattern 'expired' set. */
+  function faceOf(rec, now) {
+    var st = statusOf(rec, now);
+    if (st === 'active' && rec && rec.dispatchedAt) return 'dispatched';
+    if (st === 'active') return 'issued';
+    return st;
   }
 
   /* Sliding-window gate, per browser, for the till-side voucher checker —
@@ -535,6 +577,7 @@
     TS: function () { return firebase.database.ServerValue.TIMESTAMP; },
     signIn: signIn,
     rotateOwnPin: rotateOwnPin,
+    chooseRoute: chooseRoute,
     bootstrapMaster: bootstrapMaster,
     session: null,
     newPasscode: function () { return randFrom(CODE_ALPHA, 6); },
@@ -553,6 +596,7 @@
     isExpired: isExpired,
     expiresAt: expiresAt,
     statusOf: statusOf,
+    faceOf: faceOf,
     notifyUpload: notifyUpload,
     pillFor: function (status) {
       var s = STATUS[status] || STATUS.active;
