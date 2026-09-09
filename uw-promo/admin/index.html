@@ -24,6 +24,10 @@
            write config. That is the change that stops all 72 till PINs being
            world-readable. First run mints a bootstrap master token while no
            passcode exists; nothing subscribes to RTDB until the session does.
+  Version: v6.5 (09/09/2026) — clubOptionsHtml takes a method filter:
+           add-codes lists in-store clubs only, requests online clubs only
+           (this dropdown was unfiltered — the UW page's was not), register
+           stays unfiltered. Method picker onto the canon chip-group.
   Version: v6.4 (09/09/2026) — resume falls back to the gate on any
            failure; /uw-promo/* joins _headers no-cache.
   Version: v6.3 (09/09/2026) — the console remembers its session (resume
@@ -542,7 +546,7 @@
     var wrap = document.createElement('div');
     wrap.innerHTML =
       '<div class="alloc-row"><label for="rqClub">Ask a club for codes</label>' +
-        '<select id="rqClub">' + clubOptionsHtml('Choose a club…') + '</select></div>' +
+        '<select id="rqClub">' + clubOptionsHtml('Choose a club…', 'online') + '</select></div>' +
       '<div class="alloc-row" style="display:flex;gap:10px">' +
         '<span style="flex:1"><label for="rqQty">How many</label><input id="rqQty" type="number" min="1" max="500" value="5"></span>' +
         '<span style="flex:1"><label for="rqDue">Due</label><input id="rqDue" type="date"></span></div>' +
@@ -634,18 +638,20 @@
   }
 
   /* Options for an "which club?" dropdown, grouped by division. */
-  function clubOptionsHtml(placeholder) {
+  /* methodFilter narrows the list to one redemption method (owner ruling
+     09/09/2026): central codes are added for IN-STORE clubs only, requests
+     are raised against ONLINE clubs only, and registering a pre-v3.0 code
+     stays unfiltered. */
+  function clubOptionsHtml(placeholder, methodFilter) {
     var byDiv = {}, order = [];
     clubList().forEach(function (c) {
+      if (methodFilter && c.route !== methodFilter) return;
       if (!byDiv[c.division]) { byDiv[c.division] = []; order.push(c.division); }
       byDiv[c.division].push(c);
     });
-    /* Central codes are the IN-STORE route's supply. Adding them to an
-       online or unassigned club isn't blocked — NL may have its reasons —
-       but the dropdown says what you're doing. */
     return '<option value="">' + esc(placeholder) + '</option>' + order.map(function (d) {
       return '<optgroup label="' + esc(d || 'Clubs') + '">' + byDiv[d].map(function (c) {
-        var mark = c.route === 'instore' ? '' : ' — ' + ROUTE_LABEL[c.route].toLowerCase();
+        var mark = methodFilter || c.route === 'instore' ? '' : ' — ' + ROUTE_LABEL[c.route].toLowerCase();
         return '<option value="' + esc(c.code) + '">' + esc(c.name) + esc(mark) + '</option>';
       }).join('') + '</optgroup>';
     }).join('');
@@ -961,7 +967,7 @@
     var wrap = document.createElement('div');
     wrap.innerHTML =
       '<div class="alloc-row"><label for="alClub">Club — required, one club per batch</label>' +
-        '<select id="alClub">' + clubOptionsHtml('Choose a club…') + '</select></div>' +
+        '<select id="alClub">' + clubOptionsHtml('Choose a club…', 'instore') + '</select></div>' +
       '<div class="alloc-row"><label for="alStyle">Codes</label><select id="alStyle">' +
         '<option value="paste">Paste a list of codes</option>' +
         '<option value="gen">Generate codes for me</option>' +
@@ -1399,11 +1405,11 @@
     var wrap = document.createElement('div');
     wrap.innerHTML =
       '<p class="confirm-text">' + esc(c.name) + ' is currently ' + UWP.methodPill(cur) + '</p>' +
-      '<div class="checker__row" style="margin-bottom:12px">' +
+      '<div class="chip-group" style="margin-bottom:12px;width:max-content">' +
       ['online', 'unassigned', 'instore'].map(function (r) {
-        return '<button class="btn ' + (cur === r ? 'btn--navy' : 'btn--ghost') +
+        return '<button class="chip' + (cur === r ? ' active' : '') +
           '" data-mpick="' + r + '">' + ROUTE_LABEL[r] + '</button>';
-      }).join(' ') + '</div>' +
+      }).join('') + '</div>' +
       '<div id="mConseq"></div>';
     var ctrl = NL.modal({
       title: 'Change redemption method', body: wrap,
@@ -1418,7 +1424,7 @@
       if (!b) return;
       var route = b.getAttribute('data-mpick');
       Array.prototype.forEach.call(wrap.querySelectorAll('[data-mpick]'), function (x) {
-        x.className = 'btn ' + (x === b ? 'btn--navy' : 'btn--ghost');
+        x.classList.toggle('active', x === b);
       });
       var panel = wrap.querySelector('#mConseq');
       if (route === cur) { panel.innerHTML = ''; return; }

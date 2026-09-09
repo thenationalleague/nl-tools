@@ -3,6 +3,12 @@
 <head>
 <!--
   UW Promo Codes — Utility Warehouse partner page
+  Version: v7.4 (09/09/2026) — add-codes offers IN-STORE clubs only (owner
+           ruling: an online club's codes come from its own uploads, an
+           unassigned club has nowhere to redeem — the v42 "NL may have
+           reasons" marking is overruled). The method picker becomes the
+           canon chip-group segmented control — its old row class only
+           existed on the club page, so the buttons here had no spacing.
   Version: v7.3 (09/09/2026) — the resume path can no longer strand the
            gate: any failure (including a cached _shared.js that predates
            UWP.resume) falls back to the passcode form. /uw-promo/* joins
@@ -579,18 +585,23 @@
       toast('No clubs are set up yet — the National League needs to seed the roster first.', 'error');
       return;
     }
+    /* Central codes are the in-store method's supply, full stop (owner
+       ruling 09/09/2026 — "shouldn't be able to"): an online club's codes
+       come from its own uploads against requests, and an unassigned club
+       has nowhere to redeem anything, so neither is offered at all. */
+    var instore = clubs.filter(function (c) { return c.route === 'instore'; });
+    if (!instore.length) {
+      toast('No club is on the in-store method yet — codes are added for in-store clubs only.', 'error');
+      return;
+    }
     var byDiv = {}, order = [];
-    clubs.forEach(function (c) {
+    instore.forEach(function (c) {
       if (!byDiv[c.division]) { byDiv[c.division] = []; order.push(c.division); }
       byDiv[c.division].push(c);
     });
-    /* Central codes are the in-store route's supply — an online or
-       unassigned club is marked so a batch doesn't land somewhere its codes
-       can never be redeemed in a shop. Not blocked: the NL may have reasons. */
     var clubOpts = '<option value="">Choose a club…</option>' + order.map(function (d) {
       return '<optgroup label="' + esc(d || 'Clubs') + '">' + byDiv[d].map(function (c) {
-        var mark = c.route === 'instore' || !c.route ? '' : ' — ' + esc(c.route === 'online' ? 'online route' : 'not activated');
-        return '<option value="' + esc(c.code) + '">' + esc(c.name) + mark + '</option>';
+        return '<option value="' + esc(c.code) + '">' + esc(c.name) + '</option>';
       }).join('') + '</optgroup>';
     }).join('');
 
@@ -867,11 +878,11 @@
     var wrap = document.createElement('div');
     wrap.innerHTML =
       '<p class="confirm-text">' + esc(club.name) + ' is currently ' + UWP.methodPill(cur) + '</p>' +
-      '<div class="checker__row" style="margin-bottom:12px">' +
+      '<div class="chip-group" style="margin-bottom:12px;width:max-content">' +
       ['online', 'unassigned', 'instore'].map(function (r) {
-        return '<button class="btn ' + (cur === r ? 'btn--navy' : 'btn--ghost') +
+        return '<button class="chip' + (cur === r ? ' active' : '') +
           '" data-mpick="' + r + '">' + METHOD_LABEL[r] + '</button>';
-      }).join(' ') + '</div>' +
+      }).join('') + '</div>' +
       '<div id="mConseq"></div>';
     var ctrl = NL.modal({
       title: 'Change redemption method', body: wrap,
@@ -884,7 +895,7 @@
       if (!b) return;
       var route = b.getAttribute('data-mpick');
       Array.prototype.forEach.call(wrap.querySelectorAll('[data-mpick]'), function (x) {
-        x.className = 'btn ' + (x === b ? 'btn--navy' : 'btn--ghost');
+        x.classList.toggle('active', x === b);
       });
       var panel = wrap.querySelector('#mConseq');
       if (route === cur) { panel.innerHTML = ''; return; }
