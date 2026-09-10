@@ -3,6 +3,35 @@
 <head>
 <!--
   UW Promo Codes — Club point-of-sale redemption page
+  Version: v7.1 (10/09/2026) — owner N9. Central codes are ANONYMOUS to
+           the club until redeemed: the dashboard table (and the previous-
+           scheme block, and the CSV) list a central code only once the
+           till has redeemed it, with a muted count line for what is
+           withheld — a manager could previously read live unredeemed
+           strings the moment UW created them, defeating the whole
+           anonymous-until-redeemed premise. The club's own uploads stay
+           fully visible (its own knowledge). The club's-activity section
+           is gone — the master console's audit is the log, and one log is
+           enough.
+  Version: v7.0 (10/09/2026) — owner N8: ONE table, the same one UW sees,
+           scoped to this club. An open request renders one placeholder row
+           per code still owed — Requested/Overdue pill, red Upload button —
+           and uploads convert placeholders to Issued rows one for one; the
+           separate requests table is gone. New: an online club marks its
+           own uploaded codes redeemed (confirm first) as fans use them in
+           its store — the redemption loop closes from the one place that
+           knowledge exists.
+  Version: v6.9 (10/09/2026) — owner N2/N3/N5/N6. Uploads exist only inside
+           a request — the add-codes-without-a-request door is gone, so
+           every uploaded code answers an ask. The upload form renders ONE
+           INPUT BOX PER CODE STILL OWED (request for 5, 2 supplied → 3
+           boxes; part-filling fine) instead of a textarea. Check a code
+           hides for a pure online club — it adjudicates contested TILL
+           codes, and an online club's codes live in its own retail system;
+           a club still running a till on central codes keeps it. The
+           header badge reads Dashboard · Online method / Till · In-store
+           method — "Club admin · Online" told a manager neither what the
+           page was nor what "online" was describing.
   Version: v6.8 (09/09/2026) — rendered UX sweep fixes: the requests
            table drops its Requested column (minor detail that pushed the
            Upload button past a phone's fold; raised-when lives in the
@@ -298,6 +327,11 @@
   .contact-row__name { font-weight: 700; font-variation-settings: 'wght' 700; }
   .contact-row__role { color: var(--text-muted); }
   .contact-row__email { color: var(--text-muted); }
+  #upLines { display: grid; gap: 8px; }
+  .up-line { font-family: var(--font-mono); font-size: var(--text-md); letter-spacing: 0.08em;
+    padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--radius); color: var(--text);
+    text-transform: uppercase; }
+  .up-line:focus-visible { outline: none; box-shadow: var(--focus-ring); border-color: var(--primary); }
   .life-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
   @media (max-width: 560px) { .life-cards { grid-template-columns: repeat(2, 1fr); } }
   .life-card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--off-white);
@@ -458,17 +492,13 @@
     <div class="inv" id="historyCard">
       <div class="life-cards" id="lifeCounts"></div>
       <div id="requestBanner"></div>
-      <div class="table-wrap"><table class="table">
-        <thead><tr><th>Codes</th><th>Due</th><th></th><th>Status</th></tr></thead>
-        <tbody id="reqRows"></tbody>
-      </table></div>
 
     <div id="uploadSection" hidden>
     <div class="upload">
       <p class="upload__intro" id="upIntro"></p>
       <div class="upload__field">
-        <label for="upCodes">Codes — one per line</label>
-        <textarea id="upCodes" rows="4" placeholder="CODEONE&#10;CODETWO&#10;CODETHREE"></textarea>
+        <label>Codes — one box per code still owed</label>
+        <div id="upLines"></div>
       </div>
       <div class="upload__terms">
         <div class="upload__terms-head">Before you upload, please confirm</div>
@@ -494,10 +524,6 @@
     </div>
     </div><!-- /#uploadSection -->
 
-      <div class="checker__row" id="upOpenRow" hidden style="margin-bottom:12px">
-        <button class="btn btn--ghost btn--sm" id="upOpen" type="button">Add codes without a request</button>
-      </div>
-
       <div class="inv__bar">
         <select class="toolbar__filter" id="invStatus" aria-label="Filter by status">
           <option value="">All statuses</option>
@@ -510,7 +536,7 @@
       </div>
       <div class="table-wrap">
         <table class="table">
-          <thead><tr><th>Code</th><th>Status</th><th>Redeemed</th><th>Added</th></tr></thead>
+          <thead><tr><th>Code</th><th>Status</th><th>Redeemed</th><th>Added</th><th></th></tr></thead>
           <tbody id="invRows"></tbody>
         </table>
       </div>
@@ -521,6 +547,7 @@
          neutral (spec v42.0 item 5 — till staff never adjudicate), and a
          detailed lookup sitting next to it would hand the detail straight
          back. Managers adjudicate; tills don't. -->
+    <div id="checkSection">
     <div class="list-head">Check a code</div>
     <div class="checker">
       <p class="checker__intro">Look a code up without redeeming it — whether it’s genuine, which club
@@ -534,6 +561,7 @@
       <div class="checker__out" id="chkOut" role="status" aria-live="polite"></div>
       <div class="checker__quota" id="chkQuota"></div>
     </div>
+    </div><!-- /#checkSection -->
 
     <!-- §4: codes from a scheme this club has since left — a list, not a
          second set of controls. They stay valid and redeemable under the
@@ -546,20 +574,6 @@
           <thead><tr><th>Code</th><th>Status</th><th>Redeemed</th><th>Added</th></tr></thead>
           <tbody id="legacyRows"></tbody>
         </table></div>
-      </div>
-    </div>
-
-    <!-- The club's own slice of the append-only trail. Same record the NL sees. -->
-    <div class="list-head">Your club’s activity</div>
-    <div class="inv">
-      <p class="checker__meta" style="margin-bottom:10px">Everything done under your club’s name —
-        redemptions, checks and uploads. This is the same record the National League sees, and it
-        cannot be edited by anyone, us included.</p>
-      <div class="table-wrap">
-        <table class="table">
-          <thead><tr><th>When</th><th>What</th><th>Detail</th></tr></thead>
-          <tbody id="audRows"></tbody>
-        </table>
       </div>
     </div>
 
@@ -604,7 +618,6 @@
   var ROUTE = 'instore', SUPPORT = null, HASCENTRAL = false;
   var CONTACTS = [], REQS = {};
   var MODE = 'till';                   // 'till' (4-digit PIN) | 'manager' (club passcode)
-  var AUDIT = {}, auditQuery = null;
   var CODES = {}, codesLoaded = false, unlocked = false, codesQuery = null;
   var busy = false;
 
@@ -760,16 +773,24 @@
     document.getElementById('setupSection').hidden = !setup;
     document.getElementById('tillSection').hidden = setup || !(ROUTE === 'instore' || HASCENTRAL);
     document.getElementById('managerOnly').hidden = setup || MODE !== 'manager';
-    /* The upload form lives inside the codes card and opens on demand —
-       from a request's Upload button, or the no-request link (online only). */
+    /* The upload form lives inside the codes card and opens only from a
+       request's Upload button (owner N2, 10/09/2026: no unsolicited
+       uploads — every uploaded code answers an ask). */
     closeUpload();
-    document.getElementById('upOpenRow').hidden = !(MODE === 'manager' && ROUTE === 'online');
+    /* The checker adjudicates contested TILL codes (owner N5): a pure
+       online club has no till and its codes live in its own retail system,
+       so there is nothing here for it to check. A club still running a
+       till on central codes keeps it. */
+    document.getElementById('checkSection').hidden =
+      setup || MODE !== 'manager' || !(ROUTE === 'instore' || HASCENTRAL);
     document.getElementById('pinSection').hidden = !(MODE === 'manager' && CREDS);
     document.getElementById('pinCard').hidden = ROUTE !== 'instore';
 
     var tag = document.getElementById('modeTag');
+    /* Owner N6 (10/09/2026): the manager view is the club's Dashboard, and
+       the second half names the METHOD, not a bare adjective. */
     tag.textContent = setup ? 'Setup'
-      : (MODE === 'manager' ? 'Club admin' : 'Till') + (ROUTE === 'online' ? ' · Online' : ' · In-store');
+      : (MODE === 'manager' ? 'Dashboard' : 'Till') + (ROUTE === 'online' ? ' · Online method' : ' · In-store method');
     tag.classList.toggle('mode-tag--admin', MODE === 'manager');
     document.getElementById('signout').textContent = MODE === 'manager' ? 'Sign out' : 'Not you?';
   }
@@ -1044,9 +1065,6 @@
   /* Only reached on the club's manager passcode. Subscribes to the club's own
      slice of the audit trail and wires the panels that a till PIN never sees. */
   function startManager() {
-    if (auditQuery) auditQuery.off();
-    auditQuery = UWP.ref('audit').orderByChild('club').equalTo(CLUB.code).limitToLast(100);
-    auditQuery.on('value', function (s) { AUDIT = s.val() || {}; renderAudit(); });
 
     UWP.ref('contacts/' + CLUB.code).on('value', function (s) {
       CONTACTS = s.val() || [];
@@ -1056,6 +1074,7 @@
     UWP.ref('requests').orderByChild('club').equalTo(CLUB.code).on('value', function (s) {
       REQS = s.val() || {};
       renderRequests();
+      renderInventory();   // placeholder rows live in the code table (N8)
     });
     document.getElementById('contactEdit').addEventListener('click', editContacts);
 
@@ -1077,14 +1096,27 @@
     var uploaded = String(r.createdBy || '').indexOf('club:') === 0;
     return ROUTE === 'online' ? uploaded : !uploaded;
   }
+  /* Owner N9 (10/09/2026): central codes stay ANONYMOUS to the club until
+     the till redeems them — a manager must never be able to read live
+     unredeemed strings the moment UW creates them. The club's own uploads
+     are its own knowledge and stay visible. */
+  function isCentral(r) { return String(r.createdBy || '').indexOf('club:') !== 0; }
+  function hiddenCentralCount() {
+    return Object.keys(CODES).filter(function (k) {
+      var r = CODES[k];
+      return isCentral(r) && r.status !== 'redeemed';
+    }).length;
+  }
   function invRows() {
     return Object.keys(CODES).map(function (k) { var r = CODES[k]; r._id = k; return r; })
       .filter(isCurrentScheme)
+      .filter(function (r) { return !isCentral(r) || r.status === 'redeemed'; })
       .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
   }
   function renderLegacy() {
     var list = Object.keys(CODES).map(function (k) { return CODES[k]; })
       .filter(function (r) { return !isCurrentScheme(r); })
+      .filter(function (r) { return !isCentral(r) || r.status === 'redeemed'; })   // N9
       .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
     var block = document.getElementById('legacyBlock');
     block.hidden = !list.length || MODE !== 'manager';
@@ -1113,18 +1145,52 @@
   function renderInventory() {
     if (MODE !== 'manager') return;
     var list = invFiltered(), tb = document.getElementById('invRows');
-    if (!list.length) {
-      tb.innerHTML = '<tr class="empty-row"><td colspan="4">' +
+    /* Owner N8: the club sees the same table UW sees, scoped to itself. An
+       open request renders one placeholder row per code still owed, each
+       carrying the red Upload button; uploads convert them one for one. */
+    var phs = [];
+    if (ROUTE === 'online' && !document.getElementById('invStatus').value &&
+        !(document.getElementById('invSearch').value || '').trim()) {
+      reqList().filter(function (r) { return r.status === 'open'; }).forEach(function (r) {
+        var f = UWP.reqFace(r, CODES);
+        for (var i = f.got; i < f.qty; i++) phs.push({ req: r, face: f });
+      });
+    }
+    var hidden = hiddenCentralCount();
+    var note = hidden
+      ? '<tr class="empty-row"><td colspan="5">' + hidden + ' unredeemed code' + (hidden === 1 ? '' : 's') +
+        ' not shown — codes stay anonymous until redeemed at your till.</td></tr>'
+      : '';
+    if (!list.length && !phs.length) {
+      tb.innerHTML = note + (note ? '' : '<tr class="empty-row"><td colspan="5">' +
         (invRows().length ? 'Nothing matches those filters.' : 'No codes registered to your club yet.') +
-        '</td></tr>';
+        '</td></tr>');
       return;
     }
-    tb.innerHTML = list.map(function (r) {
+    var phHtml = phs.map(function (p) {
+      var r = p.req, overdue = p.face.key === 'overdue';
+      return '<tr><td><span class="code-note">—</span></td>' +
+        '<td' + (r.due ? ' title="Due ' + esc(NL.formatDateShort(r.due)) + '"' : '') + '>' +
+          '<span class="pill ' + (overdue ? 'pill--rejected' : 'pill--pending') + '">' +
+          (overdue ? 'Overdue' : 'Requested') + '</span></td>' +
+        '<td>—</td>' +
+        '<td title="' + esc(UWP.fmt(r.raisedAt)) + '">' + esc(UWP.ago(r.raisedAt)) + '</td>' +
+        '<td><button class="btn btn--primary btn--sm" data-upreq="' + esc(r._id) + '">Upload</button></td></tr>';
+    }).join('');
+    tb.innerHTML = note + phHtml + list.map(function (r) {
+      /* An online club settles its own redemptions (owner N8): its store is
+         where fans redeem, so the club closes the loop here — with a
+         confirm, and on its own uploaded codes only. */
+      var canRedeem = ROUTE === 'online' && r.status === 'active' &&
+        String(r.createdBy || '').indexOf('club:') === 0;
       return '<tr' + (r.status === 'revoked' ? ' class="is-revoked"' : '') + '>' +
         '<td><span class="code-mono">' + esc(r.code) + '</span></td>' +
         '<td>' + UWP.pillFor(UWP.faceOf(r)) + '</td>' +
         '<td>' + esc(r.status === 'redeemed' ? UWP.fmt(r.redeemedAt) : '—') + '</td>' +
-        '<td title="' + esc(UWP.fmt(r.createdAt)) + '">' + esc(UWP.ago(r.createdAt)) + '</td></tr>';
+        '<td title="' + esc(UWP.fmt(r.createdAt)) + '">' + esc(UWP.ago(r.createdAt)) + '</td>' +
+        '<td>' + (canRedeem
+          ? '<button class="btn btn--ghost btn--sm" data-mredeem="' + esc(r._id) + '">Mark redeemed</button>'
+          : '') + '</td></tr>';
     }).join('');
   }
 
@@ -1140,31 +1206,6 @@
     NL.download('uw-promo-' + CLUB.code.toLowerCase() + '-' + UWP.dateStamp() + '.csv',
       NL.csv(rows, { bom: true }), 'text/csv;charset=utf-8');
     toast('CSV exported', 'success');
-  }
-
-  var ACTION_LABEL = {
-    'add-codes': 'Codes uploaded', redeem: 'Code redeemed', check: 'Code checked',
-    release: 'Released by NL', revoke: 'Revoked by NL', register: 'Registered to club',
-    'delete': 'Deleted by NL', 'regen-passcode': 'PIN or passcode changed', 'regen-link': 'Link changed'
-  };
-  function renderAudit() {
-    if (MODE !== 'manager') return;
-    var list = Object.keys(AUDIT).map(function (k) { return AUDIT[k]; })
-      .sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
-    var tb = document.getElementById('audRows');
-    if (!list.length) {
-      tb.innerHTML = '<tr class="empty-row"><td colspan="3">Nothing recorded yet.</td></tr>';
-      return;
-    }
-    tb.innerHTML = list.map(function (r) {
-      var bits = [];
-      if (r.count) bits.push(r.count + ' codes');
-      if (r.codes) bits.push(r.codes);
-      if (r.detail) bits.push(r.detail);
-      return '<tr><td title="' + esc(UWP.fmt(r.ts)) + '" style="white-space:nowrap">' + esc(UWP.ago(r.ts)) + '</td>' +
-        '<td>' + esc(ACTION_LABEL[r.action] || r.action || '') + '</td>' +
-        '<td class="checker__meta">' + esc(bits.join(' · ')) + '</td></tr>';
-    }).join('');
   }
 
   /* Till-PIN self-service. Uniqueness is checked against every club's PIN,
@@ -1224,55 +1265,91 @@
      even the master console can quietly alter it later. */
   var UPLOAD_MAX = 200;      // one indexed lookup per code — see checkExisting
   var upBusy = false;
-  var UP_REQ = null;         // request id this upload answers; null = unsolicited
-  var upCodes = document.getElementById('upCodes'),
-      upOut = document.getElementById('upOut');
+  var UP_REQ = null;         // the request this upload answers — always set (N2)
+  var upOut = document.getElementById('upOut');
 
   function upMsg(html) { upOut.innerHTML = '<div class="checker__card">' + html + '</div>'; }
 
-  /* The form opens inside the request it answers, or bare via the
-     no-request link. Either way it is the same form — what differs is
-     whether the codes it writes carry a request id. */
+  /* The form only ever opens inside a request (owner N2), and renders one
+     input box per code still owed (owner N3) — the form itself says how
+     many are wanted and cannot overshoot the ask. */
   function openUpload(reqId) {
-    UP_REQ = reqId || null;
-    var intro;
-    if (UP_REQ && REQS[UP_REQ]) {
-      var r = REQS[UP_REQ], qty = parseInt(r.qty, 10) || 0, got = uploadedFor(UP_REQ);
-      intro = 'Uploading against Utility Warehouse’s request for <strong>' + qty +
-        ' code' + (qty === 1 ? '' : 's') + '</strong>' +
-        (r.due ? ', due ' + esc(NL.formatDate(r.due)) : '') +
-        (got ? ' — ' + got + ' supplied so far' : '') + '.';
-    } else {
-      intro = 'These codes are registered to <strong>' + esc(CLUB.name) + '</strong> and can only be redeemed here.';
+    if (!reqId || !REQS[reqId]) return;
+    UP_REQ = reqId;
+    var r = REQS[UP_REQ], qty = parseInt(r.qty, 10) || 0, got = uploadedFor(UP_REQ);
+    var remaining = Math.min(Math.max(1, qty - got), UPLOAD_MAX);
+    document.getElementById('upIntro').innerHTML =
+      'Utility Warehouse asked for <strong>' + qty + ' code' + (qty === 1 ? '' : 's') + '</strong>' +
+      (r.due ? ', due ' + esc(NL.formatDateShort(r.due)) : '') +
+      (got ? ' — ' + got + ' supplied, ' + (qty - got) + ' to go' : '') +
+      '. Fill in what you have; part-filling is fine.';
+    var lines = document.getElementById('upLines');
+    lines.innerHTML = '';
+    for (var i = 0; i < remaining; i++) {
+      var inp = document.createElement('input');
+      inp.className = 'up-line';
+      inp.maxLength = 64;
+      inp.autocomplete = 'off';
+      inp.setAttribute('aria-label', 'Code ' + (i + 1) + ' of ' + remaining);
+      inp.placeholder = 'Code ' + (i + 1);
+      lines.appendChild(inp);
     }
-    document.getElementById('upIntro').innerHTML = intro;
     var sec = document.getElementById('uploadSection');
     sec.hidden = false;
     sec.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    upCodes.focus();
+    var first = lines.querySelector('input');
+    if (first) first.focus();
   }
   function closeUpload() {
     UP_REQ = null;
     var sec = document.getElementById('uploadSection');
     if (sec) sec.hidden = true;
     if (upOut) upOut.innerHTML = '';
+    var lines = document.getElementById('upLines');
+    if (lines) lines.innerHTML = '';
   }
 
   document.getElementById('upBtn').addEventListener('click', runUpload);
   document.getElementById('upCancel').addEventListener('click', closeUpload);
-  document.getElementById('upOpen').addEventListener('click', function () { openUpload(null); });
-  document.getElementById('reqRows').addEventListener('click', function (e) {
+  document.getElementById('invRows').addEventListener('click', function (e) {
     var b = e.target.closest('[data-upreq]');
-    if (b) openUpload(b.getAttribute('data-upreq'));
+    if (b) { openUpload(b.getAttribute('data-upreq')); return; }
+    var mr = e.target.closest('[data-mredeem]');
+    if (mr) markRedeemed(mr.getAttribute('data-mredeem'));
   });
+
+  /* Owner N8: an online club marks its own uploaded codes redeemed as fans
+     use them in its store — the one place that knowledge exists. */
+  function markRedeemed(id) {
+    var r = CODES[id];
+    if (!r) return;
+    NL.confirm('Mark ' + r.code + ' as redeemed?', {
+      title: 'Mark redeemed',
+      detail: 'Records that a supporter has used this code in your store, with today’s date. Utility Warehouse and the National League see it immediately.',
+      confirmText: 'Mark redeemed'
+    }).then(function (ok) {
+      if (!ok) return;
+      UWP.ensureAuth().then(function () {
+        return UWP.ref('codes/' + id).update({
+          status: 'redeemed', redeemedAt: Date.now(), redeemedBy: actor()
+        });
+      }).then(function () {
+        UWP.audit(actor(), CLUB.name, 'redeem', {
+          club: CLUB.code, clubName: CLUB.name, codes: r.code,
+          detail: 'Marked redeemed by the club (online store)'
+        });
+        toast(r.code + ' marked redeemed', 'success');
+      }).catch(function (err) { toast('Failed: ' + err.message, 'error'); });
+    });
+  }
 
   function parseUploaded() {
     var seen = {}, out = [];
-    (upCodes.value || '').split(/\r?\n/).forEach(function (line) {
-      var raw = line.trim();
-      if (!raw) return;
+    Array.prototype.forEach.call(document.querySelectorAll('#upLines input'), function (inp) {
+      var raw = (inp.value || '').trim();
+      if (!raw) return;                     // an empty box is fine — part-filling allowed
       var norm = UWP.normCode(raw);
-      if (!norm || seen[norm]) return;      // blank or repeated in the paste
+      if (!norm || seen[norm]) return;      // blank or repeated across boxes
       seen[norm] = true;
       out.push({ code: raw.toUpperCase(), norm: norm });
     });
@@ -1304,7 +1381,8 @@
         t3 = document.getElementById('upT3').checked;
 
     var list = parseUploaded();
-    if (!list.length) { upMsg('Paste at least one code above.'); return; }
+    if (!list.length) { upMsg('Fill in at least one code above.'); return; }
+    if (!UP_REQ) { upMsg('This upload lost its request — close and reopen from the request row.'); return; }
     if (list.length > UPLOAD_MAX) {
       upMsg('That’s ' + list.length + ' codes — please upload up to ' + UPLOAD_MAX +
         ' at a time so each one can be checked properly.');
@@ -1371,7 +1449,6 @@
           detail: 'Club upload' + (forReq ? ' against a UW request' : '') +
             ' — confirmed: works in club till system; applies agreed ' + UWP.VALUE + ' discount; valid 12 months+'
         });
-        upCodes.value = '';
         ['upT1', 'upT2', 'upT3'].forEach(function (id) { document.getElementById(id).checked = false; });
         /* Tell the NL the codes are in (spec item 6) — otherwise an upload
            can sit unnoticed until someone thinks to look. Fire-and-forget:
@@ -1585,29 +1662,11 @@
         '<strong>' + (due.length ? 'Overdue: ' : 'Outstanding: ') + '</strong>' +
         remaining + ' code' + (remaining === 1 ? '' : 's') + ' still to supply to Utility Warehouse' +
         (next.due ? ', due ' + esc(NL.formatDate(next.due)) : '') +
-        (ROUTE === 'online' ? ' — use Upload on the request.' : '.') + '</div>';
+        (ROUTE === 'online' ? ' — press Upload on a requested line below.' : '.') + '</div>';
     }
 
-    var tb = document.getElementById('reqRows');
-    if (!list.length) {
-      tb.innerHTML = '<tr class="empty-row"><td colspan="4">No requests yet.</td></tr>';
-      return;
-    }
-    tb.innerHTML = list.map(function (r) {
-      /* Derived, never pressed: waiting → overdue → fulfilled → dispatched
-         falls out of the uploads that answer the request. */
-      var f = UWP.reqFace(r, CODES);
-      var canUpload = ROUTE === 'online' && (f.key === 'waiting' || f.key === 'overdue');
-      return '<tr><td title="Requested ' + esc(UWP.ago(r.raisedAt)) + '">' +
-        (f.got ? f.got + ' of ' + f.qty : esc(String(r.qty || ''))) + '</td>' +
-        '<td class="nowrap">' + (r.due ? esc(NL.formatDateShort(r.due)) : '—') + '</td>' +
-        /* Upload before Status: on a phone the action must sit inside the
-           fold — the banner already tells the state (sweep, 09/09/2026). */
-        '<td>' + (canUpload
-          ? '<button class="btn btn--primary btn--sm" data-upreq="' + esc(r._id) + '">Upload</button>'
-          : '') + '</td>' +
-        '<td>' + UWP.reqPill(f.key) + '</td></tr>';
-    }).join('');
+    /* The ask itself renders as placeholder rows in the one code table
+       below (owner N8) — this function keeps only the counts and banner. */
   }
 
 })();

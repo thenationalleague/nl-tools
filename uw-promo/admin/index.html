@@ -24,6 +24,18 @@
            write config. That is the change that stops all 72 till PINs being
            world-readable. First run mints a bootstrap master token while no
            passcode exists; nothing subscribes to RTDB until the session does.
+  Version: v7.0 (10/09/2026) — owner N8, mirrored: placeholder rows in the
+           Online codes table replace the requests panel; Dispatch is per
+           row with a confirm, on both method tabs.
+  Version: v6.9 (10/09/2026) — owner N7: the console mirrors the UW
+           dashboard. Clubs & access leads (settle the setup: master
+           passcode, UW access, support, the club table), then In-store
+           codes and Online codes as method tabs sharing one pane through
+           METHOD_TAB — per-tab stats, breakdown and toolbar (paste-capable
+           add + Code adds on In-store as the NL back-door; Request club
+           codes on Online, with the requests list living on the tab, not
+           in a modal), Audit last. Master powers overlay throughout:
+           Delete, Revoke-redeemed, Redeem…, Register.
   Version: v6.8 (09/09/2026) — rendered UX sweep fixes: Card renders only
            for in-store clubs (online rows were offering a till card for a
            club with no till); requests-modal due dates short-form.
@@ -228,13 +240,15 @@
 
   <div class="wrap">
     <div class="tabs" id="tabs">
-      <button class="tab active" data-tab="codes">Codes</button>
-      <button class="tab" data-tab="access">Clubs &amp; access</button>
+      <button class="tab active" data-tab="access">Clubs &amp; access</button>
+      <button class="tab" data-tab="instore">In-store codes</button>
+      <button class="tab" data-tab="online">Online codes</button>
       <button class="tab" data-tab="audit">Audit</button>
     </div>
 
-    <!-- Codes tab -->
-    <div id="tab-codes">
+    <!-- One codes pane serves both method tabs — METHOD_TAB decides the
+         slice, exactly the UW dashboard's shape (owner N7, 10/09/2026). -->
+    <div id="tab-codes" style="display:none">
       <div class="stats" id="stats"></div>
       <div class="byclub">
         <div class="byclub__title">Redeemed by club <span class="byclub__note">(redeemed / registered)</span></div>
@@ -253,9 +267,10 @@
           <input class="toolbar__search" id="fSearch" type="search" placeholder="Search codes…" aria-label="Search codes">
         </div>
         <div class="toolbar__right">
-          <button class="btn btn--ghost" id="btnRequests">Requests</button> <button class="btn btn--ghost" id="btnBatches">Code adds</button>
+          <button class="btn btn--ghost" id="btnBatches">Code adds</button>
+          <button class="btn btn--primary" id="btnRequests" hidden>Request club codes</button>
           <button class="btn btn--ghost" id="btnExport">Export CSV</button>
-          <button class="btn btn--primary" id="btnAdd">Add codes</button>
+          <button class="btn btn--primary" id="btnAdd">Add in-store codes</button>
         </div>
       </div>
       <div class="table-wrap">
@@ -269,7 +284,7 @@
     </div>
 
     <!-- Clubs & access tab -->
-    <div id="tab-access" style="display:none">
+    <div id="tab-access">
       <div class="access-card" id="sandboxCard" style="display:none">
         <div class="access-card__title">Sandbox</div>
         <div class="access-card__row">
@@ -391,7 +406,7 @@
       AUDIT = s.val() || {}; auditLoaded = true;
       if (unlocked) renderAudit();
     });
-    UWP.ref('requests').on('value', function (s) { REQS = s.val() || {}; });
+    UWP.ref('requests').on('value', function (s) { REQS = s.val() || {}; if (unlocked) renderCodes(); });
     UWP.ref('contacts').on('value', function (s) {
       CONTACTS_ALL = s.val() || {};
       if (unlocked) renderAccess();
@@ -502,16 +517,29 @@
     location.reload();
   });
 
-  /* ── Tabs ───────────────────────────────────────────────────────────── */
+  /* ── Tabs (owner N7: mirror the UW dashboard) ───────────────────────
+     Clubs & access leads — settle the setup there, work the codes in the
+     two method tabs, receipts in Audit. Both method tabs render the one
+     codes pane through METHOD_TAB, exactly as the UW page does. */
+  var METHOD_TAB = 'instore';
+  function isOnlineCode(r) { return String((r && r.createdBy) || '').indexOf('club:') === 0; }
   document.getElementById('tabs').addEventListener('click', function (e) {
     var t = e.target.closest('.tab'); if (!t) return;
     var tab = t.getAttribute('data-tab');
     Array.prototype.forEach.call(document.querySelectorAll('#tabs .tab'), function (el) {
       el.classList.toggle('active', el === t);
     });
-    ['codes', 'access', 'audit'].forEach(function (k) {
-      document.getElementById('tab-' + k).style.display = k === tab ? 'block' : 'none';
-    });
+    var isCodes = tab === 'instore' || tab === 'online';
+    document.getElementById('tab-codes').style.display = isCodes ? 'block' : 'none';
+    document.getElementById('tab-access').style.display = tab === 'access' ? 'block' : 'none';
+    document.getElementById('tab-audit').style.display = tab === 'audit' ? 'block' : 'none';
+    if (isCodes) {
+      METHOD_TAB = tab;
+      document.getElementById('btnAdd').hidden = tab !== 'instore';
+      document.getElementById('btnBatches').hidden = tab !== 'instore';
+      document.getElementById('btnRequests').hidden = tab !== 'online';
+      renderCodes();
+    }
   });
 
   /* ── Clubs helpers ──────────────────────────────────────────────────── */
@@ -534,11 +562,9 @@
       (list.length > 1 ? ' <span class="code-note">+' + (list.length - 1) + '</span>' : '') + '</span>';
   }
 
-  /* Requests — same feature as the UW panel's; Richard can raise them too
-     (owner ruling 09/09/2026), recorded as the master rather than as UW. */
+  /* Requests (owner N7/N8): the ask lives as placeholder rows in the
+     Online codes table itself — this modal is only the raise form. */
   document.getElementById('btnRequests').addEventListener('click', function () {
-    var list = Object.keys(REQS).map(function (k) { var r = REQS[k]; r._id = k; return r; })
-      .sort(function (a, b) { return (b.raisedAt || 0) - (a.raisedAt || 0); });
     function nameOf(code) { var c = (CONFIG.clubs || {})[code]; return c ? c.name : code; }
     var wrap = document.createElement('div');
     wrap.innerHTML =
@@ -546,27 +572,16 @@
         '<select id="rqClub">' + clubOptionsHtml('Choose a club…', 'online') + '</select></div>' +
       '<div class="alloc-row" style="display:flex;gap:10px">' +
         '<span style="flex:1"><label for="rqQty">How many</label><input id="rqQty" type="number" min="1" max="500" value="5"></span>' +
-        '<span style="flex:1"><label for="rqDue">Due</label><input id="rqDue" type="date"></span></div>' +
-      '<button class="btn btn--primary btn--sm" id="rqRaise">Raise request</button>' +
-      '<div class="table-wrap" style="margin-top:16px"><table class="table">' +
-      '<thead><tr><th>Club</th><th>Codes</th><th>Due</th><th>Raised by</th><th>Status</th></tr></thead><tbody>' +
-      (list.length ? list.map(function (r) {
-        /* Derived, never pressed: uploads carrying the request id decide
-           waiting → overdue → fulfilled → dispatched. */
-        var f = UWP.reqFace(r, CODES);
-        return '<tr><td>' + esc(nameOf(r.club)) + '</td>' +
-          '<td>' + (f.got ? f.got + ' of ' + f.qty + ' uploaded' : esc(String(r.qty))) + '</td>' +
-          '<td>' + (r.due ? esc(NL.formatDateShort(r.due)) : '—') + '</td>' +
-          '<td>' + esc(r.raisedBy === 'uw' ? 'UW' : 'NL') + '</td>' +
-          '<td>' + UWP.reqPill(f.key) + '</td></tr>';
-      }).join('') : '<tr class="empty-row"><td colspan="5">No requests yet.</td></tr>') +
-      '</tbody></table></div>';
+        '<span style="flex:1"><label for="rqDue">Due</label><input id="rqDue" type="date"></span></div>';
     wrap.querySelector('#rqDue').value = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
     var ctrl = NL.modal({
-      title: 'Code requests', width: 'wide', body: wrap,
-      buttons: [{ label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } }]
+      title: 'Request club codes', body: wrap,
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Raise request', className: 'btn--primary', onClick: function () { raise(); } }
+      ]
     });
-    wrap.querySelector('#rqRaise').addEventListener('click', function () {
+    function raise() {
       var code = wrap.querySelector('#rqClub').value;
       var qty = parseInt(wrap.querySelector('#rqQty').value, 10);
       var dueRaw = wrap.querySelector('#rqDue').value;
@@ -585,7 +600,7 @@
         toast('Request raised', 'success');
         ctrl.close();
       }).catch(function (err) { toast('Failed: ' + err.message, 'error'); });
-    });
+    }
   });
 
   function clubList() {
@@ -671,6 +686,7 @@
   /* ── Codes tab ──────────────────────────────────────────────────────── */
   function codeRows() {
     return Object.keys(CODES).map(function (k) { var r = CODES[k]; r._id = k; return r; })
+      .filter(function (r) { return isOnlineCode(r) === (METHOD_TAB === 'online'); })
       .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
   }
   function clubFiltered() {
@@ -730,22 +746,52 @@
     scope.forEach(function (r) { var st = UWP.statusOf(r); if (counts[st] != null) counts[st]++; });
     var suffix = label ? ' · ' + esc(label) : '';
     document.getElementById('stats').innerHTML =
-      '<div class="stat"><div class="stat__num">' + counts.total + '</div><div class="stat__label">Codes in pool' + suffix + '</div></div>' +
+      '<div class="stat"><div class="stat__num">' + counts.total + '</div><div class="stat__label">' +
+        (METHOD_TAB === 'online' ? 'Codes uploaded' : 'Codes in pool') + suffix + '</div></div>' +
       '<div class="stat stat--info"><div class="stat__num">' + counts.active + '</div><div class="stat__label">Unredeemed</div></div>' +
       '<div class="stat stat--approved"><div class="stat__num">' + counts.redeemed + '</div><div class="stat__label">Redeemed</div></div>' +
       '<div class="stat stat--expired"><div class="stat__num">' + counts.revoked + '</div><div class="stat__label">Revoked</div></div>' +
-      '<div class="stat stat--expired"><div class="stat__num">' + counts.expired + '</div><div class="stat__label">Expired</div></div>';
+      (METHOD_TAB === 'online' ? '' :
+      '<div class="stat stat--expired"><div class="stat__num">' + counts.expired + '</div><div class="stat__label">Expired</div></div>');
 
     renderByClub(all);
 
     var list = filtered();
+    /* Owner N8: a request IS empty rows here too — one placeholder per code
+       still owed, converting to real Issued rows as the club uploads. Shown
+       on the unfiltered Online view; filters and search show real codes. */
+    var phs = [];
+    if (METHOD_TAB === 'online' && !document.getElementById('fStatus').value &&
+        !(document.getElementById('fSearch').value || '').trim()) {
+      var clubSel = document.getElementById('fClub').value;
+      Object.keys(REQS).forEach(function (k) {
+        var r = REQS[k]; r._id = k;
+        if (clubSel && r.club !== clubSel) return;
+        var f = UWP.reqFace(r, CODES);
+        for (var i = f.got; i < f.qty; i++) phs.push({ req: r, face: f });
+      });
+    }
     var tbody = document.getElementById('rows');
-    if (!list.length) {
+    if (!list.length && !phs.length) {
       tbody.innerHTML = '<tr class="empty-row"><td colspan="7">' +
         (all.length ? 'No codes match the current filters.' : 'No codes in the pool yet.') + '</td></tr>';
       return;
     }
-    tbody.innerHTML = list.map(function (r) {
+    var phHtml = phs.map(function (p) {
+      var r = p.req, overdue = p.face.key === 'overdue';
+      var name = (CONFIG.clubs && CONFIG.clubs[r.club] && CONFIG.clubs[r.club].name) || r.club;
+      return '<tr><td><span class="code-note">—</span></td>' +
+        '<td' + (r.due ? ' title="Due ' + esc(NL.formatDateShort(r.due)) + '"' : '') + '>' +
+          '<span class="pill ' + (overdue ? 'pill--rejected' : 'pill--pending') + '">' +
+          (overdue ? 'Overdue' : 'Requested') + '</span></td>' +
+        '<td><span class="club-cell">' + NL.clubs.crestImgHtml(name, 'thumb') +
+          '<span class="club-cell__name">' + esc(name) + '</span></span></td>' +
+        '<td>—</td>' +
+        '<td title="' + esc(UWP.fmt(r.raisedAt)) + '">' + esc(UWP.ago(r.raisedAt)) + '</td>' +
+        '<td>' + esc(r.raisedBy === 'uw' ? 'UW' : 'NL') + '</td>' +
+        '<td></td></tr>';
+    }).join('');
+    tbody.innerHTML = phHtml + list.map(function (r) {
       var del = '<button class="btn btn--ghost btn--sm" data-delete="' + esc(r._id) + '">Delete</button>';
       var acts = del;
       /* Club-uploaded codes are never revoked, by anyone (owner ruling
@@ -757,7 +803,9 @@
       if (r.status === 'active') {
         // Pre-v3.0 codes have no club — register one before it can be redeemed
         // on anybody's behalf.
-        acts = (r.club
+        var dispatchBtn = (!r.dispatchedAt && !UWP.isExpired(r))
+          ? '<button class="btn btn--navy btn--sm" data-dispatch="' + esc(r._id) + '">Dispatch</button> ' : '';
+        acts = dispatchBtn + (r.club
                  ? '<button class="btn btn--ghost btn--sm" data-redeem="' + esc(r._id) + '">Redeem…</button> '
                  : '<button class="btn btn--navy btn--sm" data-register="' + esc(r._id) + '">Register…</button> ') +
                revokeBtn + del;
@@ -791,9 +839,31 @@
   document.getElementById('fStatus').value = '';
   document.getElementById('fSearch').value = '';
 
+  function dispatchOne(id) {
+    var r = CODES[id];
+    if (!r) return;
+    NL.confirm('Mark ' + r.code + ' as dispatched?', {
+      title: 'Dispatch',
+      detail: 'Records that this code has gone out, with today’s date — it doesn’t send anything.',
+      confirmText: 'Mark dispatched'
+    }).then(function (ok) {
+      if (!ok) return;
+      UWP.ensureAuth().then(function () {
+        return UWP.ref('codes/' + id).update({ dispatchedAt: Date.now(), dispatchedBy: ACTOR });
+      }).then(function () {
+        UWP.audit(ACTOR, ACTOR_LABEL, 'dispatch', {
+          club: r.club || null, clubName: r.clubName || null, codes: r.code, count: 1, detail: 'Marked dispatched'
+        });
+        toast(r.code + ' marked dispatched', 'success');
+      }).catch(function (err) { toast('Failed: ' + err.message, 'error'); });
+    });
+  }
+
   document.getElementById('rows').addEventListener('click', function (e) {
     var cp = e.target.closest('[data-copy]');
     if (cp) { NL.copy(cp.getAttribute('data-copy')); return; }
+    var dp = e.target.closest('[data-dispatch]');
+    if (dp) { dispatchOne(dp.getAttribute('data-dispatch')); return; }
     var rv = e.target.closest('[data-revoke]');
     if (rv) { revokeCode(rv.getAttribute('data-revoke')); return; }
     var rd = e.target.closest('[data-redeem]');
