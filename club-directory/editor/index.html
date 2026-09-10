@@ -15,6 +15,13 @@
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
 <!--
   club-directory / editor / index.html
+  v1.42 — (10/09/2026) Reseed pitch retired, same day it ran. The 10/09
+          survey is seeded and published, and Richard chose a clean bar
+          over a standing control: the next survey arrives as a clubs-meta
+          PR anyway, and the button rides back in with it (revive from
+          v1.41, one commit back). The pipeline it served is unchanged —
+          clubs-meta stays the truth, its validator keeps the 90-120 x
+          45-90m window.
   v1.41 — (10/09/2026) Reseed pitch, master only, in the bar. Pitch
           dimensions now live in clubs-meta (metres, "L x W m", validator
           bounds 90-120 x 45-90m) and the button projects them into every
@@ -1107,7 +1114,6 @@
       <button class="nl-idbar__btn" id="changes" type="button">My changes</button>
       <button class="nl-idbar__btn" id="recheck" type="button" hidden>Re-check all</button>
       <button class="nl-idbar__btn" id="addOrg" type="button" hidden>Add organisation</button>
-      <button class="nl-idbar__btn" id="reseedPitch" type="button" hidden>Reseed pitch</button>
       <button class="nl-idbar__btn" id="signOut" type="button">Sign out</button>
     </div>
   </div>
@@ -1247,8 +1253,6 @@
          like Publish, not a routine edit. */
       $('addOrg').hidden = false;
       $('addOrg').addEventListener('click', addOrganisation);
-      $('reseedPitch').hidden = false;
-      $('reseedPitch').addEventListener('click', reseedPitch);
     }
     wireView();
     fillPicker();
@@ -3777,68 +3781,6 @@
     });
     setTimeout(function () { form.querySelector('#aoName').focus(); }, 30);
     return ctrl;
-  }
-
-  /* Pitch dimensions arrive as a batch — a League-wide re-measure lands as
-     one spreadsheet, not 72 phone calls — so their truth lives in
-     clubs-meta (the data schema: PR-reviewed, bounds-checked by its
-     validator) and this button projects it into every club record in ONE
-     write. A club clubs-meta holds no pitch for is CLEARED, not skipped:
-     absent data is the statement (that ground is being re-measured), and a
-     stale number left behind would outrank it. Orgs are not grounds and
-     are left alone. Master only; works regardless of sign-off, because a
-     batch correction is not a per-club edit. Journal-free by design — 72
-     journal lines saying the same thing is noise; the audit entry is the
-     record. */
-  function reseedPitch() {
-    var metaOf = function (n) {
-      var c = (NL.clubs.byName && NL.clubs.byName(n)) || null;
-      return (c && c.pitch) || null;
-    };
-    var names = Object.keys(ALL).filter(function (n) {
-      return !NLDirectory.isOrg(ALL[n]);
-    });
-    var paths = {}, set = 0, cleared = 0, same = 0;
-    names.forEach(function (n) {
-      var p = metaOf(n);
-      var info = ALL[n].info || {};
-      var dims = (p && p.dimensions) || '';
-      var type = (p && p.type) || '';
-      if ((info.pitchDims || '') === dims && (info.pitchType || '') === type) { same++; return; }
-      paths[n + '/info/pitchDims'] = dims || null;
-      paths[n + '/info/pitchType'] = type || null;
-      if (dims) { set++; } else { cleared++; }
-    });
-    if (!set && !cleared) {
-      NL.alert('Every club already matches clubs-meta.');
-      return;
-    }
-    NL.confirm(
-      set + ' club' + (set === 1 ? '' : 's') + ' will take the clubs-meta ' +
-      'dimensions and surface, ' + cleared + ' will be cleared (clubs-meta ' +
-      'holds nothing for them), ' + same + ' already match.',
-      { title: 'Reseed pitch from clubs-meta?', confirmText: 'Reseed' }
-    ).then(function (ok) {
-      if (!ok) { return; }
-      NL.writeAudit('directory_pitch_reseed',
-        'Pitch reseeded from clubs-meta: ' + set + ' set, ' + cleared + ' cleared');
-      firebase.database().ref(ROOT + '/clubs').update(paths)
-        .then(function () {
-          names.forEach(function (n) {
-            var p = metaOf(n);
-            ALL[n].info = ALL[n].info || {};
-            if (p && p.dimensions) { ALL[n].info.pitchDims = p.dimensions; }
-            else { delete ALL[n].info.pitchDims; }
-            if (p && p.type) { ALL[n].info.pitchType = p.type; }
-            else { delete ALL[n].info.pitchType; }
-          });
-          draw(current);
-          NL.toast(set + ' updated, ' + cleared + ' cleared', 'success');
-        })
-        ['catch'](function (err) {
-          NL.toast('Could not reseed: ' + ((err && err.message) || err), 'error');
-        });
-    });
   }
 
   /* The HQ list is a hierarchy, not an alphabet — the CEO leads it because
