@@ -1,5 +1,12 @@
 /*
   UW Promo Codes — shared runtime for the three standalone pages
+  Version: v6.5 (10/09/2026) — owner N4: switching a club ON (to in-store
+           or online) requires naming who runs it. The method modal loads
+           the club's contacts, shows them prefilled (or one empty row),
+           refuses to commit without a named person with a valid email,
+           and writes contacts/<club> alongside the route — so no colleague
+           can activate a club without a responsible person on record.
+           Moving to unassigned asks for nothing.
   Version: v6.4 (09/09/2026) — editMethodModal fixed and refined: it called
            a bare ref() that never existed inside this file (the pages'
            copies had used UWP.ref / their own scope — a runtime name no
@@ -568,6 +575,7 @@
     var esc = window.NL.escHtml;
     var cur = ['instore', 'online'].indexOf(opts.route) !== -1 ? opts.route : 'unassigned';
     var pending = null;
+    var existing = [];   // contacts already on record, loaded at open
     var wrap = document.createElement('div');
     wrap.innerHTML =
       '<p class="confirm-text">' + esc(opts.name) + ' is currently ' + methodPill(cur) + '</p>' +
@@ -581,15 +589,36 @@
       title: 'Change redemption method', body: wrap,
       buttons: [
         { label: 'Cancel', className: 'btn--ghost', onClick: function (x) { x.close(); } },
-        /* The commit sits in the footer beside Cancel (owner ruling
-           09/09/2026) and only exists once a DIFFERENT method is picked —
-           the consequences render in the body above it first. */
         { label: 'Change method', className: 'btn--danger', onClick: function () { commit(); } }
       ]
     });
     var goBtn = ctrl.el.querySelector('.modal__footer .btn--danger');
     goBtn.hidden = true;
+
+    ensureAuth().then(function () {
+      return window.UWP.ref('contacts/' + opts.code).once('value');
+    }).then(function (s) {
+      var v = s.val();
+      existing = Array.isArray(v) ? v : v ? Object.keys(v).map(function (k) { return v[k]; }) : [];
+    }).catch(function () {});
+
+    function contactRow(c) {
+      c = c || {};
+      return '<div class="mcontact">' +
+        '<input data-mc="name" placeholder="Name" maxlength="80" value="' + esc(c.name || '') + '">' +
+        '<input data-mc="role" placeholder="Role" maxlength="80" value="' + esc(c.role || '') + '">' +
+        '<input data-mc="email" type="email" placeholder="Email" maxlength="120" value="' + esc(c.email || '') + '">' +
+        '<button class="code-copy" data-mcrm type="button" title="Remove" aria-label="Remove contact">' +
+        '<svg class="icon icon--sm"><use href="/assets/icons/sprites.svg#icon-close"></use></svg></button></div>';
+    }
+
     wrap.addEventListener('click', function (e) {
+      var rm = e.target.closest('[data-mcrm]');
+      if (rm) { rm.closest('.mcontact').remove(); return; }
+      if (e.target.closest('[data-mcadd]')) {
+        e.target.closest('[data-mchost]').insertAdjacentHTML('beforeend', contactRow());
+        return;
+      }
       var b = e.target.closest('[data-mpick]');
       if (!b) return;
       var route = b.getAttribute('data-mpick');
@@ -597,30 +626,53 @@
         x.classList.toggle('active', x === b);
       });
       var panel = wrap.querySelector('[data-mconseq]');
-      if (route === cur) {
-        pending = null;
-        panel.innerHTML = '';
-        goBtn.hidden = true;
-        return;
-      }
+      if (route === cur) { pending = null; panel.innerHTML = ''; goBtn.hidden = true; return; }
       pending = route;
       panel.innerHTML =
-        '<div class="banner banner--amber"><strong>What this does</strong>' +
+        '<div class="banner banner--amber" style="margin-bottom:12px"><strong>What this does</strong>' +
         '<ul style="margin:6px 0 0 18px;padding:0">' +
         methodConsequences(cur, route).map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') +
-        '</ul></div>';
+        '</ul></div>' +
+        /* Owner N4 (10/09/2026): switching a club ON requires naming who
+           runs it — nobody activates a club without a responsible person
+           on record. Prefilled when the club already has contacts. */
+        (route === 'unassigned' ? '' :
+          '<div class="alloc-row"><label>Who runs this at ' + esc(opts.name) + ' — required</label>' +
+          '<div data-mchost>' + (existing.length ? existing.map(contactRow).join('') : contactRow()) + '</div>' +
+          '<button class="btn btn--ghost btn--sm" data-mcadd type="button">Add another contact</button></div>');
       goBtn.hidden = false;
       goBtn.textContent = 'Move ' + opts.name + ' to ' + METHOD[route].label;
     });
+
+    function readContacts() {
+      return Array.prototype.map.call(wrap.querySelectorAll('.mcontact'), function (row) {
+        var g = function (k) { return (row.querySelector('[data-mc="' + k + '"]').value || '').trim(); };
+        return { name: g('name'), role: g('role'), email: g('email'), addedAt: Date.now() };
+      }).filter(function (c) { return c.name || c.role || c.email; });
+    }
+
     function commit() {
       if (!pending) return;
       var route = pending;
+      var contacts = null;
+      if (route !== 'unassigned') {
+        contacts = readContacts();
+        var okList = contacts.filter(function (c) { return c.name && /.+@.+\..+/.test(c.email); });
+        if (!okList.length) {
+          window.NL.toast('Name at least one contact with a valid email — someone must own this at the club.', 'error');
+          return;
+        }
+        contacts = okList;
+      }
       ensureAuth().then(function () {
-        return window.UWP.ref('config/clubs/' + opts.code + '/route').set(route);
+        var writes = [window.UWP.ref('config/clubs/' + opts.code + '/route').set(route)];
+        if (contacts) writes.push(window.UWP.ref('contacts/' + opts.code).set(contacts));
+        return Promise.all(writes);
       }).then(function () {
         audit(opts.actor, opts.actorLabel, 'route', {
           club: opts.code, clubName: opts.name,
-          detail: 'Redemption method set to ' + METHOD[route].label.toLowerCase()
+          detail: 'Redemption method set to ' + METHOD[route].label.toLowerCase() +
+            (contacts ? ' — contact: ' + contacts.map(function (c) { return c.name; }).join(', ') : '')
         });
         window.NL.toast(opts.name + ' \u2192 ' + METHOD[route].label, 'success');
         if (opts.onDone) opts.onDone(route);
