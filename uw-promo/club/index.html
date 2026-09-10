@@ -3,6 +3,14 @@
 <head>
 <!--
   UW Promo Codes — Club point-of-sale redemption page
+  Version: v7.0 (10/09/2026) — owner N8: ONE table, the same one UW sees,
+           scoped to this club. An open request renders one placeholder row
+           per code still owed — Requested/Overdue pill, red Upload button —
+           and uploads convert placeholders to Issued rows one for one; the
+           separate requests table is gone. New: an online club marks its
+           own uploaded codes redeemed (confirm first) as fans use them in
+           its store — the redemption loop closes from the one place that
+           knowledge exists.
   Version: v6.9 (10/09/2026) — owner N2/N3/N5/N6. Uploads exist only inside
            a request — the add-codes-without-a-request door is gone, so
            every uploaded code answers an ask. The upload form renders ONE
@@ -474,10 +482,6 @@
     <div class="inv" id="historyCard">
       <div class="life-cards" id="lifeCounts"></div>
       <div id="requestBanner"></div>
-      <div class="table-wrap"><table class="table">
-        <thead><tr><th>Codes</th><th>Due</th><th></th><th>Status</th></tr></thead>
-        <tbody id="reqRows"></tbody>
-      </table></div>
 
     <div id="uploadSection" hidden>
     <div class="upload">
@@ -522,7 +526,7 @@
       </div>
       <div class="table-wrap">
         <table class="table">
-          <thead><tr><th>Code</th><th>Status</th><th>Redeemed</th><th>Added</th></tr></thead>
+          <thead><tr><th>Code</th><th>Status</th><th>Redeemed</th><th>Added</th><th></th></tr></thead>
           <tbody id="invRows"></tbody>
         </table>
       </div>
@@ -1078,6 +1082,7 @@
     UWP.ref('requests').orderByChild('club').equalTo(CLUB.code).on('value', function (s) {
       REQS = s.val() || {};
       renderRequests();
+      renderInventory();   // placeholder rows live in the code table (N8)
     });
     document.getElementById('contactEdit').addEventListener('click', editContacts);
 
@@ -1135,18 +1140,47 @@
   function renderInventory() {
     if (MODE !== 'manager') return;
     var list = invFiltered(), tb = document.getElementById('invRows');
-    if (!list.length) {
-      tb.innerHTML = '<tr class="empty-row"><td colspan="4">' +
+    /* Owner N8: the club sees the same table UW sees, scoped to itself. An
+       open request renders one placeholder row per code still owed, each
+       carrying the red Upload button; uploads convert them one for one. */
+    var phs = [];
+    if (ROUTE === 'online' && !document.getElementById('invStatus').value &&
+        !(document.getElementById('invSearch').value || '').trim()) {
+      reqList().filter(function (r) { return r.status === 'open'; }).forEach(function (r) {
+        var f = UWP.reqFace(r, CODES);
+        for (var i = f.got; i < f.qty; i++) phs.push({ req: r, face: f });
+      });
+    }
+    if (!list.length && !phs.length) {
+      tb.innerHTML = '<tr class="empty-row"><td colspan="5">' +
         (invRows().length ? 'Nothing matches those filters.' : 'No codes registered to your club yet.') +
         '</td></tr>';
       return;
     }
-    tb.innerHTML = list.map(function (r) {
+    var phHtml = phs.map(function (p) {
+      var r = p.req, overdue = p.face.key === 'overdue';
+      return '<tr><td><span class="code-note">—</span></td>' +
+        '<td' + (r.due ? ' title="Due ' + esc(NL.formatDateShort(r.due)) + '"' : '') + '>' +
+          '<span class="pill ' + (overdue ? 'pill--rejected' : 'pill--pending') + '">' +
+          (overdue ? 'Overdue' : 'Requested') + '</span></td>' +
+        '<td>—</td>' +
+        '<td title="' + esc(UWP.fmt(r.raisedAt)) + '">' + esc(UWP.ago(r.raisedAt)) + '</td>' +
+        '<td><button class="btn btn--primary btn--sm" data-upreq="' + esc(r._id) + '">Upload</button></td></tr>';
+    }).join('');
+    tb.innerHTML = phHtml + list.map(function (r) {
+      /* An online club settles its own redemptions (owner N8): its store is
+         where fans redeem, so the club closes the loop here — with a
+         confirm, and on its own uploaded codes only. */
+      var canRedeem = ROUTE === 'online' && r.status === 'active' &&
+        String(r.createdBy || '').indexOf('club:') === 0;
       return '<tr' + (r.status === 'revoked' ? ' class="is-revoked"' : '') + '>' +
         '<td><span class="code-mono">' + esc(r.code) + '</span></td>' +
         '<td>' + UWP.pillFor(UWP.faceOf(r)) + '</td>' +
         '<td>' + esc(r.status === 'redeemed' ? UWP.fmt(r.redeemedAt) : '—') + '</td>' +
-        '<td title="' + esc(UWP.fmt(r.createdAt)) + '">' + esc(UWP.ago(r.createdAt)) + '</td></tr>';
+        '<td title="' + esc(UWP.fmt(r.createdAt)) + '">' + esc(UWP.ago(r.createdAt)) + '</td>' +
+        '<td>' + (canRedeem
+          ? '<button class="btn btn--ghost btn--sm" data-mredeem="' + esc(r._id) + '">Mark redeemed</button>'
+          : '') + '</td></tr>';
     }).join('');
   }
 
@@ -1292,10 +1326,37 @@
 
   document.getElementById('upBtn').addEventListener('click', runUpload);
   document.getElementById('upCancel').addEventListener('click', closeUpload);
-  document.getElementById('reqRows').addEventListener('click', function (e) {
+  document.getElementById('invRows').addEventListener('click', function (e) {
     var b = e.target.closest('[data-upreq]');
-    if (b) openUpload(b.getAttribute('data-upreq'));
+    if (b) { openUpload(b.getAttribute('data-upreq')); return; }
+    var mr = e.target.closest('[data-mredeem]');
+    if (mr) markRedeemed(mr.getAttribute('data-mredeem'));
   });
+
+  /* Owner N8: an online club marks its own uploaded codes redeemed as fans
+     use them in its store — the one place that knowledge exists. */
+  function markRedeemed(id) {
+    var r = CODES[id];
+    if (!r) return;
+    NL.confirm('Mark ' + r.code + ' as redeemed?', {
+      title: 'Mark redeemed',
+      detail: 'Records that a supporter has used this code in your store, with today’s date. Utility Warehouse and the National League see it immediately.',
+      confirmText: 'Mark redeemed'
+    }).then(function (ok) {
+      if (!ok) return;
+      UWP.ensureAuth().then(function () {
+        return UWP.ref('codes/' + id).update({
+          status: 'redeemed', redeemedAt: Date.now(), redeemedBy: actor()
+        });
+      }).then(function () {
+        UWP.audit(actor(), CLUB.name, 'redeem', {
+          club: CLUB.code, clubName: CLUB.name, codes: r.code,
+          detail: 'Marked redeemed by the club (online store)'
+        });
+        toast(r.code + ' marked redeemed', 'success');
+      }).catch(function (err) { toast('Failed: ' + err.message, 'error'); });
+    });
+  }
 
   function parseUploaded() {
     var seen = {}, out = [];
@@ -1616,29 +1677,11 @@
         '<strong>' + (due.length ? 'Overdue: ' : 'Outstanding: ') + '</strong>' +
         remaining + ' code' + (remaining === 1 ? '' : 's') + ' still to supply to Utility Warehouse' +
         (next.due ? ', due ' + esc(NL.formatDate(next.due)) : '') +
-        (ROUTE === 'online' ? ' — use Upload on the request.' : '.') + '</div>';
+        (ROUTE === 'online' ? ' — press Upload on a requested line below.' : '.') + '</div>';
     }
 
-    var tb = document.getElementById('reqRows');
-    if (!list.length) {
-      tb.innerHTML = '<tr class="empty-row"><td colspan="4">No requests yet.</td></tr>';
-      return;
-    }
-    tb.innerHTML = list.map(function (r) {
-      /* Derived, never pressed: waiting → overdue → fulfilled → dispatched
-         falls out of the uploads that answer the request. */
-      var f = UWP.reqFace(r, CODES);
-      var canUpload = ROUTE === 'online' && (f.key === 'waiting' || f.key === 'overdue');
-      return '<tr><td title="Requested ' + esc(UWP.ago(r.raisedAt)) + '">' +
-        (f.got ? f.got + ' of ' + f.qty : esc(String(r.qty || ''))) + '</td>' +
-        '<td class="nowrap">' + (r.due ? esc(NL.formatDateShort(r.due)) : '—') + '</td>' +
-        /* Upload before Status: on a phone the action must sit inside the
-           fold — the banner already tells the state (sweep, 09/09/2026). */
-        '<td>' + (canUpload
-          ? '<button class="btn btn--primary btn--sm" data-upreq="' + esc(r._id) + '">Upload</button>'
-          : '') + '</td>' +
-        '<td>' + UWP.reqPill(f.key) + '</td></tr>';
-    }).join('');
+    /* The ask itself renders as placeholder rows in the one code table
+       below (owner N8) — this function keeps only the counts and banner. */
   }
 
 })();

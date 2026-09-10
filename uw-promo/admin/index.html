@@ -24,6 +24,9 @@
            write config. That is the change that stops all 72 till PINs being
            world-readable. First run mints a bootstrap master token while no
            passcode exists; nothing subscribes to RTDB until the session does.
+  Version: v7.0 (10/09/2026) — owner N8, mirrored: placeholder rows in the
+           Online codes table replace the requests panel; Dispatch is per
+           row with a confirm, on both method tabs.
   Version: v6.9 (10/09/2026) — owner N7: the console mirrors the UW
            dashboard. Clubs & access leads (settle the setup: master
            passcode, UW access, support, the club table), then In-store
@@ -270,14 +273,6 @@
           <button class="btn btn--primary" id="btnAdd">Add in-store codes</button>
         </div>
       </div>
-      <div class="byclub" id="reqPanel" hidden>
-        <div class="byclub__title">Requests to clubs</div>
-        <div class="table-wrap"><table class="table">
-          <thead><tr><th>Club</th><th>Codes</th><th>Due</th><th>Raised by</th><th>Status</th></tr></thead>
-          <tbody id="reqPanelRows"></tbody>
-        </table></div>
-      </div>
-
       <div class="table-wrap">
         <table class="table">
           <thead><tr>
@@ -567,27 +562,8 @@
       (list.length > 1 ? ' <span class="code-note">+' + (list.length - 1) + '</span>' : '') + '</span>';
   }
 
-  /* Requests (owner N7): the LIST lives on the Online codes tab
-     (renderRequestPanel, with the Raised-by column — both Lucy and the
-     master can raise); this modal is only the raise form. */
-  function renderRequestPanel() {
-    var panel = document.getElementById('reqPanel');
-    if (!panel) return;
-    var list = Object.keys(REQS).map(function (k) { var r = REQS[k]; r._id = k; return r; })
-      .sort(function (a, b) { return (b.raisedAt || 0) - (a.raisedAt || 0); });
-    if (METHOD_TAB !== 'online' || !list.length) { panel.hidden = true; return; }
-    panel.hidden = false;
-    function nameOf(code) { var c = (CONFIG.clubs || {})[code]; return c ? c.name : code; }
-    document.getElementById('reqPanelRows').innerHTML = list.map(function (r) {
-      var f = UWP.reqFace(r, CODES);
-      return '<tr><td>' + esc(nameOf(r.club)) + '</td>' +
-        '<td>' + (f.got ? f.got + ' of ' + f.qty + ' uploaded' : esc(String(r.qty))) + '</td>' +
-        '<td class="nowrap">' + (r.due ? esc(NL.formatDateShort(r.due)) : '—') + '</td>' +
-        '<td>' + esc(r.raisedBy === 'uw' ? 'UW' : 'NL') + '</td>' +
-        '<td>' + UWP.reqPill(f.key) + '</td></tr>';
-    }).join('');
-  }
-
+  /* Requests (owner N7/N8): the ask lives as placeholder rows in the
+     Online codes table itself — this modal is only the raise form. */
   document.getElementById('btnRequests').addEventListener('click', function () {
     function nameOf(code) { var c = (CONFIG.clubs || {})[code]; return c ? c.name : code; }
     var wrap = document.createElement('div');
@@ -779,16 +755,43 @@
       '<div class="stat stat--expired"><div class="stat__num">' + counts.expired + '</div><div class="stat__label">Expired</div></div>');
 
     renderByClub(all);
-    renderRequestPanel();
 
     var list = filtered();
+    /* Owner N8: a request IS empty rows here too — one placeholder per code
+       still owed, converting to real Issued rows as the club uploads. Shown
+       on the unfiltered Online view; filters and search show real codes. */
+    var phs = [];
+    if (METHOD_TAB === 'online' && !document.getElementById('fStatus').value &&
+        !(document.getElementById('fSearch').value || '').trim()) {
+      var clubSel = document.getElementById('fClub').value;
+      Object.keys(REQS).forEach(function (k) {
+        var r = REQS[k]; r._id = k;
+        if (clubSel && r.club !== clubSel) return;
+        var f = UWP.reqFace(r, CODES);
+        for (var i = f.got; i < f.qty; i++) phs.push({ req: r, face: f });
+      });
+    }
     var tbody = document.getElementById('rows');
-    if (!list.length) {
+    if (!list.length && !phs.length) {
       tbody.innerHTML = '<tr class="empty-row"><td colspan="7">' +
         (all.length ? 'No codes match the current filters.' : 'No codes in the pool yet.') + '</td></tr>';
       return;
     }
-    tbody.innerHTML = list.map(function (r) {
+    var phHtml = phs.map(function (p) {
+      var r = p.req, overdue = p.face.key === 'overdue';
+      var name = (CONFIG.clubs && CONFIG.clubs[r.club] && CONFIG.clubs[r.club].name) || r.club;
+      return '<tr><td><span class="code-note">—</span></td>' +
+        '<td' + (r.due ? ' title="Due ' + esc(NL.formatDateShort(r.due)) + '"' : '') + '>' +
+          '<span class="pill ' + (overdue ? 'pill--rejected' : 'pill--pending') + '">' +
+          (overdue ? 'Overdue' : 'Requested') + '</span></td>' +
+        '<td><span class="club-cell">' + NL.clubs.crestImgHtml(name, 'thumb') +
+          '<span class="club-cell__name">' + esc(name) + '</span></span></td>' +
+        '<td>—</td>' +
+        '<td title="' + esc(UWP.fmt(r.raisedAt)) + '">' + esc(UWP.ago(r.raisedAt)) + '</td>' +
+        '<td>' + esc(r.raisedBy === 'uw' ? 'UW' : 'NL') + '</td>' +
+        '<td></td></tr>';
+    }).join('');
+    tbody.innerHTML = phHtml + list.map(function (r) {
       var del = '<button class="btn btn--ghost btn--sm" data-delete="' + esc(r._id) + '">Delete</button>';
       var acts = del;
       /* Club-uploaded codes are never revoked, by anyone (owner ruling
@@ -800,7 +803,9 @@
       if (r.status === 'active') {
         // Pre-v3.0 codes have no club — register one before it can be redeemed
         // on anybody's behalf.
-        acts = (r.club
+        var dispatchBtn = (!r.dispatchedAt && !UWP.isExpired(r))
+          ? '<button class="btn btn--navy btn--sm" data-dispatch="' + esc(r._id) + '">Dispatch</button> ' : '';
+        acts = dispatchBtn + (r.club
                  ? '<button class="btn btn--ghost btn--sm" data-redeem="' + esc(r._id) + '">Redeem…</button> '
                  : '<button class="btn btn--navy btn--sm" data-register="' + esc(r._id) + '">Register…</button> ') +
                revokeBtn + del;
@@ -834,9 +839,31 @@
   document.getElementById('fStatus').value = '';
   document.getElementById('fSearch').value = '';
 
+  function dispatchOne(id) {
+    var r = CODES[id];
+    if (!r) return;
+    NL.confirm('Mark ' + r.code + ' as dispatched?', {
+      title: 'Dispatch',
+      detail: 'Records that this code has gone out, with today’s date — it doesn’t send anything.',
+      confirmText: 'Mark dispatched'
+    }).then(function (ok) {
+      if (!ok) return;
+      UWP.ensureAuth().then(function () {
+        return UWP.ref('codes/' + id).update({ dispatchedAt: Date.now(), dispatchedBy: ACTOR });
+      }).then(function () {
+        UWP.audit(ACTOR, ACTOR_LABEL, 'dispatch', {
+          club: r.club || null, clubName: r.clubName || null, codes: r.code, count: 1, detail: 'Marked dispatched'
+        });
+        toast(r.code + ' marked dispatched', 'success');
+      }).catch(function (err) { toast('Failed: ' + err.message, 'error'); });
+    });
+  }
+
   document.getElementById('rows').addEventListener('click', function (e) {
     var cp = e.target.closest('[data-copy]');
     if (cp) { NL.copy(cp.getAttribute('data-copy')); return; }
+    var dp = e.target.closest('[data-dispatch]');
+    if (dp) { dispatchOne(dp.getAttribute('data-dispatch')); return; }
     var rv = e.target.closest('[data-revoke]');
     if (rv) { revokeCode(rv.getAttribute('data-revoke')); return; }
     var rd = e.target.closest('[data-redeem]');

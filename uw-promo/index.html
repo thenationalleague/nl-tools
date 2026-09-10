@@ -3,6 +3,13 @@
 <head>
 <!--
   UW Promo Codes — Utility Warehouse partner page
+  Version: v8.0 (10/09/2026) — owner N8: a request IS empty rows in the
+           code table — one placeholder per code still owed (Requested /
+           Overdue pill, empty code cell), converting to Issued rows as the
+           club uploads; the separate Requests-to-clubs table is gone, and
+           "Fulfilled" is simply having no placeholders left. Dispatch is
+           per row with its own confirm — the tick column and the appearing
+           Mark-dispatched button are gone.
   Version: v7.9 (10/09/2026) — owner N1: Add in-store codes is
            GENERATE-ONLY — the paste path is gone from this door (the v3.0
            paste-first ruling is retired) and the count starts at 1, the
@@ -212,7 +219,6 @@
       </div>
       <div class="toolbar__right">
         <button class="btn btn--ghost" id="btnRoutes">Redemption methods</button>
-        <button class="btn btn--navy" id="btnDispatch" hidden>Mark dispatched (<span id="dispN">0</span>)</button>
         <button class="btn btn--ghost" id="btnExport">Export CSV</button>
         <!-- One primary per tab, always in the SAME rightmost slot — the tab
              swaps which of these two is visible, not where red lives. -->
@@ -224,20 +230,12 @@
     <!-- Raised requests, visible in place (owner, 09/09/2026): adding
          in-store codes shows in the list instantly, so raising a request
          must too — not vanish into a modal until the club uploads. -->
-    <div class="byclub" id="reqPanel" hidden>
-      <div class="byclub__title">Requests to clubs</div>
-      <div class="table-wrap"><table class="table">
-        <thead><tr><th>Club</th><th>Codes</th><th>Due</th><th>Status</th></tr></thead>
-        <tbody id="reqPanelRows"></tbody>
-      </table></div>
-    </div>
-
     <div class="table-wrap">
       <table class="table">
         <thead><tr>
-          <th></th><th>Code</th><th>Status</th><th>Club</th><th>Redeemed</th><th>Added</th><th></th>
+          <th>Code</th><th>Status</th><th>Club</th><th>Redeemed</th><th>Added</th><th></th>
         </tr></thead>
-        <tbody id="rows"><tr class="loading-row"><td colspan="7">Loading codes…</td></tr></tbody>
+        <tbody id="rows"><tr class="loading-row"><td colspan="6">Loading codes…</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -468,16 +466,45 @@
       '<div class="stat stat--expired"><div class="stat__num">' + counts.expired + '</div><div class="stat__label">Expired</div></div>');
 
     renderByClub(all);
-    renderRequestPanel();
 
     var list = filtered();
+    /* Owner N8 (10/09/2026): a request IS empty rows in this table. Each
+       open ask renders one placeholder per code still owed — empty code
+       cell, Requested (or Overdue) pill — and every club upload converts
+       one placeholder into a real Issued row, one for one. "Fulfilled" is
+       simply the state of having no placeholders left. Placeholders join
+       the unfiltered Online view; a status filter or search shows real
+       codes only. */
+    var phs = [];
+    if (TAB === 'online' && !document.getElementById('fStatus').value &&
+        !(document.getElementById('fSearch').value || '').trim()) {
+      var clubSel = document.getElementById('fClub').value;
+      reqList().forEach(function (r) {
+        if (clubSel && r.club !== clubSel) return;
+        var f = UWP.reqFace(r, CODES);
+        for (var i = f.got; i < f.qty; i++) phs.push({ ph: true, req: r, face: f });
+      });
+    }
     var tbody = document.getElementById('rows');
-    if (!list.length) {
-      tbody.innerHTML = '<tr class="empty-row"><td colspan="7">' +
-        (all.length ? 'No codes match the current filters.' : TAB === 'online' ? 'No club-uploaded codes yet.' : 'No codes in the pool yet — use “Add codes” to get started.') + '</td></tr>';
+    if (!list.length && !phs.length) {
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="6">' +
+        (all.length ? 'No codes match the current filters.' : TAB === 'online' ? 'No club-uploaded codes yet — raise a request.' : 'No codes in the pool yet — use “Add codes” to get started.') + '</td></tr>';
       return;
     }
-    tbody.innerHTML = list.map(function (r) {
+    var rowsHtml = phs.map(function (p) {
+      var r = p.req;
+      var overdue = p.face.key === 'overdue';
+      return '<tr><td><span class="code-note">—</span></td>' +
+        '<td' + (r.due ? ' title="Due ' + esc(NL.formatDateShort(r.due)) + '"' : '') + '>' +
+          '<span class="pill ' + (overdue ? 'pill--rejected' : 'pill--pending') + '">' +
+          (overdue ? 'Overdue' : 'Requested') + '</span></td>' +
+        '<td><span class="club-cell">' + NL.clubs.crestImgHtml(clubName(r.club), 'thumb') +
+          '<span class="club-cell__name">' + esc(clubName(r.club)) + '</span></span></td>' +
+        '<td>—</td>' +
+        '<td title="' + esc(UWP.fmt(r.raisedAt)) + '">' + esc(UWP.ago(r.raisedAt)) + '</td>' +
+        '<td></td></tr>';
+    }).join('');
+    rowsHtml += list.map(function (r) {
       var acts = '';
       /* Club-uploaded codes are never revoked (owner ruling 09/09/2026):
          the club's own POS is the authority on whether they work. NL master
@@ -488,19 +515,16 @@
       } else if (r.status === 'redeemed') {
         acts = '<button class="btn btn--restore btn--sm" data-release="' + esc(r._id) + '">Release</button>';
       }
-      // The club a code is REGISTERED to — shown whether or not it's redeemed.
-      // Blank only for codes created before v3.0, which belong to no club.
       var clubCell = r.clubName
         ? '<span class="club-cell">' + NL.clubs.crestImgHtml(r.clubName, 'thumb') +
           '<span class="club-cell__name">' + esc(r.clubName) + '</span></span>'
         : '<span class="code-note">Not registered</span>';
-      /* §5.2: Lucy works a monthly batch — dispatch is a bulk tick, offered
-         only where it means something (an undispatched, unredeemed code). */
-      var canDispatch = r.status === 'active' && !r.dispatchedAt && !UWP.isExpired(r);
+      /* Per-row dispatch with its own confirm (owner N8 — the bulk tick
+         column and the appearing button are gone). */
+      if (r.status === 'active' && !r.dispatchedAt && !UWP.isExpired(r)) {
+        acts = '<button class="btn btn--navy btn--sm" data-dispatch="' + esc(r._id) + '">Dispatch</button> ' + acts;
+      }
       return '<tr' + (r.status === 'revoked' ? ' class="is-revoked"' : '') + '>' +
-        '<td>' + (canDispatch
-          ? '<input type="checkbox" class="disp-tick" data-disp="' + esc(r._id) + '" aria-label="Select for dispatch">'
-          : '') + '</td>' +
         '<td><span class="code-mono">' + esc(r.code) + '</span> ' +
           '<button class="code-copy" data-copy="' + esc(r.code) + '" title="Copy code" aria-label="Copy code">⧉</button></td>' +
         '<td' + (r.dispatchedAt ? ' title="Dispatched ' + esc(UWP.fmt(r.dispatchedAt)) + '"' : '') + '>' +
@@ -510,6 +534,7 @@
         '<td title="' + esc(UWP.fmt(r.createdAt)) + '">' + esc(UWP.ago(r.createdAt)) + '</td>' +
         '<td class="ta-right">' + acts + '</td></tr>';
     }).join('');
+    tbody.innerHTML = rowsHtml;
     NL.clubs.wireCrestImgs(tbody);   // thumb → full → rose, same tick as insertion
   }
 
@@ -525,7 +550,6 @@
     document.getElementById('btnAdd').hidden = TAB !== 'instore';
     document.getElementById('btnRequests').hidden = TAB !== 'online';
     render();
-    refreshDispatchBtn();   // ticked rows left with the other tab's render
   });
 
   ['fClub', 'fStatus'].forEach(function (id) {
@@ -540,6 +564,8 @@
   document.getElementById('rows').addEventListener('click', function (e) {
     var cp = e.target.closest('[data-copy]');
     if (cp) { NL.copy(cp.getAttribute('data-copy')); return; }
+    var dp = e.target.closest('[data-dispatch]');
+    if (dp) { dispatchOne(dp.getAttribute('data-dispatch')); return; }
     var rv = e.target.closest('[data-revoke]');
     if (rv) { revokeCode(rv.getAttribute('data-revoke')); return; }
     var rl = e.target.closest('[data-release]');
@@ -748,24 +774,6 @@
 
   document.getElementById('btnRequests').addEventListener('click', openRequests);
 
-  /* The requests LIST lives on the Online tab itself (renderRequestPanel);
-     this modal is only the raise form. */
-  function renderRequestPanel() {
-    var panel = document.getElementById('reqPanel');
-    var list = reqList();
-    if (TAB !== 'online' || !list.length) { panel.hidden = true; return; }
-    panel.hidden = false;
-    document.getElementById('reqPanelRows').innerHTML = list.map(function (r) {
-      /* Nothing on a request is pressed after raising it: the state falls
-         out of the uploads that answer it (they carry the request id). */
-      var f = UWP.reqFace(r, CODES);
-      return '<tr><td>' + esc(clubName(r.club)) + '</td>' +
-        '<td>' + (f.got ? f.got + ' of ' + f.qty + ' uploaded' : esc(String(r.qty))) + '</td>' +
-        '<td>' + (r.due ? esc(NL.formatDateShort(r.due)) : '—') + '</td>' +
-        '<td>' + UWP.reqPill(f.key) + '</td></tr>';
-    }).join('');
-  }
-
   function openRequests() {
     var wrap = document.createElement('div');
     wrap.innerHTML =
@@ -812,49 +820,28 @@
     }
   }
 
-  /* ── Bulk dispatch (spec v43 §5.2) ──────────────────────────────────
-     Distinguishes a code sitting in stock from one already in a supporter's
-     inbox, and settles "I never received it". Timestamp written on marking;
-     nothing manual. */
-  document.getElementById('rows').addEventListener('change', function (e) {
-    if (e.target.classList.contains('disp-tick')) refreshDispatchBtn();
-  });
-  function selectedDispatch() {
-    return Array.prototype.map.call(document.querySelectorAll('.disp-tick:checked'), function (el) {
-      return el.getAttribute('data-disp');
-    });
-  }
-  function refreshDispatchBtn() {
-    var n = selectedDispatch().length;
-    document.getElementById('dispN').textContent = n;
-    document.getElementById('btnDispatch').hidden = !n;
-  }
-  document.getElementById('btnDispatch').addEventListener('click', function () {
-    var ids = selectedDispatch();
-    if (!ids.length) return;
-    NL.confirm('Mark ' + ids.length + ' code' + (ids.length === 1 ? '' : 's') + ' as dispatched?', {
-      title: 'Mark dispatched',
-      detail: 'Records that these codes have gone out to supporters, with today’s date. This is the audit trail for “I never received it” — it doesn’t send anything.',
+  /* ── Dispatch, per row (owner N8) ───────────────────────────────────
+     Distinguishes a code sitting in stock from one already sent out, and
+     settles "I never received it". One row, one confirm, one timestamp. */
+  function dispatchOne(id) {
+    var r = CODES[id];
+    if (!r) return;
+    NL.confirm('Mark ' + r.code + ' as dispatched?', {
+      title: 'Dispatch',
+      detail: 'Records that this code has gone out, with today’s date — it doesn’t send anything.',
       confirmText: 'Mark dispatched'
     }).then(function (ok) {
       if (!ok) return;
-      var updates = {};
-      ids.forEach(function (id) {
-        updates[id + '/dispatchedAt'] = Date.now();
-        updates[id + '/dispatchedBy'] = UW_ACTOR.actor;
-      });
       UWP.ensureAuth().then(function () {
-        return UWP.ref('codes').update(updates);
+        return UWP.ref('codes/' + id).update({ dispatchedAt: Date.now(), dispatchedBy: UW_ACTOR.actor });
       }).then(function () {
         UWP.audit(UW_ACTOR.actor, UW_ACTOR.label, 'dispatch', {
-          count: ids.length, detail: 'Marked dispatched (bulk)'
+          club: r.club || null, clubName: r.clubName || null, codes: r.code, count: 1, detail: 'Marked dispatched'
         });
-        toast(ids.length + ' marked dispatched', 'success');
-        refreshDispatchBtn();
+        toast(r.code + ' marked dispatched', 'success');
       }).catch(function (err) { toast('Failed: ' + err.message, 'error'); });
     });
-  });
-
+  }
   /* ── Redemption methods (spec v43 §4: reversal is NL or UW admin) ────── */
   /* A method change is rare and consequential, so it gets ceremony instead
      of a live dropdown (owner ruling 09/09/2026): the method reads as text
