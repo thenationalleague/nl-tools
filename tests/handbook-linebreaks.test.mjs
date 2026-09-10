@@ -74,21 +74,53 @@ test('empty and missing cells do not become "null" or "undefined"', () => {
   for (const v of [null, undefined, '']) assert.equal(cellHtml(v), '');
 });
 
-test('the cell is READ with something that understands a line break', () => {
-  /* textContent is the bug. It returns "Line oneLine two" for a cell holding
-     "Line one<br>Line two" — the two lines are welded together with not even
-     a space between them. */
+test('the cell is READ with something that keeps a line break AND the formatting', () => {
+  /* textContent was the first bug: "Line one<br>Line two" came back as
+     "Line oneLine two". A text walk (cellText, v0.55) was the second: it kept
+     the line but flattened <ul>, <li> and <i> to words, so nothing typed with
+     the toolbar survived a save (Appendix G, 10/09/2026). The cell is markup
+     now and is read through the same sanitiser as a clause body. */
   const save = lift('saveTableCell');
-  assert.match(save, /cellText\(cell\)/,
-    'saveTableCell must read the cell with cellText');
+  assert.match(save, /cellMarkup\(cell\)/,
+    'saveTableCell must read the cell with cellMarkup');
   assert.ok(!/cell\.textContent/.test(save),
     'textContent silently discards every <br> in the cell');
+  assert.ok(!/cellText\(/.test(save),
+    'cellText flattened lists and italics to words — that was the v0.55 read');
+  assert.match(save, /node\.table\.rich = true/,
+    'a saved cell is markup, and the table must say so or the reader escapes it');
 
-  const read = lift('cellText');
-  assert.match(read, /tag === 'br'[\s\S]{0,40}\\n/, 'a <br> becomes a newline');
-  assert.match(read, /tag === 'div' \|\| tag === 'p'/,
-    'Chrome wraps new lines in divs and Firefox splits paragraphs — both are ' +
-    'a line break and neither is a <br>');
+  const read = lift('cellMarkup');
+  assert.match(read, /sanitize\(el\.innerHTML\)/,
+    'the cell goes through the same allow-list as a clause body');
+});
+
+/* A cell in a rich table is drawn as stored; a cell in a table without the
+   flag is the old plain text and is still escaped. Both branches have to
+   hold: the first is the fix, the second is what stops an edition published
+   before v0.65 showing a club a literal "<". */
+test('a rich cell is drawn as the markup it holds', () => {
+  assert.equal(cellHtml('Clubs must lodge:<ul><li>the <em>signed</em> declaration</li></ul>', true),
+    'Clubs must lodge:<ul><li>the <em>signed</em> declaration</li></ul>');
+});
+
+test('a plain cell is still escaped, whatever it holds', () => {
+  assert.equal(cellHtml('<ul><li>x</li></ul>', false), '&lt;ul&gt;&lt;li&gt;x&lt;/li&gt;&lt;/ul&gt;');
+  assert.equal(cellHtml('a\nb', false), 'a<br>b');
+});
+
+test('renderTable passes the table\'s rich flag to every cell', () => {
+  const r = lift('renderTable');
+  assert.match(r, /var rich = !!t\.rich/);
+  const calls = r.match(/cellHtml\(c, rich\)/g) || [];
+  assert.equal(calls.length, 2, 'both th and td must pass the flag');
+  assert.ok(!/cellHtml\(c\)/.test(r), 'a call without the flag escapes a rich cell');
+});
+
+test('normNode converts a plain table to rich on the way in, through the one shared conversion', () => {
+  const nn = lift('normNode');
+  assert.match(nn, /if \(!t\.rich\) n\.table = window\.HB_DIFF\.richTable\(t\)/,
+    'the editor and the diff must convert identically or the first review reports every table as changed');
 });
 
 test('sanitize turns a div into a paragraph instead of deleting it', () => {
@@ -123,7 +155,17 @@ test('the allow-list still refuses live markup', () => {
 
 test('a phrase spanning a line break inside a cell is still searchable', () => {
   const t = lift('tableText');
+  assert.match(t, /HB_DIFF\.htmlToText\(s\)/,
+    'cells are markup now: search the words, not the tags');
   assert.match(t, /replace\(\/\\s\+\/g, ' '\)/,
-    'cells hold newlines now, so the search text has to flatten them or a ' +
+    'cells hold line breaks, so the search text has to flatten them or a ' +
     'phrase running across one stops matching');
+});
+
+test('the reader search strips cell markup too', () => {
+  const rd = readFileSync(join(REPO, 'handbook/_reader.js'), 'utf8');
+  const i = rd.indexOf('function tableText(');
+  const fn = rd.slice(i, rd.indexOf('\n  }', i));
+  assert.match(fn, /replace\(\/<\[\^>\]\+>\/g, ' '\)/,
+    'a search for "signed declaration" must not be beaten by the <em> between the words');
 });

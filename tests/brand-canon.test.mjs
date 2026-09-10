@@ -1019,3 +1019,19 @@ test('open dropdowns stack above sticky bars, below modals', () => {
   assert.ok(modal > dropdown,
     'modal (' + modal + ') must beat an open dropdown (' + dropdown + ')');
 });
+
+/* A bullet list typed into a document-table cell painted its marker in the
+   NEXT column (Appendix G, 10/09/2026): the universal reset zeroes list
+   padding and only .nl-clause__text restored it. brand v2.68 gives lists in
+   .nl-tbl their own indent. Guarded here because the reset makes the
+   default the wrong one — delete the rule and nothing else warns. */
+test('lists inside a document-table cell have an indent for their marker', () => {
+  const i = rules.indexOf('.nl-tbl ul, .nl-tbl ol {');
+  assert.ok(i >= 0, '.nl-tbl ul, .nl-tbl ol missing from nl-brand.css');
+  const body = rules.slice(i, rules.indexOf('}', i));
+  const m = body.match(/padding-left:\s*(\d+)px/);
+  assert.ok(m && Number(m[1]) > 0,
+    'the universal reset zeroes ul padding; without a left indent the disc paints outside the cell');
+  assert.match(ruleBody('.nl-tbl ul'), /list-style:\s*disc/);
+  assert.match(ruleBody('.nl-tbl ol'), /list-style:\s*decimal/);
+});
