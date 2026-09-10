@@ -3,6 +3,18 @@
 <head>
 <!--
   UW Promo Codes — Club point-of-sale redemption page
+  Version: v7.8 (10/09/2026) — LIVE WEDGE FIXED: the manager panes
+           (code table, requests, legacy) repaint first in render(), on
+           every data tick. They sat on render()'s LAST line, below the
+           till list's early returns — so a club with nothing redeemed
+           yet returned at "Nothing redeemed yet" and never repainted the
+           manager view on a codes change: uploads wrote fine and never
+           appeared, and Upload codes went silent (the shortfall was
+           already zero). Found by instrumenting the offline rig; the
+           earlier rig pass had a redeemed code in its seed, which dodged
+           the early return. Also: a watchdog on the upload chain — any
+           step that stalls now names itself instead of leaving
+           "Checking…" up forever with the modal swallowing every tap.
   Version: v7.7 (10/09/2026) — ONE upload door (owner): the per-row red
            Upload buttons and the outstanding/overdue banner prose are
            gone. A single Upload codes button sits rightmost in the codes
@@ -945,6 +957,13 @@
   }
 
   function render() {
+    /* Manager panes repaint FIRST, on every data tick. They lived on the
+       last line, below the till list's early returns — so a club with
+       nothing redeemed yet returned at the empty state and never saw an
+       upload land: codes wrote fine, placeholders never converted, and
+       Upload codes went silent because the shortfall was already zero
+       (live wedge, 10/09/2026). */
+    if (MODE === 'manager' && codesLoaded) { renderInventory(); renderRequests(); renderLegacy(); }
     var list = rows();
     var waiting = Object.keys(CODES).filter(function (k) { return CODES[k].status === 'active'; }).length;
     var dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
@@ -968,8 +987,6 @@
         '<div class="code-note">Redeemed ' + esc(UWP.fmt(r.redeemedAt)) + '</div></div>' +
         '<div>' + UWP.pillFor(r.status) + '</div></div>';
     }).join('');
-
-    if (MODE === 'manager') { renderInventory(); renderRequests(); renderLegacy(); }
   }
 
   /* ── Voucher checker ────────────────────────────────────────────────── */
@@ -1419,8 +1436,17 @@
 
     upBusy = true;
     upMsg('Checking ' + list.length + ' code' + (list.length === 1 ? '' : 's') + '…');
-    UWP.ensureAuth().then(function () {
-      return checkExisting(list);
+    /* Watchdog (10/09/2026, live wedge): a hang anywhere here used to
+       leave "Checking…" up forever with upBusy stuck true — the modal
+       swallowed every tap and nothing named the failing step. Any step
+       that stalls now surfaces as a message that says WHICH one. */
+    function withTimeout(p, ms, label) {
+      return Promise.race([p, new Promise(function (ignore, fail) {
+        setTimeout(function () { fail(new Error(label + ' did not respond after ' + (ms / 1000) + 's')); }, ms);
+      })]);
+    }
+    withTimeout(UWP.ensureAuth(), 10000, 'The sign-in check').then(function () {
+      return withTimeout(checkExisting(list), 20000, 'The duplicate check');
     }).then(function (clashes) {
       upBusy = false;
       if (clashes.length) {
