@@ -9,9 +9,9 @@ NO auth-guard/portal login), with a full audit trail.
 
 | Page | Who | Gets in via | Can do |
 |---|---|---|---|
-| `/uw-promo/` | **Utility Warehouse** (one shared login) | shared 6-character passcode or `?u=<token>` direct link | The code list splits into **In-store / Online tabs** — stats, breakdown, filters and export follow the tab, and each tab carries only its own verbs. In-store: add codes **for one club at a time** (club dropdown required; paste a list — the default — or generate plain 6-character codes; ≤500 per add), revoke **unredeemed** codes. Online: raise/see requests, dispatch, **no revoke — club-uploaded codes are never revoked by anyone**. Both: release a redeemed code (required reason), bulk dispatch, search, CSV export. The big count cards follow the club filter |
-| `/uw-promo/club/` | **Each of the 72 clubs** | own `?c=<token>` direct link (the QR-code target for the point of sale) plus a credential — the 4-digit till PIN (**demanded on every visit**, never stored), or the club's manager passcode (**remembered on that browser** until Sign out); either alone also works without the link | **Till page**: big code entry → a valid unredeemed code *registered to this club* is redeemed here (RTDB transaction — two tills can't claim the same code) and joins the club's redeemed list. Refusals (spec item 5): already-redeemed shows **club + date/time**, expired shows **its expiry date**, and everything else — not recognised, revoked, another club's code — shares ONE neutral message with the UW support address and T&Cs link, so till staff can't adjudicate. Clubs cannot undo — the page points them at NL. On the manager passcode only: **Check a code** (full detail, 10/hr, audited), and per route: upload (online), inventory, CSV, audit slice, PIN self-service (in-store) — see *Routes* and *Two doors* |
-| `/uw-promo/admin/` | **NL master (Richard)** | master passcode only (no direct link, deliberately; first-run bootstrap sets it) | Everything UW can do, plus: redeem on behalf of a club (the club it is registered to, same race-safe transaction), **register** a pre-v3.0 code to a club, revoke **redeemed** codes (typed `REVOKE`), seed/sync the roster from clubs-meta, the **list of all 72 club URLs, PINs and manager passcodes** (copy/regenerate each, **Reissue all club PINs**, **Issue missing manager passcodes**, export access CSV), **Print till cards** (one A4 card per club: crest, QR of the club link, PIN + the till steps — print-to-PDF gives the 72-page hand-out pack), audit viewer + export, sandbox reset (test mode) |
+| `/uw-promo/` | **Utility Warehouse** (one shared login) | shared 6-character passcode or `?u=<token>` direct link | Two method tabs — **In-store codes / Online codes** — sharing one table. In-store: **generate codes** for one in-store club at a time (generate-only; count defaults to 1; ≤500), revoke unredeemed codes, per-row **Dispatch** with confirm. Online: **Request club codes** (online clubs only; due prefilled +7, editable) — an open request renders as **placeholder rows** in the table (Requested/Overdue pill, empty code cell) that convert to Issued rows as the club uploads; per-row Dispatch; **no revoke on club-uploaded codes, ever**. Both: release a redeemed code (required reason), search, CSV export; stat cards follow tab + club filter |
+| `/uw-promo/club/` | **Each of the 72 clubs** | own `?c=<token>` direct link (the QR-code target for the point of sale) plus a credential — the 4-digit till PIN (**demanded on every visit**, never stored), or the club's manager passcode (**remembered on that browser** until Sign out) | **Till page**: big code entry → a valid unredeemed code *registered to this club* is redeemed here (RTDB transaction — two tills can't claim the same code). Refusals: already-redeemed shows club + date/time, expired its expiry date, everything else ONE neutral message. **Dashboard** (manager passcode; badge reads *Dashboard · In-store method* or *· Online method*): the same table UW sees, scoped to this club — **central codes are anonymous until redeemed** (a muted count line covers what's withheld; the club's own uploads stay visible); placeholder rows carry the red **Upload** button (one input box per code still owed; part-filling fine; three undertakings + confirm); an online club **marks its own codes redeemed** (confirm first); **Check a code** only where a till lives (in-store, or central codes still in the wild); PIN self-service + own till card (in-store). No activity feed — the master console's audit is the log |
+| `/uw-promo/admin/` | **NL master (Richard)** | master passcode only (no direct link, deliberately; first-run bootstrap sets it; **remembered** until Sign out) | Mirrors the UW dashboard: tabs **Clubs & access · In-store codes · Online codes · Audit**, landing on Clubs & access (master passcode, UW access, support & notifications, the club table — method pill + pencil, contact column, credential chips with reissue glyphs, Card for in-store rows only, bulk reissues, access CSV, print till cards). The method tabs are UW's shape plus master powers: paste-capable add (the NL back-door) + Code adds on In-store, Request club codes on Online, and per-row Dispatch / Redeem… / Register… / Revoke (typed for redeemed) / Delete (typed). Sandbox reset in test mode |
 
 ## Which club a code belongs to
 
@@ -156,20 +156,16 @@ These are **derived faces** (`UWP.faceOf` over `statusOf` + the
 `dispatchedAt` flag), never a stored status — expired/redeemed/revoked
 always win.
 
-**Requests are logged, never operated.** Lucy (UW page) or Richard (admin
-console) raises one against an online club — quantity plus a due date that
-prefills a week out and stays editable — and from then on **nothing on the
-request is ever pressed**. Uploads carry the id of the request they answer,
-so its state falls out of the codes themselves (`UWP.reqFace`):
-
-- **Waiting** — open, uploads short of the ask (progress shown as "2 of 5")
-- **Overdue** — waiting, past the due date
-- **Fulfilled** — uploads meet the quantity; nobody marks anything
-- **Dispatched** — fulfilled, and every one of its codes marked dispatched
-
-The club admin view shows its own history — lifecycle count cards, the
-request table with per-request Upload buttons, and a banner that nets off
-what has already been supplied.
+**Requests are logged, never operated — and a request IS empty rows.**
+Lucy (UW page) or Richard (admin console) raises one against an online
+club; from then on nothing on the request is ever pressed. It renders as
+one **placeholder row per code still owed** in the code table itself —
+Requested pill (Overdue past due), empty code cell — and each club upload
+converts one placeholder into a real Issued row. "Fulfilled" is not a
+label: it is having no placeholders left. Dispatch is **per row** with its
+own confirm. An **online club marks its own codes redeemed** (confirm
+first, audited) — its store is where fans redeem, so the club closes the
+loop and the Redeemed counts move for online codes too.
 
 **Overdue chasing is internal only** (§7): a scheduled Cloud Function
 (`uwPromoOverdue`, daily 08:30 UK) pokes the GAS router when requests are
@@ -286,48 +282,17 @@ have to be reprinted and resent.
 
 ## Clubs uploading their own codes
 
-In the club admin view (manager passcode — **not** the till PIN), and only
-on the **online route** — an in-store club's codes come centrally from UW,
-so its managers don't see the module. Uploads live **inside the request
-they answer** (each open request has an Upload button; an unsolicited
-upload stays possible via a small link). A club pastes its own codes, one
-per line, and they go live immediately — registered to that club, because a
-club can only ever upload its own. There is no club to choose and therefore
-nothing to get wrong, and no batch labels — codes added together share one
-server timestamp, and that date stamp is the grouping.
-
-Three undertakings must be ticked, then a second confirm dialog restates them:
-
-1. The codes **work in that club's own till system** — the club is responsible
-   for that; neither NL nor UW can test them.
-2. Each code applies the **agreed £50 discount**.
-3. The codes stay valid for **at least 12 months** from upload.
-
-**Expiry is an undertaking, not a field.** Nothing stores an expiry date and
-nothing enforces one at the till — the club commits to 12 months and that
-commitment is what we keep. The record lives in the audit trail: the entry
-names the club, the count, the request answered and each undertaking, and the trail is
-append-only, so not even the master console can alter it afterwards. That is
-deliberately stronger evidence than a flag on the code would be.
-
-Uploaded codes are checked against the **whole** system before anything is
-written — one indexed `norm` lookup per code, ten at a time. The obvious
-alternative (read the `codes` node once, build a local set) would put every
-other club's codes in that club's browser, which is exactly what a club must
-not have. The lookups are the reason for the **200-per-upload cap**; if a
-clash is found, nothing at all is written and the clashing codes are named.
-
-In the NL and UW panels these appear with **Club** in the "By" column
-(`createdBy` is `club:<CODE>`), so a club-supplied batch is always
-distinguishable from a UW or NL one.
-
-**A completed upload emails the NL** (spec item 6): the page fires
-`uwPromo_uploadNotify` at the GAS router, which reads its recipients from
-`config/support/notify` — set from the master console's **Support &
-notifications** card, held in RTDB because this repo is public and no
-personal address is ever committed. Fire-and-forget: the upload has already
-succeeded and been audited either way, and no recipients configured is a
-silent no-op, not an error at a club's screen.
+Only **inside a request** (owner ruling 10/09/2026): each placeholder row
+carries the red Upload button, and the form renders **one input box per
+code still owed** — a request for 5 with 2 supplied shows 3 boxes.
+Part-filling is fine; overshooting is impossible. The three undertakings
+(work in the club's own system, agreed £50, valid 12+ months) must be
+ticked, then a confirm restates them; the audit entry names the club, the
+count, the request answered and each undertaking, and the trail is
+append-only. Codes are checked against the whole system one indexed
+lookup at a time before anything is written — a clash writes nothing and
+is named. Codes uploaded together share one server timestamp: the date
+stamp is the grouping (there are no batches or labels anywhere).
 
 ## Till cards
 
@@ -354,7 +319,12 @@ family would print a blank sheet.
 
 ## Checking a code without redeeming it
 
-Behind the **manager door** as of v5.0, not on the till. The till's refusal
+Behind the **manager door**, and only where a till lives — in-store
+clubs, or a club whose central codes are still in the wild. A pure online
+club has no till and no contested codes, so no checker (owner N5).
+Note the pairing with N9: the dashboard never *lists* unredeemed central
+strings, while the checker requires already *having* one code in hand —
+opposite directions, deliberately. The till's refusal
 screen is deliberately neutral so till staff can't adjudicate a contested
 code — a detailed lookup sitting next to it would hand the detail straight
 back. Managers get the full story: genuine or not, which club it belongs to,
