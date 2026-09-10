@@ -24,6 +24,24 @@
            write config. That is the change that stops all 72 till PINs being
            world-readable. First run mints a bootstrap master token while no
            passcode exists; nothing subscribes to RTDB until the session does.
+  Version: v7.7 (10/09/2026) — the Support & notifications card is gone
+           (owner: the addresses will be seeded separately when they
+           exist). The RTDB config/support node and everything that reads
+           it — the refusal-screen support address in the club grant, the
+           GAS notify list — are untouched; the console just no longer
+           edits it.
+  Version: v7.6 (10/09/2026) — the Till PIN chip is muted and won't copy
+           while the club is not on the in-store method (owner): a PIN is
+           till furniture, so it reads as idle — still visible, refresh
+           still works.
+  Version: v7.5 (10/09/2026) — divisions are gone from the tool (owner:
+           "don't need to filter; alphabetical to all clubs is fine"): the
+           Clubs & access Division column is removed — which is what was
+           overspilling the table after the Link button landed — every
+           club list and dropdown is flat alphabetical with no optgroups,
+           and the access CSV drops the column. The division field stays
+           on the stored record (seeded from the roster) — it just no
+           longer renders anywhere.
   Version: v7.4 (10/09/2026) — credential rotation is per club (owner):
            the roster-wide "Reissue all club PINs" / "Reissue all manager
            passcodes" buttons and their typed-confirm flows are gone — the
@@ -218,12 +236,6 @@
   .route-pick { font-family: var(--font); font-size: var(--text-sm); padding: 5px 6px;
     border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); background: var(--white); }
   .route-pick:focus-visible { outline: none; box-shadow: var(--focus-ring); border-color: var(--primary); }
-  .support-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
-  .support-form label { display: block; font-size: var(--text-xs); font-weight: 800; text-transform: uppercase;
-    letter-spacing: 0.07em; color: var(--text-muted); margin-bottom: 5px; }
-  .support-form input { font-family: var(--font); font-size: var(--text-sm); padding: 8px 10px; min-width: 260px;
-    border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); }
-  .support-form input:focus-visible { outline: none; box-shadow: var(--focus-ring); border-color: var(--primary); }
 
 </style>
 </head>
@@ -328,20 +340,6 @@
       <div class="access-card">
         <div class="access-card__title">Utility Warehouse access</div>
         <div class="access-card__row" id="uwAccessRow"></div>
-      </div>
-      <div class="access-card">
-        <div class="access-card__title">Support &amp; notifications</div>
-        <!-- Personal addresses live HERE, in RTDB, precisely because this
-             repo is public: nothing in git ever carries an email address.
-             The support address rides to clubs in their sign-in grant; the
-             notify list is read by the GAS mailer with its server credential. -->
-        <div class="support-form">
-          <div><label for="supEmail">UW support email — shown to fans on a refused code</label>
-            <input id="supEmail" type="email" placeholder="not set yet — refusal screens show only the T&amp;Cs link"></div>
-          <div><label for="supNotify">Upload alerts go to (comma-separated)</label>
-            <input id="supNotify" type="text" placeholder="Comma-separated email addresses"></div>
-          <button class="btn btn--primary btn--sm" id="supSave">Save</button>
-        </div>
       </div>
       <div class="access-card">
         <div class="access-card__title">Club access <span id="clubCount" style="color:var(--text-muted);font-weight:700"></span></div>
@@ -639,9 +637,7 @@
       return { code: k, name: c.name, division: c.division || '', passcode: c.passcode,
                managerPass: c.managerPass, token: c.token,
                route: (c.route === 'instore' || c.route === 'online') ? c.route : 'unassigned' };
-    }).sort(function (a, b) {
-      return (a.division || '').localeCompare(b.division || '') || a.name.localeCompare(b.name);
-    });
+    }).sort(function (a, b) { return a.name.localeCompare(b.name); });
   }
 
   /* Every PIN currently issued to a club, as a set for UWP.newPin. A club
@@ -666,45 +662,34 @@
        codes on the tab, so no row is ever unfilterable. */
     var owned = {};
     codeRows().forEach(function (r) { if (r.club) owned[r.club] = true; });
-    var byDiv = {}, order = [];
-    clubList().forEach(function (c) {
-      if (c.route !== METHOD_TAB && !owned[c.code]) return;
-      if (!byDiv[c.division]) { byDiv[c.division] = []; order.push(c.division); }
-      byDiv[c.division].push(c);
-    });
     var html = '<option value="">All clubs</option>';
     // Codes created before v3.0 belong to no club — central by definition,
     // so the register-me bucket lives on the In-store tab only (the per-row
     // "Register…" button is how they get a club).
     if (METHOD_TAB === 'instore') html += '<option value="__none">Not yet registered to a club</option>';
-    order.forEach(function (d) {
-      html += '<optgroup label="' + esc(d || 'Clubs') + '">';
-      byDiv[d].forEach(function (c) { html += '<option value="' + esc(c.code) + '">' + esc(c.name) + '</option>'; });
-      html += '</optgroup>';
+    clubList().forEach(function (c) {
+      if (c.route !== METHOD_TAB && !owned[c.code]) return;
+      html += '<option value="' + esc(c.code) + '">' + esc(c.name) + '</option>';
     });
     sel.innerHTML = html;
     sel.value = prev;
     if (sel.selectedIndex === -1) sel.value = '';
   }
 
-  /* Options for an "which club?" dropdown, grouped by division. */
-  /* methodFilter narrows the list to one redemption method (owner ruling
+  /* Options for a "which club?" dropdown — alphabetical, no division
+     grouping (owner ruling 10/09/2026: divisions are gone from this tool).
+     methodFilter narrows the list to one redemption method (owner ruling
      09/09/2026): central codes are added for IN-STORE clubs only, requests
      are raised against ONLINE clubs only, and registering a pre-v3.0 code
      stays unfiltered. */
   function clubOptionsHtml(placeholder, methodFilter) {
-    var byDiv = {}, order = [];
-    clubList().forEach(function (c) {
-      if (methodFilter && c.route !== methodFilter) return;
-      if (!byDiv[c.division]) { byDiv[c.division] = []; order.push(c.division); }
-      byDiv[c.division].push(c);
-    });
-    return '<option value="">' + esc(placeholder) + '</option>' + order.map(function (d) {
-      return '<optgroup label="' + esc(d || 'Clubs') + '">' + byDiv[d].map(function (c) {
+    return '<option value="">' + esc(placeholder) + '</option>' +
+      clubList().filter(function (c) {
+        return !methodFilter || c.route === methodFilter;
+      }).map(function (c) {
         var mark = methodFilter || c.route === 'instore' ? '' : ' — ' + ROUTE_LABEL[c.route].toLowerCase();
         return '<option value="' + esc(c.code) + '">' + esc(c.name) + esc(mark) + '</option>';
-      }).join('') + '</optgroup>';
-    }).join('');
+      }).join('');
   }
 
   /* The club filter is the one filter the big count cards also obey — every
@@ -1270,15 +1255,6 @@
     chip.onclick = function () { NL.copy(chip.textContent, { ok: 'Master passcode copied' }); };
     document.getElementById('btnMasterPass').onclick = changeMasterPass;
 
-    /* Support & notifications — refill only while the fields are idle, so a
-       half-typed address isn't clobbered by a config listener tick. */
-    var supEmail = document.getElementById('supEmail'), supNotify = document.getElementById('supNotify');
-    if (document.activeElement !== supEmail && document.activeElement !== supNotify) {
-      supEmail.value = (CONFIG.support && CONFIG.support.email) || '';
-      supNotify.value = (CONFIG.support && CONFIG.support.notify) || '';
-    }
-    document.getElementById('supSave').onclick = saveSupport;
-
     // UW access
     var uwRow = document.getElementById('uwAccessRow');
     if (CONFIG.uw && CONFIG.uw.passcode) {
@@ -1363,11 +1339,10 @@
           'the refresh glyph beside a club’s PIN converts it to a 4-digit PIN.</p>'
         : '') +
       '<div class="table-wrap"><table class="table">' +
-      '<thead><tr><th>Club</th><th>Division</th><th>Method</th><th>Scheme contact</th><th>Till PIN</th><th>Manager passcode</th><th></th></tr></thead><tbody>' +
+      '<thead><tr><th>Club</th><th>Method</th><th>Scheme contact</th><th>Till PIN</th><th>Manager passcode</th><th></th></tr></thead><tbody>' +
       clubs.map(function (c) {
         return '<tr><td><span class="club-cell">' + NL.clubs.crestImgHtml(c.name, 'thumb') +
           '<span class="club-cell__name">' + esc(c.name) + '</span></span></td>' +
-          '<td>' + esc(c.division) + '</td>' +
           '<td style="white-space:nowrap">' + UWP.methodPill(c.route) +
             ' <button class="code-copy" data-medit="' + esc(c.code) + '" title="Change redemption method"' +
             ' aria-label="Change redemption method for ' + esc(c.name) + '">' +
@@ -1376,7 +1351,13 @@
           /* Each reissue glyph sits beside the thing it renews — five
              spelled-out buttons per row made the table ginormous (owner,
              09/09/2026). Same icon-button pattern as the method pencil. */
-          '<td class="nowrap"><button class="cred-chip" data-copypass="' + esc(c.code) + '" title="Click to copy">' + esc(c.passcode) + '</button>' +
+          /* A PIN is till furniture: while the club is not on the in-store
+             method it renders muted and won't copy (owner 10/09/2026) —
+             still visible and still rotatable, but clearly idle. */
+          '<td class="nowrap"><button class="cred-chip"' + (c.route === 'instore'
+            ? ' data-copypass="' + esc(c.code) + '" title="Click to copy"'
+            : ' disabled title="Idle — the club is not on the in-store method"') +
+            '>' + esc(c.passcode) + '</button>' +
             rowIcon('refresh', 'New PIN', 'data-newpass', c) + '</td>' +
           '<td class="nowrap">' + (c.managerPass
             ? '<button class="cred-chip" data-copymgr="' + esc(c.code) + '" title="Click to copy">' + esc(c.managerPass) + '</button>' +
@@ -1530,17 +1511,6 @@
     });
   }
 
-  function saveSupport() {
-    var email = document.getElementById('supEmail').value.trim();
-    var notify = document.getElementById('supNotify').value.trim();
-    UWP.ensureAuth().then(function () {
-      return UWP.ref('config/support').set({ email: email || null, notify: notify || null, updatedAt: UWP.TS() });
-    }).then(function () {
-      UWP.audit(ACTOR, ACTOR_LABEL, 'support', { detail: 'Support/notification addresses updated' });
-      toast('Saved — clubs pick the support address up at their next sign-in', 'success');
-    }).catch(function (err) { toast('Save failed: ' + err.message, 'error'); });
-  }
-
   function changeMasterPass() {
     NL.prompt('New master passcode (exactly 6 characters):', {
       title: 'Change master passcode', placeholder: '••••••'
@@ -1590,8 +1560,8 @@
 
   function exportAccess() {
     var clubs = clubList();
-    var rows = [['Club', 'Division', 'Method', 'Till PIN', 'Manager passcode', 'Direct link']];
-    clubs.forEach(function (c) { rows.push([c.name, c.division, ROUTE_LABEL[c.route], c.passcode, c.managerPass || '', UWP.clubLink(c.token)]); });
+    var rows = [['Club', 'Method', 'Till PIN', 'Manager passcode', 'Direct link']];
+    clubs.forEach(function (c) { rows.push([c.name, ROUTE_LABEL[c.route], c.passcode, c.managerPass || '', UWP.clubLink(c.token)]); });
     if (CONFIG.uw && CONFIG.uw.passcode) rows.push(['Utility Warehouse', '', '', CONFIG.uw.passcode, '', UWP.uwLink(CONFIG.uw.token)]);
     NL.download('uw-promo-access.csv', NL.csv(rows, { bom: true }), 'text/csv;charset=utf-8');
     toast('Access CSV exported — treat it like a password list', 'success');
