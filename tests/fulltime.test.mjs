@@ -71,14 +71,29 @@ test('urls: 100-row paged form first, plain page second, table unpaged', () => {
   assert.equal(P.urlsFor('table', '1').length, 1);
 });
 
-test('fetchKind falls back to the plain page when the paged path is refused', async () => {
+test('fetchKind falls back to the plain page when the paged path is refused, and says what each answered', async () => {
   const hits = [];
   const get = async (url) => { hits.push(url); return url.includes('/1/100.html') ? null : FX('results.html'); };
-  const rows = await P.fetchKind('results', '355815748', get);
-  assert.equal(rows.length, 10);
+  const r = await P.fetchKind('results', '355815748', get);
+  assert.equal(r.rows.length, 10);
   assert.equal(hits.length, 2);
+  assert.equal(r.tried.length, 2);
+  assert.equal(r.tried[0].status, 0);
+  assert.equal(r.tried[1].rows, 10);
   const none = await P.fetchKind('results', '355815748', async () => null);
-  assert.equal(none, null, 'nothing fetched reports null so the stored copy is kept');
+  assert.equal(none.rows, null, 'nothing fetched reports null so the stored copy is kept');
+  assert.equal(none.tried.length, 2);
+});
+
+test('a 200 that is not the page (a challenge or holding page) is a miss with the title recorded', async () => {
+  const get = async () => ({ html: '<html><head><title>Access denied</title></head><body>Sorry</body></html>', status: 200, bytes: 70, title: 'Access denied', redirected: '', error: '' });
+  const r = await P.fetchKind('table', '355815748', get);
+  assert.equal(r.rows, null);
+  assert.equal(r.tried[0].title, 'Access denied');
+  assert.equal(r.tried[0].rows, 0);
+  const d = await P.fetchDivision({ key: 'academy-north', ft: '355815748' }, get);
+  assert.equal(d.table, null);
+  assert.equal(d.diag.table[0].title, 'Access denied');
 });
 
 test('division IDs agree with the tool', () => {

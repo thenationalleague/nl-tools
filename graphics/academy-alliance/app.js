@@ -231,39 +231,92 @@
   function esc(s) { return NL.escHtml(s); }
 
   /* ---------------- paste → fixtures ----------------
-     home / [score or v] / away per line. A line with no opponent — a date, a
-     round heading, anything on its own — becomes a divider, so a list copied
-     day-by-day keeps its day headings. */
+     Three shapes are accepted, one match per line:
+       Home  v  Away            or   Home  2-1  Away
+       Home [tab] v [tab] Away  — what the editor writes back
+       a row copied off Full-Time's fixtures or results page:
+         Type  Date/Time  Home  (blank)  VS|score  (blank)  Away  Venue  Competition  Status
+     The pair is whatever sits either side of the VS or the score; a
+     DD/MM/YY HH:MM cell supplies the kick-off and, when the paste spans more
+     than one day, a heading per day; a Postponed row is dropped and counted.
+     A line with no opponent — a date, a round heading — becomes a heading. */
+  var _lastSkipped = 0;
   function parseScore(s) {
     var m = String(s || "").match(/^(\d{1,2})\s*[-–:]\s*(\d{1,2})$/);
     return m ? { hs: m[1], as: m[2] } : null;
+  }
+  function isVs(c) { return /^(v|vs)\.?$/i.test(c); }
+  function isDateCell(c) { return /^\d{2}\/\d{2}\/\d{2,4}(\s+\d{1,2}[:.]\d{2})?$/.test(c); }
+  function isoFromCell(c) {
+    var m = c.match(/^(\d{2})\/(\d{2})\/(\d{2,4})/);
+    return m ? (m[3].length === 2 ? "20" + m[3] : m[3]) + "-" + m[2] + "-" + m[1] : "";
   }
   function splitFixture(line) {
     if (line.indexOf("\t") >= 0) return line.split("\t");
     var sm = line.match(/^(.*?)\s+(\d{1,2}\s*[-–:]\s*\d{1,2})\s+(.*)$/);
     if (sm) return [sm[1], sm[2], sm[3]];
     var vm = line.split(/\s+(?:v|vs)\.?\s+/i);
-    if (vm.length === 2) return [vm[0], "", vm[1]];
+    if (vm.length === 2) return [vm[0], "v", vm[1]];
     if (line.indexOf(",") >= 0) return line.split(",");
     return [line];
+  }
+  /* Full-Time's results page is built from divs, so a copy comes out one
+     field per line: type, blank, date/time, home, score, away, competition.
+     Fold that back into one line per match — the score (or a lone VS) pairs
+     the line above with the line below, and the nearest date line above
+     supplies the day and kick-off — so the per-line parser sees it as the
+     tab-separated shape. Only kicks in when a line is a bare score or VS. */
+  function foldStacked(lines) {
+    var bare = lines.some(function (l) { return isVs(l) || parseScore(l) || /^p\s*-\s*p$/i.test(l); });
+    if (bare) {
+      var out = [], date = "";
+      for (var i = 0; i < lines.length; i++) {
+        var l = lines[i];
+        if (isDateCell(l)) { date = l; continue; }
+        if (/^p\s*-\s*p$/i.test(l)) { out.push([date, lines[i - 1] || "", "Postponed", "v", lines[i + 1] || ""].join("\t")); i++; continue; }
+        if ((isVs(l) || parseScore(l)) && i > 0 && i < lines.length - 1) {
+          out.push([date, lines[i - 1], l, lines[i + 1]].join("\t")); i++;
+        }
+      }
+      return out;
+    }
+    return lines;
   }
   function parseFixtures(raw) {
     var lines = (raw || "").replace(/\r/g, "\n").split("\n")
       .map(function (l) { return l.trim(); }).filter(function (l) { return l.length; });
-    var out = [], n = 0;
+    lines = foldStacked(lines);
+    var out = [], n = 0, skipped = 0, dates = {}, dateCount = 0;
+    var parsed = [];
     lines.forEach(function (line) {
       var cells = splitFixture(line).map(function (s) { return s.trim(); }).filter(function (s) { return s.length; });
       if (!cells.length) return;
-      if (cells.length === 1) { out.push({ divider: cells[0] }); return; }
-      if (n >= MAX_FIXTURES) return;
-      var home = cells[0], away = cells[cells.length - 1], hs = "", as = "", ko = "";
+      if (/home team|away team/i.test(line) && /date/i.test(line)) return;   /* Full-Time header row */
+      if (cells.length === 1) { parsed.push({ divider: cells[0] }); return; }
+      var mid = -1, sc = null;
       for (var k = 1; k < cells.length - 1; k++) {
-        var sc = parseScore(cells[k]);
-        if (sc) { hs = sc.hs; as = sc.as; break; }
-        if (/^\d{1,2}[:.]\d{2}$/.test(cells[k])) ko = cells[k].replace(".", ":");
+        if (isVs(cells[k]) || (sc = parseScore(cells[k]))) { mid = k; break; }
       }
-      out.push({ home: home, away: away, hs: hs, as: as, ko: ko }); n++;
+      var home, away, ko = "", date = "";
+      if (mid > 0) { home = cells[mid - 1]; away = cells[mid + 1]; }
+      else { home = cells[0]; away = cells[cells.length - 1]; }
+      cells.forEach(function (c) {
+        if (isDateCell(c)) { date = isoFromCell(c); var t = c.match(/(\d{1,2})[:.](\d{2})$/); if (t) ko = t[1].padStart(2, "0") + ":" + t[2]; }
+        else if (!ko && /^\d{1,2}[:.]\d{2}$/.test(c)) ko = c.replace(".", ":");
+      });
+      if (cells.some(function (c) { return /^(postponed|cancelled|abandoned|walkover)/i.test(c); })) { skipped++; return; }
+      if (date && !dates[date]) { dates[date] = 1; dateCount++; }
+      parsed.push({ home: home, away: away, hs: sc ? sc.hs : "", as: sc ? sc.as : "", ko: ko, date: date });
     });
+    var lastDate = "";
+    parsed.forEach(function (r) {
+      if (r.divider != null) { out.push(r); return; }
+      if (n >= MAX_FIXTURES) return;
+      if (dateCount > 1 && r.date && r.date !== lastDate) { out.push({ divider: dividerLabel(r.date) }); lastDate = r.date; }
+      delete r.date;
+      out.push(r); n++;
+    });
+    _lastSkipped = skipped;
     return out;
   }
 
@@ -619,6 +672,7 @@
       state.fixtures = parsed;
     }
     buildGrid(); save(); render(); reportMatches();
+    if (state.type !== "table" && _lastSkipped) setStatus(_lastSkipped + " postponed left out", 4000);
   }
   function syncPasteFromRows() {
     if (state.type === "table") {
@@ -716,9 +770,21 @@
     var node = feedNode();
     if (!node || !node.fetchedAt) { el.textContent = "No copy of this division yet. Refresh fetches it from Full-Time."; el.className = "warn"; return; }
     var when = NL.formatDateTime ? NL.formatDateTime(node.fetchedAt) : new Date(node.fetchedAt).toLocaleString("en-GB");
-    var miss = (node.missing || []).length ? " · last fetch missed: " + node.missing.join(", ") : "";
+    var missing = node.missing || [];
+    var miss = missing.length ? " · last fetch missed: " + missing.join(", ") : "";
     el.textContent = "Fetched " + when + miss;
     el.className = miss ? "warn" : "";
+    /* say why: what Full-Time answered for each missed page */
+    if (missing.length && node.diag) {
+      missing.forEach(function (kind) {
+        (node.diag[kind] || []).forEach(function (t) {
+          var line = document.createElement("div");
+          line.textContent = kind + " " + (t.path || "") + " → " + (t.error ? t.error : "HTTP " + t.status + ", " + t.bytes + " bytes, " + t.rows + " rows" +
+            (t.title ? ", \"" + t.title + "\"" : "") + (t.redirected ? ", redirected to " + t.redirected : ""));
+          el.appendChild(line);
+        });
+      });
+    }
   }
   /* Load fills the editor from the stored copy. Fixtures and results take
      the chosen date, or the run from Date through to Through to, with a
@@ -991,5 +1057,7 @@
   window.TOOL = window.TOOL || {};
   window.TOOL.boot = init;
   window.TOOL.resolveTeam = resolveTeam;   /* exposed for tests/academy-alliance-names.test.mjs */
+  window.TOOL.parseFixtures = parseFixtures;
+  window.TOOL.parseTable = parseTable;
   if (window._toolDeferredSession) { init(); delete window._toolDeferredSession; }
 })();

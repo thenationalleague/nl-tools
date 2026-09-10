@@ -138,18 +138,32 @@ function urlsFor(kind, ft) {
   return [BASE + '/' + kind + '/1/100.html?' + query(ft), BASE + '/' + kind + '.html?' + query(ft)];
 }
 
+/* Browser-like headers on purpose: Full-Time sits behind an edge that has
+   been seen to answer a bare server fetch with an empty or challenge page
+   while the same URL renders in a browser. Every attempt records what came
+   back — status, size, redirect target, page title — because "missed" on
+   its own tells nobody why. Never logs or stores cookies. */
+const HEADERS = {
+  'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+  'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'accept-language': 'en-GB,en;q=0.9',
+  'cache-control': 'no-cache',
+};
+function titleOf(html) {
+  const m = String(html || '').match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  return m ? m[1].replace(/\s+/g, ' ').trim().slice(0, 80) : '';
+}
+/* → { html|null, status, bytes, title, redirected, error } */
 async function getHtml(url) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(url, {
-      headers: { 'user-agent': 'nl-tools/fulltime-ingester (thenationalleague.org.uk)', accept: 'text/html' },
-      signal: ctrl.signal, redirect: 'follow',
-    });
-    if (!res.ok) return null;
-    return await res.text();
+    const res = await fetch(url, { headers: HEADERS, signal: ctrl.signal, redirect: 'follow' });
+    const html = await res.text();
+    return { html: res.ok ? html : null, status: res.status, bytes: html.length, title: titleOf(html),
+      redirected: res.redirected ? String(res.url).replace(/\?.*$/, '') : '' , error: '' };
   } catch (e) {
-    return null;
+    return { html: null, status: 0, bytes: 0, title: '', redirected: '', error: String(e && e.name === 'AbortError' ? 'timeout' : (e && e.message) || e).slice(0, 120) };
   } finally {
     clearTimeout(timer);
   }
@@ -158,16 +172,20 @@ async function getHtml(url) {
 const PARSERS = { table: parseTable, results: parseResults, fixtures: parseFixtures };
 
 /* One kind for one division: first URL whose page parses to at least one
-   row wins; an empty parse on every candidate is reported as null so the
-   caller keeps the previous good copy rather than blanking the node. */
+   row wins. `rows` is null when every candidate failed or parsed empty, so
+   the caller keeps the previous good copy rather than blanking the node;
+   `tried` says what each candidate answered. A fetcher may return a bare
+   string (the tests do) or the { html, status… } record getHtml returns. */
 async function fetchKind(kind, ft, get) {
+  const tried = [];
   for (const url of urlsFor(kind, ft)) {
-    const html = await get(url);
-    if (!html) continue;
-    const rows = PARSERS[kind](html);
-    if (rows.length) return rows;
+    const got = await get(url);
+    const rec = (got && typeof got === 'object') ? got : { html: got || null, status: got ? 200 : 0, bytes: got ? got.length : 0, title: titleOf(got), redirected: '', error: '' };
+    const rows = rec.html ? PARSERS[kind](rec.html) : [];
+    tried.push({ path: url.replace(BASE, '').replace(/\?.*$/, ''), status: rec.status, bytes: rec.bytes, title: rec.title, redirected: rec.redirected, error: rec.error, rows: rows.length });
+    if (rows.length) return { rows, tried };
   }
-  return null;
+  return { rows: null, tried };
 }
 
 async function fetchDivision(div, get) {
@@ -176,8 +194,9 @@ async function fetchDivision(div, get) {
     fetchKind('results', div.ft, get),
     fetchKind('fixtures', div.ft, get),
   ]);
-  return { table, results, fixtures };
+  return { table: table.rows, results: results.rows, fixtures: fixtures.rows,
+    diag: { table: table.tried, results: results.tried, fixtures: fixtures.tried } };
 }
 
 
-module.exports = { parseTable, parseResults, parseFixtures, isoDate, urlsFor, getHtml, fetchKind, fetchDivision, DIVISIONS, SEASON, BASE };
+module.exports = { parseTable, parseResults, parseFixtures, isoDate, titleOf, urlsFor, getHtml, fetchKind, fetchDivision, DIVISIONS, SEASON, BASE };
