@@ -3,6 +3,16 @@
 <head>
 <!--
   UW Promo Codes — Club point-of-sale redemption page
+  Version: v7.1 (10/09/2026) — owner N9. Central codes are ANONYMOUS to
+           the club until redeemed: the dashboard table (and the previous-
+           scheme block, and the CSV) list a central code only once the
+           till has redeemed it, with a muted count line for what is
+           withheld — a manager could previously read live unredeemed
+           strings the moment UW created them, defeating the whole
+           anonymous-until-redeemed premise. The club's own uploads stay
+           fully visible (its own knowledge). The club's-activity section
+           is gone — the master console's audit is the log, and one log is
+           enough.
   Version: v7.0 (10/09/2026) — owner N8: ONE table, the same one UW sees,
            scoped to this club. An open request renders one placeholder row
            per code still owed — Requested/Overdue pill, red Upload button —
@@ -567,20 +577,6 @@
       </div>
     </div>
 
-    <!-- The club's own slice of the append-only trail. Same record the NL sees. -->
-    <div class="list-head">Your club’s activity</div>
-    <div class="inv">
-      <p class="checker__meta" style="margin-bottom:10px">Everything done under your club’s name —
-        redemptions, checks and uploads. This is the same record the National League sees, and it
-        cannot be edited by anyone, us included.</p>
-      <div class="table-wrap">
-        <table class="table">
-          <thead><tr><th>When</th><th>What</th><th>Detail</th></tr></thead>
-          <tbody id="audRows"></tbody>
-        </table>
-      </div>
-    </div>
-
     <!-- Self-service on the till PIN so a walked card doesn't need an email. -->
     <div id="pinSection">
     <div class="list-head">Your till PIN</div>
@@ -622,7 +618,6 @@
   var ROUTE = 'instore', SUPPORT = null, HASCENTRAL = false;
   var CONTACTS = [], REQS = {};
   var MODE = 'till';                   // 'till' (4-digit PIN) | 'manager' (club passcode)
-  var AUDIT = {}, auditQuery = null;
   var CODES = {}, codesLoaded = false, unlocked = false, codesQuery = null;
   var busy = false;
 
@@ -1070,9 +1065,6 @@
   /* Only reached on the club's manager passcode. Subscribes to the club's own
      slice of the audit trail and wires the panels that a till PIN never sees. */
   function startManager() {
-    if (auditQuery) auditQuery.off();
-    auditQuery = UWP.ref('audit').orderByChild('club').equalTo(CLUB.code).limitToLast(100);
-    auditQuery.on('value', function (s) { AUDIT = s.val() || {}; renderAudit(); });
 
     UWP.ref('contacts/' + CLUB.code).on('value', function (s) {
       CONTACTS = s.val() || [];
@@ -1104,14 +1096,27 @@
     var uploaded = String(r.createdBy || '').indexOf('club:') === 0;
     return ROUTE === 'online' ? uploaded : !uploaded;
   }
+  /* Owner N9 (10/09/2026): central codes stay ANONYMOUS to the club until
+     the till redeems them — a manager must never be able to read live
+     unredeemed strings the moment UW creates them. The club's own uploads
+     are its own knowledge and stay visible. */
+  function isCentral(r) { return String(r.createdBy || '').indexOf('club:') !== 0; }
+  function hiddenCentralCount() {
+    return Object.keys(CODES).filter(function (k) {
+      var r = CODES[k];
+      return isCentral(r) && r.status !== 'redeemed';
+    }).length;
+  }
   function invRows() {
     return Object.keys(CODES).map(function (k) { var r = CODES[k]; r._id = k; return r; })
       .filter(isCurrentScheme)
+      .filter(function (r) { return !isCentral(r) || r.status === 'redeemed'; })
       .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
   }
   function renderLegacy() {
     var list = Object.keys(CODES).map(function (k) { return CODES[k]; })
       .filter(function (r) { return !isCurrentScheme(r); })
+      .filter(function (r) { return !isCentral(r) || r.status === 'redeemed'; })   // N9
       .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
     var block = document.getElementById('legacyBlock');
     block.hidden = !list.length || MODE !== 'manager';
@@ -1151,10 +1156,15 @@
         for (var i = f.got; i < f.qty; i++) phs.push({ req: r, face: f });
       });
     }
+    var hidden = hiddenCentralCount();
+    var note = hidden
+      ? '<tr class="empty-row"><td colspan="5">' + hidden + ' unredeemed code' + (hidden === 1 ? '' : 's') +
+        ' not shown — codes stay anonymous until redeemed at your till.</td></tr>'
+      : '';
     if (!list.length && !phs.length) {
-      tb.innerHTML = '<tr class="empty-row"><td colspan="5">' +
+      tb.innerHTML = note + (note ? '' : '<tr class="empty-row"><td colspan="5">' +
         (invRows().length ? 'Nothing matches those filters.' : 'No codes registered to your club yet.') +
-        '</td></tr>';
+        '</td></tr>');
       return;
     }
     var phHtml = phs.map(function (p) {
@@ -1167,7 +1177,7 @@
         '<td title="' + esc(UWP.fmt(r.raisedAt)) + '">' + esc(UWP.ago(r.raisedAt)) + '</td>' +
         '<td><button class="btn btn--primary btn--sm" data-upreq="' + esc(r._id) + '">Upload</button></td></tr>';
     }).join('');
-    tb.innerHTML = phHtml + list.map(function (r) {
+    tb.innerHTML = note + phHtml + list.map(function (r) {
       /* An online club settles its own redemptions (owner N8): its store is
          where fans redeem, so the club closes the loop here — with a
          confirm, and on its own uploaded codes only. */
@@ -1196,31 +1206,6 @@
     NL.download('uw-promo-' + CLUB.code.toLowerCase() + '-' + UWP.dateStamp() + '.csv',
       NL.csv(rows, { bom: true }), 'text/csv;charset=utf-8');
     toast('CSV exported', 'success');
-  }
-
-  var ACTION_LABEL = {
-    'add-codes': 'Codes uploaded', redeem: 'Code redeemed', check: 'Code checked',
-    release: 'Released by NL', revoke: 'Revoked by NL', register: 'Registered to club',
-    'delete': 'Deleted by NL', 'regen-passcode': 'PIN or passcode changed', 'regen-link': 'Link changed'
-  };
-  function renderAudit() {
-    if (MODE !== 'manager') return;
-    var list = Object.keys(AUDIT).map(function (k) { return AUDIT[k]; })
-      .sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
-    var tb = document.getElementById('audRows');
-    if (!list.length) {
-      tb.innerHTML = '<tr class="empty-row"><td colspan="3">Nothing recorded yet.</td></tr>';
-      return;
-    }
-    tb.innerHTML = list.map(function (r) {
-      var bits = [];
-      if (r.count) bits.push(r.count + ' codes');
-      if (r.codes) bits.push(r.codes);
-      if (r.detail) bits.push(r.detail);
-      return '<tr><td title="' + esc(UWP.fmt(r.ts)) + '" style="white-space:nowrap">' + esc(UWP.ago(r.ts)) + '</td>' +
-        '<td>' + esc(ACTION_LABEL[r.action] || r.action || '') + '</td>' +
-        '<td class="checker__meta">' + esc(bits.join(' · ')) + '</td></tr>';
-    }).join('');
   }
 
   /* Till-PIN self-service. Uniqueness is checked against every club's PIN,
