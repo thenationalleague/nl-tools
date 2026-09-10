@@ -1,5 +1,12 @@
 /*
   UW Promo Codes — shared runtime for the three standalone pages
+  Version: v6.7 (10/09/2026) — setting is not switching (owner): a first
+           method assignment (from unassigned) drops the switch-flavoured
+           consequence lines ("every existing code is untouched" made no
+           sense with no codes) for setting-flavoured ones, and the footer
+           verb is Set rather than Move. The picker is the same two big
+           cards as the club's own setup screen (.setup__route, promoted
+           to _shared.css) instead of a chip row.
   Version: v6.6 (10/09/2026) — the method modal grows up (owner feedback):
            the picker is the two real methods only — Unassigned is a state
            a club starts in, not something anyone chooses, so switching a
@@ -560,18 +567,24 @@
     return '<span class="pill ' + m.pill + '">' + m.label + '</span>';
   }
   /* What a from→to change actually does, as lines a person reads before
-     confirming. Owner ruling 09/09/2026: the change modal must be clear on
-     consequence — this is the one place the consequences are written. */
+     confirming. Owner rulings 09–10/09/2026: the modal must be clear on
+     consequence, and SETTING a first method (from unassigned) must not talk
+     like a switch — there are no existing codes or screens to reassure
+     anyone about. This is the one place the consequences are written. */
   function methodConsequences(from, to) {
-    var lines = ['Every existing code is untouched and stays valid exactly as it is.'];
+    var setting = from !== 'instore' && from !== 'online';
+    var lines = [];
+    if (!setting) lines.push('Every existing code is untouched and stays valid exactly as it is.');
     if (from === 'instore') {
       lines.push('The till and any printed cards keep working for as long as the club’s ' +
         'central codes are in the wild — but no new till cards can be printed.');
     }
-    if (to === 'online') lines.push('New codes will come from the club’s own uploads, raised against requests.');
-    if (to === 'instore') lines.push('New codes will be created centrally and redeemed at the club’s till — it will need a till card with its PIN.');
+    if (to === 'online') lines.push((setting ? 'Codes' : 'New codes') + ' will come from the club’s own uploads, raised against requests.');
+    if (to === 'instore') lines.push((setting ? 'Codes' : 'New codes') + ' will be created centrally and redeemed at the club’s till — it will need a till card with its PIN.');
     if (to === 'unassigned') lines.push('The club is switched OFF: both sign-in doors show a holding screen until its manager completes setup again.');
-    lines.push('The club sees the change at its next sign-in; anyone already signed in keeps their current screen until then.');
+    lines.push(setting
+      ? 'The club’s holding screen becomes its ' + (to === 'online' ? 'dashboard' : 'till and dashboard') + ' at its next sign-in.'
+      : 'The club sees the change at its next sign-in; anyone already signed in keeps their current screen until then.');
     return lines;
   }
 
@@ -598,16 +611,25 @@
         '</div>';
     }
 
-    /* The picker offers the two real methods only. Unassigned is a STATE a
-       club starts in, not a method anyone chooses — switching a club off is
-       the quiet action at the foot, not a peer chip in the middle. */
+    /* The picker offers the two real methods only, as the same cards the
+       club's own setup screen uses (.setup__route, promoted to _shared.css)
+       — the whole surface is the choice. Unassigned is a STATE a club
+       starts in, not a method anyone chooses — switching a club off is the
+       quiet action at the foot, not a peer option in the middle. */
+    var CARDS = [
+      { r: 'instore', icon: 'shop', desc: 'Codes are created centrally and redeemed at the club’s physical till.' },
+      { r: 'online', icon: 'website', desc: 'The club generates codes in its own retail system and uploads them against requests.' }
+    ];
     var wrap = document.createElement('div');
     wrap.innerHTML =
       '<p class="confirm-text">' + esc(opts.name) + ' is currently ' + methodPill(cur) + '</p>' +
-      '<div class="chip-group" style="margin-bottom:12px">' +
-      ['instore', 'online'].map(function (r) {
-        return '<button class="chip' + (cur === r ? ' active' : '') +
-          '" data-mpick="' + r + '" type="button">' + METHOD[r].label + '</button>';
+      '<div class="setup__routes" style="margin-bottom:12px">' +
+      CARDS.map(function (o) {
+        return '<button class="setup__route' + (cur === o.r ? ' is-picked' : '') +
+          '" data-mpick="' + o.r + '" type="button">' +
+          '<svg class="setup__route-icon" aria-hidden="true"><use href="/assets/icons/sprites.svg#icon-' + o.icon + '"></use></svg>' +
+          '<span class="setup__route-name">' + METHOD[o.r].label + '</span>' +
+          '<span class="setup__route-desc">' + o.desc + '</span></button>';
       }).join('') + '</div>' +
       '<div data-mconseq></div>' +
       /* Owner N4 (10/09/2026): a club on a method must have a named owner.
@@ -639,7 +661,7 @@
       if (pending) {
         goBtn.classList.remove('btn--primary'); goBtn.classList.add('btn--danger');
         goBtn.textContent = pending === 'unassigned' ? 'Switch ' + opts.name + ' off'
-          : 'Move ' + opts.name + ' to ' + METHOD[pending].label;
+          : (cur === 'unassigned' ? 'Set ' : 'Move ') + opts.name + ' to ' + METHOD[pending].label;
         goBtn.hidden = false;
       } else if (cur !== 'unassigned' && touched) {
         goBtn.classList.remove('btn--danger'); goBtn.classList.add('btn--primary');
@@ -679,7 +701,7 @@
 
     function pick(route) {
       Array.prototype.forEach.call(wrap.querySelectorAll('[data-mpick]'), function (x) {
-        x.classList.toggle('active', x.getAttribute('data-mpick') === route);
+        x.classList.toggle('is-picked', x.getAttribute('data-mpick') === route);
       });
       var panel = wrap.querySelector('[data-mconseq]');
       if (route === cur) { pending = null; panel.innerHTML = ''; sync(); return; }
