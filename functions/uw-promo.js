@@ -95,9 +95,28 @@ function safeEqual(a, b) {
   return diff === 0;
 }
 
+/* Which club (if any) a typed code opens, and by which role. `scoped` is
+   the club named by the ?c= link token, or null on a linkless visit.
+   Owner ruling 10/09/2026: till PINs are compared ONLY for the club the
+   link names — a 4-digit PIN is only safe inside the per-club throttle the
+   link enables, so the linkless door is manager passcodes only. A valid
+   PIN typed without a link fails exactly like a wrong one (and counts
+   against the throttle), so the refusal leaks nothing about the PIN. */
+function findCredential(candidates, code, scoped) {
+  for (const c of candidates) {
+    if (!c.rec) continue;
+    if (scoped && safeEqual(normCode(c.rec.passcode), code)) return { c, role: "till" };
+    if (c.rec.managerPass && safeEqual(normCode(c.rec.managerPass), code)) {
+      return { c, role: "manager" };
+    }
+  }
+  return null;
+}
+
 /* Must agree with UWP.newPin: four digits, never a leading zero (a leading
-   zero survives neither the access CSV nor a hurried retype), unique across
-   the roster because a club signing in on its PIN alone is resolved BY it. */
+   zero survives neither the access CSV nor a hurried retype). Unique across
+   the roster still — the admin table and printed cards are easier to reason
+   about, even though a PIN no longer signs a club in without its link. */
 function newPin(taken) {
   for (let i = 0; i < 20000; i++) {
     const p = String(1 + Math.floor(Math.random() * 9)) +
@@ -288,14 +307,7 @@ function makeTrigger(ROOT, name) {
           ? [scoped]
           : Object.keys(clubs).map((k) => ({ key: k, rec: clubs[k] }));
 
-        let hit = null;
-        for (const c of candidates) {
-          if (!c.rec) continue;
-          if (safeEqual(normCode(c.rec.passcode), code)) { hit = { c, role: "till" }; break; }
-          if (c.rec.managerPass && safeEqual(normCode(c.rec.managerPass), code)) {
-            hit = { c, role: "manager" }; break;
-          }
-        }
+        const hit = findCredential(candidates, code, scoped);
 
         if (hit) {
           await db.ref(ROOT + "/rate/uid/" + uid).remove().catch(() => {});
