@@ -3,6 +3,12 @@
 <head>
 <!--
   UW Promo Codes — Utility Warehouse partner page
+  Version: v8.4 (10/09/2026) — Redemption methods is a top tab, third
+           of three (owner: the UW cousin of the master console's Clubs &
+           access, way more stripped back) — the toolbar button and its
+           modal are gone; the club/method table lives in its own pane
+           with the same per-row pencil, and the codes tabs keep their
+           state while you're there.
   Version: v8.3 (10/09/2026) — the by-club panel's empty state stops
            claiming codes can exist unregistered ("No codes registered to
            a club yet — use Add codes" was pre-v3.0 truth): every code is
@@ -211,7 +217,10 @@
     <div class="tabs" id="methodTabs">
       <button class="tab active" data-mtab="instore">In-store codes</button>
       <button class="tab" data-mtab="online">Online codes</button>
+      <button class="tab" data-mtab="methods">Redemption methods</button>
     </div>
+
+    <div id="pane-codes">
 
     <div class="stats" id="stats"></div>
 
@@ -233,7 +242,6 @@
         <input class="toolbar__search" id="fSearch" type="search" placeholder="Search codes…" aria-label="Search codes">
       </div>
       <div class="toolbar__right">
-        <button class="btn btn--ghost" id="btnRoutes">Redemption methods</button>
         <button class="btn btn--ghost" id="btnExport">Export CSV</button>
         <!-- One primary per tab, always in the SAME rightmost slot — the tab
              swaps which of these two is visible, not where red lives. -->
@@ -252,6 +260,19 @@
         </tr></thead>
         <tbody id="rows"><tr class="loading-row"><td colspan="6">Loading codes…</td></tr></tbody>
       </table>
+    </div>
+    </div><!-- /#pane-codes -->
+
+    <!-- Redemption methods — a top tab (owner 10/09/2026): the UW cousin
+         of the master console's Clubs & access, stripped to the one thing
+         UW manages about a club. -->
+    <div id="pane-methods" style="display:none">
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Club</th><th>Method</th></tr></thead>
+          <tbody id="methodRows"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 </div>
@@ -563,10 +584,17 @@
   document.getElementById('methodTabs').addEventListener('click', function (e) {
     var b = e.target.closest('[data-mtab]');
     if (!b) return;
-    TAB = b.getAttribute('data-mtab');
+    var mtab = b.getAttribute('data-mtab');
     Array.prototype.forEach.call(document.querySelectorAll('#methodTabs .tab'), function (t) {
       t.classList.toggle('active', t === b);
     });
+    // Methods is a pane of its own; TAB stays the last CODES tab so the
+    // code table picks up where it left off when you come back.
+    var isMethods = mtab === 'methods';
+    document.getElementById('pane-codes').style.display = isMethods ? 'none' : 'block';
+    document.getElementById('pane-methods').style.display = isMethods ? 'block' : 'none';
+    if (isMethods) { renderMethods(); return; }
+    TAB = mtab;
     document.getElementById('btnAdd').hidden = TAB !== 'instore';
     document.getElementById('btnRequests').hidden = TAB !== 'online';
     buildClubFilter();   // the club list follows the tab's method
@@ -880,28 +908,21 @@
     });
   }
 
-  document.getElementById('btnRoutes').addEventListener('click', function () {
-    var wrap = document.createElement('div');
-    wrap.innerHTML = '<p class="alloc-preview" style="margin-bottom:12px">How each club redeems ' +
-      'vouchers. Changing a method never touches existing codes.</p>' +
-      '<div class="table-wrap"><table class="table"><thead><tr><th>Club</th><th>Method</th></tr></thead><tbody>' +
-      clubList().map(function (c) {
-        return '<tr><td>' + esc(c.name) + '</td><td data-mcell="' + esc(c.code) + '" style="white-space:nowrap">' +
-          methodCellHtml(c) + '</td></tr>';
-      }).join('') + '</tbody></table></div>';
-    var ctrl = NL.modal({
-      title: 'Redemption methods', width: 'wide', body: wrap,
-      buttons: [{ label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } }]
-    });
-    ctrl.body.addEventListener('click', function (e) {
-      var ed = e.target.closest('[data-medit]');
-      if (!ed) return;
-      var code = ed.getAttribute('data-medit');
-      editMethod(code, function () {
-        var club = CLUBS.filter(function (c) { return c.code === code; })[0];
-        var cell = ctrl.body.querySelector('[data-mcell="' + code + '"]');
-        if (club && cell) cell.innerHTML = methodCellHtml(club);
-      });
+  function renderMethods() {
+    document.getElementById('methodRows').innerHTML = clubList().map(function (c) {
+      return '<tr><td>' + esc(c.name) + '</td><td data-mcell="' + esc(c.code) + '" style="white-space:nowrap">' +
+        methodCellHtml(c) + '</td></tr>';
+    }).join('');
+  }
+
+  document.getElementById('methodRows').addEventListener('click', function (e) {
+    var ed = e.target.closest('[data-medit]');
+    if (!ed) return;
+    var code = ed.getAttribute('data-medit');
+    editMethod(code, function () {
+      var club = CLUBS.filter(function (c) { return c.code === code; })[0];
+      var cell = document.querySelector('#methodRows [data-mcell="' + code + '"]');
+      if (club && cell) cell.innerHTML = methodCellHtml(club);
     });
   });
 
