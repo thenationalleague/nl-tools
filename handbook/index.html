@@ -1,6 +1,28 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27
+  Version: v0.65 (10/09/2026) — TABLE CELLS KEEP THEIR FORMATTING. Reported
+    from Appendix G (NLS Regulations): "there is a table which needs bullet
+    points and italicisation in it. When I try to do that, it first shows the
+    bullets on the wrong side of the line (ie in the left hand column) and
+    then they disappear and the formatting does not stick."
+
+    Both halves were the same decision. A cell was PLAIN TEXT: escaped on
+    render, read back as text (cellText) on blur. So the toolbar's list
+    command drew a real <ul> in the cell — with its marker painted in the
+    next column, because the brand reset zeroes list padding and only clause
+    prose put it back — and the save then flattened it to words. Working as
+    designed; the design did not match the toolbar.
+
+    A cell is now sanitised MARKUP, through the same allow-list a clause body
+    uses (bold, italic, underline, lists, line breaks, links). A table says so
+    with `rich: true`. Tables stored before this — every one of them — are
+    converted on the way in by HB_DIFF.richCell (escape, newline -> <br>), so
+    nothing already typed changes by so much as a character, and the diff
+    converts the published side the same way so the first review after this
+    does not report every table as changed. Lists inside .nl-tbl get their
+    indent back in nl-brand v2.68, which is what puts the bullet in the right
+    column. The reader and the PDF pick this up on the next Publish.
   Version: v0.64 (22/08/2026) — the mode note says nothing while you edit.
     Cut in two goes and the second one was the right one. "Editing the draft ·
     numbers recalculate live" lost its first half for repeating the lit Edit
@@ -496,7 +518,7 @@
   <title>Handbook 2026-27 — NL Tools</title>
 
   <!-- Brand stylesheet (lint canonical: ?v=45) -->
-  <link rel="stylesheet" href="/system/nl-brand.css?v=64">
+  <link rel="stylesheet" href="/system/nl-brand.css?v=65">
 
   <!-- Firebase 10.12.0 SDK (compat) -->
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -527,6 +549,15 @@
     var NL_TOOL_KEY = 'ops-handbook';
 
     window.NL_CHANGELOG = [
+      {
+        date: '10/09/2026',
+        version: 'v0.65',
+        items: [
+          'Table cells keep bold, italic, underline, bullet and numbered ' +
+            'lists, and the bullet sits inside its own cell rather than in ' +
+            'the next column. Text already in a table is unchanged.'
+        ]
+      },
       {
         date: '22/08/2026',
         version: 'v0.64',
@@ -1094,7 +1125,7 @@
   <!-- Draft vs published edition. Its own file because it is an algorithm
        with a right answer — renumbering, reordering, word-level text — and
        it is unit-tested in tests/handbook-diff.test.mjs. -->
-  <script src="hb-diff.js?v=1"></script>
+  <script src="hb-diff.js?v=2"></script>
   <script src="/system/nl-utils.js?v=47"></script>
   <script src="/system/nl-topbar.js?v=10"></script>
   <script src="/system/auth-guard.js?v=16"></script>
@@ -2116,52 +2147,46 @@
     return out + '</div></div>';
   }
 
-  /* A cell is PLAIN TEXT that may contain newlines, and a newline is drawn as
-     a line break. Cells are stored as strings, not markup — allowing HTML in
-     them would need a sanitiser they have never had, and esc() below means
-     anything stored would be shown to a club as literal angle brackets. Text
-     with newlines gives the fee tariffs the lines they need and nothing else. */
-  function cellHtml(c) {
-    return esc(String(c == null ? '' : c)).replace(/\n/g, '<br>');
+  /* A cell in a RICH table (table.rich === true) is sanitised markup, and is
+     drawn as it is stored — sanitize() ran on the way in, exactly as it does
+     for a clause body. A cell in a table without the flag is the old plain
+     text: escaped, with each newline drawn as a line break. normNode converts
+     every table to rich as it loads, so in this page the second branch only
+     runs for a table that reached render without passing through normNode,
+     and it must stay, because a plain cell drawn as markup would show a
+     literal "<" to a club and lose its lines. */
+  function cellHtml(c, rich) {
+    var s = String(c == null ? '' : c);
+    return rich ? s : esc(s).replace(/\n/g, '<br>');
   }
 
-  /* The inverse, read off the live cell. textContent — which this used —
-     drops a <br> entirely, not even leaving a space, so every line the editor
-     typed was concatenated into one on save and the breaks appeared to be
-     "taken away" on leaving edit mode. */
-  function cellText(el) {
-    var out = '';
-    (function walk(n) {
-      for (var c = n.firstChild; c; c = c.nextSibling) {
-        if (c.nodeType === 3) { out += c.nodeValue; continue; }
-        if (c.nodeType !== 1) continue;
-        var tag = c.tagName.toLowerCase();
-        if (tag === 'br') { out += '\n'; continue; }
-        /* Chrome wraps each new line in a div; Firefox splits paragraphs. */
-        var block = (tag === 'div' || tag === 'p' || tag === 'li');
-        if (block && out && out.slice(-1) !== '\n') out += '\n';
-        walk(c);
-      }
-    })(el);
-    /* contenteditable litters non-breaking spaces; they look identical to a
-       normal space and wrap, search and sort differently. */
-    return out.replace(/\u00a0/g, ' ').replace(/\n+$/, '');
+  /* The inverse, read off the live cell. The same sanitiser as a clause body:
+     bold, italic, underline, lists, line breaks and links survive; anything
+     else is unwrapped to its text. A cell the browser has emptied is left
+     holding a bare <br> or a non-breaking space, and that is an empty cell,
+     not a one-character edit. */
+  function cellMarkup(el) {
+    var html = sanitize(el.innerHTML);
+    var bare = html.replace(/<br\s*\/?>/gi, '').replace(/<\/?p>/gi, '').replace(/&nbsp;/gi, '');
+    if (!/[^\s\u00a0]/.test(bare)) return '';
+    return html;
   }
 
   function renderTable(node, editing) {
     var t = node.table || { header: [], rows: [] };
     var head = Array.isArray(t.header) ? t.header : [];
     var rows = Array.isArray(t.rows) ? t.rows : [];
+    var rich = !!t.rich;
     var h = '<div class="nl-tbl-wrap"><table class="nl-tbl">';
     if (head.length) {
       h += '<thead><tr>' + head.map(function (c, ci) {
-        return '<th' + (editing ? ' contenteditable="true" data-th="' + ci + '"' : '') + '>' + cellHtml(c) + '</th>';
+        return '<th' + (editing ? ' contenteditable="true" data-th="' + ci + '"' : '') + '>' + cellHtml(c, rich) + '</th>';
       }).join('') + '</tr></thead>';
     }
     h += '<tbody>' + rows.map(function (row, ri) {
       row = Array.isArray(row) ? row : [];
       return '<tr>' + row.map(function (c, ci) {
-        return '<td' + (editing ? ' contenteditable="true" data-tr="' + ri + '" data-tc="' + ci + '"' : '') + '>' + cellHtml(c) + '</td>';
+        return '<td' + (editing ? ' contenteditable="true" data-tr="' + ri + '" data-tc="' + ci + '"' : '') + '>' + cellHtml(c, rich) + '</td>';
       }).join('') + '</tr>';
     }).join('') + '</tbody></table></div>';
     if (editing) {
@@ -3046,6 +3071,12 @@
       t.header = Array.isArray(t.header) ? t.header : (t.header ? Object.values(t.header) : []);
       t.rows = Array.isArray(t.rows) ? t.rows : (t.rows ? Object.values(t.rows) : []);
       t.rows = t.rows.map(function (r) { return Array.isArray(r) ? r : (r ? Object.values(r) : []); });
+      /* Plain-text cells (every table stored before v0.65) become markup
+         here, once, on the way in — see HB_DIFF.richCell for why the
+         conversion lives there. No database write: the flag reaches the
+         database with the first edit to that table, and until then the
+         stored table is still readable by anything that predates this. */
+      if (!t.rich) n.table = window.HB_DIFF.richTable(t);
     }
     return n;
   }
@@ -3459,10 +3490,11 @@
   function saveTableCell(cell) {
     var host = cell.closest('[data-id]'); if (!host) return;
     var id = host.dataset.id, node = S.nodes[id]; if (!node || !node.table) return;
-    /* NOT textContent. It drops a <br> without leaving so much as a space, so
-       every line typed into a fee tariff was concatenated back into one the
-       moment the cell was left. See cellText. */
-    var val = cellText(cell);
+    /* NOT textContent, and not a text walk either: the cell is markup now
+       (v0.65), and either of those would flatten the formatting the toolbar
+       just applied. See cellMarkup. */
+    var val = cellMarkup(cell);
+    node.table.rich = true;
     if (cell.hasAttribute('data-th')) {
       var ci = +cell.getAttribute('data-th');
       if ((node.table.header[ci] || '') === val) return;
@@ -3494,9 +3526,11 @@
     if (!n.table) return '';
     var s = (n.table.header || []).join(' ');
     (n.table.rows || []).forEach(function (r) { s += ' ' + (r || []).join(' '); });
-    /* Cells hold newlines now, and a search phrase that runs across a line
-       break inside one cell should still find it. */
-    return s.replace(/\s+/g, ' ');
+    /* Cells are markup (v0.65): search the words, not the tags. htmlToText
+       turns a <br> or a list item into a line, and the collapse below folds
+       the lines, so a phrase that runs across a break inside one cell is
+       still found. A plain-text cell has no tags and comes through as is. */
+    return HB_DIFF.htmlToText(s).replace(/\s+/g, ' ');
   }
 
   /* ================= Publish + export ================= */

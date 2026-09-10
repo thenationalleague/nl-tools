@@ -40,6 +40,12 @@
    Firebase. index.html hands it two plain objects and renders what it
    returns.
 
+   2026-09-10 v1.1 — table cells become rich text. richCell/richTable
+              convert a plain-text table (the only kind until handbook
+              v0.65) to the markup form, and normTable runs both sides
+              through it, so a table that was never touched compares equal
+              to itself after the conversion and a cell that gained an
+              italic word compares as edited.
    2026-08-21 v1.0 — first cut.
 */
 (function (global) {
@@ -169,12 +175,39 @@
       .map(function (k) { return v[k]; });
   }
 
+  /* A TABLE CELL IS MARKUP NOW, and a stored table says so with `rich: true`.
+     Until handbook v0.65 cells were plain text — escaped on render, read back
+     as text — so nothing typed with the formatting toolbar could survive a
+     save. A cell in a rich table is sanitised HTML, the same allow-list as a
+     clause body. A cell in a table without the flag is still the old plain
+     text, and every edition published before v0.65 holds only those.
+
+     richCell is the ONE conversion from the old form to the new: escape the
+     four characters that mean something in HTML, and turn each newline into
+     the <br> the editor drew for it. The editor uses it on the way in
+     (normNode), so the draft is rich in memory whatever it was on disk, and
+     normTable uses it here so a published plain table and its untouched rich
+     descendant are byte-identical — otherwise the first review after v0.65
+     would report every table in the handbook as changed. */
+  function richCell(v) {
+    return norm(v)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+      .replace(/\r\n?/g, '\n').replace(/\n/g, '<br>');
+  }
+  function richTable(t) {
+    if (!t) return null;
+    var rich = !!t.rich, cell = rich ? norm : richCell;
+    return {
+      rich: true,
+      header: toArray(t.header).map(cell),
+      rows: toArray(t.rows).map(function (r) { return toArray(r).map(cell); })
+    };
+  }
+
   function normTable(t) {
     if (!t) return null;
-    return {
-      header: toArray(t.header).map(norm),
-      rows: toArray(t.rows).map(function (r) { return toArray(r).map(norm); })
-    };
+    var r = richTable(t);
+    return { header: r.header, rows: r.rows };
   }
 
   var STYLE_FIELDS = ['kind', 'numStyle', 'numberOverride'];
@@ -353,6 +386,8 @@
     label: label,
     _lisIndices: lisIndices,
     _movedWithinParent: movedWithinParent,
+    richCell: richCell,
+    richTable: richTable,
     _contentOf: contentOf,
     _normTable: normTable
   };

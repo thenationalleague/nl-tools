@@ -694,3 +694,42 @@ test('the diff reads nodes with their keys too', () => {
   assert.match(CODE, /drf\[id\] = normNode\(Object\.assign\(\{\}, drfNodes\[id\]\), id\)/);
   assert.match(CODE, /pub\[nd\.id\] = normNode\(Object\.assign\(\{\}, nd\), nd\.id\)/);
 });
+
+/* ------------------------------------------------- rich cells (v1.1) */
+
+/* Cells became markup in handbook v0.65. Every edition before it holds plain
+   text; the draft holds the same text converted (escaped, newline -> <br>)
+   and flagged rich. Those two must compare EQUAL — otherwise the first
+   review after v0.65 reports every table in the handbook as changed — while
+   a cell that gained an italic word must still compare as edited. */
+test('a plain published table and its untouched rich conversion are not a change', () => {
+  const plain = { header: ['Offence', 'Fee'], rows: [['Late team sheet\nsecond line', '£100 & "costs" <net>']] };
+  const rich  = D.richTable(plain);
+  assert.equal(rich.rich, true);
+  assert.equal(host(rich.rows[0])[0], 'Late team sheet<br>second line');
+  assert.equal(host(rich.rows[0])[1], '£100 &amp; &quot;costs&quot; &lt;net&gt;');
+  const pub = [n('a', null, 0, '', { table: plain })];
+  const drf = [n('a', null, 0, '', { table: rich })];
+  const r = diff(pub, drf);
+  assert.equal(r.edited.length, 0, 'conversion alone must not read as an edit');
+});
+
+test('an italic word added to a rich cell IS a change', () => {
+  const plain = { header: ['A'], rows: [['the signed declaration']] };
+  const rich  = D.richTable(plain);
+  rich.rows[0][0] = 'the <em>signed</em> declaration';
+  const r = diff([n('a', null, 0, '', { table: plain })], [n('a', null, 0, '', { table: rich })]);
+  assert.equal(r.edited.length, 1);
+  assert.equal(r.edited[0].tableChanged, true);
+});
+
+test('richTable leaves a table that is already rich alone', () => {
+  const rich = { rich: true, header: ['A'], rows: [['<ul><li>x</li></ul>']] };
+  assert.equal(host(D.richTable(rich).rows[0])[0], '<ul><li>x</li></ul>',
+    'converting twice would escape the markup it made');
+});
+
+test('richCell escapes what HTML would otherwise read', () => {
+  assert.equal(D.richCell('a<b>&"c\r\nd'), 'a&lt;b&gt;&amp;&quot;c<br>d');
+  assert.equal(D.richCell(null), '');
+});

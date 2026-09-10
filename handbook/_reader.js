@@ -1,7 +1,12 @@
 /* =========================================================================
    NL Tools — Handbook reader
    File: /handbook/_reader.js
-   Version: v1.0 (26/08/2026)
+   Version: v1.1 (10/09/2026)
+
+   v1.1 — search reads table cells as words, not markup. Cells carry
+          bold, italic and lists from handbook v0.65, and a search that
+          matched inside "<li>" would have found tags and missed phrases
+          split by them.
 
    The reading half of the handbook: the five areas, the outline, the search,
    the clause deep-links, the mobile drawer and the PDF button. It was written
@@ -347,7 +352,11 @@ window.NLHandbook = (function () {
     if (!n.table) return '';
     var s = (n.table.header || []).join(' ');
     (n.table.rows || []).forEach(function (r) { s += ' ' + (Array.isArray(r) ? r.join(' ') : ''); });
-    return s;
+    /* Cells are markup from handbook v0.65 (bold, lists, line breaks), so
+       search the words and not the tags — the same strip the body gets. An
+       edition published before that holds plain cells, which have no tags
+       and come through untouched. */
+    return s.replace(/<[^>]+>/g, ' ');
   }
 
   function renderSearch(q) {
