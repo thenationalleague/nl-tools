@@ -329,7 +329,12 @@ test('method identity: pills for the three states, consequences for a change', (
   assert.match(offSwitch, /switched OFF/i, 'unassigned says the club goes dark');
   const leaving = UWP.methodConsequences('instore', 'online').join(' ');
   assert.match(leaving, /till.*keep working/i, 'leaving in-store says the till survives');
-  assert.match(leaving, /untouched/, 'every change says existing codes are untouched');
+  assert.match(leaving, /untouched/, 'every SWITCH says existing codes are untouched');
+  // Setting a first method is not a switch (owner ruling 10/09/2026):
+  // no legacy-code reassurance, and the holding screen is what changes.
+  const setting = UWP.methodConsequences('unassigned', 'online').join(' ');
+  assert.doesNotMatch(setting, /untouched/, 'first assignment has no codes to reassure about');
+  assert.match(setting, /holding screen/i, 'first assignment says the holding screen opens up');
 });
 
 test('status metadata covers the full lifecycle', () => {
