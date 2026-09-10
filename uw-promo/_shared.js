@@ -1,5 +1,15 @@
 /*
   UW Promo Codes — shared runtime for the three standalone pages
+  Version: v6.6 (10/09/2026) — the method modal grows up (owner feedback):
+           the picker is the two real methods only — Unassigned is a state
+           a club starts in, not something anyone chooses, so switching a
+           club off is a quiet action at the foot, not a chip in the middle.
+           The contact editor is built once and shown/hidden after that, so
+           typed contacts survive flipping between methods (they were being
+           rebuilt from the snapshot on every chip click), it prefills as
+           soon as the record loads, appears on plain open for a club
+           already on a method, and saves contact edits without a method
+           change. Contact inputs stack one per line.
   Version: v6.5 (10/09/2026) — owner N4: switching a club ON (to in-store
            or online) requires naming who runs it. The method modal loads
            the club's contacts, shows them prefilled (or one empty row),
@@ -574,75 +584,113 @@
   function editMethodModal(opts) {
     var esc = window.NL.escHtml;
     var cur = ['instore', 'online'].indexOf(opts.route) !== -1 ? opts.route : 'unassigned';
-    var pending = null;
-    var existing = [];   // contacts already on record, loaded at open
-    var wrap = document.createElement('div');
-    wrap.innerHTML =
-      '<p class="confirm-text">' + esc(opts.name) + ' is currently ' + methodPill(cur) + '</p>' +
-      '<div class="chip-group" style="margin-bottom:12px">' +
-      ['online', 'unassigned', 'instore'].map(function (r) {
-        return '<button class="chip' + (cur === r ? ' active' : '') +
-          '" data-mpick="' + r + '">' + METHOD[r].label + '</button>';
-      }).join('') + '</div>' +
-      '<div data-mconseq></div>';
-    var ctrl = window.NL.modal({
-      title: 'Change redemption method', body: wrap,
-      buttons: [
-        { label: 'Cancel', className: 'btn--ghost', onClick: function (x) { x.close(); } },
-        { label: 'Change method', className: 'btn--danger', onClick: function () { commit(); } }
-      ]
-    });
-    var goBtn = ctrl.el.querySelector('.modal__footer .btn--danger');
-    goBtn.hidden = true;
-
-    ensureAuth().then(function () {
-      return window.UWP.ref('contacts/' + opts.code).once('value');
-    }).then(function (s) {
-      var v = s.val();
-      existing = Array.isArray(v) ? v : v ? Object.keys(v).map(function (k) { return v[k]; }) : [];
-    }).catch(function () {});
+    var pending = null;    // a picked method change; null = no change (contacts may still save)
+    var touched = false;   // the moment anyone types, the async prefill must never clobber the form
 
     function contactRow(c) {
       c = c || {};
       return '<div class="mcontact">' +
         '<input data-mc="name" placeholder="Name" maxlength="80" value="' + esc(c.name || '') + '">' +
+        '<button class="code-copy" data-mcrm type="button" title="Remove" aria-label="Remove contact">' +
+        '<svg class="icon icon--sm"><use href="/assets/icons/sprites.svg#icon-close"></use></svg></button>' +
         '<input data-mc="role" placeholder="Role" maxlength="80" value="' + esc(c.role || '') + '">' +
         '<input data-mc="email" type="email" placeholder="Email" maxlength="120" value="' + esc(c.email || '') + '">' +
-        '<button class="code-copy" data-mcrm type="button" title="Remove" aria-label="Remove contact">' +
-        '<svg class="icon icon--sm"><use href="/assets/icons/sprites.svg#icon-close"></use></svg></button></div>';
+        '</div>';
     }
+
+    /* The picker offers the two real methods only. Unassigned is a STATE a
+       club starts in, not a method anyone chooses — switching a club off is
+       the quiet action at the foot, not a peer chip in the middle. */
+    var wrap = document.createElement('div');
+    wrap.innerHTML =
+      '<p class="confirm-text">' + esc(opts.name) + ' is currently ' + methodPill(cur) + '</p>' +
+      '<div class="chip-group" style="margin-bottom:12px">' +
+      ['instore', 'online'].map(function (r) {
+        return '<button class="chip' + (cur === r ? ' active' : '') +
+          '" data-mpick="' + r + '" type="button">' + METHOD[r].label + '</button>';
+      }).join('') + '</div>' +
+      '<div data-mconseq></div>' +
+      /* Owner N4 (10/09/2026): a club on a method must have a named owner.
+         The block is built ONCE and only shown/hidden after that, so what
+         someone typed survives flipping between methods; it also shows the
+         current contacts on plain open, editable without a method change. */
+      '<div class="alloc-row" data-mcontacts hidden>' +
+        '<label>Who runs this at ' + esc(opts.name) + ' — required</label>' +
+        '<div data-mchost>' + contactRow() + '</div>' +
+        '<button class="btn btn--ghost btn--sm" data-mcadd type="button">Add another contact</button>' +
+      '</div>' +
+      (cur === 'unassigned' ? '' :
+        '<div class="moff-row"><button class="btn btn--ghost btn--sm" data-moff type="button">Switch ' +
+        esc(opts.name) + ' off…</button></div>');
+    var ctrl = window.NL.modal({
+      title: 'Redemption method', body: wrap,
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (x) { x.close(); } },
+        { label: 'Save', className: 'btn--danger', onClick: function () { commit(); } }
+      ]
+    });
+    var goBtn = ctrl.el.querySelector('.modal__footer .btn--danger');
+
+    /* One place decides what the form is doing: which method the contacts
+       belong to, and what (if anything) the footer button commits. */
+    function sync() {
+      var eff = pending || cur;
+      wrap.querySelector('[data-mcontacts]').hidden = eff !== 'instore' && eff !== 'online';
+      if (pending) {
+        goBtn.classList.remove('btn--primary'); goBtn.classList.add('btn--danger');
+        goBtn.textContent = pending === 'unassigned' ? 'Switch ' + opts.name + ' off'
+          : 'Move ' + opts.name + ' to ' + METHOD[pending].label;
+        goBtn.hidden = false;
+      } else if (cur !== 'unassigned' && touched) {
+        goBtn.classList.remove('btn--danger'); goBtn.classList.add('btn--primary');
+        goBtn.textContent = 'Save contacts';
+        goBtn.hidden = false;
+      } else {
+        goBtn.hidden = true;
+      }
+    }
+    sync();
+
+    ensureAuth().then(function () {
+      return window.UWP.ref('contacts/' + opts.code).once('value');
+    }).then(function (s) {
+      var v = s.val();
+      var existing = Array.isArray(v) ? v : v ? Object.keys(v).map(function (k) { return v[k]; }) : [];
+      if (existing.length && !touched) {
+        wrap.querySelector('[data-mchost]').innerHTML = existing.map(contactRow).join('');
+      }
+    }).catch(function () {});
+
+    wrap.addEventListener('input', function (e) {
+      if (e.target.closest('.mcontact')) { touched = true; sync(); }
+    });
 
     wrap.addEventListener('click', function (e) {
       var rm = e.target.closest('[data-mcrm]');
-      if (rm) { rm.closest('.mcontact').remove(); return; }
+      if (rm) { rm.closest('.mcontact').remove(); touched = true; sync(); return; }
       if (e.target.closest('[data-mcadd]')) {
-        e.target.closest('[data-mchost]').insertAdjacentHTML('beforeend', contactRow());
+        wrap.querySelector('[data-mchost]').insertAdjacentHTML('beforeend', contactRow());
         return;
       }
+      if (e.target.closest('[data-moff]')) { pick('unassigned'); return; }
       var b = e.target.closest('[data-mpick]');
-      if (!b) return;
-      var route = b.getAttribute('data-mpick');
+      if (b) pick(b.getAttribute('data-mpick'));
+    });
+
+    function pick(route) {
       Array.prototype.forEach.call(wrap.querySelectorAll('[data-mpick]'), function (x) {
-        x.classList.toggle('active', x === b);
+        x.classList.toggle('active', x.getAttribute('data-mpick') === route);
       });
       var panel = wrap.querySelector('[data-mconseq]');
-      if (route === cur) { pending = null; panel.innerHTML = ''; goBtn.hidden = true; return; }
+      if (route === cur) { pending = null; panel.innerHTML = ''; sync(); return; }
       pending = route;
       panel.innerHTML =
         '<div class="banner banner--amber" style="margin-bottom:12px"><strong>What this does</strong>' +
         '<ul style="margin:6px 0 0 18px;padding:0">' +
         methodConsequences(cur, route).map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') +
-        '</ul></div>' +
-        /* Owner N4 (10/09/2026): switching a club ON requires naming who
-           runs it — nobody activates a club without a responsible person
-           on record. Prefilled when the club already has contacts. */
-        (route === 'unassigned' ? '' :
-          '<div class="alloc-row"><label>Who runs this at ' + esc(opts.name) + ' — required</label>' +
-          '<div data-mchost>' + (existing.length ? existing.map(contactRow).join('') : contactRow()) + '</div>' +
-          '<button class="btn btn--ghost btn--sm" data-mcadd type="button">Add another contact</button></div>');
-      goBtn.hidden = false;
-      goBtn.textContent = 'Move ' + opts.name + ' to ' + METHOD[route].label;
-    });
+        '</ul></div>';
+      sync();
+    }
 
     function readContacts() {
       return Array.prototype.map.call(wrap.querySelectorAll('.mcontact'), function (row) {
@@ -652,8 +700,7 @@
     }
 
     function commit() {
-      if (!pending) return;
-      var route = pending;
+      var route = pending;   // null = contacts-only save on the current method
       var contacts = null;
       if (route !== 'unassigned') {
         contacts = readContacts();
@@ -665,20 +712,29 @@
         contacts = okList;
       }
       ensureAuth().then(function () {
-        var writes = [window.UWP.ref('config/clubs/' + opts.code + '/route').set(route)];
+        var writes = [];
+        if (route) writes.push(window.UWP.ref('config/clubs/' + opts.code + '/route').set(route));
         if (contacts) writes.push(window.UWP.ref('contacts/' + opts.code).set(contacts));
         return Promise.all(writes);
       }).then(function () {
-        audit(opts.actor, opts.actorLabel, 'route', {
-          club: opts.code, clubName: opts.name,
-          detail: 'Redemption method set to ' + METHOD[route].label.toLowerCase() +
-            (contacts ? ' — contact: ' + contacts.map(function (c) { return c.name; }).join(', ') : '')
-        });
-        window.NL.toast(opts.name + ' \u2192 ' + METHOD[route].label, 'success');
-        if (opts.onDone) opts.onDone(route);
+        if (route) {
+          audit(opts.actor, opts.actorLabel, 'route', {
+            club: opts.code, clubName: opts.name,
+            detail: 'Redemption method set to ' + METHOD[route].label.toLowerCase() +
+              (contacts ? ' — contact: ' + contacts.map(function (c) { return c.name; }).join(', ') : '')
+          });
+          window.NL.toast(opts.name + ' → ' + METHOD[route].label, 'success');
+        } else {
+          audit(opts.actor, opts.actorLabel, 'contact', {
+            club: opts.code, clubName: opts.name,
+            detail: 'Scheme contacts updated (' + contacts.length + ')'
+          });
+          window.NL.toast('Contacts saved', 'success');
+        }
+        if (opts.onDone) opts.onDone(route || cur);
         ctrl.close();
       }).catch(function (err) {
-        window.NL.toast('Method change failed: ' + err.message, 'error');
+        window.NL.toast('Save failed: ' + err.message, 'error');
       });
     }
   }

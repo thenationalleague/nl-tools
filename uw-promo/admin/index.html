@@ -24,6 +24,16 @@
            write config. That is the change that stops all 72 till PINs being
            world-readable. First run mints a bootstrap master token while no
            passcode exists; nothing subscribes to RTDB until the session does.
+  Version: v7.1 (10/09/2026) — owner feedback: the club filter follows the
+           method tab (Online lists online clubs; the pre-v3.0 "not yet
+           registered" bucket is In-store only; a method-changed club stays
+           listed while it owns codes on the tab), rebuilt on tab switch
+           with a vanished selection reset to All. Toolbar order matches
+           the UW page — the one primary is always rightmost. The scheme-
+           contact column reads again: the console subscribes to the
+           contacts PARENT node, which had no read rule (each $club did),
+           so every cell said "none" despite the data being there — rules
+           press required.
   Version: v7.0 (10/09/2026) — owner N8, mirrored: placeholder rows in the
            Online codes table replace the requests panel; Dispatch is per
            row with a confirm, on both method tabs.
@@ -268,9 +278,11 @@
         </div>
         <div class="toolbar__right">
           <button class="btn btn--ghost" id="btnBatches">Code adds</button>
-          <button class="btn btn--primary" id="btnRequests" hidden>Request club codes</button>
           <button class="btn btn--ghost" id="btnExport">Export CSV</button>
+          <!-- One primary per tab, always the SAME rightmost slot — the tab
+               swaps which of these two is visible, not where red lives. -->
           <button class="btn btn--primary" id="btnAdd">Add in-store codes</button>
+          <button class="btn btn--primary" id="btnRequests" hidden>Request club codes</button>
         </div>
       </div>
       <div class="table-wrap">
@@ -400,7 +412,9 @@
     });
     UWP.ref('codes').on('value', function (s) {
       CODES = s.val() || {}; codesLoaded = true;
-      if (unlocked) renderCodes();
+      // The club filter keeps method-changed clubs only while they own
+      // codes on the tab, so it tracks the codes node too.
+      if (unlocked) { buildClubFilter(); renderCodes(); }
     });
     UWP.ref('audit').orderByChild('ts').limitToLast(500).on('value', function (s) {
       AUDIT = s.val() || {}; auditLoaded = true;
@@ -538,6 +552,7 @@
       document.getElementById('btnAdd').hidden = tab !== 'instore';
       document.getElementById('btnBatches').hidden = tab !== 'instore';
       document.getElementById('btnRequests').hidden = tab !== 'online';
+      buildClubFilter();   // the club list follows the tab's method
       renderCodes();
     }
   });
@@ -631,22 +646,31 @@
   function buildClubFilter() {
     var sel = document.getElementById('fClub');
     var prev = sel.value;
+    /* The filter follows the method tab (owner ruling 10/09/2026): the
+       Online tab offers online clubs, In-store offers in-store ones. A club
+       whose method has since changed keeps its entry while it still owns
+       codes on the tab, so no row is ever unfilterable. */
+    var owned = {};
+    codeRows().forEach(function (r) { if (r.club) owned[r.club] = true; });
     var byDiv = {}, order = [];
     clubList().forEach(function (c) {
+      if (c.route !== METHOD_TAB && !owned[c.code]) return;
       if (!byDiv[c.division]) { byDiv[c.division] = []; order.push(c.division); }
       byDiv[c.division].push(c);
     });
-    var html = '<option value="">All clubs</option>' +
-      // Codes created before v3.0 belong to no club — findable here so they
-      // can be registered to one with the per-row "Register…" button.
-      '<option value="__none">Not yet registered to a club</option>';
+    var html = '<option value="">All clubs</option>';
+    // Codes created before v3.0 belong to no club — central by definition,
+    // so the register-me bucket lives on the In-store tab only (the per-row
+    // "Register…" button is how they get a club).
+    if (METHOD_TAB === 'instore') html += '<option value="__none">Not yet registered to a club</option>';
     order.forEach(function (d) {
       html += '<optgroup label="' + esc(d || 'Clubs') + '">';
       byDiv[d].forEach(function (c) { html += '<option value="' + esc(c.code) + '">' + esc(c.name) + '</option>'; });
       html += '</optgroup>';
     });
     sel.innerHTML = html;
-    sel.value = prev || '';
+    sel.value = prev;
+    if (sel.selectedIndex === -1) sel.value = '';
   }
 
   /* Options for an "which club?" dropdown, grouped by division. */

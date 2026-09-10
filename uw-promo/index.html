@@ -3,6 +3,13 @@
 <head>
 <!--
   UW Promo Codes — Utility Warehouse partner page
+  Version: v8.1 (10/09/2026) — the club filter follows the method tab
+           (owner ruling, made on the master console and mirrored here):
+           Online lists online clubs, In-store lists in-store ones, the
+           pre-v3.0 "not yet registered" bucket is In-store only, and a
+           method-changed club stays listed while it still owns codes on
+           the tab. Rebuilt on tab switch; a selection that vanishes with
+           the switch resets to All clubs.
   Version: v8.0 (10/09/2026) — owner N8: a request IS empty rows in the
            code table — one placeholder per code still owed (Requested /
            Overdue pill, empty code cell), converting to Issued rows as the
@@ -335,6 +342,9 @@
     UWP.ref('codes').on('value', function (s) {
       CODES = s.val() || {};
       codesLoaded = true;
+      // The club filter keeps method-changed clubs only while they own
+      // codes on the tab, so it tracks the codes node too.
+      buildClubFilter();
       render();
     });
     UWP.ref('requests').on('value', function (s) { REQS = s.val() || {}; render(); });
@@ -357,22 +367,31 @@
   function buildClubFilter() {
     var sel = document.getElementById('fClub');
     var prev = sel.value;
+    /* The filter follows the method tab (owner ruling 10/09/2026): the
+       Online tab offers online clubs, In-store offers in-store ones. A club
+       whose method has since changed keeps its entry while it still owns
+       codes on the tab, so no row is ever unfilterable. */
+    var owned = {};
+    codeRows().forEach(function (r) { if (r.club) owned[r.club] = true; });
     var byDiv = {}, order = [];
     clubList().forEach(function (c) {
+      if (c.route !== TAB && !owned[c.code]) return;
       if (!byDiv[c.division]) { byDiv[c.division] = []; order.push(c.division); }
       byDiv[c.division].push(c);
     });
-    var html = '<option value="">All clubs</option>' +
-      // Codes created before v3.0 carry no club — findable, so NL can register
-      // them to one retrospectively from the master console.
-      '<option value="__none">Not yet registered to a club</option>';
+    var html = '<option value="">All clubs</option>';
+    // Codes created before v3.0 carry no club — central by definition, so
+    // the not-yet-registered bucket only means anything on the In-store tab
+    // (NL registers them to a club from the master console).
+    if (TAB === 'instore') html += '<option value="__none">Not yet registered to a club</option>';
     order.forEach(function (d) {
       html += '<optgroup label="' + esc(d || 'Clubs') + '">';
       byDiv[d].forEach(function (c) { html += '<option value="' + esc(c.code) + '">' + esc(c.name) + '</option>'; });
       html += '</optgroup>';
     });
     sel.innerHTML = html;
-    sel.value = prev || '';
+    sel.value = prev;
+    if (sel.selectedIndex === -1) sel.value = '';
   }
 
   /* The club filter is the one filter the big count cards also obey: every
@@ -549,6 +568,7 @@
     });
     document.getElementById('btnAdd').hidden = TAB !== 'instore';
     document.getElementById('btnRequests').hidden = TAB !== 'online';
+    buildClubFilter();   // the club list follows the tab's method
     render();
   });
 
