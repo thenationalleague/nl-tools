@@ -24,6 +24,14 @@
            write config. That is the change that stops all 72 till PINs being
            world-readable. First run mints a bootstrap master token while no
            passcode exists; nothing subscribes to RTDB until the session does.
+  Version: v7.5 (10/09/2026) — divisions are gone from the tool (owner:
+           "don't need to filter; alphabetical to all clubs is fine"): the
+           Clubs & access Division column is removed — which is what was
+           overspilling the table after the Link button landed — every
+           club list and dropdown is flat alphabetical with no optgroups,
+           and the access CSV drops the column. The division field stays
+           on the stored record (seeded from the roster) — it just no
+           longer renders anywhere.
   Version: v7.4 (10/09/2026) — credential rotation is per club (owner):
            the roster-wide "Reissue all club PINs" / "Reissue all manager
            passcodes" buttons and their typed-confirm flows are gone — the
@@ -639,9 +647,7 @@
       return { code: k, name: c.name, division: c.division || '', passcode: c.passcode,
                managerPass: c.managerPass, token: c.token,
                route: (c.route === 'instore' || c.route === 'online') ? c.route : 'unassigned' };
-    }).sort(function (a, b) {
-      return (a.division || '').localeCompare(b.division || '') || a.name.localeCompare(b.name);
-    });
+    }).sort(function (a, b) { return a.name.localeCompare(b.name); });
   }
 
   /* Every PIN currently issued to a club, as a set for UWP.newPin. A club
@@ -666,45 +672,34 @@
        codes on the tab, so no row is ever unfilterable. */
     var owned = {};
     codeRows().forEach(function (r) { if (r.club) owned[r.club] = true; });
-    var byDiv = {}, order = [];
-    clubList().forEach(function (c) {
-      if (c.route !== METHOD_TAB && !owned[c.code]) return;
-      if (!byDiv[c.division]) { byDiv[c.division] = []; order.push(c.division); }
-      byDiv[c.division].push(c);
-    });
     var html = '<option value="">All clubs</option>';
     // Codes created before v3.0 belong to no club — central by definition,
     // so the register-me bucket lives on the In-store tab only (the per-row
     // "Register…" button is how they get a club).
     if (METHOD_TAB === 'instore') html += '<option value="__none">Not yet registered to a club</option>';
-    order.forEach(function (d) {
-      html += '<optgroup label="' + esc(d || 'Clubs') + '">';
-      byDiv[d].forEach(function (c) { html += '<option value="' + esc(c.code) + '">' + esc(c.name) + '</option>'; });
-      html += '</optgroup>';
+    clubList().forEach(function (c) {
+      if (c.route !== METHOD_TAB && !owned[c.code]) return;
+      html += '<option value="' + esc(c.code) + '">' + esc(c.name) + '</option>';
     });
     sel.innerHTML = html;
     sel.value = prev;
     if (sel.selectedIndex === -1) sel.value = '';
   }
 
-  /* Options for an "which club?" dropdown, grouped by division. */
-  /* methodFilter narrows the list to one redemption method (owner ruling
+  /* Options for a "which club?" dropdown — alphabetical, no division
+     grouping (owner ruling 10/09/2026: divisions are gone from this tool).
+     methodFilter narrows the list to one redemption method (owner ruling
      09/09/2026): central codes are added for IN-STORE clubs only, requests
      are raised against ONLINE clubs only, and registering a pre-v3.0 code
      stays unfiltered. */
   function clubOptionsHtml(placeholder, methodFilter) {
-    var byDiv = {}, order = [];
-    clubList().forEach(function (c) {
-      if (methodFilter && c.route !== methodFilter) return;
-      if (!byDiv[c.division]) { byDiv[c.division] = []; order.push(c.division); }
-      byDiv[c.division].push(c);
-    });
-    return '<option value="">' + esc(placeholder) + '</option>' + order.map(function (d) {
-      return '<optgroup label="' + esc(d || 'Clubs') + '">' + byDiv[d].map(function (c) {
+    return '<option value="">' + esc(placeholder) + '</option>' +
+      clubList().filter(function (c) {
+        return !methodFilter || c.route === methodFilter;
+      }).map(function (c) {
         var mark = methodFilter || c.route === 'instore' ? '' : ' — ' + ROUTE_LABEL[c.route].toLowerCase();
         return '<option value="' + esc(c.code) + '">' + esc(c.name) + esc(mark) + '</option>';
-      }).join('') + '</optgroup>';
-    }).join('');
+      }).join('');
   }
 
   /* The club filter is the one filter the big count cards also obey — every
@@ -1363,11 +1358,10 @@
           'the refresh glyph beside a club’s PIN converts it to a 4-digit PIN.</p>'
         : '') +
       '<div class="table-wrap"><table class="table">' +
-      '<thead><tr><th>Club</th><th>Division</th><th>Method</th><th>Scheme contact</th><th>Till PIN</th><th>Manager passcode</th><th></th></tr></thead><tbody>' +
+      '<thead><tr><th>Club</th><th>Method</th><th>Scheme contact</th><th>Till PIN</th><th>Manager passcode</th><th></th></tr></thead><tbody>' +
       clubs.map(function (c) {
         return '<tr><td><span class="club-cell">' + NL.clubs.crestImgHtml(c.name, 'thumb') +
           '<span class="club-cell__name">' + esc(c.name) + '</span></span></td>' +
-          '<td>' + esc(c.division) + '</td>' +
           '<td style="white-space:nowrap">' + UWP.methodPill(c.route) +
             ' <button class="code-copy" data-medit="' + esc(c.code) + '" title="Change redemption method"' +
             ' aria-label="Change redemption method for ' + esc(c.name) + '">' +
@@ -1590,8 +1584,8 @@
 
   function exportAccess() {
     var clubs = clubList();
-    var rows = [['Club', 'Division', 'Method', 'Till PIN', 'Manager passcode', 'Direct link']];
-    clubs.forEach(function (c) { rows.push([c.name, c.division, ROUTE_LABEL[c.route], c.passcode, c.managerPass || '', UWP.clubLink(c.token)]); });
+    var rows = [['Club', 'Method', 'Till PIN', 'Manager passcode', 'Direct link']];
+    clubs.forEach(function (c) { rows.push([c.name, ROUTE_LABEL[c.route], c.passcode, c.managerPass || '', UWP.clubLink(c.token)]); });
     if (CONFIG.uw && CONFIG.uw.passcode) rows.push(['Utility Warehouse', '', '', CONFIG.uw.passcode, '', UWP.uwLink(CONFIG.uw.token)]);
     NL.download('uw-promo-access.csv', NL.csv(rows, { bom: true }), 'text/csv;charset=utf-8');
     toast('Access CSV exported — treat it like a password list', 'success');
