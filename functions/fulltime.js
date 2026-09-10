@@ -78,10 +78,11 @@ async function ingestDivision(div, db, get, now) {
   }
   update.fetchedAt = now;
   update.missing = missing;
+  update.diag = got.diag;      /* what each page answered — the tool shows it when something is missing */
   update.version = VERSION;
   await db.ref(ROOT + '/' + div.key).update(update);
   logger.info('fulltime ingest', { division: div.key, table: (got.table || []).length,
-    results: (got.results || []).length, fixtures: (got.fixtures || []).length, missing });
+    results: (got.results || []).length, fixtures: (got.fixtures || []).length, missing, diag: got.diag });
   return { key: div.key, missing };
 }
 

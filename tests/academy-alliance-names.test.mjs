@@ -208,3 +208,71 @@ test('empty and junk input do not throw', () => {
   assert.equal(e.club, null); assert.equal(e.name, ''); assert.equal(e.display, '');
   assert.equal(resolve('U19').club, null);
 });
+
+/* ---- paste shapes (added 10/09/2026, both pastes as Richard copied them off Full-Time) ---- */
+/* rows are built inside the VM, so compare by value, not prototype */
+const parseFixtures = (t) => JSON.parse(JSON.stringify(window.TOOL.parseFixtures(t)));
+
+test('a fixtures table copied off Full-Time: pair either side of VS, date heading, postponed dropped', () => {
+  const paste = [
+    'Type\tDate / Time\tHome Team\t\tAway Team\tVenue\tCompetition\tStatus / Notes',
+    'NOR\t02/09/26 13:00\tChester FC U19 Scholars\t\tVS\t\tGateshead FC U19 Academy North\tKING GEORGE V SPORTS HUB\tNLFA North Division\tPostponed',
+    'NOR\t23/09/26 14:00\tAFC Fylde U19 National League North\t\tVS\t\tGateshead FC U19 Academy North\tMILL FARM SPORTS VILLAGE\tNLFA North Division\t',
+    'NOR\t23/09/26 14:00\tChester FC U19 Scholars\t\tVS\t\tHarrogate Town FC U19 Academy\tKING GEORGE V SPORTS HUB\tNLFA North Division\t',
+  ].join('\n');
+  const rows = parseFixtures(paste);
+  assert.equal(rows.length, 2, 'header and the postponed row are dropped; one date so no heading');
+  assert.deepEqual(rows[0], { home: 'AFC Fylde U19 National League North', away: 'Gateshead FC U19 Academy North', hs: '', as: '', ko: '14:00' });
+  assert.equal(rows[1].away, 'Harrogate Town FC U19 Academy');
+});
+
+test('results copied off Full-Time come one field per line: fold on the score, heading per day', () => {
+  const paste = `Type
+
+Date / Time
+
+Home Team
+
+Away Team
+
+Competition
+
+NOR
+
+09/09/26 14:00
+Morecambe FC U19 Morecambe FC U19
+2 - 9
+AFC Fylde U19 National League North
+NLFA North Division
+
+NOR
+
+09/09/26 13:30
+Hednesford Town U19
+0 - 1
+Hartlepool United FC U19 Hartlepool Unit
+NLFA North Division
+
+NOR
+
+02/09/26 14:00
+AFC Fylde U19 National League North
+2 - 3
+Southport FC U19 Academy
+NLFA North Division
+`;
+  const rows = parseFixtures(paste);
+  assert.equal(rows.length, 5, 'two day headings plus three matches');
+  assert.match(rows[0].divider, /^WED 9 SEPT?$/);   /* en-GB short month is "Sept" in Node and Chromium alike */
+  assert.deepEqual(rows[1], { home: 'Morecambe FC U19 Morecambe FC U19', away: 'AFC Fylde U19 National League North', hs: '2', as: '9', ko: '14:00' });
+  assert.equal(rows[2].hs, '0'); assert.equal(rows[2].as, '1');
+  assert.match(rows[3].divider, /^WED 2 SEPT?$/);
+  assert.equal(rows[4].away, 'Southport FC U19 Academy');
+});
+
+test('the plain shapes still parse: "Home v Away", "Home 2-1 Away", a lone line is a heading', () => {
+  const rows = parseFixtures('SAT 13 SEP\nHorsham v Southend United\nChester 2-1 Gateshead');
+  assert.equal(rows[0].divider, 'SAT 13 SEP');
+  assert.deepEqual(rows[1], { home: 'Horsham', away: 'Southend United', hs: '', as: '', ko: '' });
+  assert.deepEqual(rows[2], { home: 'Chester', away: 'Gateshead', hs: '2', as: '1', ko: '' });
+});
