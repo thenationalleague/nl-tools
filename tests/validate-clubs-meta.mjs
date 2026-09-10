@@ -96,6 +96,24 @@ export function validateClubsMeta(repo = REPO) {
     }
 
     if (c.division != null && typeof c.division !== 'string') E(`${at}: "division" not a string`);
+
+    // pitch — the metric window set 10/09/2026: length 90–120m, width
+    // 45–90m. Current roster only; departed clubs keep whatever format they
+    // left with. Absent pitch is legal (grounds under re-measurement are
+    // wiped rather than guessed). A present one must be the canonical
+    // "<length> x <width> m" metres form so the bounds can actually be
+    // read, and must sit inside them.
+    if (onCurrentRoster && c.pitch != null) {
+      const dims = typeof c.pitch === 'object' ? c.pitch.dimensions : null;
+      const mm = typeof dims === 'string' && dims.match(/^(\d+(?:\.\d+)?) x (\d+(?:\.\d+)?) m$/);
+      if (!mm) {
+        W(`${at}: pitch.dimensions ${JSON.stringify(dims)} not in "<length> x <width> m" metres form`);
+      } else {
+        const len = Number(mm[1]), wid = Number(mm[2]);
+        if (len < 90 || len > 120) W(`${at}: pitch length ${len}m outside 90-120m`);
+        if (wid < 45 || wid > 90) W(`${at}: pitch width ${wid}m outside 45-90m`);
+      }
+    }
   });
 
   // ── uniqueness ───────────────────────────────────────────────────────────
