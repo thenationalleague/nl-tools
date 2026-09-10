@@ -19,6 +19,13 @@ The functions in this directory:
   that write to a **different project's** database (`nl-widgets`). See the
   section below — they need one extra IAM grant that nothing else does.
 
+- **`fulltimeIngestHourly`** / **`fulltimeRefresh`** (`fulltime.js`) — FA
+  Full-Time → RTDB for the Academy & Alliance graphic. Hourly schedule plus an
+  RTDB trigger the tool writes to for an on-demand fetch. Writes only to this
+  project's database, so it needs no extra IAM grant. The HTML parsers are
+  pure (`fulltime/parse.js`) and pinned by `tests/fulltime.test.mjs` against
+  saved pages, which is where a Full-Time redesign shows up first.
+
 See the headers of `index.js` / `account.js` for details.
 
 This is the **only server-side code** in the repo; everything else is a static

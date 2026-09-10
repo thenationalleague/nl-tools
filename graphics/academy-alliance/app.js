@@ -13,6 +13,13 @@
 
   var STORAGE_KEY = "nl-academy-alliance-gfx-v1";
   var MAX_FIXTURES = 14;
+  /* The feed: functions/fulltime.js fetches FA Full-Time hourly and writes
+     each division's table, results and fixtures here. Read behind the login;
+     the browser never calls Full-Time. A write to FEED_REFRESH/<uid> asks the
+     function to fetch one division now; it deletes the request when done. */
+  var FEED_ROOT = "app-data/staff-graphics/fulltime";
+  var FEED_REFRESH = "app-data/staff-graphics/fulltime-refresh";
+  var REFRESH_WAIT_MS = 30000;
 
   /* ---------------- competitions ----------------
      Both roundels live in assets/divisions; the 256px tier is built by the
@@ -179,6 +186,9 @@
   var state = {
     division: "academy-north",
     type: "fixtures",          /* fixtures | results | table */
+    source: "feed",            /* feed | manual — which entry card is shown */
+    feedFrom: "",              /* YYYY-MM-DD, or "" = first date offered */
+    feedTo: "",                /* YYYY-MM-DD, or "" = same day */
     format: "1x1",
     crests: true,
     title: "",
@@ -192,7 +202,7 @@
     try {
       var d = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
       if (d && typeof d === "object") {
-        ["division", "type", "format", "title", "sub", "footnote"].forEach(function (k) {
+        ["division", "type", "format", "title", "sub", "footnote", "source", "feedFrom", "feedTo"].forEach(function (k) {
           if (typeof d[k] === "string") state[k] = d[k];
         });
         if (typeof d.crests === "boolean") state.crests = d.crests;
@@ -202,6 +212,7 @@
     } catch (e) {}
     if (!divisionOf(state.division) || DIVISIONS.map(function (x) { return x.key; }).indexOf(state.division) < 0) state.division = DIVISIONS[0].key;
     if (["fixtures", "results", "table"].indexOf(state.type) < 0) state.type = "fixtures";
+    if (state.source !== "manual") state.source = "feed";
   }
 
   function headline() {
@@ -632,6 +643,163 @@
     setStatus(miss.length ? miss.length + " of " + names.length + " without a crest on file" : "All " + names.length + " matched", 4000);
   }
 
+  /* ---------------- the feed ----------------
+     One node per division: { table, results, fixtures, fetchedAt, missing }.
+     Read once per division per visit and cached; Refresh re-reads. */
+  var _feed = {};
+  function dbRef(path) { return (window.db || firebase.database()).ref(path); }
+  function feedNode() { return _feed[state.division] || null; }
+  function dividerLabel(ymd) {
+    var d = new Date(ymd + "T12:00:00Z");   /* midday: no DST edge either way */
+    return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }).replace(/,/g, "").toUpperCase();
+  }
+  function dateLabel(ymd) {
+    var d = new Date(ymd + "T12:00:00Z");
+    return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }).replace(/,/g, "");
+  }
+  function loadFeedNode(key, force) {
+    if (_feed[key] && !force) { fillDates(); showMeta(); return Promise.resolve(_feed[key]); }
+    setStatus("Reading the feed…", 6000);
+    return NL.ensureAuth().then(function () {
+      return dbRef(FEED_ROOT + "/" + key).once("value");
+    }).then(function (snap) {
+      _feed[key] = snap.val() || null;
+      fillDates(); showMeta();
+      setStatus(_feed[key] ? "Feed ready" : "No feed copy yet — press Refresh");
+      return _feed[key];
+    }).catch(function (err) {
+      console.error(err);
+      showMeta("Could not read the feed — " + (err && err.code === "PERMISSION_DENIED" ? "no access" : "check your connection"), true);
+      setStatus("Feed unavailable");
+      return null;
+    });
+  }
+  /* The dates a type offers: results most recent first, fixtures soonest
+     first. Only these two types have dates; the table loads whole. */
+  function feedDates() {
+    var node = feedNode();
+    if (!node) return [];
+    var rows = state.type === "results" ? (node.results || []) : state.type === "fixtures" ? (node.fixtures || []) : [];
+    var seen = {}, out = [];
+    rows.forEach(function (r) { if (r.date && !seen[r.date]) { seen[r.date] = 1; out.push(r.date); } });
+    out.sort();
+    if (state.type === "results") out.reverse();
+    return out;
+  }
+  function fillDates() {
+    var from = $("feedFrom"), to = $("feedTo");
+    if (!from || !to) return;
+    var dates = feedDates();
+    if (!dates.length) {
+      from.innerHTML = '<option value="">' + (feedNode() ? "No dates in the feed" : "No feed copy yet") + '</option>';
+      to.innerHTML = '<option value="">Same day</option>';
+      return;
+    }
+    from.innerHTML = dates.map(function (d) { return '<option value="' + d + '">' + esc(dateLabel(d)) + '</option>'; }).join("");
+    from.value = dates.indexOf(state.feedFrom) >= 0 ? state.feedFrom : dates[0];
+    state.feedFrom = from.value;
+    fillToDates();
+  }
+  function fillToDates() {
+    var to = $("feedTo"), dates = feedDates();
+    var i = dates.indexOf(state.feedFrom);
+    var rest = i >= 0 ? dates.slice(i + 1) : [];
+    to.innerHTML = '<option value="">Same day</option>' +
+      rest.map(function (d) { return '<option value="' + d + '">' + esc(dateLabel(d)) + '</option>'; }).join("");
+    to.value = rest.indexOf(state.feedTo) >= 0 ? state.feedTo : "";
+    state.feedTo = to.value;
+  }
+  function showMeta(msg, warn) {
+    var el = $("feedMeta");
+    if (!el) return;
+    if (msg) { el.textContent = msg; el.className = warn ? "warn" : ""; return; }
+    var node = feedNode();
+    if (!node || !node.fetchedAt) { el.textContent = "No copy of this division yet. Refresh fetches it from Full-Time."; el.className = "warn"; return; }
+    var when = NL.formatDateTime ? NL.formatDateTime(node.fetchedAt) : new Date(node.fetchedAt).toLocaleString("en-GB");
+    var miss = (node.missing || []).length ? " · last fetch missed: " + node.missing.join(", ") : "";
+    el.textContent = "Fetched " + when + miss;
+    el.className = miss ? "warn" : "";
+  }
+  /* Load fills the editor from the stored copy. Fixtures and results take
+     the chosen date, or the run from Date through to Through to, with a
+     divider per day; the table comes whole. */
+  function loadFromFeed() {
+    var node = feedNode();
+    if (!node) { setStatus("No feed copy — press Refresh"); return; }
+    if (state.type === "table") {
+      var t = node.table || [];
+      if (!t.length) { setStatus("The feed has no table for this division"); return; }
+      state.table = t.map(function (r) {
+        return { team: r.team, label: "", adj: !!r.adj, p: r.p, w: r.w, d: r.d, l: r.l, f: r.f, a: r.a, gd: r.gd, pts: r.pts };
+      });
+      syncPasteFromRows(); buildGrid(); save(); render(); reportMatches();
+      return;
+    }
+    var rows = state.type === "results" ? (node.results || []) : (node.fixtures || []);
+    var dates = feedDates();
+    var i = dates.indexOf(state.feedFrom), j = state.feedTo ? dates.indexOf(state.feedTo) : i;
+    if (i < 0) { setStatus("Pick a date"); return; }
+    if (j < i) j = i;
+    var wanted = dates.slice(i, j + 1);
+    var out = [], skipped = 0, n = 0;
+    wanted.forEach(function (d) {
+      var day = rows.filter(function (r) { return r.date === d; });
+      if (state.type === "fixtures") {
+        var live = day.filter(function (r) { return !/postponed|cancel|abandon/i.test(r.status || ""); });
+        skipped += day.length - live.length; day = live;
+      }
+      if (!day.length) return;
+      if (wanted.length > 1) out.push({ divider: dividerLabel(d) });
+      day.forEach(function (r) {
+        if (n >= MAX_FIXTURES) return;
+        out.push({ home: r.home, away: r.away, hs: r.hs || "", as: r.as || "", ko: r.time || "" }); n++;
+      });
+    });
+    if (!out.length) { setStatus(skipped ? "Every match that day is postponed" : "Nothing in the feed for those dates"); return; }
+    state.fixtures = out;
+    syncPasteFromRows(); buildGrid(); save(); render();
+    var names = out.filter(function (r) { return r.divider == null; });
+    var miss = names.filter(function (r) { return !resolveTeam(r.home, state.division).club || !resolveTeam(r.away, state.division).club; }).length;
+    setStatus("Loaded " + names.length + (skipped ? " — " + skipped + " postponed left out" : "") + (miss ? " — " + miss + " without a crest on file" : ""), 5000);
+  }
+  /* Refresh: write the request, then wait for fetchedAt to move. The function
+     deletes the request when it has finished, so a stale one never blocks. */
+  function refreshFeed() {
+    var key = state.division, before = (feedNode() || {}).fetchedAt || 0;
+    var btn = $("feedRefreshBtn");
+    btn.disabled = true; showMeta("Asking Full-Time…");
+    var done = false, timer, ref;
+    function finish(msg, warn) {
+      if (done) return; done = true; clearTimeout(timer);
+      if (ref) ref.off("value", onValue);
+      btn.disabled = false;
+      loadFeedNode(key, true).then(function () { if (msg) showMeta(msg, warn); });
+    }
+    function onValue(snap) {
+      var v = snap.val();
+      if (v && v > before) finish();
+    }
+    NL.ensureAuth().then(function () {
+      var uid = firebase.auth().currentUser.uid;
+      return dbRef(FEED_REFRESH + "/" + uid).set({ division: key, at: firebase.database.ServerValue.TIMESTAMP });
+    }).then(function () {
+      ref = dbRef(FEED_ROOT + "/" + key + "/fetchedAt");
+      ref.on("value", onValue);
+      timer = setTimeout(function () { finish("Full-Time did not answer in time — the hourly fetch will catch it", true); }, REFRESH_WAIT_MS);
+    }).catch(function (err) {
+      console.error(err);
+      done = true; btn.disabled = false;
+      showMeta("Could not ask for a refresh — " + (err && err.code === "PERMISSION_DENIED" ? "no access" : "check your connection"), true);
+    });
+  }
+  function setSource(src) {
+    state.source = (src === "manual") ? "manual" : "feed";
+    document.querySelectorAll(".src-btn").forEach(function (b) { b.classList.toggle("active", b.getAttribute("data-src") === state.source); });
+    document.body.setAttribute("data-source", state.source);
+    save();
+    if (state.source === "feed") loadFeedNode(state.division);
+  }
+
   /* ---------------- datalist ----------------
      The chosen division's sides come first, then the whole roster, so a
      typed fixture picks from the right eight-to-fourteen without hiding a
@@ -747,6 +915,7 @@
         : "One match per line:\nHome  v  Away\nA line on its own becomes a heading.";
     $("titleInput").placeholder = t === "table" ? "Current Standings" : t === "results" ? "Results" : "Fixtures — or a matchday number";
     syncPasteFromRows(); buildGrid(); save(); render();
+    fillDates();
   }
   function syncSizeSeg() {
     document.querySelectorAll(".size-btn").forEach(function (b) { b.classList.toggle("active", b.getAttribute("data-fmt") === state.format); });
@@ -769,8 +938,19 @@
     $("crestToggle").checked = state.crests;
     syncSizeSeg();
     setType(state.type);
+    setSource(state.source);
 
-    sel.addEventListener("change", function () { state.division = this.value; buildTeamList(); buildGrid(); save(); render(); reportMatches(); });
+    sel.addEventListener("change", function () {
+      state.division = this.value; buildTeamList(); buildGrid(); save(); render(); reportMatches();
+      if (state.source === "feed") loadFeedNode(state.division);   /* each division is its own node */
+    });
+    document.querySelectorAll(".src-btn").forEach(function (b) {
+      b.addEventListener("click", function () { setSource(b.getAttribute("data-src")); fitStage(); });
+    });
+    $("feedFrom").addEventListener("change", function () { state.feedFrom = this.value; fillToDates(); save(); });
+    $("feedTo").addEventListener("change", function () { state.feedTo = this.value; save(); });
+    $("feedLoadBtn").addEventListener("click", loadFromFeed);
+    $("feedRefreshBtn").addEventListener("click", refreshFeed);
     $("titleInput").addEventListener("input", function () { state.title = this.value; save(); render(); });
     $("seasonInput").addEventListener("input", function () { state.sub = this.value; save(); render(); });
     $("footnoteInput").addEventListener("input", function () { state.footnote = this.value; save(); render(); });
