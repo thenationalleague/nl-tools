@@ -24,6 +24,13 @@
            write config. That is the change that stops all 72 till PINs being
            world-readable. First run mints a bootstrap master token while no
            passcode exists; nothing subscribes to RTDB until the session does.
+  Version: v7.4 (10/09/2026) — credential rotation is per club (owner):
+           the roster-wide "Reissue all club PINs" / "Reissue all manager
+           passcodes" buttons and their typed-confirm flows are gone — the
+           per-row refresh glyphs are the rotation path; the legacy-
+           passcode note now points at them. Personal names scrubbed from
+           master-view copy and comments (public repo; the notify
+           placeholder is neutral).
   Version: v7.3 (10/09/2026) — Clubs & access: the roster-sync button is
            gone once clubs exist — seeding is the one-time first act of an
            empty console (owner), so the empty state is the only door. The
@@ -96,7 +103,7 @@
   Version: v6.0 (09/09/2026) — spec v43.0: the NL side of the request
            lifecycle. Requests modal mirrors the UW one (raise, due a week
            out by default, mark fulfilled) with a Raised-by column since both
-           Lucy and Richard can raise. Clubs & access grows a Scheme contact
+           UW and NL can raise. Clubs & access grows a Scheme contact
            column fed from contacts/<club>; the audit filter learns request/
            dispatch/contact; code pills show the issued/dispatched faces.
   Version: v5.0 (03/09/2026) — routes land (spec v42.0). New Route column in
@@ -332,7 +339,7 @@
           <div><label for="supEmail">UW support email — shown to fans on a refused code</label>
             <input id="supEmail" type="email" placeholder="not set yet — refusal screens show only the T&amp;Cs link"></div>
           <div><label for="supNotify">Upload alerts go to (comma-separated)</label>
-            <input id="supNotify" type="text" placeholder="e.g. Lucy&#8217;s and your addresses"></div>
+            <input id="supNotify" type="text" placeholder="Comma-separated email addresses"></div>
           <button class="btn btn--primary btn--sm" id="supSave">Save</button>
         </div>
       </div>
@@ -1317,7 +1324,7 @@
     var noMgr = clubs.filter(function (c) { return !c.managerPass; });
     /* The route ledger, at a glance (spec item 1: "the admin view should show
        all 72 states so chasing is trivial"). The unassigned number is the
-       chase list — it should reach zero within Jon's two-week deadline. */
+       chase list — it should reach zero within the partner's two-week deadline. */
     var byRoute = { unassigned: 0, instore: 0, online: 0 };
     clubs.forEach(function (c) { byRoute[c.route]++; });
 
@@ -1332,8 +1339,6 @@
       '<div class="access-actions">' +
         '<button class="btn btn--ghost btn--sm" id="btnExportAccess">Export access CSV</button>' +
         '<button class="btn btn--navy btn--sm" id="btnPrintCards">Print till cards</button>' +
-        '<button class="btn btn--danger btn--sm" id="btnReissuePins">Reissue all club PINs</button>' +
-        '<button class="btn btn--danger btn--sm" id="btnReissueMgr">Reissue all manager passcodes</button>' +
         (noMgr.length
           ? '<button class="btn btn--navy btn--sm" id="btnIssueMgr">Issue missing manager passcodes</button>'
           : '') +
@@ -1354,8 +1359,8 @@
         : '') +
       (legacy.length
         ? '<p class="code-note" style="margin:-4px 0 12px">' + legacy.length + ' club' +
-          (legacy.length > 1 ? 's are' : ' is') + ' still on an old 6-character passcode. ' +
-          '“Reissue all club PINs” converts every club to a 4-digit PIN in one go.</p>'
+          (legacy.length > 1 ? 's are' : ' is') + ' still on an old 6-character passcode — ' +
+          'the refresh glyph beside a club’s PIN converts it to a 4-digit PIN.</p>'
         : '') +
       '<div class="table-wrap"><table class="table">' +
       '<thead><tr><th>Club</th><th>Division</th><th>Method</th><th>Scheme contact</th><th>Till PIN</th><th>Manager passcode</th><th></th></tr></thead><tbody>' +
@@ -1392,8 +1397,6 @@
     NL.clubs.wireCrestImgs(body);   // thumb → full → rose, same tick as insertion
     document.getElementById('btnExportAccess').onclick = exportAccess;
     document.getElementById('btnPrintCards').onclick = function () { printCards(); };
-    document.getElementById('btnReissuePins').onclick = reissueAllPins;
-    document.getElementById('btnReissueMgr').onclick = function () { reissueAllManagerPasses(clubs); };
     if (noMgr.length) document.getElementById('btnIssueMgr').onclick = function () { issueMissingManagerPasses(noMgr); };
   }
 
@@ -1423,66 +1426,6 @@
         });
         toast(missing.length + ' manager passcodes issued', 'success');
       }).catch(function (err) { toast('Failed: ' + err.message, 'error'); });
-    });
-  }
-
-  /* Rotate EVERY club's manager passcode. The sibling of "Reissue all club
-     PINs", and needed for the same reason: any credential that existed while
-     app-data/uw-promo was world-readable has to be treated as burned, and
-     doing 72 of them one row at a time is not a plan. Unlike "Issue missing",
-     this replaces passcodes that already exist, so it is a typed confirm. */
-  function reissueAllManagerPasses(clubs) {
-    if (!clubs || !clubs.length) return;
-    NL.prompt('Give all ' + clubs.length + ' clubs a new manager passcode? Every club’s current ' +
-      'manager passcode stops working immediately, and each one has to be sent to its named contact ' +
-      'again. Till PINs are not affected. Type PASSCODES to confirm.', {
-      title: 'Reissue all manager passcodes', placeholder: 'PASSCODES'
-    }).then(function (v) {
-      if (v == null) return;
-      if ((v || '').trim().toUpperCase() !== 'PASSCODES') {
-        toast('Not confirmed — type PASSCODES exactly.', 'error'); return;
-      }
-      var updates = {};
-      clubs.forEach(function (c) {
-        updates[c.code + '/managerPass'] = UWP.newPasscode();
-        updates[c.code + '/updatedAt'] = UWP.TS();
-      });
-      UWP.ensureAuth().then(function () {
-        return UWP.ref('config/clubs').update(updates);
-      }).then(function () {
-        UWP.audit(ACTOR, ACTOR_LABEL, 'regen-passcode', {
-          count: clubs.length, detail: 'Reissued every club manager passcode'
-        });
-        toast(clubs.length + ' manager passcodes reissued', 'success');
-      }).catch(function (err) { toast('Reissue failed: ' + err.message, 'error'); });
-    });
-  }
-
-  /* Reseed every club with a fresh, unique 4-digit PIN. This is the migration
-     from the 6-character alphanumeric passcodes: it invalidates every club's
-     current credential at once, so the till cards have to be reprinted and
-     resent. Typed confirm, and one audit entry naming the count. */
-  function reissueAllPins() {
-    var clubs = clubList();
-    if (!clubs.length) return;
-    NL.prompt('Give all ' + clubs.length + ' clubs a new 4-digit PIN? Every club’s current ' +
-      'PIN or passcode stops working immediately, so every till card has to be reprinted and resent. ' +
-      'Type PINS to confirm.', {
-      title: 'Reissue all club PINs', placeholder: 'PINS'
-    }).then(function (v) {
-      if (v == null) return;
-      if ((v || '').trim().toUpperCase() !== 'PINS') { toast('Not confirmed — type PINS exactly.', 'error'); return; }
-      var updates = {}, taken = {};
-      clubs.forEach(function (c) { updates[c.code + '/passcode'] = UWP.newPin(taken); });
-      clubs.forEach(function (c) { updates[c.code + '/updatedAt'] = UWP.TS(); });
-      UWP.ensureAuth().then(function () {
-        return UWP.ref('config/clubs').update(updates);
-      }).then(function () {
-        UWP.audit(ACTOR, ACTOR_LABEL, 'regen-passcode', {
-          count: clubs.length, detail: 'Reissued every club as a 4-digit PIN'
-        });
-        toast(clubs.length + ' club PINs reissued — reprint the till cards', 'success');
-      }).catch(function (err) { toast('Reissue failed: ' + err.message, 'error'); });
     });
   }
 

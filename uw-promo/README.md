@@ -11,7 +11,7 @@ NO auth-guard/portal login), with a full audit trail.
 |---|---|---|---|
 | `/uw-promo/` | **Utility Warehouse** (one shared login) | shared 6-character passcode or `?u=<token>` direct link | Two method tabs — **In-store codes / Online codes** — sharing one table. In-store: **generate codes** for one in-store club at a time (generate-only; count defaults to 1; ≤500), revoke unredeemed codes, per-row **Dispatch** with confirm. Online: **Request club codes** (online clubs only; due prefilled +7, editable) — an open request renders as **placeholder rows** in the table (Requested/Overdue pill, empty code cell) that convert to Issued rows as the club uploads; per-row Dispatch; **no revoke on club-uploaded codes, ever**. Both: release a redeemed code (required reason), search, CSV export; stat cards follow tab + club filter |
 | `/uw-promo/club/` | **Each of the 72 clubs** | own `?c=<token>` direct link (the QR-code target for the point of sale) plus a credential — the 4-digit till PIN (**demanded on every visit**, never stored), or the club's manager passcode (**remembered on that browser** until Sign out) | **Till page**: big code entry → a valid unredeemed code *registered to this club* is redeemed here (RTDB transaction — two tills can't claim the same code). Refusals: already-redeemed shows club + date/time, expired its expiry date, everything else ONE neutral message. **Dashboard** (manager passcode; badge reads *Dashboard · In-store method* or *· Online method*): the same table UW sees, scoped to this club — **central codes are anonymous until redeemed** (a muted count line covers what's withheld; the club's own uploads stay visible); placeholder rows carry the red **Upload** button (one input box per code still owed; part-filling fine; three undertakings + confirm); an online club **marks its own codes redeemed** (confirm first); **Check a code** only where a till lives (in-store, or central codes still in the wild); PIN self-service + own till card (in-store). No activity feed — the master console's audit is the log |
-| `/uw-promo/admin/` | **NL master (Richard)** | master passcode only (no direct link, deliberately; first-run bootstrap sets it; **remembered** until Sign out) | Mirrors the UW dashboard: tabs **Clubs & access · In-store codes · Online codes · Audit**, landing on Clubs & access (master passcode, UW access, support & notifications, the club table — method pill + pencil, contact column, credential chips with reissue glyphs, Card for in-store rows only, bulk reissues, access CSV, print till cards). The method tabs are UW's shape plus master powers: paste-capable add (the NL back-door) + Code adds on In-store, Request club codes on Online, and per-row Dispatch / Redeem… / Register… / Revoke (typed for redeemed) / Delete (typed). Sandbox reset in test mode |
+| `/uw-promo/admin/` | **NL master** | master passcode only (no direct link, deliberately; first-run bootstrap sets it; **remembered** until Sign out) | Mirrors the UW dashboard: tabs **Clubs & access · In-store codes · Online codes · Audit**, landing on Clubs & access (master passcode, UW access, support & notifications, the club table — method pill + pencil, contact column, credential chips with reissue glyphs, Card for in-store rows only, access CSV, print till cards). The method tabs are UW's shape plus master powers: paste-capable add (the NL back-door) + Code adds on In-store, Request club codes on Online, and per-row Dispatch / Redeem… / Register… / Revoke (typed for redeemed) / Delete (typed). Sandbox reset in test mode |
 
 ## Which club a code belongs to
 
@@ -157,7 +157,7 @@ These are **derived faces** (`UWP.faceOf` over `statusOf` + the
 always win.
 
 **Requests are logged, never operated — and a request IS empty rows.**
-Lucy (UW page) or Richard (admin console) raises one against an online
+UW (partner page) or NL (master console) raises one against an online
 club; from then on nothing on the request is ever pressed. It renders as
 one **placeholder row per code still owed** in the code table itself —
 Requested pill (Overdue past due), empty code cell — and each club upload
@@ -266,19 +266,16 @@ it now requires a valid credential rather than just the URL — but it is not
 nothing, and closing it properly would mean a server-side lookup endpoint.
 
 Club PINs never start with `0` — a leading zero survives neither the access
-CSV (Excel reads `0123` as `123`) nor a hurried retype. They are also unique
-across the 72 clubs, enforced at generation: a club signing in on its PIN
-alone is resolved *by* that PIN, so a duplicate would open the wrong club's
-till. If an ambiguous PIN ever does reach the till page it opens nothing
-rather than guessing.
+CSV (Excel reads `0123` as `123`) nor a hurried retype. They stay unique
+across the 72 clubs, enforced at generation, so the roster and printed cards
+are unambiguous. A till PIN only signs in from the club's own `?c=` link
+(ruling 10/09/2026) — the linkless door is manager passcodes only, and a
+valid PIN typed without a link fails exactly like a wrong one.
 
-**Reissue all club PINs** and **Reissue all manager passcodes** (Clubs &
-access) each rotate the whole roster in one go — the second is what you reach
-for when a credential has to be treated as burned rather than merely rotated.
-The PIN one also converts the roster in one
-go — that is the migration from the old 6-character club passcodes. It
-invalidates every club's current credential immediately, so the till cards
-have to be reprinted and resent.
+Credential rotation is **per club** (ruling 10/09/2026 — the roster-wide
+reissue buttons are gone): the refresh glyph beside a club's PIN, manager
+passcode or link rotates that one immediately. Rotating a PIN or link means
+reprinting that club's till card.
 
 ## Clubs uploading their own codes
 
@@ -474,8 +471,9 @@ Two layers:
 3. Dry-run the whole flow in **sandbox mode** (above).
 4. Open `/uw-promo/admin/` → first-run screen → set the master passcode.
 5. Clubs & access tab → **Seed clubs from roster** → **Create UW access**.
-   Already seeded before v3.0? **Reissue all club PINs** converts the roster
-   from 6-character passcodes to 4-digit PINs, then reprint the till cards.
+   Already seeded before v3.0? A note above the table counts clubs still on
+   6-character passcodes — the refresh glyph beside each PIN converts one to
+   a 4-digit PIN; reprint that club's till card after.
 6. Send Utility Warehouse their link/passcode; generate club QR codes from
    the **Export access CSV** links (treat the CSV as a password list).
 7. Any codes already in the system from before v3.0 belong to no club: filter

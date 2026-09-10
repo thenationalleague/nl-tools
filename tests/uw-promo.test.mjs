@@ -314,6 +314,26 @@ test('the server refuses a credential of the wrong length before comparing', () 
   assert.equal(safeEqual(null, undefined), true, 'both normalise to empty');
 });
 
+test('till PINs open only from the club link; the linkless door is manager passcodes only', () => {
+  // findCredential calls normCode and safeEqual, so compile the three together.
+  const src = ['normCode', 'safeEqual', 'findCredential'].map((n) => {
+    const m = SERVER_SRC.match(new RegExp(`function ${n}\\([\\s\\S]*?\\n\\}`));
+    assert.ok(m, `could not find ${n} in functions/uw-promo.js`);
+    return m[0];
+  }).join('\n');
+  const find = new Function(`${src}; return findCredential;`)();
+  const clubs = { ALT: { passcode: '1234', managerPass: 'K7PMQ2XJ' } };
+  const all = Object.keys(clubs).map((k) => ({ key: k, rec: clubs[k] }));
+  const scoped = { key: 'ALT', rec: clubs.ALT };
+
+  const till = find([scoped], '1234', scoped);
+  assert.equal(till && till.role, 'till', 'the PIN works from the club link');
+  assert.equal(find(all, '1234', null), null,
+    'a VALID PIN without the link fails exactly like a wrong one — no oracle');
+  const mgr = find(all, 'K7PMQ2XJ', null);
+  assert.equal(mgr && mgr.role, 'manager', 'the manager passcode still opens a linkless visit');
+});
+
 test('links: club/UW direct links point at the family pages', () => {
   assert.equal(UWP.clubLink('abc123'), 'https://nl.tools/uw-promo/club/?c=abc123');
   assert.equal(UWP.uwLink('xyz789'), 'https://nl.tools/uw-promo/?u=xyz789');
