@@ -26,39 +26,43 @@
      them, with three deliberate edits: a trailing "FC" is dropped (Bromley,
      Folkestone Invicta, Dorchester Town…) while a leading one stays (FC Halifax
      Town, FC United of Manchester); "and" becomes "&"; Brentford keeps CST.
-     `label` is what the graphic prints after the competition name. */
+     `label` is what the graphic prints after the competition name. `ft` is
+     the division's ID on FA Full-Time (fulltime.thefa.com, ?selectedDivision=)
+     for season 395289686 (2026-27), recorded 10/09/2026 for the feed
+     follow-up; nothing reads it yet. */
+  var FULLTIME_SEASON = "395289686";
   var DIVISIONS = [
-    { key: "academy-north", comp: "academy",  label: "North Division", teams: [
+    { key: "academy-north", ft: "355815748", comp: "academy",  label: "North Division", teams: [
       "AFC Fylde", "Altrincham", "Boston United", "Chester", "FC Halifax Town", "Gateshead", "Harrogate Town",
       "Hartlepool United", "Hednesford Town", "Morecambe", "Solihull Moors", "South Shields", "Southport" ] },
-    { key: "academy-south", comp: "academy",  label: "South Division", teams: [
+    { key: "academy-south", ft: "681316394", comp: "academy",  label: "South Division", teams: [
       "Aldershot Town", "Boreham Wood", "Dagenham & Redbridge", "Dorking Wanderers", "Eastleigh", "Forest Green Rovers",
       "Maidenhead United", "Maidstone United", "Oxford City", "Slough Town", "Southend United", "Sutton United", "Wealdstone", "Woking" ] },
-    { key: "alliance-a", comp: "alliance", label: "Division A", teams: [
+    { key: "alliance-a", ft: "308197696", comp: "alliance", label: "Division A", teams: [
       "AFC Sudbury", "Aveley", "Barking", "Billericay Town", "Bishop's Stortford", "Chelmsford City", "Enfield Town",
       "Hertford Town", "King's Lynn Town", "Lowestoft Town", "Southend United", "Wroxham" ] },
-    { key: "alliance-b", comp: "alliance", label: "Division B", teams: [
+    { key: "alliance-b", ft: "531392282", comp: "alliance", label: "Division B", teams: [
       "Dover Athletic", "Burgess Hill", "Dartford", "Eastbourne Borough", "Ebbsfleet United", "Folkestone Invicta",
       "Maidstone United", "Tonbridge Angels", "Whitstable Town" ] },
-    { key: "alliance-c", comp: "alliance", label: "Division C", teams: [
+    { key: "alliance-c", ft: "484327210", comp: "alliance", label: "Division C", teams: [
       "Barnet", "Bedford Town", "Brentford CST", "Chesham United", "Flackwell Heath", "Hemel Hempstead", "Hertford Town",
       "Slough Town", "Wellingborough", "Wealdstone" ] },
-    { key: "alliance-d", comp: "alliance", label: "Division D", teams: [
+    { key: "alliance-d", ft: "900324610", comp: "alliance", label: "Division D", teams: [
       "Bromley", "Cray Wanderers", "Dagenham & Redbridge", "Dartford", "Dover Athletic", "Faversham Town",
       "Folkestone Invicta", "Hollands & Blair", "Ramsgate" ] },
-    { key: "alliance-e", comp: "alliance", label: "Division E", teams: [
+    { key: "alliance-e", ft: "996619526", comp: "alliance", label: "Division E", teams: [
       "Basingstoke Town", "Dorchester Town", "Eastleigh", "Havant & Waterlooville", "Torquay United", "Weston-super-Mare",
       "Wimborne Town", "Yeovil Town" ] },
-    { key: "alliance-f", comp: "alliance", label: "Division F", teams: [
+    { key: "alliance-f", ft: "86586371", comp: "alliance", label: "Division F", teams: [
       "AFC Greenwich Borough", "Boreham Wood", "Bromley", "Carshalton Athletic", "Chatham Town", "Dartford",
       "Dorking Wanderers", "Eastleigh", "Metropolitan Police", "Sutton United", "Woking" ] },
-    { key: "alliance-g", comp: "alliance", label: "Division G", teams: [
+    { key: "alliance-g", ft: "637572765", comp: "alliance", label: "Division G", teams: [
       "Alvechurch", "Boldmere St Michaels", "Boston United", "Hednesford Town", "Ilkeston Town", "Racing Club Warwick",
       "Redditch United", "Rugby Town", "Solihull Moors", "Stourbridge", "Stratford Town", "Tamworth" ] },
-    { key: "alliance-h", comp: "alliance", label: "Division H", teams: [
+    { key: "alliance-h", ft: "272864635", comp: "alliance", label: "Division H", teams: [
       "Blyth Spartans", "Blyth Town", "Darlington", "Gateshead", "Guiseley", "Harrogate Town", "Hartlepool United",
       "Heaton Stannington", "Pontefract Collieries", "South Shields" ] },
-    { key: "alliance-i", comp: "alliance", label: "Division I", teams: [
+    { key: "alliance-i", ft: "421309651", comp: "alliance", label: "Division I", teams: [
       "Alfreton Town", "AFC Fylde", "Buxton", "Chester", "Chesterfield", "Chorley", "FC Halifax Town",
       "FC United of Manchester", "Marine", "Oldham Athletic", "Rochdale", "Stockport County" ] }
   ];
