@@ -3,6 +3,13 @@
 <head>
 <!--
   UW Promo Codes — Club point-of-sale redemption page
+  Version: v7.7 (10/09/2026) — ONE upload door (owner): the per-row red
+           Upload buttons and the outstanding/overdue banner prose are
+           gone. A single Upload codes button sits rightmost in the codes
+           bar while anything is owed, opening a MODAL — one box per code
+           still owed, oldest request first (codes fill requests FIFO),
+           the three undertakings, no intro waffle. Placeholder rows keep
+           the pill and dates only.
   Version: v7.6 (10/09/2026) — the scheme contact reads last on the
            Dashboard (owner): reference, not work — below the code table,
            the checker, the PIN and the redeem box alike.
@@ -349,9 +356,6 @@
     font-variation-settings: 'wght' 900; color: var(--navy); line-height: 1.2; }
   .life-card span { font-size: var(--text-xs); color: var(--text-muted); text-transform: uppercase;
     letter-spacing: 0.06em; }
-  .req-banner { border: 1px solid var(--border); border-radius: var(--radius); background: var(--off-white);
-    padding: 12px 14px; margin-bottom: 10px; font-size: var(--text-sm); line-height: 1.5; }
-  .req-banner--due { border-color: var(--primary-600); background: var(--primary-50); }
   .upload__out:empty { margin-top: 0; }
 
   /* Manager-mode panels (inventory, activity, PIN) */
@@ -500,38 +504,6 @@
     <div class="list-head">Your codes</div>
     <div class="inv" id="historyCard">
       <div class="life-cards" id="lifeCounts"></div>
-      <div id="requestBanner"></div>
-
-    <div id="uploadSection" hidden>
-    <div class="upload">
-      <p class="upload__intro" id="upIntro"></p>
-      <div class="upload__field">
-        <label>Codes — one box per code still owed</label>
-        <div id="upLines"></div>
-      </div>
-      <div class="upload__terms">
-        <div class="upload__terms-head">Before you upload, please confirm</div>
-        <label class="upload__term">
-          <input type="checkbox" id="upT1">
-          <span>These codes work in <strong>our own till system</strong>. It is our responsibility to
-            make sure they do — the National League and Utility Warehouse cannot test them for us.</span>
-        </label>
-        <label class="upload__term">
-          <input type="checkbox" id="upT2">
-          <span>Each code applies the <strong>agreed <span class="uwVal"></span> discount</strong>.</span>
-        </label>
-        <label class="upload__term">
-          <input type="checkbox" id="upT3">
-          <span>These codes stay valid for <strong>at least 12 months</strong> from today.</span>
-        </label>
-      </div>
-      <div class="checker__row">
-        <button class="btn btn--primary" id="upBtn">Upload codes</button>
-        <button class="btn btn--ghost" id="upCancel" type="button">Cancel</button>
-      </div>
-      <div class="upload__out" id="upOut" role="status" aria-live="polite"></div>
-    </div>
-    </div><!-- /#uploadSection -->
 
       <div class="inv__bar">
         <select class="toolbar__filter" id="invStatus" aria-label="Filter by status">
@@ -542,6 +514,9 @@
         </select>
         <input class="toolbar__search" id="invSearch" type="search" placeholder="Search codes…" aria-label="Search your codes">
         <button class="btn btn--ghost btn--sm" id="invExport">Export CSV</button>
+        <!-- ONE red button for the whole ask (owner 10/09/2026) — not one
+             per placeholder row. Shown only while codes are still owed. -->
+        <button class="btn btn--primary btn--sm" id="btnUpload" hidden>Upload codes</button>
       </div>
       <div class="table-wrap">
         <table class="table">
@@ -1205,7 +1180,7 @@
           (overdue ? 'Overdue' : 'Requested') + '</span></td>' +
         '<td>—</td>' +
         '<td title="' + esc(UWP.fmt(r.raisedAt)) + '">' + esc(UWP.ago(r.raisedAt)) + '</td>' +
-        '<td><button class="btn btn--primary btn--sm" data-upreq="' + esc(r._id) + '">Upload</button></td></tr>';
+        '<td></td></tr>';
     }).join('');
     tb.innerHTML = note + phHtml + list.map(function (r) {
       /* An online club settles its own redemptions (owner N8): its store is
@@ -1295,55 +1270,73 @@
      even the master console can quietly alter it later. */
   var UPLOAD_MAX = 200;      // one indexed lookup per code — see checkExisting
   var upBusy = false;
-  var UP_REQ = null;         // the request this upload answers — always set (N2)
-  var upOut = document.getElementById('upOut');
+  var UP_SLOTS = [];         // request id per code still owed, oldest ask first (N2)
+  var upCtrl = null;         // the open upload modal, if any
 
-  function upMsg(html) { upOut.innerHTML = '<div class="checker__card">' + html + '</div>'; }
+  function upMsg(html) {
+    var el = document.getElementById('upOut');
+    if (el) el.innerHTML = '<div class="checker__card">' + html + '</div>';
+  }
 
-  /* The form only ever opens inside a request (owner N2), and renders one
-     input box per code still owed (owner N3) — the form itself says how
-     many are wanted and cannot overshoot the ask. */
-  function openUpload(reqId) {
-    if (!reqId || !REQS[reqId]) return;
-    UP_REQ = reqId;
-    var r = REQS[UP_REQ], qty = parseInt(r.qty, 10) || 0, got = uploadedFor(UP_REQ);
-    var remaining = Math.min(Math.max(1, qty - got), UPLOAD_MAX);
-    document.getElementById('upIntro').innerHTML =
-      'Utility Warehouse asked for <strong>' + qty + ' code' + (qty === 1 ? '' : 's') + '</strong>' +
-      (r.due ? ', due ' + esc(NL.formatDateShort(r.due)) : '') +
-      (got ? ' — ' + got + ' supplied, ' + (qty - got) + ' to go' : '') +
-      '. Fill in what you have; part-filling is fine.';
-    var lines = document.getElementById('upLines');
-    lines.innerHTML = '';
-    for (var i = 0; i < remaining; i++) {
+  /* ONE upload door for the whole ask (owner 10/09/2026): a modal with one
+     input box per code still owed (owner N3), oldest request first — codes
+     fill the requests FIFO, so the form cannot overshoot and nobody picks
+     which ask they are answering. */
+  function openUpload() {
+    var open = reqList().filter(function (r) { return r.status === 'open'; })
+      .sort(function (a, b) { return (a.raisedAt || 0) - (b.raisedAt || 0); });
+    var slots = [];
+    open.forEach(function (r) {
+      var rem = Math.max(0, (parseInt(r.qty, 10) || 0) - uploadedFor(r._id));
+      for (var i = 0; i < rem && slots.length < UPLOAD_MAX; i++) slots.push(r._id);
+    });
+    if (!slots.length) return;
+    UP_SLOTS = slots;
+    var wrap = document.createElement('div');
+    wrap.innerHTML =
+      '<div class="upload__field">' +
+        '<label>Codes — one box per code still owed</label>' +
+        '<div id="upLines"></div>' +
+      '</div>' +
+      '<div class="upload__terms">' +
+        '<div class="upload__terms-head">Before you upload, please confirm</div>' +
+        '<label class="upload__term"><input type="checkbox" id="upT1">' +
+          '<span>These codes work in <strong>our own till system</strong>. It is our responsibility to ' +
+          'make sure they do — the National League and Utility Warehouse cannot test them for us.</span></label>' +
+        '<label class="upload__term"><input type="checkbox" id="upT2">' +
+          '<span>Each code applies the <strong>agreed ' + esc(UWP.VALUE) + ' discount</strong>.</span></label>' +
+        '<label class="upload__term"><input type="checkbox" id="upT3">' +
+          '<span>These codes stay valid for <strong>at least 12 months</strong> from today.</span></label>' +
+      '</div>' +
+      '<div class="upload__out" id="upOut" role="status" aria-live="polite"></div>';
+    var lines = wrap.querySelector('#upLines');
+    for (var i = 0; i < slots.length; i++) {
       var inp = document.createElement('input');
       inp.className = 'up-line';
       inp.maxLength = 64;
       inp.autocomplete = 'off';
-      inp.setAttribute('aria-label', 'Code ' + (i + 1) + ' of ' + remaining);
+      inp.setAttribute('aria-label', 'Code ' + (i + 1) + ' of ' + slots.length);
       inp.placeholder = 'Code ' + (i + 1);
       lines.appendChild(inp);
     }
-    var sec = document.getElementById('uploadSection');
-    sec.hidden = false;
-    sec.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    upCtrl = NL.modal({
+      title: 'Upload codes', body: wrap,
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Upload codes', className: 'btn--primary', onClick: function () { runUpload(); } }
+      ],
+      onClose: function () { upCtrl = null; UP_SLOTS = []; }
+    });
     var first = lines.querySelector('input');
     if (first) first.focus();
   }
   function closeUpload() {
-    UP_REQ = null;
-    var sec = document.getElementById('uploadSection');
-    if (sec) sec.hidden = true;
-    if (upOut) upOut.innerHTML = '';
-    var lines = document.getElementById('upLines');
-    if (lines) lines.innerHTML = '';
+    UP_SLOTS = [];
+    if (upCtrl) { upCtrl.close(); upCtrl = null; }
   }
 
-  document.getElementById('upBtn').addEventListener('click', runUpload);
-  document.getElementById('upCancel').addEventListener('click', closeUpload);
+  document.getElementById('btnUpload').addEventListener('click', openUpload);
   document.getElementById('invRows').addEventListener('click', function (e) {
-    var b = e.target.closest('[data-upreq]');
-    if (b) { openUpload(b.getAttribute('data-upreq')); return; }
     var mr = e.target.closest('[data-mredeem]');
     if (mr) markRedeemed(mr.getAttribute('data-mredeem'));
   });
@@ -1412,7 +1405,7 @@
 
     var list = parseUploaded();
     if (!list.length) { upMsg('Fill in at least one code above.'); return; }
-    if (!UP_REQ) { upMsg('This upload lost its request — close and reopen from the request row.'); return; }
+    if (!UP_SLOTS.length) { upMsg('This upload lost its request — close and press Upload codes again.'); return; }
     if (list.length > UPLOAD_MAX) {
       upMsg('That’s ' + list.length + ' codes — please upload up to ' + UPLOAD_MAX +
         ' at a time so each one can be checked properly.');
@@ -1455,13 +1448,16 @@
       confirmText: 'Yes, upload them'
     }).then(function (ok) {
       if (!ok) return;
-      var forReq = UP_REQ;
+      var slots = UP_SLOTS.slice();
+      var forReq = slots[0] || null;
       var updates = {};
-      list.forEach(function (c) {
+      list.forEach(function (c, i) {
         updates[UWP.ref('codes').push().key] = {
           code: c.code, norm: c.norm, status: 'active',
           club: CLUB.code, clubName: CLUB.name,
-          request: forReq || null,
+          // Codes answer the oldest ask first — slot i is the request this
+          // code fills, so per-request progress stays countable.
+          request: slots[i] || slots[slots.length - 1] || null,
           createdAt: UWP.TS(), createdBy: actor()
         };
       });
@@ -1479,7 +1475,9 @@
           detail: 'Club upload' + (forReq ? ' against a UW request' : '') +
             ' — confirmed: works in club till system; applies agreed ' + UWP.VALUE + ' discount; valid 12 months+'
         });
-        ['upT1', 'upT2', 'upT3'].forEach(function (id) { document.getElementById(id).checked = false; });
+        ['upT1', 'upT2', 'upT3'].forEach(function (id) {
+          var t = document.getElementById(id); if (t) t.checked = false;
+        });
         /* Tell the NL the codes are in (spec item 6) — otherwise an upload
            can sit unnoticed until someone thinks to look. Fire-and-forget:
            the upload already succeeded and is audited either way. */
@@ -1676,27 +1674,13 @@
       }).join('');
 
     var open = list.filter(function (r) { return r.status === 'open'; });
-    var banner = document.getElementById('requestBanner');
     var remaining = open.reduce(function (n, r) {
       return n + Math.max(0, (parseInt(r.qty, 10) || 0) - uploadedFor(r._id));
     }, 0);
-    if (!open.length) {
-      banner.innerHTML = '';
-    } else if (!remaining) {
-      banner.innerHTML = '<div class="req-banner">Everything requested has been uploaded — ' +
-        'Utility Warehouse will confirm and close the request' + (open.length === 1 ? '' : 's') + '.</div>';
-    } else {
-      var due = open.filter(function (r) { return r.due && Date.now() > r.due; });
-      var next = open[0];
-      banner.innerHTML = '<div class="req-banner' + (due.length ? ' req-banner--due' : '') + '">' +
-        '<strong>' + (due.length ? 'Overdue: ' : 'Outstanding: ') + '</strong>' +
-        remaining + ' code' + (remaining === 1 ? '' : 's') + ' still to supply to Utility Warehouse' +
-        (next.due ? ', due ' + esc(NL.formatDate(next.due)) : '') +
-        (ROUTE === 'online' ? ' — press Upload on a requested line below.' : '.') + '</div>';
-    }
-
-    /* The ask itself renders as placeholder rows in the one code table
-       below (owner N8) — this function keeps only the counts and banner. */
+    /* The ask renders as placeholder rows in the code table (owner N8);
+       the ONE red Upload codes button appears while anything is owed
+       (owner 10/09/2026 — the banner prose and per-row buttons are gone). */
+    document.getElementById('btnUpload').hidden = !(ROUTE === 'online' && remaining > 0);
   }
 
 })();
