@@ -1,19 +1,24 @@
 <!DOCTYPE html>
 <!--
   Academy & Alliance Graphic — NL Tools (Graphics sub-tool)
-  Version: v1.0 (10/09/2026)
+  Version: v1.1 (10/09/2026)
   File: /graphics/academy-alliance/index.html
 
   Fixtures, results and league-table graphics for the National League
-  Football Academy (2 divisions) and the U19 Alliance (9 divisions). No feed:
-  a fixture list or a standings table is pasted straight from wherever the
-  competition publishes it, the pasted names are reduced to the sides the
-  Divisional Constitution lists, and the card exports as a 1:1 / 4:5 / 9:16
-  PNG. Crests are a toggle — many of these sides have no badge on file.
+  Football Academy (2 divisions) and the U19 Alliance (9 divisions). Rows
+  come either from FA Full-Time — fetched hourly by functions/fulltime.js
+  into RTDB, never by the browser — or are pasted straight from wherever the
+  competition publishes them. Either way the names are reduced to the sides
+  the Divisional Constitution lists, and the card exports as a 1:1 / 4:5 /
+  9:16 PNG. Crests are a toggle — many of these sides have no badge on file.
 
   Storage:
-    localStorage nl-academy-alliance-gfx-v1   (tool state only — no RTDB)
+    localStorage nl-academy-alliance-gfx-v1   (tool state)
+    RTDB app-data/staff-graphics/fulltime/<division>   (read — the feed)
+    RTDB app-data/staff-graphics/fulltime-refresh/<uid> (write — asks the
+      function to fetch a division now; the function deletes it when done)
   Data:
+    FA Full-Time (fulltime.thefa.com) via functions/fulltime.js
     Divisional Constitution 2026-27 → the eleven team lists in app.js
     NL.clubs (canon) → /assets/data/clubs-meta.json  (crest records)
     /assets/crests/medium/*                          (crests, by printed name)
@@ -22,6 +27,9 @@
     toolKey 'staff-graphics' — same gate as the other graphics sub-tools.
 
   Changelog:
+    v1.1 (10/09/2026) — Full-Time feed: Load a division's table, results or
+      fixtures from RTDB, date pickers for results/fixtures, Refresh asks the
+      function to fetch now. Paste stays as the other source.
     v1.0 (10/09/2026) — first build.
 -->
 <html lang="en">
@@ -63,6 +71,15 @@
   var NL_TOOL_KEY = 'staff-graphics';
 
   window.NL_CHANGELOG = [
+    {
+      date: '10/09/2026',
+      version: 'v1.1',
+      items: [
+        'Rows can now come from FA Full-Time. A switch at the top chooses The feed or Typed in; with the feed, pick the division, pick a date (or a run of dates) for fixtures and results, and press Load. The table loads whole.',
+        'Refresh asks for that division to be fetched from Full-Time straight away, rather than waiting for the hourly update. The line under the buttons says when the stored copy was last fetched.',
+        'Postponed matches are left out of a loaded fixtures card, and the status line says how many.'
+      ]
+    },
     {
       date: '10/09/2026',
       version: 'v1.0',
@@ -182,6 +199,14 @@
   table#fxGrid { min-width: 560px; }
   table#tbGrid { min-width: 820px; }
 
+  /* one source at a time — the editor below belongs to both */
+  body[data-source="manual"] #feedCard { display: none; }
+  body[data-source="feed"] #pasteCard { display: none; }
+  body[data-type="table"] #feedDates { display: none; }
+  #feedMeta { margin-top: 8px; font-size: var(--text-xs); color: var(--nl-grey-500); font-family: var(--font-bold);
+    letter-spacing: var(--tracking-wide); text-transform: uppercase; }
+  #feedMeta.warn { color: var(--nl-rose-red); }
+
   /* one editor at a time; scores only make sense for results */
   body[data-type="table"] #fxEditor, body[data-type="table"] #fxHeadings { display: none; }
   body:not([data-type="table"]) #tbEditor, body:not([data-type="table"]) #footnoteField { display: none; }
@@ -193,7 +218,7 @@
     text-transform: uppercase; color: var(--nl-grey-500); padding-top: 4px; }
 </style>
 </head>
-<body data-type="fixtures">
+<body data-type="fixtures" data-source="feed">
 
 <div id="pageWrap">
 
@@ -217,6 +242,13 @@
 
     <div class="card">
       <h2>Setup</h2>
+      <div class="field">
+        <label>Rows from</label>
+        <div class="seg" id="sourceSeg">
+          <button type="button" class="src-btn active" data-src="feed">The feed</button>
+          <button type="button" class="src-btn" data-src="manual">Typed in</button>
+        </div>
+      </div>
       <div class="field">
         <label for="divisionSel">Division</label>
         <select id="divisionSel"></select>
@@ -259,7 +291,26 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" id="feedCard">
+      <h2>Load from Full-Time</h2>
+      <div class="row2" id="feedDates">
+        <div class="field">
+          <label for="feedFrom">Date</label>
+          <select id="feedFrom"><option value="">Loading…</option></select>
+        </div>
+        <div class="field">
+          <label for="feedTo">Through to</label>
+          <select id="feedTo"><option value="">Same day</option></select>
+        </div>
+      </div>
+      <div class="btns">
+        <button type="button" class="btn btn--primary" id="feedLoadBtn">Load</button>
+        <button type="button" class="btn btn--ghost" id="feedRefreshBtn" title="Fetch this division from Full-Time now">Refresh</button>
+      </div>
+      <div id="feedMeta"></div>
+    </div>
+
+    <div class="card" id="pasteCard">
       <h2>Paste</h2>
       <textarea id="pasteIn" rows="8"></textarea>
     </div>

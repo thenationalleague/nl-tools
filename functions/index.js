@@ -113,3 +113,9 @@ Object.assign(exports, require("./handbook-pdf"));
 // The broadcast-selections access gate: a handful of audience codes for the
 // public travel page, same trigger shape as uw-promo/programme/club-code.
 Object.assign(exports, require("./broadcast-selections"));
+
+// FA Full-Time → RTDB ingester for the Academy & Alliance graphic
+// (fulltimeIngestHourly, scheduled; fulltimeRefresh, RTDB-triggered). Same
+// two shapes as the NLS ingester and the auth triggers above, for the same
+// org-policy reason. See functions/fulltime.js.
+Object.assign(exports, require("./fulltime"));
