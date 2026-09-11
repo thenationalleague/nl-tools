@@ -60,7 +60,7 @@ should see; anything failed gets a note and the run continues.
 |---|--------|----------|------|
 | E1 | Club 2's link → **till PIN** | Holding screen — the PIN can never reach setup | ☐ |
 | E2 | Reload → **manager passcode** | Setup screen: globe/shop method cards, *method* language throughout | ☐ |
-| E3 | **Online** → Save unticked → refused; three ticks, no contact → refused; add a contact → **Save** | Dashboard · Online method opens: contact card, count cards — **no till, no PIN card, no checker** | ☐ |
+| E3 | **Online** → Save unticked → refused; both ticks, no contact → refused; add a contact → **Save** | Dashboard · Online method opens: contact card, count cards — **no till, no PIN card, no checker** | ☐ |
 
 ## Phase F — request → placeholder rows → issued → dispatched → redeemed
 

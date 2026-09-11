@@ -258,7 +258,7 @@ function makeTrigger(ROOT, name) {
             return grant({ ok: false, error: "Choose a route." });
           }
           const ticks = req.ticks || {};
-          const REQUIRED = 3;   // three undertakings per route (11/09/2026 — the named-person ticks went; the forced contact records that)
+          const REQUIRED = route === "online" ? 2 : 3;   // per-route tick count, in lockstep with TICKS on the club page (11/09/2026)
           const ticked = Object.keys(ticks).filter((k) => ticks[k] === true).length;
           if (ticked < REQUIRED) {
             return grant({ ok: false, error: "Please confirm every requirement for this route." });
