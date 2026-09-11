@@ -10,7 +10,11 @@
   var DIVISION_LOGO = {
     National: "/assets/divisions/medium/National.png",
     North:    "/assets/divisions/medium/North.png",
-    South:    "/assets/divisions/medium/South.png"
+    South:    "/assets/divisions/medium/South.png",
+    CupA: "/assets/divisions/medium/NL%20Cup.png",
+    CupB: "/assets/divisions/medium/NL%20Cup.png",
+    CupC: "/assets/divisions/medium/NL%20Cup.png",
+    CupD: "/assets/divisions/medium/NL%20Cup.png"
   };
   /* No LOGO_FALLBACK. A division badge that fails used to be replaced with the
      generic National League logo, which published a graphic branded as the
@@ -24,20 +28,31 @@
      already do, so no proxy is involved. competitionID values are firm NLS
      codes; never derive them from a division name. */
   var NLS_BASE = "https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2";
-  var COMPETITION_ID = { National: 89, North: 373, South: 372 };
+  var COMPETITION_ID = { National: 89, North: 373, South: 372, CupA: 1275, CupB: 1275, CupC: 1275, CupD: 1275 };
+  /* The Cup's league-tables endpoint serves one group per call, chosen by
+     roundID (A–D; A when omitted) — confirmed against the live feed 11/09/2026. */
+  var CUP_ROUND = { CupA: "A", CupB: "B", CupC: "C", CupD: "D" };
+  function isCup(div) { return !!CUP_ROUND[div || state.division]; }
+  /* Top two in each group go through. No relegation, no play-off ladder. */
+  var CUP_QUALIFY = 2;
 
   var ROSE_WHITE = "/assets/crests/National%20League%20rose%20white.png";
 
   var DIV_EYEBROW = {
     National: "Enterprise National League",
     North: "Enterprise National League North",
-    South: "Enterprise National League South"
+    South: "Enterprise National League South",
+    CupA: "National League Cup", CupB: "National League Cup", CupC: "National League Cup", CupD: "National League Cup"
   };
   /* Division name shown beneath the title */
   var DIV_NAME = {
     National: "Enterprise National League",
     North: "Enterprise National League North",
-    South: "Enterprise National League South"
+    South: "Enterprise National League South",
+    CupA: "National League Cup · Group A",
+    CupB: "National League Cup · Group B",
+    CupC: "National League Cup · Group C",
+    CupD: "National League Cup · Group D"
   };
 
   /* Long names that need shortening to fit the team column */
@@ -100,10 +115,27 @@
   var gridBody = $("gridBody");
 
   /* ---------------- helpers ---------------- */
+  /* The Cup's guest sides. cup-clubs-meta lists them as "<club> PL2" with a
+     crestName pointing at the parent club's badge; NLS names some of them
+     "<club> U21" instead. Match on the club part, keep the tag NLS printed. */
+  function guestOf(name) {
+    var n = String(name || "").trim();
+    var m = n.match(/^(.*?)\s+(PL2|U21|U23)$/i);
+    if (!m || !NL.clubs.guestByName) return null;
+    var g = NL.clubs.guestByName(m[1] + " PL2") || NL.clubs.guestByName(n);
+    return g ? { guest: g, tag: m[2].toUpperCase() } : null;
+  }
   function teamDisplay(name) {
     var k = String(name || "").toLowerCase().trim();
     if (SHORTEN[k]) return SHORTEN[k].toUpperCase();
+    var g = guestOf(name);
+    if (g && g.guest.short) return g.guest.short.replace(/\s+PL2$/i, " " + g.tag).toUpperCase();
     return String(name || "").toUpperCase();
+  }
+  /* Crest file for a printed name: a guest draws its parent club's badge. */
+  function crestFor(name) {
+    var g = guestOf(name);
+    return NL.clubs.crestUrl(g ? g.guest.crestName : name, 'medium');
   }
 
   function save() {
@@ -152,6 +184,7 @@
     var COLS_MIN  = [["P","p"],["GD","gd"],["PTS","pts"]];
     var cols = state.format === "1x1" ? COLS_FULL : COLS_MIN;
     gfx.setAttribute("data-cols", state.format === "1x1" ? "full" : "min");
+    gfx.setAttribute("data-rows", n <= 12 ? "short" : "long");
 
     /* column header */
     var colhead = document.createElement("div");
@@ -171,6 +204,9 @@
        • BAND  = confirmed to date, driven by the CSV flag (is-*) — a club
          lights up only once its tally guarantees the zone. */
     function posZone(pos) {
+      /* Cup group: the two qualifying places, nothing else. They wear the
+         play-off treatment — same idea, a cut-off for going through. */
+      if (isCup()) return pos <= CUP_QUALIFY ? "po-sf" : "mid";
       if (pos === 1) return "champ";
       if (pos <= 3) return "po-sf";
       if (pos <= 7) return "po-qf";
@@ -182,6 +218,7 @@
       var rowEl = document.createElement("div");
       var cls = "row z-" + posZone(i + 1);
       if (flag === "C") cls += " is-champ";
+      else if (flag === "Q") cls += " is-po-sf";      /* qualified (cup) — same band as a confirmed semi-final place */
       else if (flag === "SF") cls += " is-po-sf";
       else if (flag === "QF") cls += " is-po-qf";
       else if (flag === "R") cls += " is-releg";
@@ -191,7 +228,7 @@
          1080-wide canvas, so 256px is comfortably oversampled and ~9x lighter
          than the full-res originals — the difference between ~12.6MB and
          ~1.4MB, which decides whether they all arrive on a slow connection. */
-      var crest = r.team ? NL.clubs.crestUrl(r.team, 'medium') : null;
+      var crest = r.team ? crestFor(r.team) : null;
       var statCells = cols.map(function (c) {
         var cls = c[1] === "pts" ? "stat pts" : "stat";
         return '<div class="' + cls + '">' + escapeHtml(r[c[1]] || "") + '</div>';
@@ -236,10 +273,31 @@
 
     /* size rows after layout */
     requestAnimationFrame(function () {
-      var h = rowsEl.clientHeight;
-      if (h && n) gfx.style.setProperty("--rh", (h / n) + "px");
+      /* rows are flex-sized (and capped for short tables), so read the
+         height they settled at rather than dividing the block by n */
+      var first = rowsEl.querySelector(".row");
+      var h = first ? first.clientHeight : (n ? rowsEl.clientHeight / n : 0);
+      if (h) gfx.style.setProperty("--rh", h + "px");
+      fitTeamColumn(rowsEl);
       fitStage();
     });
+  }
+
+  /* Shrink the team column's type until the longest printed name fits its
+     cell. Full names at a tall row's scale ("FC HALIFAX TOWN" in an
+     eight-row Cup group) overrun the column otherwise.
+     Canon candidate (11/09/2026): academy-alliance carries the same routine. */
+  function fitTeamColumn(rowsEl) {
+    var cells = [].slice.call(rowsEl.querySelectorAll(".row .team"));
+    if (!cells.length) return;
+    cells.forEach(function (c) { c.style.fontSize = ""; });
+    var base = parseFloat(getComputedStyle(cells[0]).fontSize) || 20;
+    var size = base, g = 0;
+    var overflows = function () { return cells.some(function (c) { return c.scrollWidth > c.clientWidth + 1; }); };
+    while (overflows() && size > base * 0.5 && g < 80) {
+      size -= 0.5; g++;
+      cells.forEach(function (c) { c.style.fontSize = size + "px"; });
+    }
   }
 
   /* Escaping is canon — NL.escHtml. The local copy this replaced was a fifth
@@ -290,7 +348,7 @@
         '<td class="g-pos">' + (i + 1) + '</td>' +
         '<td><select class="nl-select g-flag" data-i="' + i + '">' +
           flagOpt("-", r.flag) + flagOpt("C", r.flag) + flagOpt("SF", r.flag) +
-          flagOpt("QF", r.flag) + flagOpt("R", r.flag) + '</select></td>' +
+          flagOpt("QF", r.flag) + flagOpt("R", r.flag) + flagOpt("Q", r.flag) + '</select></td>' +
         '<td>' + teamSelect(i, r.team) + '</td>' +
         '<td><input class="g-num" data-i="' + i + '" data-k="p" value="' + escapeHtml(r.p) + '"></td>' +
         '<td><input class="g-num" data-i="' + i + '" data-k="gd" value="' + escapeHtml(r.gd) + '"></td>' +
@@ -488,7 +546,8 @@
       .catch(function () { /* fall back to the clock-derived season */ })
       .then(function () {
         return fetch(NLS_BASE + "/league-tables/?competitionID=" + comp +
-                     "&seasonID=" + encodeURIComponent(nlsSeason()));
+                     "&seasonID=" + encodeURIComponent(nlsSeason()) +
+                     (CUP_ROUND[state.division] ? "&roundID=" + CUP_ROUND[state.division] : ""));
       })
       .then(function (r) {
         if (!r.ok) throw new Error("NLS " + r.status);
@@ -535,6 +594,7 @@
     var n = state.rows.length;
     state.rows.forEach(function (r, i) {
       var pos = i + 1;
+      if (isCup()) { r.flag = pos <= CUP_QUALIFY ? "Q" : E.FLAG_NONE; return; }
       if (pos === 1) r.flag = "C";
       else if (pos <= 3) r.flag = "SF";
       else if (pos <= 7) r.flag = "QF";
@@ -674,6 +734,9 @@
     });
 
     window.addEventListener("resize", fitStage);
+    /* Cup guest sides (PL2 / U21) resolve their short names and parent crests
+       from cup-clubs-meta, so load it up front and redraw when it lands. */
+    if (NL.clubs.guests) NL.clubs.guests().then(render).catch(function () {});
 
     /* The grid is built before the roster arrives, so rebuild it once the
        options exist. */

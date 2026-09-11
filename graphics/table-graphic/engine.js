@@ -7,8 +7,8 @@
 (function () {
   "use strict";
 
-  var FLAG_NONE = "-", FLAG_C = "C", FLAG_SF = "SF", FLAG_QF = "QF", FLAG_R = "R";
-  var VALID_FLAGS = { "-":1, "C":1, "SF":1, "QF":1, "R":1 };
+  var FLAG_NONE = "-", FLAG_C = "C", FLAG_SF = "SF", FLAG_QF = "QF", FLAG_R = "R", FLAG_Q = "Q";
+  var VALID_FLAGS = { "-":1, "C":1, "SF":1, "QF":1, "R":1, "Q":1 };   /* Q = qualified (cup group) */
 
   function safeText(s) { return (s || "").replace(/\s+/g, " ").trim(); }
 
@@ -92,6 +92,7 @@
   function zoneFor(flag, pos, total, division) {
     var f = safeText(flag || FLAG_NONE).toUpperCase();
     if (f === FLAG_C)  return "champ";
+    if (f === FLAG_Q)  return "po-sf";
     if (f === FLAG_SF) return "po-sf";
     if (f === FLAG_QF) return "po-qf";
     if (f === FLAG_R)  return "releg";
