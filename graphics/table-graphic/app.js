@@ -253,19 +253,24 @@
         '<img class="sponsor-logo" crossorigin="anonymous" src="' + SPONSOR_URL + '" onerror="this.style.display=\'none\'">' +
       '</div>';
 
+    /* column header + rows travel together, so a short table can sit
+       centred in the space a full division would fill */
+    var table = document.createElement("div");
+    table.className = "gfx-table";
+    table.appendChild(colhead);
+    table.appendChild(rowsEl);
+
     /* assemble — dirs 3 & 4 wrap the table in a framed card on a navy field */
     if (state.dir === "3" || state.dir === "4") {
       var frame = document.createElement("div");
       frame.className = "frame";
       frame.appendChild(head);
-      frame.appendChild(colhead);
-      frame.appendChild(rowsEl);
+      frame.appendChild(table);
       frame.appendChild(legend);
       gfx.appendChild(frame);
     } else {
       gfx.appendChild(head);
-      gfx.appendChild(colhead);
-      gfx.appendChild(rowsEl);
+      gfx.appendChild(table);
       gfx.appendChild(legend);
     }
 
