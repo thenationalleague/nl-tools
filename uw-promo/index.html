@@ -3,6 +3,10 @@
 <head>
 <!--
   UW Promo Codes — Utility Warehouse partner page
+  Version: v9.10 (11/09/2026) — Revoke and Release leave this console
+           (owner): both are corrections, and corrections are NL master
+           powers — Revoke and Release live on there. Dispatch is the
+           one verb UW works a row with.
   Version: v9.9 (11/09/2026) — in-store rows hold column 1 blank
            (owner): the missing Requested tile becomes an invisible
            spacer so the four real tiles line up with the online rows'
@@ -654,15 +658,9 @@
     }).join('');
     rowsHtml += list.map(function (r) {
       var acts = '';
-      /* Club-uploaded codes are never revoked (owner ruling 09/09/2026):
-         the club's own POS is the authority on whether they work. NL master
-         keeps typed-DELETE for genuine mistakes; that is removal, not
-         revocation. */
-      if (r.status === 'active' && !isOnlineCode(r)) {
-        acts = '<button class="btn btn--danger btn--sm" data-revoke="' + esc(r._id) + '">Revoke</button>';
-      } else if (r.status === 'redeemed') {
-        acts = '<button class="btn btn--restore btn--sm" data-release="' + esc(r._id) + '">Release</button>';
-      }
+      /* No Revoke or Release here (owner 11/09/2026): corrections are
+         NL master powers — Dispatch is the one verb UW works a row
+         with. */
       var clubCell = r.clubName
         ? '<span class="club-cell">' + NL.clubs.crestImgHtml(r.clubName, 'thumb') +
           '<span class="club-cell__name">' + esc(r.clubName) + '</span></span>'
@@ -720,61 +718,8 @@
     var cp = e.target.closest('[data-copy]');
     if (cp) { NL.copy(cp.getAttribute('data-copy')); return; }
     var dp = e.target.closest('[data-dispatch]');
-    if (dp) { dispatchOne(dp.getAttribute('data-dispatch')); return; }
-    var rv = e.target.closest('[data-revoke]');
-    if (rv) { revokeCode(rv.getAttribute('data-revoke')); return; }
-    var rl = e.target.closest('[data-release]');
-    if (rl) { releaseCode(rl.getAttribute('data-release')); }
+    if (dp) { dispatchOne(dp.getAttribute('data-dispatch')); }
   });
-
-  function revokeCode(id) {
-    var r = CODES[id];
-    if (!r || r.status !== 'active') { toast('Only unredeemed codes can be revoked.', 'error'); return; }
-    NL.confirm('Revoke ' + r.code + '?', {
-      title: 'Revoke code',
-      detail: 'The code becomes invalid — a club entering it at the till will be told it’s no longer valid.',
-      variant: 'danger', confirmText: 'Revoke'
-    }).then(function (ok) {
-      if (!ok) return;
-      UWP.ensureAuth().then(function () {
-        return UWP.ref('codes/' + id).update({
-          status: 'revoked', revokedAt: UWP.TS(), revokedBy: ACTOR
-        });
-      }).then(function () {
-        UWP.audit(ACTOR, ACTOR_LABEL, 'revoke', { codes: r.code });
-        toast('Code revoked', 'success');
-      }).catch(function (err) { toast('Revoke failed: ' + err.message, 'error'); });
-    });
-  }
-
-  /* Release a redeemed code — un-redeems it so the club can use it again
-     (mistake at the till). It stays REGISTERED to the same club: as of v3.0
-     the club a code belongs to is fixed at creation, so a release rewinds the
-     redemption, not the registration. Requires a reason — recorded on the
-     code and in the audit trail. */
-  function releaseCode(id) {
-    var r = CODES[id];
-    if (!r || r.status !== 'redeemed') return;
-    NL.prompt('Release ' + r.code + '? It was redeemed at ' +
-      (r.clubName || 'a club') + ' on ' + UWP.fmt(r.redeemedAt) +
-      '. It goes back to being unredeemed and stays registered to ' + (r.clubName || 'that club') +
-      '. Reason (recorded in the audit trail):', {
-      title: 'Release code', placeholder: 'e.g. Entered at the wrong till', multiline: true
-    }).then(function (reason) {
-      if (reason == null) return;
-      reason = reason.trim();
-      if (!reason) { toast('A reason is required.', 'error'); return; }
-      UWP.ensureAuth().then(function () {
-        return UWP.ref('codes/' + id).update({
-          status: 'active', redeemedAt: null, redeemedBy: null,
-          releasedAt: UWP.TS(), releasedBy: ACTOR, releaseReason: reason, releasedFrom: r.clubName || null
-        });
-      }).then(function () {
-        UWP.audit(ACTOR, ACTOR_LABEL, 'release', { club: r.club, clubName: r.clubName, codes: r.code, detail: reason });
-        toast('Code released — unredeemed, still registered to ' + (r.clubName || 'its club'), 'success');
-      }).catch(function (err) { toast('Release failed: ' + err.message, 'error'); });
-    });
-  }
 
   /* ── Add codes to the pool ──────────────────────────────────────────── */
   /* Add codes — opened from a club's row on the Clubs tab (owner

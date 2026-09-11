@@ -9,7 +9,7 @@ NO auth-guard/portal login), with a full audit trail.
 
 | Page | Who | Gets in via | Can do |
 |---|---|---|---|
-| `/uw-promo/` | **Utility Warehouse** (one shared login) | shared 6-character passcode or `?u=<token>` direct link | Lands on **Clubs** — the per-club overview (method, all contacts, lifecycle totals, CSV) and where everything **starts**: an in-store row carries **Add codes** (generate-only; count defaults to 1; ≤500), an online row **Request codes** (due prefilled +7, editable), and an overdue online row **Remind** (drafts the chase email). The two method tabs — **In-store codes / Online codes** — share one table and are pure management: an open request renders as **placeholder rows** (Requested/Overdue pill, empty code cell) that convert to Issued rows as the club uploads; per-row **Dispatch** with confirm; revoke unredeemed generated codes but **no revoke on club-uploaded codes, ever**; release a redeemed code (required reason), search, CSV export; stat cards follow tab + club filter |
+| `/uw-promo/` | **Utility Warehouse** (one shared login) | shared 6-character passcode or `?u=<token>` direct link | Lands on **Clubs** — the per-club overview (method, all contacts, lifecycle totals, CSV) and where everything **starts**: an in-store row carries **Add codes** (generate-only; count defaults to 1; ≤500), an online row **Request codes** (due prefilled +7, editable), and an overdue online row **Remind** (drafts the chase email). The two method tabs — **In-store codes / Online codes** — share one table and are pure management: an open request renders as **placeholder rows** (Requested/Overdue pill, empty code cell) that convert to Issued rows as the club uploads; per-row **Dispatch** with confirm — the one row verb (**no Revoke or Release**: corrections are NL master powers); search, CSV export; stat cards follow tab + club filter |
 | `/uw-promo/club/` | **Each of the 72 clubs** | own `?c=<token>` direct link (the QR-code target for the point of sale) plus a credential — the 4-digit till PIN (**demanded on every visit**, never stored), or the club's manager passcode (**remembered on that browser** until Sign out) | **Till page**: big code entry → a valid unredeemed code *registered to this club* is redeemed here (RTDB transaction — two tills can't claim the same code). Refusals: already-redeemed shows club + date/time, expired its expiry date, everything else ONE neutral message. **Dashboard** (manager passcode; badge reads *Dashboard · In-store method* or *· Online method*): the same table UW sees, scoped to this club — **central codes are anonymous until redeemed** (a muted count line covers what's withheld; the club's own uploads stay visible); placeholder rows carry the red **Upload** button (one input box per code still owed; part-filling fine; three undertakings + confirm); an online club **marks its own codes redeemed** (confirm first); **Check a code** only where a till lives (in-store, or central codes still in the wild); PIN self-service + own till card (in-store). No activity feed — the master console's audit is the log |
 | `/uw-promo/admin/` | **NL master** | master passcode only (no direct link, deliberately; first-run bootstrap sets it; **remembered** until Sign out) | Mirrors the UW dashboard: tabs **Clubs & access · In-store codes · Online codes · Audit**, landing on Clubs & access (master passcode, UW access, the club table — method pill + pencil, contact column, credential chips with reissue glyphs, Card for in-store rows only, access CSV, print till cards). The method tabs are UW's shape plus master powers: generate-only add + Code adds on In-store, Request club codes on Online, and per-row Dispatch / Redeem… / Register… / Revoke (typed for redeemed) / Delete (typed). Sandbox reset in test mode |
 
@@ -22,9 +22,9 @@ registered to one club cannot both be true, and the club is what the whole
 model turns on. A code registered to Hartlepool and presented at Sutton is
 refused, by name, at the till.
 
-The registration is fixed for the life of the code. **Release** un-redeems a
-code so it can be used again, but leaves it registered to the same club —
-it rewinds the redemption, not the registration.
+The registration is fixed for the life of the code. **Release** (a master
+power) un-redeems a code so it can be used again, but leaves it registered
+to the same club — it rewinds the redemption, not the registration.
 
 Enforcement is in two places: the till checks before it writes, and
 `UWP.redeemTxn` (the transaction updater, unit-tested in
@@ -39,10 +39,11 @@ which no current door can create.
 ## Status model
 
 `active` (shown as **Unredeemed** — issued to the club, not yet used) →
-`redeemed` (used at that club) → back to `active` only via a **release** by
-NL/UW (required reason, recorded; the club registration is kept). `revoked`
-ends a code either way (UW: unredeemed only; NL master: redeemed too, behind
-a typed confirm).
+`redeemed` (used at that club) → back to `active` only via a **release** on
+the NL master console (required reason, recorded; the club registration is
+kept). `revoked` ends a code either way — also master-only (behind a typed
+confirm for a redeemed one). The UW console has neither verb: corrections
+are NL acts (owner ruling 11/09/2026).
 
 **Central codes expire 12 months from generation** (spec item 4). Nothing is
 stored: `UWP.isExpired` derives it from `createdAt`, so it covers every
