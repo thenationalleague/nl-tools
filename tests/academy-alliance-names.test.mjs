@@ -92,8 +92,8 @@ const CASES = [
   ['Chesham United FC U19', 'alliance-c', 'Chesham United', 'Chesham United'],
   ['Slough Town FC U19 STFC Academy', 'alliance-c', 'Slough Town', 'Slough Town'],
   ['Flackwell Heath FC U19 National Alliance', 'alliance-c', 'Flackwell Heath', null],
-  ['Hemel Hempstead Town U19 Alliance', 'alliance-c', 'Hemel Hempstead', 'Hemel Hempstead Town'],
-  ['Wellingborough Town U19', 'alliance-c', 'Wellingborough', null],
+  ['Hemel Hempstead Town U19 Alliance', 'alliance-c', 'Hemel Hempstead Town', 'Hemel Hempstead Town'],
+  ['Wellingborough Town U19', 'alliance-c', 'Wellingborough Town', null],
   ['Bedford Town U19 Academy', 'alliance-c', 'Bedford Town', 'Bedford Town'],
   ['Barnet FC U18 SS2', 'alliance-c', 'Barnet', null],
   ['Wealdstone FC U19 National League Allian', 'alliance-c', 'Wealdstone', 'Wealdstone'],
@@ -183,7 +183,8 @@ test('crest source: a roster record where one exists, else the printed name', ()
     const r = resolve(raw, div);
     if (club && !rosterNames.has(club)) { bad.push(`${raw}: test expects roster club "${club}" which is not in clubs-meta`); continue; }
     if (r.club !== club) bad.push(`${raw} → crest from ${JSON.stringify(r.club)}, expected ${JSON.stringify(club)}`);
-    if (r.name !== (club || display)) bad.push(`${raw} → crest file "${r.name}", expected "${club || display}"`);
+    const CREST = { 'Brentford CST': 'Brentford' };   /* a side that draws its parent club's badge */
+    if (r.name !== (club || CREST[display] || display)) bad.push(`${raw} → crest file "${r.name}", expected "${club || CREST[display] || display}"`);
   }
   assert.deepEqual(bad, []);
 });

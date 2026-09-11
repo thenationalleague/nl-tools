@@ -40,8 +40,8 @@
       "Dover Athletic", "Burgess Hill Town", "Dartford", "Eastbourne Borough", "Ebbsfleet United", "Folkestone Invicta",
       "Maidstone United", "Tonbridge Angels", "Whitstable Town" ] },
     { key: "alliance-c", comp: "alliance", label: "Division C", teams: [
-      "Barnet", "Bedford Town", "Brentford CST", "Chesham United", "Flackwell Heath", "Hemel Hempstead", "Hertford Town",
-      "Slough Town", "Wellingborough", "Wealdstone" ] },
+      "Barnet", "Bedford Town", "Brentford CST", "Chesham United", "Flackwell Heath", "Hemel Hempstead Town", "Hertford Town",
+      "Slough Town", "Wellingborough Town", "Wealdstone" ] },
     { key: "alliance-d", comp: "alliance", label: "Division D", teams: [
       "Bromley", "Cray Wanderers", "Dagenham & Redbridge", "Dartford", "Dover Athletic", "Faversham Town",
       "Folkestone Invicta", "Hollands & Blair", "Ramsgate" ] },
@@ -65,9 +65,9 @@
     for (var i = 0; i < DIVISIONS.length; i++) if (DIVISIONS[i].key === key) return DIVISIONS[i];
     return DIVISIONS[0];
   }
-  /* A constitution name whose club record on the roster is spelt differently.
-     The record supplies the crest; the constitution supplies the printed name. */
-  var ROSTER_ALIAS = { "Hemel Hempstead": "Hemel Hempstead Town", "Rochdale": "Rochdale", "Wellingborough": "Wellingborough Town" };
+  /* A printed name whose crest file is called something else — a side that
+     draws its parent club's badge. */
+  var CREST_ALIAS = { "Brentford CST": "Brentford" };
 
   var ROSE_WHITE = "/assets/crests/National%20League%20rose%20white.png";
   /* Crests are served same-origin on purpose: the PNG export draws every image
@@ -131,7 +131,7 @@
   }
   /* The roster record a printed name draws its crest from, or null. */
   function rosterClub(name) {
-    var want = ROSTER_ALIAS[name] || name;
+    var want = CREST_ALIAS[name] || name;
     var rec = NL.clubs.byName(want);
     if (rec) return rec.name;
     var f = " " + fold(want) + " ", idx = rosterIndex();
@@ -150,7 +150,7 @@
     var hit = (dv && findIn(keyed(dv.teams), padded)) || findIn(constIndex(), padded);
     if (hit) {
       var club = rosterClub(hit);
-      return { club: club, name: club || hit, display: hit };
+      return { club: club, name: club || CREST_ALIAS[hit] || hit, display: hit };
     }
     var rhit = findIn(rosterIndex(), padded);
     if (rhit) return { club: rhit, name: rhit, display: rhit };
