@@ -117,20 +117,21 @@
   /* ---------------- helpers ---------------- */
   /* The Cup's guest sides. cup-clubs-meta lists them as "<club> PL2" with a
      crestName pointing at the parent club's badge; NLS names some of them
-     "<club> U21" instead. Match on the club part, keep the tag NLS printed. */
+     "<club> U21" instead. Every such side prints as PL2 — the competition's
+     own name for them — and matches on the club part, so the crest is the
+     parent's whichever tag came in. */
   function guestOf(name) {
-    var n = String(name || "").trim();
-    var m = n.match(/^(.*?)\s+(PL2|U21|U23)$/i);
-    if (!m || !NL.clubs.guestByName) return null;
-    var g = NL.clubs.guestByName(m[1] + " PL2") || NL.clubs.guestByName(n);
-    return g ? { guest: g, tag: m[2].toUpperCase() } : null;
+    var n = pl2Name(name);
+    if (!/\sPL2$/i.test(n) || !NL.clubs.guestByName) return null;
+    var g = NL.clubs.guestByName(n);
+    return g ? { guest: g } : null;
   }
   function teamDisplay(name) {
     var k = String(name || "").toLowerCase().trim();
     if (SHORTEN[k]) return SHORTEN[k].toUpperCase();
     var g = guestOf(name);
-    if (g && g.guest.short) return g.guest.short.replace(/\s+PL2$/i, " " + g.tag).toUpperCase();
-    return String(name || "").toUpperCase();
+    if (g && g.guest.short) return g.guest.short.toUpperCase();
+    return pl2Name(name).toUpperCase();
   }
   /* Crest file for a printed name: a guest draws its parent club's badge. */
   function crestFor(name) {
@@ -524,7 +525,14 @@
   function nlsTeamName(row) {
     var a = row.attributes || {};
     var club = row.id && NL.clubs.byOpta(row.id);
-    return (club && club.name) || a.teamName || a.teamShortName || "";
+    return (club && club.name) || pl2Name(a.teamName || a.teamShortName || "");
+  }
+
+  /* A guest side is a PL2 side whatever NLS calls it: "<club> U21" and
+     "<club> U23" normalise to "<club> PL2" the moment a name comes in, so
+     every later step — crest, short name, the grid — sees one spelling. */
+  function pl2Name(name) {
+    return String(name || "").trim().replace(/\s+U2[13]$/i, " PL2");
   }
 
   /* The graphic prints GD with its sign, the way a table does. */

@@ -84,10 +84,11 @@ test('the U21/PL2 disagreement between NLS and cup-clubs-meta collapses', () => 
   assert.equal(W.baseName('Everton U23'), 'Everton');
 });
 
-test('a tile calls a side what the broadcast calls them', () => {
-  /* The repo's short + the suffix NLS actually used, so the rail agrees with
-     the coverage rather than with the file it read the crest from. */
-  assert.equal(W.shortFor('Birmingham City U21'), 'Birmingham U21');
+test('a tile calls every academy side PL2, whatever tag NLS used', () => {
+  /* The repo's short + PL2: the competition's own name for the academy
+     sides, so a U21 or U23 from the feed prints the same as the rest. */
+  assert.equal(W.shortFor('Birmingham City U21'), 'Birmingham PL2');
+  assert.equal(W.shortFor('Everton U23'), 'Everton PL2');
   assert.equal(W.shortFor('Birmingham City PL2'), 'Birmingham PL2');
   assert.equal(W.shortFor('Middlesbrough PL2'), 'Boro PL2');
   assert.equal(W.shortFor('Wolverhampton Wanderers PL2'), 'Wolves PL2');
@@ -95,7 +96,7 @@ test('a tile calls a side what the broadcast calls them', () => {
   assert.equal(W.shortFor('FC Halifax Town'), 'Halifax');
   assert.equal(W.shortFor('Hartlepool United'), 'Hartlepool');
   /* A side nobody has heard of still gets a name, not an empty tile. */
-  assert.equal(W.shortFor('Some New Club U21'), 'Some New Club U21');
+  assert.equal(W.shortFor('Some New Club U21'), 'Some New Club PL2');
 });
 
 test('a member club name is never mistaken for a suffixed one', () => {
