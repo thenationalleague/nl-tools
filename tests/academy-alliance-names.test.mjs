@@ -270,6 +270,23 @@ NLFA North Division
   assert.equal(rows[4].away, 'Southport FC U19 Academy');
 });
 
+test('a table copied off the Full-Time table page: overall columns, not home', () => {
+  const parseTable = (t) => JSON.parse(JSON.stringify(window.TOOL.parseTable(t)));
+  const paste = [
+    '\t\t\tHome\t\t\t\t\tAway\t\t\t\t\tOverall\t\t\t\t\t\t',
+    'Pos\tTeam\tP\tW\tD\tL\tF\tA\tW\tD\tL\tF\tA\tW\tD\tL\tF\tA\tGD\tPTS',
+    '1\tFC Halifax Town U19\t2\t1\t0\t0\t5\t0\t1\t0\t0\t3\t1\t2\t0\t0\t8\t1\t7\t6',
+    '6\tHartlepool United FC U19 Hartlepool Unit\t2\t0\t1\t0\t2\t2\t1\t0\t0\t1\t0\t1\t1\t0\t3\t2\t1\t3 *',
+  ].join('\n');
+  const rows = parseTable(paste);
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows[0], { team: 'FC Halifax Town U19', label: '', adj: false, p: '2', pts: '6', gd: '7', w: '2', d: '0', l: '0', f: '8', a: '1' });
+  assert.equal(rows[1].adj, true);
+  assert.equal(rows[1].w, '1'); assert.equal(rows[1].d, '1');
+  const ten = parseTable('1\tFC Halifax Town U19\t2\t2\t0\t0\t8\t1\t7\t6');
+  assert.deepEqual([ten[0].w, ten[0].d, ten[0].l, ten[0].f, ten[0].a], ['2', '0', '0', '8', '1']);
+});
+
 test('the plain shapes still parse: "Home v Away", "Home 2-1 Away", a lone line is a heading', () => {
   const rows = parseFixtures('SAT 13 SEP\nHorsham v Southend United\nChester 2-1 Gateshead');
   assert.equal(rows[0].divider, 'SAT 13 SEP');

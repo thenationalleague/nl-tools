@@ -19,14 +19,6 @@ The functions in this directory:
   that write to a **different project's** database (`nl-widgets`). See the
   section below — they need one extra IAM grant that nothing else does.
 
-- ~~`fulltimeIngestHourly` / `fulltimeRefresh`~~ — lived for a day
-  (10–11/09/2026). FA Full-Time sits behind Cloudflare and answers every
-  request from Google's address space, and from a GitHub runner, with the
-  block page (HTTP 403, "Attention Required!"). The parsers stay in
-  `fulltime/parse.js` (tests in `tests/fulltime.test.mjs`); the fetching is
-  done by the Academy & Alliance tool's Sync bookmarklet in the user's own
-  browser, which Full-Time does let in.
-
 See the headers of `index.js` / `account.js` for details.
 
 This is the **only server-side code** in the repo; everything else is a static

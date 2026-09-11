@@ -13,16 +13,6 @@
 
   var STORAGE_KEY = "nl-academy-alliance-gfx-v1";
   var MAX_FIXTURES = 14;
-  /* The feed: one node per division with its table, results and fixtures.
-     Written by THIS page in ?sync=1 mode — the Sync bookmarklet, run on a
-     Full-Time page, fetches every division's pages there (a signed-in
-     user's browser is the only thing Full-Time lets in; see
-     functions/fulltime/parse.js) and hands them here by postMessage. Read
-     by Load, behind the login. */
-  var FEED_ROOT = "app-data/staff-graphics/fulltime";
-  var FT_ORIGIN = "https://fulltime.thefa.com";
-  var SYNC_VERSION = "sync-1.2";
-
   /* ---------------- competitions ----------------
      Both roundels live in assets/divisions; the 256px tier is built by the
      image-tiers Action (crest-thumbs.yml) whenever a badge lands on main. */
@@ -35,43 +25,39 @@
      them, with three deliberate edits: a trailing "FC" is dropped (Bromley,
      Folkestone Invicta, Dorchester Town…) while a leading one stays (FC Halifax
      Town, FC United of Manchester); "and" becomes "&"; Brentford keeps CST.
-     `label` is what the graphic prints after the competition name. `ft` is
-     the division's ID on FA Full-Time (fulltime.thefa.com, ?selectedDivision=)
-     for season 395289686 (2026-27), recorded 10/09/2026 for the feed
-     follow-up; nothing reads it yet. */
-  var FULLTIME_SEASON = "395289686";
+     `label` is what the graphic prints after the competition name. */
   var DIVISIONS = [
-    { key: "academy-north", ft: "355815748", comp: "academy",  label: "North Division", teams: [
+    { key: "academy-north", comp: "academy",  label: "North Division", teams: [
       "AFC Fylde", "Altrincham", "Boston United", "Chester", "FC Halifax Town", "Gateshead", "Harrogate Town",
       "Hartlepool United", "Hednesford Town", "Morecambe", "Solihull Moors", "South Shields", "Southport" ] },
-    { key: "academy-south", ft: "681316394", comp: "academy",  label: "South Division", teams: [
+    { key: "academy-south", comp: "academy",  label: "South Division", teams: [
       "Aldershot Town", "Boreham Wood", "Dagenham & Redbridge", "Dorking Wanderers", "Eastleigh", "Forest Green Rovers",
       "Maidenhead United", "Maidstone United", "Oxford City", "Slough Town", "Southend United", "Sutton United", "Wealdstone", "Woking" ] },
-    { key: "alliance-a", ft: "308197696", comp: "alliance", label: "Division A", teams: [
+    { key: "alliance-a", comp: "alliance", label: "Division A", teams: [
       "AFC Sudbury", "Aveley", "Barking", "Billericay Town", "Bishop's Stortford", "Chelmsford City", "Enfield Town",
       "Hertford Town", "King's Lynn Town", "Lowestoft Town", "Southend United", "Wroxham" ] },
-    { key: "alliance-b", ft: "531392282", comp: "alliance", label: "Division B", teams: [
+    { key: "alliance-b", comp: "alliance", label: "Division B", teams: [
       "Dover Athletic", "Burgess Hill", "Dartford", "Eastbourne Borough", "Ebbsfleet United", "Folkestone Invicta",
       "Maidstone United", "Tonbridge Angels", "Whitstable Town" ] },
-    { key: "alliance-c", ft: "484327210", comp: "alliance", label: "Division C", teams: [
+    { key: "alliance-c", comp: "alliance", label: "Division C", teams: [
       "Barnet", "Bedford Town", "Brentford CST", "Chesham United", "Flackwell Heath", "Hemel Hempstead", "Hertford Town",
       "Slough Town", "Wellingborough", "Wealdstone" ] },
-    { key: "alliance-d", ft: "900324610", comp: "alliance", label: "Division D", teams: [
+    { key: "alliance-d", comp: "alliance", label: "Division D", teams: [
       "Bromley", "Cray Wanderers", "Dagenham & Redbridge", "Dartford", "Dover Athletic", "Faversham Town",
       "Folkestone Invicta", "Hollands & Blair", "Ramsgate" ] },
-    { key: "alliance-e", ft: "996619526", comp: "alliance", label: "Division E", teams: [
+    { key: "alliance-e", comp: "alliance", label: "Division E", teams: [
       "Basingstoke Town", "Dorchester Town", "Eastleigh", "Havant & Waterlooville", "Torquay United", "Weston-super-Mare",
       "Wimborne Town", "Yeovil Town" ] },
-    { key: "alliance-f", ft: "86586371", comp: "alliance", label: "Division F", teams: [
+    { key: "alliance-f", comp: "alliance", label: "Division F", teams: [
       "AFC Greenwich Borough", "Boreham Wood", "Bromley", "Carshalton Athletic", "Chatham Town", "Dartford",
       "Dorking Wanderers", "Eastleigh", "Metropolitan Police", "Sutton United", "Woking" ] },
-    { key: "alliance-g", ft: "637572765", comp: "alliance", label: "Division G", teams: [
+    { key: "alliance-g", comp: "alliance", label: "Division G", teams: [
       "Alvechurch", "Boldmere St Michaels", "Boston United", "Hednesford Town", "Ilkeston Town", "Racing Club Warwick",
       "Redditch United", "Rugby Town", "Solihull Moors", "Stourbridge", "Stratford Town", "Tamworth" ] },
-    { key: "alliance-h", ft: "272864635", comp: "alliance", label: "Division H", teams: [
+    { key: "alliance-h", comp: "alliance", label: "Division H", teams: [
       "Blyth Spartans", "Blyth Town", "Darlington", "Gateshead", "Guiseley", "Harrogate Town", "Hartlepool United",
       "Heaton Stannington", "Pontefract Collieries", "South Shields" ] },
-    { key: "alliance-i", ft: "421309651", comp: "alliance", label: "Division I", teams: [
+    { key: "alliance-i", comp: "alliance", label: "Division I", teams: [
       "Alfreton Town", "AFC Fylde", "Buxton", "Chester", "Chesterfield", "Chorley", "FC Halifax Town",
       "FC United of Manchester", "Marine", "Oldham Athletic", "Rochdale", "Stockport County" ] }
   ];
@@ -188,9 +174,6 @@
   var state = {
     division: "academy-north",
     type: "fixtures",          /* fixtures | results | table */
-    source: "feed",            /* feed | manual — which entry card is shown */
-    feedFrom: "",              /* YYYY-MM-DD, or "" = first date offered */
-    feedTo: "",                /* YYYY-MM-DD, or "" = same day */
     format: "1x1",
     crests: true,
     title: "",
@@ -204,7 +187,7 @@
     try {
       var d = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
       if (d && typeof d === "object") {
-        ["division", "type", "format", "title", "sub", "footnote", "source", "feedFrom", "feedTo"].forEach(function (k) {
+        ["division", "type", "format", "title", "sub", "footnote"].forEach(function (k) {
           if (typeof d[k] === "string") state[k] = d[k];
         });
         if (typeof d.crests === "boolean") state.crests = d.crests;
@@ -214,7 +197,6 @@
     } catch (e) {}
     if (!divisionOf(state.division) || DIVISIONS.map(function (x) { return x.key; }).indexOf(state.division) < 0) state.division = DIVISIONS[0].key;
     if (["fixtures", "results", "table"].indexOf(state.type) < 0) state.type = "fixtures";
-    if (state.source !== "manual") state.source = "feed";
   }
 
   function headline() {
@@ -354,7 +336,11 @@
       if (!team || nums.length < 2) return;
       var r = { team: team, label: "", adj: adj, p: nums[0] || "", pts: nums[nums.length - 1] || "",
                 gd: nums.length >= 3 ? nums[nums.length - 2] : "", w: "", d: "", l: "", f: "", a: "" };
-      if (nums.length >= 8) { r.w = nums[1]; r.d = nums[2]; r.l = nums[3]; r.f = nums[4]; r.a = nums[5]; }
+      /* Full-Time's table page copies as P, then Home W D L F A, Away W D L
+         F A, Overall W D L F A, GD, PTS — 18 numbers; the overall set is
+         what the graphic prints. A plain 8-number row is W D L F A direct. */
+      if (nums.length >= 18) { r.w = nums[11]; r.d = nums[12]; r.l = nums[13]; r.f = nums[14]; r.a = nums[15]; }
+      else if (nums.length >= 8) { r.w = nums[1]; r.d = nums[2]; r.l = nums[3]; r.f = nums[4]; r.a = nums[5]; }
       out.push(r);
     });
     return out;
@@ -699,230 +685,9 @@
     setStatus(miss.length ? miss.length + " of " + names.length + " without a crest on file" : "All " + names.length + " matched", 4000);
   }
 
-  /* ---------------- the feed ----------------
-     One node per division: { table, results, fixtures, fetchedAt, missing }.
-     Read once per division per visit and cached; a Sync writes a fresh copy
-     which the next visit (or a division change) reads. */
-  var _feed = {};
-  function dbRef(path) { return (window.db || firebase.database()).ref(path); }
-  function feedNode() { return _feed[state.division] || null; }
   function dividerLabel(ymd) {
     var d = new Date(ymd + "T12:00:00Z");   /* midday: no DST edge either way */
     return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }).replace(/,/g, "").toUpperCase();
-  }
-  function dateLabel(ymd) {
-    var d = new Date(ymd + "T12:00:00Z");
-    return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }).replace(/,/g, "");
-  }
-  function loadFeedNode(key, force) {
-    if (_feed[key] && !force) { fillDates(); showMeta(); return Promise.resolve(_feed[key]); }
-    setStatus("Reading the feed…", 6000);
-    return NL.ensureAuth().then(function () {
-      return dbRef(FEED_ROOT + "/" + key).once("value");
-    }).then(function (snap) {
-      _feed[key] = snap.val() || null;
-      fillDates(); showMeta();
-      setStatus(_feed[key] ? "Feed ready" : "No feed copy yet — use the Sync bookmark");
-      return _feed[key];
-    }).catch(function (err) {
-      console.error(err);
-      showMeta("Could not read the feed — " + (err && err.code === "PERMISSION_DENIED" ? "no access" : "check your connection"), true);
-      setStatus("Feed unavailable");
-      return null;
-    });
-  }
-  /* The dates a type offers: results most recent first, fixtures soonest
-     first. Only these two types have dates; the table loads whole. */
-  function feedDates() {
-    var node = feedNode();
-    if (!node) return [];
-    var rows = state.type === "results" ? (node.results || []) : state.type === "fixtures" ? (node.fixtures || []) : [];
-    var seen = {}, out = [];
-    rows.forEach(function (r) { if (r.date && !seen[r.date]) { seen[r.date] = 1; out.push(r.date); } });
-    out.sort();
-    if (state.type === "results") out.reverse();
-    return out;
-  }
-  function fillDates() {
-    var from = $("feedFrom"), to = $("feedTo");
-    if (!from || !to) return;
-    var dates = feedDates();
-    if (!dates.length) {
-      from.innerHTML = '<option value="">' + (feedNode() ? "No dates in the feed" : "No feed copy yet") + '</option>';
-      to.innerHTML = '<option value="">Same day</option>';
-      return;
-    }
-    from.innerHTML = dates.map(function (d) { return '<option value="' + d + '">' + esc(dateLabel(d)) + '</option>'; }).join("");
-    from.value = dates.indexOf(state.feedFrom) >= 0 ? state.feedFrom : dates[0];
-    state.feedFrom = from.value;
-    fillToDates();
-  }
-  function fillToDates() {
-    var to = $("feedTo"), dates = feedDates();
-    var i = dates.indexOf(state.feedFrom);
-    var rest = i >= 0 ? dates.slice(i + 1) : [];
-    to.innerHTML = '<option value="">Same day</option>' +
-      rest.map(function (d) { return '<option value="' + d + '">' + esc(dateLabel(d)) + '</option>'; }).join("");
-    to.value = rest.indexOf(state.feedTo) >= 0 ? state.feedTo : "";
-    state.feedTo = to.value;
-  }
-  function showMeta(msg, warn) {
-    var el = $("feedMeta");
-    if (!el) return;
-    if (msg) { el.textContent = msg; el.className = warn ? "warn" : ""; return; }
-    var node = feedNode();
-    if (!node || !node.fetchedAt) { el.textContent = "No copy of this division yet — use the Sync bookmark on a Full-Time page."; el.className = "warn"; return; }
-    var when = NL.formatDateTime ? NL.formatDateTime(node.fetchedAt) : new Date(node.fetchedAt).toLocaleString("en-GB");
-    var missing = node.missing || [];
-    var miss = missing.length ? " · last fetch missed: " + missing.join(", ") : "";
-    el.textContent = "Fetched " + when + miss;
-    el.className = miss ? "warn" : "";
-    /* say why: what Full-Time answered for each missed page */
-    if (missing.length && node.diag) {
-      missing.forEach(function (kind) {
-        (node.diag[kind] || []).forEach(function (t) {
-          var line = document.createElement("div");
-          line.textContent = kind + " " + (t.path || "") + " → " + (t.error ? t.error : "HTTP " + t.status + ", " + t.bytes + " bytes, " + t.rows + " rows" +
-            (t.title ? ", \"" + t.title + "\"" : "") + (t.redirected ? ", redirected to " + t.redirected : ""));
-          el.appendChild(line);
-        });
-      });
-    }
-  }
-  /* Load fills the editor from the stored copy. Fixtures and results take
-     the chosen date, or the run from Date through to Through to, with a
-     divider per day; the table comes whole. */
-  function loadFromFeed() {
-    var node = feedNode();
-    if (!node) { setStatus("No feed copy — use the Sync bookmark"); return; }
-    if (state.type === "table") {
-      var t = node.table || [];
-      if (!t.length) { setStatus("The feed has no table for this division"); return; }
-      state.table = t.map(function (r) {
-        return { team: r.team, label: "", adj: !!r.adj, p: r.p, w: r.w, d: r.d, l: r.l, f: r.f, a: r.a, gd: r.gd, pts: r.pts };
-      });
-      syncPasteFromRows(); buildGrid(); save(); render(); reportMatches();
-      return;
-    }
-    var rows = state.type === "results" ? (node.results || []) : (node.fixtures || []);
-    var dates = feedDates();
-    var i = dates.indexOf(state.feedFrom), j = state.feedTo ? dates.indexOf(state.feedTo) : i;
-    if (i < 0) { setStatus("Pick a date"); return; }
-    if (j < i) j = i;
-    var wanted = dates.slice(i, j + 1);
-    var out = [], skipped = 0, n = 0;
-    wanted.forEach(function (d) {
-      var day = rows.filter(function (r) { return r.date === d; });
-      if (state.type === "fixtures") {
-        var live = day.filter(function (r) { return !/postponed|cancel|abandon/i.test(r.status || ""); });
-        skipped += day.length - live.length; day = live;
-      }
-      if (!day.length) return;
-      if (wanted.length > 1) out.push({ divider: dividerLabel(d) });
-      day.forEach(function (r) {
-        if (n >= MAX_FIXTURES) return;
-        out.push({ home: r.home, away: r.away, hs: r.hs || "", as: r.as || "", ko: r.time || "" }); n++;
-      });
-    });
-    if (!out.length) { setStatus(skipped ? "Every match that day is postponed" : "Nothing in the feed for those dates"); return; }
-    state.fixtures = out;
-    syncPasteFromRows(); buildGrid(); save(); render();
-    var names = out.filter(function (r) { return r.divider == null; });
-    var miss = names.filter(function (r) { return !resolveTeam(r.home, state.division).club || !resolveTeam(r.away, state.division).club; }).length;
-    setStatus("Loaded " + names.length + (skipped ? " — " + skipped + " postponed left out" : "") + (miss ? " — " + miss + " without a crest on file" : ""), 5000);
-  }
-  /* ---------------- sync ----------------
-     The bookmarklet. Built here rather than kept as a file so the division
-     list and season have one home (DIVISIONS above). Dragged to the
-     bookmarks bar from the link on the feed card; run on any Full-Time page
-     it: opens this tool in a popup with ?sync=1 (synchronously, so the popup
-     blocker allows it), fetches every division's table, results and fixtures
-     from Full-Time — same-origin, so the fetch is let through — then posts
-     the pages to the popup once a second until it acknowledges. */
-  function bookmarkletCode() {
-    var divs = DIVISIONS.map(function (d) { return [d.key, d.ft]; });
-    var origin = location.origin;
-    var code = "(function(){" +
-      "if(location.host!=='fulltime.thefa.com'){alert('Open a Full-Time page first, then click Sync.');return;}" +
-      "var S=" + JSON.stringify(FULLTIME_SEASON) + ",D=" + JSON.stringify(divs) + ",O=" + JSON.stringify(origin) + ";" +
-      "var w=window.open(O+'/graphics/academy-alliance/?sync=1','nlsync');" +
-      "if(!w){alert('Allow pop-ups for fulltime.thefa.com, then click Sync again.');return;}" +
-      "function q(f){return 'selectedSeason='+S+'&selectedFixtureGroupAgeGroup=0&selectedDivision='+f+'&selectedCompetition=0';}" +
-      "var J=[];D.forEach(function(d){J.push([d[0],'table','/table.html?'+q(d[1])]);J.push([d[0],'results','/results/1/100.html?'+q(d[1])]);J.push([d[0],'fixtures','/fixtures/1/100.html?'+q(d[1])]);});" +
-      "var P=[],i=0,a=0,n=0,ok=false;" +
-      "window.addEventListener('message',function(e){if(e.origin===O&&e.data&&e.data.type==='ft-ack')ok=true;});" +
-      "function run(j){a++;fetch('https://fulltime.thefa.com'+j[2],{credentials:'include'}).then(function(r){return r.text().then(function(t){return {s:r.status,t:t};});})" +
-      ".catch(function(){return {s:0,t:''};}).then(function(r){P.push({key:j[0],kind:j[1],status:r.s,html:r.t});a--;n++;if(n===J.length)send();else next();});}" +
-      "function next(){while(a<3&&i<J.length)run(J[i++]);}" +
-      "function send(){var k=0,t=setInterval(function(){if(ok||k++>90){clearInterval(t);return;}try{w.postMessage({type:'ft-pages',season:S,pages:P},O);}catch(x){}},1000);}" +
-      "next();})();";
-    return "javascript:" + encodeURIComponent(code);
-  }
-  var _syncDone = false;
-  function syncLog(msg, warn) {
-    var el = $("syncLog");
-    var line = document.createElement("div");
-    line.textContent = msg; if (warn) line.className = "warn";
-    el.appendChild(line);
-  }
-  function initSync() {
-    document.body.setAttribute("data-sync", "1");
-    window.addEventListener("message", function (e) {
-      if (e.origin !== FT_ORIGIN || !e.data || e.data.type !== "ft-pages") return;
-      try { e.source.postMessage({ type: "ft-ack" }, e.origin); } catch (x) {}
-      if (_syncDone) return;
-      _syncDone = true;
-      savePages(e.data.pages || []);
-    });
-  }
-  /* Parse and save what the bookmarklet sent. One write per division; a
-     kind that came back empty or unparseable leaves the stored copy alone
-     and is named in `missing`, exactly as the function did. */
-  function savePages(pages) {
-    var P = window.FulltimeParse;
-    if (!P) { $("syncStatus").textContent = "The parser did not load — reload this page and click Sync again."; return; }
-    $("syncStatus").textContent = "Received " + pages.length + " pages. Parsing…";
-    var byKey = {};
-    pages.forEach(function (pg) {
-      var d = byKey[pg.key] || (byKey[pg.key] = { rows: {}, diag: {} });
-      var parser = pg.kind === "table" ? P.parseTable : pg.kind === "results" ? P.parseResults : P.parseFixtures;
-      var rows = pg.html ? parser(pg.html) : [];
-      d.diag[pg.kind] = [{ path: "/" + pg.kind, status: pg.status || 0, bytes: (pg.html || "").length, title: P.titleOf(pg.html), rows: rows.length }];
-      if (rows.length) d.rows[pg.kind] = rows;
-    });
-    var keys = Object.keys(byKey);
-    if (!keys.length) { $("syncStatus").textContent = "Nothing arrived. Click Sync again on a Full-Time page."; return; }
-    var now = Date.now(), saved = 0, failed = 0;
-    NL.ensureAuth().then(function () {
-      return Promise.all(keys.map(function (key) {
-        var d = byKey[key], update = {};
-        var missing = ["table", "results", "fixtures"].filter(function (k) { return !d.rows[k]; });
-        ["table", "results", "fixtures"].forEach(function (k) { if (d.rows[k]) update[k] = d.rows[k]; });
-        update.fetchedAt = now; update.missing = missing; update.diag = d.diag; update.version = SYNC_VERSION;
-        return dbRef(FEED_ROOT + "/" + key).update(update).then(function () {
-          saved++;
-          var dv = divisionOf(key);
-          syncLog((dv.comp === "academy" ? "Academy " : "Alliance ") + dv.label + ": " +
-            ["table", "results", "fixtures"].map(function (k) { return k + " " + (d.rows[k] ? d.rows[k].length : "—"); }).join(", ") +
-            (missing.length ? " · missing " + missing.join(", ") : ""), missing.length > 0);
-        }).catch(function (err) {
-          failed++;
-          syncLog(key + ": not saved — " + (err && err.code === "PERMISSION_DENIED" ? "no access" : (err && err.message) || err), true);
-        });
-      }));
-    }).then(function () {
-      $("syncStatus").textContent = "Saved " + saved + " of " + keys.length + " divisions" + (failed ? " (" + failed + " failed)" : "") + ". You can close this window; press Load in the tool.";
-    }).catch(function (err) {
-      $("syncStatus").textContent = "Could not save — " + ((err && err.message) || err);
-    });
-  }
-
-  function setSource(src) {
-    state.source = (src === "manual") ? "manual" : "feed";
-    document.querySelectorAll(".src-btn").forEach(function (b) { b.classList.toggle("active", b.getAttribute("data-src") === state.source); });
-    document.body.setAttribute("data-source", state.source);
-    save();
-    if (state.source === "feed") loadFeedNode(state.division);
   }
 
   /* ---------------- datalist ----------------
@@ -1040,7 +805,6 @@
         : "One match per line:\nHome  v  Away\nA line on its own becomes a heading.";
     $("titleInput").placeholder = t === "table" ? "Current Standings" : t === "results" ? "Results" : "Fixtures — or a matchday number";
     syncPasteFromRows(); buildGrid(); save(); render();
-    fillDates();
   }
   function syncSizeSeg() {
     document.querySelectorAll(".size-btn").forEach(function (b) { b.classList.toggle("active", b.getAttribute("data-fmt") === state.format); });
@@ -1063,25 +827,8 @@
     $("crestToggle").checked = state.crests;
     syncSizeSeg();
     setType(state.type);
-    setSource(state.source);
 
-    sel.addEventListener("change", function () {
-      state.division = this.value; buildTeamList(); buildGrid(); save(); render(); reportMatches();
-      if (state.source === "feed") loadFeedNode(state.division);   /* each division is its own node */
-    });
-    document.querySelectorAll(".src-btn").forEach(function (b) {
-      b.addEventListener("click", function () { setSource(b.getAttribute("data-src")); fitStage(); });
-    });
-    $("feedFrom").addEventListener("change", function () { state.feedFrom = this.value; fillToDates(); save(); });
-    $("feedTo").addEventListener("change", function () { state.feedTo = this.value; save(); });
-    $("feedLoadBtn").addEventListener("click", loadFromFeed);
-    var bm = $("syncLink");
-    if (bm) {
-      bm.href = bookmarkletCode();
-      /* a click runs it here, where it can only say "open Full-Time first" */
-      bm.addEventListener("click", function (e) { e.preventDefault(); setStatus("Drag it to the bookmarks bar, then use it on a Full-Time page", 5000); });
-    }
-    if (new URLSearchParams(location.search).get("sync")) initSync();
+    sel.addEventListener("change", function () { state.division = this.value; buildTeamList(); buildGrid(); save(); render(); reportMatches(); });
     $("titleInput").addEventListener("input", function () { state.title = this.value; save(); render(); });
     $("seasonInput").addEventListener("input", function () { state.sub = this.value; save(); render(); });
     $("footnoteInput").addEventListener("input", function () { state.footnote = this.value; save(); render(); });
