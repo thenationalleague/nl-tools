@@ -11,7 +11,7 @@ NO auth-guard/portal login), with a full audit trail.
 |---|---|---|---|
 | `/uw-promo/` | **Utility Warehouse** (one shared login) | shared 6-character passcode or `?u=<token>` direct link | Two method tabs — **In-store codes / Online codes** — sharing one table. In-store: **generate codes** for one in-store club at a time (generate-only; count defaults to 1; ≤500), revoke unredeemed codes, per-row **Dispatch** with confirm. Online: **Request club codes** (online clubs only; due prefilled +7, editable) — an open request renders as **placeholder rows** in the table (Requested/Overdue pill, empty code cell) that convert to Issued rows as the club uploads; per-row Dispatch; **no revoke on club-uploaded codes, ever**. Both: release a redeemed code (required reason), search, CSV export; stat cards follow tab + club filter |
 | `/uw-promo/club/` | **Each of the 72 clubs** | own `?c=<token>` direct link (the QR-code target for the point of sale) plus a credential — the 4-digit till PIN (**demanded on every visit**, never stored), or the club's manager passcode (**remembered on that browser** until Sign out) | **Till page**: big code entry → a valid unredeemed code *registered to this club* is redeemed here (RTDB transaction — two tills can't claim the same code). Refusals: already-redeemed shows club + date/time, expired its expiry date, everything else ONE neutral message. **Dashboard** (manager passcode; badge reads *Dashboard · In-store method* or *· Online method*): the same table UW sees, scoped to this club — **central codes are anonymous until redeemed** (a muted count line covers what's withheld; the club's own uploads stay visible); placeholder rows carry the red **Upload** button (one input box per code still owed; part-filling fine; three undertakings + confirm); an online club **marks its own codes redeemed** (confirm first); **Check a code** only where a till lives (in-store, or central codes still in the wild); PIN self-service + own till card (in-store). No activity feed — the master console's audit is the log |
-| `/uw-promo/admin/` | **NL master** | master passcode only (no direct link, deliberately; first-run bootstrap sets it; **remembered** until Sign out) | Mirrors the UW dashboard: tabs **Clubs & access · In-store codes · Online codes · Audit**, landing on Clubs & access (master passcode, UW access, the club table — method pill + pencil, contact column, credential chips with reissue glyphs, Card for in-store rows only, access CSV, print till cards). The method tabs are UW's shape plus master powers: paste-capable add (the NL back-door) + Code adds on In-store, Request club codes on Online, and per-row Dispatch / Redeem… / Register… / Revoke (typed for redeemed) / Delete (typed). Sandbox reset in test mode |
+| `/uw-promo/admin/` | **NL master** | master passcode only (no direct link, deliberately; first-run bootstrap sets it; **remembered** until Sign out) | Mirrors the UW dashboard: tabs **Clubs & access · In-store codes · Online codes · Audit**, landing on Clubs & access (master passcode, UW access, the club table — method pill + pencil, contact column, credential chips with reissue glyphs, Card for in-store rows only, access CSV, print till cards). The method tabs are UW's shape plus master powers: generate-only add + Code adds on In-store, Request club codes on Online, and per-row Dispatch / Redeem… / Register… / Revoke (typed for redeemed) / Delete (typed). Sandbox reset in test mode |
 
 ## Which club a code belongs to
 
@@ -30,10 +30,11 @@ Enforcement is in two places: the till checks before it writes, and
 `UWP.redeemTxn` (the transaction updater, unit-tested in
 `tests/uw-promo.test.mjs`) refuses again inside the transaction.
 
-**Codes created before v3.0 belong to no club** and stay redeemable anywhere,
-which is the old pool behaviour. Filter to *Not yet registered to a club* in
-either panel to find them; the master console's per-row **Register…** puts
-each one right without deleting it.
+**Every code is born assigned to a club** — the pre-v3.0 clubless pool is
+extinct (ruling 11/09/2026: the "Not yet registered" filter bucket is gone
+from both consoles). The master console's per-row **Register…** survives
+only as dormant recovery machinery: it renders solely on a clubless row,
+which no current door can create.
 
 ## Status model
 
@@ -180,13 +181,13 @@ data flows the spec explicitly rejected.
 Codes left behind by a route change appear in the club admin view as a
 read-only **previous scheme** block — visible history, no actions.
 
-## The voucher's value is one constant
+## The voucher's value is master-set config
 
-Public marketing says £40; every internal document says £50 (open item in
-the spec). So the number exists in exactly one place — `UWP.VALUE` in
-`_shared.js`, currently **£50** — and every mention in copy, upload
-undertakings and confirmations reads it. When the question resolves, one
-line changes.
+NL sets it on Clubs & access (**Voucher value** card — "65" or "£65", whole
+pounds, stored as an integer at `config/value`). It rides to clubs in their
+sign-in grant, `UWP.VALUE` renders it, and every mention in copy reads
+"the agreed value (£N)". Clubs see a change at their next sign-in. £50 is
+the fallback for a grant that predates the field.
 
 ## Two doors, one page
 
@@ -283,7 +284,7 @@ Only **inside a request** (owner ruling 10/09/2026): each placeholder row
 carries the red Upload button, and the form renders **one input box per
 code still owed** — a request for 5 with 2 supplied shows 3 boxes.
 Part-filling is fine; overshooting is impossible. The three undertakings
-(work in the club's own system, agreed £50, valid 12+ months) must be
+(work in the club's own system, the agreed value, valid 12+ months) must be
 ticked, then a confirm restates them; the audit entry names the club, the
 count, the request answered and each undertaking, and the trail is
 append-only. Codes are checked against the whole system one indexed
@@ -476,9 +477,8 @@ Two layers:
    a 4-digit PIN; reprint that club's till card after.
 6. Send Utility Warehouse their link/passcode; generate club QR codes from
    the **Export access CSV** links (treat the CSV as a password list).
-7. Any codes already in the system from before v3.0 belong to no club: filter
-   to *Not yet registered to a club* and **Register…** each one, or delete
-   them if they were only ever tests.
+7. Set the **Voucher value** on Clubs & access if it differs from £50 —
+   clubs read it from their next sign-in.
 
 No `tools/<toolKey>` registry record and no portal card — this family is
 intentionally outside the gated suite (external users have no portal logins).

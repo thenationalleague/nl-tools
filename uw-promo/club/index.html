@@ -3,6 +3,13 @@
 <head>
 <!--
   UW Promo Codes — Club point-of-sale redemption page
+  Version: v8.0 (11/09/2026) — value copy reads "the agreed value (£N)"
+           everywhere (owner), and the amount itself is master-set config
+           riding the sign-in grant (_shared v6.8) — .uwVal spans refill
+           once the session lands, £50 the fallback. The status filter
+           offers the STATUS column's faces (Issued/Dispatched/Redeemed/
+           Revoked, via UWP.faceOf) instead of "Unredeemed"; the CSV
+           Status column says the same face.
   Version: v7.9 (10/09/2026) — in-store Dashboards drop the lifecycle
            cards (owner: "requested" doesn't exist in-store and central
            codes aren't "issued" — the row told the online story in the
@@ -526,7 +533,8 @@
       <div class="inv__bar">
         <select class="toolbar__filter" id="invStatus" aria-label="Filter by status">
           <option value="">All statuses</option>
-          <option value="active">Unredeemed</option>
+          <option value="issued">Issued</option>
+          <option value="dispatched">Dispatched</option>
           <option value="redeemed">Redeemed</option>
           <option value="revoked">Revoked</option>
         </select>
@@ -612,9 +620,12 @@
 
   /* Spec item 3: the voucher value appears nowhere as a literal — every
      mention reads UWP.VALUE, so £40-vs-£50 resolves in one line of canon. */
-  Array.prototype.forEach.call(document.querySelectorAll('.uwVal'), function (el) {
-    el.textContent = UWP.VALUE;
-  });
+  function fillVal() {
+    Array.prototype.forEach.call(document.querySelectorAll('.uwVal'), function (el) {
+      el.textContent = UWP.VALUE;
+    });
+  }
+  fillVal();
 
   var CLUB = null, CREDS = null;       // CLUB from the grant; CREDS instore-manager-only
   var ROUTE = 'instore', SUPPORT = null, HASCENTRAL = false;
@@ -754,6 +765,7 @@
     document.getElementById('idbarClub').textContent = CLUB.name;
     document.getElementById('tcsLinkTill').href = UWP.TCS_URL;
     document.getElementById('tcsLinkMgr').href = UWP.TCS_URL;
+    fillVal();   // the session grant may carry a master-set voucher value
 
     applyView();
     if (MODE === 'manager') startManager();
@@ -1175,7 +1187,7 @@
     var st = document.getElementById('invStatus').value;
     var q = (document.getElementById('invSearch').value || '').toUpperCase().trim();
     return invRows().filter(function (r) {
-      if (st && r.status !== st) return false;
+      if (st && UWP.faceOf(r) !== st) return false;
       if (q && (r.code || '').toUpperCase().indexOf(q) === -1) return false;
       return true;
     });
@@ -1237,7 +1249,7 @@
     if (!list.length) { toast('Nothing to export with those filters.', 'error'); return; }
     var rows = [['Code', 'Status', 'Redeemed', 'Added', 'Added by']];
     list.forEach(function (r) {
-      rows.push([r.code, (UWP.STATUS[r.status] || {}).label || r.status,
+      rows.push([r.code, (UWP.STATUS[UWP.faceOf(r)] || {}).label || r.status,
         r.redeemedAt ? UWP.fmt(r.redeemedAt) : '', UWP.fmt(r.createdAt),
         String(r.createdBy || '').indexOf('club:') === 0 ? 'Club' : (r.createdBy === 'uw' ? 'UW' : 'NL')]);
     });
@@ -1337,7 +1349,7 @@
           '<span>These codes work in <strong>our own till system</strong>. It is our responsibility to ' +
           'make sure they do — the National League and Utility Warehouse cannot test them for us.</span></label>' +
         '<label class="upload__term"><input type="checkbox" id="upT2">' +
-          '<span>Each code applies the <strong>agreed ' + esc(UWP.VALUE) + ' discount</strong>.</span></label>' +
+          '<span>Each code applies the <strong>agreed value (' + esc(UWP.VALUE) + ')</strong>.</span></label>' +
         '<label class="upload__term"><input type="checkbox" id="upT3">' +
           '<span>These codes stay valid for <strong>at least 12 months</strong> from today.</span></label>' +
       '</div>' +
@@ -1485,7 +1497,7 @@
     NL.confirm('Upload ' + list.length + ' code' + (list.length === 1 ? '' : 's') + ' for ' + CLUB.name + '?', {
       title: 'Confirm upload',
       detail: 'You are confirming these codes work in ' + CLUB.name + '’s own till system, apply the ' +
-        'agreed ' + UWP.VALUE + ' discount, and stay valid for at least 12 months. This is recorded against your club ' +
+        'agreed value (' + UWP.VALUE + '), and stay valid for at least 12 months. This is recorded against your club ' +
         'and cannot be edited afterwards.',
       confirmText: 'Yes, upload them'
     }).then(function (ok) {
@@ -1515,7 +1527,7 @@
           codes: list.slice(0, 10).map(function (c) { return c.code; }).join(', ') +
                  (list.length > 10 ? ' …' : ''),
           detail: 'Club upload' + (forReq ? ' against a UW request' : '') +
-            ' — confirmed: works in club till system; applies agreed ' + UWP.VALUE + ' discount; valid 12 months+'
+            ' — confirmed: works in club till system; applies the agreed value (' + UWP.VALUE + '); valid 12 months+'
         });
         ['upT1', 'upT2', 'upT3'].forEach(function (id) {
           var t = document.getElementById(id); if (t) t.checked = false;
@@ -1537,13 +1549,13 @@
   var TICKS = {
     online: [
       'We can generate voucher codes in our own retail system.',
-      'Each code carries {V}.',
+      'Each code carries the agreed value ({V}).',
       'Codes do not expire for at least 12 months.',
       'Codes work without the supporter being present in store.',
       'A named person will upload codes and respond to requests.'
     ],
     instore: [
-      'Our POS allows a manual discount of up to {V}.',
+      'Our POS allows a manual discount up to the agreed value ({V}).',
       'Retail staff are briefed on the redemption process.',
       'We can print and display the till card.',
       'Someone is contactable on matchdays if a supporter disputes a refusal.',

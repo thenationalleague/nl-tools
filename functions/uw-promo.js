@@ -95,6 +95,13 @@ function safeEqual(a, b) {
   return diff === 0;
 }
 
+/* The voucher's worth: master-set at config/value from Clubs & access.
+   Normalised here so a "£65" stored by hand still grants 65. */
+function schemeValue(cfg) {
+  var n = parseInt(String((cfg && cfg.value) || "").replace(/[^0-9]/g, ""), 10);
+  return n >= 1 && n <= 500 ? n : 50;
+}
+
 /* Which club (if any) a typed code opens, and by which role. `scoped` is
    the club named by the ?c= link token, or null on a linkless visit.
    Owner ruling 10/09/2026: till PINs are compared ONLY for the club the
@@ -278,7 +285,7 @@ function makeTrigger(ROOT, name) {
           });
           logger.info(name + ": route chosen in-app", { club: key, route });
           return grant({
-            ok: true, route,
+            ok: true, route, value: schemeValue(cfg),
             creds: route === "instore" ? { passcode: rec.passcode || "", token: rec.token || "" } : null,
           });
         }
@@ -373,6 +380,7 @@ function makeTrigger(ROOT, name) {
                is master-set config (open item 1 in the spec), and config is
                not client-readable, so it rides in on the grant. */
             support: (cfg.support && cfg.support.email) || null,
+            value: schemeValue(cfg),
             club: {
               code: key,
               name: hit.c.rec.name || key,

@@ -24,6 +24,16 @@
            write config. That is the change that stops all 72 till PINs being
            world-readable. First run mints a bootstrap master token while no
            passcode exists; nothing subscribes to RTDB until the session does.
+  Version: v7.9 (11/09/2026) — owner rulings before the UW demo: the
+           "Not yet registered to a club" filter bucket is gone on both
+           consoles (defunct — every code is born assigned), the
+           CSV Status column exports the face the table shows, the
+           add-codes modal is GENERATE-ONLY (the NL paste back-door is
+           retired — no paste path exists anywhere for in-store codes),
+           and Clubs & access gains a Voucher value card: a whole-pound
+           figure ("65" or "£65"), stored at config/value, delivered to
+           clubs in their sign-in grant, read everywhere as "the agreed
+           value (£N)". New audit filter option for value changes.
   Version: v7.8 (10/09/2026) — the by-club panel's empty state stops
            claiming codes can exist unregistered (pre-v3.0 truth): empty
            means no codes on this tab yet, and the copy says which tab.
@@ -296,13 +306,7 @@
       <div class="toolbar">
         <div class="toolbar__left">
           <select class="toolbar__filter" id="fClub" aria-label="Filter by club"></select>
-          <select class="toolbar__filter" id="fStatus" aria-label="Filter by status">
-            <option value="">All statuses</option>
-            <option value="active">Unredeemed</option>
-            <option value="redeemed">Redeemed</option>
-            <option value="revoked">Revoked</option>
-            <option value="expired">Expired</option>
-          </select>
+          <select class="toolbar__filter" id="fStatus" aria-label="Filter by status"></select>
           <input class="toolbar__search" id="fSearch" type="search" placeholder="Search codes…" aria-label="Search codes">
         </div>
         <div class="toolbar__right">
@@ -341,6 +345,13 @@
         </div>
       </div>
       <div class="access-card">
+        <div class="access-card__title">Voucher value</div>
+        <div class="access-card__row">
+          <span class="cred-chip" id="valueChip" style="cursor:default"></span>
+          <button class="btn btn--ghost btn--sm" id="btnValue">Change&hellip;</button>
+        </div>
+      </div>
+      <div class="access-card">
         <div class="access-card__title">Utility Warehouse access</div>
         <div class="access-card__row" id="uwAccessRow"></div>
       </div>
@@ -372,6 +383,7 @@
             <option value="dispatch">Dispatch</option>
             <option value="contact">Scheme contact</option>
             <option value="support">Support details</option>
+            <option value="value">Voucher value</option>
             <option value="register">Register to club</option>
             <option value="delete">Delete</option>
             <option value="seed-clubs">Seed clubs</option>
@@ -538,7 +550,7 @@
     document.getElementById('app').style.display = 'block';
     if (UWP.isTest) document.getElementById('sandboxCard').style.display = 'block';
     subscribe();
-    buildClubFilter(); renderCodes(); renderAccess(); renderAudit();
+    buildClubFilter(); buildStatusFilter(); renderCodes(); renderAccess(); renderAudit();
   }
 
   document.getElementById('signout').addEventListener('click', function () {
@@ -568,6 +580,7 @@
       document.getElementById('btnBatches').hidden = tab !== 'instore';
       document.getElementById('btnRequests').hidden = tab !== 'online';
       buildClubFilter();   // the club list follows the tab's method
+      buildStatusFilter();  // and the status faces follow the tab too
       renderCodes();
     }
   });
@@ -656,6 +669,23 @@
     return taken;
   }
 
+  /* The status filter speaks the STATUS column's language (owner
+     11/09/2026): the faces a row can actually show on this tab. */
+  var FACE_LABELS = { created: 'Created', issued: 'Issued', dispatched: 'Dispatched',
+                      redeemed: 'Redeemed', revoked: 'Revoked', expired: 'Expired' };
+  function buildStatusFilter() {
+    var sel = document.getElementById('fStatus');
+    var prev = sel.value;
+    var faces = METHOD_TAB === 'online'
+      ? ['issued', 'dispatched', 'redeemed', 'revoked']
+      : ['created', 'dispatched', 'redeemed', 'revoked', 'expired'];
+    sel.innerHTML = '<option value="">All statuses</option>' + faces.map(function (f) {
+      return '<option value="' + f + '">' + FACE_LABELS[f] + '</option>';
+    }).join('');
+    sel.value = prev;
+    if (sel.selectedIndex === -1) sel.value = '';
+  }
+
   function buildClubFilter() {
     var sel = document.getElementById('fClub');
     var prev = sel.value;
@@ -666,10 +696,6 @@
     var owned = {};
     codeRows().forEach(function (r) { if (r.club) owned[r.club] = true; });
     var html = '<option value="">All clubs</option>';
-    // Codes created before v3.0 belong to no club — central by definition,
-    // so the register-me bucket lives on the In-store tab only (the per-row
-    // "Register…" button is how they get a club).
-    if (METHOD_TAB === 'instore') html += '<option value="__none">Not yet registered to a club</option>';
     clubList().forEach(function (c) {
       if (c.route !== METHOD_TAB && !owned[c.code]) return;
       html += '<option value="' + esc(c.code) + '">' + esc(c.name) + '</option>';
@@ -700,7 +726,6 @@
      said whose. Status and search stay table-only. */
   function matchesClub(r, club) {
     if (!club) return true;
-    if (club === '__none') return !r.club;
     return r.club === club;
   }
   function clubFilterLabel() {
@@ -725,7 +750,7 @@
     var q = (document.getElementById('fSearch').value || '').toUpperCase().trim();
     return codeRows().filter(function (r) {
       if (!matchesClub(r, club)) return false;
-      if (status && UWP.statusOf(r) !== status) return false;
+      if (status && UWP.faceOf(r) !== status) return false;
       if (q && (r.code || '').toUpperCase().indexOf(q) === -1) return false;
       return true;
     });
@@ -1059,19 +1084,16 @@
     var clubs = clubList();
     if (!clubs.length) { toast('Seed the clubs first (Clubs & access tab).', 'error'); return; }
 
+    /* GENERATE-ONLY, no paste path anywhere (owner ruling 11/09/2026 —
+       the earlier NL paste back-door is retired): every in-store code is
+       minted here or on the UW page, same shape, same door. */
     var wrap = document.createElement('div');
     wrap.innerHTML =
       '<div class="alloc-row"><label for="alClub">Club — required, one club per batch</label>' +
         '<select id="alClub">' + clubOptionsHtml('Choose a club…', 'instore') + '</select></div>' +
-      '<div class="alloc-row"><label for="alStyle">Codes</label><select id="alStyle">' +
-        '<option value="paste">Paste a list of codes</option>' +
-        '<option value="gen">Generate codes for me</option>' +
-      '</select></div>' +
-      '<div class="alloc-row" id="alPasteRow"><label for="alPaste">Codes — one per line</label>' +
-        '<textarea id="alPaste" rows="6" placeholder="CODEONE&#10;CODETWO"></textarea></div>' +
-      '<div class="alloc-row" id="alQtyRow" style="display:none"><label for="alQty">How many</label>' +
-        '<input id="alQty" type="number" min="1" max="500" value="25"></div>' +
-      '<div class="alloc-preview" id="alPreview"></div>';
+      '<div class="alloc-row"><label for="alQty">How many</label>' +
+        '<input id="alQty" type="number" min="1" max="500" value="1"></div>' +
+      '<div class="alloc-preview">Generated codes are 6 characters, no dash — e.g. <span class="code-mono">7F3K9C</span>.</div>';
 
     var ctrl = NL.modal({
       title: 'Add codes for a club',
@@ -1082,18 +1104,7 @@
       ]
     });
 
-    var elClub = wrap.querySelector('#alClub'), elStyle = wrap.querySelector('#alStyle'),
-        elQty = wrap.querySelector('#alQty'), elPaste = wrap.querySelector('#alPaste');
-    function refresh() {
-      var paste = elStyle.value === 'paste';
-      wrap.querySelector('#alQtyRow').style.display = paste ? 'none' : 'block';
-      wrap.querySelector('#alPasteRow').style.display = paste ? 'block' : 'none';
-      wrap.querySelector('#alPreview').innerHTML = paste
-        ? 'Any format — codes are matched ignoring spaces, dashes and case. Up to 500 per batch.'
-        : 'Generated codes are 6 characters, no dash — e.g. <span class="code-mono">7F3K9C</span>.';
-    }
-    elStyle.addEventListener('input', refresh);
-    refresh();
+    var elClub = wrap.querySelector('#alClub'), elQty = wrap.querySelector('#alQty');
 
     function doAdd() {
       var club = null;
@@ -1105,20 +1116,10 @@
         existing[CODES[k].norm || UWP.normCode(CODES[k].code)] = true;
       });
       var codes;
-      if (elStyle.value === 'paste') {
-        codes = (elPaste.value || '').split(/\r?\n/).map(function (l) { return l.trim().toUpperCase(); })
-          .filter(function (l) { return l; })
-          .filter(function (l, i, arr) { return arr.findIndex(function (x) { return UWP.normCode(x) === UWP.normCode(l); }) === i; });
-        if (!codes.length) { toast('Paste at least one code.', 'error'); return; }
-        if (codes.length > 500) { toast('Maximum 500 codes per batch.', 'error'); return; }
-        var dupes = codes.filter(function (c) { return existing[UWP.normCode(c)]; });
-        if (dupes.length) { toast('Already in the system: ' + dupes.slice(0, 3).join(', ') + (dupes.length > 3 ? '…' : ''), 'error'); return; }
-      } else {
-        var qty = parseInt(elQty.value, 10);
-        if (!(qty >= 1 && qty <= 500)) { toast('Quantity must be between 1 and 500.', 'error'); return; }
-        try { codes = UWP.genCodes(qty, '', existing); }
-        catch (e) { toast(e.message, 'error'); return; }
-      }
+      var qty = parseInt(elQty.value, 10);
+      if (!(qty >= 1 && qty <= 500)) { toast('Quantity must be between 1 and 500.', 'error'); return; }
+      try { codes = UWP.genCodes(qty, '', existing); }
+      catch (e) { toast(e.message, 'error'); return; }
       NL.confirm('Add ' + codes.length + ' code' + (codes.length > 1 ? 's' : '') +
         ' for ' + club.name + '?\nThey can only be redeemed at ' + club.name + '.', {
         title: 'Confirm', confirmText: 'Add codes'
@@ -1240,7 +1241,7 @@
     if (!list.length) { toast('Nothing to export with the current filters.', 'error'); return; }
     var rows = [['Code', 'Status', 'Club', 'Redeemed', 'Redeemed via', 'Added', 'Added by', 'Revoked', 'Last release reason']];
     list.forEach(function (r) {
-      rows.push([r.code, (UWP.STATUS[r.status] || {}).label || r.status,
+      rows.push([r.code, (UWP.STATUS[UWP.faceOf(r)] || {}).label || r.status,
         r.clubName || r.club || '',
         r.redeemedAt ? UWP.fmt(r.redeemedAt) : '', r.redeemedBy || '',
         UWP.fmt(r.createdAt), r.createdBy || '',
@@ -1259,6 +1260,26 @@
     chip.textContent = (CONFIG.master && CONFIG.master.passcode) || '——————';
     chip.onclick = function () { NL.copy(chip.textContent, { ok: 'Master passcode copied' }); };
     document.getElementById('btnMasterPass').onclick = changeMasterPass;
+
+    /* Voucher value (owner 11/09/2026): the worth of one code, set here,
+       delivered to clubs in their sign-in grant — copy everywhere reads
+       "the agreed value (£N)". Accepts "65" or "£65". */
+    document.getElementById('valueChip').textContent = '£' + UWP.parseValue(CONFIG.value);
+    document.getElementById('btnValue').onclick = function () {
+      NL.prompt('Voucher value — whole pounds, e.g. 65 or £65. Clubs see the new value at their next sign-in.', {
+        title: 'Change voucher value', placeholder: '£65'
+      }).then(function (v) {
+        if (v == null) return;
+        var n = parseInt(String(v).replace(/[^0-9]/g, ''), 10);
+        if (!(n >= 1 && n <= 500)) { toast('Enter a whole number of pounds (1–500).', 'error'); return; }
+        UWP.ensureAuth().then(function () {
+          return UWP.ref('config/value').set(n);
+        }).then(function () {
+          UWP.audit(ACTOR, ACTOR_LABEL, 'value', { detail: 'Voucher value set to £' + n });
+          toast('Voucher value set to £' + n, 'success');
+        }).catch(function (err) { toast('Failed: ' + err.message, 'error'); });
+      });
+    };
 
     // UW access
     var uwRow = document.getElementById('uwAccessRow');

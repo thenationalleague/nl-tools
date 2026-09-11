@@ -1,5 +1,10 @@
 /*
   UW Promo Codes — shared runtime for the three standalone pages
+  Version: v6.8 (11/09/2026) — the voucher value is master-set config
+           (config/value, whole pounds) delivered in the sign-in grant:
+           parseValue() normalises "65"/"£65", absorbValue() updates
+           UWP.VALUE for the session, £50 stays the fallback. Copy reads
+           "the agreed value (£N)".
   Version: v6.7 (10/09/2026) — setting is not switching (owner): a first
            method assignment (from unassigned) drops the switch-flavoured
            consequence lines ("every existing code is untouched" made no
@@ -271,6 +276,7 @@
     return requestGrant({ code: normCode(code), token: token || null })
       .then(function (g) {
         return app.auth().signInWithCustomToken(g.customToken).then(function () {
+          absorbValue(g);
           SESSION = {
             role: g.role, club: g.club || null,
             route: g.route || 'unassigned',
@@ -319,7 +325,17 @@
      piece of copy, confirmation and export reads this constant, so the answer
      is one line here when it lands. £50 is the standing internal figure
      (owner call, 03/09/2026). */
+  /* The voucher's worth in whole pounds. Master-set at config/value
+     (Clubs & access), delivered to club sessions in the grant; £50 stays
+     the standing fallback for sessions whose grant predates the field. */
+  function parseValue(v) {
+    var n = parseInt(String(v == null ? '' : v).replace(/[^0-9]/g, ''), 10);
+    return n >= 1 && n <= 500 ? n : 50;
+  }
   var VALUE = '£50';
+  function absorbValue(g) {
+    if (g && g.value) { VALUE = '£' + parseValue(g.value); if (window.UWP) window.UWP.VALUE = VALUE; }
+  }
   var TCS_URL = 'https://partner.uw.co.uk/national-league';
 
   /* Fire-and-forget email when an online club completes an upload — closes
@@ -351,6 +367,7 @@
      second sign-in. */
   function chooseRoute(route, ticks, contacts) {
     return requestGrant({ chooseRoute: route, ticks: ticks, contacts: contacts }).then(function (g) {
+      absorbValue(g);
       if (SESSION) {
         SESSION.route = g.route;
         SESSION.creds = g.creds || null;
@@ -962,6 +979,7 @@
     STATUS: STATUS,
     redeemTxn: redeemTxn,
     VALUE: VALUE,
+    parseValue: parseValue,
     TCS_URL: TCS_URL,
     CODE_TTL_MS: CODE_TTL_MS,
     isCentral: isCentral,

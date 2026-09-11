@@ -3,6 +3,12 @@
 <head>
 <!--
   UW Promo Codes — Utility Warehouse partner page
+  Version: v8.5 (11/09/2026) — the "Not yet registered to a club" filter
+           bucket is gone (owner: defunct — every code is born assigned;
+           the pre-v3.0 clubless state no longer exists anywhere), and the
+           status filter offers the STATUS column's faces per tab (Created/
+           Issued/Dispatched/Redeemed/…, filtering by UWP.faceOf) instead
+           of redemption-speak like "Unredeemed"; the CSV Status column says the same face.
   Version: v8.4 (10/09/2026) — Redemption methods is a top tab, third
            of three (owner: the UW cousin of the master console's Clubs &
            access, way more stripped back) — the toolbar button and its
@@ -232,13 +238,7 @@
     <div class="toolbar">
       <div class="toolbar__left">
         <select class="toolbar__filter" id="fClub" aria-label="Filter by club"></select>
-        <select class="toolbar__filter" id="fStatus" aria-label="Filter by status">
-          <option value="">All statuses</option>
-          <option value="active">Unredeemed</option>
-          <option value="redeemed">Redeemed</option>
-          <option value="revoked">Revoked</option>
-          <option value="expired">Expired</option>
-        </select>
+        <select class="toolbar__filter" id="fStatus" aria-label="Filter by status"></select>
         <input class="toolbar__search" id="fSearch" type="search" placeholder="Search codes…" aria-label="Search codes">
       </div>
       <div class="toolbar__right">
@@ -378,6 +378,7 @@
     });
     UWP.ref('requests').on('value', function (s) { REQS = s.val() || {}; render(); });
     buildClubFilter();
+    buildStatusFilter();
     render();
   }
 
@@ -391,6 +392,24 @@
     return CLUBS.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
   }
 
+  /* The status filter speaks the STATUS column's language (owner
+     11/09/2026): the faces a row can actually show on this tab, not
+     redemption-speak like "Unredeemed". */
+  var FACE_LABELS = { created: 'Created', issued: 'Issued', dispatched: 'Dispatched',
+                      redeemed: 'Redeemed', revoked: 'Revoked', expired: 'Expired' };
+  function buildStatusFilter() {
+    var sel = document.getElementById('fStatus');
+    var prev = sel.value;
+    var faces = TAB === 'online'
+      ? ['issued', 'dispatched', 'redeemed', 'revoked']
+      : ['created', 'dispatched', 'redeemed', 'revoked', 'expired'];
+    sel.innerHTML = '<option value="">All statuses</option>' + faces.map(function (f) {
+      return '<option value="' + f + '">' + FACE_LABELS[f] + '</option>';
+    }).join('');
+    sel.value = prev;
+    if (sel.selectedIndex === -1) sel.value = '';
+  }
+
   function buildClubFilter() {
     var sel = document.getElementById('fClub');
     var prev = sel.value;
@@ -401,10 +420,6 @@
     var owned = {};
     codeRows().forEach(function (r) { if (r.club) owned[r.club] = true; });
     var html = '<option value="">All clubs</option>';
-    // Codes created before v3.0 carry no club — central by definition, so
-    // the not-yet-registered bucket only means anything on the In-store tab
-    // (NL registers them to a club from the master console).
-    if (TAB === 'instore') html += '<option value="__none">Not yet registered to a club</option>';
     clubList().forEach(function (c) {
       if (c.route !== TAB && !owned[c.code]) return;
       html += '<option value="' + esc(c.code) + '">' + esc(c.name) + '</option>';
@@ -424,7 +439,6 @@
   }
   function matchesClub(r, club) {
     if (!club) return true;
-    if (club === '__none') return !r.club;
     return r.club === club;
   }
   function clubFilterLabel() {
@@ -455,7 +469,7 @@
     var q = (document.getElementById('fSearch').value || '').toUpperCase().trim();
     return codeRows().filter(function (r) {
       if (!matchesClub(r, club)) return false;
-      if (status && UWP.statusOf(r) !== status) return false;
+      if (status && UWP.faceOf(r) !== status) return false;
       if (q && (r.code || '').toUpperCase().indexOf(q) === -1) return false;
       return true;
     });
@@ -598,6 +612,7 @@
     document.getElementById('btnAdd').hidden = TAB !== 'instore';
     document.getElementById('btnRequests').hidden = TAB !== 'online';
     buildClubFilter();   // the club list follows the tab's method
+    buildStatusFilter();  // and the status faces follow the tab too
     render();
   });
 
@@ -785,7 +800,7 @@
     if (!list.length) { toast('Nothing to export with the current filters.', 'error'); return; }
     var rows = [['Code', 'Status', 'Club', 'Redeemed', 'Added', 'Added by', 'Revoked']];
     list.forEach(function (r) {
-      rows.push([r.code, (UWP.STATUS[r.status] || {}).label || r.status,
+      rows.push([r.code, (UWP.STATUS[UWP.faceOf(r)] || {}).label || r.status,
         r.clubName || r.club || '',
         r.redeemedAt ? UWP.fmt(r.redeemedAt) : '',
         UWP.fmt(r.createdAt), r.createdBy || '',
