@@ -104,16 +104,18 @@ function schemeValue(cfg) {
 
 /* Which club (if any) a typed code opens, and by which role. `scoped` is
    the club named by the ?c= link token, or null on a linkless visit.
-   Owner ruling 10/09/2026: till PINs are compared ONLY for the club the
-   link names — a 4-digit PIN is only safe inside the per-club throttle the
-   link enables, so the linkless door is manager passcodes only. A valid
-   PIN typed without a link fails exactly like a wrong one (and counts
-   against the throttle), so the refusal leaks nothing about the PIN. */
+   THE DOORS ARE MUTUALLY EXCLUSIVE (owner rulings 10–11/09/2026): the club
+   link is the STAFF door and compares only that club's till PIN — a manager
+   passcode typed there fails like a wrong PIN, so a till device can never
+   end up showing the Dashboard. The bare URL is the MANAGER door and
+   compares only manager passcodes — a 4-digit PIN is only safe inside the
+   per-club throttle the link enables. Every mismatch fails identically to a
+   wrong credential and counts against the throttle: no oracle either way. */
 function findCredential(candidates, code, scoped) {
   for (const c of candidates) {
     if (!c.rec) continue;
     if (scoped && safeEqual(normCode(c.rec.passcode), code)) return { c, role: "till" };
-    if (c.rec.managerPass && safeEqual(normCode(c.rec.managerPass), code)) {
+    if (!scoped && c.rec.managerPass && safeEqual(normCode(c.rec.managerPass), code)) {
       return { c, role: "manager" };
     }
   }

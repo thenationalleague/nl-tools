@@ -48,7 +48,7 @@ should see; anything failed gets a note and the run continues.
 
 | # | Action | Expected | Pass |
 |---|--------|----------|------|
-| D1 | Club 1's link → **manager passcode** | **Dashboard · In-store method** badge beside the club name; session remembered on refresh; **Sign out** works | ☐ |
+| D1 | The bare club URL (no link) → **manager passcode** | **Dashboard · In-store method** badge beside the club name; session remembered on refresh; **Sign out** works | ☐ |
 | D2 | Read the code table | **Only redeemed codes are listed**; a muted line reads "*N unredeemed codes not shown — codes stay anonymous until redeemed at your till*". No unredeemed strings anywhere on the page, and none in the CSV export | ☐ |
 | D3 | Look for an activity feed | **There isn't one** — the master console's audit is the log | ☐ |
 | D4 | **Check a code**: the code redeemed in C2, then a made-up one | Present (this club has a till); redeemed shows club+time; nonsense refused; 10/hr counter ticks | ☐ |
@@ -59,7 +59,7 @@ should see; anything failed gets a note and the run continues.
 | # | Action | Expected | Pass |
 |---|--------|----------|------|
 | E1 | Club 2's link → **till PIN** | Holding screen — the PIN can never reach setup | ☐ |
-| E2 | Reload → **manager passcode** | Setup screen: globe/shop method cards, *method* language throughout | ☐ |
+| E2 | The bare club URL → **manager passcode** | Setup screen: globe/shop method cards, *method* language throughout | ☐ |
 | E3 | **Online** → Save unticked → refused; both ticks, no contact → refused; add a contact → **Save** | Dashboard · Online method opens: contact card, count cards — **no till, no PIN card, no checker** | ☐ |
 
 ## Phase F — request → placeholder rows → issued → dispatched → redeemed
@@ -88,7 +88,7 @@ should see; anything failed gets a note and the run continues.
 | # | Action | Expected | Pass |
 |---|--------|----------|------|
 | H1 | UW tab → **Redemption methods** → Club 1 → pencil → **Online** | Consequences banner notes the till keeps working; contact fields prefilled from A4; red footer button | ☐ |
-| H2 | Club 1's Dashboard (manager passcode) | Badge *Dashboard · Online method*; **till still live** (central codes in the wild); checker still present (same reason); central codes in the read-only **previous scheme** block — still redeemed-only, anonymity holds | ☐ |
+| H2 | Club 1's Dashboard (bare URL, manager passcode) | Badge *Dashboard · Online method*; **till still live** (central codes in the wild); checker still present (same reason); central codes in the read-only **previous scheme** block — still redeemed-only, anonymity holds | ☐ |
 | H3 | Move Club 1 back to **In-store**, same ceremony | Round trip clean | ☐ |
 
 ## Phase I — phone lap + wrap

@@ -269,9 +269,12 @@ nothing, and closing it properly would mean a server-side lookup endpoint.
 Club PINs never start with `0` — a leading zero survives neither the access
 CSV (Excel reads `0123` as `123`) nor a hurried retype. They stay unique
 across the 72 clubs, enforced at generation, so the roster and printed cards
-are unambiguous. A till PIN only signs in from the club's own `?c=` link
-(ruling 10/09/2026) — the linkless door is manager passcodes only, and a
-valid PIN typed without a link fails exactly like a wrong one.
+are unambiguous. THE TWO DOORS ARE MUTUALLY EXCLUSIVE (rulings
+10–11/09/2026): the club's `?c=` link is the staff door and takes only that
+club's till PIN; the bare URL is the manager door and takes only manager
+passcodes. A manager passcode typed at the staff door fails like a wrong
+PIN — a till device can never end up showing the Dashboard — and every
+mismatch counts against the throttle with no oracle either way.
 
 Credential rotation is **per club** (ruling 10/09/2026 — the roster-wide
 reissue buttons are gone): the refresh glyph beside a club's PIN, manager

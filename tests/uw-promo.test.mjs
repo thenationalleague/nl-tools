@@ -332,6 +332,11 @@ test('till PINs open only from the club link; the linkless door is manager passc
     'a VALID PIN without the link fails exactly like a wrong one — no oracle');
   const mgr = find(all, 'K7PMQ2XJ', null);
   assert.equal(mgr && mgr.role, 'manager', 'the manager passcode still opens a linkless visit');
+  // Mutual exclusivity (owner 11/09/2026): the club link is the STAFF door
+  // only — a manager passcode typed there is refused, so a till device can
+  // never end up showing the Dashboard.
+  assert.equal(find([scoped], 'K7PMQ2XJ', scoped), null,
+    'a manager passcode on the club link fails like a wrong PIN — the till device never opens a Dashboard');
 });
 
 test('pill colours: no two states that share a table share a hue', () => {
