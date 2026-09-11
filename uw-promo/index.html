@@ -3,6 +3,13 @@
 <head>
 <!--
   UW Promo Codes — Utility Warehouse partner page
+  Version: v9.2 (11/09/2026) — overdue chasing (owner): placeholder
+           rows show their due date under a "Requested (overdue)" pill,
+           and a toolbar Chase overdue button (Online tab, only while
+           something is late) drafts the per-club reminder email — one
+           overdue club goes straight to the draft, several get a
+           chooser; the reminder names codes still owed, the value, the
+           overdue due date and the upload link.
   Version: v9.1 (11/09/2026) — the Redeemed-by-club breakdown panel is
            gone (owner: waffle — the club filter and the stat cards carry
            those numbers).
@@ -270,6 +277,7 @@
         <input class="toolbar__search" id="fSearch" type="search" placeholder="Search codes…" aria-label="Search codes">
       </div>
       <div class="toolbar__right">
+        <button class="btn btn--ghost" id="btnRemind" hidden>Chase overdue</button>
         <button class="btn btn--ghost" id="btnExport">Export CSV</button>
         <!-- One primary per tab, always in the SAME rightmost slot — the tab
              swaps which of these two is visible, not where red lives. -->
@@ -521,6 +529,7 @@
   }
 
   function render() {
+    document.getElementById('btnRemind').hidden = !(TAB === 'online' && overdueOutstanding().length);
     if (!codesLoaded) return;
     var all = codeRows();
     var scope = clubFiltered(), label = clubFilterLabel();
@@ -567,9 +576,9 @@
       var r = p.req;
       var overdue = p.face.key === 'overdue';
       return '<tr><td><span class="code-note">—</span></td>' +
-        '<td' + (r.due ? ' title="Due ' + esc(NL.formatDateShort(r.due)) + '"' : '') + '>' +
-          '<span class="pill ' + (overdue ? 'pill--rejected' : 'pill--pending') + '">' +
-          (overdue ? 'Overdue' : 'Requested') + '</span></td>' +
+        '<td><span class="pill ' + (overdue ? 'pill--rejected' : 'pill--pending') + '">' +
+          (overdue ? 'Requested (overdue)' : 'Requested') + '</span>' +
+          (r.due ? '<div class="code-note">due ' + esc(NL.formatDateShort(r.due)) + '</div>' : '') + '</td>' +
         '<td><span class="club-cell">' + NL.clubs.crestImgHtml(clubName(r.club), 'thumb') +
           '<span class="club-cell__name">' + esc(clubName(r.club)) + '</span></span></td>' +
         '<td>—</td>' +
@@ -837,6 +846,10 @@
      uploaded the same week were these codes. */
   var UW_ACTOR = { actor: 'uw', label: 'Utility Warehouse' };
 
+  function uploadedFor(reqId) {
+    return Object.keys(CODES).filter(function (k) { return CODES[k].request === reqId; }).length;
+  }
+
   function reqList() {
     return Object.keys(REQS).map(function (k) { var r = REQS[k]; r._id = k; return r; })
       .sort(function (a, b) { return (b.raisedAt || 0) - (a.raisedAt || 0); });
@@ -850,17 +863,20 @@
      11/09/2026): to the club's scheme contact, subject and prose drafted —
      one click opens the email app, one copies the text. Everything is
      editable before sending; nothing is sent by this page. */
-  function offerEmail(code, qty, dueRaw) {
+  function offerEmail(code, qty, dueMs, kind) {
+    var remind = kind === 'remind';
     var name = clubName(code);
     var list = CONTACTS_ALL[code];
     if (list && !Array.isArray(list)) list = Object.keys(list).map(function (k) { return list[k]; });
     var emails = (list || []).map(function (c) { return c.email; }).filter(Boolean);
     var first = ((list && list[0] && list[0].name) || '').split(' ')[0];
     var body = 'Hi' + (first ? ' ' + first : '') + ',\n\n' +
-      'We\u2019ve raised a request on the National League voucher platform for ' + name + ':\n\n' +
-      '\u2022 Codes requested: ' + qty + '\n' +
+      (remind
+        ? 'A reminder about the outstanding code request on the National League voucher platform for ' + name + ':\n\n'
+        : 'We\u2019ve raised a request on the National League voucher platform for ' + name + ':\n\n') +
+      '\u2022 ' + (remind ? 'Codes still to upload: ' : 'Codes requested: ') + qty + '\n' +
       '\u2022 Value of each code: ' + UWP.VALUE + '\n' +
-      (dueRaw ? '\u2022 Due: ' + NL.formatDate(new Date(dueRaw + 'T12:00:00').getTime()) + '\n' : '') +
+      (dueMs ? '\u2022 Due: ' + NL.formatDate(dueMs) + (remind ? ' (now overdue)' : '') + '\n' : '') +
       '\u2022 Upload them here: https://nl.tools/uw-promo/club/\n\n' +
       'Sign in with the club passcode previously sent by the National League commercial team. ' +
       'A reminder that these codes must work in your own online retail system \u2013 ' +
@@ -879,7 +895,7 @@
     // commercial team's addresses never live in this public repo.
     wrap.querySelector('#emCc').value = (UWP.session && UWP.session.notifyCc) || '';
     wrap.querySelector('#emSubject').value = 'National League \u00d7 Utility Warehouse \u2013 ' +
-      qty + ' voucher code' + (qty === 1 ? '' : 's') + ' requested';
+      qty + ' voucher code' + (qty === 1 ? '' : 's') + (remind ? ' outstanding (reminder)' : ' requested');
     wrap.querySelector('#emBody').value = body;
     NL.modal({
       title: 'Email ' + name, body: wrap,
@@ -898,6 +914,48 @@
       ]
     });
   }
+
+  /* One reminder per CLUB, not per row (owner 11/09/2026): a request is
+     several placeholder rows, so the chase lives on the toolbar. One
+     overdue club goes straight to its drafted reminder; several get a
+     chooser first. */
+  function overdueOutstanding() {
+    var by = {};
+    reqList().forEach(function (r) {
+      if (r.status !== 'open' || !r.due || Date.now() <= r.due) return;
+      var owed = Math.max(0, (parseInt(r.qty, 10) || 0) - uploadedFor(r._id));
+      if (!owed) return;
+      if (!by[r.club]) by[r.club] = { code: r.club, owed: 0, due: r.due };
+      by[r.club].owed += owed;
+      by[r.club].due = Math.min(by[r.club].due, r.due);
+    });
+    return Object.keys(by).map(function (k) { return by[k]; });
+  }
+
+  document.getElementById('btnRemind').addEventListener('click', function () {
+    var list = overdueOutstanding();
+    if (!list.length) return;
+    if (list.length === 1) { offerEmail(list[0].code, list[0].owed, list[0].due, 'remind'); return; }
+    var wrap = document.createElement('div');
+    wrap.innerHTML = '<div class="table-wrap"><table class="table">' +
+      '<thead><tr><th>Club</th><th>Still owed</th><th>Due</th><th></th></tr></thead><tbody>' +
+      list.map(function (e) {
+        return '<tr><td>' + esc(clubName(e.code)) + '</td><td>' + e.owed + '</td>' +
+          '<td>' + esc(NL.formatDateShort(e.due)) + '</td>' +
+          '<td class="ta-right"><button class="btn btn--primary btn--sm" data-remind="' + esc(e.code) + '">Email</button></td></tr>';
+      }).join('') + '</tbody></table></div>';
+    var ctrl = NL.modal({
+      title: 'Chase overdue requests', body: wrap,
+      buttons: [{ label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } }]
+    });
+    wrap.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-remind]');
+      if (!b) return;
+      var hit = list.filter(function (x) { return x.code === b.getAttribute('data-remind'); })[0];
+      ctrl.close();
+      if (hit) offerEmail(hit.code, hit.owed, hit.due, 'remind');
+    });
+  });
 
   document.getElementById('btnRequests').addEventListener('click', openRequests);
 
@@ -943,7 +1001,7 @@
         });
         toast('Request raised — ' + clubName(code) + ' will see it on their dashboard', 'success');
         ctrl.close();
-        offerEmail(code, qty, dueRaw);
+        offerEmail(code, qty, due, 'request');
       }).catch(function (err) { toast('Failed: ' + err.message, 'error'); });
     }
   }
