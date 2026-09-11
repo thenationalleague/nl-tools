@@ -334,6 +334,28 @@ test('till PINs open only from the club link; the linkless door is manager passc
   assert.equal(mgr && mgr.role, 'manager', 'the manager passcode still opens a linkless visit');
 });
 
+test('pill colours: no two states that share a table share a hue', () => {
+  // Owner ruling 11/09/2026: every status a table can show gets its own
+  // colour — except Created/Issued, which are equivalents and share.
+  const HUE = {
+    'pill--approved': 'green', 'pill--live': 'green',
+    'pill--soon': 'amber', 'pill--pending': 'amber',
+    'pill--rejected': 'red', 'pill--expired': 'red',
+    'pill--info': 'blue',
+    'pill--postponed': 'purple', 'pill--dispatched': 'purple',
+    'pill--void': 'grey',
+  };
+  const face = (k) => HUE[UWP.STATUS[k].pill];
+  const req = (k) => HUE[(UWP.reqPill(k).match(/pill--[a-z-]+/) || [''])[0]];
+  const instore = [face('created'), face('dispatched'), face('redeemed'), face('revoked'), face('expired')];
+  const online = [req('waiting'), req('overdue'), face('issued'), face('dispatched'), face('redeemed'), face('revoked')];
+  for (const set of [instore, online]) {
+    assert.ok(set.every(Boolean), 'unmapped pill class in ' + set.join(','));
+    assert.equal(new Set(set).size, set.length, 'hue collision: ' + set.join(','));
+  }
+  assert.equal(UWP.STATUS.created.pill, UWP.STATUS.issued.pill, 'the equivalents share deliberately');
+});
+
 test('links: club/UW direct links point at the family pages', () => {
   assert.equal(UWP.clubLink('abc123'), 'https://nl.tools/uw-promo/club/?c=abc123');
   assert.equal(UWP.uwLink('xyz789'), 'https://nl.tools/uw-promo/?u=xyz789');

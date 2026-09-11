@@ -1,5 +1,11 @@
 /*
   UW Promo Codes — shared runtime for the three standalone pages
+  Version: v6.9 (11/09/2026) — every status that can share a table gets
+           its own hue (owner; created/issued share deliberately as
+           equivalents): Dispatched moves amber → purple and Revoked
+           red → grey (.pill--dispatched / .pill--void, _shared.css) —
+           Requested-vs-Dispatched and Revoked-vs-Expired both collided.
+           Pinned by a hue test in tests/uw-promo.test.mjs.
   Version: v6.8 (11/09/2026) — the voucher value is master-set config
            (config/value, whole pounds) delivered in the sign-in grant:
            parseValue() normalises "65"/"£65", absorbValue() updates
@@ -465,14 +471,14 @@
   var STATUS = {
     active:   { label: 'Unredeemed', pill: 'pill--info' },
     redeemed: { label: 'Redeemed',   pill: 'pill--approved' },
-    revoked:  { label: 'Revoked',    pill: 'pill--rejected' },
+    revoked:  { label: 'Revoked',    pill: 'pill--void' },      // dead, not urgent — family pill, _shared.css
     expired:  { label: 'Expired',    pill: 'pill--expired' },  // derived, never stored — see statusOf
     /* Both derived by faceOf for an active undispatched code. 'Issued' is a
        club act (an upload); 'Created' is ours — same lifecycle stage, named
        for who did it (owner ruling 09/09/2026). */
     created:    { label: 'Created',    pill: 'pill--info' },
     issued:     { label: 'Issued',     pill: 'pill--info' },
-    dispatched: { label: 'Dispatched', pill: 'pill--soon' }     // derived — faceOf: active + dispatchedAt
+    dispatched: { label: 'Dispatched', pill: 'pill--dispatched' } // derived — faceOf: active + dispatchedAt; purple, family pill
   };
 
   /* Pure transaction updater for a till redemption, factored out so
@@ -790,7 +796,7 @@
     waiting:    { label: 'Waiting',    pill: 'pill--pending' },
     overdue:    { label: 'Overdue',    pill: 'pill--rejected' },
     fulfilled:  { label: 'Fulfilled',  pill: 'pill--approved' },
-    dispatched: { label: 'Dispatched', pill: 'pill--soon' }
+    dispatched: { label: 'Dispatched', pill: 'pill--dispatched' }
   };
   function reqPill(key) {
     var s = REQ_STATUS[key] || REQ_STATUS.waiting;
