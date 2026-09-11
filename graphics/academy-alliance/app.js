@@ -65,9 +65,10 @@
     for (var i = 0; i < DIVISIONS.length; i++) if (DIVISIONS[i].key === key) return DIVISIONS[i];
     return DIVISIONS[0];
   }
-  /* A constitution name whose club record on the roster is spelt differently.
-     The record supplies the crest; the constitution supplies the printed name. */
-  var ROSTER_ALIAS = { "Hemel Hempstead": "Hemel Hempstead Town", "Rochdale": "Rochdale", "Wellingborough": "Wellingborough Town" };
+  /* A printed name whose crest file is called something else — a roster
+     record spelt differently, or a side that draws its parent club's badge.
+     The constitution supplies the printed name; this supplies the file. */
+  var CREST_ALIAS = { "Hemel Hempstead": "Hemel Hempstead Town", "Wellingborough": "Wellingborough Town", "Brentford CST": "Brentford" };
 
   var ROSE_WHITE = "/assets/crests/National%20League%20rose%20white.png";
   /* Crests are served same-origin on purpose: the PNG export draws every image
@@ -131,7 +132,7 @@
   }
   /* The roster record a printed name draws its crest from, or null. */
   function rosterClub(name) {
-    var want = ROSTER_ALIAS[name] || name;
+    var want = CREST_ALIAS[name] || name;
     var rec = NL.clubs.byName(want);
     if (rec) return rec.name;
     var f = " " + fold(want) + " ", idx = rosterIndex();
@@ -150,7 +151,7 @@
     var hit = (dv && findIn(keyed(dv.teams), padded)) || findIn(constIndex(), padded);
     if (hit) {
       var club = rosterClub(hit);
-      return { club: club, name: club || hit, display: hit };
+      return { club: club, name: club || CREST_ALIAS[hit] || hit, display: hit };
     }
     var rhit = findIn(rosterIndex(), padded);
     if (rhit) return { club: rhit, name: rhit, display: rhit };

@@ -183,7 +183,8 @@ test('crest source: a roster record where one exists, else the printed name', ()
     const r = resolve(raw, div);
     if (club && !rosterNames.has(club)) { bad.push(`${raw}: test expects roster club "${club}" which is not in clubs-meta`); continue; }
     if (r.club !== club) bad.push(`${raw} → crest from ${JSON.stringify(r.club)}, expected ${JSON.stringify(club)}`);
-    if (r.name !== (club || display)) bad.push(`${raw} → crest file "${r.name}", expected "${club || display}"`);
+    const CREST = { 'Wellingborough': 'Wellingborough Town', 'Brentford CST': 'Brentford' };   /* sides whose crest file is named differently */
+    if (r.name !== (club || CREST[display] || display)) bad.push(`${raw} → crest file "${r.name}", expected "${club || CREST[display] || display}"`);
   }
   assert.deepEqual(bad, []);
 });
