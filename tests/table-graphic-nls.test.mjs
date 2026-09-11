@@ -34,11 +34,17 @@ function loadSection() {
   const status = [];
   const state = { division: 'National', source: 'feed', rows: [] };
   const body = `
-    var COMPETITION_ID = { National: 89, North: 373, South: 372 };
+    var COMPETITION_ID = { National: 89, North: 373, South: 372, CupA: 1275, CupB: 1275, CupC: 1275, CupD: 1275 };
+    var CUP_ROUND = { CupA: "A", CupB: "B", CupC: "C", CupD: "D" };
+    var CUP_QUALIFY = 2;
+    function isCup(div) { return !!CUP_ROUND[div || state.division]; }
     var NLS_BASE = "";
+    var FETCHED = [];
+    function fetch(url) { FETCHED.push(url); return new Promise(function () {}); }   /* never resolves: only the URL is under test */
     var E = { FLAG_NONE: "-" };
     var NL = {
-      clubs:  { meta: function () { return META; }, byOpta: function (id) { return OPTA[id] || null; } },
+      clubs:  { meta: function () { return META; }, byOpta: function (id) { return OPTA[id] || null; },
+                load: function () { return Promise.resolve(META); } },
       season: { current: function (m) { return m && m.seasons && m.seasons.current; },
                 fromDate: function () { return 2026; } }
     };
@@ -47,11 +53,11 @@ function loadSection() {
     function buildGrid() {}
     function save() {}
     function render() {}
-    function $() { return null; }
+    function $() { return { disabled: false }; }   /* the Load button, as far as the section cares */
     ${src.slice(a, b)}
     return { applyTable: applyTable, fillZonesByPosition: fillZonesByPosition,
              clearZones: clearZones, nlsTeamName: nlsTeamName, gdText: gdText,
-             nlsSeason: nlsSeason };
+             nlsSeason: nlsSeason, loadFromNLS: loadFromNLS, fetched: function () { return FETCHED; } };
   `;
   const api = new Function('META', 'OPTA', 'STATUS', 'state', body)(meta, optaIndex, status, state);
   return { ...api, state, status: () => status.join(' · ') };
@@ -167,4 +173,32 @@ test('a short table never marks relegation it cannot know about', () => {
   const flags = t.state.rows.map(r => r.flag);
   assert.deepEqual(flags, ['C', 'SF', 'SF', 'QF', 'QF', 'QF', 'QF', '-'],
     'with 8 rows there is no relegation zone to fill');
+});
+
+/* ---- National League Cup groups (added 11/09/2026) ---- */
+
+test('a cup group asks the feed for its round, a division does not', async () => {
+  const t = loadSection();
+  t.state.division = 'CupB';
+  t.loadFromNLS();
+  await new Promise(r => setTimeout(r, 0));
+  assert.equal(t.fetched().length, 1);
+  assert.match(t.fetched()[0], /competitionID=1275&/);
+  assert.match(t.fetched()[0], /&roundID=B$/);
+  t.state.division = 'North';
+  t.loadFromNLS();
+  await new Promise(r => setTimeout(r, 0));
+  assert.match(t.fetched()[1], /competitionID=373&/);
+  assert.doesNotMatch(t.fetched()[1], /roundID/);
+});
+
+test('Mark by position on a cup group marks the two qualifiers as Q and nothing else', () => {
+  const t = loadSection();
+  t.state.division = 'CupA';
+  t.applyTable([1, 2, 3, 4, 5, 6, 7, 8].map((p, i) =>
+    row(meta.clubs.filter(c => c.optaID)[i].optaID, p)));
+  t.fillZonesByPosition();
+  assert.deepEqual(t.state.rows.map(r => r.flag), ['Q', 'Q', '-', '-', '-', '-', '-', '-']);
+  t.clearZones();
+  assert.ok(t.state.rows.every(r => r.flag === '-'));
 });
