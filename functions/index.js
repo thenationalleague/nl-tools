@@ -113,10 +113,3 @@ Object.assign(exports, require("./handbook-pdf"));
 // The broadcast-selections access gate: a handful of audience codes for the
 // public travel page, same trigger shape as uw-promo/programme/club-code.
 Object.assign(exports, require("./broadcast-selections"));
-
-// The FA Full-Time ingester (fulltime.js, 10–11/09/2026) is gone: Full-Time
-// answers every request from Google's address space with Cloudflare's block
-// page, and a GitHub runner fared no better. The parsers survive in
-// fulltime/parse.js; the fetching now happens in the user's own browser via
-// the Academy & Alliance tool's Sync bookmarklet. Deploy --force removes the
-// two functions from the project.
