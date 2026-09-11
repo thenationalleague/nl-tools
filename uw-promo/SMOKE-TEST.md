@@ -28,8 +28,8 @@ should see; anything failed gets a note and the run continues.
 
 | # | Action | Expected | Pass |
 |---|--------|----------|------|
-| B1 | Open the UW direct link → wrong passcode → correct passcode | Link alone never opens; wrong refused; opens on **In-store codes**, red **ADD IN-STORE CODES** rightmost | ☐ |
-| B2 | **Add in-store codes** | Club dropdown offers **in-store clubs only** (just Club 1); **generate-only** — no paste; count prefilled **1** | ☐ |
+| B1 | Open the UW direct link → wrong passcode → correct passcode | Link alone never opens; wrong refused; opens on **Clubs** — every in-store row carries **Add codes**, every online row **Request codes**; the code tabs have **no add/request buttons at all** (Export CSV only) | ☐ |
+| B2 | **Add codes** on Club 1's row | Modal is titled with the club — **no club dropdown**; **generate-only** — no paste; count prefilled **1** | ☐ |
 | B3 | Club 1 → count **10** → confirm | 10 six-character no-hyphen codes; **Copy all**; pills read **Created**; table updates instantly | ☐ |
 | B4 | On one row press **Dispatch** → confirm | Pill flips **Created → Dispatched**; one audit entry; no tick column, no floating button | ☐ |
 | B5 | Refresh the tab | Signs itself back in; everything as left | ☐ |
@@ -66,8 +66,8 @@ should see; anything failed gets a note and the run continues.
 
 | # | Action | Expected | Pass |
 |---|--------|----------|------|
-| F1 | UW tab → **Online codes** → red **REQUEST CLUB CODES** (rightmost) | Dropdown offers **online clubs only**; qty; due prefilled +7, editable | ☐ |
-| F2 | Club 2, **3** codes, due edited to **yesterday** → **Raise request** | **Three placeholder rows appear in the code table**: empty code cell, **Overdue** pill, Club 2, raised-just-now. No separate requests table exists | ☐ |
+| F1 | UW tab → **Clubs** → **Request codes** on Club 2's row | Modal is titled with the club — **no dropdown**; qty; due prefilled +7, editable | ☐ |
+| F2 | **3** codes, due edited to **yesterday** → **Raise request** | **Three placeholder rows appear in the Online codes table**: empty code cell, **Overdue** pill, Club 2, raised-just-now. No separate requests table exists — and back on **Clubs**, Club 2's row now also shows **Remind** (drafts the chase email; the button exists only while a club is overdue and short) | ☐ |
 | F3 | Club 2's Dashboard | The same three placeholder rows, each with a red **Upload** button; banner "3 still to supply"; count cards read 3 requested | ☐ |
 | F4 | **Upload** on a placeholder → tick the three undertakings → **the form shows exactly 3 input boxes** → fill **2** → upload | Toast only; two placeholders become **Issued** rows with real codes; one **Overdue** placeholder remains; banner "1 still to supply" | ☐ |
 | F5 | Upload the last one | No placeholders left — the ask is simply complete; banner clears | ☐ |
