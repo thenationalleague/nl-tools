@@ -114,8 +114,9 @@ Object.assign(exports, require("./handbook-pdf"));
 // public travel page, same trigger shape as uw-promo/programme/club-code.
 Object.assign(exports, require("./broadcast-selections"));
 
-// FA Full-Time → RTDB ingester for the Academy & Alliance graphic
-// (fulltimeIngestHourly, scheduled; fulltimeRefresh, RTDB-triggered). Same
-// two shapes as the NLS ingester and the auth triggers above, for the same
-// org-policy reason. See functions/fulltime.js.
-Object.assign(exports, require("./fulltime"));
+// The FA Full-Time ingester (fulltime.js, 10–11/09/2026) is gone: Full-Time
+// answers every request from Google's address space with Cloudflare's block
+// page, and a GitHub runner fared no better. The parsers survive in
+// fulltime/parse.js; the fetching now happens in the user's own browser via
+// the Academy & Alliance tool's Sync bookmarklet. Deploy --force removes the
+// two functions from the project.
