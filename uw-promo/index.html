@@ -3,6 +3,12 @@
 <head>
 <!--
   UW Promo Codes — Utility Warehouse partner page
+  Version: v9.4 (11/09/2026) — FULL RELOCATION (owner): initiation
+           lives on the Clubs rows — Add codes (in-store), Request
+           codes (online) and Remind (only when that club is overdue)
+           are per-row buttons with the club pre-chosen, and the code
+           tabs lose their toolbar primaries to become pure management
+           (filter, dispatch, export).
   Version: v9.3 (11/09/2026) — the landing tab becomes CLUBS (owner):
            the per-club overview grows lifecycle totals — Requested
            (online clubs only), Issued (Created folded in), Dispatched,
@@ -284,12 +290,10 @@
         <input class="toolbar__search" id="fSearch" type="search" placeholder="Search codes…" aria-label="Search codes">
       </div>
       <div class="toolbar__right">
-        <button class="btn btn--ghost" id="btnRemind" hidden>Chase overdue</button>
+        <!-- Initiation lives on the Clubs rows (owner 11/09/2026, full
+             relocation): these tabs are pure management — filter,
+             dispatch, export. -->
         <button class="btn btn--ghost" id="btnExport">Export CSV</button>
-        <!-- One primary per tab, always in the SAME rightmost slot — the tab
-             swaps which of these two is visible, not where red lives. -->
-        <button class="btn btn--primary" id="btnAdd">Add in-store codes</button>
-        <button class="btn btn--primary" id="btnRequests" hidden>Request club codes</button>
       </div>
     </div>
 
@@ -316,7 +320,7 @@
       <div class="table-wrap">
         <table class="table">
           <thead><tr><th>Club</th><th>Method</th><th>Scheme contact</th>
-            <th>Requested</th><th>Issued</th><th>Dispatched</th><th>Redeemed</th><th>Eligible</th></tr></thead>
+            <th>Requested</th><th>Issued</th><th>Dispatched</th><th>Redeemed</th><th>Eligible</th><th></th></tr></thead>
           <tbody id="methodRows"></tbody>
         </table>
       </div>
@@ -541,7 +545,6 @@
   }
 
   function render() {
-    document.getElementById('btnRemind').hidden = !(TAB === 'online' && overdueOutstanding().length);
     if (!codesLoaded) return;
     var all = codeRows();
     var scope = clubFiltered(), label = clubFilterLabel();
@@ -647,8 +650,6 @@
     document.getElementById('pane-methods').style.display = isMethods ? 'block' : 'none';
     if (isMethods) { renderMethods(); return; }
     TAB = mtab;
-    document.getElementById('btnAdd').hidden = TAB !== 'instore';
-    document.getElementById('btnRequests').hidden = TAB !== 'online';
     buildClubFilter();   // the club list follows the tab's method
     buildStatusFilter();  // and the status faces follow the tab too
     render();
@@ -724,45 +725,23 @@
   }
 
   /* ── Add codes to the pool ──────────────────────────────────────────── */
-  document.getElementById('btnAdd').addEventListener('click', openAdd);
-
-  /* Add codes — one club per batch, always. The club dropdown is required and
-     there is deliberately no "all clubs" or multi-select option: a code is
-     redeemable only at the club it is registered to, so registering a batch
-     to two clubs would have no coherent meaning. Do 25 for Hartlepool, then
-     25 for Sutton. Generate-only as of N1 (10/09/2026). */
-  function openAdd() {
-    var clubs = clubList();
-    if (!clubs.length) {
-      toast('No clubs are set up yet — the National League needs to seed the roster first.', 'error');
-      return;
-    }
-    /* Central codes are the in-store method's supply, full stop (owner
-       ruling 09/09/2026 — "shouldn't be able to"): an online club's codes
-       come from its own uploads against requests, and an unassigned club
-       has nowhere to redeem anything, so neither is offered at all. */
-    var instore = clubs.filter(function (c) { return c.route === 'instore'; });
-    if (!instore.length) {
-      toast('No club is on the in-store method yet — codes are added for in-store clubs only.', 'error');
-      return;
-    }
-    var clubOpts = '<option value="">Choose a club…</option>' + instore.map(function (c) {
-      return '<option value="' + esc(c.code) + '">' + esc(c.name) + '</option>';
-    }).join('');
+  /* Add codes — opened from a club's row on the Clubs tab (owner
+     11/09/2026, full relocation), so the club is already chosen: no
+     dropdown, the title names it. One club per add, generate-only
+     (owner N1) — a code is redeemable only at the club it is
+     registered to. */
+  function openAdd(clubCode) {
+    var club = clubList().filter(function (c) { return c.code === clubCode; })[0];
+    if (!club || club.route !== 'instore') return;
 
     var wrap = document.createElement('div');
-    /* Generate-only (owner N1, 10/09/2026): pasting outside lists is gone
-       from this door — every UW code is minted here, and the everyday add
-       is a single code, so the count starts at 1. */
     wrap.innerHTML =
-      '<div class="alloc-row"><label for="alClub">Club — required, one club per add</label>' +
-        '<select id="alClub">' + clubOpts + '</select></div>' +
       '<div class="alloc-row"><label for="alQty">How many</label>' +
         '<input id="alQty" type="number" min="1" max="500" value="1"></div>' +
       '<div class="alloc-preview">Generated codes are 6 characters, no dash — e.g. <span class="code-mono">7F3K9C</span>.</div>';
 
     var ctrl = NL.modal({
-      title: 'Add in-store codes',
+      title: 'Add in-store codes — ' + club.name,
       body: wrap,
       buttons: [
         { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
@@ -770,12 +749,9 @@
       ]
     });
 
-    var elClub = wrap.querySelector('#alClub'), elQty = wrap.querySelector('#alQty');
+    var elQty = wrap.querySelector('#alQty');
 
     function doAdd() {
-      var club = null;
-      clubs.forEach(function (c) { if (c.code === elClub.value) club = c; });
-      if (!club) { toast('Choose the club these codes are for.', 'error'); return; }
 
       var existing = {};
       Object.keys(CODES).forEach(function (k) {
@@ -928,9 +904,9 @@
   }
 
   /* One reminder per CLUB, not per row (owner 11/09/2026): a request is
-     several placeholder rows, so the chase lives on the toolbar. One
-     overdue club goes straight to its drafted reminder; several get a
-     chooser first. */
+     several placeholder rows, so the chase lives on the club's own row
+     on the Clubs tab — a Remind button that appears only when that club
+     is overdue. */
   function overdueOutstanding() {
     var by = {};
     reqList().forEach(function (r) {
@@ -944,41 +920,13 @@
     return Object.keys(by).map(function (k) { return by[k]; });
   }
 
-  document.getElementById('btnRemind').addEventListener('click', function () {
-    var list = overdueOutstanding();
-    if (!list.length) return;
-    if (list.length === 1) { offerEmail(list[0].code, list[0].owed, list[0].due, 'remind'); return; }
-    var wrap = document.createElement('div');
-    wrap.innerHTML = '<div class="table-wrap"><table class="table">' +
-      '<thead><tr><th>Club</th><th>Still owed</th><th>Due</th><th></th></tr></thead><tbody>' +
-      list.map(function (e) {
-        return '<tr><td>' + esc(clubName(e.code)) + '</td><td>' + e.owed + '</td>' +
-          '<td>' + esc(NL.formatDateShort(e.due)) + '</td>' +
-          '<td class="ta-right"><button class="btn btn--primary btn--sm" data-remind="' + esc(e.code) + '">Email</button></td></tr>';
-      }).join('') + '</tbody></table></div>';
-    var ctrl = NL.modal({
-      title: 'Chase overdue requests', body: wrap,
-      buttons: [{ label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } }]
-    });
-    wrap.addEventListener('click', function (e) {
-      var b = e.target.closest('[data-remind]');
-      if (!b) return;
-      var hit = list.filter(function (x) { return x.code === b.getAttribute('data-remind'); })[0];
-      ctrl.close();
-      if (hit) offerEmail(hit.code, hit.owed, hit.due, 'remind');
-    });
-  });
-
-  document.getElementById('btnRequests').addEventListener('click', openRequests);
-
-  function openRequests() {
+  /* Raise a request — opened from a club's row on the Clubs tab (owner
+     11/09/2026, full relocation): the club is already chosen. */
+  function openRequests(clubCode) {
+    var club = clubList().filter(function (c) { return c.code === clubCode; })[0];
+    if (!club || club.route !== 'online') return;
     var wrap = document.createElement('div');
     wrap.innerHTML =
-      '<div class="alloc-row"><label for="rqClub">Ask a club for codes</label>' +
-        '<select id="rqClub"><option value="">Choose a club…</option>' +
-        clubList().filter(function (c) { return c.route === 'online'; }).map(function (c) {
-          return '<option value="' + esc(c.code) + '">' + esc(c.name) + '</option>';
-        }).join('') + '</select></div>' +
       '<div class="alloc-row" style="display:flex;gap:10px">' +
         '<span style="flex:1"><label for="rqQty">How many</label><input id="rqQty" type="number" min="1" max="500" value="5"></span>' +
         '<span style="flex:1"><label for="rqDue">Due</label><input id="rqDue" type="date"></span></div>';
@@ -987,7 +935,7 @@
     wrap.querySelector('#rqDue').value = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
 
     var ctrl = NL.modal({
-      title: 'Request club codes', body: wrap,
+      title: 'Request club codes — ' + club.name, body: wrap,
       buttons: [
         { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
         { label: 'Raise request', className: 'btn--primary', onClick: function () { raise(); } }
@@ -995,10 +943,9 @@
     });
 
     function raise() {
-      var code = wrap.querySelector('#rqClub').value;
+      var code = club.code;
       var qty = parseInt(wrap.querySelector('#rqQty').value, 10);
       var dueRaw = wrap.querySelector('#rqDue').value;
-      if (!code) { toast('Choose a club.', 'error'); return; }
       if (!(qty >= 1 && qty <= 500)) { toast('Quantity must be 1–500.', 'error'); return; }
       var due = dueRaw ? new Date(dueRaw + 'T23:59:59').getTime() : null;
       UWP.ensureAuth().then(function () {
@@ -1076,15 +1023,37 @@
       '<div class="stat stat--approved"><div class="stat__num">' + byRoute.instore + '</div><div class="stat__label">In-store</div></div>' +
       '<div class="stat stat--info"><div class="stat__num">' + byRoute.online + '</div><div class="stat__label">Online</div></div>' +
       '<div class="stat' + (byRoute.unassigned ? ' stat--pending' : '') + '"><div class="stat__num">' + byRoute.unassigned + '</div><div class="stat__label">Unassigned</div></div>';
+    /* Initiation lives here (owner 11/09/2026, full relocation): the
+       club is the row, so Add / Request start with it chosen, and
+       Remind appears only on an online club with an overdue shortfall. */
+    var late = {};
+    overdueOutstanding().forEach(function (e) { late[e.code] = e; });
     document.getElementById('methodRows').innerHTML = clubList().map(function (c) {
       var t = clubTotals(c.code);
+      var acts = '';
+      if (c.route === 'instore') {
+        acts = '<button class="btn btn--navy btn--sm" data-addfor="' + esc(c.code) + '">Add codes</button>';
+      } else if (c.route === 'online') {
+        acts = '<button class="btn btn--navy btn--sm" data-reqfor="' + esc(c.code) + '">Request codes</button>' +
+          (late[c.code] ? ' <button class="btn btn--ghost btn--sm" data-remindfor="' + esc(c.code) + '">Remind</button>' : '');
+      }
       return '<tr><td>' + esc(c.name) + '</td><td style="white-space:nowrap">' + UWP.methodPill(c.route) + '</td>' +
         '<td>' + contactStack(c.code) + '</td>' +
         '<td>' + (c.route === 'online' ? t.requested : '\u2014') + '</td>' +
         '<td>' + t.issued + '</td><td>' + t.dispatched + '</td>' +
-        '<td>' + t.redeemed + '</td><td>' + t.eligible + '</td></tr>';
+        '<td>' + t.redeemed + '</td><td>' + t.eligible + '</td>' +
+        '<td class="ta-right nowrap">' + acts + '</td></tr>';
     }).join('');
   }
+
+  document.getElementById('methodRows').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-addfor],[data-reqfor],[data-remindfor]');
+    if (!b) return;
+    if (b.hasAttribute('data-addfor')) { openAdd(b.getAttribute('data-addfor')); return; }
+    if (b.hasAttribute('data-reqfor')) { openRequests(b.getAttribute('data-reqfor')); return; }
+    var hit = overdueOutstanding().filter(function (x) { return x.code === b.getAttribute('data-remindfor'); })[0];
+    if (hit) offerEmail(hit.code, hit.owed, hit.due, 'remind');
+  });
 
   document.getElementById('btnClubsCsv').addEventListener('click', function () {
     var rows = [['Club', 'Method', 'Contacts', 'Requested', 'Issued', 'Dispatched', 'Redeemed', 'Eligible']];
