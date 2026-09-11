@@ -96,9 +96,9 @@ Every club carries a `route` on its config record, defaulting to
 
 **Clubs choose their own route** (spec v43.0 §1). An unassigned club's
 manager passcode mints a session scoped to a setup screen: pick in-store or
-online (each card says what it means), tick the five route-specific
+online (each card says what it means), tick the three route-specific
 undertakings — the tick boxes *are* the gate; nothing saves without all
-five — and give at least one **scheme contact** (name, role, email).
+three — and give at least one **scheme contact** (name, role, email).
 Saving locks the route. The till PIN deliberately cannot reach setup:
 choosing a route binds the club to undertakings, and that is a manager
 decision, not a till-shift one.
