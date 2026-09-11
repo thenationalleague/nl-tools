@@ -37,7 +37,7 @@
       "AFC Sudbury", "Aveley", "Barking", "Billericay Town", "Bishop's Stortford", "Chelmsford City", "Enfield Town",
       "Hertford Town", "King's Lynn Town", "Lowestoft Town", "Southend United", "Wroxham" ] },
     { key: "alliance-b", comp: "alliance", label: "Division B", teams: [
-      "Dover Athletic", "Burgess Hill", "Dartford", "Eastbourne Borough", "Ebbsfleet United", "Folkestone Invicta",
+      "Dover Athletic", "Burgess Hill Town", "Dartford", "Eastbourne Borough", "Ebbsfleet United", "Folkestone Invicta",
       "Maidstone United", "Tonbridge Angels", "Whitstable Town" ] },
     { key: "alliance-c", comp: "alliance", label: "Division C", teams: [
       "Barnet", "Bedford Town", "Brentford CST", "Chesham United", "Flackwell Heath", "Hemel Hempstead", "Hertford Town",
@@ -437,7 +437,16 @@
   }
 
   var COLS = [["P","p"],["W","w"],["D","d"],["L","l"],["F","f"],["A","a"],["GD","gd"],["PTS","pts"]];
+  /* Portrait and story carry three stat columns, not eight: at 1080 wide the
+     full set leaves the names no room to grow, and a nine-row table in a
+     tall card then floats in white. With P, GD and PTS the rows can be tall
+     and the type big, which is what those formats want. Same call the senior
+     table graphic makes. The editor and the paste keep every column. */
+  var COLS_MIN = [["P","p"],["GD","gd"],["PTS","pts"]];
+  function tableCols() { return state.format === "1x1" ? COLS : COLS_MIN; }
   function renderTable(gfx) {
+    var COLS = tableCols();
+    gfx.setAttribute("data-cols", state.format === "1x1" ? "full" : "min");
     var rows = state.table.filter(function (r) { return (r.team || "").trim(); });
     var colhead = document.createElement("div");
     colhead.className = "gfx-colhead";
@@ -533,7 +542,7 @@
     var base = parseFloat(getComputedStyle(cells[0]).fontSize) || 20;
     var size = base, g = 0;
     var overflows = function () { return cells.some(function (c) { return c.scrollWidth > c.clientWidth + 1; }); };
-    while (overflows() && size > base * 0.6 && g < 80) {
+    while (overflows() && size > base * 0.5 && g < 80) {
       size -= 0.5; g++;
       cells.forEach(function (c) { c.style.fontSize = size + "px"; });
     }
