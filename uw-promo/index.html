@@ -3,6 +3,10 @@
 <head>
 <!--
   UW Promo Codes — Utility Warehouse partner page
+  Version: v8.6 (11/09/2026) — the code table carries a stacked Scheme
+           contact column (name over muted role/email — owner: the person
+           to chase, on the row you chase them from), fed by a contacts
+           subscription; placeholder rows carry it too.
   Version: v8.5 (11/09/2026) — the "Not yet registered to a club" filter
            bucket is gone (owner: defunct — every code is born assigned;
            the pre-v3.0 clubless state no longer exists anywhere), and the
@@ -256,9 +260,9 @@
     <div class="table-wrap">
       <table class="table">
         <thead><tr>
-          <th>Code</th><th>Status</th><th>Club</th><th>Redeemed</th><th>Added</th><th></th>
+          <th>Code</th><th>Status</th><th>Club</th><th>Scheme contact</th><th>Redeemed</th><th>Added</th><th></th>
         </tr></thead>
-        <tbody id="rows"><tr class="loading-row"><td colspan="6">Loading codes…</td></tr></tbody>
+        <tbody id="rows"><tr class="loading-row"><td colspan="7">Loading codes…</td></tr></tbody>
       </table>
     </div>
     </div><!-- /#pane-codes -->
@@ -287,6 +291,7 @@
   var SS_KEY = 'uwPromoUwPass' + (UWP.isTest ? ':test' : '');
 
   var CLUBS = [];             // from the grant — code/name/division/route, no credentials
+  var CONTACTS_ALL = {};      // contacts/<club> — the person to chase per row
   var REQS = {};              // code requests (spec v43 §5.1)
   var CODES = {};             // id -> record
   var codesLoaded = false, unlocked = false;
@@ -377,6 +382,7 @@
       render();
     });
     UWP.ref('requests').on('value', function (s) { REQS = s.val() || {}; render(); });
+    UWP.ref('contacts').on('value', function (s) { CONTACTS_ALL = s.val() || {}; render(); });
     buildClubFilter();
     buildStatusFilter();
     render();
@@ -445,6 +451,19 @@
     var sel = document.getElementById('fClub');
     if (!sel.value) return '';
     return sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : '';
+  }
+
+  /* Stacked contact for the code table (owner 11/09/2026): the person
+     to chase, on the row you chase them from. */
+  function contactStack(code) {
+    var list = CONTACTS_ALL[code];
+    if (list && !Array.isArray(list)) list = Object.keys(list).map(function (k) { return list[k]; });
+    if (!list || !list.length) return '<span class="code-note">—</span>';
+    var c = list[0];
+    return '<div class="contact-stack">' + esc(c.name || '') +
+      (c.role ? '<span>' + esc(c.role) + '</span>' : '') +
+      (c.email ? '<span>' + esc(c.email) + '</span>' : '') +
+      (list.length > 1 ? '<span>+' + (list.length - 1) + ' more</span>' : '') + '</div>';
   }
 
   /* ── Render ─────────────────────────────────────────────────────────── */
@@ -542,7 +561,7 @@
     }
     var tbody = document.getElementById('rows');
     if (!list.length && !phs.length) {
-      tbody.innerHTML = '<tr class="empty-row"><td colspan="6">' +
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="7">' +
         (all.length ? 'No codes match the current filters.' : TAB === 'online' ? 'No club-uploaded codes yet — raise a request.' : 'No codes in the pool yet — use “Add codes” to get started.') + '</td></tr>';
       return;
     }
@@ -555,6 +574,7 @@
           (overdue ? 'Overdue' : 'Requested') + '</span></td>' +
         '<td><span class="club-cell">' + NL.clubs.crestImgHtml(clubName(r.club), 'thumb') +
           '<span class="club-cell__name">' + esc(clubName(r.club)) + '</span></span></td>' +
+        '<td>' + contactStack(r.club) + '</td>' +
         '<td>—</td>' +
         '<td title="' + esc(UWP.fmt(r.raisedAt)) + '">' + esc(UWP.ago(r.raisedAt)) + '</td>' +
         '<td></td></tr>';
@@ -585,6 +605,7 @@
         '<td' + (r.dispatchedAt ? ' title="Dispatched ' + esc(UWP.fmt(r.dispatchedAt)) + '"' : '') + '>' +
           UWP.pillFor(UWP.faceOf(r)) + '</td>' +
         '<td>' + clubCell + '</td>' +
+        '<td>' + contactStack(r.club) + '</td>' +
         '<td>' + esc(r.status === 'redeemed' ? UWP.fmt(r.redeemedAt) : '—') + '</td>' +
         '<td title="' + esc(UWP.fmt(r.createdAt)) + '">' + esc(UWP.ago(r.createdAt)) + '</td>' +
         '<td class="ta-right">' + acts + '</td></tr>';
