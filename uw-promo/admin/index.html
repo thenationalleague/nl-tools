@@ -24,6 +24,11 @@
            write config. That is the change that stops all 72 till PINs being
            world-readable. First run mints a bootstrap master token while no
            passcode exists; nothing subscribes to RTDB until the session does.
+  Version: v8.2 (11/09/2026) — Clubs & access gains a Notifications
+           card (owner "seed notify"): the comma-separated alert list at
+           config/support/notify, set from the console so real addresses
+           never touch this public repo — feeds the GAS upload alerts and
+           the Cc on UW's request-chasing email.
   Version: v8.1 (11/09/2026) — the code tables carry a stacked Scheme
            contact column (name over muted role/email — owner: the person
            to chase, on the row you chase them from), fed by the contacts
@@ -356,6 +361,13 @@
         <div class="access-card__row">
           <span class="cred-chip" id="valueChip" style="cursor:default"></span>
           <button class="btn btn--ghost btn--sm" id="btnValue">Change&hellip;</button>
+        </div>
+      </div>
+      <div class="access-card">
+        <div class="access-card__title">Notifications</div>
+        <div class="access-card__row">
+          <span class="code-note" id="notifyList"></span>
+          <button class="btn btn--ghost btn--sm" id="btnNotify">Change&hellip;</button>
         </div>
       </div>
       <div class="access-card">
@@ -1291,6 +1303,28 @@
        delivered to clubs in their sign-in grant — copy everywhere reads
        "the agreed value (£N)". Accepts "65" or "£65". */
     document.getElementById('valueChip').textContent = '£' + UWP.parseValue(CONFIG.value);
+    /* Alert addresses (owner 11/09/2026): where upload alerts go, and the
+       Cc on UW's request-chasing email. Real addresses live ONLY in RTDB —
+       set here, never in this public repo. */
+    document.getElementById('notifyList').textContent =
+      (CONFIG.support && CONFIG.support.notify) || 'none set — upload alerts and the email Cc stay off';
+    document.getElementById('btnNotify').onclick = function () {
+      NL.prompt('Alert addresses, comma-separated. They receive upload alerts and ride as the Cc on UW\u2019s request emails.', {
+        title: 'Notification addresses', placeholder: 'name@thenationalleague.org.uk, name2@\u2026'
+      }).then(function (v) {
+        if (v == null) return;
+        var list = String(v).split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+        if (list.length && !list.every(function (e) { return /.+@.+\..+/.test(e); })) {
+          toast('Every entry must be an email address.', 'error'); return;
+        }
+        UWP.ensureAuth().then(function () {
+          return UWP.ref('config/support/notify').set(list.join(', ') || null);
+        }).then(function () {
+          UWP.audit(ACTOR, ACTOR_LABEL, 'support', { detail: 'Notification addresses updated (' + list.length + ')' });
+          toast(list.length ? list.length + ' address' + (list.length === 1 ? '' : 'es') + ' saved' : 'Notifications cleared', 'success');
+        }).catch(function (err) { toast('Failed: ' + err.message, 'error'); });
+      });
+    };
     document.getElementById('btnValue').onclick = function () {
       NL.prompt('Voucher value — whole pounds, e.g. 65 or £65. Clubs see the new value at their next sign-in.', {
         title: 'Change voucher value', placeholder: '£65'
