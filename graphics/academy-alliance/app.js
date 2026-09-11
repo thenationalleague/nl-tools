@@ -13,13 +13,15 @@
 
   var STORAGE_KEY = "nl-academy-alliance-gfx-v1";
   var MAX_FIXTURES = 14;
-  /* The feed: functions/fulltime.js fetches FA Full-Time hourly and writes
-     each division's table, results and fixtures here. Read behind the login;
-     the browser never calls Full-Time. A write to FEED_REFRESH/<uid> asks the
-     function to fetch one division now; it deletes the request when done. */
+  /* The feed: one node per division with its table, results and fixtures.
+     Written by THIS page in ?sync=1 mode — the Sync bookmarklet, run on a
+     Full-Time page, fetches every division's pages there (a signed-in
+     user's browser is the only thing Full-Time lets in; see
+     functions/fulltime/parse.js) and hands them here by postMessage. Read
+     by Load, behind the login. */
   var FEED_ROOT = "app-data/staff-graphics/fulltime";
-  var FEED_REFRESH = "app-data/staff-graphics/fulltime-refresh";
-  var REFRESH_WAIT_MS = 30000;
+  var FT_ORIGIN = "https://fulltime.thefa.com";
+  var SYNC_VERSION = "sync-1.2";
 
   /* ---------------- competitions ----------------
      Both roundels live in assets/divisions; the 256px tier is built by the
@@ -699,7 +701,8 @@
 
   /* ---------------- the feed ----------------
      One node per division: { table, results, fixtures, fetchedAt, missing }.
-     Read once per division per visit and cached; Refresh re-reads. */
+     Read once per division per visit and cached; a Sync writes a fresh copy
+     which the next visit (or a division change) reads. */
   var _feed = {};
   function dbRef(path) { return (window.db || firebase.database()).ref(path); }
   function feedNode() { return _feed[state.division] || null; }
@@ -719,7 +722,7 @@
     }).then(function (snap) {
       _feed[key] = snap.val() || null;
       fillDates(); showMeta();
-      setStatus(_feed[key] ? "Feed ready" : "No feed copy yet — press Refresh");
+      setStatus(_feed[key] ? "Feed ready" : "No feed copy yet — use the Sync bookmark");
       return _feed[key];
     }).catch(function (err) {
       console.error(err);
@@ -768,7 +771,7 @@
     if (!el) return;
     if (msg) { el.textContent = msg; el.className = warn ? "warn" : ""; return; }
     var node = feedNode();
-    if (!node || !node.fetchedAt) { el.textContent = "No copy of this division yet. Refresh fetches it from Full-Time."; el.className = "warn"; return; }
+    if (!node || !node.fetchedAt) { el.textContent = "No copy of this division yet — use the Sync bookmark on a Full-Time page."; el.className = "warn"; return; }
     var when = NL.formatDateTime ? NL.formatDateTime(node.fetchedAt) : new Date(node.fetchedAt).toLocaleString("en-GB");
     var missing = node.missing || [];
     var miss = missing.length ? " · last fetch missed: " + missing.join(", ") : "";
@@ -791,7 +794,7 @@
      divider per day; the table comes whole. */
   function loadFromFeed() {
     var node = feedNode();
-    if (!node) { setStatus("No feed copy — press Refresh"); return; }
+    if (!node) { setStatus("No feed copy — use the Sync bookmark"); return; }
     if (state.type === "table") {
       var t = node.table || [];
       if (!t.length) { setStatus("The feed has no table for this division"); return; }
@@ -828,36 +831,92 @@
     var miss = names.filter(function (r) { return !resolveTeam(r.home, state.division).club || !resolveTeam(r.away, state.division).club; }).length;
     setStatus("Loaded " + names.length + (skipped ? " — " + skipped + " postponed left out" : "") + (miss ? " — " + miss + " without a crest on file" : ""), 5000);
   }
-  /* Refresh: write the request, then wait for fetchedAt to move. The function
-     deletes the request when it has finished, so a stale one never blocks. */
-  function refreshFeed() {
-    var key = state.division, before = (feedNode() || {}).fetchedAt || 0;
-    var btn = $("feedRefreshBtn");
-    btn.disabled = true; showMeta("Asking Full-Time…");
-    var done = false, timer, ref;
-    function finish(msg, warn) {
-      if (done) return; done = true; clearTimeout(timer);
-      if (ref) ref.off("value", onValue);
-      btn.disabled = false;
-      loadFeedNode(key, true).then(function () { if (msg) showMeta(msg, warn); });
-    }
-    function onValue(snap) {
-      var v = snap.val();
-      if (v && v > before) finish();
-    }
-    NL.ensureAuth().then(function () {
-      var uid = firebase.auth().currentUser.uid;
-      return dbRef(FEED_REFRESH + "/" + uid).set({ division: key, at: firebase.database.ServerValue.TIMESTAMP });
-    }).then(function () {
-      ref = dbRef(FEED_ROOT + "/" + key + "/fetchedAt");
-      ref.on("value", onValue);
-      timer = setTimeout(function () { finish("Full-Time did not answer in time — the hourly fetch will catch it", true); }, REFRESH_WAIT_MS);
-    }).catch(function (err) {
-      console.error(err);
-      done = true; btn.disabled = false;
-      showMeta("Could not ask for a refresh — " + (err && err.code === "PERMISSION_DENIED" ? "no access" : "check your connection"), true);
+  /* ---------------- sync ----------------
+     The bookmarklet. Built here rather than kept as a file so the division
+     list and season have one home (DIVISIONS above). Dragged to the
+     bookmarks bar from the link on the feed card; run on any Full-Time page
+     it: opens this tool in a popup with ?sync=1 (synchronously, so the popup
+     blocker allows it), fetches every division's table, results and fixtures
+     from Full-Time — same-origin, so the fetch is let through — then posts
+     the pages to the popup once a second until it acknowledges. */
+  function bookmarkletCode() {
+    var divs = DIVISIONS.map(function (d) { return [d.key, d.ft]; });
+    var origin = location.origin;
+    var code = "(function(){" +
+      "if(location.host!=='fulltime.thefa.com'){alert('Open a Full-Time page first, then click Sync.');return;}" +
+      "var S=" + JSON.stringify(FULLTIME_SEASON) + ",D=" + JSON.stringify(divs) + ",O=" + JSON.stringify(origin) + ";" +
+      "var w=window.open(O+'/graphics/academy-alliance/?sync=1','nlsync');" +
+      "if(!w){alert('Allow pop-ups for fulltime.thefa.com, then click Sync again.');return;}" +
+      "function q(f){return 'selectedSeason='+S+'&selectedFixtureGroupAgeGroup=0&selectedDivision='+f+'&selectedCompetition=0';}" +
+      "var J=[];D.forEach(function(d){J.push([d[0],'table','/table.html?'+q(d[1])]);J.push([d[0],'results','/results/1/100.html?'+q(d[1])]);J.push([d[0],'fixtures','/fixtures/1/100.html?'+q(d[1])]);});" +
+      "var P=[],i=0,a=0,n=0,ok=false;" +
+      "window.addEventListener('message',function(e){if(e.origin===O&&e.data&&e.data.type==='ft-ack')ok=true;});" +
+      "function run(j){a++;fetch('https://fulltime.thefa.com'+j[2],{credentials:'include'}).then(function(r){return r.text().then(function(t){return {s:r.status,t:t};});})" +
+      ".catch(function(){return {s:0,t:''};}).then(function(r){P.push({key:j[0],kind:j[1],status:r.s,html:r.t});a--;n++;if(n===J.length)send();else next();});}" +
+      "function next(){while(a<3&&i<J.length)run(J[i++]);}" +
+      "function send(){var k=0,t=setInterval(function(){if(ok||k++>90){clearInterval(t);return;}try{w.postMessage({type:'ft-pages',season:S,pages:P},O);}catch(x){}},1000);}" +
+      "next();})();";
+    return "javascript:" + encodeURIComponent(code);
+  }
+  var _syncDone = false;
+  function syncLog(msg, warn) {
+    var el = $("syncLog");
+    var line = document.createElement("div");
+    line.textContent = msg; if (warn) line.className = "warn";
+    el.appendChild(line);
+  }
+  function initSync() {
+    document.body.setAttribute("data-sync", "1");
+    window.addEventListener("message", function (e) {
+      if (e.origin !== FT_ORIGIN || !e.data || e.data.type !== "ft-pages") return;
+      try { e.source.postMessage({ type: "ft-ack" }, e.origin); } catch (x) {}
+      if (_syncDone) return;
+      _syncDone = true;
+      savePages(e.data.pages || []);
     });
   }
+  /* Parse and save what the bookmarklet sent. One write per division; a
+     kind that came back empty or unparseable leaves the stored copy alone
+     and is named in `missing`, exactly as the function did. */
+  function savePages(pages) {
+    var P = window.FulltimeParse;
+    if (!P) { $("syncStatus").textContent = "The parser did not load — reload this page and click Sync again."; return; }
+    $("syncStatus").textContent = "Received " + pages.length + " pages. Parsing…";
+    var byKey = {};
+    pages.forEach(function (pg) {
+      var d = byKey[pg.key] || (byKey[pg.key] = { rows: {}, diag: {} });
+      var parser = pg.kind === "table" ? P.parseTable : pg.kind === "results" ? P.parseResults : P.parseFixtures;
+      var rows = pg.html ? parser(pg.html) : [];
+      d.diag[pg.kind] = [{ path: "/" + pg.kind, status: pg.status || 0, bytes: (pg.html || "").length, title: P.titleOf(pg.html), rows: rows.length }];
+      if (rows.length) d.rows[pg.kind] = rows;
+    });
+    var keys = Object.keys(byKey);
+    if (!keys.length) { $("syncStatus").textContent = "Nothing arrived. Click Sync again on a Full-Time page."; return; }
+    var now = Date.now(), saved = 0, failed = 0;
+    NL.ensureAuth().then(function () {
+      return Promise.all(keys.map(function (key) {
+        var d = byKey[key], update = {};
+        var missing = ["table", "results", "fixtures"].filter(function (k) { return !d.rows[k]; });
+        ["table", "results", "fixtures"].forEach(function (k) { if (d.rows[k]) update[k] = d.rows[k]; });
+        update.fetchedAt = now; update.missing = missing; update.diag = d.diag; update.version = SYNC_VERSION;
+        return dbRef(FEED_ROOT + "/" + key).update(update).then(function () {
+          saved++;
+          var dv = divisionOf(key);
+          syncLog((dv.comp === "academy" ? "Academy " : "Alliance ") + dv.label + ": " +
+            ["table", "results", "fixtures"].map(function (k) { return k + " " + (d.rows[k] ? d.rows[k].length : "—"); }).join(", ") +
+            (missing.length ? " · missing " + missing.join(", ") : ""), missing.length > 0);
+        }).catch(function (err) {
+          failed++;
+          syncLog(key + ": not saved — " + (err && err.code === "PERMISSION_DENIED" ? "no access" : (err && err.message) || err), true);
+        });
+      }));
+    }).then(function () {
+      $("syncStatus").textContent = "Saved " + saved + " of " + keys.length + " divisions" + (failed ? " (" + failed + " failed)" : "") + ". You can close this window; press Load in the tool.";
+    }).catch(function (err) {
+      $("syncStatus").textContent = "Could not save — " + ((err && err.message) || err);
+    });
+  }
+
   function setSource(src) {
     state.source = (src === "manual") ? "manual" : "feed";
     document.querySelectorAll(".src-btn").forEach(function (b) { b.classList.toggle("active", b.getAttribute("data-src") === state.source); });
@@ -1016,7 +1075,13 @@
     $("feedFrom").addEventListener("change", function () { state.feedFrom = this.value; fillToDates(); save(); });
     $("feedTo").addEventListener("change", function () { state.feedTo = this.value; save(); });
     $("feedLoadBtn").addEventListener("click", loadFromFeed);
-    $("feedRefreshBtn").addEventListener("click", refreshFeed);
+    var bm = $("syncLink");
+    if (bm) {
+      bm.href = bookmarkletCode();
+      /* a click runs it here, where it can only say "open Full-Time first" */
+      bm.addEventListener("click", function (e) { e.preventDefault(); setStatus("Drag it to the bookmarks bar, then use it on a Full-Time page", 5000); });
+    }
+    if (new URLSearchParams(location.search).get("sync")) initSync();
     $("titleInput").addEventListener("input", function () { state.title = this.value; save(); render(); });
     $("seasonInput").addEventListener("input", function () { state.sub = this.value; save(); render(); });
     $("footnoteInput").addEventListener("input", function () { state.footnote = this.value; save(); render(); });

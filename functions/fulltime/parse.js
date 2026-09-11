@@ -1,9 +1,21 @@
 /**
- * fulltime/parse.js — the pure half of the Full-Time ingester: HTML → rows,
- * URL building, and the fetch-then-parse step with the fetcher injected.
- * No dependencies, no Firebase, so tests/fulltime.test.mjs can load it
- * directly against the saved pages in tests/fixtures/fulltime/.
- * The orchestration (schedule, trigger, RTDB writes) is in ../fulltime.js.
+ * fulltime/parse.js — FA Full-Time HTML → rows, plus URL building and the
+ * fetch-then-parse step with the fetcher injected. No dependencies, no
+ * Firebase, so tests/fulltime.test.mjs loads it directly against the saved
+ * pages in tests/fixtures/fulltime/, and the Academy & Alliance tool loads
+ * the same file in the browser (window.FulltimeParse) to parse what the
+ * Sync bookmarklet hands it.
+ *
+ * WHY THE BROWSER AND NOT A SERVER
+ * --------------------------------
+ * The Cloud Function this was written for (functions/fulltime.js, retired
+ * 11/09/2026) was answered by Cloudflare's block page — HTTP 403,
+ * "Attention Required!" — from Google's address space, and a GitHub runner
+ * running real headless Chrome got the same (Actions → Probe FA Full-Time,
+ * run 1). Full-Time refuses cloud address ranges outright. A signed-in
+ * user's own browser is let in, and a page on Full-Time may fetch other
+ * Full-Time pages, so the fetching moved to a bookmarklet run there. See
+ * graphics/academy-alliance/app.js, "sync".
  */
 'use strict';
 
@@ -199,4 +211,6 @@ async function fetchDivision(div, get) {
 }
 
 
-module.exports = { parseTable, parseResults, parseFixtures, isoDate, titleOf, urlsFor, getHtml, fetchKind, fetchDivision, DIVISIONS, SEASON, BASE };
+const API = { parseTable, parseResults, parseFixtures, isoDate, titleOf, urlsFor, getHtml, fetchKind, fetchDivision, DIVISIONS, SEASON, BASE };
+if (typeof module !== 'undefined' && module.exports) module.exports = API;
+else if (typeof window !== 'undefined') window.FulltimeParse = API;

@@ -1,24 +1,26 @@
 <!DOCTYPE html>
 <!--
   Academy & Alliance Graphic — NL Tools (Graphics sub-tool)
-  Version: v1.1 (10/09/2026)
+  Version: v1.2 (11/09/2026)
   File: /graphics/academy-alliance/index.html
 
   Fixtures, results and league-table graphics for the National League
   Football Academy (2 divisions) and the U19 Alliance (9 divisions). Rows
-  come either from FA Full-Time — fetched hourly by functions/fulltime.js
-  into RTDB, never by the browser — or are pasted straight from wherever the
-  competition publishes them. Either way the names are reduced to the sides
+  come either from FA Full-Time — fetched by the Sync bookmarklet in the
+  user's own browser and saved to RTDB, because Full-Time refuses every
+  cloud address (see functions/fulltime/parse.js) — or are pasted straight
+  from wherever the competition publishes them. Either way the names are reduced to the sides
   the Divisional Constitution lists, and the card exports as a 1:1 / 4:5 /
   9:16 PNG. Crests are a toggle — many of these sides have no badge on file.
 
   Storage:
     localStorage nl-academy-alliance-gfx-v1   (tool state)
-    RTDB app-data/staff-graphics/fulltime/<division>   (read — the feed)
-    RTDB app-data/staff-graphics/fulltime-refresh/<uid> (write — asks the
-      function to fetch a division now; the function deletes it when done)
+    RTDB app-data/staff-graphics/fulltime/<division>   (the feed — read by
+      Load, written by this page in ?sync=1 mode when the bookmarklet
+      hands it the pages)
   Data:
-    FA Full-Time (fulltime.thefa.com) via functions/fulltime.js
+    FA Full-Time (fulltime.thefa.com) via the Sync bookmarklet, parsed by
+      /functions/fulltime/parse.js loaded into this page
     Divisional Constitution 2026-27 → the eleven team lists in app.js
     NL.clubs (canon) → /assets/data/clubs-meta.json  (crest records)
     /assets/crests/medium/*                          (crests, by printed name)
@@ -27,6 +29,9 @@
     toolKey 'staff-graphics' — same gate as the other graphics sub-tools.
 
   Changelog:
+    v1.2 (11/09/2026) — Sync bookmarklet replaces the Cloud Function: run
+      on any Full-Time page it fetches all eleven divisions and hands them
+      to this page in a popup, which parses and saves them. Refresh is gone.
     v1.1 (10/09/2026) — Full-Time feed: Load a division's table, results or
       fixtures from RTDB, date pickers for results/fixtures, Refresh asks the
       function to fetch now. Paste stays as the other source.
@@ -61,6 +66,8 @@
 <link rel="stylesheet" href="/graphics/_shared/brand-graphic.css">
 <link rel="stylesheet" href="styles.css">
 <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js"></script>
+<!-- The Full-Time parser, shared with the tests — the ?sync=1 popup parses what the bookmarklet hands it -->
+<script src="/functions/fulltime/parse.js?v=1.2"></script>
 
 <!-- Tool identity + changelog. Keep window.NL_TOOL and NL_TOOL_KEY in sync. -->
 <script>
@@ -71,6 +78,14 @@
   var NL_TOOL_KEY = 'staff-graphics';
 
   window.NL_CHANGELOG = [
+    {
+      date: '11/09/2026',
+      version: 'v1.2',
+      items: [
+        'The feed now comes from a bookmark. Drag "Sync Full-Time" from the Load from Full-Time card to your bookmarks bar; on any Full-Time page, click it and every division\'s table, results and fixtures arrive here within about half a minute. Full-Time refuses requests from servers, so this runs in your browser instead.',
+        'Refresh is gone — the bookmark is the refresh. The line under Load still says when the copy was made and what, if anything, is missing.'
+      ]
+    },
     {
       date: '10/09/2026',
       version: 'v1.1',
@@ -206,6 +221,16 @@
   #feedMeta { margin-top: 8px; font-size: var(--text-xs); color: var(--nl-grey-500); font-family: var(--font-bold);
     letter-spacing: var(--tracking-wide); text-transform: uppercase; }
   #feedMeta.warn { color: var(--nl-rose-red); }
+  .sync-how { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: var(--text-xs); color: var(--nl-grey-500); line-height: 1.4; }
+  .sync-bm { flex: 0 0 auto; display: inline-block; padding: 7px 12px; border: 1px dashed var(--nl-navy-300); border-radius: var(--radius-sm);
+    background: var(--nl-navy-100); color: var(--nl-league-navy); font-family: var(--font-bold); font-size: var(--text-xs);
+    letter-spacing: var(--tracking-wide); text-transform: uppercase; text-decoration: none; cursor: grab; white-space: nowrap; }
+  /* ?sync=1 — the popup the bookmarklet opens: only the sync card matters */
+  body[data-sync] .preview, body[data-sync] .card:not(#syncCard), body[data-sync] .btns, body[data-sync] footer.status { display: none; }
+  body:not([data-sync]) #syncCard { display: none; }
+  #syncStatus { font-family: var(--font-bold); font-size: var(--text-sm); color: var(--nl-ink); }
+  #syncLog { margin-top: 8px; font-size: var(--text-xs); color: var(--nl-grey-700); line-height: 1.6; white-space: pre-line; }
+  #syncLog .warn { color: var(--nl-rose-red); }
 
   /* one editor at a time; scores only make sense for results */
   body[data-type="table"] #fxEditor, body[data-type="table"] #fxHeadings { display: none; }
@@ -305,9 +330,18 @@
       </div>
       <div class="btns">
         <button type="button" class="btn btn--primary" id="feedLoadBtn">Load</button>
-        <button type="button" class="btn btn--ghost" id="feedRefreshBtn" title="Fetch this division from Full-Time now">Refresh</button>
       </div>
       <div id="feedMeta"></div>
+      <div class="sync-how">
+        <a id="syncLink" class="sync-bm" href="#" title="Drag this to your bookmarks bar">Sync Full-Time</a>
+        <span>Drag to your bookmarks bar once. Then on any Full-Time page, click it: all eleven divisions arrive here.</span>
+      </div>
+    </div>
+
+    <div class="card" id="syncCard">
+      <h2>Sync from Full-Time</h2>
+      <div id="syncStatus">Waiting for the bookmark to send the pages…</div>
+      <div id="syncLog"></div>
     </div>
 
     <div class="card" id="pasteCard">
