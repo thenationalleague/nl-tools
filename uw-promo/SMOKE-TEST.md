@@ -72,7 +72,7 @@ should see; anything failed gets a note and the run continues.
 | F4 | **Upload** on a placeholder → tick the three undertakings → **the form shows exactly 3 input boxes** → fill **2** → upload | Toast only; two placeholders become **Issued** rows with real codes; one **Overdue** placeholder remains; banner "1 still to supply" | ☐ |
 | F5 | Upload the last one | No placeholders left — the ask is simply complete; banner clears | ☐ |
 | F6 | UW tab: the three read **Issued** | **No Revoke button** on club-uploaded codes; **Dispatch** each (or spot-check one) → **Dispatched** | ☐ |
-| F7 | Club 2's Dashboard: each Dispatched row has **Mark redeemed** → press one → confirm | Row flips **Redeemed** with today's date; UW and admin see it immediately — the online loop closes club-side | ☐ |
+| F7 | Club 2's Dashboard: every uploaded row — **Issued or Dispatched** — has **Mark redeemed** → press one → confirm | Row flips **Redeemed** with today's date (an Issued code may jump straight to Redeemed — it's live in the club's own store from upload); UW and admin see it immediately — the online loop closes club-side | ☐ |
 
 ## Phase G — the console mirrors, and master powers (R)
 
