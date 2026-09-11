@@ -40,8 +40,8 @@
       "Dover Athletic", "Burgess Hill Town", "Dartford", "Eastbourne Borough", "Ebbsfleet United", "Folkestone Invicta",
       "Maidstone United", "Tonbridge Angels", "Whitstable Town" ] },
     { key: "alliance-c", comp: "alliance", label: "Division C", teams: [
-      "Barnet", "Bedford Town", "Brentford CST", "Chesham United", "Flackwell Heath", "Hemel Hempstead", "Hertford Town",
-      "Slough Town", "Wellingborough", "Wealdstone" ] },
+      "Barnet", "Bedford Town", "Brentford CST", "Chesham United", "Flackwell Heath", "Hemel Hempstead Town", "Hertford Town",
+      "Slough Town", "Wellingborough Town", "Wealdstone" ] },
     { key: "alliance-d", comp: "alliance", label: "Division D", teams: [
       "Bromley", "Cray Wanderers", "Dagenham & Redbridge", "Dartford", "Dover Athletic", "Faversham Town",
       "Folkestone Invicta", "Hollands & Blair", "Ramsgate" ] },
@@ -65,10 +65,9 @@
     for (var i = 0; i < DIVISIONS.length; i++) if (DIVISIONS[i].key === key) return DIVISIONS[i];
     return DIVISIONS[0];
   }
-  /* A printed name whose crest file is called something else — a roster
-     record spelt differently, or a side that draws its parent club's badge.
-     The constitution supplies the printed name; this supplies the file. */
-  var CREST_ALIAS = { "Hemel Hempstead": "Hemel Hempstead Town", "Wellingborough": "Wellingborough Town", "Brentford CST": "Brentford" };
+  /* A printed name whose crest file is called something else — a side that
+     draws its parent club's badge. */
+  var CREST_ALIAS = { "Brentford CST": "Brentford" };
 
   var ROSE_WHITE = "/assets/crests/National%20League%20rose%20white.png";
   /* Crests are served same-origin on purpose: the PNG export draws every image
