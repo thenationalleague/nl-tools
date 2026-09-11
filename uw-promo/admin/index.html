@@ -24,6 +24,10 @@
            write config. That is the change that stops all 72 till PINs being
            world-readable. First run mints a bootstrap master token while no
            passcode exists; nothing subscribes to RTDB until the session does.
+  Version: v8.1 (11/09/2026) — the code tables carry a stacked Scheme
+           contact column (name over muted role/email — owner: the person
+           to chase, on the row you chase them from), fed by the contacts
+           subscription; placeholder rows carry it too.
   Version: v8.0 (11/09/2026) — Redeem… renders only on Dispatched rows
            (owner: a code cannot be redeemed before it is sent out); an
            Issued/Created row offers Dispatch alone.
@@ -324,9 +328,9 @@
       <div class="table-wrap">
         <table class="table">
           <thead><tr>
-            <th>Code</th><th>Status</th><th>Club</th><th>Redeemed</th><th>Added</th><th>By</th><th></th>
+            <th>Code</th><th>Status</th><th>Club</th><th>Scheme contact</th><th>Redeemed</th><th>Added</th><th>By</th><th></th>
           </tr></thead>
-          <tbody id="rows"><tr class="loading-row"><td colspan="7">Loading codes…</td></tr></tbody>
+          <tbody id="rows"><tr class="loading-row"><td colspan="8">Loading codes…</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -453,7 +457,8 @@
     UWP.ref('requests').on('value', function (s) { REQS = s.val() || {}; if (unlocked) renderCodes(); });
     UWP.ref('contacts').on('value', function (s) {
       CONTACTS_ALL = s.val() || {};
-      if (unlocked) renderAccess();
+      // The codes tables carry a contact column too (owner 11/09/2026).
+      if (unlocked) { renderAccess(); renderCodes(); }
     });
   }
 
@@ -597,6 +602,19 @@
     return ' <button class="code-copy" ' + attr + '="' + esc(c.code) + '" title="' + label +
       '" aria-label="' + label + ' for ' + esc(c.name) + '">' +
       '<svg class="icon icon--sm"><use href="/assets/icons/sprites.svg#icon-' + icon + '"></use></svg></button>';
+  }
+
+  /* Stacked contact for the code tables: the person to chase, on the
+     row you chase them from. First contact + a count of the rest. */
+  function contactStack(code) {
+    var list = CONTACTS_ALL[code];
+    if (list && !Array.isArray(list)) list = Object.keys(list).map(function (k) { return list[k]; });
+    if (!list || !list.length) return '<span class="code-note">—</span>';
+    var c = list[0];
+    return '<div class="contact-stack">' + esc(c.name || '') +
+      (c.role ? '<span>' + esc(c.role) + '</span>' : '') +
+      (c.email ? '<span>' + esc(c.email) + '</span>' : '') +
+      (list.length > 1 ? '<span>+' + (list.length - 1) + ' more</span>' : '') + '</div>';
   }
 
   function contactCell(code) {
@@ -829,7 +847,7 @@
     }
     var tbody = document.getElementById('rows');
     if (!list.length && !phs.length) {
-      tbody.innerHTML = '<tr class="empty-row"><td colspan="7">' +
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="8">' +
         (all.length ? 'No codes match the current filters.' : 'No codes in the pool yet.') + '</td></tr>';
       return;
     }
@@ -842,6 +860,7 @@
           (overdue ? 'Overdue' : 'Requested') + '</span></td>' +
         '<td><span class="club-cell">' + NL.clubs.crestImgHtml(name, 'thumb') +
           '<span class="club-cell__name">' + esc(name) + '</span></span></td>' +
+        '<td>' + contactStack(r.club) + '</td>' +
         '<td>—</td>' +
         '<td title="' + esc(UWP.fmt(r.raisedAt)) + '">' + esc(UWP.ago(r.raisedAt)) + '</td>' +
         '<td>' + esc(r.raisedBy === 'uw' ? 'UW' : 'NL') + '</td>' +
@@ -883,6 +902,7 @@
         '<td' + (r.dispatchedAt ? ' title="Dispatched ' + esc(UWP.fmt(r.dispatchedAt)) + '"' : '') + '>' +
           UWP.pillFor(UWP.faceOf(r)) + '</td>' +
         '<td>' + clubCell + '</td>' +
+        '<td>' + contactStack(r.club) + '</td>' +
         '<td>' + esc(r.status === 'redeemed' ? UWP.fmt(r.redeemedAt) : '—') + '</td>' +
         '<td title="' + esc(UWP.fmt(r.createdAt)) + '">' + esc(UWP.ago(r.createdAt)) + '</td>' +
         '<td>' + esc(addedBy(r.createdBy)) + '</td>' +
