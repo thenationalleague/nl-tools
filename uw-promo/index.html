@@ -3,6 +3,11 @@
 <head>
 <!--
   UW Promo Codes — Utility Warehouse partner page
+  Version: v9.5 (11/09/2026) — Clubs rows compress to fit (owner): the
+           five lifecycle totals become equal square tiles inside each
+           row (self-labelled, no column per number), the method pill
+           tucks under the club name, and Remind stacks below Request —
+           the action buttons were blowing out the right edge.
   Version: v9.4 (11/09/2026) — FULL RELOCATION (owner): initiation
            lives on the Clubs rows — Add codes (in-store), Request
            codes (online) and Remind (only when that club is overdue)
@@ -238,6 +243,20 @@
 <link rel="stylesheet" href="/uw-promo/_shared.css">
 <style>
   /* .alloc-row / .byclub live in _shared.css — both consoles render them. */
+
+  /* Clubs rows (owner 11/09/2026): the five lifecycle totals sit as
+     equal square tiles inside each row — self-labelled, so the table
+     needs no column per number and the row fits the viewport. */
+  .ctile-row { display: flex; gap: 6px; }
+  .ctile {
+    width: 64px; height: 64px; flex: none;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    background: var(--navy-50); border-radius: var(--radius);
+  }
+  .ctile__num { font-size: 20px; font-weight: 700; color: var(--navy); line-height: 1; }
+  .ctile__label { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); }
+  /* Method pill tucks under the club name — one column fewer. */
+  .mrow-method { margin-top: 4px; }
 </style>
 </head>
 <body>
@@ -319,8 +338,7 @@
         <div class="toolbar__right"><button class="btn btn--ghost" id="btnClubsCsv">Export CSV</button></div></div>
       <div class="table-wrap">
         <table class="table">
-          <thead><tr><th>Club</th><th>Method</th><th>Scheme contact</th>
-            <th>Requested</th><th>Issued</th><th>Dispatched</th><th>Redeemed</th><th>Eligible</th><th></th></tr></thead>
+          <thead><tr><th>Club</th><th>Scheme contact</th><th></th><th></th></tr></thead>
           <tbody id="methodRows"></tbody>
         </table>
       </div>
@@ -1028,6 +1046,10 @@
        Remind appears only on an online club with an overdue shortfall. */
     var late = {};
     overdueOutstanding().forEach(function (e) { late[e.code] = e; });
+    function tile(num, label) {
+      return '<div class="ctile"><div class="ctile__num">' + num + '</div>' +
+        '<div class="ctile__label">' + label + '</div></div>';
+    }
     document.getElementById('methodRows').innerHTML = clubList().map(function (c) {
       var t = clubTotals(c.code);
       var acts = '';
@@ -1035,13 +1057,18 @@
         acts = '<button class="btn btn--navy btn--sm" data-addfor="' + esc(c.code) + '">Add codes</button>';
       } else if (c.route === 'online') {
         acts = '<button class="btn btn--navy btn--sm" data-reqfor="' + esc(c.code) + '">Request codes</button>' +
-          (late[c.code] ? ' <button class="btn btn--ghost btn--sm" data-remindfor="' + esc(c.code) + '">Remind</button>' : '');
+          (late[c.code] ? '<br><button class="btn btn--ghost btn--sm" style="margin-top:6px" data-remindfor="' + esc(c.code) + '">Remind</button>' : '');
       }
-      return '<tr><td>' + esc(c.name) + '</td><td style="white-space:nowrap">' + UWP.methodPill(c.route) + '</td>' +
+      return '<tr><td><div>' + esc(c.name) + '</div>' +
+        '<div class="mrow-method">' + UWP.methodPill(c.route) + '</div></td>' +
         '<td>' + contactStack(c.code) + '</td>' +
-        '<td>' + (c.route === 'online' ? t.requested : '\u2014') + '</td>' +
-        '<td>' + t.issued + '</td><td>' + t.dispatched + '</td>' +
-        '<td>' + t.redeemed + '</td><td>' + t.eligible + '</td>' +
+        '<td><div class="ctile-row">' +
+          tile(c.route === 'online' ? t.requested : '\u2014', 'Requested') +
+          /* The face's word follows the route (owner): generated
+             in-store codes are Created, club uploads are Issued. */
+          tile(t.issued, c.route === 'instore' ? 'Created' : 'Issued') + tile(t.dispatched, 'Dispatched') +
+          tile(t.redeemed, 'Redeemed') + tile(t.eligible, 'Eligible') +
+        '</div></td>' +
         '<td class="ta-right nowrap">' + acts + '</td></tr>';
     }).join('');
   }
@@ -1056,7 +1083,7 @@
   });
 
   document.getElementById('btnClubsCsv').addEventListener('click', function () {
-    var rows = [['Club', 'Method', 'Contacts', 'Requested', 'Issued', 'Dispatched', 'Redeemed', 'Eligible']];
+    var rows = [['Club', 'Method', 'Contacts', 'Requested', 'Issued/Created', 'Dispatched', 'Redeemed', 'Eligible']];
     clubList().forEach(function (c) {
       var t = clubTotals(c.code);
       var list = CONTACTS_ALL[c.code];
