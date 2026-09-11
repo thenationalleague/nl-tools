@@ -290,7 +290,8 @@
             /* §4: a club moved off in-store keeps a live till for the cards
                already in the wild — this flag is how the page knows. */
             hasCentral: g.hasCentral === true,
-            creds: g.creds || null, clubs: g.clubs || null
+            creds: g.creds || null, clubs: g.clubs || null,
+            notifyCc: g.notifyCc || null
           };
           window.UWP.session = SESSION;
           return SESSION;

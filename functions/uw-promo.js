@@ -405,6 +405,10 @@ function makeTrigger(ROOT, name) {
           logger.info(name + ": UW granted");
           return grant({
             ok: true, customToken, role: "uw",
+            value: schemeValue(cfg),
+            /* CC list for the request-chasing email draft — lives in RTDB
+               (config/support/notify), never in this public repo. */
+            notifyCc: (cfg.support && cfg.support.notify) || null,
             /* The club dropdown, with nothing sensitive in it — UW never needs
                a credential, and must not be handed 72 of them. */
             clubs: Object.keys(clubs).map((k) => ({

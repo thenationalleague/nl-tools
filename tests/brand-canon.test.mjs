@@ -953,6 +953,14 @@ test('the sprite carries a shop glyph, filled to pair with the website globe', (
   }
 });
 
+test('the sprite carries a printer glyph, stroked like the UI set', () => {
+  const sprite = readFileSync(join(REPO, 'assets/icons/sprites.svg'), 'utf8');
+  const m = /<symbol id="icon-print"[\s\S]*?<\/symbol>/.exec(sprite);
+  assert.ok(m, '#icon-print is in the sprite');
+  assert.ok(m[0].includes('stroke="currentColor"') && m[0].includes('fill="none"'),
+    'stroked to match the UI set (first user: the club till tiles)');
+});
+
 test('the handbook toolbar uses them rather than HTML entities', () => {
   const hb = readFileSync(join(REPO, 'handbook/index.html'), 'utf8');
   /* HTML comments stripped first. The markup carries a comment naming the

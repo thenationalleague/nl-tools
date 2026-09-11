@@ -3,6 +3,20 @@
 <head>
 <!--
   UW Promo Codes — Utility Warehouse partner page
+  Version: v8.9 (11/09/2026) — the chasing email grows up (owner):
+           bulleted facts (count, value each, due, upload link
+           nl.tools/uw-promo/club/), the passcode-from-the-commercial-team
+           prompt, the belt-and-braces own-retail-system reminder, the
+           fan-facing T&Cs link, and a Cc field prefilled from RTDB
+           config via the grant (addresses never live in this public
+           repo — seed config/support/notify).
+  Version: v8.8 (11/09/2026) — raising a request offers the chasing
+           email (owner): a drafted To/Subject/Message to the club's
+           scheme contact naming the count, due date and the agreed
+           value, from the commercial-team relationship — one click
+           opens the email app (mailto:), one copies the prose; all
+           editable, nothing sent by the page. The uw grant carries the
+           voucher value so the draft quotes the real figure.
   Version: v8.7 (11/09/2026) — Redemption methods is READ-ONLY here
            (owner: method changes are an NL act — pencil and modal gone,
            and the route write rule drops uw in lockstep), and the pane
@@ -856,6 +870,59 @@
     return hit ? hit.name : code;
   }
 
+  /* After a request is raised, hand Lucy the email that chases it (owner
+     11/09/2026): to the club's scheme contact, subject and prose drafted —
+     one click opens the email app, one copies the text. Everything is
+     editable before sending; nothing is sent by this page. */
+  function offerEmail(code, qty, dueRaw) {
+    var name = clubName(code);
+    var list = CONTACTS_ALL[code];
+    if (list && !Array.isArray(list)) list = Object.keys(list).map(function (k) { return list[k]; });
+    var emails = (list || []).map(function (c) { return c.email; }).filter(Boolean);
+    var first = ((list && list[0] && list[0].name) || '').split(' ')[0];
+    var body = 'Hi' + (first ? ' ' + first : '') + ',\n\n' +
+      'We\u2019ve raised a request on the National League voucher platform for ' + name + ':\n\n' +
+      '\u2022 Codes requested: ' + qty + '\n' +
+      '\u2022 Value of each code: ' + UWP.VALUE + '\n' +
+      (dueRaw ? '\u2022 Due: ' + NL.formatDate(new Date(dueRaw + 'T12:00:00').getTime()) + '\n' : '') +
+      '\u2022 Upload them here: https://nl.tools/uw-promo/club/\n\n' +
+      'Sign in with the club passcode previously sent by the National League commercial team. ' +
+      'A reminder that these codes must work in your own online retail system \u2013 ' +
+      'that is part of what you confirm when uploading.\n\n' +
+      'Fan-facing voucher terms: ' + UWP.TCS_URL + '\n\n' +
+      'Any problems, reply to this email.\n\n' +
+      'Thanks,\nUtility Warehouse';
+    var wrap = document.createElement('div');
+    wrap.innerHTML =
+      '<div class="alloc-row"><label for="emTo">To</label><input id="emTo"></div>' +
+      '<div class="alloc-row"><label for="emCc">Cc</label><input id="emCc"></div>' +
+      '<div class="alloc-row"><label for="emSubject">Subject</label><input id="emSubject"></div>' +
+      '<div class="alloc-row"><label for="emBody">Message</label><textarea id="emBody" rows="12"></textarea></div>';
+    wrap.querySelector('#emTo').value = emails.join(', ');
+    // CC comes from RTDB config (seeded out-of-band) via the grant — the
+    // commercial team's addresses never live in this public repo.
+    wrap.querySelector('#emCc').value = (UWP.session && UWP.session.notifyCc) || '';
+    wrap.querySelector('#emSubject').value = 'National League \u00d7 Utility Warehouse \u2013 ' +
+      qty + ' voucher code' + (qty === 1 ? '' : 's') + ' requested';
+    wrap.querySelector('#emBody').value = body;
+    NL.modal({
+      title: 'Email ' + name, body: wrap,
+      buttons: [
+        { label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Copy message', className: 'btn--ghost', onClick: function () {
+            NL.copy(wrap.querySelector('#emBody').value, { ok: 'Message copied' });
+          } },
+        { label: 'Open in your email app', className: 'btn--primary', onClick: function () {
+            var cc = wrap.querySelector('#emCc').value.trim();
+            location.href = 'mailto:' + encodeURIComponent(wrap.querySelector('#emTo').value) +
+              '?subject=' + encodeURIComponent(wrap.querySelector('#emSubject').value) +
+              (cc ? '&cc=' + encodeURIComponent(cc) : '') +
+              '&body=' + encodeURIComponent(wrap.querySelector('#emBody').value);
+          } }
+      ]
+    });
+  }
+
   document.getElementById('btnRequests').addEventListener('click', openRequests);
 
   function openRequests() {
@@ -900,6 +967,7 @@
         });
         toast('Request raised — ' + clubName(code) + ' will see it on their dashboard', 'success');
         ctrl.close();
+        offerEmail(code, qty, dueRaw);
       }).catch(function (err) { toast('Failed: ' + err.message, 'error'); });
     }
   }
