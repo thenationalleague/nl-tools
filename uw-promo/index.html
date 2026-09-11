@@ -3,6 +3,13 @@
 <head>
 <!--
   UW Promo Codes — Utility Warehouse partner page
+  Version: v9.11 (11/09/2026) — tiles become mutually exclusive
+           buckets (owner): Requested counts only the still-unfilled
+           remainder of open asks — each upload moves the code to
+           Issued, so a fully supplied request clears — and Total is
+           the sum of the four buckets, so a club with 5 requested and
+           nothing issued reads Total 5, not 0. Email drafts' To/Cc
+           join with semicolons — Outlook's separator.
   Version: v9.10 (11/09/2026) — Revoke and Release leave this console
            (owner): both are corrections, and corrections are NL master
            powers — Revoke and Release live on there. Dispatch is the
@@ -875,10 +882,14 @@
       '<div class="alloc-row"><label for="emCc">Cc</label><input id="emCc"></div>' +
       '<div class="alloc-row"><label for="emSubject">Subject</label><input id="emSubject"></div>' +
       '<div class="alloc-row"><label for="emBody">Message</label><textarea id="emBody" rows="12"></textarea></div>';
-    wrap.querySelector('#emTo').value = emails.join(', ');
+    // Semicolon-separated (owner 11/09/2026): these fields get pasted
+    // into Outlook, whose separator is the semicolon.
+    wrap.querySelector('#emTo').value = emails.join('; ');
     // CC comes from RTDB config (seeded out-of-band) via the grant — the
-    // commercial team's addresses never live in this public repo.
-    wrap.querySelector('#emCc').value = (UWP.session && UWP.session.notifyCc) || '';
+    // commercial team's addresses never live in this public repo. Stored
+    // comma-separated; rendered with Outlook's semicolons.
+    wrap.querySelector('#emCc').value = String((UWP.session && UWP.session.notifyCc) || '')
+      .split(/[,;]/).map(function (s) { return s.trim(); }).filter(Boolean).join('; ');
     wrap.querySelector('#emSubject').value = 'National League \u00d7 Utility Warehouse \u2013 ' +
       qty + ' voucher code' + (qty === 1 ? '' : 's') + (remind ? ' outstanding (reminder)' : ' requested');
     wrap.querySelector('#emBody').value = body;
@@ -995,14 +1006,20 @@
      pencil and the shared modal are gone from this console, and the
      route write rule no longer grants uw. The pane keeps the master
      view's method stat cards, minus the powers. */
-  /* Per-club lifecycle totals (owner 11/09/2026): requested is the sum
-     of asks (online clubs only), Issued folds the Created equivalents,
-     Total = every code the club has earned — everything registered to
-     it bar revoked (withdrawn) ones. Expired counts: it was earned,
-     it just died unused. (Replaced Eligible, owner 11/09/2026.) */
+  /* Per-club lifecycle totals — mutually exclusive buckets (owner
+     11/09/2026): a code lives in exactly ONE bucket and moves along
+     the line. Requested counts only the still-unfilled remainder of
+     open asks (each upload leaves it and becomes Issued); Issued folds
+     the Created equivalents and holds until dispatch; then Dispatched;
+     then Redeemed. Total is simply the sum of the four, so the row
+     always reconciles at a glance. Expired and revoked codes sit in no
+     bucket and no total. */
   function clubTotals(code) {
     var t = { requested: 0, issued: 0, dispatched: 0, redeemed: 0, total: 0 };
-    reqList().forEach(function (r) { if (r.club === code) t.requested += parseInt(r.qty, 10) || 0; });
+    reqList().forEach(function (r) {
+      if (r.club !== code || r.status !== 'open') return;
+      t.requested += Math.max(0, (parseInt(r.qty, 10) || 0) - uploadedFor(r._id));
+    });
     Object.keys(CODES).forEach(function (k) {
       var r = CODES[k];
       if (r.club !== code) return;
@@ -1010,8 +1027,8 @@
       if (f === 'created' || f === 'issued') t.issued++;
       else if (f === 'dispatched') t.dispatched++;
       else if (f === 'redeemed') t.redeemed++;
-      if (r.status !== 'revoked') t.total++;
     });
+    t.total = t.requested + t.issued + t.dispatched + t.redeemed;
     return t;
   }
 
