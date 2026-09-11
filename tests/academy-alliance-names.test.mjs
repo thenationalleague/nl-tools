@@ -83,7 +83,7 @@ const CASES = [
   ['Folkestone Invicta FC U19 Academy', 'alliance-b', 'Folkestone Invicta', 'Folkestone Invicta'],
   ['Eastbourne Borough FC U19', 'alliance-b', 'Eastbourne Borough', 'Eastbourne Borough'],
   ['Maidstone United FC U19 Academy (2)', 'alliance-b', 'Maidstone United', 'Maidstone United'],
-  ['Burgess Hill Town U19 Burgess Hill Town', 'alliance-b', 'Burgess Hill', null],
+  ['Burgess Hill Town U19 Burgess Hill Town', 'alliance-b', 'Burgess Hill Town', null],
   ['Ebbsfleet United Youth U19 Academy', 'alliance-b', 'Ebbsfleet United', 'Ebbsfleet United'],
   ['Whitstable Town FC U19 Academy U19', 'alliance-b', 'Whitstable Town', null],
   ['Dover Athletic FC U19 Academy Whites', 'alliance-b', 'Dover Athletic', 'Dover Athletic'],
