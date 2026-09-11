@@ -260,11 +260,6 @@
     table.appendChild(colhead);
     table.appendChild(rowsEl);
 
-    /* a Rose Red tail below the sponsor; CSS shows it only where a short
-       table leaves spare height (9:16) */
-    var tail = document.createElement("div");
-    tail.className = "gfx-tail";
-
     /* assemble — dirs 3 & 4 wrap the table in a framed card on a navy field */
     if (state.dir === "3" || state.dir === "4") {
       var frame = document.createElement("div");
@@ -272,13 +267,11 @@
       frame.appendChild(head);
       frame.appendChild(table);
       frame.appendChild(legend);
-      frame.appendChild(tail);
       gfx.appendChild(frame);
     } else {
       gfx.appendChild(head);
       gfx.appendChild(table);
       gfx.appendChild(legend);
-      gfx.appendChild(tail);
     }
 
     gfxHost.innerHTML = "";
