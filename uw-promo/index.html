@@ -3,6 +3,12 @@
 <head>
 <!--
   UW Promo Codes — Utility Warehouse partner page
+  Version: v9.3 (11/09/2026) — the landing tab becomes CLUBS (owner):
+           the per-club overview grows lifecycle totals — Requested
+           (online clubs only), Issued (Created folded in), Dispatched,
+           Redeemed, and Eligible (active + unexpired, the
+           reconciliation number) — plus its own CSV export with
+           contacts inline.
   Version: v9.2 (11/09/2026) — overdue chasing (owner): placeholder
            rows show their due date under a "Requested (overdue)" pill,
            and a toolbar Chase overdue button (Online tab, only while
@@ -258,10 +264,11 @@
   </div>
 
   <div class="wrap">
-    <!-- Methods lead (owner 11/09/2026): UW lands on the club list with
-         methods and every contact — the codes tabs are the working panes. -->
+    <!-- Clubs lead (owner 11/09/2026): UW lands on the per-club overview —
+         method, every contact, and the lifecycle totals — with the codes
+         tabs as the working panes. (data-mtab key stays 'methods'.) -->
     <div class="tabs" id="methodTabs">
-      <button class="tab active" data-mtab="methods">Redemption methods</button>
+      <button class="tab active" data-mtab="methods">Clubs</button>
       <button class="tab" data-mtab="instore">In-store codes</button>
       <button class="tab" data-mtab="online">Online codes</button>
     </div>
@@ -304,9 +311,12 @@
          UW manages about a club. -->
     <div id="pane-methods">
       <div class="stats" id="methodStats"></div>
+      <div class="toolbar"><div class="toolbar__left"></div>
+        <div class="toolbar__right"><button class="btn btn--ghost" id="btnClubsCsv">Export CSV</button></div></div>
       <div class="table-wrap">
         <table class="table">
-          <thead><tr><th>Club</th><th>Method</th><th>Scheme contact</th></tr></thead>
+          <thead><tr><th>Club</th><th>Method</th><th>Scheme contact</th>
+            <th>Requested</th><th>Issued</th><th>Dispatched</th><th>Redeemed</th><th>Eligible</th></tr></thead>
           <tbody id="methodRows"></tbody>
         </table>
       </div>
@@ -410,11 +420,13 @@
       CODES = s.val() || {};
       codesLoaded = true;
       // The club filter keeps method-changed clubs only while they own
-      // codes on the tab, so it tracks the codes node too.
+      // codes on the tab, so it tracks the codes node too — and the Clubs
+      // pane's totals track every codes tick.
       buildClubFilter();
+      renderMethods();
       render();
     });
-    UWP.ref('requests').on('value', function (s) { REQS = s.val() || {}; render(); });
+    UWP.ref('requests').on('value', function (s) { REQS = s.val() || {}; renderMethods(); render(); });
     UWP.ref('contacts').on('value', function (s) { CONTACTS_ALL = s.val() || {}; renderMethods(); render(); });
     buildClubFilter();
     buildStatusFilter();
@@ -1039,6 +1051,24 @@
      pencil and the shared modal are gone from this console, and the
      route write rule no longer grants uw. The pane keeps the master
      view's method stat cards, minus the powers. */
+  /* Per-club lifecycle totals (owner 11/09/2026): requested is the sum
+     of asks (online clubs only), Issued folds the Created equivalents,
+     Eligible = active and unexpired — the reconciliation number. */
+  function clubTotals(code) {
+    var t = { requested: 0, issued: 0, dispatched: 0, redeemed: 0, eligible: 0 };
+    reqList().forEach(function (r) { if (r.club === code) t.requested += parseInt(r.qty, 10) || 0; });
+    Object.keys(CODES).forEach(function (k) {
+      var r = CODES[k];
+      if (r.club !== code) return;
+      var f = UWP.faceOf(r);
+      if (f === 'created' || f === 'issued') t.issued++;
+      else if (f === 'dispatched') t.dispatched++;
+      else if (f === 'redeemed') t.redeemed++;
+      if (r.status === 'active' && !UWP.isExpired(r)) t.eligible++;
+    });
+    return t;
+  }
+
   function renderMethods() {
     var byRoute = { instore: 0, online: 0, unassigned: 0 };
     clubList().forEach(function (c) { byRoute[c.route] = (byRoute[c.route] || 0) + 1; });
@@ -1047,10 +1077,30 @@
       '<div class="stat stat--info"><div class="stat__num">' + byRoute.online + '</div><div class="stat__label">Online</div></div>' +
       '<div class="stat' + (byRoute.unassigned ? ' stat--pending' : '') + '"><div class="stat__num">' + byRoute.unassigned + '</div><div class="stat__label">Unassigned</div></div>';
     document.getElementById('methodRows').innerHTML = clubList().map(function (c) {
+      var t = clubTotals(c.code);
       return '<tr><td>' + esc(c.name) + '</td><td style="white-space:nowrap">' + UWP.methodPill(c.route) + '</td>' +
-        '<td>' + contactStack(c.code) + '</td></tr>';
+        '<td>' + contactStack(c.code) + '</td>' +
+        '<td>' + (c.route === 'online' ? t.requested : '\u2014') + '</td>' +
+        '<td>' + t.issued + '</td><td>' + t.dispatched + '</td>' +
+        '<td>' + t.redeemed + '</td><td>' + t.eligible + '</td></tr>';
     }).join('');
   }
+
+  document.getElementById('btnClubsCsv').addEventListener('click', function () {
+    var rows = [['Club', 'Method', 'Contacts', 'Requested', 'Issued', 'Dispatched', 'Redeemed', 'Eligible']];
+    clubList().forEach(function (c) {
+      var t = clubTotals(c.code);
+      var list = CONTACTS_ALL[c.code];
+      if (list && !Array.isArray(list)) list = Object.keys(list).map(function (k) { return list[k]; });
+      var contacts = (list || []).map(function (x) {
+        return x.name + (x.email ? ' <' + x.email + '>' : '');
+      }).join('; ');
+      rows.push([c.name, c.route, contacts,
+        c.route === 'online' ? t.requested : '', t.issued, t.dispatched, t.redeemed, t.eligible]);
+    });
+    NL.download('uw-promo-clubs-' + UWP.dateStamp() + '.csv', NL.csv(rows, { bom: true }), 'text/csv;charset=utf-8');
+    toast('CSV exported', 'success');
+  });
 
 })();
 </script>
