@@ -78,7 +78,7 @@ should see; anything failed gets a note and the run continues.
 
 | # | Action | Expected | Pass |
 |---|--------|----------|------|
-| G1 | Admin → **In-store codes** / **Online codes** tabs | UW's exact shape: same stats ("Codes uploaded" online, no Expired card there), same placeholder rows, same per-row Dispatch — plus Redeem… / Register… / Revoke / Delete on rows, paste-capable add + **Code adds** on In-store, **Request club codes** on Online | ☐ |
+| G1 | Admin → **In-store codes** / **Online codes** tabs | UW's exact shape: same stats ("Codes uploaded" online, no Expired card there), same placeholder rows, same per-row Dispatch — plus Redeem… / Revoke / Delete on rows, generate-only add + **Code adds** on In-store, **Request club codes** on Online | ☐ |
 | G2 | **Delete** a code (typed `DELETE`); **Revoke** a redeemed one (typed `REVOKE`) | Master-only powers work; each leaves an audit entry | ☐ |
 | G3 | **Audit** tab | Every action from A–F attributed: adds, dispatches, redemptions (incl. the club-marked one), requests, method changes with contact names | ☐ |
 | G4 | **Code adds** | Grouped by date stamp + club + author; no batch labels anywhere; delete-unused keeps redeemed codes | ☐ |
