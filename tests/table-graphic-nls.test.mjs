@@ -56,7 +56,7 @@ function loadSection() {
     function $() { return { disabled: false }; }   /* the Load button, as far as the section cares */
     ${src.slice(a, b)}
     return { applyTable: applyTable, fillZonesByPosition: fillZonesByPosition,
-             clearZones: clearZones, nlsTeamName: nlsTeamName, gdText: gdText,
+             clearZones: clearZones, nlsTeamName: nlsTeamName, pl2Name: pl2Name, gdText: gdText,
              nlsSeason: nlsSeason, loadFromNLS: loadFromNLS, fetched: function () { return FETCHED; } };
   `;
   const api = new Function('META', 'OPTA', 'STATUS', 'state', body)(meta, optaIndex, status, state);
@@ -92,6 +92,8 @@ test('season comes from clubs-meta, not the clock', () => {
 test('clubs resolve on optaID, so the crest never depends on the feed spelling', () => {
   const { nlsTeamName } = loadSection();
   assert.equal(nlsTeamName(row(optaFor('FC Halifax Town'), 1)), 'FC Halifax Town');
+  assert.equal(nlsTeamName({ id: 't0000000', attributes: { teamName: 'Manchester United U21' } }), 'Manchester United PL2',
+    'a U21 guest side normalises to PL2 as it comes off the feed');
   assert.equal(nlsTeamName({ id: 't0000000', attributes: { teamName: 'Someone New' } }), 'Someone New',
     'an unmatched id keeps the feed name rather than blanking the row');
 });
@@ -190,6 +192,15 @@ test('a cup group asks the feed for its round, a division does not', async () =>
   await new Promise(r => setTimeout(r, 0));
   assert.match(t.fetched()[1], /competitionID=373&/);
   assert.doesNotMatch(t.fetched()[1], /roundID/);
+});
+
+test('pl2Name: U21 and U23 tags become PL2; anything else is untouched', () => {
+  const { pl2Name } = loadSection();
+  assert.equal(pl2Name('Wolverhampton Wanderers U21'), 'Wolverhampton Wanderers PL2');
+  assert.equal(pl2Name('Stoke City U23'), 'Stoke City PL2');
+  assert.equal(pl2Name('Derby County PL2'), 'Derby County PL2');
+  assert.equal(pl2Name('FC Halifax Town'), 'FC Halifax Town');
+  assert.equal(pl2Name('  Nottingham Forest u21 '), 'Nottingham Forest PL2');
 });
 
 test('Mark by position on a cup group marks the two qualifiers as Q and nothing else', () => {
