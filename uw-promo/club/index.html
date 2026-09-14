@@ -9,6 +9,13 @@
            before UW presses Dispatch — the face jumps straight from
            Issued to Redeemed, exactly as the in-store till has always
            allowed for Created codes.
+  Version: v8.15 (14/09/2026) — the anonymity sentence becomes cards
+           (owner "hate this"): the in-store Dashboard's Your codes
+           section leads with unredeemed / redeemed / redeemed-today
+           cards — the unredeemed count IS the anonymity story — and
+           the table below just holds the redeemed rows. The stat row
+           under the redeem box hides on the Dashboard (it was the
+           same numbers); the till keeps it.
   Version: v8.14 (14/09/2026) — three till-page tidies (owner): the
            mode pill is gone at the till (it crowded the mobile
            header; the navy coat already places you), an empty
@@ -481,8 +488,8 @@
     padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--radius); color: var(--text);
     text-transform: uppercase; }
   .up-line:focus-visible { outline: none; box-shadow: var(--focus-ring); border-color: var(--primary); }
-  .life-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
-  @media (max-width: 560px) { .life-cards { grid-template-columns: repeat(2, 1fr); } }
+  /* auto-fit: online shows four cards, in-store three — both fill the row. */
+  .life-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-bottom: 12px; }
   .life-card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--off-white);
     padding: 8px 6px; text-align: center; }
   .life-card b { display: block; font-size: var(--text-lg); font-weight: 900;
@@ -515,6 +522,10 @@
   /* The terms link sits on its own line — mid-sentence it wrapped
      awkwardly under the hint text (owner 14/09/2026). */
   .pos__tcs { display: block; margin-top: 6px; }
+  /* Canon .stats declares display:grid !important, which beats both
+     the UA's [hidden] and a plain override — the Dashboard's hidden
+     stat row kept painting until this matched its weight. */
+  .stats[hidden] { display: none !important; }
   /* Only the ground-level footer recolours — gate__foot and the other
      .checker__meta lines live INSIDE white cards and keep their ink. */
   body.door-till #tcsFoot { color: var(--navy-200); }
@@ -994,12 +1005,16 @@
        central codes are "created", not "issued" — the row was answering
        questions nobody asked in the wrong words (owner 10/09/2026); its
        real numbers live in the till stats. */
-    document.getElementById('lifeCounts').hidden = ROUTE !== 'online';
+    document.getElementById('lifeCounts').hidden = false;   // both routes card their counts
     /* The redeemed-at-your-club list is till furniture (owner 11/09/2026):
        on the Dashboard it doubles the code table, so the manager view
        keeps the redeem box and stats but not the list. */
     document.getElementById('redeemedHead').hidden =
       document.getElementById('list').hidden = MODE === 'manager';
+    /* The stat row under the redeem box is till furniture too (owner
+       14/09/2026): on the Dashboard those counts are the cards at the
+       top of Your codes. */
+    document.getElementById('stats').hidden = MODE === 'manager';
     // The redeem block's heading: list-head in the manager flow, the big
     // in-card title at the till.
     document.getElementById('tillHead').hidden = MODE !== 'manager';
@@ -1399,15 +1414,15 @@
         for (var i = f.got; i < f.qty; i++) phs.push({ req: r, face: f });
       });
     }
-    var hidden = hiddenCentralCount();
-    var note = hidden
-      ? '<tr class="empty-row"><td colspan="5">' + hidden + ' unredeemed code' + (hidden === 1 ? '' : 's') +
-        ' not shown — codes stay anonymous until redeemed at your till.</td></tr>'
-      : '';
+    /* The anonymity SENTENCE is gone (owner 14/09/2026): the unredeemed
+       count is a card above the table now, so the table just holds
+       what's showable. */
     if (!list.length && !phs.length) {
-      tb.innerHTML = note + (note ? '' : '<tr class="empty-row"><td colspan="5">' +
-        (invRows().length ? 'Nothing matches those filters.' : 'No codes registered to your club yet.') +
-        '</td></tr>');
+      tb.innerHTML = '<tr class="empty-row"><td colspan="5">' +
+        (invRows().length ? 'Nothing matches those filters.'
+          : hiddenCentralCount() ? 'Redeemed codes will appear here.'
+          : 'No codes registered to your club yet.') +
+        '</td></tr>';
       return;
     }
     var phHtml = phs.map(function (p) {
@@ -1420,7 +1435,7 @@
         '<td title="' + esc(UWP.fmt(r.raisedAt)) + '">' + esc(UWP.ago(r.raisedAt)) + '</td>' +
         '<td></td></tr>';
     }).join('');
-    tb.innerHTML = note + phHtml + list.map(function (r) {
+    tb.innerHTML = phHtml + list.map(function (r) {
       /* An online club settles its own redemptions (owner N8): its store is
          where fans redeem, so the club closes the loop here — with a
          confirm, and on its own uploaded codes only. */
@@ -1916,10 +1931,25 @@
     };
     /* The spec's own sentence — requested / issued / dispatched / redeemed —
        as four small cards. */
-    document.getElementById('lifeCounts').innerHTML =
-      ['requested', 'issued', 'dispatched', 'redeemed'].map(function (k) {
-        return '<div class="life-card"><b>' + counts[k] + '</b><span>' + k + '</span></div>';
-      }).join('');
+    /* In-store gets its own card set (owner 14/09/2026): the codes are
+       anonymous until redeemed, so the cards say the counts the table
+       can't — replacing the "N not shown" sentence, and the stat row
+       that sat under the redeem box. */
+    if (ROUTE === 'online') {
+      document.getElementById('lifeCounts').innerHTML =
+        ['requested', 'issued', 'dispatched', 'redeemed'].map(function (k) {
+          return '<div class="life-card"><b>' + counts[k] + '</b><span>' + k + '</span></div>';
+        }).join('');
+    } else {
+      var central = rows.filter(isCentral);
+      var red = central.filter(function (r) { return r.status === 'redeemed'; });
+      var dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
+      var today = red.filter(function (r) { return (r.redeemedAt || 0) >= dayStart.getTime(); }).length;
+      document.getElementById('lifeCounts').innerHTML =
+        '<div class="life-card"><b>' + hiddenCentralCount() + '</b><span>unredeemed</span></div>' +
+        '<div class="life-card"><b>' + red.length + '</b><span>redeemed</span></div>' +
+        '<div class="life-card"><b>' + today + '</b><span>redeemed today</span></div>';
+    }
 
     var open = list.filter(function (r) { return r.status === 'open'; });
     var remaining = open.reduce(function (n, r) {
