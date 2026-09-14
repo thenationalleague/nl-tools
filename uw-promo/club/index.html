@@ -9,6 +9,21 @@
            before UW presses Dispatch — the face jumps straight from
            Issued to Redeemed, exactly as the in-store till has always
            allowed for Created codes.
+  Version: v8.14 (14/09/2026) — three till-page tidies (owner): the
+           mode pill is gone at the till (it crowded the mobile
+           header; the navy coat already places you), an empty
+           redeemed list shows nothing instead of a grey card
+           floating on the navy ground, and the voucher-terms link
+           sits on its own line under the mistake hint.
+  Version: v8.13 (11/09/2026) — the manager gate shows the full NL
+           logo (rose + wordmark, owner) instead of the bare rose; the
+           staff door still swaps in the club's crest.
+  Version: v8.12 (11/09/2026) — the manager gate stops implying PINs
+           work there (owner): the sub is just the passcode ask, and
+           the foot signposts the till — "Your PIN works from the link
+           or QR on your till card, not here." No hyperlink by design:
+           pre-sign-in the page can't know the club, and till URLs
+           carry per-club tokens.
   Version: v8.11 (11/09/2026) — the till wears navy (owner): the
            staff-door gate and the till interface sit on a navy
            ground with the canon navy idbar (.nl-idbar--open), so the
@@ -497,6 +512,9 @@
      go navy (idbar via the canon --open variant); cards stay white. */
   body.door-till { background: var(--navy); }
   body.door-till .list-head { color: var(--white); border-color: var(--navy-600); }
+  /* The terms link sits on its own line — mid-sentence it wrapped
+     awkwardly under the hint text (owner 14/09/2026). */
+  .pos__tcs { display: block; margin-top: 6px; }
   /* Only the ground-level footer recolours — gate__foot and the other
      .checker__meta lines live INSIDE white cards and keep their ink. */
   body.door-till #tcsFoot { color: var(--navy-200); }
@@ -510,7 +528,7 @@
   <div class="gate__card">
     <img class="gate__lockup" src="/assets/partners/Utility%20Warehouse.png" alt="Utility Warehouse"
          onerror="this.onerror=null;this.style.display='none';">
-    <img class="gate__logo" id="gateLogo" src="/assets/crests/National%20League%20rose.png" alt="National League">
+    <img class="gate__logo gate__logo--nl" id="gateLogo" src="/assets/crests/The%20National%20League.png" alt="The National League">
     <div class="gate__title" id="gateTitle">Promo Codes</div>
     <div class="gate__sub" id="gateSub">Loading…</div>
     <div id="gateForm" style="display:none">
@@ -602,7 +620,7 @@
       <div><button class="btn btn--primary pos__btn" id="posBtn">Redeem</button></div>
       <div class="pos__msg" id="posMsg" role="alert" aria-live="polite"></div>
       <div class="pos__hint">Redeemed by mistake? Contact the National League — codes can be released back.
-        <a href="#" id="tcsLinkTill" target="_blank" rel="noopener">Utility Warehouse voucher terms</a></div>
+        <a href="#" id="tcsLinkTill" class="pos__tcs" target="_blank" rel="noopener">Utility Warehouse voucher terms</a></div>
     </div>
 
     <div class="stats" id="stats"></div>
@@ -801,6 +819,7 @@
   function showGateForm(clubName) {
     if (clubName) {
       var logo = document.getElementById('gateLogo');
+      logo.classList.remove('gate__logo--nl');   // back to crest sizing
       logo.src = NL.clubs.crestUrl(clubName, 'medium');
       NL.clubs.wireCrestImg(logo, clubName);
       document.getElementById('gateTitle').textContent = clubName;
@@ -815,14 +834,19 @@
     var staffDoor = !!new URLSearchParams(location.search).get('c');
     document.getElementById('gateSub').textContent = staffDoor
       ? 'Enter your till PIN.'
-      : 'Enter your manager passcode. Till PINs work from the link on your till card.';
+      : 'Enter your manager passcode.';
     /* Each door answers its own "forgotten?" (owner 11/09/2026). The PIN
        lives on the Dashboard; the passcode came by email from the
        commercial team (a role inbox, not a person — safe in public copy). */
     var dashUrl = '/uw-promo/club/' + (UWP.isTest ? '?env=test' : '');
+    /* No "click here" to the till (owner asked for one, 11/09/2026):
+       before sign-in this page cannot know which club is visiting, and
+       every club's till URL carries its own private token \u2014 a public
+       chooser would hand out every door. Point at the card instead. */
     document.getElementById('gateFoot').innerHTML = staffDoor
       ? 'Forgotten your PIN? It\u2019s shown on the club Dashboard \u2014 <a href="' + dashUrl + '">sign in here</a>.'
-      : 'Forgotten your passcode? Check your emails, or ask ' +
+      : 'Looking to redeem a code at the till? Your PIN works from the link or QR on your till card, not here.<br>' +
+        'Forgotten your passcode? Check your emails, or ask ' +
         '<a href="mailto:commercial@thenationalleague.org.uk">commercial@thenationalleague.org.uk</a>.';
     document.getElementById('gateForm').style.display = 'block';
     var inp = document.getElementById('gateInput'), err = document.getElementById('gateErr'),
@@ -984,6 +1008,9 @@
     var tag = document.getElementById('modeTag');
     /* Owner N6 (10/09/2026): the manager view is the club's Dashboard, and
        the second half names the METHOD, not a bare adjective. */
+    /* No pill at the till (owner 14/09/2026): it crowded the mobile
+       header, and the navy coat already says where you are. */
+    tag.hidden = !setup && MODE !== 'manager';
     tag.textContent = setup ? 'Setup'
       : (MODE === 'manager' ? 'Dashboard' : 'Till') + (ROUTE === 'online' ? ' · Online method' : ' · In-store method');
     tag.classList.toggle('mode-tag--admin', MODE === 'manager');
@@ -1158,12 +1185,14 @@
       '<div class="stat"><div class="stat__num">' + waiting + '</div><div class="stat__label">Yet to be redeemed</div></div>';
 
     var el = document.getElementById('list');
-    if (!codesLoaded) { el.innerHTML = '<div class="empty-state"><div class="empty-state__text">Loading…</div></div>'; return; }
-    if (!list.length) {
-      el.innerHTML = '<div class="empty-state"><div class="empty-state__title">Nothing redeemed yet</div>' +
-        '<div class="empty-state__text">Codes you redeem at the till will appear here.</div></div>';
-      return;
-    }
+    /* An empty list shows NOTHING (owner 11/09/2026): the grey
+       empty-state card floated on the navy till ground with nothing to
+       sit on, and the stats card already says redeemed = 0. The section
+       appears with its first redemption. */
+    var show = MODE !== 'manager' && codesLoaded && list.length > 0;
+    document.getElementById('redeemedHead').hidden = !show;
+    el.hidden = !show;
+    if (!show) { el.innerHTML = ''; return; }
     el.innerHTML = list.map(function (r) {
       return '<div class="code-row">' +
         '<div class="code-row__main"><span class="code-mono">' + esc(r.code) + '</span>' +
