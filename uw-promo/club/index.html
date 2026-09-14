@@ -9,6 +9,13 @@
            before UW presses Dispatch — the face jumps straight from
            Issued to Redeemed, exactly as the in-store till has always
            allowed for Created codes.
+  Version: v8.17 (14/09/2026) — the till gets the upload flow's
+           watchdog (live wedge: offline, an RTDB read neither resolves
+           nor rejects, so "Checking…" hung forever with busy stuck) —
+           sign-in check, code lookup and the redemption transaction
+           all race a clock and fail loud. withTimeout hoisted to page
+           scope. (The refresh-asks-for-the-PIN-again behaviour is by
+           design: the till stores nothing, ever.)
   Version: v8.16 (14/09/2026) — the in-store Dashboard splits into two
            closed tabs (owner): Dashboard (PIN, codes, checker,
            contact) and Redeem — the pure till surface (big title,
@@ -791,6 +798,16 @@
   var CONTACTS = [], REQS = {};
   var MODE = 'till';                   // 'till' (4-digit PIN) | 'manager' (club passcode)
   var MTAB = 'dash';                   // in-store manager tab: 'dash' | 'redeem'
+
+  /* Watchdog (10/09/2026 upload wedge; hoisted 14/09/2026 after the
+     TILL wedged the same way): offline, an RTDB read neither resolves
+     nor rejects, so any await without a clock leaves "Checking…" up
+     forever with busy stuck true. Every till/upload step races this. */
+  function withTimeout(p, ms, label) {
+    return Promise.race([p, new Promise(function (ignore, fail) {
+      setTimeout(function () { fail(new Error(label + ' did not respond after ' + (ms / 1000) + 's')); }, ms);
+    })]);
+  }
   var CODES = {}, codesLoaded = false, unlocked = false, codesQuery = null;
   var busy = false;
 
@@ -1113,8 +1130,9 @@
     if (norm.length < 3) { setMsg('Enter the full code.', 'err'); return; }
     busy = true;
     setMsg('Checking…', 'info');
-    UWP.ensureAuth().then(function () {
-      return UWP.ref('codes').orderByChild('norm').equalTo(norm).once('value');
+    withTimeout(UWP.ensureAuth(), 10000, 'The sign-in check').then(function () {
+      return withTimeout(UWP.ref('codes').orderByChild('norm').equalTo(norm).once('value'),
+        10000, 'The code lookup');
     }).then(function (s) {
       var val = s.val();
       if (!val) { busy = false; refused(); return; }
@@ -1132,7 +1150,7 @@
       attemptRedeem(id, rec);
     }).catch(function (err) {
       busy = false;
-      setMsg('Could not check the code: ' + err.message, 'err');
+      setMsg('Could not check the code: ' + err.message + ' — check the connection and try again.', 'err');
     });
   }
 
@@ -1177,9 +1195,9 @@
      first wins; the loser sees the already-redeemed details. The updater is
      UWP.redeemTxn (pure, unit-tested in tests/uw-promo.test.mjs). */
   function attemptRedeem(id, rec) {
-    UWP.ref('codes/' + id).transaction(function (cur) {
+    withTimeout(UWP.ref('codes/' + id).transaction(function (cur) {
       return UWP.redeemTxn(cur, CLUB, actor());
-    }).then(function (res) {
+    }), 15000, 'The redemption').then(function (res) {
       busy = false;
       if (!res.committed) {
         var cur = res.snapshot && res.snapshot.val();
@@ -1715,15 +1733,6 @@
 
     upBusy = true;
     upMsg('Checking ' + list.length + ' code' + (list.length === 1 ? '' : 's') + '…');
-    /* Watchdog (10/09/2026, live wedge): a hang anywhere here used to
-       leave "Checking…" up forever with upBusy stuck true — the modal
-       swallowed every tap and nothing named the failing step. Any step
-       that stalls now surfaces as a message that says WHICH one. */
-    function withTimeout(p, ms, label) {
-      return Promise.race([p, new Promise(function (ignore, fail) {
-        setTimeout(function () { fail(new Error(label + ' did not respond after ' + (ms / 1000) + 's')); }, ms);
-      })]);
-    }
     withTimeout(UWP.ensureAuth(), 10000, 'The sign-in check').then(function () {
       return withTimeout(checkExisting(list), 20000, 'The duplicate check');
     }).then(function (clashes) {
