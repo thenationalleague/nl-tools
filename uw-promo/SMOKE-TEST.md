@@ -53,6 +53,7 @@ should see; anything failed gets a note and the run continues.
 | D3 | Look for an activity feed | **There isn't one** — the master console's audit is the log | ☐ |
 | D4 | **Check a code**: the code redeemed in C2, then a made-up one | Present (this club has a till); redeemed shows club+time; nonsense refused; 10/hr counter ticks | ☐ |
 | D5 | PIN section: see the PIN, print own till card | Both present (in-store only) | ☐ |
+| D6 | Switch to the **Redeem** tab, redeem a code, switch back | Pure till surface (big title, stats, redeemed list); redemption works; **Dashboard** tab returns the admin page; the tabs exist only on an in-store Dashboard — never online, never at the till door | ☐ |
 
 ## Phase E — Club 2 sets itself up (N)
 

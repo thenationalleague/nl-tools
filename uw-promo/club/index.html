@@ -9,6 +9,12 @@
            before UW presses Dispatch — the face jumps straight from
            Issued to Redeemed, exactly as the in-store till has always
            allowed for Created codes.
+  Version: v8.16 (14/09/2026) — the in-store Dashboard splits into two
+           closed tabs (owner): Dashboard (PIN, codes, checker,
+           contact) and Redeem — the pure till surface (big title,
+           redeem box, stats, redeemed list) for the small club whose
+           office machine is the till. Online keeps the single page;
+           the real till door is untouched.
   Version: v8.15 (14/09/2026) — the anonymity sentence becomes cards
            (owner "hate this"): the in-store Dashboard's Your codes
            section leads with unredeemed / redeemed / redeemed-today
@@ -646,6 +652,14 @@
          QR at a public kiosk, so it must not be the thing that lets someone
          commit the club to a voucher's value a time. Same URL, same QR —
          two doors, and now two routes as well (spec v42.0). -->
+    <!-- Two closed tabs, in-store manager only (owner 14/09/2026):
+         Dashboard is the admin work, Redeem is the pure till surface
+         for the small club whose office machine IS the till. -->
+    <div class="tabs" id="mgrTabs" hidden>
+      <button class="tab active" data-vtab="dash">Dashboard</button>
+      <button class="tab" data-vtab="redeem">Redeem</button>
+    </div>
+
     <div id="managerOnly" hidden>
 
     <!-- Club-supplied codes — ONLINE-route clubs only: in-store clubs get
@@ -776,6 +790,7 @@
   var ROUTE = 'instore', SUPPORT = null, HASCENTRAL = false;
   var CONTACTS = [], REQS = {};
   var MODE = 'till';                   // 'till' (4-digit PIN) | 'manager' (club passcode)
+  var MTAB = 'dash';                   // in-store manager tab: 'dash' | 'redeem'
   var CODES = {}, codesLoaded = false, unlocked = false, codesQuery = null;
   var busy = false;
 
@@ -959,9 +974,16 @@
                             follows the current route. */
   function applyView() {
     var setup = ROUTE === 'unassigned';
+    /* The in-store Dashboard splits into two closed tabs (owner
+       14/09/2026): Dashboard = admin work, Redeem = the pure till
+       surface. Online has no till and keeps the single page. */
+    var tabbed = MODE === 'manager' && !setup && ROUTE === 'instore';
+    document.getElementById('mgrTabs').hidden = !tabbed;
+    var onRedeem = tabbed && MTAB === 'redeem';
     document.getElementById('setupSection').hidden = !setup;
-    document.getElementById('tillSection').hidden = setup || !(ROUTE === 'instore' || HASCENTRAL);
-    document.getElementById('managerOnly').hidden = setup || MODE !== 'manager';
+    document.getElementById('tillSection').hidden = setup || !(ROUTE === 'instore' || HASCENTRAL) ||
+      (tabbed && !onRedeem);
+    document.getElementById('managerOnly').hidden = setup || MODE !== 'manager' || onRedeem;
     /* The upload form lives inside the codes card and opens only from a
        request's Upload button (owner N2, 10/09/2026: no unsolicited
        uploads — every uploaded code answers an ask). */
@@ -971,8 +993,8 @@
        so there is nothing here for it to check. A club still running a
        till on central codes keeps it. */
     document.getElementById('checkSection').hidden =
-      setup || MODE !== 'manager' || !(ROUTE === 'instore' || HASCENTRAL);
-    document.getElementById('pinSection').hidden = !(MODE === 'manager' && CREDS);
+      setup || MODE !== 'manager' || !(ROUTE === 'instore' || HASCENTRAL) || onRedeem;
+    document.getElementById('pinSection').hidden = !(MODE === 'manager' && CREDS) || onRedeem;
     document.getElementById('pinCard').hidden = ROUTE !== 'instore';
     document.getElementById('pinLink').hidden = ROUTE !== 'instore';
 
@@ -983,6 +1005,9 @@
        are idempotent, so re-running applyView is safe. */
     if (MODE === 'manager') {
       var mo = document.getElementById('managerOnly');
+      // The tab bar leads the page, outside #managerOnly so the Redeem
+      // tab (which hides #managerOnly) keeps its own switcher visible.
+      mo.parentNode.insertBefore(document.getElementById('mgrTabs'), mo);
       mo.insertBefore(document.getElementById('pinSection'), mo.firstChild);
       mo.parentNode.appendChild(document.getElementById('tillSection'));
       // The checker is reference tooling, not daily work (owner
@@ -998,6 +1023,7 @@
       var foot = document.getElementById('tcsFoot');
       mo.parentNode.appendChild(foot);
       // Outside #managerOnly they no longer inherit its hidden state.
+      // (On the Redeem tab they follow the Dashboard sections off.)
       cHead.hidden = cCard.hidden = foot.hidden = mo.hidden;
     }
     /* The lifecycle cards narrate the ONLINE loop (requested → issued →
@@ -1010,15 +1036,14 @@
        on the Dashboard it doubles the code table, so the manager view
        keeps the redeem box and stats but not the list. */
     document.getElementById('redeemedHead').hidden =
-      document.getElementById('list').hidden = MODE === 'manager';
+      document.getElementById('list').hidden = MODE === 'manager' && !onRedeem;
     /* The stat row under the redeem box is till furniture too (owner
        14/09/2026): on the Dashboard those counts are the cards at the
-       top of Your codes. */
-    document.getElementById('stats').hidden = MODE === 'manager';
-    // The redeem block's heading: list-head in the manager flow, the big
-    // in-card title at the till.
-    document.getElementById('tillHead').hidden = MODE !== 'manager';
-    document.getElementById('posTitle').hidden = MODE === 'manager';
+       top of Your codes. The Redeem tab IS a till surface, so it keeps
+       them, along with the redeemed list and the big in-card title. */
+    document.getElementById('stats').hidden = MODE === 'manager' && !onRedeem;
+    document.getElementById('tillHead').hidden = MODE !== 'manager' || onRedeem;
+    document.getElementById('posTitle').hidden = MODE === 'manager' && !onRedeem;
 
     var tag = document.getElementById('modeTag');
     /* Owner N6 (10/09/2026): the manager view is the club's Dashboard, and
@@ -1036,6 +1061,18 @@
     document.body.classList.toggle('door-till', MODE !== 'manager' && !setup);
     document.querySelector('.nl-idbar').classList.toggle('nl-idbar--open', MODE !== 'manager' && !setup);
   }
+
+  document.getElementById('mgrTabs').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-vtab]');
+    if (!b) return;
+    MTAB = b.getAttribute('data-vtab');
+    Array.prototype.forEach.call(document.querySelectorAll('#mgrTabs .tab'), function (t) {
+      t.classList.toggle('active', t === b);
+    });
+    applyView();
+    render();
+    if (MTAB === 'redeem') document.getElementById('posInput').focus();
+  });
 
   function subscribeCodes() {
     if (codesQuery) codesQuery.off();
@@ -1204,7 +1241,8 @@
        empty-state card floated on the navy till ground with nothing to
        sit on, and the stats card already says redeemed = 0. The section
        appears with its first redemption. */
-    var show = MODE !== 'manager' && codesLoaded && list.length > 0;
+    var show = (MODE !== 'manager' || (ROUTE === 'instore' && MTAB === 'redeem')) &&
+      codesLoaded && list.length > 0;
     document.getElementById('redeemedHead').hidden = !show;
     el.hidden = !show;
     if (!show) { el.innerHTML = ''; return; }
