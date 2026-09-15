@@ -3,6 +3,14 @@
 <head>
 <!--
   UW Promo Codes — NL master console
+  Version: v8.4 (15/09/2026) — NL admins (owner): a root-master-only card
+           adds named people who sign in with the master's full powers
+           but their OWN audit identity — every audit call already speaks
+           through ACTOR/ACTOR_LABEL, so the grant's admin name names it
+           everywhere. The roster lives in a sibling `admins` node (not
+           config, which the console subscribes to wholesale), gated by
+           rules to the root master alone, so an admin can never read
+           another's passcode. Token is uwRole master + uwAdmin id.
   Version: v4.5 (16/08/2026) — crest strings come from canon
            NL.clubs.crestImgHtml('thumb') with a NL.clubs.wireCrestImgs sweep
            after each render (UWP.crestImgHtml is gone — _shared.js v3.3).
@@ -297,7 +305,7 @@
     <img class="nl-idbar__lockup" src="/assets/divisions/The%20National%20League.png" alt="The National League">
     <div class="nl-idbar__id">
       <div class="nl-idbar__title">Promo Codes — Master</div>
-      <div class="nl-idbar__sub">Utility Warehouse partnership · NL control</div>
+      <div class="nl-idbar__sub" id="idbarSub">Utility Warehouse partnership · NL control</div>
     </div>
     <div class="nl-idbar__actions"><button class="nl-idbar__btn" id="signout">Sign out</button></div>
   </div>
@@ -373,6 +381,17 @@
           <button class="btn btn--ghost btn--sm" id="btnNotify">Change&hellip;</button>
         </div>
       </div>
+      <!-- NL admins — root master only (owner 15/09/2026): named people
+           with the master's powers but their own audit trail. An admin
+           session never sees this card, and its roster lives outside
+           config so an admin can never read another's passcode. -->
+      <div class="access-card" id="adminsCard">
+        <div class="access-card__title">NL admins <span id="adminCount" style="color:var(--text-muted);font-weight:700"></span></div>
+        <div id="adminsBody"></div>
+        <div class="access-card__row" style="margin-top:10px">
+          <button class="btn btn--ghost btn--sm" id="btnAddAdmin">Add an admin&hellip;</button>
+        </div>
+      </div>
       <div class="access-card">
         <div class="access-card__title">Utility Warehouse access</div>
         <div class="access-card__row" id="uwAccessRow"></div>
@@ -406,6 +425,7 @@
             <option value="contact">Scheme contact</option>
             <option value="support">Support details</option>
             <option value="value">Voucher value</option>
+            <option value="admin">NL admins</option>
             <option value="register">Register to club</option>
             <option value="delete">Delete</option>
             <option value="seed-clubs">Seed clubs</option>
@@ -439,7 +459,7 @@
 
   var ACTOR = 'master', ACTOR_LABEL = 'NL master';
 
-  var CONFIG = null, CODES = {}, AUDIT = {}, REQS = {}, CONTACTS_ALL = {};
+  var CONFIG = null, CODES = {}, AUDIT = {}, REQS = {}, CONTACTS_ALL = {}, ADMINS = {};
   var configLoaded = false, codesLoaded = false, auditLoaded = false, unlocked = false;
 
   function esc(s) { return NL.escHtml(s); }
@@ -476,6 +496,72 @@
       if (unlocked) { renderAccess(); renderCodes(); }
     });
   }
+
+  /* NL admins — the root master's own roster (owner 15/09/2026). Kept in
+     a sibling node, not config, so an admin session (which subscribes to
+     config) can never read another admin's passcode; rules also deny an
+     admin token the read. Only the root master ever subscribes here. */
+  function subscribeAdmins() {
+    UWP.ref('admins').on('value', function (s) {
+      ADMINS = s.val() || {};
+      if (unlocked) renderAdmins();
+    }, function () { /* an admin token is denied — expected, never subscribed */ });
+  }
+
+  function renderAdmins() {
+    var ids = Object.keys(ADMINS);
+    document.getElementById('adminCount').textContent = ids.length ? '· ' + ids.length : '';
+    var body = document.getElementById('adminsBody');
+    if (!ids.length) {
+      body.innerHTML = '<div class="code-note">No NL admins yet — each one you add gets the master’s powers under their own name in the audit.</div>';
+    } else {
+      body.innerHTML = ids.map(function (id) {
+        var a = ADMINS[id];
+        return '<div class="access-card__row" style="justify-content:space-between">' +
+          '<span><strong>' + esc(a.name || id) + '</strong> ' +
+            '<button class="cred-chip" data-copypass="' + esc(a.passcode || '') + '" title="Click to copy">' + esc(a.passcode || '——————') + '</button></span>' +
+          '<button class="btn btn--ghost btn--sm" data-rmadmin="' + esc(id) + '">Remove</button></div>';
+      }).join('');
+    }
+  }
+
+  document.getElementById('adminsBody').addEventListener('click', function (e) {
+    var cp = e.target.closest('[data-copypass]');
+    if (cp) { NL.copy(cp.getAttribute('data-copypass'), { ok: 'Passcode copied' }); return; }
+    var rm = e.target.closest('[data-rmadmin]');
+    if (!rm) return;
+    var id = rm.getAttribute('data-rmadmin'), a = ADMINS[id] || {};
+    NL.confirm('Remove ' + (a.name || id) + '? Their passcode stops working immediately; their past actions stay in the audit under their name.', {
+      title: 'Remove admin', variant: 'danger', confirmText: 'Remove'
+    }).then(function (ok) {
+      if (!ok) return;
+      UWP.ensureAuth().then(function () { return UWP.ref('admins/' + id).remove(); })
+        .then(function () {
+          UWP.audit(ACTOR, ACTOR_LABEL, 'admin', { detail: 'Removed NL admin ' + (a.name || id) });
+          toast('Admin removed', 'success');
+        }).catch(function (err) { toast('Failed: ' + err.message, 'error'); });
+    });
+  });
+
+  document.getElementById('btnAddAdmin').onclick = function () {
+    NL.prompt('The person’s name — it labels their actions in the audit.', {
+      title: 'Add an NL admin', placeholder: 'e.g. Sam Smith'
+    }).then(function (nm) {
+      if (nm == null) return;
+      nm = String(nm).trim();
+      if (!nm) { toast('A name is required.', 'error'); return; }
+      var pass = UWP.newPasscode();
+      UWP.ensureAuth().then(function () {
+        return UWP.ref('admins').push({ name: nm, passcode: pass, addedAt: UWP.TS() });
+      }).then(function () {
+        UWP.audit(ACTOR, ACTOR_LABEL, 'admin', { detail: 'Added NL admin ' + nm });
+        NL.alert('<p class="confirm-text"><strong>' + esc(nm) + '</strong> can now sign in at the master console with:</p>' +
+          '<p style="text-align:center"><span class="code-mono" style="font-size:var(--text-lg)">' + esc(pass) + '</span></p>' +
+          '<p class="code-note">Send it to them privately. It works exactly like the master passcode, and everything they do is audited under their name.</p>',
+          { title: 'Admin added', html: true });
+      }).catch(function (err) { toast('Failed: ' + err.message, 'error'); });
+    });
+  };
 
   /* First run is the one case the console cannot ask the server to verify —
      there is no passcode yet. The trigger mints a master token for a bootstrap
@@ -569,10 +655,24 @@
 
   function unlock() {
     unlocked = true;
+    /* An NL admin is a master with its own name (owner 15/09/2026): every
+       audit call already speaks through ACTOR/ACTOR_LABEL, so naming the
+       actor here names it everywhere. The root master stays 'NL master'. */
+    var s = UWP.session;
+    var isAdmin = !!(s && s.adminName);
+    if (isAdmin) {
+      ACTOR = 'admin:' + s.adminId;
+      ACTOR_LABEL = s.adminName;
+      document.getElementById('idbarSub').textContent = 'Signed in as ' + s.adminName + ' · NL admin';
+    }
+    /* The roster is the root master's alone — an admin never manages (or
+       sees) other admins. Rules enforce it; this hides the dead card. */
+    document.getElementById('adminsCard').hidden = isAdmin;
     document.getElementById('gate').style.display = 'none';
     document.getElementById('app').style.display = 'block';
     if (UWP.isTest) document.getElementById('sandboxCard').style.display = 'block';
     subscribe();
+    if (!isAdmin) subscribeAdmins();
     buildClubFilter(); buildStatusFilter(); renderCodes(); renderAccess(); renderAudit();
   }
 
