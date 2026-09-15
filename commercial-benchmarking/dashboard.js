@@ -1,4 +1,4 @@
-/* commercial-benchmarking/dashboard.js  v1.4
+/* commercial-benchmarking/dashboard.js  v1.5
    Shared dashboard renderer for the Commercial Benchmarking tool. Pure
    rendering — no Firebase, no data loading. Both entry points use it:
      - index.html  (gated NL tool: staff picker / club's own row via auth-guard)
@@ -88,20 +88,30 @@ window.CBDash = (function () {
       return Object.keys(d).map(function (k) { return { label: k, count: d[k] }; })
         .sort(function (a, b) { return b.count - a.count; });
     }
-    function single(field) {
-      var d = {};
-      clubs.forEach(function (c) { var v = (c[field] || '').trim(); if (v) d[v] = (d[v] || 0) + 1; });
-      return toArr(d);
+    // One scope: the four distributions plus how many clubs each is drawn from.
+    function forScope(list) {
+      var out = { clubs: {} };
+      ['front', 'back', 'sleeve'].forEach(function (kind) {
+        var field = { front: 'fsSector', back: 'bsSector', sleeve: 'slSector' }[kind], d = {}, n = 0;
+        list.forEach(function (c) { var v = (c[field] || '').trim(); if (v) { d[v] = (d[v] || 0) + 1; n++; } });
+        out[kind] = toArr(d); out.clubs[kind] = n;
+      });
+      var st = {}, sn = 0;
+      list.forEach(function (c) {
+        var any = false;
+        (c.standSectors || '').split('|').forEach(function (p) { p = p.trim(); if (p) { st[p] = (st[p] || 0) + 1; any = true; } });
+        if (any) sn++;
+      });
+      out.stand = toArr(st); out.clubs.stand = sn;
+      return out;
     }
-    var st = {};
-    clubs.forEach(function (c) {
-      (c.standSectors || '').split('|').forEach(function (p) { p = p.trim(); if (p) st[p] = (st[p] || 0) + 1; });
-    });
-    AGG.sectors = AGG.sectors || {};
-    AGG.sectors.front = single('fsSector');
-    AGG.sectors.back = single('bsSector');
-    AGG.sectors.sleeve = single('slSector');
-    AGG.sectors.stand = toArr(st);
+    var league = forScope(clubs);
+    var scopes = { league: league };
+    SCOPES.forEach(function (d) { scopes[d] = forScope(clubs.filter(function (c) { return c.division === d; })); });
+    scopes.Step2 = forScope(clubs.filter(function (c) { return c.division === 'North' || c.division === 'South'; }));
+    // league-wide lists stay at the top level: the sector palette and any
+    // reader of the old shape use them; `scopes` is what the cards follow.
+    AGG.sectors = { front: league.front, back: league.back, sleeve: league.sleeve, stand: league.stand, scopes: scopes };
     return AGG;
   }
 
@@ -397,7 +407,7 @@ window.CBDash = (function () {
       // headline-only: benchmark how long the current sponsor has been on board
       var tenureMetric = (sl.tenureKey && AGG.aggregates[sl.tenureKey])
         ? '<div class="cb-slot-full">' + metricBody(sl.tenureKey, 'Time with current sponsor') + '</div>' : '';
-      var donut = (sl.dist && sl.dist.length) ? donutBlock('Sector mix', sl.dist, sl.ownSec, sl.noun) : '';
+      var donut = donutBlock('Sector mix', sl.sec, sl.ownSec, sl.noun, 'Your sponsor');
       return '<div class="card cb-slotcard">' + head + metrics + tenureMetric + donut + '</div>';
     }
 
@@ -430,11 +440,10 @@ window.CBDash = (function () {
       }
       // Shirt & kit: one composite card per placement (sponsor + income + term + sector donut).
       function shirtSectionHtml() {
-        var S = AGG.sectors || {};
         var slots = [
-          { kind: 'Front-of-shirt sponsorship', incomeKey: 'frontShirt', termKey: 'frontTerm', tenureKey: 'fsTenure', sponKey: 'fsSponsor', startKey: 'fsStart', rollKey: 'rollingFront', dist: S.front, ownSec: OWN.fsSector, noun: 'front-of-shirt sponsors' },
-          { kind: 'Back-of-shirt sponsorship', incomeKey: 'backShirt', termKey: 'backTerm', sponKey: 'bsSponsor', startKey: 'bsStart', rollKey: 'rollingBack', dist: S.back, ownSec: OWN.bsSector, noun: 'back-of-shirt sponsors' },
-          { kind: 'Sleeve sponsorship', incomeKey: 'sleeve', termKey: 'sleeveTerm', sponKey: 'slSponsor', startKey: 'slStart', rollKey: 'rollingSleeve', dist: S.sleeve, ownSec: OWN.slSector, noun: 'sleeve sponsors' }
+          { kind: 'Front-of-shirt sponsorship', incomeKey: 'frontShirt', termKey: 'frontTerm', tenureKey: 'fsTenure', sponKey: 'fsSponsor', startKey: 'fsStart', rollKey: 'rollingFront', sec: 'front', ownSec: OWN.fsSector, noun: 'front-of-shirt sponsors' },
+          { kind: 'Back-of-shirt sponsorship', incomeKey: 'backShirt', termKey: 'backTerm', sponKey: 'bsSponsor', startKey: 'bsStart', rollKey: 'rollingBack', sec: 'back', ownSec: OWN.bsSector, noun: 'back-of-shirt sponsors' },
+          { kind: 'Sleeve sponsorship', incomeKey: 'sleeve', termKey: 'sleeveTerm', sponKey: 'slSponsor', startKey: 'slStart', rollKey: 'rollingSleeve', sec: 'sleeve', ownSec: OWN.slSector, noun: 'sleeve sponsors' }
         ];
         return '<div class="section"><div class="cb-section-head"><h2>Shirt &amp; kit sponsorship</h2>' +
           '<span class="count">vs ' + scopeTxt + '</span></div>' +
@@ -457,8 +466,7 @@ window.CBDash = (function () {
       var st = (OWN.stands || []).slice().sort(function (a, b) {
         return (b.income == null ? -1 : b.income) - (a.income == null ? -1 : a.income);
       });
-      // sectors without a fixed colour show as "Other (Name)" — consistent with the donut.
-      var secLabel = function (sec) { return !sec ? '' : (SECTOR_COLORS[sec] ? sec : 'Other (' + sec + ')'); };
+      var secLabel = function (sec) { return sec || ''; };
       var rows = st.length
         ? st.map(function (s) {
           return '<div class="cb-standrow"><span class="cb-standname">' + (s.name || '—') + '</span>' +
@@ -470,8 +478,8 @@ window.CBDash = (function () {
       return '<div class="card"><div class="lab">Your stand sponsors</div><div class="cb-standlist">' + rows + '</div></div>';
     }
     function standDonut() {
-      if (!(AGG.sectors && AGG.sectors.stand && AGG.sectors.stand.length)) return '';
-      return '<div class="cb-standdonut">' + donutBlock('Stand sponsor sectors', AGG.sectors.stand, OWN.standSectors, 'stand sponsors') + '</div>';
+      var d = donutBlock('Stand sponsor sectors', 'stand', OWN.standSectors, 'stand sponsors', 'Your stands');
+      return d ? '<div class="cb-standdonut">' + d + '</div>' : '';
     }
 
     function chipNarrative(kind) {
@@ -549,46 +557,55 @@ window.CBDash = (function () {
       return map;
     })();
     var OTHER_COLOR = 'var(--navy-200)';
-    function donutBlock(title, dist, ownStr, noun) {
+    // Sector mix for one kind ('front' | 'back' | 'sleeve' | 'stand') in the
+    // scope the reader has chosen, the same "Compare against" as every other
+    // card. Five named slices and Other — ten was unreadable. The club's own
+    // sectors are named in a line under the chart rather than tagged onto
+    // legend rows, because a rare sector is counted inside Other and a tag on
+    // that slice claimed the whole of it. Data written before v1.5 has no
+    // per-scope lists: then the league-wide list shows, labelled as such.
+    var TOP_SLICES = 5;
+    function donutBlock(title, kind, ownStr, noun, ownLabel) {
+      var S = AGG.sectors || {}, sk = scopeKey();
+      var scoped = S.scopes && S.scopes[sk], scopeTxt;
+      var dist, clubsN = null;
+      if (scoped) { dist = scoped[kind]; clubsN = (scoped.clubs || {})[kind]; scopeTxt = curScopeLabel(); }
+      else { dist = S[kind]; scopeTxt = 'all divisions'; }
       if (!dist) return '';
-      var arr = Array.isArray(dist) ? dist
-        : Object.keys(dist).map(function (k) { return { label: k, count: dist[k] }; });
-      var own = (ownStr || '').split('|').map(function (s) { return s.trim(); }).filter(Boolean);
+      var arr = Array.isArray(dist) ? dist : Object.keys(dist).map(function (k) { return { label: k, count: dist[k] }; });
       var total = arr.reduce(function (a, e) { return a + e.count; }, 0);
       if (!total) return '';
-      // sectors with a fixed colour are shown individually; the rest -> Other
-      var known = arr.filter(function (e) { return SECTOR_COLORS[e.label]; })
-        .sort(function (a, b) { return b.count - a.count; });
-      var otherCount = total - known.reduce(function (a, e) { return a + e.count; }, 0);
-      var segs = known.slice();
+      var own = (ownStr || '').split('|').map(function (x) { return x.trim(); }).filter(Boolean);
+      var sorted = arr.slice().sort(function (a, b) { return b.count - a.count; });
+      var segs = sorted.slice(0, TOP_SLICES);
+      var otherCount = sorted.slice(TOP_SLICES).reduce(function (a, e) { return a + e.count; }, 0);
       if (otherCount > 0) segs.push({ label: 'Other', count: otherCount, other: true });
+      var named = {}; segs.forEach(function (x) { if (!x.other) named[x.label] = true; });
       var r = 60, cx = 80, cy = 80, sw = 24, C = 2 * Math.PI * r, off = 0, arcs = '';
-      // own sector highlighted; if the club's sector is itself uncommon, the
-      // Other slice is the highlighted one.
-      var ownInOther = own.some(function (o) { return !SECTOR_COLORS[o]; });
-      segs.forEach(function (s) {
-        var len = s.count / total * C, isOwn = s.other ? ownInOther : own.indexOf(s.label) >= 0;
-        s._c = s.other ? OTHER_COLOR : SECTOR_COLORS[s.label];
-        s._own = isOwn;
-        arcs += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + s._c +
+      segs.forEach(function (x) {
+        var len = x.count / total * C, isOwn = !x.other && own.indexOf(x.label) >= 0;
+        x._c = x.other ? OTHER_COLOR : (SECTOR_COLORS[x.label] || 'var(--navy-400)');
+        arcs += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + x._c +
           '" stroke-width="' + (isOwn ? sw + 7 : sw) + '" stroke-dasharray="' + len.toFixed(2) + ' ' +
           (C - len).toFixed(2) + '" stroke-dashoffset="' + (-off).toFixed(2) + '"></circle>';
         off += len;
       });
-      var legend = segs.map(function (s) {
-        var pct = Math.round(100 * s.count / total);
-        return '<div class="cb-leg' + (s._own ? ' own' : '') + '"><span class="cb-leg-sw" style="background:' + s._c + '"></span>' +
-          '<span class="cb-leg-lab">' + s.label + (s._own ? ' — your sector' : '') + '</span>' +
-          '<span class="cb-leg-n">' + s.count + ' (' + pct + '%)</span></div>';
+      var legend = segs.map(function (x) {
+        return '<div class="cb-leg"><span class="cb-leg-sw" style="background:' + x._c + '"></span>' +
+          '<span class="cb-leg-lab">' + esc(x.label) + '</span>' +
+          '<span class="cb-leg-n">' + x.count + ' (' + Math.round(100 * x.count / total) + '%)</span></div>';
       }).join('');
+      var ownTxt = !own.length ? 'not provided' : own.map(function (o) {
+        return esc(o) + (named[o] ? '' : ' <span class="cb-sector-inother">(in Other)</span>');
+      }).join(' · ');
+      var base = (clubsN != null ? clubsN + ' club' + (clubsN === 1 ? '' : 's') : '') +
+        (clubsN != null && total !== clubsN ? ' · ' + total + ' ' + (noun || 'sponsors') : (clubsN == null ? total + ' ' + (noun || 'sponsors') : '')) +
+        ' · ' + scopeTxt;
       return '<div class="cb-sector"><div class="cb-sector-h">' + title +
-        '<span class="cb-sector-sub">' + total + ' ' + (noun || 'sponsors') + ' · all divisions</span></div><div class="cb-sector-body">' +
-        '<div class="cb-donut-col"><div class="cb-donut">' +
-        '<svg viewBox="0 0 160 160" width="100%" height="100%" style="transform:rotate(-90deg);display:block">' + arcs + '</svg></div>' +
-        '<div class="cb-donut-cap"><span class="cb-donut-k">Your sector</span>' +
-        '<span class="cb-donut-capv">' + (!own.length ? 'Not provided' : (own.length > 2 ? own.length + ' sectors' :
-          own.map(function (s) { return SECTOR_COLORS[s] ? s : 'Other (' + s + ')'; }).join(', '))) + '</span></div></div>' +
-        '<div class="cb-legend">' + legend + '</div></div></div>';
+        '<span class="cb-sector-sub">' + base + '</span></div><div class="cb-sector-body">' +
+        '<div class="cb-donut"><svg viewBox="0 0 160 160" width="100%" height="100%" style="transform:rotate(-90deg);display:block">' + arcs + '</svg></div>' +
+        '<div class="cb-legend">' + legend + '</div></div>' +
+        '<div class="cb-sector-own"><b>' + (ownLabel || 'Yours') + ':</b> ' + ownTxt + '</div></div>';
     }
     function renderAll() { renderHeader(); renderScopeControl(); render(); }
 
@@ -1193,5 +1210,5 @@ window.CBDash = (function () {
     }
   }
 
-  return { mount: mount, recompute: recompute, importRows: importRows, hasData: hasData, NO_DATA: NO_DATA, review: review };
+  return { mount: mount, recompute: recompute, recomputeSectors: recomputeSectors, recomputeChips: recomputeChips, importRows: importRows, hasData: hasData, NO_DATA: NO_DATA, review: review };
 })();

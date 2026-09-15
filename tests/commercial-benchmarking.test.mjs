@@ -155,6 +155,21 @@ test('percentiles are recomputed for the new club AND its neighbours', () => {
   same(AGG.chips.progFormat, { Printed: 3, Digital: 1 });
 });
 
+test('sector mixes are rebuilt per scope, with the clubs each is drawn from', () => {
+  const { AGG, clubs } = fixture();
+  CB.importRows(AGG, clubs, [deltaRow()]);
+  const sc = AGG.sectors.scopes;
+  same(sc.league.front, [{ label: 'Retail', count: 3 }, { label: 'Manufacturing', count: 1 }]);
+  same(sc.North.front, [{ label: 'Retail', count: 2 }, { label: 'Manufacturing', count: 1 }]);
+  same(sc.South.front, [{ label: 'Retail', count: 1 }]);
+  same(sc.Step2.front, plain(sc.league.front), 'Step 2 = North + South, which here is everyone');
+  assert.equal(sc.league.clubs.front, 4);
+  assert.equal(sc.North.clubs.front, 3);
+  same(sc.North.stand, [{ label: 'Manufacturing', count: 1 }]);
+  assert.equal(sc.North.clubs.stand, 1, 'stand count is clubs with any stand sector, not stands');
+  same(AGG.sectors.front, plain(sc.league.front), 'the league list stays at the top level for the palette');
+});
+
 test('pasted percentiles are ignored — recompute owns them', () => {
   const { AGG, clubs } = fixture();
   const row = deltaRow(); row.metrics.msTicket.divPct = 1;
