@@ -1,11 +1,23 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.121 (17/08/2026)
+  Version: v5.122 (15/09/2026)
   Date: 09/04/2026
   File: /portal/index.html
 
   Changelog:
+  v5.122 (15/09/2026) — Say what Google sent back when it is not JSON.
+    An invite failed with "Unexpected token '<', "<!DOCTYPE "... is not valid
+    JSON" — the browser's JSON parser complaining about the first character of
+    an HTML page, with the page itself thrown away. Every Apps Script fault
+    that matters (authorisation lost, deployment gone, the account blocked,
+    Drive's "unable to open the file") arrives as an HTML page, so that
+    message hid the one line that would have named the cause. nlGasFetch now
+    reads the body as text, parses it itself, and on failure raises an error
+    carrying the page's title and first line of text plus the URL the
+    response actually came from. Callers are unchanged: the object it resolves
+    with still answers .json() (and .text()), so the three sendInvite sites,
+    sendApproval and sendRejection keep their .then/.catch chains.
   v5.105 (17/08/2026) — Club access follows the ROLE; club rows are read-only.
     Settled 17/08/2026 (see system/roles-and-access-plan.md): a club person gets
     exactly what Club Admin or Club Staff grants, with no per-tool exceptions.
@@ -875,6 +887,13 @@
 
   /* Public-facing "What's new" — shown when users click the version badge. */
   window.NL_CHANGELOG = [
+    {
+      date: '15/09/2026',
+      version: 'v5.122',
+      items: [
+        'When an invite or approval email cannot be sent, the error now quotes what Google actually returned instead of "Unexpected token".'
+      ]
+    },
     {
       date: '17/08/2026',
       version: 'v5.116',
@@ -2730,8 +2749,16 @@ var NL_GAS_URL = NL.endpoints.gas; /* Consolidated GAS — invite + notification
 /* Privileged GAS calls (sendInvite / sendApproval / sendRejection) are verified
    server-side: GAS checks the caller's Firebase ID token and role before acting.
    nlGasFetch attaches a fresh idToken to the payload; the URL alone no longer
-   grants privilege. Returns the fetch() promise so existing .then/.catch chains
-   are unchanged. */
+   grants privilege.
+
+   Resolves with a response-like object — { ok, status, url, json(), text() } —
+   so existing .then(r => r.json()) chains are unchanged. The body is read and
+   parsed HERE rather than by the caller, because Apps Script reports every
+   fault that matters (authorisation lost, deployment gone, account blocked,
+   Drive "unable to open the file") as an HTML page, and the browser's own
+   parser reduces all of them to the same useless line: Unexpected token '<'.
+   When the body is not JSON, .json() rejects with the page's title and first
+   line of text, and the URL the response actually came from. */
 function nlGasFetch(payload) {
   return (NL && NL.ensureAuth ? NL.ensureAuth() : Promise.resolve())
     .then(function() {
@@ -2745,7 +2772,48 @@ function nlGasFetch(payload) {
         headers: { 'Content-Type': 'text/plain' },
         body:    JSON.stringify(payload)
       });
+    })
+    .then(function(res) {
+      return res.text().then(function(text) {
+        var parsed = null, parseErr = null;
+        try { parsed = JSON.parse(text); } catch (e) { parseErr = e; }
+        return {
+          ok:     res.ok,
+          status: res.status,
+          url:    res.url,
+          text:   function() { return Promise.resolve(text); },
+          json:   function() {
+            return parseErr
+              ? Promise.reject(new Error(nlGasNonJsonReason(text, res)))
+              : Promise.resolve(parsed);
+          }
+        };
+      });
     });
+}
+
+/* One readable line naming what Google sent instead of JSON: HTTP status, the
+   host that answered (script.google.com vs the googleusercontent echo the
+   reply normally redirects through), the page <title>, and the first sentence
+   of visible text. Scripts and styles are stripped so the sentence is prose. */
+function nlGasNonJsonReason(text, res) {
+  var title = (text.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [, ''])[1]
+    .replace(/\s+/g, ' ').trim();
+  var body = text
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (title && body.indexOf(title) === 0) body = body.slice(title.length).trim();
+  if (body.length > 140) body = body.slice(0, 140).replace(/\s+\S*$/, '') + '…';
+  var host = '';
+  try { host = new URL(res.url).host; } catch (e) {}
+  return 'Google returned a web page, not a reply (HTTP ' + res.status +
+    (host ? ' from ' + host : '') + ')' +
+    (title ? ' — "' + title + '"' : '') +
+    (body ? ': ' + body : '');
 }
 
 var CREST_BASE     = '/assets/crests/';
