@@ -623,45 +623,48 @@ window.CBDash = (function () {
     // Generic picker: a dropdown of `opts` plus an "Other…" option that reveals
     // a freetext box. `key` namespaces the control, e.g. 'sec:fsSector',
     // 'sec:stand0', 'chip:rollingFront'. Empty selection means "not provided".
+    // A select of the known options, with "Other…" revealing a free-text box
+    // beneath it. Both live in one .form-group so they stack at every width.
     function pickerControl(cur, key, opts, placeholder) {
       cur = (cur == null ? '' : String(cur)).trim();
       var known = opts.indexOf(cur) >= 0, custom = !known && !!cur;
-      return '<select class="cb-edit-sel" data-pick="' + key + '">' +
-        '<option value=""' + (cur ? '' : ' selected') + '>— none —</option>' +
+      return '<select data-pick="' + key + '">' +
+        '<option value=""' + (cur ? '' : ' selected') + '>None</option>' +
         opts.map(function (o) { return '<option' + (known && o === cur ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') +
         '<option value="__other"' + (custom ? ' selected' : '') + '>Other…</option></select>' +
-        '<input type="text" class="cb-edit-other" data-pickother="' + key + '" placeholder="' + (placeholder || 'Specify') + '" value="' +
-          (custom ? esc(cur) : '') + '"' + (custom ? '' : ' style="display:none"') + '>';
+        '<input type="text" class="cb-pick-other" data-pickother="' + key + '" placeholder="' + (placeholder || 'Specify') + '" value="' +
+          (custom ? esc(cur) : '') + '"' + (custom ? '' : ' hidden') + '>';
     }
-    function sectorControl(cur, attr) { return pickerControl(cur, 'sec:' + attr, allSectors(), 'Specify sector'); }
+    function sectorControl(cur, attr) { return pickerControl(cur, 'sec:' + attr, allSectors(), 'Which sector?'); }
     function chipPicker(kind) { return pickerControl((OWN.chips || {})[kind], 'chip:' + kind, chipOpts(kind)); }
 
+    // Blank = no figure; 0 = a real zero. No separate "None" tick to explain.
     function numCtl(k) {
-      var m = OWN.metrics[k] || (OWN.metrics[k] = { value: null }), np = m.value == null;
-      return '<input type="number" step="any" data-ekey="' + k + '" value="' + (np ? '' : m.value) + '"' + (np ? ' disabled' : '') + '>' +
-        '<label class="cb-np"><input type="checkbox" data-np="' + k + '"' + (np ? ' checked' : '') + '> None</label>';
+      var m = OWN.metrics[k] || (OWN.metrics[k] = { value: null });
+      return '<input type="number" step="any" inputmode="decimal" data-ekey="' + k + '" value="' + (m.value == null ? '' : m.value) + '" placeholder="—">';
     }
 
-    function editRow(lab, ctl) {
-      return '<div class="cb-edit-row"><span class="cb-edit-lab">' + lab + '</span><span class="cb-edit-ctl">' + ctl + '</span></div>';
+    function field(lab, ctl, span) {
+      return '<div class="form-group' + (span ? ' span2' : '') + '"><label>' + lab + '</label>' + ctl + '</div>';
     }
+    function formGrid(inner, cls) { return '<div class="cb-form-grid' + (cls ? ' ' + cls : '') + '">' + inner + '</div>'; }
+    function slot(title, inner) { return '<div class="cb-form-slot"><div class="cb-form-slot-kind">' + title + '</div>' + inner + '</div>'; }
 
     var SHIRT_SLOTS = [
-      { kind: 'Front-of-shirt', spon: 'fsSponsor', sec: 'fsSector', income: 'frontShirt', term: 'frontTerm', roll: 'rollingFront' },
-      { kind: 'Back-of-shirt', spon: 'bsSponsor', sec: 'bsSector', income: 'backShirt', term: 'backTerm', roll: 'rollingBack' },
+      { kind: 'Front of shirt', spon: 'fsSponsor', sec: 'fsSector', income: 'frontShirt', term: 'frontTerm', roll: 'rollingFront' },
+      { kind: 'Back of shirt', spon: 'bsSponsor', sec: 'bsSector', income: 'backShirt', term: 'backTerm', roll: 'rollingBack' },
       { kind: 'Sleeve', spon: 'slSponsor', sec: 'slSector', income: 'sleeve', term: 'sleeveTerm', roll: 'rollingSleeve' }
     ];
 
     function shirtEditSection() {
       return '<div class="section"><div class="cb-section-head"><h2>Shirt &amp; kit sponsorship</h2></div>' +
         SHIRT_SLOTS.map(function (sl) {
-          return '<div class="cb-edit-slot"><div class="cb-edit-slot-kind">' + sl.kind + ' sponsorship</div>' +
-            editRow('Sponsor name', '<input type="text" data-espon="' + sl.spon + '" value="' + esc(OWN[sl.spon] || '') + '" placeholder="None">') +
-            editRow('Sector', sectorControl(OWN[sl.sec], sl.sec)) +
-            editRow('Income (£)', numCtl(sl.income)) +
-            editRow('Deal length (yrs)', numCtl(sl.term)) +
-            editRow('Rolling deal? (Yes/No)', chipPicker(sl.roll)) +
-            '</div>';
+          return slot(sl.kind, formGrid(
+            field('Sponsor', '<input type="text" data-espon="' + sl.spon + '" value="' + esc(OWN[sl.spon] || '') + '" placeholder="None">') +
+            field('Sector', sectorControl(OWN[sl.sec], sl.sec)) +
+            field('Income (£)', numCtl(sl.income)) +
+            field('Deal length (yrs)', numCtl(sl.term)) +
+            field('Rolling deal', chipPicker(sl.roll)), 'cb-form-grid--slot'));
         }).join('') + '</div>';
     }
 
@@ -671,14 +674,13 @@ window.CBDash = (function () {
       for (var i = 0; i < 4; i++) {
         var st = OWN.stands[i] || {};
         var nm = st.name && st.name !== '—' ? st.name : '';
-        rows += '<div class="cb-edit-slot"><div class="cb-edit-slot-kind">Stand sponsor ' + (i + 1) + '</div>' +
-          editRow('Name', '<input type="text" data-estand="' + i + '-name" value="' + esc(nm) + '" placeholder="None">') +
-          editRow('Sector', sectorControl(st.sector, 'stand' + i)) +
-          editRow('Income (£)', '<input type="number" step="any" data-estand="' + i + '-income" value="' + (st.income != null ? st.income : '') + '" placeholder="—">') +
-          '</div>';
+        rows += slot('Stand sponsor ' + (i + 1), formGrid(
+          field('Sponsor', '<input type="text" data-estand="' + i + '-name" value="' + esc(nm) + '" placeholder="None">') +
+          field('Sector', sectorControl(st.sector, 'stand' + i)) +
+          field('Income (£)', '<input type="number" step="any" inputmode="decimal" data-estand="' + i + '-income" value="' + (st.income != null ? st.income : '') + '" placeholder="—">'), 'cb-form-grid--slot'));
       }
       return '<div class="section"><div class="cb-section-head"><h2>Stand sponsorship</h2></div>' + rows +
-        '<div class="cb-edit-hint">Number of stand sponsors, combined total and average per stand are calculated from these rows.</div></div>';
+        '<div class="form-hint cb-form-hint">Stand count, combined total and average per stand are calculated from these rows. A row with no sponsor and no income is not a stand.</div></div>';
     }
 
     function renderEditForm() {
@@ -686,32 +688,26 @@ window.CBDash = (function () {
         if (g.title === 'Shirt & kit sponsorship') return shirtEditSection();
         if (g.title === 'Stand sponsorship') return standEditSection();
         // numeric metrics, plus any categorical chips that belong in this group
-        var chipRows = CHIP_DEFS.filter(function (d) { return d.group === g.title; }).map(function (d) {
-          return editRow(d.label, chipPicker(d.kind));
+        var chipFields = CHIP_DEFS.filter(function (d) { return d.group === g.title; }).map(function (d) {
+          return field(d.label, chipPicker(d.kind));
         }).join('');
         return '<div class="section"><div class="cb-section-head"><h2>' + g.title + '</h2></div>' +
-          '<div class="cb-edit-grid">' + g.keys.map(function (k) {
+          formGrid(g.keys.map(function (k) {
             var agg = AGG.aggregates[k], u = (agg.unit || '').trim();
-            return editRow(agg.label + (u ? ' (' + u + ')' : ''), numCtl(k));
-          }).join('') + chipRows + '</div></div>';
+            return field(agg.label + (u ? ' (' + u + ')' : ''), numCtl(k));
+          }).join('') + chipFields) + '</div>';
       }).join('');
-      body += '<div class="cb-edit-actions"><button id="cb-save" class="cb-edit-btn" type="button">Save changes</button>' +
-        '<button id="cb-cancel" class="cb-cancel" type="button">Cancel</button>' +
-        '<span id="cb-editnote">Editing <b>' + OWN.club + '</b> — tick <b>None</b> for no figure; 0 is a real zero. Pick a sector or choose <b>Other…</b> to type your own. Saving recomputes all benchmarks.</span></div>';
+      body += '<div class="cb-edit-actions"><button id="cb-save" class="btn btn--primary btn--sm" type="button">Save changes</button>' +
+        '<button id="cb-cancel" class="btn btn--ghost btn--sm" type="button">Cancel</button>' +
+        '<span id="cb-editnote" class="cb-editnote">Editing <b>' + esc(OWN.club) + '</b>. Blank means no figure; 0 is a real zero. Saving recomputes every benchmark.</span></div>';
       $('sections').innerHTML = body;
       $('sections').onchange = function (e) {
         var t = e.target;
         if (!t || !t.getAttribute) return;
-        var npk = t.getAttribute('data-np');
-        if (npk != null) {
-          var inp = $('sections').querySelector('input[data-ekey="' + npk + '"]');
-          if (inp) { inp.disabled = t.checked; if (!t.checked) inp.focus(); }
-          return;
-        }
         var pick = t.getAttribute('data-pick');
         if (pick != null) {
           var other = $('sections').querySelector('input[data-pickother="' + pick + '"]');
-          if (other) { var show = t.value === '__other'; other.style.display = show ? '' : 'none'; if (show) other.focus(); }
+          if (other) { var show = t.value === '__other'; other.hidden = !show; if (show) other.focus(); }
         }
       };
       $('cb-cancel').onclick = function () { editMode = false; setEditUI(); render(); };
@@ -732,10 +728,9 @@ window.CBDash = (function () {
     function doSave() {
       // numeric metrics (incl. shirt income/term; stand totals are derived below)
       [].forEach.call($('sections').querySelectorAll('input[data-ekey]'), function (inp) {
-        var k = inp.getAttribute('data-ekey');
-        var np = $('sections').querySelector('input[data-np="' + k + '"]');
-        if (np && np.checked) { OWN.metrics[k] = OWN.metrics[k] || {}; OWN.metrics[k].value = null; }
-        else { var raw = inp.value.trim(); OWN.metrics[k] = OWN.metrics[k] || {}; OWN.metrics[k].value = raw === '' ? 0 : Number(raw); }
+        var k = inp.getAttribute('data-ekey'), raw = inp.value.trim();
+        OWN.metrics[k] = OWN.metrics[k] || {};
+        OWN.metrics[k].value = raw === '' ? null : Number(raw);
       });
       // shirt sponsor names + sectors
       [].forEach.call($('sections').querySelectorAll('input[data-espon]'), function (inp) {
@@ -865,7 +860,7 @@ window.CBDash = (function () {
           proof = '<td><a class="cb-linkword" href="' + proofUrl(tok) + '" target="_blank" rel="noopener">Proof</a></td>';
           bench = '<td><a class="cb-linkword" href="' + linkUrl(tok) + '" target="_blank" rel="noopener">Benchmarked</a></td>';
         } else {
-          proof = '<td colspan="2"><button class="cb-edit-btn" type="button" data-gen="' + c.club.replace(/"/g, '&quot;') + '">Generate links</button></td>';
+          proof = '<td colspan="2"><button class="btn btn--ghost btn--sm" type="button" data-gen="' + c.club.replace(/"/g, '&quot;') + '">Generate links</button></td>';
           bench = '';
         }
         return '<tr><td>' + nameCell + '</td><td>' + c.division + '</td>' + proof + bench + '<td>' + confCell(c) + '</td></tr>';
@@ -873,10 +868,10 @@ window.CBDash = (function () {
       var have = clubs.filter(function (c) { return tb[c.club]; }).length;
       var confirmed = clubs.filter(function (c) { return cf[c.club]; }).length;
       $('sections').innerHTML = '<div class="cb-edit-actions">' +
-        '<button id="cb-genall" class="cb-edit-btn" type="button">Generate all missing</button>' +
-        '<button id="cb-linkdl" class="cb-edit-btn" type="button">Download links (Excel)</button>' +
-        '<button id="cb-linkdone" class="cb-cancel" type="button">Done</button>' +
-        '<span id="cb-linknote"><b>' + confirmed + ' of ' + clubs.length + '</b> clubs have confirmed their data. ' + have + ' have links. <b>Proof</b> = own-data check; <b>Benchmarked</b> = full comparison.</span></div>' +
+        '<button id="cb-genall" class="btn btn--navy btn--sm" type="button">Generate all missing</button>' +
+        '<button id="cb-linkdl" class="btn btn--navy btn--sm" type="button">Download links (Excel)</button>' +
+        '<button id="cb-linkdone" class="btn btn--ghost btn--sm" type="button">Done</button>' +
+        '<span id="cb-linknote" class="cb-linknote"><b>' + confirmed + ' of ' + clubs.length + '</b> clubs have confirmed their data. ' + have + ' have links. <b>Proof</b> = own-data check; <b>Benchmarked</b> = full comparison.</span></div>' +
         '<table class="cb-linktable"><thead><tr><th>Club</th><th>Division</th><th>Proof</th><th>Benchmarked</th><th>Confirmed</th></tr></thead><tbody>' + rows + '</tbody></table>';
       $('cb-linkdone').onclick = function () { $('sections').onclick = null; render(); };
       $('cb-genall').onclick = genMissing;
@@ -954,6 +949,7 @@ window.CBDash = (function () {
           clubByName = {}; clubs.forEach(function (x) { clubByName[x.club] = x; });
           var pick = $('clubPick');
           if (pick) { pick.innerHTML = pickOptions(); var first = res.added[0] || res.replaced[0]; var idx = clubs.map(function (x) { return x.club; }).indexOf(first); if (idx >= 0) { pick.value = String(idx); OWN = clubs[idx]; } }
+          setText('lgn', AGG.meta.leagueN);
           renderAll(); if (updateSelLink) updateSelLink();
           c.close();
           if (NL.toast) NL.toast('Imported ' + (res.added.length + res.replaced.length) + ' club' + (res.added.length + res.replaced.length === 1 ? '' : 's'));
@@ -968,12 +964,12 @@ window.CBDash = (function () {
       var bar = $('staffBar');
       if (bar) {
         bar.style.display = '';
-        var btns = '<button class="cb-cancel" id="cb-export" type="button">Export (Excel)</button>';
-        if (opts.canEdit && opts.writeLink) btns += '<button class="cb-cancel" id="cb-links" type="button">Links</button>';
-        if (opts.canEdit && opts.onSave) btns += '<button class="cb-cancel" id="cb-import" type="button">Import rows</button>';
-        if (opts.canEdit) btns += '<button class="cb-edit-btn" id="cb-edit" type="button">Edit data</button>';
+        var btns = '<button class="btn btn--ghost btn--sm" id="cb-export" type="button">Export</button>';
+        if (opts.canEdit && opts.writeLink) btns += '<button class="btn btn--ghost btn--sm" id="cb-links" type="button">Links</button>';
+        if (opts.canEdit && opts.onSave) btns += '<button class="btn btn--ghost btn--sm" id="cb-import" type="button">Import rows</button>';
+        if (opts.canEdit) btns += '<button class="btn btn--primary btn--sm" id="cb-edit" type="button">Edit data</button>';
         bar.innerHTML =
-          '<select id="clubPick" class="cb-staff-pick">' + pickOptions() + '</select>' +
+          '<select id="clubPick" class="nl-select cb-staff-pick">' + pickOptions() + '</select>' +
           '<a id="cb-selLink" class="cb-sellink" target="_blank" rel="noopener"></a>' +
           '<span class="cb-staff-actions">' + btns + '</span>';
         updateSelLink = function () {
