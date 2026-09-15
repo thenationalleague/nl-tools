@@ -390,10 +390,17 @@ def main():
         return sorted([{'label': k, 'count': v} for k, v in d.items()], key=lambda x: -x['count']), n
 
     def sectors_for(rows):
-        out = {'clubs': {}}
-        for kind, cols in (('front', ['Front Shirt — Sector']), ('back', ['Back Shirt — Sector']),
-                           ('sleeve', ['Sleeve — Sector']), ('stand', ['Stand %d — Sector' % s for s in (1, 2, 3, 4)])):
+        # `unstated`: named sponsors with no sector, so sectors + unstated =
+        # named sponsors (mirrors recomputeSectors in dashboard.js).
+        out = {'clubs': {}, 'unstated': {}}
+        for kind, cols, name_col in (('front', ['Front Shirt — Sector'], 'Front Shirt — Sponsor Name'),
+                                     ('back', ['Back Shirt — Sector'], 'Back Shirt — Sponsor Name'),
+                                     ('sleeve', ['Sleeve — Sector'], 'Sleeve — Sponsor Name')):
             out[kind], out['clubs'][kind] = sector_dist(cols, rows)
+            out['unstated'][kind] = sum(1 for r in rows if clean_name(r[H[name_col]])
+                                        and not (r[H[cols[0]]] and str(r[H[cols[0]]]).strip()))
+        out['stand'], out['clubs']['stand'] = sector_dist(['Stand %d — Sector' % s for s in (1, 2, 3, 4)], rows)
+        out['unstated']['stand'] = sum(1 for r in rows for st in extract_stands(r, H) if not st['sector'])
         return out
 
     # Sector mixes per scope — the cards follow the reader's "Compare against"

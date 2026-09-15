@@ -1,4 +1,4 @@
-/* commercial-benchmarking/dashboard.js  v1.5
+/* commercial-benchmarking/dashboard.js  v1.6
    Shared dashboard renderer for the Commercial Benchmarking tool. Pure
    rendering — no Firebase, no data loading. Both entry points use it:
      - index.html  (gated NL tool: staff picker / club's own row via auth-guard)
@@ -89,20 +89,32 @@ window.CBDash = (function () {
         .sort(function (a, b) { return b.count - a.count; });
     }
     // One scope: the four distributions plus how many clubs each is drawn from.
+    // One scope: the four distributions, how many clubs each is drawn from,
+    // and how many named sponsors gave no sector (so every sponsor is
+    // accounted for: sectors + unstated = named sponsors).
     function forScope(list) {
-      var out = { clubs: {} };
+      var out = { clubs: {}, unstated: {} };
       ['front', 'back', 'sleeve'].forEach(function (kind) {
-        var field = { front: 'fsSector', back: 'bsSector', sleeve: 'slSector' }[kind], d = {}, n = 0;
-        list.forEach(function (c) { var v = (c[field] || '').trim(); if (v) { d[v] = (d[v] || 0) + 1; n++; } });
-        out[kind] = toArr(d); out.clubs[kind] = n;
+        var field = { front: 'fsSector', back: 'bsSector', sleeve: 'slSector' }[kind];
+        var spon = { front: 'fsSponsor', back: 'bsSponsor', sleeve: 'slSponsor' }[kind];
+        var d = {}, n = 0, u = 0;
+        list.forEach(function (c) {
+          var v = (c[field] || '').trim();
+          if (v) { d[v] = (d[v] || 0) + 1; n++; }
+          else if ((c[spon] || '').trim()) u++;
+        });
+        out[kind] = toArr(d); out.clubs[kind] = n; out.unstated[kind] = u;
       });
-      var st = {}, sn = 0;
+      var st = {}, sn = 0, su = 0;
       list.forEach(function (c) {
         var any = false;
-        (c.standSectors || '').split('|').forEach(function (p) { p = p.trim(); if (p) { st[p] = (st[p] || 0) + 1; any = true; } });
+        (c.stands || []).forEach(function (x) {
+          var v = (x && x.sector || '').trim();
+          if (v) { st[v] = (st[v] || 0) + 1; any = true; } else su++;
+        });
         if (any) sn++;
       });
-      out.stand = toArr(st); out.clubs.stand = sn;
+      out.stand = toArr(st); out.clubs.stand = sn; out.unstated.stand = su;
       return out;
     }
     var league = forScope(clubs);
@@ -407,7 +419,7 @@ window.CBDash = (function () {
       // headline-only: benchmark how long the current sponsor has been on board
       var tenureMetric = (sl.tenureKey && AGG.aggregates[sl.tenureKey])
         ? '<div class="cb-slot-full">' + metricBody(sl.tenureKey, 'Time with current sponsor') + '</div>' : '';
-      var donut = donutBlock('Sector mix', sl.sec, sl.ownSec, sl.noun, 'Your sponsor');
+      var donut = sectorBlock('Sector mix', sl.sec, sl.ownSec, sl.noun, 'Your sponsor');
       return '<div class="card cb-slotcard">' + head + metrics + tenureMetric + donut + '</div>';
     }
 
@@ -478,7 +490,7 @@ window.CBDash = (function () {
       return '<div class="card"><div class="lab">Your stand sponsors</div><div class="cb-standlist">' + rows + '</div></div>';
     }
     function standDonut() {
-      var d = donutBlock('Stand sponsor sectors', 'stand', OWN.standSectors, 'stand sponsors', 'Your stands');
+      var d = sectorBlock('Stand sponsor sectors', 'stand', OWN.standSectors, 'stand sponsors', 'Your stands');
       return d ? '<div class="cb-standdonut">' + d + '</div>' : '';
     }
 
@@ -557,55 +569,66 @@ window.CBDash = (function () {
       return map;
     })();
     var OTHER_COLOR = 'var(--navy-200)';
+    // The survey's fixed sector list. Anything else a club gave is free text
+    // from its "Other (please specify)" box — 41 distinct wordings across the
+    // 2025/26 returns — and is shown as one Other row that opens to list them.
+    var SURVEY_SECTORS = ['Automotive & Transport', 'Construction & Property', 'Education & Training', 'Energy & Utilities',
+      'Financial Services', 'Food & Beverage', 'Gambling & Gaming', 'Healthcare & Medical', 'Hospitality & Leisure',
+      'Manufacturing & Engineering', 'Media, Marketing & Communications', 'Professional Services (Legal, Accounting, Consulting)',
+      'Retail & E-commerce', 'Technology & IT Services', 'Travel & Tourism'];
+    var IS_SURVEY = {}; SURVEY_SECTORS.forEach(function (x) { IS_SURVEY[x] = true; });
+
     // Sector mix for one kind ('front' | 'back' | 'sleeve' | 'stand') in the
     // scope the reader has chosen, the same "Compare against" as every other
-    // card. Five named slices and Other — ten was unreadable. The club's own
-    // sectors are named in a line under the chart rather than tagged onto
-    // legend rows, because a rare sector is counted inside Other and a tag on
-    // that slice claimed the whole of it. Data written before v1.5 has no
-    // per-scope lists: then the league-wide list shows, labelled as such.
-    var TOP_SLICES = 5;
-    function donutBlock(title, kind, ownStr, noun, ownLabel) {
+    // card. Ranked horizontal bars, three tiers that sum to the named-sponsor
+    // count on the base line: the survey's sectors, one Other row for the
+    // free-text wordings (collapsed; opens to list them), and Not stated for
+    // sponsors named without a sector. The club's own sectors are the red
+    // bars; an own sector that is free text gets its own red row above
+    // Other, so Other is never claimed as the club's. Data written before
+    // v1.5 has no per-scope lists: then the league-wide list shows, labelled
+    // as such, without the Not stated row.
+    function sectorBlock(title, kind, ownStr, noun, ownLabel) {
       var S = AGG.sectors || {}, sk = scopeKey();
       var scoped = S.scopes && S.scopes[sk], scopeTxt;
-      var dist, clubsN = null;
-      if (scoped) { dist = scoped[kind]; clubsN = (scoped.clubs || {})[kind]; scopeTxt = curScopeLabel(); }
+      var dist, clubsN = null, unstated = 0;
+      if (scoped) { dist = scoped[kind]; clubsN = (scoped.clubs || {})[kind]; unstated = (scoped.unstated || {})[kind] || 0; scopeTxt = curScopeLabel(); }
       else { dist = S[kind]; scopeTxt = 'all divisions'; }
       if (!dist) return '';
       var arr = Array.isArray(dist) ? dist : Object.keys(dist).map(function (k) { return { label: k, count: dist[k] }; });
-      var total = arr.reduce(function (a, e) { return a + e.count; }, 0);
+      var total = arr.reduce(function (a, e) { return a + e.count; }, 0) + unstated;
       if (!total) return '';
       var own = (ownStr || '').split('|').map(function (x) { return x.trim(); }).filter(Boolean);
-      var sorted = arr.slice().sort(function (a, b) { return b.count - a.count; });
-      var segs = sorted.slice(0, TOP_SLICES);
-      var otherCount = sorted.slice(TOP_SLICES).reduce(function (a, e) { return a + e.count; }, 0);
-      if (otherCount > 0) segs.push({ label: 'Other', count: otherCount, other: true });
-      var named = {}; segs.forEach(function (x) { if (!x.other) named[x.label] = true; });
-      var r = 60, cx = 80, cy = 80, sw = 24, C = 2 * Math.PI * r, off = 0, arcs = '';
-      segs.forEach(function (x) {
-        var len = x.count / total * C, isOwn = !x.other && own.indexOf(x.label) >= 0;
-        x._c = x.other ? OTHER_COLOR : (SECTOR_COLORS[x.label] || 'var(--navy-400)');
-        arcs += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + x._c +
-          '" stroke-width="' + (isOwn ? sw + 7 : sw) + '" stroke-dasharray="' + len.toFixed(2) + ' ' +
-          (C - len).toFixed(2) + '" stroke-dashoffset="' + (-off).toFixed(2) + '"></circle>';
-        off += len;
-      });
-      var legend = segs.map(function (x) {
-        return '<div class="cb-leg"><span class="cb-leg-sw" style="background:' + x._c + '"></span>' +
-          '<span class="cb-leg-lab">' + esc(x.label) + '</span>' +
-          '<span class="cb-leg-n">' + x.count + ' (' + Math.round(100 * x.count / total) + '%)</span></div>';
-      }).join('');
-      var ownTxt = !own.length ? 'not provided' : own.map(function (o) {
-        return esc(o) + (named[o] ? '' : ' <span class="cb-sector-inother">(in Other)</span>');
-      }).join(' · ');
-      var base = (clubsN != null ? clubsN + ' club' + (clubsN === 1 ? '' : 's') : '') +
-        (clubsN != null && total !== clubsN ? ' · ' + total + ' ' + (noun || 'sponsors') : (clubsN == null ? total + ' ' + (noun || 'sponsors') : '')) +
-        ' · ' + scopeTxt;
+      var byCount = function (a, b) { return b.count - a.count || a.label.localeCompare(b.label); };
+      var fixed = arr.filter(function (x) { return IS_SURVEY[x.label]; }).sort(byCount);
+      var free = arr.filter(function (x) { return !IS_SURVEY[x.label]; }).sort(byCount);
+      var ownFree = free.filter(function (x) { return own.indexOf(x.label) >= 0; });
+      var otherFree = free.filter(function (x) { return own.indexOf(x.label) < 0; });
+      var otherN = otherFree.reduce(function (a, e) { return a + e.count; }, 0);
+      var max = Math.max.apply(null, fixed.concat(free).map(function (x) { return x.count; }).concat([otherN, unstated, 1]));
+      function row(label, count, opts) {
+        opts = opts || {};
+        var isOwn = !!opts.own, pct = Math.round(100 * count / total);
+        return '<div class="cb-secrow' + (isOwn ? ' own' : '') + (opts.muted ? ' muted' : '') + '">' +
+          '<span class="cb-secrow-lab">' + esc(label) + (isOwn ? ' <span class="cb-secrow-you">you</span>' : '') + '</span>' +
+          '<span class="cb-secrow-bar"><span style="width:' + (100 * count / max).toFixed(1) + '%"></span></span>' +
+          '<span class="cb-secrow-n">' + count + ' <span class="cb-secrow-pct">(' + pct + '%)</span></span></div>';
+      }
+      var list = fixed.map(function (x) { return row(x.label, x.count, { own: own.indexOf(x.label) >= 0 }); }).join('');
+      list += ownFree.map(function (x) { return row(x.label, x.count, { own: true }); }).join('');
+      if (otherN) {
+        list += '<details class="disclosure cb-secrow-other"><summary>' + row('Other', otherN, { muted: true }) + '</summary>' +
+          '<div class="cb-secrow-sub">' + otherFree.map(function (x) {
+            return '<div class="cb-secrow-subrow"><span>' + esc(x.label) + '</span><span>' + x.count + '</span></div>';
+          }).join('') + '<div class="cb-secrow-subnote">As each club described it in the survey’s “Other” box.</div></div></details>';
+      }
+      if (unstated) list += row('Not stated', unstated, { muted: true });
+      var base = (clubsN != null ? clubsN + ' club' + (clubsN === 1 ? '' : 's') + ' · ' : '') + total + ' ' + (noun || 'sponsors') + ' · ' + scopeTxt;
+      var ownLine = '';
+      if (!own.length) ownLine = '<div class="cb-sector-own"><b>' + (ownLabel || 'Yours') + ':</b> not provided</div>';
       return '<div class="cb-sector"><div class="cb-sector-h">' + title +
-        '<span class="cb-sector-sub">' + base + '</span></div><div class="cb-sector-body">' +
-        '<div class="cb-donut"><svg viewBox="0 0 160 160" width="100%" height="100%" style="transform:rotate(-90deg);display:block">' + arcs + '</svg></div>' +
-        '<div class="cb-legend">' + legend + '</div></div>' +
-        '<div class="cb-sector-own"><b>' + (ownLabel || 'Yours') + ':</b> ' + ownTxt + '</div></div>';
+        '<span class="cb-sector-sub">' + base + '</span></div>' +
+        '<div class="cb-seclist">' + list + '</div>' + ownLine + '</div>';
     }
     function renderAll() { renderHeader(); renderScopeControl(); render(); }
 
