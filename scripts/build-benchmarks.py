@@ -9,8 +9,12 @@ import into Firebase RTDB at  app-data/ops-commercial-benchmarking  :
 NOTHING here is committed to the repo. The repo is a PUBLIC GitHub Pages site,
 so all survey-derived data (anonymised aggregates included) is served from RTDB
 at runtime, never baked into a committed file. Personal data was already
-stripped by clean_survey.py; this script additionally never emits a club name
-into the `aggregates` block — only the club's own `dash/<token>` node names it.
+stripped by clean-survey-export.py (raw SurveyMonkey export -> this cleaned
+layout); this script additionally never emits a club name into the
+`aggregates` block — only the club's own `links/<token>` node names it.
+
+Late returns after the seed do NOT come through here: see
+build-benchmark-rows.py and the tool's admin Import rows.
 
 Usage:
     python scripts/build-benchmarks.py <cleaned.xlsx> <out-rtdb-import.json> [links.csv]
@@ -52,7 +56,7 @@ CHIP_FIELDS = [
     ('emailPartners', 'Can email on behalf of partners?', 'Can email on behalf of partners?'),
 ]
 
-# Official 72-club roster (from clean_survey.py) — drives the full staff dropdown
+# Official 72-club roster (2025/26) — drives the full staff dropdown
 # incl. clubs that submitted nothing or never entered.
 _NAT = "Aldershot Town|Altrincham|Boreham Wood|Boston United|Brackley Town|Braintree Town|Carlisle United|Eastleigh|FC Halifax Town|Forest Green Rovers|Gateshead|Hartlepool United|Morecambe|Rochdale|Scunthorpe United|Solihull Moors|Southend United|Sutton United|Tamworth|Truro City|Wealdstone|Woking|Yeovil Town|York City".split("|")
 _NTH = "AFC Fylde|AFC Telford United|Alfreton Town|Bedford Town|Buxton|Chester|Chorley|Curzon Ashton|Darlington|Hereford|Kidderminster Harriers|King's Lynn Town|Leamington|Macclesfield|Marine|Merthyr Town|Oxford City|Peterborough Sports|Radcliffe|Scarborough Athletic|South Shields|Southport|Spennymoor Town|Worksop Town".split("|")
