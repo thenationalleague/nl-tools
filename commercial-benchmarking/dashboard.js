@@ -1,4 +1,4 @@
-/* commercial-benchmarking/dashboard.js  v1.3
+/* commercial-benchmarking/dashboard.js  v1.4
    Shared dashboard renderer for the Commercial Benchmarking tool. Pure
    rendering — no Firebase, no data loading. Both entry points use it:
      - index.html  (gated NL tool: staff picker / club's own row via auth-guard)
@@ -7,13 +7,27 @@
    CBDash.mount(AGG, clubs, opts)
      AGG    = { meta, aggregates:{<key>:{label,unit,desc,group,scopes:{...}}}, chips }
      clubs  = array of club payloads { club, division, fsSponsor, metrics, chips }
-     opts   = { staff: bool }   // staff:true shows the club picker
+     opts   = { staff, canEdit, onSave(AGG, clubs), writeLink(token, payload),
+                tokenByClub, confirmByClub }
+              staff:true shows the club picker; canEdit + onSave enable the
+              editor and Import rows; writeLink enables the link manager.
+   CBDash.importRows(AGG, clubs, rows, {dryRun, replace}) — see the function.
 
    Operates on fixed IDs present in the page skeleton (#sections, #chips,
    #scopeSeg, #viewSeg, #clubPick, header fields). Topbar fields are optional
    (the gated tool uses nl-topbar instead) and updated only if present.
 */
 window.CBDash = (function () {
+
+  // One escaper for the whole file: NL.escHtml where nl-utils is loaded
+  // (index.html), the same rule inline for link.html, which does not load it.
+  function esc(s) {
+    s = String(s == null ? '' : s);
+    if (window.NL && NL.escHtml) return NL.escHtml(s);
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  var DIV_FULL = { National: 'National League', North: 'National League North', South: 'National League South' };
+  var MON3 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
   /* ---- recompute (mirrors scripts/build-benchmarks.py) ----
      One club's edit shifts the division/league medians, the sorted graph
@@ -109,6 +123,92 @@ window.CBDash = (function () {
     return AGG;
   }
 
+  // Bring late club returns into the live set. `rows` is the array written by
+  // scripts/build-benchmark-rows.py: one payload per club in the stored shape,
+  // with metric values but no percentiles. Every row is checked against the
+  // roster and the metric list before anything changes, so a bad paste fails
+  // whole rather than half-applying. With {dryRun:true} nothing is mutated —
+  // the result still says what would happen. A club that already has data is
+  // refused unless {replace:true}. On success the aggregates, sector and chip
+  // distributions, percentiles for EVERY club, the roster flags and the
+  // response counts are all recomputed from the merged set.
+  function importRows(AGG, clubs, rows, opts) {
+    opts = opts || {};
+    var res = { ok: false, added: [], replaced: [], errors: [] };
+    if (!AGG || !AGG.aggregates) { res.errors.push('Benchmark data isn’t loaded.'); return res; }
+    if (!Array.isArray(rows) || !rows.length) { res.errors.push('Expected a JSON array of club rows.'); return res; }
+    var rosterByClub = {};
+    (AGG.roster || []).forEach(function (e) { rosterByClub[e.club] = e; });
+    var idxByClub = {};
+    clubs.forEach(function (c, i) { idxByClub[c.club] = i; });
+    var plan = [], seen = {};
+    rows.forEach(function (r, i) {
+      if (!r || typeof r !== 'object' || typeof r.club !== 'string' || !r.club.trim()) {
+        res.errors.push('Row ' + (i + 1) + ': no club name'); return;
+      }
+      var club = r.club.trim();
+      if (seen[club]) { res.errors.push(club + ': listed twice'); return; }
+      seen[club] = true;
+      var ros = rosterByClub[club];
+      if (AGG.roster && !ros) { res.errors.push(club + ': not on the roster'); return; }
+      if (ros && ros.division !== r.division) {
+        res.errors.push(club + ': division “' + r.division + '” — the roster says “' + ros.division + '”'); return;
+      }
+      if (!ros && SCOPES.indexOf(r.division) < 0) { res.errors.push(club + ': unknown division “' + r.division + '”'); return; }
+      if (!r.metrics || typeof r.metrics !== 'object') { res.errors.push(club + ': no metrics'); return; }
+      var unknown = [], bad = [];
+      Object.keys(r.metrics).forEach(function (k) {
+        if (!AGG.aggregates[k]) { unknown.push(k); return; }
+        var v = r.metrics[k] && r.metrics[k].value;
+        if (!(v == null || (typeof v === 'number' && isFinite(v)))) bad.push(k);
+      });
+      if (unknown.length) { res.errors.push(club + ': unknown metric' + (unknown.length > 1 ? 's' : '') + ' ' + unknown.join(', ')); return; }
+      if (bad.length) { res.errors.push(club + ': non-numeric value for ' + bad.join(', ')); return; }
+      if (!hasData(r)) { res.errors.push(club + ': no figures'); return; }
+      var existing = idxByClub[club] != null ? clubs[idxByClub[club]] : null;
+      var replacing = !!(existing && hasData(existing));
+      if (replacing && !opts.replace) { res.errors.push(club + ': already has data — tick Replace to overwrite it'); return; }
+      plan.push({ row: r, club: club, existing: existing, replacing: replacing });
+    });
+    if (res.errors.length) return res;
+    plan.forEach(function (p) { res[p.replacing ? 'replaced' : 'added'].push(p.club); });
+    res.ok = true;
+    if (opts.dryRun) return res;
+
+    var KEEP = ['division', 'fsSponsor', 'bsSponsor', 'slSponsor', 'fsSector', 'bsSector', 'slSector',
+      'fsStart', 'bsStart', 'slStart', 'stands', 'standSectors', 'chips'];
+    plan.forEach(function (p) {
+      var r = p.row, rec = { club: p.club, metrics: {} };
+      KEEP.forEach(function (k) { if (r[k] !== undefined) rec[k] = r[k]; });
+      rec.chips = rec.chips || {};
+      rec.stands = rec.stands || [];
+      rec.standSectors = rec.standSectors || '';
+      // values only — recompute below assigns the percentiles
+      Object.keys(r.metrics).forEach(function (k) { rec.metrics[k] = { value: r.metrics[k].value == null ? null : r.metrics[k].value }; });
+      rec._noData = false;
+      if (p.existing) clubs[idxByClub[p.club]] = rec;
+      else clubs.push(rec);
+      if (rosterByClub[p.club]) rosterByClub[p.club].data = true;
+    });
+    if (!AGG.roster) {
+      var DIV_ORDER = { National: 0, North: 1, South: 2 };
+      clubs.sort(function (a, b) { return (DIV_ORDER[a.division] - DIV_ORDER[b.division]) || a.club.localeCompare(b.club); });
+    }
+    recompute(AGG, clubs);
+    recomputeSectors(AGG, clubs);
+    recomputeChips(AGG, clubs);
+    // response counts: clubs with figures, per division — the footer's "N responding clubs"
+    var meta = AGG.meta || (AGG.meta = {});
+    meta.divN = { National: 0, North: 0, South: 0 };
+    meta.leagueN = 0;
+    clubs.forEach(function (c) {
+      if (!hasData(c)) return;
+      meta.leagueN++;
+      if (meta.divN[c.division] != null) meta.divN[c.division]++;
+    });
+    return res;
+  }
+
   // Whether a club has actually submitted usable commercial data. Mirrors the
   // Python has_data(): any metric other than standCount (which is always 0–4,
   // never null) carries a value. Used to lock out the "no data submitted"
@@ -159,7 +259,6 @@ window.CBDash = (function () {
       return { cls: 'lo', txt: 'Bottom quartile' };
     }
     // scope model: 'div' (own division), 'step2' (North+South), 'league' (all)
-    var DIV_FULL = { National: 'National League', North: 'National League North', South: 'National League South' };
     function divName(d) { return DIV_FULL[d] || d; }
     function scopeOptions() {
       if (OWN.division === 'National') return [{ k: 'div', l: divName('National') }, { k: 'league', l: 'All divisions' }];
@@ -324,7 +423,7 @@ window.CBDash = (function () {
         var cards = byGroup[title].map(metricCard);
         CHIP_DEFS.filter(function (d) { return d.group === title; }).forEach(function (d) { cards.push(chipCard(d)); });
         if (title === 'Stand sponsorship') cards.push(standListCard());  // half-width card alongside Avg per stand
-        return '<div class="section"><div class="section-head"><h2>' + title + '</h2>' +
+        return '<div class="section"><div class="cb-section-head"><h2>' + title + '</h2>' +
           '<span class="count">vs ' + scopeTxt + '</span></div>' +
           '<div class="grid">' + cards.join('') + '</div>' +
           (title === 'Stand sponsorship' ? standDonut() : '') + '</div>';
@@ -337,7 +436,7 @@ window.CBDash = (function () {
           { kind: 'Back-of-shirt sponsorship', incomeKey: 'backShirt', termKey: 'backTerm', sponKey: 'bsSponsor', startKey: 'bsStart', rollKey: 'rollingBack', dist: S.back, ownSec: OWN.bsSector, noun: 'back-of-shirt sponsors' },
           { kind: 'Sleeve sponsorship', incomeKey: 'sleeve', termKey: 'sleeveTerm', sponKey: 'slSponsor', startKey: 'slStart', rollKey: 'rollingSleeve', dist: S.sleeve, ownSec: OWN.slSector, noun: 'sleeve sponsors' }
         ];
-        return '<div class="section"><div class="section-head"><h2>Shirt &amp; kit sponsorship</h2>' +
+        return '<div class="section"><div class="cb-section-head"><h2>Shirt &amp; kit sponsorship</h2>' +
           '<span class="count">vs ' + scopeTxt + '</span></div>' +
           slots.map(shirtSlotCard).join('') + '</div>';
       }
@@ -449,7 +548,7 @@ window.CBDash = (function () {
         .forEach(function (lab, i) { if (i < pal.length) map[lab] = pal[i]; });
       return map;
     })();
-    var OTHER_COLOR = 'var(--navy-200, #c8d0e0)';
+    var OTHER_COLOR = 'var(--navy-200)';
     function donutBlock(title, dist, ownStr, noun) {
       if (!dist) return '';
       var arr = Array.isArray(dist) ? dist
@@ -505,10 +604,6 @@ window.CBDash = (function () {
       return groups;
     }
 
-    function escAttr(s) {
-      return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-    }
-
     // The dropdown offers exactly the sectors that surface individually on the
     // front end — the 8 most common league-wide (keys of SECTOR_COLORS). Any
     // rarer sector is "Other" on the donuts, so in the editor it lands on the
@@ -528,45 +623,48 @@ window.CBDash = (function () {
     // Generic picker: a dropdown of `opts` plus an "Other…" option that reveals
     // a freetext box. `key` namespaces the control, e.g. 'sec:fsSector',
     // 'sec:stand0', 'chip:rollingFront'. Empty selection means "not provided".
+    // A select of the known options, with "Other…" revealing a free-text box
+    // beneath it. Both live in one .form-group so they stack at every width.
     function pickerControl(cur, key, opts, placeholder) {
       cur = (cur == null ? '' : String(cur)).trim();
       var known = opts.indexOf(cur) >= 0, custom = !known && !!cur;
-      return '<select class="cb-edit-sel" data-pick="' + key + '">' +
-        '<option value=""' + (cur ? '' : ' selected') + '>— none —</option>' +
-        opts.map(function (o) { return '<option' + (known && o === cur ? ' selected' : '') + '>' + escAttr(o) + '</option>'; }).join('') +
+      return '<select data-pick="' + key + '">' +
+        '<option value=""' + (cur ? '' : ' selected') + '>None</option>' +
+        opts.map(function (o) { return '<option' + (known && o === cur ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') +
         '<option value="__other"' + (custom ? ' selected' : '') + '>Other…</option></select>' +
-        '<input type="text" class="cb-edit-other" data-pickother="' + key + '" placeholder="' + (placeholder || 'Specify') + '" value="' +
-          (custom ? escAttr(cur) : '') + '"' + (custom ? '' : ' style="display:none"') + '>';
+        '<input type="text" class="cb-pick-other" data-pickother="' + key + '" placeholder="' + (placeholder || 'Specify') + '" value="' +
+          (custom ? esc(cur) : '') + '"' + (custom ? '' : ' hidden') + '>';
     }
-    function sectorControl(cur, attr) { return pickerControl(cur, 'sec:' + attr, allSectors(), 'Specify sector'); }
+    function sectorControl(cur, attr) { return pickerControl(cur, 'sec:' + attr, allSectors(), 'Which sector?'); }
     function chipPicker(kind) { return pickerControl((OWN.chips || {})[kind], 'chip:' + kind, chipOpts(kind)); }
 
+    // Blank = no figure; 0 = a real zero. No separate "None" tick to explain.
     function numCtl(k) {
-      var m = OWN.metrics[k] || (OWN.metrics[k] = { value: null }), np = m.value == null;
-      return '<input type="number" step="any" data-ekey="' + k + '" value="' + (np ? '' : m.value) + '"' + (np ? ' disabled' : '') + '>' +
-        '<label class="cb-np"><input type="checkbox" data-np="' + k + '"' + (np ? ' checked' : '') + '> None</label>';
+      var m = OWN.metrics[k] || (OWN.metrics[k] = { value: null });
+      return '<input type="number" step="any" inputmode="decimal" data-ekey="' + k + '" value="' + (m.value == null ? '' : m.value) + '" placeholder="—">';
     }
 
-    function editRow(lab, ctl) {
-      return '<div class="cb-edit-row"><span class="cb-edit-lab">' + lab + '</span><span class="cb-edit-ctl">' + ctl + '</span></div>';
+    function field(lab, ctl, span) {
+      return '<div class="form-group' + (span ? ' span2' : '') + '"><label>' + lab + '</label>' + ctl + '</div>';
     }
+    function formGrid(inner, cls) { return '<div class="cb-form-grid' + (cls ? ' ' + cls : '') + '">' + inner + '</div>'; }
+    function slot(title, inner) { return '<div class="cb-form-slot"><div class="cb-form-slot-kind">' + title + '</div>' + inner + '</div>'; }
 
     var SHIRT_SLOTS = [
-      { kind: 'Front-of-shirt', spon: 'fsSponsor', sec: 'fsSector', income: 'frontShirt', term: 'frontTerm', roll: 'rollingFront' },
-      { kind: 'Back-of-shirt', spon: 'bsSponsor', sec: 'bsSector', income: 'backShirt', term: 'backTerm', roll: 'rollingBack' },
+      { kind: 'Front of shirt', spon: 'fsSponsor', sec: 'fsSector', income: 'frontShirt', term: 'frontTerm', roll: 'rollingFront' },
+      { kind: 'Back of shirt', spon: 'bsSponsor', sec: 'bsSector', income: 'backShirt', term: 'backTerm', roll: 'rollingBack' },
       { kind: 'Sleeve', spon: 'slSponsor', sec: 'slSector', income: 'sleeve', term: 'sleeveTerm', roll: 'rollingSleeve' }
     ];
 
     function shirtEditSection() {
-      return '<div class="section"><div class="section-head"><h2>Shirt &amp; kit sponsorship</h2></div>' +
+      return '<div class="section"><div class="cb-section-head"><h2>Shirt &amp; kit sponsorship</h2></div>' +
         SHIRT_SLOTS.map(function (sl) {
-          return '<div class="cb-edit-slot"><div class="cb-edit-slot-kind">' + sl.kind + ' sponsorship</div>' +
-            editRow('Sponsor name', '<input type="text" data-espon="' + sl.spon + '" value="' + escAttr(OWN[sl.spon] || '') + '" placeholder="None">') +
-            editRow('Sector', sectorControl(OWN[sl.sec], sl.sec)) +
-            editRow('Income (£)', numCtl(sl.income)) +
-            editRow('Deal length (yrs)', numCtl(sl.term)) +
-            editRow('Rolling deal? (Yes/No)', chipPicker(sl.roll)) +
-            '</div>';
+          return slot(sl.kind, formGrid(
+            field('Sponsor', '<input type="text" data-espon="' + sl.spon + '" value="' + esc(OWN[sl.spon] || '') + '" placeholder="None">') +
+            field('Sector', sectorControl(OWN[sl.sec], sl.sec)) +
+            field('Income (£)', numCtl(sl.income)) +
+            field('Deal length (yrs)', numCtl(sl.term)) +
+            field('Rolling deal', chipPicker(sl.roll)), 'cb-form-grid--slot'));
         }).join('') + '</div>';
     }
 
@@ -576,14 +674,13 @@ window.CBDash = (function () {
       for (var i = 0; i < 4; i++) {
         var st = OWN.stands[i] || {};
         var nm = st.name && st.name !== '—' ? st.name : '';
-        rows += '<div class="cb-edit-slot"><div class="cb-edit-slot-kind">Stand sponsor ' + (i + 1) + '</div>' +
-          editRow('Name', '<input type="text" data-estand="' + i + '-name" value="' + escAttr(nm) + '" placeholder="None">') +
-          editRow('Sector', sectorControl(st.sector, 'stand' + i)) +
-          editRow('Income (£)', '<input type="number" step="any" data-estand="' + i + '-income" value="' + (st.income != null ? st.income : '') + '" placeholder="—">') +
-          '</div>';
+        rows += slot('Stand sponsor ' + (i + 1), formGrid(
+          field('Sponsor', '<input type="text" data-estand="' + i + '-name" value="' + esc(nm) + '" placeholder="None">') +
+          field('Sector', sectorControl(st.sector, 'stand' + i)) +
+          field('Income (£)', '<input type="number" step="any" inputmode="decimal" data-estand="' + i + '-income" value="' + (st.income != null ? st.income : '') + '" placeholder="—">'), 'cb-form-grid--slot'));
       }
-      return '<div class="section"><div class="section-head"><h2>Stand sponsorship</h2></div>' + rows +
-        '<div class="cb-edit-hint">Number of stand sponsors, combined total and average per stand are calculated from these rows.</div></div>';
+      return '<div class="section"><div class="cb-section-head"><h2>Stand sponsorship</h2></div>' + rows +
+        '<div class="form-hint cb-form-hint">Stand count, combined total and average per stand are calculated from these rows. A row with no sponsor and no income is not a stand.</div></div>';
     }
 
     function renderEditForm() {
@@ -591,32 +688,26 @@ window.CBDash = (function () {
         if (g.title === 'Shirt & kit sponsorship') return shirtEditSection();
         if (g.title === 'Stand sponsorship') return standEditSection();
         // numeric metrics, plus any categorical chips that belong in this group
-        var chipRows = CHIP_DEFS.filter(function (d) { return d.group === g.title; }).map(function (d) {
-          return editRow(d.label, chipPicker(d.kind));
+        var chipFields = CHIP_DEFS.filter(function (d) { return d.group === g.title; }).map(function (d) {
+          return field(d.label, chipPicker(d.kind));
         }).join('');
-        return '<div class="section"><div class="section-head"><h2>' + g.title + '</h2></div>' +
-          '<div class="cb-edit-grid">' + g.keys.map(function (k) {
+        return '<div class="section"><div class="cb-section-head"><h2>' + g.title + '</h2></div>' +
+          formGrid(g.keys.map(function (k) {
             var agg = AGG.aggregates[k], u = (agg.unit || '').trim();
-            return editRow(agg.label + (u ? ' (' + u + ')' : ''), numCtl(k));
-          }).join('') + chipRows + '</div></div>';
+            return field(agg.label + (u ? ' (' + u + ')' : ''), numCtl(k));
+          }).join('') + chipFields) + '</div>';
       }).join('');
-      body += '<div class="cb-edit-actions"><button id="cb-save" class="cb-edit-btn" type="button">Save changes</button>' +
-        '<button id="cb-cancel" class="cb-cancel" type="button">Cancel</button>' +
-        '<span id="cb-editnote">Editing <b>' + OWN.club + '</b> — tick <b>None</b> for no figure; 0 is a real zero. Pick a sector or choose <b>Other…</b> to type your own. Saving recomputes all benchmarks.</span></div>';
+      body += '<div class="cb-edit-actions"><button id="cb-save" class="btn btn--primary btn--sm" type="button">Save changes</button>' +
+        '<button id="cb-cancel" class="btn btn--ghost btn--sm" type="button">Cancel</button>' +
+        '<span id="cb-editnote" class="cb-editnote">Editing <b>' + esc(OWN.club) + '</b>. Blank means no figure; 0 is a real zero. Saving recomputes every benchmark.</span></div>';
       $('sections').innerHTML = body;
       $('sections').onchange = function (e) {
         var t = e.target;
         if (!t || !t.getAttribute) return;
-        var npk = t.getAttribute('data-np');
-        if (npk != null) {
-          var inp = $('sections').querySelector('input[data-ekey="' + npk + '"]');
-          if (inp) { inp.disabled = t.checked; if (!t.checked) inp.focus(); }
-          return;
-        }
         var pick = t.getAttribute('data-pick');
         if (pick != null) {
           var other = $('sections').querySelector('input[data-pickother="' + pick + '"]');
-          if (other) { var show = t.value === '__other'; other.style.display = show ? '' : 'none'; if (show) other.focus(); }
+          if (other) { var show = t.value === '__other'; other.hidden = !show; if (show) other.focus(); }
         }
       };
       $('cb-cancel').onclick = function () { editMode = false; setEditUI(); render(); };
@@ -637,10 +728,9 @@ window.CBDash = (function () {
     function doSave() {
       // numeric metrics (incl. shirt income/term; stand totals are derived below)
       [].forEach.call($('sections').querySelectorAll('input[data-ekey]'), function (inp) {
-        var k = inp.getAttribute('data-ekey');
-        var np = $('sections').querySelector('input[data-np="' + k + '"]');
-        if (np && np.checked) { OWN.metrics[k] = OWN.metrics[k] || {}; OWN.metrics[k].value = null; }
-        else { var raw = inp.value.trim(); OWN.metrics[k] = OWN.metrics[k] || {}; OWN.metrics[k].value = raw === '' ? 0 : Number(raw); }
+        var k = inp.getAttribute('data-ekey'), raw = inp.value.trim();
+        OWN.metrics[k] = OWN.metrics[k] || {};
+        OWN.metrics[k].value = raw === '' ? null : Number(raw);
       });
       // shirt sponsor names + sectors
       [].forEach.call($('sections').querySelectorAll('input[data-espon]'), function (inp) {
@@ -691,23 +781,19 @@ window.CBDash = (function () {
 
     function exportData() {
       var keys = Object.keys(AGG.aggregates);
-      function cell(s) { s = s == null ? '' : String(s); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
       var chipCols = [['progFormat', 'Programme format'], ['rollingFront', 'Front-shirt rolling?'],
         ['emailSupporters', 'Can email supporters?'], ['emailPartners', 'Can email partners?']];
       var header = ['Club', 'Division'].concat(keys.map(function (k) {
         var u = (AGG.aggregates[k].unit || '').trim(); return AGG.aggregates[k].label + (u ? ' (' + u + ')' : '');
       })).concat(chipCols.map(function (c) { return c[1]; }));
-      var lines = [header.map(cell).join(',')];
-      clubs.forEach(function (c) {
+      var rows = [header].concat(clubs.map(function (c) {
         var row = [c.club, c.division];
         keys.forEach(function (k) { var m = c.metrics && c.metrics[k]; row.push(m && m.value != null ? m.value : ''); });
         chipCols.forEach(function (cc) { row.push((c.chips && c.chips[cc[0]]) || ''); });
-        lines.push(row.map(cell).join(','));
-      });
-      var blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
-      var url = URL.createObjectURL(blob), a = document.createElement('a');
-      a.href = url; a.download = 'commercial-benchmarking-' + new Date().toISOString().slice(0, 10) + '.csv';
-      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+        return row;
+      }));
+      NL.download('commercial-benchmarking-' + new Date().toISOString().slice(0, 10) + '.csv',
+        NL.csv(rows, { bom: true }), 'text/csv;charset=utf-8;');
     }
 
     // Excel workbook of every club's two links, styled like the on-screen
@@ -716,7 +802,6 @@ window.CBDash = (function () {
     // links without any library.
     function exportLinks() {
       var tb = opts.tokenByClub || {};
-      function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
       var th = 'style="background:#1B2A4A;color:#fff;font-weight:bold;text-align:left;padding:7px 12px;border:1px solid #cfd6e4"';
       var td = 'style="padding:6px 12px;border:1px solid #e2e6ee"';
       function lk(word, url) { return '<a href="' + esc(url) + '" style="color:#9e0000;font-weight:bold;text-decoration:none">' + word + '</a>'; }
@@ -732,10 +817,8 @@ window.CBDash = (function () {
         '<style>table{border-collapse:collapse;font-family:Arial,sans-serif;font-size:11pt}</style></head><body>' +
         '<table><tr><th ' + th + '>Club</th><th ' + th + '>Division</th><th ' + th + '>Proof</th><th ' + th + '>Benchmarking</th></tr>' +
         rows + '</table></body></html>';
-      var blob = new Blob(['﻿' + html], { type: 'application/vnd.ms-excel' });
-      var url = URL.createObjectURL(blob), a = document.createElement('a');
-      a.href = url; a.download = 'commercial-benchmarking-links-' + new Date().toISOString().slice(0, 10) + '.xls';
-      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+      NL.download('commercial-benchmarking-links-' + new Date().toISOString().slice(0, 10) + '.xls',
+        new Blob(['﻿' + html], { type: 'application/vnd.ms-excel' }));
     }
 
     // ---- admin: generate & manage per-club capability links ----
@@ -767,18 +850,17 @@ window.CBDash = (function () {
       function confCell(c) {
         var v = cf[c.club];
         if (!v) return '<span class="cb-unconf">—</span>';
-        var d = (typeof v === 'number') ? new Date(v) : null;
-        return '<span class="cb-conf">✓' + (d && !isNaN(d) ? ' ' + d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '') + '</span>';
+        return '<span class="cb-conf">✓' + (typeof v === 'number' ? ' ' + NL.formatDateShort(v) : '') + '</span>';
       }
       var rows = clubs.map(function (c) {
         var tok = tb[c.club];
-        var nameCell = c.club + (c._noData ? ' <span class="cb-nodata">(no data yet)</span>' : '');
+        var nameCell = c.club + (c._noData ? ' <span class="cb-nodata-tag">(no data yet)</span>' : '');
         var proof, bench;
         if (tok) {
           proof = '<td><a class="cb-linkword" href="' + proofUrl(tok) + '" target="_blank" rel="noopener">Proof</a></td>';
           bench = '<td><a class="cb-linkword" href="' + linkUrl(tok) + '" target="_blank" rel="noopener">Benchmarked</a></td>';
         } else {
-          proof = '<td colspan="2"><button class="cb-edit-btn" type="button" data-gen="' + c.club.replace(/"/g, '&quot;') + '">Generate links</button></td>';
+          proof = '<td colspan="2"><button class="btn btn--ghost btn--sm" type="button" data-gen="' + c.club.replace(/"/g, '&quot;') + '">Generate links</button></td>';
           bench = '';
         }
         return '<tr><td>' + nameCell + '</td><td>' + c.division + '</td>' + proof + bench + '<td>' + confCell(c) + '</td></tr>';
@@ -786,10 +868,10 @@ window.CBDash = (function () {
       var have = clubs.filter(function (c) { return tb[c.club]; }).length;
       var confirmed = clubs.filter(function (c) { return cf[c.club]; }).length;
       $('sections').innerHTML = '<div class="cb-edit-actions">' +
-        '<button id="cb-genall" class="cb-edit-btn" type="button">Generate all missing</button>' +
-        '<button id="cb-linkdl" class="cb-edit-btn" type="button">Download links (Excel)</button>' +
-        '<button id="cb-linkdone" class="cb-cancel" type="button">Done</button>' +
-        '<span id="cb-linknote"><b>' + confirmed + ' of ' + clubs.length + '</b> clubs have confirmed their data. ' + have + ' have links. <b>Proof</b> = own-data check; <b>Benchmarked</b> = full comparison.</span></div>' +
+        '<button id="cb-genall" class="btn btn--navy btn--sm" type="button">Generate all missing</button>' +
+        '<button id="cb-linkdl" class="btn btn--navy btn--sm" type="button">Download links (Excel)</button>' +
+        '<button id="cb-linkdone" class="btn btn--ghost btn--sm" type="button">Done</button>' +
+        '<span id="cb-linknote" class="cb-linknote"><b>' + confirmed + ' of ' + clubs.length + '</b> clubs have confirmed their data. ' + have + ' have links. <b>Proof</b> = own-data check; <b>Benchmarked</b> = full comparison.</span></div>' +
         '<table class="cb-linktable"><thead><tr><th>Club</th><th>Division</th><th>Proof</th><th>Benchmarked</th><th>Confirmed</th></tr></thead><tbody>' + rows + '</tbody></table>';
       $('cb-linkdone').onclick = function () { $('sections').onclick = null; render(); };
       $('cb-genall').onclick = genMissing;
@@ -800,29 +882,102 @@ window.CBDash = (function () {
       };
     }
 
+    var updateSelLink = null;
+    function pickOptions() {
+      var opt = '', curDiv = '';
+      clubs.forEach(function (c, i) {
+        if (c.division !== curDiv) { if (curDiv) opt += '</optgroup>'; opt += '<optgroup label="' + divName(c.division) + '">'; curDiv = c.division; }
+        opt += '<option value="' + i + '">' + esc(c.club) + (c._noData ? ' — no data' : '') + '</option>';
+      });
+      return opt + '</optgroup>';
+    }
+
+    // ---- admin: import late club rows (paste the JSON from build-benchmark-rows.py) ----
+    // Two presses: the first checks the paste and reports what would change
+    // (or every reason it can't), the second applies it. Any edit to the
+    // paste sends it back to the first step.
+    function importDialog() {
+      if (!(window.NL && NL.modal)) return;
+      editMode = false; setEditUI();
+      var checked = null;
+      var ctrl = NL.modal({
+        title: 'Import club rows',
+        width: 'wide',
+        body: '<p class="cb-import-help">Paste the JSON written by <code>build-benchmark-rows.py</code>. ' +
+          'Clubs are matched to the roster by name; every benchmark and percentile is recomputed on save.</p>' +
+          '<textarea id="cb-import-json" class="cb-import-json" rows="10" spellcheck="false" placeholder="[ { &quot;club&quot;: …"></textarea>' +
+          '<label class="cb-import-replace"><input type="checkbox" id="cb-import-replace"> Replace clubs that already have data</label>' +
+          '<div id="cb-import-note" class="cb-import-note" aria-live="polite"></div>',
+        buttons: [
+          { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+          { label: 'Check', className: 'btn--primary', onClick: onPress }
+        ]
+      });
+      var ta = document.getElementById('cb-import-json'), note = document.getElementById('cb-import-note');
+      var rep = document.getElementById('cb-import-replace');
+      var goBtn = ctrl.el.querySelector('.modal__footer button:last-child');
+      function reset() { checked = null; goBtn.textContent = 'Check'; }
+      ta.addEventListener('input', reset); rep.addEventListener('change', reset);
+      function say(html, bad) { note.innerHTML = html; note.className = 'cb-import-note' + (bad ? ' cb-import-note--bad' : ''); }
+      function parse() {
+        var rows;
+        try { rows = JSON.parse(ta.value); } catch (e) { return { errors: ['That isn’t valid JSON — paste the whole file, including the outer [ ].'] }; }
+        return importRows(AGG, clubs, rows, { dryRun: true, replace: rep.checked });
+      }
+      function onPress(c) {
+        if (!checked) {
+          var dry = parse();
+          if (!dry.ok) { say('<b>Nothing imported.</b><ul>' + dry.errors.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul>', true); return; }
+          checked = dry;
+          var parts = [];
+          if (dry.added.length) parts.push('<b>Add ' + dry.added.length + '</b>: ' + dry.added.map(esc).join(', '));
+          if (dry.replaced.length) parts.push('<b>Replace ' + dry.replaced.length + '</b>: ' + dry.replaced.map(esc).join(', '));
+          say(parts.join('<br>') + '<br>Every club’s percentiles will be recomputed and links generated for new clubs.');
+          goBtn.textContent = 'Import ' + (dry.added.length + dry.replaced.length) + ' club' + (dry.added.length + dry.replaced.length === 1 ? '' : 's');
+          return;
+        }
+        goBtn.disabled = true; say('Importing…');
+        var rows = JSON.parse(ta.value);
+        var res = importRows(AGG, clubs, rows, { replace: rep.checked });
+        if (!res.ok) { goBtn.disabled = false; reset(); say('<b>Nothing imported.</b> ' + esc(res.errors.join(' ')), true); return; }
+        var tb = opts.tokenByClub || (opts.tokenByClub = {});
+        Promise.resolve(opts.onSave(AGG, clubs)).then(function () {
+          if (!opts.writeLink) return;
+          var need = res.added.filter(function (n) { return !tb[n]; });
+          return Promise.all(need.map(function (n) { var tok = token24(); tb[n] = tok; return opts.writeLink(tok, clubByName[n]); }));
+        }).then(function () {
+          clubByName = {}; clubs.forEach(function (x) { clubByName[x.club] = x; });
+          var pick = $('clubPick');
+          if (pick) { pick.innerHTML = pickOptions(); var first = res.added[0] || res.replaced[0]; var idx = clubs.map(function (x) { return x.club; }).indexOf(first); if (idx >= 0) { pick.value = String(idx); OWN = clubs[idx]; } }
+          setText('lgn', AGG.meta.leagueN);
+          renderAll(); if (updateSelLink) updateSelLink();
+          c.close();
+          if (NL.toast) NL.toast('Imported ' + (res.added.length + res.replaced.length) + ' club' + (res.added.length + res.replaced.length === 1 ? '' : 's'));
+        }, function (e) {
+          console.error(e); goBtn.disabled = false; reset();
+          say('<b>Save failed</b> — nothing was written. Refresh the page before trying again, so the figures on screen match the database.', true);
+        });
+      }
+    }
+
     if (opts.staff) {
       var bar = $('staffBar');
       if (bar) {
         bar.style.display = '';
-        var opt = '', curDiv = '';
-        clubs.forEach(function (c, i) {
-          if (c.division !== curDiv) { if (curDiv) opt += '</optgroup>'; opt += '<optgroup label="' + divName(c.division) + '">'; curDiv = c.division; }
-          opt += '<option value="' + i + '">' + c.club + (c._noData ? ' — no data' : '') + '</option>';
-        });
-        opt += '</optgroup>';
-        var btns = '<button class="cb-cancel" id="cb-export" type="button">Export (Excel)</button>';
-        if (opts.canEdit && opts.writeLink) btns += '<button class="cb-cancel" id="cb-links" type="button">Links</button>';
-        if (opts.canEdit) btns += '<button class="cb-edit-btn" id="cb-edit" type="button">Edit data</button>';
+        var btns = '<button class="btn btn--ghost btn--sm" id="cb-export" type="button">Export</button>';
+        if (opts.canEdit && opts.writeLink) btns += '<button class="btn btn--ghost btn--sm" id="cb-links" type="button">Links</button>';
+        if (opts.canEdit && opts.onSave) btns += '<button class="btn btn--ghost btn--sm" id="cb-import" type="button">Import rows</button>';
+        if (opts.canEdit) btns += '<button class="btn btn--primary btn--sm" id="cb-edit" type="button">Edit data</button>';
         bar.innerHTML =
-          '<select id="clubPick" class="cb-staff-pick">' + opt + '</select>' +
+          '<select id="clubPick" class="nl-select cb-staff-pick">' + pickOptions() + '</select>' +
           '<a id="cb-selLink" class="cb-sellink" target="_blank" rel="noopener"></a>' +
           '<span class="cb-staff-actions">' + btns + '</span>';
-        function updateSelLink() {
+        updateSelLink = function () {
           var a = $('cb-selLink'); if (!a) return;
           var tok = (opts.tokenByClub || {})[OWN.club];
           if (tok) { a.href = new URL('link.html?t=' + tok, location.href).href; a.textContent = 'Open club link ↗'; a.style.display = ''; }
           else { a.removeAttribute('href'); a.style.display = 'none'; }
-        }
+        };
         $('clubPick').addEventListener('change', function () {
           OWN = clubs[+this.value];
           if (editMode) { editMode = false; setEditUI(); }
@@ -830,6 +985,7 @@ window.CBDash = (function () {
         });
         $('cb-export').onclick = exportData;
         if ($('cb-links')) $('cb-links').onclick = function () { editMode = false; setEditUI(); renderLinks(); };
+        if ($('cb-import')) $('cb-import').onclick = importDialog;
         if ($('cb-edit')) { ebtn = $('cb-edit'); ebtn.onclick = function () { editMode = !editMode; setEditUI(); if (editMode) renderEditForm(); else render(); }; }
         updateSelLink();
       }
@@ -863,7 +1019,7 @@ window.CBDash = (function () {
     if (!s) return '';
     var m = String(s).match(/^(\d{4})-(\d{1,2})/);
     if (m) {
-      var mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][(+m[2]) - 1];
+      var mon = MON3[(+m[2]) - 1];
       return mon ? mon + ' ' + m[1] : m[1];
     }
     return /^\d{4}$/.test(String(s)) ? String(s) : '';
@@ -875,7 +1031,7 @@ window.CBDash = (function () {
     var m = String(s).match(/^(\d{4})(?:-(\d{1,2}))?/);
     if (!m) return '';
     var y = (+m[1]) + Math.round(Number(years));
-    if (m[2]) { var mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][(+m[2]) - 1]; return (mon ? mon + ' ' : '') + y; }
+    if (m[2]) { var mon = MON3[(+m[2]) - 1]; return (mon ? mon + ' ' : '') + y; }
     return String(y);
   }
 
@@ -885,7 +1041,6 @@ window.CBDash = (function () {
   function review(OWN, opts) {
     opts = opts || {};
     var $ = function (id) { return document.getElementById(id); };
-    function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
     function val(k) { var m = (OWN.metrics || {})[k]; return m && m.value != null ? m.value : null; }
     function money(v) { return v == null ? '—' : '£' + Number(v).toLocaleString('en-GB'); }
     function plain(v) { return v == null ? '—' : Number(v).toLocaleString('en-GB'); }
@@ -898,7 +1053,6 @@ window.CBDash = (function () {
     if (crest) { crest.src = '/assets/crests/' + encodeURIComponent(OWN.club) + '.png'; crest.alt = OWN.club; }
     if ($('clubName')) $('clubName').textContent = OWN.club;
     if ($('tbClub')) $('tbClub').textContent = OWN.club;
-    var DIV_FULL = { National: 'National League', North: 'National League North', South: 'National League South' };
     if ($('divPill')) $('divPill').textContent = DIV_FULL[OWN.division] || OWN.division || '';
     if ($('sponWrap')) $('sponWrap').style.display = 'none';
 
@@ -908,13 +1062,7 @@ window.CBDash = (function () {
     // expiry = start + deal length (years); a rolling deal has no fixed expiry
     function endLabel(startKey, termKey, rollKey) {
       if (((OWN.chips || {})[rollKey] || '').trim().toLowerCase() === 'yes') return 'Rolling / ongoing';
-      var st = OWN[startKey], t = val(termKey);
-      if (!st || t == null) return '—';
-      var m = String(st).match(/^(\d{4})(?:-(\d{1,2}))?/);
-      if (!m) return '—';
-      var y = (+m[1]) + Math.round(t);
-      if (m[2]) { var mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][(+m[2]) - 1]; return (mon ? mon + ' ' : '') + y; }
-      return String(y);
+      return expiry(OWN[startKey], val(termKey)) || '—';
     }
     function shirt(kind, sponKey, secKey, incKey, termKey, startKey, rollKey) {
       return '<div class="card cb-rev-card"><div class="cb-rev-h">' + kind + '</div><div class="cb-rev-grid">'
@@ -929,7 +1077,7 @@ window.CBDash = (function () {
     }
     function help(t) { return '<div class="cb-rev-help">' + t + '</div>'; }
     function group(title, inner, h) {
-      return '<div class="section"><div class="section-head"><h2>' + title + '</h2></div>' + (h ? help(h) : '') + inner + '</div>';
+      return '<div class="section"><div class="cb-section-head"><h2>' + title + '</h2></div>' + (h ? help(h) : '') + inner + '</div>';
     }
     function card(inner) { return '<div class="card cb-rev-card"><div class="cb-rev-grid">' + inner + '</div></div>'; }
 
@@ -956,7 +1104,7 @@ window.CBDash = (function () {
       var surveyTxt = surveyUrl ? '<a href="' + esc(surveyUrl) + '" target="_blank" rel="noopener">the survey</a>' : 'the survey';
       if ($('sections')) $('sections').innerHTML =
         '<div class="cb-rev-banner"><div class="cb-rev-blurb"><b>Your benchmarking isn’t available yet.</b> ' +
-        'Please fill in ' + surveyTxt + ' which was issued by Jon Warburton to get access to your benchmarking portal.</div></div>';
+        'Please fill in ' + surveyTxt + ' sent by the League’s commercial team to get access to your benchmarking portal.</div></div>';
       return;
     }
 
@@ -1045,5 +1193,5 @@ window.CBDash = (function () {
     }
   }
 
-  return { mount: mount, recompute: recompute, hasData: hasData, NO_DATA: NO_DATA, review: review };
+  return { mount: mount, recompute: recompute, importRows: importRows, hasData: hasData, NO_DATA: NO_DATA, review: review };
 })();
