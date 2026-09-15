@@ -291,7 +291,10 @@
                already in the wild — this flag is how the page knows. */
             hasCentral: g.hasCentral === true,
             creds: g.creds || null, clubs: g.clubs || null,
-            notifyCc: g.notifyCc || null
+            notifyCc: g.notifyCc || null,
+            /* An NL admin is a named master: same role, its own audit
+               identity. Absent for the root master. */
+            adminId: g.adminId || null, adminName: g.adminName || null
           };
           window.UWP.session = SESSION;
           return SESSION;

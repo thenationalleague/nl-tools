@@ -201,6 +201,12 @@ function makeTrigger(ROOT, name) {
       try {
         const cfg = (await db.ref(ROOT + "/config").once("value")).val() || {};
         const clubs = cfg.clubs || {};
+        /* NL admin passcodes live OUTSIDE config (a sibling node): the
+           console subscribes to the whole config node, and an RTDB read
+           granted on a parent exposes every child — so the roster kept
+           under config would be visible to every admin. Here it is only
+           ever read server-side (admin SDK) and by the true master. */
+        const admins = (await db.ref(ROOT + "/admins").once("value")).val() || {};
 
         /* ---- First run: no master passcode set yet ---------------------- */
         /* Mirrors the console's first-run screen. Only reachable while the
@@ -419,6 +425,26 @@ function makeTrigger(ROOT, name) {
                 ? clubs[k].route : "unassigned",
             })),
           });
+        }
+
+        /* ---- NL admin (a separately-audited master) ---------------------- */
+        /* A named NL person with the master's operational powers, but their
+           own audit trail. The token is uwRole 'master' so every rule and
+           power resolves identically; the uwAdmin claim marks it as an
+           admin (not the root master) so the admin roster stays theirs
+           alone to manage, and rides into the audit as the actor's name. */
+        const adminId = Object.keys(admins).find(function (k) {
+          return admins[k] && admins[k].passcode &&
+            safeEqual(normCode(admins[k].passcode), code);
+        });
+        if (adminId) {
+          await db.ref(ROOT + "/rate/uid/" + uid).remove().catch(() => {});
+          const adminName = admins[adminId].name || adminId;
+          const customToken = await admin.auth().createCustomToken("uw-admin-" + adminId, {
+            uwRole: "master", uwAdmin: adminId,
+          });
+          logger.info(name + ": admin granted (" + adminId + ")");
+          return grant({ ok: true, customToken, role: "master", adminId, adminName });
         }
 
         /* ---- NL master console ------------------------------------------ */
