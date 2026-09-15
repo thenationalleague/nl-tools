@@ -1,12 +1,23 @@
 /* =========================================================================
    invite.gs — Invite token generation + send
-   Version: 1.4 (dead routes removed)
-   Date: 16/08/2026
+   Version: 1.5 (idempotent send)
+   Date: 15/09/2026
 
    In-repo mirror of the Apps Script file (keep in lockstep with the live
    project).
 
    CHANGELOG
+   v1.5 — sendInvite is now idempotent on the invite token, so a retry cannot
+          send a second email. The portal (v5.123) mints the token and retries
+          the same call when Google drops the reply on the googleusercontent
+          relay hop — an intermittent 404 that fires AFTER this function has
+          already written the record and sent the mail, which is why those
+          "failures" still delivered. The record now carries `emailed`: a
+          retry that finds the token already emailed returns ok and sends
+          nothing; one that finds the record but no confirmed email (a crash
+          between write and send) sends once and marks it. Callers that send no
+          token still work unchanged — one is generated and, with no retry,
+          the behaviour is exactly as before.
    v1.4 — Removed validateInvite() and consumeInvite() (+ consumePendingInvite_).
           Invite acceptance moved to the Cloud Function consumeInvite
           (functions/account.js); these GAS routes had no live caller but stayed
@@ -52,28 +63,44 @@ function sendInvite(body) {
   if (!config.senderAlias) return { ok: false, error: 'SENDER_ALIAS not set.' };
   if (!config.rtdbUrl)     return { ok: false, error: 'RTDB_URL not set.' };
 
-  var token   = Utilities.getUuid();
+  /* Idempotency key. The portal mints this and retries the same call when the
+     googleusercontent relay drops the reply (an intermittent 404 that fires
+     AFTER we have already run). We key on it so a retry never double-sends.
+     A caller that omits it gets a fresh one and, with no retry, the old
+     behaviour. Constrained to UUID characters so it is only ever an RTDB leaf
+     name, never a path. */
+  var token = String(body.token || '').trim();
+  if (!/^[0-9a-fA-F-]{8,64}$/.test(token)) token = Utilities.getUuid();
+
+  var recordUrl = config.rtdbUrl + '/admin/invites/' + token + '.json';
+  var existing  = rtdbRead(recordUrl, config.rtdbSecret);
+  if (existing.ok && existing.data && existing.data.emailed) {
+    /* A retry of a call that already completed: the mail went, do not resend. */
+    return { ok: true, token: token, already: true };
+  }
+
   var now     = new Date();
   var expires = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  var prior   = (existing.ok && existing.data) ? existing.data : null;
+  var record  = {
+    email:     email,
+    name:      name,
+    role:      String(body.role     || 'staff'),
+    org:       String(body.org      || ''),
+    orgKey:    String(body.orgKey   || ''),
+    club:      String(body.club     || ''),
+    clubRole:  String(body.clubRole || ''),
+    tools:     body.tools || {},
+    /* Preserve original timestamps / used-state if this token was written by a
+       first attempt whose reply was lost, so a retry does not reset the clock
+       or un-accept an invite. */
+    createdAt: (prior && prior.createdAt) || now.toISOString(),
+    expiresAt: (prior && prior.expiresAt) || expires.toISOString(),
+    used:      (prior && prior.used) || false,
+    emailed:   false
+  };
 
-  var writeResult = rtdbWrite(
-    config.rtdbUrl + '/admin/invites/' + token + '.json',
-    {
-      email:     email,
-      name:      name,
-      role:      String(body.role     || 'staff'),
-      org:       String(body.org      || ''),
-      orgKey:    String(body.orgKey   || ''),
-      club:      String(body.club     || ''),
-      clubRole:  String(body.clubRole || ''),
-      tools:     body.tools || {},
-      createdAt: now.toISOString(),
-      expiresAt: expires.toISOString(),
-      used:      false
-    },
-    config.rtdbSecret
-  );
-
+  var writeResult = rtdbWrite(recordUrl, record, config.rtdbSecret);
   if (!writeResult.ok) return { ok: false, error: 'Failed to store invite token: ' + writeResult.error };
 
   var inviteLink = config.continueUrl
@@ -93,6 +120,12 @@ function sendInvite(body) {
     from:     config.senderAlias
   });
 
+  /* Mark the send confirmed, so any later retry of this token stops at the
+     early return above rather than sending again. rtdbWrite is a PUT (whole
+     node), and we hold the full record, so this just flips one field. */
+  record.emailed = true;
+  rtdbWrite(recordUrl, record, config.rtdbSecret);
+
   Logger.log('Invite sent to ' + email);
-  return { ok: true };
+  return { ok: true, token: token };
 }
