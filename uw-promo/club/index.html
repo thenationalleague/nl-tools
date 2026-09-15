@@ -9,6 +9,12 @@
            before UW presses Dispatch — the face jumps straight from
            Issued to Redeemed, exactly as the in-store till has always
            allowed for Created codes.
+  Version: v8.18 (15/09/2026) — the online Dashboard's cards become
+           mutually exclusive buckets plus Total (owner), the same
+           arithmetic as the UW Clubs tiles: Requested is only the
+           unfilled remainder, each upload moves the code to Issued,
+           then Dispatched, then Redeemed — no more triple-counting a
+           code that travelled the whole line.
   Version: v8.17 (14/09/2026) — the till gets the upload flow's
            watchdog (live wedge: offline, an RTDB read neither resolves
            nor rejects, so "Checking…" hung forever with busy stuck) —
@@ -1970,21 +1976,29 @@
     var rows = Object.keys(CODES).map(function (k) { return CODES[k]; });
     var uploaded = rows.filter(function (r) { return String(r.createdBy || '').indexOf('club:') === 0; });
     var issuedPool = ROUTE === 'online' ? uploaded : rows;
+    var open = list.filter(function (r) { return r.status === 'open'; });
+    var remaining = open.reduce(function (n, r) {
+      return n + Math.max(0, (parseInt(r.qty, 10) || 0) - uploadedFor(r._id));
+    }, 0);
+    /* Mutually exclusive buckets, same arithmetic as the UW Clubs tiles
+       (owner 15/09/2026): a code lives in exactly one — Requested is
+       only the unfilled remainder, each upload moves it to Issued, then
+       Dispatched, then Redeemed — so the numbers reconcile instead of
+       triple-counting a code that has travelled the whole line. */
     var counts = {
-      requested: list.reduce(function (n, r) { return n + (parseInt(r.qty, 10) || 0); }, 0),
-      issued: issuedPool.length,
-      dispatched: issuedPool.filter(function (r) { return r.dispatchedAt; }).length,
-      redeemed: issuedPool.filter(function (r) { return r.status === 'redeemed'; }).length
+      requested: remaining,
+      issued: issuedPool.filter(function (r) { var f = UWP.faceOf(r); return f === 'created' || f === 'issued'; }).length,
+      dispatched: issuedPool.filter(function (r) { return UWP.faceOf(r) === 'dispatched'; }).length,
+      redeemed: issuedPool.filter(function (r) { return UWP.faceOf(r) === 'redeemed'; }).length
     };
-    /* The spec's own sentence — requested / issued / dispatched / redeemed —
-       as four small cards. */
+    counts.total = counts.requested + counts.issued + counts.dispatched + counts.redeemed;
     /* In-store gets its own card set (owner 14/09/2026): the codes are
        anonymous until redeemed, so the cards say the counts the table
        can't — replacing the "N not shown" sentence, and the stat row
        that sat under the redeem box. */
     if (ROUTE === 'online') {
       document.getElementById('lifeCounts').innerHTML =
-        ['requested', 'issued', 'dispatched', 'redeemed'].map(function (k) {
+        ['requested', 'issued', 'dispatched', 'redeemed', 'total'].map(function (k) {
           return '<div class="life-card"><b>' + counts[k] + '</b><span>' + k + '</span></div>';
         }).join('');
     } else {
@@ -1998,10 +2012,6 @@
         '<div class="life-card"><b>' + today + '</b><span>redeemed today</span></div>';
     }
 
-    var open = list.filter(function (r) { return r.status === 'open'; });
-    var remaining = open.reduce(function (n, r) {
-      return n + Math.max(0, (parseInt(r.qty, 10) || 0) - uploadedFor(r._id));
-    }, 0);
     /* The ask renders as placeholder rows in the code table (owner N8);
        the ONE red Upload codes button appears while anything is owed
        (owner 10/09/2026 — the banner prose and per-row buttons are gone). */
