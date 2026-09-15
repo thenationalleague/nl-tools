@@ -170,6 +170,19 @@ test('sector mixes are rebuilt per scope, with the clubs each is drawn from', ()
   same(AGG.sectors.front, plain(sc.league.front), 'the league list stays at the top level for the palette');
 });
 
+test('a sponsor named without a sector is counted as unstated, so nobody vanishes', () => {
+  const { AGG, clubs } = fixture();
+  const row = deltaRow(); row.bsSponsor = 'Nameless Ltd'; row.bsSector = '';
+  row.stands.push({ name: 'Sectorless Stand Co', sector: '', income: 100 });
+  CB.importRows(AGG, clubs, [row]);
+  const sc = AGG.sectors.scopes;
+  assert.equal(sc.North.unstated.back, 1);
+  assert.equal(sc.North.unstated.front, 0);
+  assert.equal(sc.North.unstated.stand, 1);
+  assert.equal(sc.South.unstated.back, 0);
+  same(sc.North.stand, [{ label: 'Manufacturing', count: 1 }], 'the sectorless stand is not in the mix');
+});
+
 test('pasted percentiles are ignored — recompute owns them', () => {
   const { AGG, clubs } = fixture();
   const row = deltaRow(); row.metrics.msTicket.divPct = 1;
