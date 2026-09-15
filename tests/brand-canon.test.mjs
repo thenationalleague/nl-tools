@@ -1043,3 +1043,16 @@ test('lists inside a document-table cell have an indent for their marker', () =>
   assert.match(ruleBody('.nl-tbl ul'), /list-style:\s*disc/);
   assert.match(ruleBody('.nl-tbl ol'), /list-style:\s*decimal/);
 });
+
+/* .toast is max-width: 300px but carried no wrap rule, so a long unbroken
+   token — a user's full email such as richard+michaela@thenationalleague.org.uk
+   — overflowed the rounded box instead of breaking across lines (user-reported,
+   brand v2.69). overflow-wrap: anywhere breaks the token; word-break is the
+   fallback. Guarded so the max-width can't be reintroduced without the wrap. */
+test('.toast wraps long unbroken content instead of overflowing', () => {
+  const body = ruleBody('.toast');
+  assert.match(body, /overflow-wrap:\s*anywhere/,
+    '.toast needs overflow-wrap: anywhere or a long email overflows its 300px box');
+  assert.match(body, /word-break:\s*break-word/,
+    '.toast needs word-break: break-word as the fallback for older engines');
+});
