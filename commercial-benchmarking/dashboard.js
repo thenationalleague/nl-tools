@@ -1,4 +1,4 @@
-/* commercial-benchmarking/dashboard.js  v1.5
+/* commercial-benchmarking/dashboard.js  v1.6
    Shared dashboard renderer for the Commercial Benchmarking tool. Pure
    rendering — no Firebase, no data loading. Both entry points use it:
      - index.html  (gated NL tool: staff picker / club's own row via auth-guard)
@@ -407,7 +407,7 @@ window.CBDash = (function () {
       // headline-only: benchmark how long the current sponsor has been on board
       var tenureMetric = (sl.tenureKey && AGG.aggregates[sl.tenureKey])
         ? '<div class="cb-slot-full">' + metricBody(sl.tenureKey, 'Time with current sponsor') + '</div>' : '';
-      var donut = donutBlock('Sector mix', sl.sec, sl.ownSec, sl.noun, 'Your sponsor');
+      var donut = sectorBlock('Sector mix', sl.sec, sl.ownSec, sl.noun, 'Your sponsor');
       return '<div class="card cb-slotcard">' + head + metrics + tenureMetric + donut + '</div>';
     }
 
@@ -478,7 +478,7 @@ window.CBDash = (function () {
       return '<div class="card"><div class="lab">Your stand sponsors</div><div class="cb-standlist">' + rows + '</div></div>';
     }
     function standDonut() {
-      var d = donutBlock('Stand sponsor sectors', 'stand', OWN.standSectors, 'stand sponsors', 'Your stands');
+      var d = sectorBlock('Stand sponsor sectors', 'stand', OWN.standSectors, 'stand sponsors', 'Your stands');
       return d ? '<div class="cb-standdonut">' + d + '</div>' : '';
     }
 
@@ -559,13 +559,13 @@ window.CBDash = (function () {
     var OTHER_COLOR = 'var(--navy-200)';
     // Sector mix for one kind ('front' | 'back' | 'sleeve' | 'stand') in the
     // scope the reader has chosen, the same "Compare against" as every other
-    // card. Five named slices and Other — ten was unreadable. The club's own
-    // sectors are named in a line under the chart rather than tagged onto
-    // legend rows, because a rare sector is counted inside Other and a tag on
-    // that slice claimed the whole of it. Data written before v1.5 has no
-    // per-scope lists: then the league-wide list shows, labelled as such.
-    var TOP_SLICES = 5;
-    function donutBlock(title, kind, ownStr, noun, ownLabel) {
+    // card. Ranked horizontal bars, every sector its own row, largest first:
+    // a ten-slice donut could not be read, an Other bucket swallowed half of
+    // a spread-out mix, and a thickened "your" slice read as its neighbour
+    // overlapping it. The club's own sectors are the red bars. Data written
+    // before v1.5 has no per-scope lists: then the league-wide list shows,
+    // labelled as such.
+    function sectorBlock(title, kind, ownStr, noun, ownLabel) {
       var S = AGG.sectors || {}, sk = scopeKey();
       var scoped = S.scopes && S.scopes[sk], scopeTxt;
       var dist, clubsN = null;
@@ -576,36 +576,22 @@ window.CBDash = (function () {
       var total = arr.reduce(function (a, e) { return a + e.count; }, 0);
       if (!total) return '';
       var own = (ownStr || '').split('|').map(function (x) { return x.trim(); }).filter(Boolean);
-      var sorted = arr.slice().sort(function (a, b) { return b.count - a.count; });
-      var segs = sorted.slice(0, TOP_SLICES);
-      var otherCount = sorted.slice(TOP_SLICES).reduce(function (a, e) { return a + e.count; }, 0);
-      if (otherCount > 0) segs.push({ label: 'Other', count: otherCount, other: true });
-      var named = {}; segs.forEach(function (x) { if (!x.other) named[x.label] = true; });
-      var r = 60, cx = 80, cy = 80, sw = 24, C = 2 * Math.PI * r, off = 0, arcs = '';
-      segs.forEach(function (x) {
-        var len = x.count / total * C, isOwn = !x.other && own.indexOf(x.label) >= 0;
-        x._c = x.other ? OTHER_COLOR : (SECTOR_COLORS[x.label] || 'var(--navy-400)');
-        arcs += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + x._c +
-          '" stroke-width="' + (isOwn ? sw + 7 : sw) + '" stroke-dasharray="' + len.toFixed(2) + ' ' +
-          (C - len).toFixed(2) + '" stroke-dashoffset="' + (-off).toFixed(2) + '"></circle>';
-        off += len;
-      });
-      var legend = segs.map(function (x) {
-        return '<div class="cb-leg"><span class="cb-leg-sw" style="background:' + x._c + '"></span>' +
-          '<span class="cb-leg-lab">' + esc(x.label) + '</span>' +
-          '<span class="cb-leg-n">' + x.count + ' (' + Math.round(100 * x.count / total) + '%)</span></div>';
+      var rows = arr.slice().sort(function (a, b) { return b.count - a.count || a.label.localeCompare(b.label); });
+      var max = rows[0].count;
+      var list = rows.map(function (x) {
+        var isOwn = own.indexOf(x.label) >= 0, pct = Math.round(100 * x.count / total);
+        return '<div class="cb-secrow' + (isOwn ? ' own' : '') + '">' +
+          '<span class="cb-secrow-lab">' + esc(x.label) + (isOwn ? ' <span class="cb-secrow-you">you</span>' : '') + '</span>' +
+          '<span class="cb-secrow-bar"><span style="width:' + (100 * x.count / max).toFixed(1) + '%"></span></span>' +
+          '<span class="cb-secrow-n">' + x.count + ' <span class="cb-secrow-pct">(' + pct + '%)</span></span></div>';
       }).join('');
-      var ownTxt = !own.length ? 'not provided' : own.map(function (o) {
-        return esc(o) + (named[o] ? '' : ' <span class="cb-sector-inother">(in Other)</span>');
-      }).join(' · ');
       var base = (clubsN != null ? clubsN + ' club' + (clubsN === 1 ? '' : 's') : '') +
         (clubsN != null && total !== clubsN ? ' · ' + total + ' ' + (noun || 'sponsors') : (clubsN == null ? total + ' ' + (noun || 'sponsors') : '')) +
         ' · ' + scopeTxt;
+      var ownLine = !own.length ? '<div class="cb-sector-own"><b>' + (ownLabel || 'Yours') + ':</b> not provided</div>' : '';
       return '<div class="cb-sector"><div class="cb-sector-h">' + title +
-        '<span class="cb-sector-sub">' + base + '</span></div><div class="cb-sector-body">' +
-        '<div class="cb-donut"><svg viewBox="0 0 160 160" width="100%" height="100%" style="transform:rotate(-90deg);display:block">' + arcs + '</svg></div>' +
-        '<div class="cb-legend">' + legend + '</div></div>' +
-        '<div class="cb-sector-own"><b>' + (ownLabel || 'Yours') + ':</b> ' + ownTxt + '</div></div>';
+        '<span class="cb-sector-sub">' + base + '</span></div>' +
+        '<div class="cb-seclist">' + list + '</div>' + ownLine + '</div>';
     }
     function renderAll() { renderHeader(); renderScopeControl(); render(); }
 
