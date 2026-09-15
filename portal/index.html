@@ -1,11 +1,25 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.122 (15/09/2026)
+  Version: v5.123 (15/09/2026)
   Date: 09/04/2026
   File: /portal/index.html
 
   Changelog:
+  v5.123 (15/09/2026) — Make invites survive the relay 404 for good.
+    The googleusercontent relay that carries an Apps Script reply back to the
+    browser 404s intermittently — AFTER the script has written the token and
+    sent the email — so a "failure" still delivered, and the invite went
+    missing from Pending because the client never heard back. Fixed on both
+    sides. The portal now mints the invite token itself and sends through
+    nlGasSend(), which retries the same payload (same token) until a real reply
+    arrives; a clean {ok:false} is a genuine rejection and is not retried.
+    The backend (Invite.js v1.5) is idempotent on that token — it will not send
+    a second email for a token it has already emailed — so retrying is safe and
+    never duplicates. All three invite paths (new invite, resend-from-card,
+    bare resend) route through it; a resend mints a fresh token by design so it
+    actually re-sends. Ships the portal half on merge; the backend half needs
+    one Deploy Apps Script run.
   v5.122 (15/09/2026) — Say what Google sent back when it is not JSON.
     An invite failed with "Unexpected token '<', "<!DOCTYPE "... is not valid
     JSON" — the browser's JSON parser complaining about the first character of
@@ -887,6 +901,13 @@
 
   /* Public-facing "What's new" — shown when users click the version badge. */
   window.NL_CHANGELOG = [
+    {
+      date: '15/09/2026',
+      version: 'v5.123',
+      items: [
+        'Invites now send reliably even when Google briefly drops the reply — the portal retries safely and never sends a duplicate.'
+      ]
+    },
     {
       date: '15/09/2026',
       version: 'v5.122',
@@ -2792,6 +2813,46 @@ function nlGasFetch(payload) {
     });
 }
 
+/* A UUID for an idempotency key. crypto.randomUUID needs a secure context;
+   nl.tools is https, but keep a fallback so a file:// or http preview still
+   works. */
+function nlUuid() {
+  try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch (e) {}
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    var r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+
+/* Idempotent GAS POST that survives the googleusercontent relay 404.
+   nlGasFetch resolves .json() only when a real JSON reply came back; a dropped
+   reply (Google serving an HTML page on the relay hop, or a network drop)
+   rejects it. Because the backend keys on payload.token and refuses to send a
+   second email for a token it has already emailed, the SAME payload can be
+   re-sent until a real reply arrives — at most one email, one record. A clean
+   { ok:false } is a genuine rejection (bad email, not an admin) and is
+   returned, never retried. Every invite send goes through this. */
+function nlGasSend(payload, opts) {
+  opts = opts || {};
+  var maxTries = (opts.retries != null ? opts.retries : 4) + 1;
+  if (!payload.token) payload.token = nlUuid();
+  function wait(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
+  function attempt(n) {
+    var retry = function(err) {
+      if (n + 1 >= maxTries) return Promise.reject(err);
+      return wait(Math.min(400 * Math.pow(2, n), 4000)).then(function() { return attempt(n + 1); });
+    };
+    /* res.json() resolves with parsed JSON (ok true OR false → done) and
+       rejects on a non-JSON body (→ retry). A fetch/network failure also
+       retries. */
+    return nlGasFetch(payload).then(
+      function(res) { return res.json().then(function(data) { return data; }, retry); },
+      retry
+    );
+  }
+  return attempt(0);
+}
+
 /* One readable line naming what Google sent instead of JSON: HTTP status, the
    host that answered (script.google.com vs the googleusercontent echo the
    reply normally redirects through), the page <title>, and the first sentence
@@ -4539,8 +4600,14 @@ function buildPendingInviteCard(inv) {
   resendBtn.addEventListener('click', function() {
     resendBtn.disabled = true;
     resendBtn.textContent = 'Sending…';
-    nlGasFetch({
+    /* A resend is a NEW send by intent, so it gets a fresh token — reusing the
+       old one would hit the backend's idempotency guard and send nothing,
+       which is the opposite of Resend. The fresh token is still retry-safe
+       within this click. */
+    var reToken = nlUuid();
+    nlGasSend({
       action:   'sendInvite',
+      token:    reToken,
       email:    inv.email    || '',
       name:     inv.name     || '',
       role:     inv.role     || 'staff',
@@ -4549,7 +4616,6 @@ function buildPendingInviteCard(inv) {
       jobTitle: inv.jobTitle || '',
       tools:    inv.tools    || {}
     })
-    .then(function(r) { return r.json(); })
     .then(function(result) {
       if (result && result.ok === false) {
         showToast('Resend failed: ' + (result.error || 'unknown'), 'error');
@@ -4557,7 +4623,7 @@ function buildPendingInviteCard(inv) {
         resendBtn.textContent = 'Resend invite';
       } else {
         /* Update sentAt on the pending record */
-        db.ref('admin/invites-pending/' + inv._key + '/sentAt').set(Date.now()).catch(function() {});
+        db.ref('admin/invites-pending/' + inv._key).update({ sentAt: Date.now(), token: reToken }).catch(function() {});
         showToast('Invite resent to ' + inv.email, 'success');
         writeAudit('invite_sent', 'Resent invite to ' + (inv.name || inv.email || ''));
         resendBtn.textContent = 'Sent ✓';
@@ -5850,9 +5916,13 @@ function initInviteForm() {
     inviteBtn.innerHTML = '<span class="btn-spinner"><\/span> Sending…';
 
     /* Send invite via GAS -- GAS stores token in RTDB invites/{token}
-       with full user payload. Login page creates user record after auth. */
-    nlGasFetch({
+       with full user payload. Login page creates user record after auth.
+       The token is minted here so it can be retried safely (nlGasSend) and
+       stored on the pending record. */
+    var inviteToken = nlUuid();
+    nlGasSend({
       action:   'sendInvite',
+      token:    inviteToken,
       email:    email,
       name:     name,
       role:     role,
@@ -5861,40 +5931,41 @@ function initInviteForm() {
       jobTitle: jobTitle || '',
       tools:    toolAccess
     })
-    .then(function(r) { return r.json(); })
     .then(function(result) {
       setBtnLoading('inviteBtn', false, 'Send invite');
       if (result && result.ok === false) {
         showMsg('inviteMsg', 'Email failed: ' + (result.error || 'unknown error'), 'error');
-      } else {
-        var auditDetail = isClubRole(role)
-          ? 'Invited ' + name + ' as ' + roleLabel(role) + ' for ' + club + (jobTitle ? ' (' + jobTitle + ')' : '')
-          : 'Invited ' + name + ' as ' + roleLabel(role) + (org ? ' (' + org + ')' : '');
-        writeAudit('invite_sent', auditDetail);
-
-        /* Write pending invite record so it appears in Pending Invites tab */
-        var pendingRecord = {
-          email:     email,
-          name:      name,
-          role:      role,
-          org:       org      || '',
-          club:      club     || '',
-          jobTitle:  jobTitle || '',
-          tools:     toolAccess,
-          sentAt:    Date.now(),
-          sentBy:    (STATE.userData && STATE.userData.name) || ''
-        };
-        db.ref('admin/invites-pending').push(pendingRecord)
-          .then(function() { loadPendingInvites(); })
-          .catch(function() {});
-
-        showToast('Invite sent to ' + email, 'success');
-        document.getElementById('inviteEmail').value    = '';
-        document.getElementById('inviteName').value     = '';
-        document.getElementById('inviteClubRole').value = ''; /* clears job title */
-        if (invClubPicker) invClubPicker.clear();
-        loadUsers();
+        return;
       }
+      var auditDetail = isClubRole(role)
+        ? 'Invited ' + name + ' as ' + roleLabel(role) + ' for ' + club + (jobTitle ? ' (' + jobTitle + ')' : '')
+        : 'Invited ' + name + ' as ' + roleLabel(role) + (org ? ' (' + org + ')' : '');
+      writeAudit('invite_sent', auditDetail);
+
+      /* Write pending invite record so it appears in Pending Invites tab.
+         Carries the token so a later resend can reuse it. */
+      var pendingRecord = {
+        email:     email,
+        name:      name,
+        role:      role,
+        org:       org      || '',
+        club:      club     || '',
+        jobTitle:  jobTitle || '',
+        tools:     toolAccess,
+        token:     inviteToken,
+        sentAt:    Date.now(),
+        sentBy:    (STATE.userData && STATE.userData.name) || ''
+      };
+      db.ref('admin/invites-pending').push(pendingRecord)
+        .then(function() { loadPendingInvites(); })
+        .catch(function() {});
+
+      showToast('Invite sent to ' + email, 'success');
+      document.getElementById('inviteEmail').value    = '';
+      document.getElementById('inviteName').value     = '';
+      document.getElementById('inviteClubRole').value = ''; /* clears job title */
+      if (invClubPicker) invClubPicker.clear();
+      loadUsers();
     })
     .catch(function(err) {
       setBtnLoading('inviteBtn', false, 'Send invite');
@@ -6053,8 +6124,7 @@ function resendInvite(email, btn) {
   if (!email) return;
   btn.textContent = 'Sending...';
   btn.disabled = true;
-  nlGasFetch({ action: 'sendInvite', email: email, name: '', role: '', org: '', club: '', jobTitle: '' })
-  .then(function(r) { return r.json(); })
+  nlGasSend({ action: 'sendInvite', email: email, name: '', role: '', org: '', club: '', jobTitle: '' })
   .then(function(result) {
     if (result && result.ok === false) {
       showToast('Failed to resend: ' + (result.error || 'unknown'), 'error');
