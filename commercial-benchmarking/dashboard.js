@@ -1,4 +1,4 @@
-/* commercial-benchmarking/dashboard.js  v1.7
+/* commercial-benchmarking/dashboard.js  v1.8
    Shared dashboard renderer for the Commercial Benchmarking tool. Pure
    rendering — no Firebase, no data loading. Both entry points use it:
      - index.html  (gated NL tool: staff picker / club's own row via auth-guard)
@@ -867,17 +867,23 @@ window.CBDash = (function () {
       var th = 'style="background:#1B2A4A;color:#fff;font-weight:bold;text-align:left;padding:7px 12px;border:1px solid #cfd6e4"';
       var td = 'style="padding:6px 12px;border:1px solid #e2e6ee"';
       function lk(word, url) { return '<a href="' + esc(url) + '" style="color:#9e0000;font-weight:bold;text-decoration:none">' + word + '</a>'; }
+      // Each link twice: as a clickable word, and as the bare URL in its own
+      // cell, because a hyperlink does not survive a copy into a mail merge
+      // or a message — the address does.
       var rows = clubs.map(function (c) {
         var tok = tb[c.club];
         return '<tr><td ' + td + '>' + esc(c.club) + '</td><td ' + td + '>' + esc(c.division) + '</td>' +
           '<td ' + td + '>' + (tok ? lk('Proof', proofUrl(tok)) : '') + '</td>' +
-          '<td ' + td + '>' + (tok ? lk('Benchmarking', linkUrl(tok)) : '') + '</td></tr>';
+          '<td ' + td + '>' + (tok ? esc(proofUrl(tok)) : '') + '</td>' +
+          '<td ' + td + '>' + (tok ? lk('Benchmarking', linkUrl(tok)) : '') + '</td>' +
+          '<td ' + td + '>' + (tok ? esc(linkUrl(tok)) : '') + '</td></tr>';
       }).join('');
       var html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8">' +
         '<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Club links</x:Name>' +
         '<x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->' +
         '<style>table{border-collapse:collapse;font-family:Arial,sans-serif;font-size:11pt}</style></head><body>' +
-        '<table><tr><th ' + th + '>Club</th><th ' + th + '>Division</th><th ' + th + '>Proof</th><th ' + th + '>Benchmarking</th></tr>' +
+        '<table><tr><th ' + th + '>Club</th><th ' + th + '>Division</th><th ' + th + '>Proof</th><th ' + th + '>Proof URL</th>' +
+        '<th ' + th + '>Benchmarking</th><th ' + th + '>Benchmarking URL</th></tr>' +
         rows + '</table></body></html>';
       NL.download('commercial-benchmarking-links-' + new Date().toISOString().slice(0, 10) + '.xls',
         new Blob(['﻿' + html], { type: 'application/vnd.ms-excel' }));
