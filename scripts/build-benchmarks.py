@@ -278,12 +278,62 @@ def build_metrics(H):
     ]
 
 
-def main():
-    wb = openpyxl.load_workbook(SRC, data_only=True)
+def load_rows(path):
+    """Open the cleaned workbook's Data sheet -> (header map, data rows).
+    Column A is the club, column B the division; every other column is looked
+    up by header name so the sheet's column order does not matter."""
+    wb = openpyxl.load_workbook(path, data_only=True)
     ws = wb['Data']
     rows = list(ws.iter_rows(values_only=True))
-    hdr = rows[0]; data = rows[1:]
-    H = {h: i for i, h in enumerate(hdr)}
+    hdr = rows[0]; data = [r for r in rows[1:] if r and r[0] not in (None, '')]
+    H = {h: i for i, h in enumerate(hdr) if h is not None}
+    return H, data
+
+
+def row_payload(r, H, METRICS):
+    """One club's payload from one cleaned-workbook row: the exact shape the
+    tool stores at clubs/<club> and links/<token>, minus the percentile fields
+    (divPct / leaguePct / step2Pct), which depend on the whole population and
+    are added by whoever has it — main() below, or the in-tool importer's
+    recompute. Shared by build-benchmark-rows.py so the two never drift."""
+    club = r[0]; div = r[1]
+    metrics = {}
+    for m in METRICS:
+        metrics[m['key']] = {'value': m['ext'](r)}
+    # per-club stand sponsor list + combined stand sectors (real stands only)
+    stands = extract_stands(r, H)
+    stand_secs = [st['sector'] for st in stands if st['sector']]
+    # commencement dates (tolerant to the cleaned workbook's exact header)
+    def start_of(*subs):
+        i = None
+        for extra_sub in (('commenc',), ('start',)):
+            i = _find(H, *(subs + extra_sub))
+            if i is not None:
+                break
+        return parse_month(r[i]) if i is not None else ''
+    extra = {
+        'bsSponsor': clean_name(r[H['Back Shirt — Sponsor Name']]),
+        'slSponsor': clean_name(r[H['Sleeve — Sponsor Name']]),
+        'fsSector': r[H['Front Shirt — Sector']] or '',
+        'bsSector': r[H['Back Shirt — Sector']] or '',
+        'slSector': r[H['Sleeve — Sector']] or '',
+        'fsStart': start_of('front shirt'),
+        'bsStart': start_of('back shirt'),
+        'slStart': start_of('sleeve'),
+        'stands': stands,
+        'standSectors': ' | '.join(stand_secs),
+    }
+    return dict({
+        'club': club,
+        'division': div,
+        'fsSponsor': clean_name(r[H['Front Shirt — Sponsor Name']]),
+        'metrics': metrics,
+        'chips': {ck: (r[H[col]] or '') for ck, _lbl, col in CHIP_FIELDS},
+    }, **extra)
+
+
+def main():
+    H, data = load_rows(SRC)
     METRICS = build_metrics(H)
 
     # ---- anonymised aggregates (NO club names) ----
@@ -368,49 +418,20 @@ def main():
         if k != 'standCount':
             patch['aggregates/aggregates/' + k + '/scopes/Step2'] = agg[k]['scopes']['Step2']
     for r in data:
-        club = r[0]; div = r[1]
+        payload = row_payload(r, H, METRICS)
+        club = payload['club']; div = payload['division']
         is_step2 = div in ('North', 'South')
-        metrics = {}
+        metrics = payload['metrics']
         for m in METRICS:
-            v = m['ext'](r)
+            v = metrics[m['key']]['value']
             league = [x for x in (m['ext'](rr) for rr in data) if x is not None]
             dv = [x for x in (m['ext'](rr) for rr in data if rr[1] == div) if x is not None]
-            entry = {'value': v, 'divPct': pct_of(dv, v), 'leaguePct': pct_of(league, v)}
+            metrics[m['key']].update({'divPct': pct_of(dv, v), 'leaguePct': pct_of(league, v)})
             if is_step2:
                 s2 = [x for x in (m['ext'](rr) for rr in data if rr[1] in ('North', 'South')) if x is not None]
-                entry['step2Pct'] = pct_of(s2, v)
-            metrics[m['key']] = entry
-        # per-club stand sponsor list + combined stand sectors (real stands only)
-        stands = extract_stands(r, H)
-        stand_secs = [st['sector'] for st in stands if st['sector']]
-        # commencement dates (tolerant to the cleaned workbook's exact header)
-        def start_of(*subs):
-            i = None
-            for extra_sub in (('commenc',), ('start',)):
-                i = _find(H, *(subs + extra_sub))
-                if i is not None:
-                    break
-            return parse_month(r[i]) if i is not None else ''
-        # extra fields beyond the original payload (additive — included in patch)
-        extra = {
-            'bsSponsor': clean_name(r[H['Back Shirt — Sponsor Name']]),
-            'slSponsor': clean_name(r[H['Sleeve — Sponsor Name']]),
-            'fsSector': r[H['Front Shirt — Sector']] or '',
-            'bsSector': r[H['Back Shirt — Sector']] or '',
-            'slSector': r[H['Sleeve — Sector']] or '',
-            'fsStart': start_of('front shirt'),
-            'bsStart': start_of('back shirt'),
-            'slStart': start_of('sleeve'),
-            'stands': stands,
-            'standSectors': ' | '.join(stand_secs),
-        }
-        payload = dict({
-            'club': club,
-            'division': div,
-            'fsSponsor': clean_name(r[H['Front Shirt — Sponsor Name']]),
-            'metrics': metrics,
-            'chips': {ck: (r[H[col]] or '') for ck, _lbl, col in CHIP_FIELDS},
-        }, **extra)
+                metrics[m['key']]['step2Pct'] = pct_of(s2, v)
+        extra = {k: payload[k] for k in ('bsSponsor', 'slSponsor', 'fsSector', 'bsSector', 'slSector',
+                                          'fsStart', 'bsStart', 'slStart', 'stands', 'standSectors')}
         clubs[club] = payload
         token = make_token(club)
         links[token] = payload
