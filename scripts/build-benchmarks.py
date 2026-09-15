@@ -9,8 +9,12 @@ import into Firebase RTDB at  app-data/ops-commercial-benchmarking  :
 NOTHING here is committed to the repo. The repo is a PUBLIC GitHub Pages site,
 so all survey-derived data (anonymised aggregates included) is served from RTDB
 at runtime, never baked into a committed file. Personal data was already
-stripped by clean_survey.py; this script additionally never emits a club name
-into the `aggregates` block — only the club's own `dash/<token>` node names it.
+stripped by clean-survey-export.py (raw SurveyMonkey export -> this cleaned
+layout); this script additionally never emits a club name into the
+`aggregates` block — only the club's own `links/<token>` node names it.
+
+Late returns after the seed do NOT come through here: see
+build-benchmark-rows.py and the tool's admin Import rows.
 
 Usage:
     python scripts/build-benchmarks.py <cleaned.xlsx> <out-rtdb-import.json> [links.csv]
@@ -52,7 +56,7 @@ CHIP_FIELDS = [
     ('emailPartners', 'Can email on behalf of partners?', 'Can email on behalf of partners?'),
 ]
 
-# Official 72-club roster (from clean_survey.py) — drives the full staff dropdown
+# Official 72-club roster (2025/26) — drives the full staff dropdown
 # incl. clubs that submitted nothing or never entered.
 _NAT = "Aldershot Town|Altrincham|Boreham Wood|Boston United|Brackley Town|Braintree Town|Carlisle United|Eastleigh|FC Halifax Town|Forest Green Rovers|Gateshead|Hartlepool United|Morecambe|Rochdale|Scunthorpe United|Solihull Moors|Southend United|Sutton United|Tamworth|Truro City|Wealdstone|Woking|Yeovil Town|York City".split("|")
 _NTH = "AFC Fylde|AFC Telford United|Alfreton Town|Bedford Town|Buxton|Chester|Chorley|Curzon Ashton|Darlington|Hereford|Kidderminster Harriers|King's Lynn Town|Leamington|Macclesfield|Marine|Merthyr Town|Oxford City|Peterborough Sports|Radcliffe|Scarborough Athletic|South Shields|Southport|Spennymoor Town|Worksop Town".split("|")
@@ -364,23 +368,14 @@ def main():
 
     # Sponsor sector distributions (front/back/sleeve). Multi-valued fields are
     # " | "-split and counted per sector. Anonymised — counts only, no names.
-    def sector_dist(col):
+    def sector_dist(cols, rows):
         # Returned as a sorted LIST of {label, count} — sector names are free
         # text (e.g. they can contain '.'), which is illegal in an RTDB key.
+        # Multi-valued fields are " | "-split and counted per sector.
         d = {}
-        for r in data:
-            v = r[H[col]]
-            if v is None or str(v).strip() == '':
-                continue
-            for p in str(v).split('|'):
-                p = p.strip()
-                if p:
-                    d[p] = d.get(p, 0) + 1
-        return sorted([{'label': k, 'count': v} for k, v in d.items()], key=lambda x: -x['count'])
-
-    def sector_dist_multi(cols):
-        d = {}
-        for r in data:
+        n = 0
+        for r in rows:
+            any_ = False
             for c in cols:
                 v = r[H[c]]
                 if v is None or str(v).strip() == '':
@@ -389,14 +384,27 @@ def main():
                     p = p.strip()
                     if p:
                         d[p] = d.get(p, 0) + 1
-        return sorted([{'label': k, 'count': v} for k, v in d.items()], key=lambda x: -x['count'])
+                        any_ = True
+            if any_:
+                n += 1
+        return sorted([{'label': k, 'count': v} for k, v in d.items()], key=lambda x: -x['count']), n
 
-    sectors = {
-        'front': sector_dist('Front Shirt — Sector'),
-        'back': sector_dist('Back Shirt — Sector'),
-        'sleeve': sector_dist('Sleeve — Sector'),
-        'stand': sector_dist_multi(['Stand %d — Sector' % s for s in (1, 2, 3, 4)]),
-    }
+    def sectors_for(rows):
+        out = {'clubs': {}}
+        for kind, cols in (('front', ['Front Shirt — Sector']), ('back', ['Back Shirt — Sector']),
+                           ('sleeve', ['Sleeve — Sector']), ('stand', ['Stand %d — Sector' % s for s in (1, 2, 3, 4)])):
+            out[kind], out['clubs'][kind] = sector_dist(cols, rows)
+        return out
+
+    # Sector mixes per scope — the cards follow the reader's "Compare against"
+    # (mirrors recomputeSectors in dashboard.js). League-wide lists also sit
+    # at the top level for the palette and any reader of the old shape.
+    league_sec = sectors_for(data)
+    sectors = {k: league_sec[k] for k in ('front', 'back', 'sleeve', 'stand')}
+    sectors['scopes'] = {'league': league_sec}
+    for d in DIVS:
+        sectors['scopes'][d] = sectors_for([r for r in data if r[1] == d])
+    sectors['scopes']['Step2'] = sectors_for([r for r in data if r[1] in ('North', 'South')])
 
     meta = {'leagueN': len(data),
             'divN': {d: sum(1 for r in data if r[1] == d) for d in DIVS}}
