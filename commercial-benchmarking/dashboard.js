@@ -615,7 +615,6 @@ window.CBDash = (function () {
     var TAIL_COLORS = ['var(--navy-300)', 'var(--navy-400)', 'var(--navy-500)', 'var(--navy-600)', 'var(--navy-700)', 'var(--navy-800)',
       'var(--proj-7)', 'var(--proj-8)'];
     var NOT_STATED_COLOR = 'var(--navy-100)';
-    var STRIPE_SEQ = 0;   // one stripe pattern per card, so ids never collide
     function sectorBlock(title, kind, ownStr, noun, ownLabel) {
       var S = AGG.sectors || {}, sk = scopeKey();
       var scoped = S.scopes && S.scopes[sk], scopeTxt;
@@ -637,9 +636,11 @@ window.CBDash = (function () {
       // Other holds EVERY free-text sector, the club's own included (owner,
       // 16/09/2026). The "you" pill sits only against the wording the club
       // supplied — inside the opened list, first — never on the Other row.
-      // On the ring the club's share of Other is a red-and-grey striped run
-      // of the Other arc, sized to its count and flush with it: part of
-      // Other, not a slice of its own.
+      // On the ring the club's share of Other is a solid red slice sized to
+      // its count, stepped out like every other own slice, drawn just before
+      // the grey Other arc that holds everyone else's free text. Red means
+      // "you" everywhere on the ring; only the club's own entry is ever
+      // split out of Other.
       var ownFree = free.filter(function (x) { return isOwnLabel(x.label); });
       var otherFree = free.filter(function (x) { return !isOwnLabel(x.label); });
       var otherN = free.reduce(function (a, e) { return a + e.count; }, 0);
@@ -650,8 +651,7 @@ window.CBDash = (function () {
         segs.push({ label: x.label, count: x.count, own: isOwn,
           color: isOwn ? 'var(--primary)' : (SECTOR_COLORS[x.label] || TAIL_COLORS[(tail++) % TAIL_COLORS.length]) });
       });
-      var stripeId = 'cb-stripe-' + (++STRIPE_SEQ);
-      ownFree.forEach(function (x) { segs.push({ label: x.label, count: x.count, own: true, inOther: true, color: 'url(#' + stripeId + ')', sliceOnly: true }); });
+      ownFree.forEach(function (x) { segs.push({ label: x.label, count: x.count, own: true, color: 'var(--primary)', sliceOnly: true }); });
       if (otherFree.length) segs.push({ label: 'Other', count: otherN - ownFree.reduce(function (a, e) { return a + e.count; }, 0), other: true, muted: true, color: OTHER_COLOR });
       else if (ownFree.length) segs.push({ label: 'Other', count: 0, other: true, muted: true, color: OTHER_COLOR, sliceOnly: true });
       if (unstated) segs.push({ label: 'Not stated', count: unstated, muted: true, color: NOT_STATED_COLOR });
@@ -666,8 +666,7 @@ window.CBDash = (function () {
       var cx = 80, cy = 80, r = 60, sw = 24, OUT = 6, GAP = 2.5, arcs = '', start = 0;
       var inner = r - sw / 2, rOwn = inner + (sw + OUT) / 2;
       segs.forEach(function (x) {
-        var stepOut = x.own && !x.inOther;
-        var f = x.count / total, R = stepOut ? rOwn : r, W = stepOut ? sw + OUT : sw, C = 2 * Math.PI * R;
+        var f = x.count / total, R = x.own ? rOwn : r, W = x.own ? sw + OUT : sw, C = 2 * Math.PI * R;
         var len = f * C, g = segs.length > 1 ? Math.min(GAP, len * 0.4) : 0;
         arcs += '<circle cx="' + cx + '" cy="' + cy + '" r="' + R + '" fill="none" stroke="' + x.color +
           '" stroke-width="' + W + '" stroke-dasharray="' + (len - g).toFixed(2) + ' ' + (C - len + g).toFixed(2) +
@@ -694,10 +693,7 @@ window.CBDash = (function () {
       var ownLine = !own.length ? '<div class="cb-sector-own"><b>' + (ownLabel || 'Yours') + ':</b> not provided</div>' : '';
       return '<div class="cb-sector"><div class="cb-sector-h">' + title +
         '<span class="cb-sector-sub">' + base + '</span></div><div class="cb-sector-body">' +
-        '<div class="cb-donut"><svg viewBox="0 0 160 160" width="100%" height="100%" style="transform:rotate(-90deg);display:block">' +
-        '<defs><pattern id="' + stripeId + '" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">' +
-        '<rect width="6" height="6" fill="' + OTHER_COLOR + '"></rect><rect width="3" height="6" fill="var(--primary)"></rect></pattern></defs>' +
-        arcs + '</svg></div>' +
+        '<div class="cb-donut"><svg viewBox="0 0 160 160" width="100%" height="100%" style="transform:rotate(-90deg);display:block">' + arcs + '</svg></div>' +
         '<div class="cb-legend">' + legend + '</div></div>' + ownLine + '</div>';
     }
     function renderAll() { renderHeader(); renderScopeControl(); render(); }
