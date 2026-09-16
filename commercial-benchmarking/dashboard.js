@@ -1,4 +1,4 @@
-/* commercial-benchmarking/dashboard.js  v1.9
+/* commercial-benchmarking/dashboard.js  v1.10
    Shared dashboard renderer for the Commercial Benchmarking tool. Pure
    rendering — no Firebase, no data loading. Both entry points use it:
      - index.html  (gated NL tool: staff picker / club's own row via auth-guard)
@@ -301,19 +301,22 @@ window.CBDash = (function () {
       var provided = own.value != null, left = 50;
       if (provided && s.max > s.min) left = 3 + 94 * Math.max(0, Math.min(1, (own.value - s.min) / (s.max - s.min)));
       var medLeft = s.max > s.min ? 3 + 94 * ((s.median - s.min) / (s.max - s.min)) : 50;
-      // The bar is a linear scale, so the median label sits under its tick —
-      // pinned to the centre it read as "halfway" when the median was a
-      // tenth of the way along. Clamped so it never sits on Lowest or Highest.
-      var medLabel = Math.max(18, Math.min(82, medLeft));
+      // The bar is a linear scale. Lowest and Highest sit above it at the
+      // ends; the median label sits below, under its tick, with nothing on
+      // its row to collide with. Near either end the label anchors to that
+      // edge rather than centring on the tick, so it stays inside the card.
+      var anchor = medLeft < 12 ? 'left' : medLeft > 88 ? 'right' : 'center';
+      var medStyle = anchor === 'left' ? 'left:' + Math.max(0, medLeft - 1).toFixed(1) + '%;transform:none'
+        : anchor === 'right' ? 'left:auto;right:' + Math.max(0, 99 - medLeft).toFixed(1) + '%;transform:none'
+        : 'left:' + medLeft.toFixed(1) + '%';
       // Only ever the selected scope — no secondary cross-reference line.
-      return '<div class="bar-wrap"><div class="bar">' +
+      return '<div class="bar-wrap">' +
+        '<div class="scale-ends"><span>' + fmtShort(s.min, u) + '<b>Lowest</b></span>' +
+        '<span class="hi">' + fmtShort(s.max, u) + '<b>Highest</b></span></div>' +
+        '<div class="bar">' +
         '<div class="median" style="left:' + medLeft.toFixed(1) + '%"></div>' +
         (provided ? '<div class="marker" style="left:' + left.toFixed(1) + '%"></div>' : '') +
-        '</div><div class="scale">' +
-        '<span>' + fmtShort(s.min, u) + '<b>Lowest</b></span>' +
-        '<span class="mid mid--at" style="left:' + medLabel.toFixed(1) + '%">' + fmtShort(s.median, u) + '<b>Median</b></span>' +
-        '<span style="text-align:right">' + fmtShort(s.max, u) + '<b>Highest</b></span>' +
-        '</div></div>';
+        '</div><div class="scale-mid"><span class="mid" style="' + medStyle + '">' + fmtShort(s.median, u) + '<b>Median</b></span></div></div>';
     }
 
     // graph: one rising bar per club, this club's bar highlighted
