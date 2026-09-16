@@ -1,4 +1,4 @@
-/* commercial-benchmarking/dashboard.js  v1.13
+/* commercial-benchmarking/dashboard.js  v1.14
    Shared dashboard renderer for the Commercial Benchmarking tool. Pure
    rendering — no Firebase, no data loading. Both entry points use it:
      - index.html  (gated NL tool: staff picker / club's own row via auth-guard)
@@ -633,9 +633,17 @@ window.CBDash = (function () {
       var byCount = function (a, b) { return b.count - a.count || a.label.localeCompare(b.label); };
       var fixed = arr.filter(function (x) { return IS_SURVEY[x.label]; }).sort(byCount);
       var free = arr.filter(function (x) { return !IS_SURVEY[x.label]; }).sort(byCount);
+      // Other holds EVERY free-text sector, the club's own included (owner,
+      // 16/09/2026). The "you" pill sits only against the wording the club
+      // supplied — inside the opened list, first — never on the Other row.
+      // On the ring the club's share of Other is a solid red slice sized to
+      // its count, stepped out like every other own slice, drawn just before
+      // the grey Other arc that holds everyone else's free text. Red means
+      // "you" everywhere on the ring; only the club's own entry is ever
+      // split out of Other.
       var ownFree = free.filter(function (x) { return isOwnLabel(x.label); });
       var otherFree = free.filter(function (x) { return !isOwnLabel(x.label); });
-      var otherN = otherFree.reduce(function (a, e) { return a + e.count; }, 0);
+      var otherN = free.reduce(function (a, e) { return a + e.count; }, 0);
       // the slice/row sequence: survey sectors, own free-text, Other, Not stated
       var segs = [], tail = 0;
       fixed.forEach(function (x) {
@@ -643,8 +651,9 @@ window.CBDash = (function () {
         segs.push({ label: x.label, count: x.count, own: isOwn,
           color: isOwn ? 'var(--primary)' : (SECTOR_COLORS[x.label] || TAIL_COLORS[(tail++) % TAIL_COLORS.length]) });
       });
-      ownFree.forEach(function (x) { segs.push({ label: x.label, count: x.count, own: true, color: 'var(--primary)' }); });
-      if (otherN) segs.push({ label: 'Other', count: otherN, other: true, muted: true, color: OTHER_COLOR });
+      ownFree.forEach(function (x) { segs.push({ label: x.label, count: x.count, own: true, color: 'var(--primary)', sliceOnly: true }); });
+      if (otherFree.length) segs.push({ label: 'Other', count: otherN - ownFree.reduce(function (a, e) { return a + e.count; }, 0), other: true, muted: true, color: OTHER_COLOR });
+      else if (ownFree.length) segs.push({ label: 'Other', count: 0, other: true, muted: true, color: OTHER_COLOR, sliceOnly: true });
       if (unstated) segs.push({ label: 'Not stated', count: unstated, muted: true, color: NOT_STATED_COLOR });
       // A hairline of white between slices (the card's ground shows through),
       // so two adjacent same-colour slices — a club's own sectors are all red —
@@ -664,19 +673,21 @@ window.CBDash = (function () {
           '" stroke-dashoffset="' + (-(start * C + g / 2)).toFixed(2) + '"></circle>';
         start += f;
       });
-      function row(x) {
-        return '<div class="cb-leg' + (x.own ? ' own' : '') + (x.muted ? ' muted' : '') + '">' +
+      function row(x, count, marked) {
+        return '<div class="cb-leg' + (marked ? ' own' : '') + (x.muted ? ' muted' : '') + '">' +
           '<span class="cb-leg-sw" style="background:' + x.color + '"></span>' +
-          '<span class="cb-leg-lab">' + esc(x.label) + (x.own ? ' <span class="cb-leg-you">you</span>' : '') + '</span>' +
-          '<span class="cb-leg-n">' + x.count + ' <span class="cb-leg-pct">(' + Math.round(100 * x.count / total) + '%)</span></span></div>';
+          '<span class="cb-leg-lab">' + esc(x.label) + (marked ? ' <span class="cb-leg-you">you</span>' : '') + '</span>' +
+          '<span class="cb-leg-n">' + count + ' <span class="cb-leg-pct">(' + Math.round(100 * count / total) + '%)</span></span></div>';
       }
-      var legend = segs.map(function (x) {
-        if (!x.other) return row(x);
-        return '<details class="disclosure cb-leg-other"><summary>' + row(x) + '</summary>' +
-          '<div class="cb-leg-sub">' + otherFree.map(function (o) {
-            var mine = isOwnLabel(o.label);
-            return '<div class="cb-leg-subrow' + (mine ? ' own' : '') + '"><span>' + esc(o.label) + (mine ? ' <span class="cb-leg-you">you</span>' : '') + '</span><span>' + o.count + '</span></div>';
-          }).join('') + '<div class="cb-leg-subnote">As each club described it in the survey’s “Other” box.</div></div></details>';
+      var legend = segs.filter(function (x) { return !x.sliceOnly || x.other; }).map(function (x) {
+        if (!x.other) return row(x, x.count, x.own);
+        // the Other row counts all free text, own included; the list has own first
+        var subs = ownFree.concat(otherFree).map(function (o) {
+          var mine = isOwnLabel(o.label);
+          return '<div class="cb-leg-subrow' + (mine ? ' own' : '') + '"><span>' + esc(o.label) + (mine ? ' <span class="cb-leg-you">you</span>' : '') + '</span><span>' + o.count + '</span></div>';
+        }).join('');
+        return '<details class="disclosure cb-leg-other"><summary>' + row(x, otherN, false) + '</summary>' +
+          '<div class="cb-leg-sub">' + subs + '<div class="cb-leg-subnote">As each club described it in the survey’s “Other” box.</div></div></details>';
       }).join('');
       var base = (clubsN != null ? clubsN + ' club' + (clubsN === 1 ? '' : 's') + ' · ' : '') + total + ' ' + (noun || 'sponsors') + ' · ' + scopeTxt;
       var ownLine = !own.length ? '<div class="cb-sector-own"><b>' + (ownLabel || 'Yours') + ':</b> not provided</div>' : '';
