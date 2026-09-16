@@ -1,4 +1,4 @@
-/* commercial-benchmarking/dashboard.js  v1.12
+/* commercial-benchmarking/dashboard.js  v1.13
    Shared dashboard renderer for the Commercial Benchmarking tool. Pure
    rendering — no Firebase, no data loading. Both entry points use it:
      - index.html  (gated NL tool: staff picker / club's own row via auth-guard)
@@ -504,7 +504,11 @@ window.CBDash = (function () {
       return '<div class="card"><div class="lab">Your stand sponsors</div><div class="cb-standlist">' + rows + '</div></div>';
     }
     function standDonut() {
-      var d = sectorBlock('Stand sponsor sectors', 'stand', OWN.standSectors, 'stand sponsors', 'Your stands');
+      // Own sectors straight from the stand rows, with the summary string as
+      // a fallback: a stale or missing standSectors must not hide the club's
+      // own sector inside Other.
+      var ownStands = (OWN.stands || []).map(function (st) { return st && st.sector || ''; }).filter(Boolean).join(' | ') || OWN.standSectors;
+      var d = sectorBlock('Stand sponsor sectors', 'stand', ownStands, 'stand sponsors', 'Your stands');
       return d ? '<div class="cb-standdonut">' + d + '</div>' : '';
     }
 
@@ -575,8 +579,11 @@ window.CBDash = (function () {
       ['front', 'back', 'sleeve', 'stand'].forEach(function (b) {
         (S[b] || []).forEach(function (e) { tot[e.label] = (tot[e.label] || 0) + e.count; });
       });
-      var pal = ['var(--proj-1)', 'var(--proj-2)', 'var(--proj-3)', 'var(--proj-4)',
-        'var(--proj-5)', 'var(--proj-6)', 'var(--proj-7)', 'var(--proj-8)'];
+      // Red is reserved for the club's own slices, so --proj-2 (brand red) is
+      // left out of the sector palette; the eighth colour comes from the
+      // navy ladder instead.
+      var pal = ['var(--proj-1)', 'var(--proj-3)', 'var(--proj-4)', 'var(--proj-5)',
+        'var(--proj-6)', 'var(--proj-7)', 'var(--proj-8)', 'var(--navy-400)'];
       var map = {};
       Object.keys(tot).sort(function (a, b) { return tot[b] - tot[a]; })
         .forEach(function (lab, i) { if (i < pal.length) map[lab] = pal[i]; });
@@ -618,17 +625,21 @@ window.CBDash = (function () {
       var arr = Array.isArray(dist) ? dist : Object.keys(dist).map(function (k) { return { label: k, count: dist[k] }; });
       var total = arr.reduce(function (a, e) { return a + e.count; }, 0) + unstated;
       if (!total) return '';
-      var own = (ownStr || '').split('|').map(function (x) { return x.trim(); }).filter(Boolean);
+      // Matching is by normalised label (trimmed, lower-cased, spaces
+      // collapsed), so "Speed cameras" and "Speed Cameras" are one sector.
+      var norm = function (x) { return String(x == null ? '' : x).trim().toLowerCase().replace(/\s+/g, ' '); };
+      var own = (ownStr || '').split('|').map(norm).filter(Boolean);
+      var isOwnLabel = function (label) { return own.indexOf(norm(label)) >= 0; };
       var byCount = function (a, b) { return b.count - a.count || a.label.localeCompare(b.label); };
       var fixed = arr.filter(function (x) { return IS_SURVEY[x.label]; }).sort(byCount);
       var free = arr.filter(function (x) { return !IS_SURVEY[x.label]; }).sort(byCount);
-      var ownFree = free.filter(function (x) { return own.indexOf(x.label) >= 0; });
-      var otherFree = free.filter(function (x) { return own.indexOf(x.label) < 0; });
+      var ownFree = free.filter(function (x) { return isOwnLabel(x.label); });
+      var otherFree = free.filter(function (x) { return !isOwnLabel(x.label); });
       var otherN = otherFree.reduce(function (a, e) { return a + e.count; }, 0);
       // the slice/row sequence: survey sectors, own free-text, Other, Not stated
       var segs = [], tail = 0;
       fixed.forEach(function (x) {
-        var isOwn = own.indexOf(x.label) >= 0;
+        var isOwn = isOwnLabel(x.label);
         segs.push({ label: x.label, count: x.count, own: isOwn,
           color: isOwn ? 'var(--primary)' : (SECTOR_COLORS[x.label] || TAIL_COLORS[(tail++) % TAIL_COLORS.length]) });
       });
@@ -663,7 +674,8 @@ window.CBDash = (function () {
         if (!x.other) return row(x);
         return '<details class="disclosure cb-leg-other"><summary>' + row(x) + '</summary>' +
           '<div class="cb-leg-sub">' + otherFree.map(function (o) {
-            return '<div class="cb-leg-subrow"><span>' + esc(o.label) + '</span><span>' + o.count + '</span></div>';
+            var mine = isOwnLabel(o.label);
+            return '<div class="cb-leg-subrow' + (mine ? ' own' : '') + '"><span>' + esc(o.label) + (mine ? ' <span class="cb-leg-you">you</span>' : '') + '</span><span>' + o.count + '</span></div>';
           }).join('') + '<div class="cb-leg-subnote">As each club described it in the survey’s “Other” box.</div></div></details>';
       }).join('');
       var base = (clubsN != null ? clubsN + ' club' + (clubsN === 1 ? '' : 's') + ' · ' : '') + total + ' ' + (noun || 'sponsors') + ' · ' + scopeTxt;
