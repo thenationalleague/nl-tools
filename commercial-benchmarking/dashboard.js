@@ -1,4 +1,4 @@
-/* commercial-benchmarking/dashboard.js  v1.11
+/* commercial-benchmarking/dashboard.js  v1.12
    Shared dashboard renderer for the Commercial Benchmarking tool. Pure
    rendering — no Firebase, no data loading. Both entry points use it:
      - index.html  (gated NL tool: staff picker / club's own row via auth-guard)
@@ -252,6 +252,12 @@ window.CBDash = (function () {
 
   function mount(AGG, clubs, opts) {
     opts = opts || {};
+    // Data written before v1.5 carries league-wide sector lists only. The
+    // staff view has every club in hand, so it derives the per-scope mixes
+    // here, in memory, and the "Compare against" toggle works at once; the
+    // next save or import writes them for good. A club's own view has only
+    // its own row and cannot — it shows the league mix until that save.
+    if (opts.staff && clubs.length > 1 && !(AGG.sectors && AGG.sectors.scopes)) recomputeSectors(AGG, clubs);
     var OWN = clubs[0];
     var state = { scope: 'div', view: 'graph', cardView: {} };
     var $ = function (id) { return document.getElementById(id); };
@@ -423,11 +429,12 @@ window.CBDash = (function () {
       // dates live with Deal length, not under the sponsor pill
       var dealCell = '<div class="cb-slot-deal">' + metricBody(sl.termKey, 'Deal length') + tenure + '</div>';
       var metrics = '<div class="cb-slot-metrics">' + metricBody(sl.incomeKey, 'Income') + dealCell + '</div>';
-      // headline-only: benchmark how long the current sponsor has been on board
-      var tenureMetric = (sl.tenureKey && AGG.aggregates[sl.tenureKey])
-        ? '<div class="cb-slot-full">' + metricBody(sl.tenureKey, 'Time with current sponsor') + '</div>' : '';
+      // "Time with current sponsor" (fsTenure) is no longer shown (owner,
+      // 16/09/2026): it is derived from the start date already on the card,
+      // and anchored to June 2026, so it only ever aged. The metric stays in
+      // the data and the export; nothing here names it.
       var donut = sectorBlock('Sector mix', sl.sec, sl.ownSec, sl.noun, 'Your sponsor');
-      return '<div class="card cb-slotcard">' + head + metrics + tenureMetric + donut + '</div>';
+      return '<div class="card cb-slotcard">' + head + metrics + donut + '</div>';
     }
 
     // fixed display order; 'Sponsor sectors' (the donuts) sits after the shirt group
@@ -460,7 +467,7 @@ window.CBDash = (function () {
       // Shirt & kit: one composite card per placement (sponsor + income + term + sector donut).
       function shirtSectionHtml() {
         var slots = [
-          { kind: 'Front-of-shirt sponsorship', incomeKey: 'frontShirt', termKey: 'frontTerm', tenureKey: 'fsTenure', sponKey: 'fsSponsor', startKey: 'fsStart', rollKey: 'rollingFront', sec: 'front', ownSec: OWN.fsSector, noun: 'front-of-shirt sponsors' },
+          { kind: 'Front-of-shirt sponsorship', incomeKey: 'frontShirt', termKey: 'frontTerm', sponKey: 'fsSponsor', startKey: 'fsStart', rollKey: 'rollingFront', sec: 'front', ownSec: OWN.fsSector, noun: 'front-of-shirt sponsors' },
           { kind: 'Back-of-shirt sponsorship', incomeKey: 'backShirt', termKey: 'backTerm', sponKey: 'bsSponsor', startKey: 'bsStart', rollKey: 'rollingBack', sec: 'back', ownSec: OWN.bsSector, noun: 'back-of-shirt sponsors' },
           { kind: 'Sleeve sponsorship', incomeKey: 'sleeve', termKey: 'sleeveTerm', sponKey: 'slSponsor', startKey: 'slStart', rollKey: 'rollingSleeve', sec: 'sleeve', ownSec: OWN.slSector, noun: 'sleeve sponsors' }
         ];

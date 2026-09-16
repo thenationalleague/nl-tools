@@ -183,6 +183,22 @@ test('a sponsor named without a sector is counted as unstated, so nobody vanishe
   same(sc.North.stand, [{ label: 'Manufacturing', count: 1 }], 'the sectorless stand is not in the mix');
 });
 
+test('mount-time fallback: a staff view derives per-scope sector mixes from old-shape data', () => {
+  // Data saved before v1.5 has flat league-wide lists and no `scopes`.
+  const { AGG, clubs } = fixture();
+  CB.recomputeSectors(AGG, clubs);
+  const old = { front: AGG.sectors.front, back: AGG.sectors.back, sleeve: AGG.sectors.sleeve, stand: AGG.sectors.stand };
+  AGG.sectors = old;
+  assert.equal(AGG.sectors.scopes, undefined);
+  // mount needs a DOM; the fallback line is the first thing it does, so
+  // exercise the same condition it uses.
+  const opts = { staff: true };
+  if (opts.staff && clubs.length > 1 && !(AGG.sectors && AGG.sectors.scopes)) CB.recomputeSectors(AGG, clubs);
+  assert.ok(AGG.sectors.scopes, 'scopes derived in memory');
+  same(AGG.sectors.scopes.North.front, [{ label: 'Retail', count: 2 }]);
+  same(AGG.sectors.front, plain(old.front), 'the league list is unchanged');
+});
+
 test('pasted percentiles are ignored — recompute owns them', () => {
   const { AGG, clubs } = fixture();
   const row = deltaRow(); row.metrics.msTicket.divPct = 1;
