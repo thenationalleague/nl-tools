@@ -1,4 +1,4 @@
-/* commercial-benchmarking/dashboard.js  v1.10
+/* commercial-benchmarking/dashboard.js  v1.11
    Shared dashboard renderer for the Commercial Benchmarking tool. Pure
    rendering — no Firebase, no data loading. Both entry points use it:
      - index.html  (gated NL tool: staff picker / club's own row via auth-guard)
@@ -631,13 +631,20 @@ window.CBDash = (function () {
       // A hairline of white between slices (the card's ground shows through),
       // so two adjacent same-colour slices — a club's own sectors are all red —
       // still read as two. Slices thinner than the gap keep what they have.
-      var r = 60, cx = 80, cy = 80, sw = 24, C = 2 * Math.PI * r, off = 0, arcs = '', GAP = 2.5;
+      // The club's own slices step OUTWARD by a few px: same inner edge as
+      // every other slice, a larger radius and stroke so only the outer edge
+      // moves. (A thicker stroke on the same radius grew both ways and read
+      // as the neighbours being overlapped.) Angles are fractions of the
+      // turn, so a slice keeps its place whichever radius it is drawn on.
+      var cx = 80, cy = 80, r = 60, sw = 24, OUT = 6, GAP = 2.5, arcs = '', start = 0;
+      var inner = r - sw / 2, rOwn = inner + (sw + OUT) / 2;
       segs.forEach(function (x) {
-        var len = x.count / total * C, g = segs.length > 1 ? Math.min(GAP, len * 0.4) : 0;
-        arcs += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + x.color +
-          '" stroke-width="' + sw + '" stroke-dasharray="' + (len - g).toFixed(2) + ' ' + (C - len + g).toFixed(2) +
-          '" stroke-dashoffset="' + (-(off + g / 2)).toFixed(2) + '"></circle>';
-        off += len;
+        var f = x.count / total, R = x.own ? rOwn : r, W = x.own ? sw + OUT : sw, C = 2 * Math.PI * R;
+        var len = f * C, g = segs.length > 1 ? Math.min(GAP, len * 0.4) : 0;
+        arcs += '<circle cx="' + cx + '" cy="' + cy + '" r="' + R + '" fill="none" stroke="' + x.color +
+          '" stroke-width="' + W + '" stroke-dasharray="' + (len - g).toFixed(2) + ' ' + (C - len + g).toFixed(2) +
+          '" stroke-dashoffset="' + (-(start * C + g / 2)).toFixed(2) + '"></circle>';
+        start += f;
       });
       function row(x) {
         return '<div class="cb-leg' + (x.own ? ' own' : '') + (x.muted ? ' muted' : '') + '">' +
