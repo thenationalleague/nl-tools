@@ -1,4 +1,4 @@
-/* commercial-benchmarking/dashboard.js  v1.9
+/* commercial-benchmarking/dashboard.js  v1.11
    Shared dashboard renderer for the Commercial Benchmarking tool. Pure
    rendering — no Firebase, no data loading. Both entry points use it:
      - index.html  (gated NL tool: staff picker / club's own row via auth-guard)
@@ -301,19 +301,22 @@ window.CBDash = (function () {
       var provided = own.value != null, left = 50;
       if (provided && s.max > s.min) left = 3 + 94 * Math.max(0, Math.min(1, (own.value - s.min) / (s.max - s.min)));
       var medLeft = s.max > s.min ? 3 + 94 * ((s.median - s.min) / (s.max - s.min)) : 50;
-      // The bar is a linear scale, so the median label sits under its tick —
-      // pinned to the centre it read as "halfway" when the median was a
-      // tenth of the way along. Clamped so it never sits on Lowest or Highest.
-      var medLabel = Math.max(18, Math.min(82, medLeft));
+      // The bar is a linear scale. Lowest and Highest sit above it at the
+      // ends; the median label sits below, under its tick, with nothing on
+      // its row to collide with. Near either end the label anchors to that
+      // edge rather than centring on the tick, so it stays inside the card.
+      var anchor = medLeft < 12 ? 'left' : medLeft > 88 ? 'right' : 'center';
+      var medStyle = anchor === 'left' ? 'left:' + Math.max(0, medLeft - 1).toFixed(1) + '%;transform:none'
+        : anchor === 'right' ? 'left:auto;right:' + Math.max(0, 99 - medLeft).toFixed(1) + '%;transform:none'
+        : 'left:' + medLeft.toFixed(1) + '%';
       // Only ever the selected scope — no secondary cross-reference line.
-      return '<div class="bar-wrap"><div class="bar">' +
+      return '<div class="bar-wrap">' +
+        '<div class="scale-ends"><span>' + fmtShort(s.min, u) + '<b>Lowest</b></span>' +
+        '<span class="hi">' + fmtShort(s.max, u) + '<b>Highest</b></span></div>' +
+        '<div class="bar">' +
         '<div class="median" style="left:' + medLeft.toFixed(1) + '%"></div>' +
         (provided ? '<div class="marker" style="left:' + left.toFixed(1) + '%"></div>' : '') +
-        '</div><div class="scale">' +
-        '<span>' + fmtShort(s.min, u) + '<b>Lowest</b></span>' +
-        '<span class="mid mid--at" style="left:' + medLabel.toFixed(1) + '%">' + fmtShort(s.median, u) + '<b>Median</b></span>' +
-        '<span style="text-align:right">' + fmtShort(s.max, u) + '<b>Highest</b></span>' +
-        '</div></div>';
+        '</div><div class="scale-mid"><span class="mid" style="' + medStyle + '">' + fmtShort(s.median, u) + '<b>Median</b></span></div></div>';
     }
 
     // graph: one rising bar per club, this club's bar highlighted
@@ -628,13 +631,20 @@ window.CBDash = (function () {
       // A hairline of white between slices (the card's ground shows through),
       // so two adjacent same-colour slices — a club's own sectors are all red —
       // still read as two. Slices thinner than the gap keep what they have.
-      var r = 60, cx = 80, cy = 80, sw = 24, C = 2 * Math.PI * r, off = 0, arcs = '', GAP = 2.5;
+      // The club's own slices step OUTWARD by a few px: same inner edge as
+      // every other slice, a larger radius and stroke so only the outer edge
+      // moves. (A thicker stroke on the same radius grew both ways and read
+      // as the neighbours being overlapped.) Angles are fractions of the
+      // turn, so a slice keeps its place whichever radius it is drawn on.
+      var cx = 80, cy = 80, r = 60, sw = 24, OUT = 6, GAP = 2.5, arcs = '', start = 0;
+      var inner = r - sw / 2, rOwn = inner + (sw + OUT) / 2;
       segs.forEach(function (x) {
-        var len = x.count / total * C, g = segs.length > 1 ? Math.min(GAP, len * 0.4) : 0;
-        arcs += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + x.color +
-          '" stroke-width="' + sw + '" stroke-dasharray="' + (len - g).toFixed(2) + ' ' + (C - len + g).toFixed(2) +
-          '" stroke-dashoffset="' + (-(off + g / 2)).toFixed(2) + '"></circle>';
-        off += len;
+        var f = x.count / total, R = x.own ? rOwn : r, W = x.own ? sw + OUT : sw, C = 2 * Math.PI * R;
+        var len = f * C, g = segs.length > 1 ? Math.min(GAP, len * 0.4) : 0;
+        arcs += '<circle cx="' + cx + '" cy="' + cy + '" r="' + R + '" fill="none" stroke="' + x.color +
+          '" stroke-width="' + W + '" stroke-dasharray="' + (len - g).toFixed(2) + ' ' + (C - len + g).toFixed(2) +
+          '" stroke-dashoffset="' + (-(start * C + g / 2)).toFixed(2) + '"></circle>';
+        start += f;
       });
       function row(x) {
         return '<div class="cb-leg' + (x.own ? ' own' : '') + (x.muted ? ' muted' : '') + '">' +
