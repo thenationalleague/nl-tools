@@ -10,6 +10,19 @@
 
      TECHNICAL CHANGELOG
      -------------------
+     v2.11.0 (2026-10-01) Export CSV. New #exportCsvBtn in the season bar,
+                         staff/admin/superadmin only (setupChromeForRole) —
+                         club users would otherwise get every club's figures.
+                         exportSeasonCsv() walks S.fixtures (already scoped to
+                         the VIEWED season by loadFixturesAndSubmissions, so
+                         archived seasons export from archive/<season>/ with
+                         no extra read) joined to S.submissions by matchID.
+                         One row per fixture incl. unsubmitted/postponed, so
+                         gaps are visible. Home fans = total - away only when
+                         away was recorded. Dates/times in Europe/London.
+                         Goals split into two columns ("2-1" opens in
+                         Excel as a date).
+                         Built on NL.csv({bom}) + NL.download.
      v2.10.14 (2026-08-16) Four inline overflow-x:auto table wrappers replaced
                          with the canon .table-wrap (promoted to the full
                          responsive treatment in brand v2.45). nl-brand
@@ -1146,6 +1159,13 @@
 
   window.NL_CHANGELOG = [
     {
+      date: '1 Oct 2026',
+      version: 'v2.11.0',
+      items: [
+        'New “Export CSV” button next to the season selector (staff and admins). It downloads every fixture for the season you’re viewing — date, competition, teams, goals, total, away and home crowd, neutral venue, and who submitted it — ready to open in Excel. Switch season first to export a past one.'
+      ]
+    },
+    {
       date: '16 Aug 2026',
       version: 'v2.10.14',
       items: [
@@ -2222,6 +2242,7 @@
     color: var(--text-muted);
   }
   .att-seasonbar__pills { display: flex; gap: 2px; }
+  .att-seasonbar__export { margin-left: auto; }
   .att-season-pill {
     padding: 6px 14px;
     font-family: var(--font);
@@ -2448,6 +2469,7 @@
       <span class="att-seasonbar__label">Season</span>
       <div class="att-seasonbar__pills" id="seasonPills"></div>
       <span class="att-seasonbar__ro" id="seasonReadOnly" style="display:none;">Read-only archive</span>
+      <button class="btn btn--ghost btn--sm att-seasonbar__export" type="button" id="exportCsvBtn" style="display:none;">Export CSV</button>
     </div>
 
     <!-- Tabs (rendered dynamically based on role) -->
@@ -3634,6 +3656,66 @@
        Keep it lazy \u2014 compute on demand via getRanking() */
   }
 
+  /* Export the viewed season as CSV: one row per fixture, joined to its
+     submission. Unsubmitted and postponed fixtures are kept so gaps show. */
+  function exportSeasonCsv() {
+    var dateFmt = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', day: '2-digit', month: '2-digit', year: 'numeric' });
+    var timeFmt = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit' });
+    function stamp(ms) {
+      if (!ms) return '';
+      var d = new Date(ms);
+      return dateFmt.format(d) + ' ' + timeFmt.format(d);
+    }
+
+    var list = [];
+    for (var matchID in S.fixtures) {
+      if (S.fixtures[matchID]) list.push({ id: matchID, fix: S.fixtures[matchID], ko: parseKickoff(S.fixtures[matchID].kickoffUTC) });
+    }
+    if (!list.length) { NL.toast('No fixtures to export for this season', 'error'); return; }
+    list.sort(function(a, b) {
+      var d = (a.ko ? a.ko.getTime() : 0) - (b.ko ? b.ko.getTime() : 0);
+      return d || String(a.fix.homeTeamName).localeCompare(String(b.fix.homeTeamName));
+    });
+
+    var rows = [[
+      'Date', 'Kick-off', 'Competition', 'Home', 'Away', 'Home goals', 'Away goals', 'Status',
+      'Neutral venue', 'Venue', 'Total attendance', 'Away fans', 'Home fans',
+      'Submitted by', 'Submitted at', 'Last edited at', 'Match ID'
+    ]];
+    list.forEach(function(r) {
+      var f = r.fix, sub = S.submissions[r.id] || null;
+      var hasScore = f.homeScore != null && f.awayScore != null;
+      var period = (f.matchPeriod || '').toLowerCase();
+      var status = period === 'postponed' ? 'Postponed' : (isPlayed(f) ? 'Played' : 'Not played');
+      var total = sub && sub.total != null ? sub.total : '';
+      var away  = sub && sub.awayRecorded && sub.away != null ? sub.away : '';
+      rows.push([
+        r.ko ? dateFmt.format(r.ko) : '',
+        r.ko ? timeFmt.format(r.ko) : '',
+        COMP_KEY_TO_LABEL[f.competitionKey] || f.competitionKey || '',
+        f.homeTeamName || '',
+        f.awayTeamName || '',
+        hasScore ? f.homeScore : '',
+        hasScore ? f.awayScore : '',
+        status,
+        f.isNeutral ? 'Yes' : '',
+        f.isNeutral ? (f.venueName || '') : '',
+        total,
+        away,
+        (total !== '' && away !== '') ? total - away : '',
+        sub ? (sub.submittedByName || '') : '',
+        sub ? stamp(sub.submittedAt) : '',
+        sub ? stamp(sub.lastEditedAt) : '',
+        r.id
+      ]);
+    });
+
+    var label = NL.season.label(S.meta, S.season) || S.season;
+    NL.download('attendance-' + String(label).replace(/[^0-9A-Za-z-]+/g, '-') + '.csv',
+      NL.csv(rows, { bom: true }), 'text/csv;charset=utf-8');
+    NL.toast('Exported ' + list.length + ' fixtures', 'success');
+  }
+
   /* Determine whether a fixture has been played (used for submission-expected filtering) */
   function isPlayed(fix) {
     var period = (fix.matchPeriod || '').toLowerCase();
@@ -3805,6 +3887,16 @@
     if (isStaffLike) {
       document.getElementById('focusControl').style.display = '';
       populateClubFocusDropdown();
+    }
+
+    /* Export CSV \u2014 staff-like only: S.fixtures holds every club's figures. */
+    var exportBtn = document.getElementById('exportCsvBtn');
+    if (exportBtn) {
+      exportBtn.style.display = isStaffLike ? '' : 'none';
+      if (isStaffLike && !exportBtn._wired) {
+        exportBtn._wired = true;
+        exportBtn.addEventListener('click', exportSeasonCsv);
+      }
     }
 
     /* "+ Add cup fixture" tab \u2014 create/edit/delete cup fixtures. Admin +
