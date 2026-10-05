@@ -1,0 +1,1212 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Responsibilities
+  Version: v1.0 (05/10/2026)
+  File: /responsibilities/index.html
+
+  The department's functions as a spoke map, with who covers each piece of
+  work. Every bullet is split between people in 5% steps; whatever is not
+  assigned is Unowned. Taking a person out of the picture (the "Without"
+  switches) turns their share into Unowned, so the gap a departure leaves
+  is visible before it happens.
+
+  Storage (RTDB):
+    app-data/media-responsibilities/people/{pid}
+        { initials, name, external (bool), colour (1–8 → --proj-N), order }
+    app-data/media-responsibilities/functions/{fid}
+        { name, emoji, note, order,
+          items/{iid}: { text, group, sop, order, shares/{pid}: pct } }
+    tools/media-responsibilities           tool registration (label, defaults)
+
+  No personal data lives in this file or anywhere in the repo: people and
+  functions arrive at runtime from RTDB, and the starting data is loaded
+  through the Import dialog, never committed.
+
+  Access (auth-guard registry — see system/auth-guard.js):
+    superadmin → admin. Every other role → off. RTDB rules allow
+    superadmin read/write only.
+
+  CHANGELOG
+  v1.0 (05/10/2026)
+    - First build. Spoke map with proportional ownership strips, per-bullet
+      share chips, "Without" switches per person, edit mode for functions,
+      bullets, shares, SOP links and people, reorder, JSON import/export.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Responsibilities — NL Tools</title>
+  <!-- Favicons. Static, not injected: nl-topbar.js adds these too, but a
+       standalone page never loads it, and an icon that arrives with the JS
+       leaves the tab blank until it does. /favicon.ico at the root is the
+       backstop every browser asks for without being told. -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+
+  <!-- Brand stylesheet (lint canonical: ?v=66) -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=66">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'Responsibilities',
+      toolKey: 'media-responsibilities'
+    };
+    var NL_TOOL_KEY = 'media-responsibilities';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '05/10/2026',
+        version: 'v1.0',
+        items: [
+          'The department map, with who covers each piece of work.',
+          'Take anyone out with the Without switches to see what goes unowned.',
+          'Edit functions, bullets, shares, SOP links and people in place.'
+        ]
+      }
+    ];
+
+    /* auth-guard fires this once the session is verified + pageWrap is
+       revealed. Boot the main app from here so RTDB reads happen with a
+       live auth token. Do NOT read RTDB before this fires. */
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts (lint canonical: ?v=47 / ?v=10 / ?v=16) -->
+  <script src="/system/nl-utils.js?v=47"></script>
+  <script src="/system/nl-topbar.js?v=10"></script>
+  <script src="/system/auth-guard.js?v=16"></script>
+
+<style>
+  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
+     style.display = 'block'. Don't clear with '' — would re-trigger the
+     brand rule and re-hide the page. */
+
+  /* Unowned is the one colour that means something: --red (semantic danger),
+     striped so it can never be mistaken for a person's solid --proj-N. */
+  .rp-unowned-fill {
+    background: repeating-linear-gradient(135deg, var(--red) 0 4px, var(--red-light) 4px 8px);
+  }
+
+  /* Toolbar: Without switches left, actions right. */
+  .rp-bar { position: relative; z-index: 21; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; margin-bottom: 14px; }
+  .rp-without { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .rp-without__label { font-size: var(--text-xs); font-weight: 800; font-variation-settings: 'wght' 800; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
+  .rp-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .rp-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: var(--text-xs); color: var(--text-muted); margin-right: 6px; }
+  .rp-legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .rp-legend i { display: inline-block; width: 14px; height: 14px; border-radius: var(--radius-sm); }
+  .rp-legend .is-staff { background: var(--navy); }
+  .rp-legend .is-ext { border: 2px solid var(--navy); }
+
+  /* Person chip — solid for staff, outlined for external. Colour comes from
+     --pc, set inline to var(--proj-N). */
+  .rp-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 9px; border-radius: var(--radius-pill);
+    font-family: var(--font); font-size: var(--text-xs); line-height: 1.3;
+    font-weight: 800; font-variation-settings: 'wght' 800; letter-spacing: 0.04em;
+    background: var(--pc); color: var(--white); border: 2px solid var(--pc);
+    white-space: nowrap;
+  }
+  .rp-chip.is-ext { background: var(--white); color: var(--pc); }
+  .rp-chip .rp-chip__pct { font-weight: 400; font-variation-settings: 'wght' 400; }
+  .rp-chip.is-unowned { --pc: var(--red); background: var(--red-light); color: var(--red); border-style: dashed; }
+  button.rp-chip { cursor: pointer; }
+  button.rp-chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  button.rp-chip[aria-pressed="true"] { opacity: 0.45; text-decoration: line-through; }
+
+  /* Stage: map fills the viewport; the panel slides in from the right and
+     the map makes room (its box changes size once, the spokes glide). */
+  .rp-stage { position: relative; min-height: 520px; }
+  .rp-map-wrap { position: absolute; top: 0; bottom: 0; left: 0; right: 0; }
+  .rp-stage.is-open .rp-map-wrap { right: var(--rp-panel); }
+  .rp-map { position: absolute; inset: 0; }
+  .rp-spokes { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  .rp-spokes line { stroke: var(--navy-200); stroke-width: 1.25; transition: stroke 0.2s, stroke-width 0.2s; }
+  .rp-spokes line.on { stroke: var(--primary); stroke-width: 3; }
+  .rp-spokes path { fill: none; stroke: var(--border); stroke-width: 1; stroke-dasharray: 4 5; }
+
+  .rp-hub {
+    position: absolute; left: 0; top: 0; border-radius: 50%;
+    background: var(--navy); color: var(--white);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
+    box-shadow: 0 0 0 8px var(--off-white), var(--shadow);
+    transition: width 0.6s, height 0.6s, font-size 0.6s;
+    padding: 0.6em;
+  }
+  .rp-hub small { font-size: 0.42em; font-weight: 700; font-variation-settings: 'wght' 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--navy-200); margin-bottom: 0.4em; }
+  .rp-hub strong { font-weight: 800; font-variation-settings: 'wght' 800; line-height: 1.08; }
+
+  .rp-node {
+    position: absolute; left: 0; top: 0;
+    display: flex; flex-direction: column; gap: 0.45em;
+    padding: 0.55em 0.85em 0.6em 0.7em; border-radius: var(--radius-lg);
+    background: var(--white); color: var(--text); border: 1.5px solid var(--navy-200);
+    font-family: var(--font); text-align: left; cursor: pointer; white-space: nowrap;
+    transition: background 0.2s, border-color 0.2s, color 0.2s, box-shadow 0.2s, width 0.6s, font-size 0.6s;
+  }
+  .rp-node:hover { background: var(--navy-50); box-shadow: var(--shadow); }
+  .rp-node:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .rp-node__row { display: flex; align-items: center; gap: 0.55em; }
+  .rp-node__emoji { flex: none; width: 1.3em; text-align: center; font-size: 1.4em; line-height: 1; font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif; }
+  .rp-node__name { font-weight: 700; font-variation-settings: 'wght' 700; line-height: 1.2; }
+  .rp-node[aria-pressed="true"] { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary), var(--shadow); }
+  .rp-measure { position: absolute; left: 0; top: 0; visibility: hidden; pointer-events: none; }
+  .rp-measure .rp-node { transition: none; }
+
+  /* Ownership strip — segments sized by share. */
+  .rp-strip { display: flex; height: 6px; border-radius: var(--radius-pill); overflow: hidden; background: var(--border); }
+  .rp-strip > span { display: block; height: 100%; }
+  .rp-strip--lg { height: 10px; }
+
+  /* Detail panel */
+  .rp-panel {
+    position: absolute; top: 0; right: 0; bottom: 0; width: var(--rp-panel); padding-left: 24px;
+    transform: translateX(calc(100% + 48px)); transition: transform 0.6s cubic-bezier(0.22, 0.8, 0.24, 1);
+  }
+  .rp-stage.is-open .rp-panel { transform: none; }
+  .rp-panel__inner {
+    height: 100%; overflow-y: auto; background: var(--white);
+    border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow);
+    padding: clamp(20px, 2vw, 40px); display: flex; flex-direction: column;
+  }
+  .rp-panel__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .rp-panel__emoji { font-size: clamp(48px, 3.6vw, 80px); line-height: 1; font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif; }
+  .rp-panel__tools { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .rp-panel h2 { margin: 14px 0 10px; font-size: var(--text-xl); line-height: 1.08; font-weight: 800; font-variation-settings: 'wght' 800; color: var(--navy); text-wrap: balance; }
+  .rp-panel .rp-strip { margin-bottom: 18px; }
+  .rp-group { margin: 16px 0 2px; font-size: var(--text-xs); font-weight: 800; font-variation-settings: 'wght' 800; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); }
+  .rp-items { list-style: none; margin: 0; padding: 0; }
+  .rp-item { padding: 11px 0; border-top: 1px solid var(--border); }
+  .rp-items .rp-item:first-child { border-top: 0; }
+  .rp-item__text { font-size: var(--text-base); line-height: 1.45; color: var(--text); }
+  .rp-item__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 7px; }
+  .rp-item__sop { font-size: var(--text-xs); font-weight: 700; font-variation-settings: 'wght' 700; color: var(--blue); text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
+  .rp-item__sop:hover { text-decoration: underline; }
+  .rp-item.is-editable { cursor: pointer; border-radius: var(--radius); padding-left: 8px; padding-right: 8px; margin: 0 -8px; }
+  .rp-item.is-editable:hover { background: var(--navy-50); }
+  .rp-note { margin-top: 18px; padding: 10px 12px; background: var(--off-white); border: 1px solid var(--border); border-radius: var(--radius); font-size: var(--text-sm); color: var(--text-muted); }
+  .rp-panel__foot { display: flex; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 22px; }
+
+  /* Edit mode marker on the button. */
+  .rp-edit-on { box-shadow: 0 0 0 2px var(--amber); }
+
+  /* Share editor inside the bullet modal. */
+  .rp-shares { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .rp-share-total { margin-top: 10px; font-size: var(--text-sm); }
+  .rp-share-total.is-over { color: var(--red); font-weight: 700; font-variation-settings: 'wght' 700; }
+  .rp-swatches { display: flex; gap: 8px; flex-wrap: wrap; }
+  .rp-swatch { width: 30px; height: 30px; border-radius: 50%; border: 3px solid var(--white); box-shadow: 0 0 0 1px var(--border); cursor: pointer; background: var(--pc); }
+  .rp-swatch[aria-pressed="true"] { box-shadow: 0 0 0 3px var(--text); }
+  .rp-people-list { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 8px; }
+  .rp-people-list li { display: flex; align-items: center; gap: 10px; justify-content: space-between; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); }
+  .rp-people-list .rp-who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .rp-check { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; font-size: var(--text-sm); }
+  .rp-modal-textarea { width: 100%; min-height: 260px; font-family: var(--font-mono); font-size: var(--text-xs) !important; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius); }
+
+  /* Narrow screens: list instead of a map. */
+  .rp-list { display: none; }
+  .rp-fn { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius-lg); margin-bottom: 8px; }
+  .rp-fn__body { padding: 4px 14px 14px; }
+  @media (max-width: 1699px) and (min-width: 1101px) {
+    .rp-panel { position: fixed; z-index: 20; width: min(620px, 92vw); padding-left: 0; transform: translateX(105%); transition: transform 0.45s ease; }
+    .rp-stage.is-open .rp-map-wrap { right: 0; }
+    .rp-panel__inner { border-radius: 0; border-width: 0 0 0 1px; }
+    .rp-scrim { display: none; }
+    .rp-stage.is-open .rp-scrim { display: block; position: fixed; inset: 0; background: color-mix(in srgb, var(--navy-900) 35%, transparent); z-index: 19; }
+  }
+  @media (min-width: 1700px) { .rp-scrim { display: none; } }
+  @media (max-width: 1100px) {
+    .rp-stage { display: none; }
+    .rp-list { display: block; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .rp-node, .rp-hub, .rp-panel, .rp-spokes line { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Topbar — auto-rendered by /system/nl-topbar.js from window.NL_TOOL -->
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="page rp-page">
+
+    <div class="rp-bar">
+      <div class="rp-without" id="rpWithout"></div>
+      <div class="rp-actions">
+        <div class="rp-legend" aria-hidden="true">
+          <span><i class="is-staff"></i>Staff</span>
+          <span><i class="is-ext"></i>External</span>
+          <span><i class="rp-unowned-fill"></i>Unowned</span>
+        </div>
+        <button type="button" class="btn btn--ghost btn--sm" id="rpEdit" aria-pressed="false">Edit</button>
+        <span id="rpEditTools" hidden>
+          <button type="button" class="btn btn--ghost btn--sm" id="rpAddFn">Add function</button>
+          <button type="button" class="btn btn--ghost btn--sm" id="rpReorder">Reorder</button>
+          <button type="button" class="btn btn--ghost btn--sm" id="rpPeople">People</button>
+          <button type="button" class="btn btn--ghost btn--sm" id="rpImport">Import</button>
+          <button type="button" class="btn btn--ghost btn--sm" id="rpExport">Export</button>
+        </span>
+      </div>
+    </div>
+
+    <div class="rp-stage" id="rpStage">
+      <div class="rp-map-wrap">
+        <div class="rp-map" id="rpMap">
+          <svg class="rp-spokes" id="rpSpokes" aria-hidden="true"></svg>
+          <div class="rp-hub" id="rpHub"><small>Department</small><strong>Media,<br>Communications,<br>Digital &amp;<br>Broadcast</strong></div>
+        </div>
+      </div>
+      <div class="rp-scrim" id="rpScrim"></div>
+      <section class="rp-panel" id="rpPanel" aria-live="polite">
+        <div class="rp-panel__inner" id="rpPanelInner"></div>
+      </section>
+    </div>
+
+    <div class="rp-list" id="rpList"></div>
+
+    <div class="empty-state" id="rpEmpty" hidden>
+      <div class="empty-state__icon">🗺️</div>
+      <div class="empty-state__title">No functions yet</div>
+      <div class="empty-state__text">Turn on Edit, then use Import to load the starting map.</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Main app -->
+<script>
+(function () {
+  'use strict';
+
+  var ROOT = 'app-data/media-responsibilities';
+  var STEP = 5;
+
+  var data = { people: {}, functions: {} };
+  var away = {};          /* pid → true while switched out (view state only) */
+  var editMode = false;
+  var current = null;     /* open function id */
+
+  var el = {};
+  var nodes = {};         /* fid → { btn, line, mirror } */
+  var order = [];         /* fids in display order */
+  var shown = null, raf = 0, animateNext = false, laidOut = false;
+  var NS = 'http://www.w3.org/2000/svg';
+  var ring;
+
+  /* ── Data helpers ─────────────────────────────────────────────────── */
+  function byOrder(obj) {
+    return Object.keys(obj || {}).map(function (k) { return { id: k, v: obj[k] }; })
+      .sort(function (a, b) { return (a.v.order || 0) - (b.v.order || 0); });
+  }
+  function people() { return byOrder(data.people); }
+  function fns() { return byOrder(data.functions); }
+  function items(fn) { return byOrder(fn && fn.items); }
+
+  /* A bullet's split for display: present people's shares; everything else
+     (unassigned, switched-out people, deleted people) is Unowned. */
+  function itemSplit(item) {
+    var shares = (item && item.shares) || {};
+    var out = [], total = 0;
+    people().forEach(function (p) {
+      var pct = Number(shares[p.id]) || 0;
+      if (pct > 0 && !away[p.id]) { out.push({ pid: p.id, pct: pct }); total += pct; }
+    });
+    return { parts: out, unowned: Math.max(0, 100 - total) };
+  }
+  /* A function's split: the average of its bullets, each bullet weighted equally. */
+  function fnSplit(fn) {
+    var list = items(fn);
+    if (!list.length) return null;
+    var acc = {}, un = 0;
+    list.forEach(function (it) {
+      var s = itemSplit(it.v);
+      s.parts.forEach(function (p) { acc[p.pid] = (acc[p.pid] || 0) + p.pct; });
+      un += s.unowned;
+    });
+    var parts = people().filter(function (p) { return acc[p.id]; })
+      .map(function (p) { return { pid: p.id, pct: acc[p.id] / list.length }; });
+    return { parts: parts, unowned: un / list.length };
+  }
+
+  function colourVar(p) {
+    var n = Math.min(8, Math.max(1, Number(p && p.colour) || 1));
+    return 'var(--proj-' + n + ')';
+  }
+
+  function chip(pid, pct) {
+    var p = data.people[pid];
+    var s = document.createElement('span');
+    s.className = 'rp-chip' + (p && p.external ? ' is-ext' : '');
+    s.style.setProperty('--pc', colourVar(p));
+    s.title = p ? (p.name || p.initials) + (p.external ? ' (external)' : '') : '';
+    s.appendChild(document.createTextNode(p ? p.initials : '?'));
+    if (pct != null) {
+      var b = document.createElement('span');
+      b.className = 'rp-chip__pct';
+      b.textContent = Math.round(pct) + '%';
+      s.appendChild(b);
+    }
+    return s;
+  }
+  function unownedChip(pct) {
+    var s = document.createElement('span');
+    s.className = 'rp-chip is-unowned';
+    s.textContent = 'Unowned ' + Math.round(pct) + '%';
+    return s;
+  }
+  function strip(split, big) {
+    var s = document.createElement('div');
+    s.className = 'rp-strip' + (big ? ' rp-strip--lg' : '');
+    if (!split) return s;
+    split.parts.forEach(function (p) {
+      var seg = document.createElement('span');
+      seg.style.width = p.pct + '%';
+      seg.style.background = colourVar(data.people[p.pid]);
+      seg.title = (data.people[p.pid] || {}).initials + ' ' + Math.round(p.pct) + '%';
+      s.appendChild(seg);
+    });
+    if (split.unowned > 0.01) {
+      var u = document.createElement('span');
+      u.className = 'rp-unowned-fill';
+      u.style.width = split.unowned + '%';
+      u.title = 'Unowned ' + Math.round(split.unowned) + '%';
+      s.appendChild(u);
+    }
+    return s;
+  }
+
+  /* ── Writes ───────────────────────────────────────────────────────── */
+  function write(updates, okMsg) {
+    return NL.ensureAuth()
+      .then(function () { return db.ref(ROOT).update(updates); })
+      .then(function () { if (okMsg) NL.toast(okMsg, 'success'); })
+      .catch(function (err) { NL.toast('Not saved: ' + err.message, 'error'); throw err; });
+  }
+  function newKey() { return db.ref(ROOT).push().key; }
+
+  /* ── Without switches ─────────────────────────────────────────────── */
+  function renderWithout() {
+    var host = el.without;
+    host.textContent = '';
+    var list = people();
+    if (!list.length) return;
+    var lab = document.createElement('span');
+    lab.className = 'rp-without__label';
+    lab.textContent = 'Without';
+    host.appendChild(lab);
+    list.forEach(function (p) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'rp-chip' + (p.v.external ? ' is-ext' : '');
+      b.style.setProperty('--pc', colourVar(p.v));
+      b.textContent = p.v.initials;
+      b.title = (p.v.name || p.v.initials) + (away[p.id] ? ' — back in' : ' — take out');
+      b.setAttribute('aria-pressed', away[p.id] ? 'true' : 'false');
+      b.addEventListener('click', function () {
+        if (away[p.id]) delete away[p.id]; else away[p.id] = true;
+        renderAll();
+      });
+      host.appendChild(b);
+    });
+  }
+
+  /* ── Map ──────────────────────────────────────────────────────────── */
+  function nodeInner(fn) {
+    var frag = document.createDocumentFragment();
+    var row = document.createElement('span');
+    row.className = 'rp-node__row';
+    var em = document.createElement('span');
+    em.className = 'rp-node__emoji';
+    em.textContent = fn.emoji || '•';
+    var nm = document.createElement('span');
+    nm.className = 'rp-node__name';
+    nm.textContent = fn.name || 'Untitled';
+    row.appendChild(em); row.appendChild(nm);
+    frag.appendChild(row);
+    frag.appendChild(strip(fnSplit(fn)));
+    return frag;
+  }
+
+  function buildNodes() {
+    var list = fns();
+    var keep = {};
+    order = list.map(function (f) { return f.id; });
+    list.forEach(function (f) {
+      keep[f.id] = true;
+      var n = nodes[f.id];
+      if (!n) {
+        var line = document.createElementNS(NS, 'line');
+        el.spokes.appendChild(line);
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'rp-node';
+        btn.setAttribute('aria-pressed', 'false');
+        btn.addEventListener('click', function () {
+          if (current === f.id) closePanel(); else openPanel(f.id);
+        });
+        el.map.appendChild(btn);
+        var mirror = document.createElement('div');
+        mirror.className = 'rp-node';
+        el.measure.appendChild(mirror);
+        n = nodes[f.id] = { btn: btn, line: line, mirror: mirror };
+      }
+      n.btn.textContent = ''; n.btn.appendChild(nodeInner(f.v));
+      n.mirror.textContent = ''; n.mirror.appendChild(nodeInner(f.v));
+      n.btn.setAttribute('aria-label', (f.v.name || 'Untitled'));
+      n.btn.setAttribute('aria-pressed', current === f.id ? 'true' : 'false');
+      n.line.classList.toggle('on', current === f.id);
+    });
+    Object.keys(nodes).forEach(function (id) {
+      if (keep[id]) return;
+      var n = nodes[id];
+      n.btn.remove(); n.line.remove(); n.mirror.remove();
+      delete nodes[id];
+    });
+  }
+
+  function clamp(min, v, max) { return Math.max(min, Math.min(max, v)); }
+  function curve(cx, cy, rx, ry, sq, a) {
+    var c = Math.cos(a), s = Math.sin(a);
+    return [cx + rx * Math.sign(c) * Math.pow(Math.abs(c), sq), cy + ry * Math.sign(s) * Math.pow(Math.abs(s), sq)];
+  }
+  /* Space boxes by the room they need: beside a neighbour a box needs its
+     width, above one it needs its height. */
+  function evenPlaces(cx, cy, rx, ry, sq, bw, bh, n) {
+    var S = 720, pts = [], cum = [0], k;
+    for (k = 0; k <= S; k++) pts.push(curve(cx, cy, rx, ry, sq, -Math.PI / 2 + k / S * 2 * Math.PI));
+    for (k = 1; k <= S; k++) cum.push(cum[k - 1] + Math.abs(pts[k][0] - pts[k - 1][0]) / bw + Math.abs(pts[k][1] - pts[k - 1][1]) / bh);
+    var T = cum[S], out = [], j = 0;
+    for (var i = 0; i < n; i++) {
+      var target = T * (i + 0.5) / n;
+      while (j < S && cum[j + 1] < target) j++;
+      var f = (target - cum[j]) / ((cum[j + 1] - cum[j]) || 1);
+      out.push([pts[j][0] + (pts[j + 1][0] - pts[j][0]) * f, pts[j][1] + (pts[j + 1][1] - pts[j][1]) * f]);
+    }
+    return out;
+  }
+
+  /* Largest text size at which every box (as wide as its own title) fits
+     round the hub without touching another box or the hub. */
+  function solve(W, H) {
+    var n = order.length, cx = W / 2, cy = H / 2, pad = 6, gap = 10;
+    var hubD = clamp(140, Math.min(W, H) * 0.24, 300);
+    var mir = order.map(function (id) { return nodes[id].mirror; });
+    var best = null, ws, hs;
+    for (var fs = clamp(16, Math.min(W, H) * 0.03, 28); fs >= 11 && !best; fs -= 0.5) {
+      mir.forEach(function (m) { m.style.width = 'auto'; m.style.fontSize = fs + 'px'; });
+      ws = mir.map(function (m) { return Math.ceil(m.offsetWidth) + 2; });
+      hs = mir.map(function (m) { return m.offsetHeight; });
+      if (!n || Math.max.apply(null, ws) > W * 0.48) continue;
+      var avgW = ws.reduce(function (t, v) { return t + v; }, 0) / n;
+      var nh = Math.max.apply(null, hs);
+      var rx = W / 2 - avgW / 2 - pad, ry = H / 2 - nh / 2 - pad;
+      [1, 0.85, 0.7, 0.55, 0.45].forEach(function (sq) {
+        [true, false].forEach(function (even) {
+          if (best) return;
+          var places = even ? evenPlaces(cx, cy, rx, ry, sq, avgW + gap, nh + gap, n) : null;
+          var rects = [], pts = [], ok = true;
+          for (var i = 0; i < n && ok; i++) {
+            var p = places ? places[i] : curve(cx, cy, rx, ry, sq, -Math.PI / 2 + Math.PI / n + i * 2 * Math.PI / n);
+            var x = clamp(pad + ws[i] / 2, p[0], W - pad - ws[i] / 2), y = clamp(pad + hs[i] / 2, p[1], H - pad - hs[i] / 2);
+            var r = [x - ws[i] / 2, y - hs[i] / 2, x + ws[i] / 2, y + hs[i] / 2];
+            var hr = hubD / 2 + gap;
+            if (r[0] < cx + hr && r[2] > cx - hr && r[1] < cy + hr && r[3] > cy - hr) ok = false;
+            for (var j = 0; j < rects.length && ok; j++) {
+              var q = rects[j];
+              if (r[0] < q[2] + gap && q[0] < r[2] + gap && r[1] < q[3] + gap && q[1] < r[3] + gap) ok = false;
+            }
+            rects.push(r); pts.push({ x: x, y: y, o: 1, s: 1 });
+          }
+          if (ok) best = { cx: cx, cy: cy, rx: rx, ry: ry, sq: sq, ws: ws.slice(), fs: fs, hubD: hubD, pts: pts };
+        });
+      });
+    }
+    if (!best) {
+      var rx2 = W / 2 - 100 - pad, ry2 = H / 2 - 30 - pad;
+      best = { cx: cx, cy: cy, rx: rx2, ry: ry2, sq: 0.7, ws: ws || [], fs: 11, hubD: hubD,
+        pts: order.map(function (_, i) { var p = curve(cx, cy, rx2, ry2, 0.7, -Math.PI / 2 + Math.PI / n + i * 2 * Math.PI / n); return { x: p[0], y: p[1], o: 1, s: 1 }; }) };
+    }
+    return best;
+  }
+
+  function draw(st) {
+    el.hub.style.transform = 'translate(' + st.cx + 'px,' + st.cy + 'px) translate(-50%,-50%)';
+    var d = '';
+    for (var k = 0; k <= 96; k++) {
+      var pt = curve(st.cx, st.cy, st.rx, st.ry, st.sq, k / 96 * 2 * Math.PI);
+      d += (k ? 'L' : 'M') + pt[0].toFixed(1) + ' ' + pt[1].toFixed(1);
+    }
+    ring.setAttribute('d', d + 'Z');
+    st.pts.forEach(function (o, i) {
+      var n = nodes[order[i]];
+      if (!n) return;
+      n.btn.style.transform = 'translate(' + o.x + 'px,' + o.y + 'px) translate(-50%,-50%)' + (o.s < 0.999 ? ' scale(' + o.s + ')' : '');
+      n.btn.style.opacity = o.o >= 0.999 ? '' : o.o;
+      var f = Math.min(1, o.o * 1.4);
+      n.line.setAttribute('x1', st.cx); n.line.setAttribute('y1', st.cy);
+      n.line.setAttribute('x2', st.cx + (o.x - st.cx) * f); n.line.setAttribute('y2', st.cy + (o.y - st.cy) * f);
+    });
+  }
+
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function ease(t) { return 1 - Math.pow(1 - t, 4); }
+  function reduced() {
+    try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; }
+  }
+  function tween(from, to, dur, stagger) {
+    cancelAnimationFrame(raf);
+    from = from || collapsed(to);
+    var start = performance.now();
+    function frame(now) {
+      var elp = now - start, done = true, tg = ease(Math.min(1, elp / dur));
+      var st = { cx: lerp(from.cx, to.cx, tg), cy: lerp(from.cy, to.cy, tg), rx: lerp(from.rx, to.rx, tg), ry: lerp(from.ry, to.ry, tg), sq: lerp(from.sq, to.sq, tg), pts: [] };
+      to.pts.forEach(function (p, i) {
+        var raw = (elp - i * stagger) / dur;
+        if (raw < 1) done = false;
+        var t = ease(clamp(0, raw, 1)), f = from.pts[i] || { x: to.cx, y: to.cy, o: 0, s: 0.6 };
+        st.pts.push({ x: lerp(f.x, p.x, t), y: lerp(f.y, p.y, t), o: lerp(f.o, p.o, t), s: lerp(f.s, p.s, t) });
+      });
+      shown = st; draw(st);
+      if (!done) raf = requestAnimationFrame(frame);
+    }
+    raf = requestAnimationFrame(frame);
+  }
+
+  function collapsed(t) {
+    return { cx: t.cx, cy: t.cy, rx: t.rx * 0.3, ry: t.ry * 0.3, sq: t.sq,
+      pts: t.pts.map(function () { return { x: t.cx, y: t.cy, o: 0, s: 0.6 }; }) };
+  }
+
+  function sizeStage() {
+    var top = el.stage.getBoundingClientRect().top + window.scrollY;
+    el.stage.style.height = Math.max(520, window.innerHeight - top - 20) + 'px';
+    el.stage.style.setProperty('--rp-panel', 'clamp(480px, 30vw, 660px)');
+  }
+
+  function layout(animate) {
+    var W = el.map.clientWidth, H = el.map.clientHeight;
+    if (!W || !H || !order.length) return;
+    var target = solve(W, H);
+    el.spokes.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    order.forEach(function (id, i) {
+      nodes[id].btn.style.width = target.ws[i] + 'px';
+      nodes[id].btn.style.fontSize = target.fs + 'px';
+    });
+    el.hub.style.width = el.hub.style.height = target.hubD + 'px';
+    el.hub.style.fontSize = (target.hubD * 0.09) + 'px';
+    var sameCount = shown && shown.pts.length === target.pts.length;
+    if (reduced()) { cancelAnimationFrame(raf); shown = target; draw(target); return; }
+    if (!laidOut || !shown) {
+      /* First view: the boxes fan out from the hub one after another. */
+      laidOut = true;
+      tween(collapsed(target), target, 700, 40);
+      return;
+    }
+    if (animate || !sameCount) tween(shown, target, 650, 0);
+    else { cancelAnimationFrame(raf); shown = target; draw(target); }
+  }
+
+  /* ── Panel ────────────────────────────────────────────────────────── */
+  function renderPanel() {
+    var inner = el.panelInner;
+    inner.textContent = '';
+    var fn = current && data.functions[current];
+    if (!fn) return;
+
+    var head = document.createElement('div');
+    head.className = 'rp-panel__head';
+    var em = document.createElement('span');
+    em.className = 'rp-panel__emoji';
+    em.textContent = fn.emoji || '•';
+    head.appendChild(em);
+    var tools = document.createElement('div');
+    tools.className = 'rp-panel__tools';
+    if (editMode) {
+      tools.appendChild(btn('Edit function', 'btn--ghost btn--sm', function () { editFunction(current); }));
+      tools.appendChild(btn('Add bullet', 'btn--ghost btn--sm', function () { editItem(current, null); }));
+      if (items(fn).length > 1) tools.appendChild(btn('Reorder', 'btn--ghost btn--sm', function () { reorderItems(current); }));
+    }
+    tools.appendChild(btn('Close', 'btn--ghost btn--sm', closePanel));
+    head.appendChild(tools);
+    inner.appendChild(head);
+
+    var h = document.createElement('h2');
+    h.textContent = fn.name || 'Untitled';
+    inner.appendChild(h);
+    inner.appendChild(strip(fnSplit(fn), true));
+
+    var list = items(fn), lastGroup = null, ul = null;
+    list.forEach(function (it) {
+      var g = (it.v.group || '').trim();
+      if (!ul || g !== lastGroup) {
+        if (g) {
+          var gl = document.createElement('p');
+          gl.className = 'rp-group';
+          gl.textContent = g;
+          inner.appendChild(gl);
+        }
+        ul = document.createElement('ul');
+        ul.className = 'rp-items';
+        inner.appendChild(ul);
+        lastGroup = g;
+      }
+      ul.appendChild(itemRow(current, it));
+    });
+    if (!list.length) {
+      var e = document.createElement('p');
+      e.className = 'rp-note';
+      e.textContent = editMode ? 'No bullets yet. Use Add bullet.' : 'No bullets yet.';
+      inner.appendChild(e);
+    }
+    if (fn.note) {
+      var note = document.createElement('p');
+      note.className = 'rp-note';
+      note.textContent = fn.note;
+      inner.appendChild(note);
+    }
+
+    var foot = document.createElement('div');
+    foot.className = 'rp-panel__foot';
+    foot.appendChild(btn('← Previous', 'btn--ghost btn--sm', function () { step(-1); }));
+    foot.appendChild(btn('Next →', 'btn--ghost btn--sm', function () { step(1); }));
+    inner.appendChild(foot);
+  }
+
+  function itemRow(fid, it) {
+    var li = document.createElement('li');
+    li.className = 'rp-item' + (editMode ? ' is-editable' : '');
+    var t = document.createElement('div');
+    t.className = 'rp-item__text';
+    t.textContent = it.v.text || '';
+    li.appendChild(t);
+    var meta = document.createElement('div');
+    meta.className = 'rp-item__meta';
+    var s = itemSplit(it.v);
+    s.parts.sort(function (a, b) { return b.pct - a.pct; })
+      .forEach(function (p) { meta.appendChild(chip(p.pid, p.pct)); });
+    if (s.unowned > 0.01) meta.appendChild(unownedChip(s.unowned));
+    if (it.v.sop) {
+      var a = document.createElement('a');
+      a.className = 'rp-item__sop';
+      a.href = it.v.sop;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = 'SOP';
+      a.prepend(NL.icon ? NL.icon('link', 'sm') : document.createTextNode(''));
+      a.addEventListener('click', function (e) { e.stopPropagation(); });
+      meta.appendChild(a);
+    }
+    li.appendChild(meta);
+    if (editMode) li.addEventListener('click', function () { editItem(fid, it.id); });
+    return li;
+  }
+
+  function btn(label, cls, onClick) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn ' + cls;
+    b.textContent = label;
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  function openPanel(fid) {
+    var wasOpen = el.stage.classList.contains('is-open');
+    current = fid;
+    if (!wasOpen) animateNext = true;
+    el.stage.classList.add('is-open');
+    renderAll();
+    el.panelInner.scrollTop = 0;
+  }
+  function closePanel() {
+    if (!current) return;
+    var last = current;
+    current = null;
+    animateNext = true;
+    el.stage.classList.remove('is-open');
+    renderAll();
+    if (nodes[last]) nodes[last].btn.focus();
+  }
+  function step(dir) {
+    if (!order.length) return;
+    var i = order.indexOf(current);
+    openPanel(order[(i + dir + order.length) % order.length]);
+  }
+
+  /* ── Narrow-screen list ───────────────────────────────────────────── */
+  function renderList() {
+    el.list.textContent = '';
+    fns().forEach(function (f) {
+      var d = document.createElement('details');
+      d.className = 'disclosure rp-fn';
+      var s = document.createElement('summary');
+      s.textContent = (f.v.emoji ? f.v.emoji + '  ' : '') + (f.v.name || 'Untitled');
+      d.appendChild(s);
+      var body = document.createElement('div');
+      body.className = 'rp-fn__body';
+      body.appendChild(strip(fnSplit(f.v), true));
+      var ul = document.createElement('ul');
+      ul.className = 'rp-items';
+      items(f.v).forEach(function (it) { ul.appendChild(itemRow(f.id, it)); });
+      body.appendChild(ul);
+      d.appendChild(body);
+      el.list.appendChild(d);
+    });
+  }
+
+  /* ── Render all ───────────────────────────────────────────────────── */
+  function renderAll() {
+    if (current && !data.functions[current]) { current = null; el.stage.classList.remove('is-open'); }
+    var has = fns().length > 0;
+    el.empty.hidden = has;
+    el.stage.style.visibility = has ? '' : 'hidden';
+    renderWithout();
+    buildNodes();
+    renderPanel();
+    renderList();
+    requestAnimationFrame(function () { layout(animateNext); animateNext = false; });
+  }
+
+  /* ── Edit: function ───────────────────────────────────────────────── */
+  function field(label, value, opts) {
+    opts = opts || {};
+    var g = document.createElement('div');
+    g.className = 'form-group';
+    var id = 'rpf-' + Math.random().toString(36).slice(2, 8);
+    var l = document.createElement('label');
+    l.htmlFor = id;
+    l.textContent = label;
+    var input = document.createElement(opts.multiline ? 'textarea' : 'input');
+    input.id = id;
+    if (!opts.multiline) input.type = opts.type || 'text';
+    if (opts.placeholder) input.placeholder = opts.placeholder;
+    if (opts.maxlength) input.maxLength = opts.maxlength;
+    input.value = value == null ? '' : value;
+    g.appendChild(l); g.appendChild(input);
+    return { wrap: g, input: input };
+  }
+
+  function editFunction(fid) {
+    var fn = fid ? data.functions[fid] : null;
+    var body = document.createElement('div');
+    var fName = field('Name', fn && fn.name);
+    var fEmoji = field('Emoji', fn && fn.emoji, { maxlength: 8 });
+    var fNote = field('Note (optional)', fn && fn.note, { multiline: true });
+    [fName, fEmoji, fNote].forEach(function (f) { body.appendChild(f.wrap); });
+    var buttons = [];
+    if (fid) buttons.push({ label: 'Delete', className: 'btn--danger', onClick: function (c) {
+      NL.confirm('Delete "' + (fn.name || 'Untitled') + '" and all its bullets?', { title: 'Delete function', confirmText: 'Delete', variant: 'danger' })
+        .then(function (yes) {
+          if (!yes) return;
+          var u = {}; u['functions/' + fid] = null;
+          write(u, 'Deleted').then(function () { c.close(); if (current === fid) closePanel(); });
+        });
+    } });
+    buttons.push({ label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } });
+    buttons.push({ label: 'Save', className: 'btn--primary', onClick: function (c) {
+      var name = fName.input.value.trim();
+      if (!name) { NL.toast('Add a name', 'error'); fName.input.focus(); return; }
+      var id = fid || newKey();
+      var u = {};
+      u['functions/' + id + '/name'] = name;
+      u['functions/' + id + '/emoji'] = fEmoji.input.value.trim();
+      u['functions/' + id + '/note'] = fNote.input.value.trim() || null;
+      if (!fid) u['functions/' + id + '/order'] = fns().length;
+      write(u, 'Saved').then(function () { c.close(); if (!fid) openPanel(id); });
+    } });
+    NL.modal({ title: fid ? 'Edit function' : 'Add function', body: body, buttons: buttons, footerSplit: !!fid });
+  }
+
+  /* ── Edit: bullet + shares ────────────────────────────────────────── */
+  function editItem(fid, iid) {
+    var fn = data.functions[fid];
+    if (!fn) return;
+    var it = iid ? (fn.items || {})[iid] : null;
+    var body = document.createElement('div');
+    var fText = field('Bullet', it && it.text, { multiline: true });
+    var fGroup = field('Group label (optional)', it && it.group, { placeholder: 'e.g. Ongoing' });
+    var fSop = field('SOP link (optional)', it && it.sop, { type: 'url', placeholder: 'https://' });
+    [fText, fGroup, fSop].forEach(function (f) { body.appendChild(f.wrap); });
+
+    var sl = document.createElement('div');
+    sl.className = 'form-group';
+    var sll = document.createElement('label');
+    sll.textContent = 'Shares (%, steps of ' + STEP + ')';
+    sl.appendChild(sll);
+    var grid = document.createElement('div');
+    grid.className = 'rp-shares';
+    var inputs = {};
+    var shares = (it && it.shares) || {};
+    people().forEach(function (p) {
+      var f = field(p.v.initials + (p.v.external ? ' (ext)' : ''), shares[p.id] || 0, { type: 'number' });
+      f.input.min = 0; f.input.max = 100; f.input.step = STEP;
+      f.input.addEventListener('input', total);
+      inputs[p.id] = f.input;
+      grid.appendChild(f.wrap);
+    });
+    sl.appendChild(grid);
+    var tot = document.createElement('p');
+    tot.className = 'rp-share-total';
+    sl.appendChild(tot);
+    if (!people().length) {
+      var none = document.createElement('p');
+      none.className = 'rp-share-total';
+      none.textContent = 'Add people first (People button) to assign shares.';
+      sl.appendChild(none);
+    }
+    body.appendChild(sl);
+
+    function readShares() {
+      var out = {}, sum = 0, bad = false;
+      Object.keys(inputs).forEach(function (pid) {
+        var v = Number(inputs[pid].value) || 0;
+        if (v < 0 || v > 100 || v % STEP !== 0) bad = true;
+        if (v > 0) { out[pid] = v; sum += v; }
+      });
+      return { shares: out, sum: sum, bad: bad };
+    }
+    function total() {
+      var r = readShares();
+      tot.classList.toggle('is-over', r.sum > 100 || r.bad);
+      tot.textContent = r.bad ? 'Use whole steps of ' + STEP + '%.'
+        : r.sum > 100 ? 'Total is ' + r.sum + '% — bring it down to 100% or less.'
+        : 'Unowned: ' + (100 - r.sum) + '%';
+    }
+    total();
+
+    var buttons = [];
+    if (iid) buttons.push({ label: 'Delete', className: 'btn--danger', onClick: function (c) {
+      NL.confirm('Delete this bullet?', { title: 'Delete bullet', confirmText: 'Delete', variant: 'danger' })
+        .then(function (yes) {
+          if (!yes) return;
+          var u = {}; u['functions/' + fid + '/items/' + iid] = null;
+          write(u, 'Deleted').then(function () { c.close(); });
+        });
+    } });
+    buttons.push({ label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } });
+    buttons.push({ label: 'Save', className: 'btn--primary', onClick: function (c) {
+      var text = fText.input.value.trim();
+      if (!text) { NL.toast('Add the bullet text', 'error'); fText.input.focus(); return; }
+      var r = readShares();
+      if (r.bad || r.sum > 100) { total(); NL.toast('Check the shares', 'error'); return; }
+      var sop = fSop.input.value.trim();
+      if (sop && !/^https?:\/\//i.test(sop)) { NL.toast('SOP link must start with https://', 'error'); fSop.input.focus(); return; }
+      var id = iid || newKey();
+      var base = 'functions/' + fid + '/items/' + id;
+      var u = {};
+      u[base + '/text'] = text;
+      u[base + '/group'] = fGroup.input.value.trim() || null;
+      u[base + '/sop'] = sop || null;
+      u[base + '/shares'] = Object.keys(r.shares).length ? r.shares : null;
+      if (!iid) u[base + '/order'] = items(fn).length;
+      write(u, 'Saved').then(function () { c.close(); });
+    } });
+    NL.modal({ title: iid ? 'Edit bullet' : 'Add bullet', body: body, buttons: buttons, footerSplit: !!iid, width: 'wide' });
+  }
+
+  /* ── Reorder ──────────────────────────────────────────────────────── */
+  function reorderModal(title, list, pathFor) {
+    var host = document.createElement('div');
+    var s = NL.sortable(host, { items: list.map(function (x) { return { id: x.id, label: x.label }; }) });
+    NL.modal({ title: title, body: host, buttons: [
+      { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+      { label: 'Save order', className: 'btn--primary', onClick: function (c) {
+        var u = {};
+        s.order().forEach(function (id, i) { u[pathFor(id)] = i; });
+        write(u, 'Order saved').then(function () { animateNext = true; c.close(); });
+      } }
+    ] });
+  }
+  function reorderFunctions() {
+    reorderModal('Reorder functions', fns().map(function (f) { return { id: f.id, label: (f.v.emoji || '') + ' ' + (f.v.name || '') }; }),
+      function (id) { return 'functions/' + id + '/order'; });
+  }
+  function reorderItems(fid) {
+    reorderModal('Reorder bullets', items(data.functions[fid]).map(function (it) { return { id: it.id, label: it.v.text || '' }; }),
+      function (id) { return 'functions/' + fid + '/items/' + id + '/order'; });
+  }
+
+  /* ── People ───────────────────────────────────────────────────────── */
+  function managePeople() {
+    var body = document.createElement('div');
+    var ul = document.createElement('ul');
+    ul.className = 'rp-people-list';
+    people().forEach(function (p) {
+      var li = document.createElement('li');
+      var who = document.createElement('span');
+      who.className = 'rp-who';
+      who.appendChild(chip(p.id, null));
+      var nm = document.createElement('span');
+      nm.textContent = (p.v.name || '') + (p.v.external ? ' · external' : ' · staff');
+      who.appendChild(nm);
+      li.appendChild(who);
+      li.appendChild(btn('Edit', 'btn--ghost btn--sm', function () { ctrl.close(); editPerson(p.id); }));
+      ul.appendChild(li);
+    });
+    body.appendChild(ul);
+    var ctrl = NL.modal({ title: 'People', body: body, buttons: [
+      { label: 'Reorder', className: 'btn--ghost', onClick: function (c) {
+        c.close();
+        reorderModal('Reorder people', people().map(function (p) { return { id: p.id, label: p.v.initials + ' — ' + (p.v.name || '') }; }),
+          function (id) { return 'people/' + id + '/order'; });
+      } },
+      { label: 'Add person', className: 'btn--primary', onClick: function (c) { c.close(); editPerson(null); } }
+    ] });
+  }
+
+  function editPerson(pid) {
+    var p = pid ? data.people[pid] : null;
+    var body = document.createElement('div');
+    var fIni = field('Initials', p && p.initials, { maxlength: 4 });
+    var fName = field('Name', p && p.name);
+    body.appendChild(fIni.wrap); body.appendChild(fName.wrap);
+    var ext = document.createElement('label');
+    ext.className = 'rp-check';
+    var cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.checked = !!(p && p.external);
+    ext.appendChild(cb); ext.appendChild(document.createTextNode('External (freelancer, consultant or supplier)'));
+    body.appendChild(ext);
+    var cg = document.createElement('div');
+    cg.className = 'form-group';
+    var cl = document.createElement('label'); cl.textContent = 'Colour';
+    cg.appendChild(cl);
+    var sw = document.createElement('div');
+    sw.className = 'rp-swatches';
+    var chosen = (p && p.colour) || nextColour();
+    for (var n = 1; n <= 8; n++) {
+      (function (n) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'rp-swatch';
+        b.style.setProperty('--pc', 'var(--proj-' + n + ')');
+        b.setAttribute('aria-label', 'Colour ' + n);
+        b.setAttribute('aria-pressed', n === chosen ? 'true' : 'false');
+        b.addEventListener('click', function () {
+          chosen = n;
+          Array.prototype.forEach.call(sw.children, function (x, i) { x.setAttribute('aria-pressed', i + 1 === n ? 'true' : 'false'); });
+        });
+        sw.appendChild(b);
+      })(n);
+    }
+    cg.appendChild(sw);
+    body.appendChild(cg);
+
+    var buttons = [];
+    if (pid) buttons.push({ label: 'Remove', className: 'btn--danger', onClick: function (c) {
+      NL.confirm('Remove ' + (p.initials || 'this person') + '? Their shares become Unowned.', { title: 'Remove person', confirmText: 'Remove', variant: 'danger' })
+        .then(function (yes) {
+          if (!yes) return;
+          var u = {}; u['people/' + pid] = null;
+          fns().forEach(function (f) {
+            items(f.v).forEach(function (it) {
+              if (it.v.shares && it.v.shares[pid] != null) u['functions/' + f.id + '/items/' + it.id + '/shares/' + pid] = null;
+            });
+          });
+          delete away[pid];
+          write(u, 'Removed').then(function () { c.close(); });
+        });
+    } });
+    buttons.push({ label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } });
+    buttons.push({ label: 'Save', className: 'btn--primary', onClick: function (c) {
+      var ini = fIni.input.value.trim().toUpperCase();
+      if (!ini) { NL.toast('Add initials', 'error'); fIni.input.focus(); return; }
+      var id = pid || newKey();
+      var u = {};
+      u['people/' + id + '/initials'] = ini;
+      u['people/' + id + '/name'] = fName.input.value.trim();
+      u['people/' + id + '/external'] = cb.checked;
+      u['people/' + id + '/colour'] = chosen;
+      if (!pid) u['people/' + id + '/order'] = people().length;
+      write(u, 'Saved').then(function () { c.close(); });
+    } });
+    NL.modal({ title: pid ? 'Edit person' : 'Add person', body: body, buttons: buttons, footerSplit: !!pid, size: 'sm' });
+  }
+  function nextColour() {
+    var used = {};
+    people().forEach(function (p) { used[p.v.colour] = true; });
+    for (var n = 1; n <= 8; n++) if (n !== 2 && !used[n]) return n;  /* skip 2: brand red reads as a warning */
+    return 1;
+  }
+
+  /* ── Import / export ──────────────────────────────────────────────── */
+  /* Import shape:
+       { people:    [{ initials, name, external, colour }],
+         functions: [{ emoji, name, note, items: [{ text, group, sop, shares: { INITIALS: pct } }] }] }
+     Shares are keyed by initials in the file and mapped to person ids here. */
+  function importData() {
+    var body = document.createElement('div');
+    var ta = document.createElement('textarea');
+    ta.className = 'rp-modal-textarea';
+    ta.placeholder = 'Paste the import JSON here';
+    body.appendChild(ta);
+    NL.modal({ title: 'Import', body: body, width: 'wide', buttons: [
+      { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+      { label: 'Import', className: 'btn--primary', onClick: function (c) {
+        var src;
+        try { src = JSON.parse(ta.value); } catch (e) { NL.toast('That is not valid JSON', 'error'); return; }
+        if (!src || !Array.isArray(src.functions)) { NL.toast('Expected a "functions" list', 'error'); return; }
+        var go = fns().length || people().length
+          ? NL.confirm('This replaces everything currently in the tool.', { title: 'Replace current data', confirmText: 'Replace', variant: 'danger' })
+          : Promise.resolve(true);
+        go.then(function (yes) {
+          if (!yes) return;
+          var out = { people: {}, functions: {} }, byIni = {}, over = [];
+          (src.people || []).forEach(function (p, i) {
+            var id = newKey();
+            var ini = String(p.initials || '').trim().toUpperCase();
+            byIni[ini] = id;
+            out.people[id] = { initials: ini, name: p.name || '', external: !!p.external, colour: Number(p.colour) || 1, order: i };
+          });
+          src.functions.forEach(function (f, i) {
+            var fid = newKey(), its = {};
+            (f.items || []).forEach(function (it, j) {
+              var sh = {};
+              Object.keys(it.shares || {}).forEach(function (k) {
+                var pid = byIni[String(k).toUpperCase()];
+                var v = Number(it.shares[k]);
+                if (pid && v > 0) sh[pid] = Math.round(v / STEP) * STEP;
+              });
+              var sum = Object.keys(sh).reduce(function (t, k) { return t + sh[k]; }, 0);
+              if (sum > 100) over.push((f.name || 'Untitled') + ': ' + (it.text || ''));
+              its[newKey()] = { text: it.text || '', group: it.group || null, sop: it.sop || null, order: j, shares: Object.keys(sh).length ? sh : null };
+            });
+            out.functions[fid] = { name: f.name || '', emoji: f.emoji || '', note: f.note || null, order: i, items: its };
+          });
+          if (over.length) {
+            NL.alert('These bullets add up to more than 100%:\n\n' + over.join('\n'), { title: 'Not imported' });
+            return;
+          }
+          NL.ensureAuth()
+            .then(function () { return db.ref(ROOT).set(out); })
+            .then(function () { away = {}; current = null; laidOut = false; shown = null; el.stage.classList.remove('is-open'); NL.toast('Imported', 'success'); c.close(); })
+            .catch(function (err) { NL.toast('Not imported: ' + err.message, 'error'); });
+        });
+      } }
+    ] });
+  }
+
+  function exportData() {
+    var ini = {};
+    people().forEach(function (p) { ini[p.id] = p.v.initials; });
+    var out = {
+      people: people().map(function (p) { return { initials: p.v.initials, name: p.v.name || '', external: !!p.v.external, colour: p.v.colour || 1 }; }),
+      functions: fns().map(function (f) {
+        return { emoji: f.v.emoji || '', name: f.v.name || '', note: f.v.note || undefined,
+          items: items(f.v).map(function (it) {
+            var sh = {};
+            Object.keys(it.v.shares || {}).forEach(function (pid) { if (ini[pid]) sh[ini[pid]] = it.v.shares[pid]; });
+            return { text: it.v.text || '', group: it.v.group || undefined, sop: it.v.sop || undefined, shares: sh };
+          }) };
+      })
+    };
+    NL.download('responsibilities-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify(out, null, 2), 'application/json');
+  }
+
+  /* ── Edit mode ────────────────────────────────────────────────────── */
+  function setEdit(on) {
+    editMode = on;
+    el.edit.setAttribute('aria-pressed', on ? 'true' : 'false');
+    el.edit.textContent = on ? 'Done editing' : 'Edit';
+    el.edit.classList.toggle('rp-edit-on', on);
+    el.editTools.hidden = !on;
+    renderPanel();
+    renderList();
+  }
+
+  /* ── Boot ─────────────────────────────────────────────────────────── */
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function () {
+    el.stage = document.getElementById('rpStage');
+    el.map = document.getElementById('rpMap');
+    el.spokes = document.getElementById('rpSpokes');
+    el.hub = document.getElementById('rpHub');
+    el.panelInner = document.getElementById('rpPanelInner');
+    el.without = document.getElementById('rpWithout');
+    el.list = document.getElementById('rpList');
+    el.empty = document.getElementById('rpEmpty');
+    el.edit = document.getElementById('rpEdit');
+    el.editTools = document.getElementById('rpEditTools');
+    el.measure = document.createElement('div');
+    el.measure.className = 'rp-measure';
+    el.measure.setAttribute('aria-hidden', 'true');
+    el.map.appendChild(el.measure);
+    ring = document.createElementNS(NS, 'path');
+    el.spokes.appendChild(ring);
+
+    el.edit.addEventListener('click', function () { setEdit(!editMode); });
+    document.getElementById('rpAddFn').addEventListener('click', function () { editFunction(null); });
+    document.getElementById('rpReorder').addEventListener('click', reorderFunctions);
+    document.getElementById('rpPeople').addEventListener('click', managePeople);
+    document.getElementById('rpImport').addEventListener('click', importData);
+    document.getElementById('rpExport').addEventListener('click', exportData);
+    document.getElementById('rpScrim').addEventListener('click', closePanel);
+
+    document.addEventListener('keydown', function (e) {
+      if (!current || document.querySelector('.modal-backdrop')) return;
+      var tag = (e.target && e.target.tagName) || '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.key === 'Escape') closePanel();
+      else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); step(1); }
+      else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); step(-1); }
+    });
+
+    sizeStage();
+    if (window.ResizeObserver) new ResizeObserver(function () { layout(animateNext); animateNext = false; }).observe(el.map);
+    window.addEventListener('resize', sizeStage);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { layout(false); });
+
+    NL.ensureAuth().then(function () {
+      db.ref(ROOT).on('value', function (snap) {
+        var v = snap.val() || {};
+        data = { people: v.people || {}, functions: v.functions || {} };
+        renderAll();
+      }, function (err) {
+        NL.toast('Could not load: ' + err.message, 'error');
+      });
+    });
+  };
+
+  if (window._toolDeferredSession) {
+    window.TOOL.boot(window._toolDeferredSession);
+    delete window._toolDeferredSession;
+  }
+})();
+</script>
+
+</body>
+</html>
