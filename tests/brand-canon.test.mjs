@@ -1056,3 +1056,48 @@ test('.toast wraps long unbroken content instead of overflowing', () => {
   assert.match(body, /word-break:\s*break-word/,
     '.toast needs word-break: break-word as the fallback for older engines');
 });
+
+/* The modal gained an entrance in brand v2.70. The guard is not that it looks
+   nice — it is that the animation stays INSIDE the reduced-motion escape
+   hatch. The file-wide prefers-reduced-motion block zeroes animation-duration
+   with !important for everything, so a keyframe animation is covered for free;
+   a transition on .modal-backdrop would be too. What would NOT be covered is
+   someone reaching for a JS-driven tween or a scroll-linked animation later,
+   and what breaks silently is the opposite: a modal that animates its
+   `display`, which does nothing, or one whose animation is long enough to
+   feel like lag on a dialog opened forty times a day. Both are caught here. */
+test('the modal entrance animates, and stays short', () => {
+  assert.match(rules, /@keyframes nl-modal-in\b/,
+    'nl-modal-in keyframes missing — the modal is back to a hard cut');
+  assert.match(rules, /@keyframes nl-scrim-in\b/,
+    'nl-scrim-in keyframes missing — the scrim is back to a hard cut');
+
+  const el = rules.indexOf('.modal-backdrop.open > .modal {');
+  assert.ok(el >= 0, '.modal-backdrop.open > .modal must carry the entrance');
+  const body = rules.slice(el, rules.indexOf('}', el));
+  const ms = body.match(/animation:\s*nl-modal-in\s+(\d+)ms/);
+  assert.ok(ms, 'the modal entrance must declare its duration in ms');
+  assert.ok(Number(ms[1]) <= 250,
+    'a dialog opened dozens of times a day must not feel slow — keep it under 250ms, got ' + ms[1]);
+
+  /* display is not animatable. A `from { display: none }` reads as working
+     and does nothing, which is the failure mode worth a test. */
+  assert.ok(!/@keyframes nl-modal-in\s*\{[\s\S]*?\}\s*\}/.test(rules.replace(/\s+/g, ' ')) ||
+            !/nl-modal-in[\s\S]{0,200}display:/.test(rules),
+    'display cannot be animated — the entrance must use opacity/transform');
+});
+
+/* The reduced-motion block is what makes every animation above safe to add,
+   including the modal entrance. It is a file-wide `*` rule, so it is easy to
+   "tidy away" during a refactor without noticing what it was holding up. */
+test('the file-wide reduced-motion escape hatch is still universal', () => {
+  /* There is more than one such block — .nl-fold has its own one-liner — so
+     this looks for the universal one by its selector, not by being first. */
+  const i = rules.indexOf('@media (prefers-reduced-motion: reduce) {\n  *, *::before, *::after {');
+  assert.ok(i >= 0,
+    'the file-wide reduced-motion block has gone, or no longer applies to every element');
+  const block = rules.slice(i, i + 600);
+  assert.match(block, /animation-duration:\s*0\.01ms\s*!important/);
+  assert.match(block, /scroll-behavior:\s*auto\s*!important/,
+    'smooth scrolling must also be cancelled for anyone who asked for less motion');
+});
