@@ -1,7 +1,25 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Club Directory
-  Version: v1.8 (03/09/2026)
+  Version: v1.9 (06/10/2026)
+
+  v1.9 (06/10/2026) — three asks from people sending mail with it.
+  · Whole divisions in one click. The club chooser carries National / North /
+    South buttons that add (or, when already all in, remove) that division,
+    so "Step 2 clubs" is North then South rather than 48 single clicks.
+  · Departments as well as lists. "Every chair and chief executive" is not
+    one of the eleven lists — those name one contact per job — so the board
+    departments and the rest of the department taxonomy are offered as a
+    second group of pills. A person in two picked groups is still one row.
+  · One address per person in the export. A person holding several
+    addresses (their own, plus secretary@ and commercial@) came out as one
+    cell of addresses run together. The CSV now has Email — the address for
+    the job you picked them for — and Other emails, "; "-separated. "For the
+    job" is decided by the data first (an address scoped to that department
+    in the editor), then by its mailbox name (commercial@ for the Commercial
+    list, matched on the same synonyms as shared inboxes), then by the
+    order the club gave them. Copy named and Copy addresses use that one
+    address too; the others stay in the CSV.
 
   v1.8 (03/09/2026) — lockstep _directory.* ?v=37: a record can pin its own
   running order within a department (rec.order, set by the editor's Reorder
@@ -145,6 +163,15 @@
     var NL_TOOL_KEY = 'ops-club-directory';
 
     window.NL_CHANGELOG = [
+      {
+        date: '6 October 2026',
+        version: 'v1.9',
+        items: [
+          'Mailing lists: National, North and South buttons in the club chooser add a whole division at once — press North then South for every Step 2 club.',
+          'Mailing lists: departments can be picked as well as lists, so you can export every chair, director or chief executive (Leadership, Directors, Executive) — or any other department.',
+          'Exports give one address per person: the CSV has an Email column holding the address for the list or department you picked them for, and an Other emails column for the rest, separated by semicolons. Copy named and Copy addresses use that one address.'
+        ]
+      },
       {
         date: '3 September 2026',
         version: 'v1.8',
@@ -291,7 +318,9 @@
     font-size: var(--text-xs); color: var(--text-muted);
     letter-spacing: 0.04em; font-variation-settings: 'wght' 600;
   }
-  .lb-actions { display: flex; gap: 4px; }
+  .lb-actions { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+  /* A division whose every club is in — so pressing it again takes it out. */
+  .lb-actions [data-div][aria-pressed="true"] { color: var(--primary); font-weight: 700; }
   .lb-pills { display: flex; flex-wrap: wrap; gap: 6px; }
   .lb-pills .filter-pill { font-size: var(--text-xs); padding: 5px 11px; }
   .lb-pills .filter-pill em {
@@ -399,6 +428,10 @@
             </div>
           </div>
           <div class="lb-pills" id="lbLists"></div>
+          <div class="lb-div">
+            <div class="lb-div__h">Departments</div>
+            <div class="lb-pills" id="lbDepts"></div>
+          </div>
         </section>
         <!-- Closed by default. Most sends go to every club, and 72 pills
              open on load push the results a full screen down for a choice
@@ -407,6 +440,9 @@
           <div class="section-head">
             <h2>Clubs <span id="lbClubSum"></span></h2>
             <div class="lb-actions">
+              <button class="btn btn--link btn--sm" data-div="National">National</button>
+              <button class="btn btn--link btn--sm" data-div="North">North</button>
+              <button class="btn btn--link btn--sm" data-div="South">South</button>
               <button class="btn btn--link btn--sm" id="lbClubsToggle">choose</button>
               <button class="btn btn--link btn--sm" id="lbClubsNone">every club</button>
             </div>
@@ -709,12 +745,103 @@ window.TOOL = (function () {
   /* -------------------------------------------------------- list builder */
   var LB = { lists: {}, clubs: {}, omit: {}, inboxes: true, held: true };
 
+  /* Departments as a second kind of pick (v1.9). "Every chair and chief
+     executive" is a department question, not a list one — the eleven lists
+     name one contact per job and the board is nobody's list. A department
+     key is the section name behind a 'dept:' prefix so it can share LB.lists
+     with the list keys and never collide with one. Other is left out: it is
+     a shrug, and nobody mails a shrug. */
+  var DEPTS = NLDirectory.ORDER.filter(function (s) { return s !== 'Other'; });
+  var DEPT = 'dept:';
+  function isDept(k) { return k.indexOf(DEPT) === 0; }
+  function labelOf(k) { return isDept(k) ? k.slice(DEPT.length) : (LIST_LABEL[k] || k); }
+
+  /* The department each list's job sits in, for reading which of a person's
+     addresses is for that job. Only the plain ones: SLO, DLO and PLO have no
+     department of their own, so they fall through to the mailbox-name match
+     and then to the order the club gave. */
+  var LIST_SECTION = {
+    secretary: 'Club secretary', media: 'Media & marketing', programme: 'Programme',
+    commercial: 'Commercial', finance: 'Finance', ticketing: 'Ticketing',
+    medical: 'Medical', safety: 'Matchday & safety'
+  };
+  function sectionFor(k) { return isDept(k) ? k.slice(DEPT.length) : (LIST_SECTION[k] || ''); }
+
+  /* Mailbox-name needles for a pick: a list's own INBOX_MATCH words, and for
+     a department the words of every list that sits in it. Leadership,
+     Directors and Executive have none, which is right — a chair's address
+     for the chair's job is their own one. */
+  function needlesFor(k) {
+    if (!isDept(k)) { return INBOX_MATCH[k] || []; }
+    var d = k.slice(DEPT.length);
+    return LIST_ORDER.filter(function (l) { return LIST_SECTION[l] === d; })
+      .reduce(function (a, l) { return a.concat(INBOX_MATCH[l] || []); }, []);
+  }
+
+  function membersOf(rec, k) {
+    return isDept(k) ? NLDirectory.sectionPeople(rec, k.slice(DEPT.length))
+                     : NLDirectory.listMembers(rec, k);
+  }
+
+  function pickedKeys() {
+    return LIST_ORDER.concat(DEPTS.map(function (d) { return DEPT + d; }))
+      .filter(function (k) { return LB.lists[k]; });
+  }
+
+  /* One person's addresses for the jobs they were picked for, best first.
+     The case that prompted it: one person holding their own address,
+     secretary@ and commercial@, exported as one cell of addresses run
+     together. Which one is "for" the Commercial list is answered in order of how much we actually know:
+       2  the editor scoped the address to that department — the club said so
+       1  its mailbox name matches the job (commercial@ for Commercial)
+      -1  its mailbox name matches a DIFFERENT list nobody picked — so a
+          chair who is also secretary is written to as chair, not secretary@
+       0  otherwise, in the order the club gave them
+     Addresses scoped to some other job only are left out, which is what the
+     scope means; if that leaves nothing, everything comes back rather than
+     a person losing their only route because of a scope. */
+  function routeFor(p, keys) {
+    var secs = keys.map(sectionFor).filter(function (s, i, a) { return s && a.indexOf(s) === i; });
+    var all = NLDirectory.contactsOf(p, '');
+    function scoped(ch) {
+      if (!secs.length) { return all[ch]; }
+      var seen = {}, out = [];
+      secs.forEach(function (s) {
+        NLDirectory.contactsOf(p, s)[ch].forEach(function (x) {
+          if (!seen[x.value.toLowerCase()]) { seen[x.value.toLowerCase()] = 1; out.push(x); }
+        });
+      });
+      return out.length ? out : all[ch];
+    }
+    var mine = keys.reduce(function (a, k) { return a.concat(needlesFor(k)); }, []);
+    var others = LIST_ORDER.filter(function (l) { return keys.indexOf(l) < 0; })
+      .reduce(function (a, l) { return a.concat(INBOX_MATCH[l] || []); }, [])
+      .filter(function (n) { return mine.indexOf(n) < 0; });
+    function hit(local, needles) {
+      return needles.some(function (n) { return local.indexOf(n.replace(/\s+/g, '')) > -1; });
+    }
+    function score(x) {
+      if (x.sections.length && x.sections.some(function (s) { return secs.indexOf(s) > -1; })) { return 2; }
+      var local = x.value.split('@')[0].toLowerCase().replace(/[^a-z]/g, '');
+      if (hit(local, mine)) { return 1; }
+      return hit(local, others) ? -1 : 0;
+    }
+    var em = scoped('emails').filter(function (x) { return LB.held || !x.hide; })
+      .map(function (x, i) { return { v: x.value, s: score(x), i: i }; })
+      .sort(function (a, b) { return (b.s - a.s) || (a.i - b.i); })
+      .map(function (x) { return x.v; });
+    var ph = scoped('phones').filter(function (x) { return LB.held || !x.hide; })
+      .map(function (x) { return x.value; });
+    return { emails: em, phones: ph };
+  }
+
   /* Every candidate recipient for the current selection, before omissions.
      A person on two selected lists is ONE recipient carrying both list names
      — the old tool shipped a version that emailed them twice and it was the
-     first thing anyone noticed. */
+     first thing anyone noticed. The same holds across a list and a
+     department: the club secretary picked twice is still one row. */
   function recipients() {
-    var picked = LIST_ORDER.filter(function (k) { return LB.lists[k]; });
+    var picked = pickedKeys();
     if (!picked.length) { return []; }
     var clubs = clubNames.filter(function (n) {
       return anyClubPicked() ? LB.clubs[n] : true;
@@ -724,21 +851,13 @@ window.TOOL = (function () {
     clubs.forEach(function (club) {
       var rec = ALL[club] || {};
       picked.forEach(function (key) {
-        NLDirectory.listMembers(rec, key).forEach(function (p) {
-          /* Per address and per number, not per person. Somebody can publish
-             their club address and keep their mobile back, so "leave out what
-             is not for publication" has to drop the withheld LINES and keep
-             the person — dropping the person would lose the address they were
-             happy to give us. Somebody left with nothing is dropped. */
-          var c = NLDirectory.contactsOf(p, '');
-          var em = c.emails.filter(function (x) { return LB.held || !x.hide; });
-          var ph = c.phones.filter(function (x) { return LB.held || !x.hide; });
-          if (!LB.held && !em.length && !ph.length) { return; }
+        membersOf(rec, key).forEach(function (p) {
           var id = club + '::' + (p.id || NLDirectory.fullName(p));
           var row = index[id];
           if (!row) {
+            var c = NLDirectory.contactsOf(p, '');
             row = index[id] = {
-              key: id, club: club, kind: 'person',
+              key: id, club: club, kind: 'person', person: p,
               name: NLDirectory.fullName(p) || 'Name not given',
               held: c.emails.concat(c.phones).some(function (x) { return x.hide; }),
               /* De-duplicated: a title entered twice is flagged on the
@@ -747,15 +866,13 @@ window.TOOL = (function () {
               roles: NLDirectory.rolesOf(p).map(function (r) {
                 return (r.title || '').trim();
               }).filter(function (t, i, a) { return t && a.indexOf(t) === i; }),
-              emails: em.map(function (x) { return x.value; }),
-              phones: ph.map(function (x) { return x.value; }),
-              lists: []
+              emails: [], phones: [], lists: []
             };
             out.push(row);
           }
           if (row.lists.indexOf(key) < 0) { row.lists.push(key); }
         });
-        if (LB.inboxes) {
+        if (LB.inboxes && !isDept(key)) {
           inboxesFor(rec, key).forEach(function (b) {
             var id = club + '::box::' + b.label;
             var row = index[id];
@@ -771,6 +888,20 @@ window.TOOL = (function () {
           });
         }
       });
+    });
+
+    /* Routes are worked out once every key a person was picked for is known,
+       because which address is theirs "for the job" depends on all of them.
+       Per address and per number, not per person: somebody can publish their
+       club address and keep their mobile back, so "leave out what is not for
+       publication" drops the withheld LINES and keeps the person. Somebody
+       left with nothing is dropped. */
+    out = out.filter(function (r) {
+      if (r.kind !== 'person') { return true; }
+      var route = routeFor(r.person, r.lists);
+      r.emails = route.emails;
+      r.phones = route.phones;
+      return LB.held || r.emails.length || r.phones.length;
     });
 
     out.sort(function (a, b) {
@@ -802,26 +933,37 @@ window.TOOL = (function () {
     }).filter(Boolean);
   }
 
+  var DIV_CLUBS = { National: [], North: [], South: [], Other: [] };
+
+  function pill(key, label, n) {
+    return '<button class="filter-pill" data-list="' + esc(key) + '">' +
+      esc(label) + '<em>' + n + '</em></button>';
+  }
+
   function buildLists() {
     $('lbLists').innerHTML = LIST_ORDER.map(function (k) {
       var n = clubNames.reduce(function (a, c) {
         return a + NLDirectory.listMembers(ALL[c] || {}, k).length;
       }, 0);
-      return '<button class="filter-pill" data-list="' + k + '">' +
-        esc(LIST_LABEL[k] || k) + '<em>' + n + '</em></button>';
+      return pill(k, LIST_LABEL[k] || k, n);
+    }).join('');
+    $('lbDepts').innerHTML = DEPTS.map(function (d) {
+      var n = clubNames.reduce(function (a, c) {
+        return a + NLDirectory.sectionPeople(ALL[c] || {}, d).length;
+      }, 0);
+      return n ? pill(DEPT + d, d, n) : '';
     }).join('');
 
-    var byDiv = { National: [], North: [], South: [], Other: [] };
     clubNames.forEach(function (n) {
       var meta = NL.clubs.byName(n);
       var d = (meta && meta.division) || 'Other';
-      (byDiv[d] || byDiv.Other).push(n);
+      (DIV_CLUBS[d] || DIV_CLUBS.Other).push(n);
     });
     $('lbClubs').innerHTML = ['National', 'North', 'South', 'Other'].map(function (d) {
-      if (!byDiv[d].length) { return ''; }
+      if (!DIV_CLUBS[d].length) { return ''; }
       return '<div class="lb-div"><div class="lb-div__h">' + esc(d) +
-        ' (' + byDiv[d].length + ')</div><div class="lb-pills">' +
-        byDiv[d].map(function (n) {
+        ' (' + DIV_CLUBS[d].length + ')</div><div class="lb-pills">' +
+        DIV_CLUBS[d].map(function (n) {
           return '<button class="filter-pill" data-club="' + esc(n) + '">' + esc(n) + '</button>';
         }).join('') + '</div></div>';
     }).join('');
@@ -829,9 +971,11 @@ window.TOOL = (function () {
     var pane = $('pane-lists');
     pane.addEventListener('click', function (e) {
       var l = e.target.closest('[data-list]');
-      if (l) { toggle(LB.lists, l.dataset.list, l); return drawLists(); }
+      if (l) { flip(LB.lists, l.dataset.list); return drawLists(); }
       var c = e.target.closest('[data-club]');
-      if (c) { toggle(LB.clubs, c.dataset.club, c); return drawLists(); }
+      if (c) { flip(LB.clubs, c.dataset.club); return drawLists(); }
+      var dv = e.target.closest('[data-div]');
+      if (dv) { pickDivision(dv.dataset.div); return drawLists(); }
       var cp = e.target.closest('[data-copy]');
       if (cp) { return doCopy(cp.dataset.copy, cp); }
       var om = e.target.closest('[data-omit]');
@@ -840,9 +984,9 @@ window.TOOL = (function () {
         if (LB.omit[k]) { delete LB.omit[k]; } else { LB.omit[k] = true; }
         return drawLists();
       }
-      if (e.target.id === 'lbListsAll') { return setAll(LB.lists, LIST_ORDER, true, '[data-list]'); }
-      if (e.target.id === 'lbListsNone') { return setAll(LB.lists, LIST_ORDER, false, '[data-list]'); }
-      if (e.target.id === 'lbClubsNone') { return setAll(LB.clubs, clubNames, false, '[data-club]'); }
+      if (e.target.id === 'lbListsAll') { return setAll(LB.lists, LIST_ORDER, true); }
+      if (e.target.id === 'lbListsNone') { LB.lists = {}; LB.omit = {}; return drawLists(); }
+      if (e.target.id === 'lbClubsNone') { LB.clubs = {}; LB.omit = {}; return drawLists(); }
       if (e.target.id === 'lbClubsToggle') {
         var box = $('lbClubs');
         box.hidden = !box.hidden;
@@ -859,21 +1003,43 @@ window.TOOL = (function () {
     drawLists();
   }
 
-  function toggle(bag, key, btn) {
+  function flip(bag, key) {
     if (bag[key]) { delete bag[key]; } else { bag[key] = true; }
-    btn.classList.toggle('active', !!bag[key]);
     LB.omit = {};
   }
-  function setAll(bag, keys, on, sel) {
+  function setAll(bag, keys, on) {
     keys.forEach(function (k) { if (on) { bag[k] = true; } else { delete bag[k]; } });
-    document.querySelectorAll(sel).forEach(function (b) {
-      b.classList.toggle('active', on);
-    });
     LB.omit = {};
     drawLists();
   }
 
+  /* Adds the division; if every club in it is already in, takes it out
+     again. Additive rather than exclusive so North then South is Step 2. */
+  function pickDivision(d) {
+    var pool = DIV_CLUBS[d] || [];
+    var allIn = pool.length && pool.every(function (n) { return LB.clubs[n]; });
+    pool.forEach(function (n) { if (allIn) { delete LB.clubs[n]; } else { LB.clubs[n] = true; } });
+    LB.omit = {};
+  }
+
+  /* Pills and division buttons are drawn from state on every change, so no
+     handler has to remember which of them its click also affected. */
+  function syncPills() {
+    document.querySelectorAll('#pane-lists [data-list]').forEach(function (b) {
+      b.classList.toggle('active', !!LB.lists[b.dataset.list]);
+    });
+    document.querySelectorAll('#pane-lists [data-club]').forEach(function (b) {
+      b.classList.toggle('active', !!LB.clubs[b.dataset.club]);
+    });
+    document.querySelectorAll('#pane-lists [data-div]').forEach(function (b) {
+      var pool = DIV_CLUBS[b.dataset.div] || [];
+      b.setAttribute('aria-pressed', String(!!pool.length &&
+        pool.every(function (n) { return LB.clubs[n]; })));
+    });
+  }
+
   function drawLists() {
+    syncPills();
     var rows = recipients();
     var kept = rows.filter(function (r) { return !LB.omit[r.key]; });
     var reach = kept.filter(function (r) { return r.emails.length; });
@@ -893,7 +1059,7 @@ window.TOOL = (function () {
     $('lbCount').textContent = reach.length;
     var omitted = rows.length - kept.length;
     $('lbCountSub').textContent = !rows.length
-      ? 'pick at least one mailing list'
+      ? 'pick at least one list or department'
       : ((reach.length === 1 ? 'address' : 'addresses') +
          ' · ' + (kept.length - reach.length) + ' with no email' +
          (omitted ? ' · ' + omitted + ' dropped' : ''));
@@ -906,8 +1072,8 @@ window.TOOL = (function () {
 
     if (!rows.length) {
       $('lbTable').innerHTML = '<tbody><tr class="empty-row"><td>' +
-        'Pick a mailing list above. Leave the clubs alone for all ' + clubNames.length +
-        ' of them, or tick a few to narrow it.</td></tr></tbody>';
+        'Pick a mailing list or department above. Leave the clubs alone for all ' +
+        clubNames.length + ' of them, or narrow it by division or club.</td></tr></tbody>';
       return;
     }
 
@@ -919,7 +1085,7 @@ window.TOOL = (function () {
           '<td><button class="lb-omit" data-omit="' + esc(r.key) + '" title="' +
             (off ? 'Put back' : 'Drop from this export') + '">' +
             (off ? '+' : '×') + '</button></td>' +
-          '<td>' + esc(r.lists.map(function (k) { return LIST_LABEL[k] || k; }).join(', ')) + '</td>' +
+          '<td>' + esc(r.lists.map(labelOf).join(', ')) + '</td>' +
           '<td>' + esc(r.name) +
             (r.kind === 'inbox' ? ' <span class="pill pill--info">shared mailbox</span>' : '') +
             (r.held ? ' <span class="pill pill--pending">has withheld details</span>' : '') +
@@ -928,9 +1094,9 @@ window.TOOL = (function () {
           '<td><span class="lb-clubcell"><img data-crest="' + esc(r.club) + '" alt="">' +
             esc(r.club) + '</span></td>' +
           '<td>' + (r.emails.length
-            ? r.emails.map(function (em) {
-                return '<a href="mailto:' + esc(em) + '">' + esc(em) + '</a>';
-              }).join('<br>')
+            ? '<a href="mailto:' + esc(r.emails[0]) + '">' + esc(r.emails[0]) + '</a>' +
+              (r.emails.length > 1 ? '<br><span class="cd-row__ext">also ' +
+                r.emails.slice(1).map(esc).join(', ') + '</span>' : '')
             : '<span class="lb-none">no email held</span>') + '</td>' +
           '<td>' + (r.phones.length ? esc(r.phones.join(', ')) : '') + '</td>' +
         '</tr>';
@@ -942,16 +1108,17 @@ window.TOOL = (function () {
      copy button rather than after the email, which is the only useful time
      to say it. */
   function drawWarnings() {
-    var picked = LIST_ORDER.filter(function (k) { return LB.lists[k]; });
+    var picked = pickedKeys();
     var pool = clubNames.filter(function (n) { return anyClubPicked() ? LB.clubs[n] : true; });
     var items = picked.map(function (k) {
       var missing = pool.filter(function (n) {
-        return !NLDirectory.listMembers(ALL[n] || {}, k).length;
+        return !membersOf(ALL[n] || {}, k).length;
       });
       if (!missing.length) { return ''; }
       return '<div class="lb-warn__item"><b>' + missing.length + ' club' +
-        (missing.length === 1 ? '' : 's') + '</b> with nobody on <b>' +
-        esc(LIST_LABEL[k] || k) + '</b><div class="lb-warn__crests">' +
+        (missing.length === 1 ? '' : 's') + '</b> with nobody ' +
+        (isDept(k) ? 'in' : 'on') + ' <b>' + esc(labelOf(k)) +
+        '</b><div class="lb-warn__crests">' +
         missing.map(function (n) {
           return '<span class="lb-warn__crest"><img data-crest="' + esc(n) +
             '" alt="">' + esc(n) + '</span>';
@@ -971,14 +1138,18 @@ window.TOOL = (function () {
     });
   }
 
-  /* bom is for the downloaded file only — Excel needs it to read an accented
+  /* One address per person everywhere a message gets sent — emails[0], the
+     one for the job they were picked for (routeFor). The rest stay in the
+     CSV's Other emails column, "; "-separated so Excel and Outlook both read
+     them as separate addresses.
+
+     bom is for the downloaded file only — Excel needs it to read an accented
      name, and pasting one into the clipboard puts an invisible character at
      the front of whatever you paste it into. */
   function formatAs(fmt, bom) {
     var rows = exportRows();
     if (fmt === 'named') {
-      /* One address each — their first, which is the one the club gave first.
-         Quoted display name because Outlook will otherwise treat a comma in
+      /* Quoted display name because Outlook will otherwise treat a comma in
          a name as a recipient separator. */
       return rows.map(function (r) {
         return '"' + r.name.replace(/"/g, '') + '" <' + r.emails[0] + '>';
@@ -987,20 +1158,19 @@ window.TOOL = (function () {
     if (fmt === 'plain') {
       var seen = {}, all = [];
       rows.forEach(function (r) {
-        r.emails.forEach(function (em) {
-          var lc = em.toLowerCase();
-          if (!seen[lc]) { seen[lc] = 1; all.push(em); }
-        });
+        var lc = r.emails[0].toLowerCase();
+        if (!seen[lc]) { seen[lc] = 1; all.push(r.emails[0]); }
       });
       return all.join('; ');
     }
     return NL.csv([['Name', 'Club', 'Division', 'Mailing lists', 'Job titles',
-                    'Emails', 'Phones', 'Type', 'Published']].concat(
+                    'Email', 'Other emails', 'Phones', 'Type', 'Published']].concat(
       rows.map(function (r) {
         var meta = NL.clubs.byName(r.club);
         return [r.name, r.club, (meta && meta.division) || '',
-          r.lists.map(function (k) { return LIST_LABEL[k] || k; }).join(' / '),
-          r.roles.join(' / '), r.emails.join(' '), r.phones.join(' '),
+          r.lists.map(labelOf).join(' / '),
+          r.roles.join(' / '), r.emails[0], r.emails.slice(1).join('; '),
+          r.phones.join('; '),
           r.kind === 'inbox' ? 'Shared mailbox' : 'Person',
           r.held ? 'Some details withheld' : 'All published'];
       })), { bom: !!bom });
@@ -1018,10 +1188,12 @@ window.TOOL = (function () {
   }
 
   function download() {
-    var picked = LIST_ORDER.filter(function (k) { return LB.lists[k]; });
+    var picked = pickedKeys();
     var stamp = new Date().toISOString().slice(0, 10);
-    NL.download('nl-mailing-list-' +
-      (picked.length === 1 ? picked[0] : picked.length + '-lists') + '-' + stamp + '.csv',
+    var one = picked.length === 1
+      ? labelOf(picked[0]).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+      : picked.length + '-lists';
+    NL.download('nl-mailing-list-' + one + '-' + stamp + '.csv',
       formatAs('csv', true), 'text/csv;charset=utf-8');
     NL.toast(exportRows().length + ' recipients downloaded', 'success');
   }
