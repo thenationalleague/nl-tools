@@ -1,7 +1,15 @@
 /* =========================================================================
    NL Tools — Club Directory presentation
    File: /club-directory/_directory.js
-   Version: v1.14 (03/09/2026)
+   Version: v1.15 (06/10/2026)
+
+   v1.15 — renderIndex() takes opts.isPicked, which turns the wall into a
+   multi-select: every tile is a toggle (aria-pressed, .is-picked), whatever
+   its published state, and each division heading carries a
+   [data-pickdiv] button the page labels and wires. The staff page's
+   mailing-list builder uses it to choose clubs — the crest wall is the one
+   club chooser this tool's readers already know, and the alternative was a
+   second club picker beside it. Without isPicked, nothing changes.
 
    v1.14 — a record can pin its own running order within a department:
    rec.order = { '<section>': [personId, …] }, honoured by sectionPeople()
@@ -914,6 +922,7 @@
     opts = opts || {};
     var roster = arr(opts.roster);
     var ready = typeof opts.isReady === 'function' ? opts.isReady : function () { return true; };
+    var picked = typeof opts.isPicked === 'function' ? opts.isPicked : null;
     var seen = {}, groups = [], byDiv = {};
     /* Orgs first — the League above the clubs it runs. Their crest is named
        by the record, and they take no colour band: an org has no strip. */
@@ -970,9 +979,15 @@
         '</section>'
       : '';
 
-    return '<div class="rd-index">' + mine + groups.map(function (d) {
-      return '<section class="rd-div">' +
-        '<h2 class="rd-div__h">' + esc(d) + '</h2>' +
+    return '<div class="rd-index' + (picked ? ' rd-index--pick' : '') + '">' + mine +
+      groups.map(function (d) {
+      return '<section class="rd-div" data-div="' + esc(d) + '">' +
+        (picked
+          ? '<div class="rd-div__h rd-div__h--pick"><h2>' + esc(d) + '</h2>' +
+              '<span class="rd-div__count" data-pickcount="' + esc(d) + '"></span>' +
+              '<button type="button" class="btn btn--ghost btn--sm" data-pickdiv="' +
+                esc(d) + '"></button></div>'
+          : '<h2 class="rd-div__h">' + esc(d) + '</h2>') +
         '<ul class="rd-grid">' + byDiv[d].slice().sort().map(function (n) {
           var ok = ready(n);
           var org = orgCrest && orgCrest[n];
@@ -985,6 +1000,12 @@
           /* The state rides in the title, not in a third line. A line of text
              saying so is what made the old rows different heights. */
           var not = ok ? '' : ' title="Not yet checked"';
+          if (picked) {
+            var on = !!picked(n);
+            return '<li class="rd-tile' + (on ? ' is-picked' : '') + '" data-tile="' + esc(n) + '">' +
+              '<button type="button" class="rd-tile__go" data-club="' + esc(n) +
+                '" aria-pressed="' + on + '">' + inner + '</button></li>';
+          }
           return '<li class="rd-tile' + (ok ? '' : ' is-pending') + '">' +
             (ok ? '<button type="button" class="rd-tile__go" data-club="' + esc(n) + '">' +
                     inner + '</button>'

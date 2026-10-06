@@ -1,7 +1,41 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Club Directory
-  Version: v1.11 (06/10/2026)
+  Version: v1.13 (06/10/2026)
+
+  v1.13 (06/10/2026) — Mailing lists is a list builder: criteria on the
+  left, the list they make on the right, live.
+  · Build from Mailing lists OR Departments — a .chip-group switch, never
+    both, because a list made of some of each cannot be described in one
+    sentence. Switching starts the other side empty. Each is a one-column
+    checklist with counts at the clubs in scope. Quick picks are gone.
+  · Clubs: All clubs or any mix of National / North / South as pills (a
+    part-chosen division shows n/24). Anything finer is Edit clubs — the
+    directory's own crest wall in pick mode (_directory.js v1.15) in an
+    NL.modal, with search, Add all / Remove all per division, and Clear
+    all. Choosing every club folds back to All clubs; choosing none sends
+    nothing. The clubPicker search and the folding division ticklists are
+    gone.
+  · On a wide screen the criteria column stays in view down a long list.
+  · Links from v1.11 that mix lists and departments keep the first one's
+    source. _directory.* ?v=38.
+
+  v1.12 (06/10/2026) — tabs reordered Directory, Mailing lists, Admin, and
+  Directory opens first: reading a club is what most visits are for.
+  · Overview becomes Admin, shown to League accounts only (a club user
+    reads their own club, so other clubs' gaps are nothing they can act on).
+  · "Checked" is gone everywhere — the column, the stat, the filter, the
+    picker's "— not yet checked" suffix and the club's status pill. It
+    tracked the seeding pass, which is over; signedOff is still written by
+    the editor and simply no longer read here.
+  · The audit asks "what will fail when someone uses this", ordered by how
+    badly: no contact at all, no email (left out of every mailing list),
+    lists unfilled — now meaning nobody ON the list has an email, the same
+    rule the builder's coverage gaps use — no chair or CEO, no job title,
+    empty club card, then the tidier's typo checks, renamed "To double-
+    check" with each one listed in the tooltip. Column tooltips say what
+    each counts. Opens on "Something missing"; each row has Fix, which opens
+    the club in the editor.
 
   v1.11 (06/10/2026) — the mailing-list builder, rebuilt after a fresh-eyes
   review found it looked wrong and, worse, acted wrong:
@@ -171,7 +205,7 @@
   <title>Club Directory — NL Tools</title>
 
   <link rel="stylesheet" href="/system/nl-brand.css?v=67">
-  <link rel="stylesheet" href="/club-directory/_directory.css?v=37">
+  <link rel="stylesheet" href="/club-directory/_directory.css?v=38">
 
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
@@ -198,6 +232,24 @@
     var NL_TOOL_KEY = 'ops-club-directory';
 
     window.NL_CHANGELOG = [
+      {
+        date: '6 October 2026',
+        version: 'v1.13',
+        items: [
+          'Mailing lists works as a list builder: choose on the left, the list builds on the right as you go.',
+          'Build from Mailing lists or from Departments — one or the other. Tick the lists (or departments) you want.',
+          'Clubs: All clubs, or any of National, North and South. For anything finer, Edit clubs opens the crest wall — tap clubs in or out, search by name, or add and remove a whole division.'
+        ]
+      },
+      {
+        date: '6 October 2026',
+        version: 'v1.12',
+        items: [
+          'Tabs are now Directory, Mailing lists, Admin, and the directory opens first.',
+          'Overview is now Admin, for League accounts only. "Checked" has gone from the page — the directory is built, so the question is what is missing.',
+          'Admin lists what will fail when someone uses a club’s entry: people with no contact at all, people with no email (left out of mailing lists), mailing lists with nobody emailable on them, no chair or chief executive, missing job titles, an empty club card, and likely typos. Hover a heading for what it counts; Fix opens the club in the editor.'
+        ]
+      },
       {
         date: '6 October 2026',
         version: 'v1.11',
@@ -296,14 +348,10 @@
   <script src="/system/nl-utils.js?v=47"></script>
   <script src="/system/nl-topbar.js?v=10"></script>
   <script src="/system/auth-guard.js?v=16"></script>
-  <script src="/club-directory/_directory.js?v=37"></script>
+  <script src="/club-directory/_directory.js?v=38"></script>
   <script src="/club-directory/_tidy.js?v=30"></script>
 
 <style>
-  /* Staff see every club, including ones the admin team has not been through
-     yet — internally it matters more to know a club is coming than to be
-     protected from it. So the state is stated rather than the club hidden,
-     which is the opposite of the reader's rule and deliberately so. */
   .cd-pickbar {
     display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
     margin: 0 0 4px;
@@ -315,9 +363,6 @@
     border-radius: var(--radius); background: var(--white); color: var(--text);
     max-width: 280px;
   }
-  /* The state chip is the canon .pill — .pill--approved and .pill--pending
-     already are green-on-green-light and amber-on-amber-light, which is
-     exactly what "checked" and "not yet checked" want to look like. */
 
   .ov-pane[hidden] { display: none; }
 
@@ -334,7 +379,7 @@
   .ov-table th.is-sorted .ov-arrow { opacity: 1; }
   .ov-table td { vertical-align: middle; }
   .ov-club {
-    display: flex; align-items: center; gap: 9px;
+    display: flex; align-items: center; gap: 9px; white-space: nowrap;
     font-variation-settings: 'wght' 700;
   }
   .ov-club img { width: 22px; height: 22px; object-fit: contain; flex: none; }
@@ -353,71 +398,90 @@
   .ov-n--warn { color: var(--amber); font-variation-settings: 'wght' 800; }
 
   /* -------------------------------------------------------- list builder
-     Canon pieces throughout: .chip-group for the two either/or questions
-     (which kind of contact; all clubs or chosen ones), .filter-pill for the
-     closed sets you tick (eleven lists, the departments), .disclosure for
-     each division's clubs, NL.clubPicker to find one by name, .btn--ghost
-     for every secondary action. What is left here is layout. */
-  .lb-grid {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
-    align-items: start; margin-bottom: 16px;
+     Criteria on the left, the list they make on the right. Canon pieces
+     throughout: .chip-group for the one either/or (mailing lists or
+     departments), .filter-pill for the divisions, the directory's own crest
+     wall (pick mode) in an NL.modal for single clubs, .btn--ghost for every
+     secondary action. What is here is layout. */
+  .lb-builder {
+    display: grid; grid-template-columns: 330px minmax(0, 1fr);
+    gap: 16px; align-items: start;
   }
-  @media (max-width: 820px) { .lb-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 900px) { .lb-builder { grid-template-columns: 1fr; } }
   .lb-panel {
     background: var(--white); border: 1px solid var(--border);
     border-radius: var(--radius); padding: 14px 16px 16px;
   }
-  .lb-panel .section-head { margin-bottom: 10px; }
-  .lb-presets { gap: 6px; margin-bottom: 14px; }
-  .lb-presets .filter-pill { font-size: var(--text-xs); padding: 5px 11px; }
-  .lb-row {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 8px; flex-wrap: wrap;
+  /* The criteria stay in view down a long list. On one column they would
+     pin over the list they made, so only side by side. */
+  @media (min-width: 901px) {
+    .lb-criteria { position: sticky; top: 88px; max-height: calc(100vh - 104px); overflow-y: auto; }
   }
-  .lb-actions { display: flex; gap: 6px; }
-  .lb-hint { margin: 8px 0 10px; font-size: var(--text-sm); color: var(--text-muted); }
+  .lb-source { display: flex; }
+  .lb-source__opt { flex: 1; }
+  .lb-hint { margin: 8px 0 6px; font-size: var(--text-sm); color: var(--text-muted); }
+  .lb-h {
+    margin: 18px 0 8px; padding-top: 14px; border-top: 1px solid var(--border);
+    font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.08em;
+    font-variation-settings: 'wght' 800; color: var(--text-muted);
+  }
+
+  /* A checklist, one row each — eleven lists or fourteen departments read
+     down a column far better than they wrap across one. */
+  .lb-items { display: flex; flex-direction: column; }
+  .lb-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 8px; margin: 0 -8px; border-radius: 6px;
+    font-size: var(--text-sm); cursor: pointer;
+  }
+  .lb-item:hover { background: var(--off-white); }
+  .lb-item.is-on { color: var(--navy); font-variation-settings: 'wght' 700; }
+  .lb-item input { width: 16px; height: 16px; flex: none; accent-color: var(--navy); }
+  .lb-item__label { flex: 1; min-width: 0; }
+  .lb-item__n { color: var(--text-muted); font-variant-numeric: tabular-nums; font-size: var(--text-xs); }
+  .lb-itemacts { display: flex; gap: 6px; margin-top: 8px; }
+
   .lb-pills { display: flex; flex-wrap: wrap; gap: 6px; }
   .lb-pills .filter-pill { font-size: var(--text-xs); padding: 5px 11px; }
   .lb-pills .filter-pill em {
     font-style: normal; opacity: 0.72; margin-left: 5px;
     font-variant-numeric: tabular-nums;
   }
-  .lb-scope { display: inline-flex; }
-  .lb-pick { margin: 12px 0 8px; }
-  .lb-divrow { border-top: 1px solid var(--border); }
-  .lb-divrow > summary { align-items: center; padding: 8px 4px; }
-  .lb-divrow__name { min-width: 72px; }
-  .lb-divall { margin-left: auto; }
-  .lb-clubgrid {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-    gap: 2px 12px; padding: 4px 4px 12px 22px;
+  .lb-pills .filter-pill em:empty { display: none; }
+  .lb-clubline {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    margin-top: 10px; font-size: var(--text-sm); color: var(--text-muted);
   }
-  .lb-clubopt {
-    display: flex; align-items: center; gap: 7px; padding: 3px 0;
-    font-size: var(--text-sm); cursor: pointer; min-width: 0;
-  }
-  .lb-clubopt input { width: 15px; height: 15px; flex: none; accent-color: var(--navy); }
-  .lb-clubopt img { width: 16px; height: 16px; object-fit: contain; flex: none; }
+  .lb-opt { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); padding: 4px 0; }
+  .lb-opt input { width: 16px; height: 16px; flex: none; accent-color: var(--navy); }
+  .lb-opt span { color: var(--text-muted); }
 
-  /* The bar sticks under the 72px topbar at the canon in-page sticky level
-     (50 — below the topbar and any open dropdown; see nl-brand v2.65). */
+  /* The Edit clubs dialog: search and a running count above the wall. */
+  .lb-wallbar {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    margin: 0 0 16px;
+  }
+  .lb-wallq { flex: 1 1 240px; margin: 0; }
+  .lb-wallbar__n { font-size: var(--text-sm); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+  /* The results header sticks under the 72px topbar at the canon in-page
+     sticky level (50 — below the topbar and any open dropdown; v2.65). */
+  .lb-results { min-width: 0; }
   .lb-bar {
     position: sticky; top: 72px; z-index: 50;
     display: flex; align-items: center; justify-content: space-between;
     gap: 10px 16px; flex-wrap: wrap;
     background: var(--white); border: 1px solid var(--border);
     border-radius: var(--radius); box-shadow: var(--shadow);
-    padding: 10px 14px; margin-bottom: 16px;
+    padding: 10px 14px; margin-bottom: 12px;
   }
-  .lb-bar__count { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1 1 320px; }
+  .lb-bar__count { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1 1 280px; }
   .lb-bar__text { min-width: 0; }
   .lb-bar__summary { font-size: var(--text-sm); font-variation-settings: 'wght' 700; color: var(--navy); }
   .lb-putback { margin-left: 4px; }
-  /* On a phone the bar is two short rows — the count with the selection
-     clamped to two lines, then the two copy buttons — because a sticky bar
-     that grows with the sentence ends up covering the controls it reports
-     on. The CSV buttons stay in the page's own flow on wider screens only;
-     a CSV is not something anyone opens on a phone. */
+  /* On a phone the bar is two short rows — count with the selection
+     clamped to two lines, then the two copy buttons. A CSV is not something
+     anyone opens on a phone, so those two go. */
   @media (max-width: 640px) {
     .lb-bar { padding: 8px 10px; gap: 8px; }
     .lb-bar__count { flex-basis: 100%; }
@@ -430,14 +494,6 @@
     .lb-copy__main { flex: 1; }
     .lb-copy__csv { display: none; }
   }
-  .lb-opts {
-    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px;
-    margin: 0 0 16px; padding: 12px 14px;
-    background: var(--off-white); border-radius: var(--radius);
-  }
-  .lb-opt { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); }
-  .lb-opt input { width: 15px; height: 15px; accent-color: var(--navy); }
-  .lb-opt span { color: var(--text-muted); }
 
   .lb-gaps {
     border: 1px solid var(--amber); background: var(--amber-light);
@@ -487,100 +543,76 @@
   <div class="page">
 
     <div class="tabs" id="tabs">
-      <button class="tab active" data-pane="overview">Overview</button>
+      <button class="tab active" data-pane="directory">Directory</button>
       <button class="tab" data-pane="lists">Mailing lists</button>
-      <button class="tab" data-pane="directory">Directory</button>
-    </div>
-
-    <!-- ============================================================ OVERVIEW -->
-    <div class="ov-pane" id="pane-overview">
-      <div class="stats" id="ovStats"></div>
-      <div class="ov-filters filter-pill-row">
-        <span class="filter-pill-row__label">Show</span>
-        <button class="filter-pill active" data-ovf="all">All clubs</button>
-        <button class="filter-pill" data-ovf="todo">Something outstanding</button>
-        <button class="filter-pill" data-ovf="unchecked">Not yet checked</button>
-      </div>
-      <div class="table-wrap">
-        <table class="table table--compact ov-table" id="ovTable"></table>
-      </div>
+      <button class="tab" data-pane="admin" id="tabAdmin" hidden>Admin</button>
     </div>
 
     <!-- ======================================================== MAILING LISTS -->
     <div class="ov-pane" id="pane-lists" hidden>
-      <!-- The running total, pinned under the topbar for the whole pane, so
-           the effect of every choice below is in view as it is made. -->
-      <div class="lb-bar">
-        <div class="lb-bar__count">
-          <span class="lb-count" id="lbCount">0</span>
-          <div class="lb-bar__text">
-            <div class="lb-bar__summary" id="lbSummary"></div>
-            <div class="lb-count__sub" id="lbCountSub"></div>
-          </div>
-        </div>
-        <div class="lb-copy">
-          <button class="btn btn--navy btn--sm lb-copy__main" data-copy="named">Copy named</button>
-          <button class="btn btn--navy btn--sm lb-copy__main" data-copy="plain">Copy addresses</button>
-          <button class="btn btn--ghost btn--sm lb-copy__csv" data-copy="csv">Copy as CSV</button>
-          <button class="btn btn--ghost btn--sm lb-copy__csv" id="lbDownload">Download CSV</button>
-        </div>
-      </div>
+      <div class="lb-builder">
 
-      <div class="lb-grid">
-        <section class="lb-panel">
-          <div class="section-head"><h2>Who</h2></div>
-          <div class="filter-pill-row lb-presets" id="lbPresets"></div>
-          <div class="lb-row">
-            <div class="chip-group" id="lbView" role="group" aria-label="Kind of contact">
-              <button class="chip" data-view="list">Named contact<span class="lb-n"></span></button>
-              <button class="chip" data-view="dept">Whole department<span class="lb-n"></span></button>
+        <!-- Criteria on the left, the list they make on the right. -->
+        <aside class="lb-panel lb-criteria">
+          <div class="chip-group lb-source" id="lbSource" role="group" aria-label="Build from">
+            <button class="chip lb-source__opt" data-source="list">Mailing lists</button>
+            <button class="chip lb-source__opt" data-source="dept">Departments</button>
+          </div>
+          <p class="lb-hint" id="lbSourceHint"></p>
+          <div class="lb-items" id="lbListItems"></div>
+          <div class="lb-items" id="lbDeptItems" hidden></div>
+          <div class="lb-itemacts">
+            <button class="btn btn--ghost btn--sm" id="lbAll">Select all</button>
+            <button class="btn btn--ghost btn--sm" id="lbNone">Clear</button>
+          </div>
+
+          <h2 class="lb-h">Clubs</h2>
+          <div class="lb-pills" id="lbDivs"></div>
+          <div class="lb-clubline">
+            <span id="lbClubLine"></span>
+            <button class="btn btn--ghost btn--sm" id="lbEditClubs">Edit clubs</button>
+          </div>
+
+          <h2 class="lb-h">Include</h2>
+          <label class="lb-opt">
+            <input type="checkbox" id="lbInboxes" checked>
+            Shared mailboxes <span id="lbInboxNote"></span>
+          </label>
+          <label class="lb-opt">
+            <input type="checkbox" id="lbHeld" checked>
+            Addresses the club asked us not to publish <span id="lbHeldNote"></span>
+          </label>
+        </aside>
+
+        <section class="lb-results">
+          <div class="lb-bar">
+            <div class="lb-bar__count">
+              <span class="lb-count" id="lbCount">0</span>
+              <div class="lb-bar__text">
+                <div class="lb-bar__summary" id="lbSummary"></div>
+                <div class="lb-count__sub" id="lbCountSub"></div>
+              </div>
             </div>
-            <div class="lb-actions">
-              <button class="btn btn--ghost btn--sm" id="lbWhoAll">Select all</button>
-              <button class="btn btn--ghost btn--sm" id="lbWhoNone">Clear</button>
+            <div class="lb-copy">
+              <button class="btn btn--navy btn--sm lb-copy__main" data-copy="named">Copy named</button>
+              <button class="btn btn--navy btn--sm lb-copy__main" data-copy="plain">Copy addresses</button>
+              <button class="btn btn--ghost btn--sm lb-copy__csv" data-copy="csv">Copy as CSV</button>
+              <button class="btn btn--ghost btn--sm lb-copy__csv" id="lbDownload">Download CSV</button>
             </div>
           </div>
-          <p class="lb-hint" id="lbViewHint"></p>
-          <div class="lb-pills" id="lbLists"></div>
-          <div class="lb-pills" id="lbDepts" hidden></div>
-        </section>
-        <section class="lb-panel">
-          <div class="section-head"><h2>Which clubs</h2></div>
-          <div class="chip-group lb-scope" id="lbScope" role="group" aria-label="Which clubs">
-            <button class="chip" data-scope="all" id="lbScopeAll">All clubs</button>
-            <button class="chip" data-scope="some">Choose clubs</button>
-          </div>
-          <div id="lbChoose" hidden>
-            <div class="lb-pick" id="lbPick"></div>
-            <div class="lb-divs" id="lbDivs"></div>
+          <div id="lbWarnings" hidden></div>
+          <div class="table-wrap">
+            <table class="table table--compact lb-table" id="lbTable"></table>
           </div>
         </section>
-      </div>
 
-      <div class="lb-opts">
-        <span class="filter-label">Include</span>
-        <label class="lb-opt">
-          <input type="checkbox" id="lbInboxes" checked>
-          Shared mailboxes <span id="lbInboxNote"></span>
-        </label>
-        <label class="lb-opt">
-          <input type="checkbox" id="lbHeld" checked>
-          Addresses the club asked us not to publish <span id="lbHeldNote"></span>
-        </label>
-      </div>
-
-      <div id="lbWarnings" hidden></div>
-
-      <div class="table-wrap">
-        <table class="table table--compact lb-table" id="lbTable"></table>
       </div>
     </div>
 
     <!-- =========================================================== DIRECTORY -->
-    <div class="ov-pane" id="pane-directory" hidden>
+    <div class="ov-pane" id="pane-directory">
       <div class="cd-pickbar">
         <select id="pick" aria-label="Choose a club"></select>
-        <span id="state"></span>
       </div>
       <div class="cd-search"><div class="cd-search__box">
         <svg class="cd-search__icon" width="17" height="17" viewBox="0 0 24 24" fill="none"
@@ -592,6 +624,20 @@
       <div id="out"></div>
     </div>
 
+
+    <!-- =============================================================== ADMIN -->
+    <div class="ov-pane" id="pane-admin" hidden>
+      <div class="stats" id="ovStats"></div>
+      <div class="ov-filters filter-pill-row">
+        <span class="filter-pill-row__label">Show</span>
+        <button class="filter-pill active" data-ovf="todo">Something missing</button>
+        <button class="filter-pill" data-ovf="all">All clubs</button>
+      </div>
+      <div class="table-wrap">
+        <table class="table table--compact ov-table" id="ovTable"></table>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -601,7 +647,7 @@ window.TOOL = (function () {
   var $ = function (id) { return document.getElementById(id); };
   var esc = NL.escHtml;
   var arr = function (v) { return NLDirectory.arr(v); };
-  var ALL = {}, names = [], clubNames = [], AUDIT = {};
+  var ALL = {}, names = [], clubNames = [], AUDIT = {}, ADMIN = false;
 
   var LIST_ORDER = NLDirectory.LIST_ORDER;
   var LIST_LABEL = NLDirectory.LIST_LABEL;
@@ -644,7 +690,7 @@ window.TOOL = (function () {
          org record (the League, the Trust) has no club-role lists to be on. */
       clubNames = names.filter(function (n) { return !NLDirectory.isOrg(ALL[n]); });
       if (!names.length) {
-        $('pane-overview').innerHTML = '<p class="cd-empty">The directory has not been ' +
+        $('pane-directory').innerHTML = '<p class="cd-empty">The directory has not been ' +
           'built yet. The admin team builds it from the club submissions in the editor.</p>';
         return;
       }
@@ -655,19 +701,27 @@ window.TOOL = (function () {
          asking a question you have just answered yourself — which is how the
          overview opened on the directory tab every single time. */
       var deep = fromHash();
+      var wantAdmin = location.hash === '#admin';
+
+      /* Admin is the League's maintenance view — what is missing, club by
+         club. A club user reads their own club only, so a 72-row table of
+         other clubs' gaps is nothing they can see or act on. */
+      ADMIN = NL.roles.realm((NL.session || {}).role) === 'league';
+      $('tabAdmin').hidden = !ADMIN;
 
       wireTabs();
-      drawOverview();
+      if (ADMIN) { drawOverview(); }
       buildLists();
       /* A #mail?… link is read after buildLists (it needs the divisions)
          and before wireDirectory, which writes a club name over the hash. */
       var mail = readMailHash();
       wireDirectory();
 
-      if (deep) { showPane('directory'); }
       if (mail) { showPane('lists'); drawLists(); }
+      else if (wantAdmin && ADMIN) { showPane('admin'); }
+      else if (deep) { showPane('directory'); }
     }).catch(function (err) {
-      $('pane-overview').innerHTML = '<p class="cd-empty">' +
+      $('pane-directory').innerHTML = '<p class="cd-empty">' +
         esc((err && err.message) || String(err)) + '</p>';
     });
   }
@@ -680,19 +734,20 @@ window.TOOL = (function () {
     });
   }
   function showPane(which) {
-    ['overview', 'lists', 'directory'].forEach(function (p) {
+    if (which === 'admin' && !ADMIN) { which = 'directory'; }
+    ['directory', 'lists', 'admin'].forEach(function (p) {
       $('pane-' + p).hidden = p !== which;
     });
     $('tabs').querySelectorAll('.tab').forEach(function (b) {
       b.classList.toggle('active', b.dataset.pane === which);
     });
-    /* Each tab owns the address while it shows: the mailing-list selection,
-       the club being read, or nothing — so a reload opens where you were. */
+    /* Each tab owns the address while it shows: the club being read, the
+       mailing-list selection, or #admin — so a reload opens where you were. */
     if (which === 'lists') { writeMailHash(); }
     else if (which === 'directory' && $('pick').value) {
       history.replaceState(null, '', '#' + encodeURIComponent($('pick').value));
-    } else if (which === 'overview' && location.hash) {
-      history.replaceState(null, '', location.pathname + location.search);
+    } else if (which === 'admin') {
+      history.replaceState(null, '', '#admin');
     }
   }
 
@@ -707,97 +762,123 @@ window.TOOL = (function () {
     }).length;
   }
 
+  /* A list or department is FILLED when somebody on it has an email. A
+     named secretary with only a phone number is a list nobody can mail, and
+     the mailing-list builder would export nothing for that club — so for
+     the question this page asks ("what will go nowhere?") they are the same
+     gap. Shared with the builder's coverage warnings so the two agree. */
+  function hasEmail(p) { return NLDirectory.emailsOf(p).length > 0; }
+  function filled(rec, k) { return membersOf(rec, k).some(hasEmail); }
+
+  /* What is MISSING from a club's entry — the directory is built, so the
+     question is no longer "has the admin team been through this one" but
+     "what will fail when someone uses it". Ordered by how badly: people
+     who cannot be reached, then mail that would go nowhere, then what is
+     merely incomplete, then the tidier's things to double-check. */
   function auditClub(name) {
     var rec = ALL[name] || {};
+    var org = NLDirectory.isOrg(rec);
     var people = arr(rec.people);
     var flags = window.NLTidy ? NLTidy.flagAttention(rec) : [];
+    var noRoute = people.filter(function (p) { return !NLDirectory.reachable(p); }).length;
+    var noEmail = people.filter(function (p) {
+      return NLDirectory.reachable(p) && !hasEmail(p);
+    }).length;
     var noTitle = people.filter(function (p) {
       return !NLDirectory.rolesOf(p).some(function (r) { return (r.title || '').trim(); });
     }).length;
-    var noRoute = people.filter(function (p) { return !NLDirectory.reachable(p); }).length;
-    /* An org has no answer to the eleven club lists; counting them as gaps
-       would pin a permanent 11 on every org row. */
-    var gaps = NLDirectory.isOrg(rec) ? [] : LIST_ORDER.filter(function (k) {
-      return !NLDirectory.listMembers(rec, k).length;
-    });
+    /* An org has no answer to the eleven club lists, or a club board;
+       counting them would pin permanent gaps on every org row. */
+    var gaps = org ? [] : LIST_ORDER.filter(function (k) { return !filled(rec, k); });
+    var noBoard = !org && !filled(rec, DEPT + 'Leadership') && !filled(rec, DEPT + 'Executive');
     var details = heldInfo(rec.info);
-    var checked = !!((rec.signedOff || {}).at);
     return {
-      club: name, org: NLDirectory.isOrg(rec), crest: NLDirectory.crestKeyOf(rec),
-      people: people.length, flags: flags.length,
-      noTitle: noTitle, noRoute: noRoute, gaps: gaps.length, gapKeys: gaps,
-      details: details, checked: checked,
-      todo: flags.length + noTitle + noRoute + gaps.length + (details ? 0 : 1)
+      club: name, org: org, crest: NLDirectory.crestKeyOf(rec),
+      people: people.length, noRoute: noRoute, noEmail: noEmail, noTitle: noTitle,
+      gaps: gaps.length, gapKeys: gaps, noBoard: noBoard ? 1 : 0,
+      details: details, noDetails: details ? 0 : 1,
+      flags: flags.length, flagList: flags,
+      todo: noRoute + noEmail + noTitle + gaps.length + (noBoard ? 1 : 0) +
+            (details ? 0 : 1) + flags.length
     };
   }
 
-  /* ----------------------------------------------------------- overview */
-  var OV = { sort: 'todo', dir: -1, filter: 'all' };
+  /* -------------------------------------------------------------- admin */
+  var OV = { sort: 'todo', dir: -1, filter: 'todo' };
 
+  /* Titles are what is wrong, in plain words; each carries a one-line
+     tooltip saying what counts, because "No route" in v1.1 needed knowing
+     the code to read. */
   var OV_COLS = [
-    { key: 'club',    label: 'Club',          num: false },
-    { key: 'checked', label: 'Checked',       num: false },
-    { key: 'people',  label: 'People',        num: true },
-    { key: 'flags',   label: 'Flags',         num: true, tone: 'bad' },
-    { key: 'noTitle', label: 'No job title',  num: true, tone: 'warn' },
-    { key: 'noRoute', label: 'No route',      num: true, tone: 'bad' },
-    { key: 'gaps',    label: 'Lists unset',   num: true, tone: 'warn' },
-    { key: 'details', label: 'Club details',  num: true, tone: 'details' },
-    { key: 'todo',    label: 'To do',         num: true, tone: 'bad' }
+    { key: 'club',      label: 'Club' },
+    { key: 'noRoute',   label: 'No contact', num: true, tone: 'bad',
+      tip: 'People with neither an email nor a phone number' },
+    { key: 'noEmail',   label: 'No email',          num: true, tone: 'warn',
+      tip: 'People with a phone number but no email — left out of every mailing list' },
+    { key: 'gaps',      label: 'Lists unfilled',  num: true, tone: 'bad',
+      tip: 'Mailing lists with nobody on them who has an email' },
+    { key: 'noBoard',   label: 'No chair/CEO',   num: true, tone: 'warn',
+      tip: 'Nobody with an email in Leadership or Executive — missing from Chairs & chief executives' },
+    { key: 'noTitle',   label: 'No job title',      num: true, tone: 'warn',
+      tip: 'People with no job title on any of their roles' },
+    { key: 'noDetails', label: 'Club card',      num: true, tone: 'bad',
+      tip: 'The club card (address, ground, website) is empty' },
+    { key: 'flags',     label: 'Check',   num: true, tone: 'warn',
+      tip: 'Likely typos: an email domain one letter off, a name and address that disagree, an undiallable number, a title entered twice' },
   ];
+  /* No People or Total column: neither is something missing, and with them
+     the table ran off a laptop screen before reaching Fix. Total still sets
+     the opening order — worst first — and its sum is the last stat. */
 
   function drawOverview() {
     var rows = names.map(function (n) { return AUDIT[n]; });
     var totals = rows.reduce(function (a, r) {
       a.people += r.people; a.todo += r.todo;
-      a.checked += r.checked ? 1 : 0;
       a.clean += r.todo ? 0 : 1;
+      a.unreach += r.noRoute + r.noEmail;
+      a.gaps += r.gaps;
       return a;
-    }, { people: 0, todo: 0, checked: 0, clean: 0 });
+    }, { people: 0, todo: 0, clean: 0, unreach: 0, gaps: 0 });
 
     $('ovStats').innerHTML =
-      stat(rows.length, 'records') +
-      stat(totals.people, 'people') +
-      stat(totals.checked + ' / ' + rows.length, 'checked off') +
-      stat(totals.clean, 'with nothing outstanding') +
-      stat(totals.todo, 'things to resolve');
+      stat(rows.length - totals.clean + ' / ' + rows.length, 'with something missing') +
+      stat(totals.unreach, 'people we cannot email') +
+      stat(totals.gaps, 'mailing lists unfilled') +
+      stat(totals.todo, 'things to fix');
 
     if (OV.filter === 'todo') { rows = rows.filter(function (r) { return r.todo > 0; }); }
-    if (OV.filter === 'unchecked') { rows = rows.filter(function (r) { return !r.checked; }); }
 
     rows.sort(function (a, b) {
-      var k = OV.sort, d;
-      if (k === 'club') { d = a.club.localeCompare(b.club); }
-      else if (k === 'checked') { d = (a.checked ? 1 : 0) - (b.checked ? 1 : 0); }
-      else { d = a[k] - b[k]; }
+      var k = OV.sort;
+      var d = k === 'club' ? a.club.localeCompare(b.club) : a[k] - b[k];
       return (d || a.club.localeCompare(b.club)) * (k === 'club' ? 1 : OV.dir);
     });
 
     var head = OV_COLS.map(function (c) {
-      return '<th data-sort="' + c.key + '"' +
-        (c.num ? ' class="ta-right' + (OV.sort === c.key ? ' is-sorted' : '') + '"'
-               : (OV.sort === c.key ? ' class="is-sorted"' : '')) + '>' +
+      var cls = (c.num ? 'ta-right' : '') + (OV.sort === c.key ? ' is-sorted' : '');
+      return '<th data-sort="' + c.key + '"' + (cls.trim() ? ' class="' + cls.trim() + '"' : '') +
+        (c.tip ? ' title="' + esc(c.tip) + '"' : '') + '>' +
         esc(c.label) + '<span class="ov-arrow">' +
         (OV.sort === c.key ? (OV.dir < 0 ? '▾' : '▴') : '') + '</span></th>';
-    }).join('');
+    }).join('') + '<th></th>';
 
     var body = rows.length ? rows.map(function (r) {
       return '<tr>' +
         '<td><span class="ov-club"><img data-crest="' + esc(r.crest) + '" alt="">' +
           '<button type="button" data-goto="' + esc(r.club) + '">' + esc(r.club) +
           '</button></span></td>' +
-        '<td><span class="pill pill--' + (r.checked ? 'approved' : 'pending') + '">' +
-          (r.checked ? 'Checked' : 'Not yet') + '</span></td>' +
-        num(r.people, null) +
-        num(r.flags, 'bad') +
-        num(r.noTitle, 'warn') +
         num(r.noRoute, 'bad') +
+        num(r.noEmail, 'warn') +
         gapCell(r) +
-        detailCell(r) +
-        num(r.todo, 'bad') +
+        (r.org ? dash() : num(r.noBoard, 'warn', r.noBoard ? 'missing' : '')) +
+        num(r.noTitle, 'warn') +
+        (r.noDetails ? '<td class="ov-n ov-n--bad">empty</td>' : dash()) +
+        flagCell(r) +
+        '<td class="ta-right"><a class="btn btn--ghost btn--sm" href="/club-directory/editor/#' +
+          encodeURIComponent(r.club) + '" target="_blank" rel="noopener">Fix</a></td>' +
       '</tr>';
-    }).join('') : '<tr class="empty-row"><td colspan="' + OV_COLS.length +
-        '">Nothing matches that filter — which here is good news.</td></tr>';
+    }).join('') : '<tr class="empty-row"><td colspan="' + (OV_COLS.length + 1) +
+        '">Nothing missing anywhere.</td></tr>';
 
     $('ovTable').innerHTML = '<thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody>';
     wireCrests($('ovTable'));
@@ -807,22 +888,25 @@ window.TOOL = (function () {
     return '<div class="stat"><div class="stat__num">' + esc(String(n)) +
       '</div><div class="stat__label">' + esc(label) + '</div></div>';
   }
-  function num(v, tone) {
+  function num(v, tone, text) {
     var cls = 'ov-n ' + (v ? (tone ? 'ov-n--' + tone : '') : 'ov-n--zero');
-    return '<td class="' + cls + '">' + v + '</td>';
+    return '<td class="' + cls + '">' + (v ? (text || v) : (tone ? '—' : v)) + '</td>';
   }
+  function dash() { return '<td class="ov-n ov-n--zero">—</td>'; }
   function gapCell(r) {
-    if (r.org) { return '<td class="ov-n ov-n--zero">—</td>'; }
-    var title = r.gaps ? ' title="' + esc(r.gapKeys.map(function (k) {
+    if (r.org) { return dash(); }
+    if (!r.gaps) { return dash(); }
+    return '<td class="ov-n ov-n--bad" title="' + esc(r.gapKeys.map(function (k) {
       return LIST_LABEL[k] || k;
-    }).join(', ')) + '"' : '';
-    return '<td class="ov-n ' + (r.gaps ? 'ov-n--warn' : 'ov-n--zero') + '"' + title + '>' +
-      r.gaps + ' / ' + LIST_ORDER.length + '</td>';
+    }).join(', ')) + '">' + r.gaps + ' / ' + LIST_ORDER.length + '</td>';
   }
-  function detailCell(r) {
-    return r.details
-      ? '<td class="ov-n ov-n--zero">' + r.details + ' held</td>'
-      : '<td class="ov-n ov-n--bad">none held</td>';
+  /* The tidier's checks are suggestions, not faults, so they are counted
+     with what each one is in the tooltip rather than added to the alarm. */
+  function flagCell(r) {
+    if (!r.flags) { return dash(); }
+    return '<td class="ov-n ov-n--warn" title="' + esc(r.flagList.map(function (f) {
+      return f.label + (f.why ? ' — ' + f.why : '');
+    }).join('\n')) + '">' + r.flags + '</td>';
   }
 
   $('ovTable').addEventListener('click', function (e) {
@@ -852,7 +936,7 @@ window.TOOL = (function () {
      so unticking the last of two clubs turned a two-club mailer into a
      72-club one with nothing on screen to say so. Now All is a choice you
      make, and Choose with nothing ticked exports nothing. */
-  var LB = { lists: {}, view: 'list', scope: 'all', clubs: {}, omit: {},
+  var LB = { lists: {}, source: 'list', scope: 'all', clubs: {}, omit: {},
              inboxes: true, held: true };
 
   /* Departments as a second kind of pick (v1.9). "Every chair and chief
@@ -1042,6 +1126,7 @@ window.TOOL = (function () {
   }
 
   var DIV_ORDER = ['National', 'North', 'South', 'Other'];
+  var DIVS = ['National', 'North', 'South'];
   var DIV_CLUBS = { National: [], North: [], South: [], Other: [] };
   function divOf(n) {
     var meta = NL.clubs.byName(n);
@@ -1049,103 +1134,40 @@ window.TOOL = (function () {
     return DIV_CLUBS[d] ? d : 'Other';
   }
 
-  /* One-click answers to the questions this page is actually asked. A preset
-     REPLACES the who-selection rather than adding to it — "Chairs & chief
-     executives" on top of whatever was there before is not what anyone means
-     by pressing it. The clubs are left alone. Its pill is lit while the
-     selection is exactly that preset, and pressing a lit one clears it, so
-     it behaves like every other pill on the page. */
-  var PRESETS = [
-    { id: 'sec',   label: 'Club secretaries',          keys: ['secretary'] },
-    { id: 'board', label: 'Chairs & chief executives', keys: [DEPT + 'Leadership', DEPT + 'Executive'] },
-    { id: 'media', label: 'Media contacts',            keys: ['media'] }
-  ];
-
-  /* Which kind of answer each view gives. Said once, under the switch,
-     because the two views carry names that overlap (Commercial is both) and
-     mean different things. */
-  var VIEW_HINT = {
-    list: 'The one person each club named for the job.',
+  /* One line under the switch, because the two sources share names
+     (Commercial is both) and mean different things. */
+  var SOURCE_HINT = {
+    list: 'The contact each club gave the League for that list.',
     dept: 'Everyone the club filed in that department.'
   };
 
-  function pill(key, label) {
-    return '<button class="filter-pill" data-list="' + esc(key) + '">' +
-      esc(label) + '<em></em></button>';
-  }
-
-  /* ------------------------------------------------------------ the page
-     Built once. Everything after this is a state change followed by
-     drawLists(), which updates what is already on the page rather than
-     rebuilding it — so an open division stays open, the picker keeps its
-     place, and a checkbox does not lose focus under the keyboard. */
+  /* -------------------------------------------------------------- build
+     A list builder: the criteria on the left, the list they make on the
+     right, live. Built once; every change after is state + drawLists(),
+     which updates in place rather than rebuilding, so nothing loses focus
+     or scroll under the pointer. */
   function buildLists() {
-    $('lbPresets').innerHTML = '<span class="filter-pill-row__label">Quick picks</span>' +
-      PRESETS.map(function (p) {
-        return '<button class="filter-pill" data-preset="' + p.id + '">' + esc(p.label) + '</button>';
-      }).join('');
-    $('lbLists').innerHTML = LIST_ORDER.map(function (k) {
-      return pill(k, LIST_LABEL[k] || k);
-    }).join('');
-    $('lbDepts').innerHTML = DEPTS.filter(function (d) {
-      return clubNames.some(function (c) { return NLDirectory.sectionPeople(ALL[c] || {}, d).length; });
-    }).map(function (d) { return pill(DEPT + d, d); }).join('');
-
     clubNames.forEach(function (n) { DIV_CLUBS[divOf(n)].push(n); });
-    $('lbScopeAll').textContent = 'All ' + clubNames.length + ' clubs';
 
-    /* A division is a closed set of two dozen, so it may list its clubs —
-       but folded, because the usual move is all of it or none of it. The
-       fold is what lets you take ONE club out of a division, which the
-       pill-per-division version could not do at all. */
-    $('lbDivs').innerHTML = DIV_ORDER.filter(function (d) {
-      return DIV_CLUBS[d].length;
-    }).map(function (d) {
-      return '<details class="disclosure lb-divrow" data-divrow="' + d + '">' +
-        '<summary><span class="lb-divrow__name">' + esc(d) + '</span>' +
-          '<span class="disclosure__meta" data-divmeta="' + d + '"></span>' +
-          '<button type="button" class="btn btn--ghost btn--sm lb-divall" data-divall="' + d + '"></button>' +
-        '</summary>' +
-        '<div class="lb-clubgrid">' + DIV_CLUBS[d].map(function (n) {
-          return '<label class="lb-clubopt"><input type="checkbox" data-club="' + esc(n) + '">' +
-            '<img data-crest="' + esc(n) + '" alt="">' + esc(n) + '</label>';
-        }).join('') + '</div></details>';
+    $('lbListItems').innerHTML = LIST_ORDER.map(function (k) {
+      return item(k, LIST_LABEL[k] || k);
     }).join('');
-    wireCrests($('lbDivs'));
+    $('lbDeptItems').innerHTML = DEPTS.filter(function (d) {
+      return clubNames.some(function (c) { return NLDirectory.sectionPeople(ALL[c] || {}, d).length; });
+    }).map(function (d) { return item(DEPT + d, d); }).join('');
 
-    /* The canon picker is a way IN for someone who knows the club's name and
-       not its division. It empties and lets go of focus after every pick, so
-       it never looks like it is holding a selection — the ticks below are
-       the selection. */
-    var picker = NL.clubPicker($('lbPick'), {
-      placeholder: 'Find a club…',
-      clearable: false,
-      onSelect: function (sel) {
-        picker.clear();
-        var input = $('lbPick').querySelector('input');
-        if (input) { input.blur(); }
-        if (clubNames.indexOf(sel.name) < 0) {
-          NL.toast(sel.name + ' is not in the directory yet', 'info');
-          return;
-        }
-        LB.clubs[sel.name] = true;
-        drawLists();
-      }
-    });
+    $('lbDivs').innerHTML = '<button class="filter-pill" data-div="all">All clubs</button>' +
+      DIVS.filter(function (d) { return DIV_CLUBS[d].length; }).map(function (d) {
+        return '<button class="filter-pill" data-div="' + d + '">' + d + '<em></em></button>';
+      }).join('');
 
     var pane = $('pane-lists');
     pane.addEventListener('click', function (e) {
       var t = e.target;
-      var da = t.closest('[data-divall]');
-      if (da) { e.preventDefault(); toggleDivision(da.dataset.divall); return drawLists(); }
-      var l = t.closest('[data-list]');
-      if (l) { flip(LB.lists, l.dataset.list); return drawLists(); }
-      var pr = t.closest('[data-preset]');
-      if (pr) { applyPreset(pr.dataset.preset); return drawLists(); }
-      var v = t.closest('[data-view]');
-      if (v) { LB.view = v.dataset.view; return drawLists(); }
-      var sc = t.closest('[data-scope]');
-      if (sc) { LB.scope = sc.dataset.scope; return drawLists(); }
+      var src = t.closest('[data-source]');
+      if (src) { setSource(src.dataset.source); return drawLists(); }
+      var dv = t.closest('[data-div]');
+      if (dv) { pickDivision(dv.dataset.div); return drawLists(); }
       var cp = t.closest('[data-copy]');
       if (cp) { return doCopy(cp.dataset.copy, cp); }
       var om = t.closest('[data-omit]');
@@ -1154,15 +1176,16 @@ window.TOOL = (function () {
         if (LB.omit[k]) { delete LB.omit[k]; } else { LB.omit[k] = true; }
         return drawLists();
       }
+      if (t.id === 'lbEditClubs') { return editClubs(); }
       if (t.id === 'lbPutBack') { LB.omit = {}; return drawLists(); }
-      if (t.id === 'lbWhoAll') { return setView(true); }
-      if (t.id === 'lbWhoNone') { return setView(false); }
+      if (t.id === 'lbAll') { return setAllItems(true); }
+      if (t.id === 'lbNone') { return setAllItems(false); }
       if (t.id === 'lbDownload') { return download(); }
     });
     pane.addEventListener('change', function (e) {
-      var c = e.target.closest('[data-club]');
-      if (c) {
-        if (c.checked) { LB.clubs[c.dataset.club] = true; } else { delete LB.clubs[c.dataset.club]; }
+      var it = e.target.closest('[data-item]');
+      if (it) {
+        if (it.checked) { LB.lists[it.dataset.item] = true; } else { delete LB.lists[it.dataset.item]; }
         return drawLists();
       }
       if (e.target.id === 'lbInboxes') { LB.inboxes = e.target.checked; drawLists(); }
@@ -1172,133 +1195,183 @@ window.TOOL = (function () {
     drawLists();
   }
 
-  /* Hand-dropped rows are NOT cleared by any of these. Re-picking a list
-     used to wipe every × you had made, so tidying fifteen people and then
-     adding a club put all fifteen back. A drop is keyed by club and person,
-     so it lies dormant while that person is out of the selection and
-     applies again if they come back. "Put all back" is the only way to
-     clear them, and it says how many it is putting back. */
-  function flip(bag, key) {
-    if (bag[key]) { delete bag[key]; } else { bag[key] = true; }
+  function item(key, label) {
+    return '<label class="lb-item"><input type="checkbox" data-item="' + esc(key) + '">' +
+      '<span class="lb-item__label">' + esc(label) + '</span>' +
+      '<span class="lb-item__n" data-itemn="' + esc(key) + '"></span></label>';
   }
 
-  /* Select all and Clear act on the view you are looking at, both of them.
-     In v1.9 "all" meant the eleven lists and "none" meant everything, from
-     two buttons side by side. */
-  function viewKeys() {
-    return LB.view === 'dept'
-      ? DEPTS.map(function (d) { return DEPT + d; }).filter(function (k) {
-          return document.querySelector('[data-list="' + k + '"]');
-        })
-      : LIST_ORDER.slice();
+  /* Mailing lists OR departments, never both. They answer different
+     questions — "who did the club give us for media" against "who works in
+     media" — and a list made of some of each cannot be described in one
+     sentence, which is the test for whether anyone will understand what
+     they sent. So switching starts the other source empty. */
+  function setSource(src) {
+    if (src === LB.source) { return; }
+    LB.source = src;
+    LB.lists = {};
   }
-  function setView(on) {
-    viewKeys().forEach(function (k) { if (on) { LB.lists[k] = true; } else { delete LB.lists[k]; } });
+  function sourceKeys() {
+    return Array.prototype.map.call(
+      document.querySelectorAll(LB.source === 'dept' ? '#lbDeptItems [data-item]' : '#lbListItems [data-item]'),
+      function (i) { return i.dataset.item; });
+  }
+  function setAllItems(on) {
+    LB.lists = {};
+    if (on) { sourceKeys().forEach(function (k) { LB.lists[k] = true; }); }
     drawLists();
   }
 
-  function applyPreset(id) {
-    var p = PRESETS.filter(function (x) { return x.id === id; })[0];
-    if (!p) { return; }
-    var lit = isPreset(p);
-    LB.lists = {};
-    if (lit) { return; }
-    p.keys.forEach(function (k) { LB.lists[k] = true; });
-    LB.view = isDept(p.keys[0]) ? 'dept' : 'list';
-  }
-
-  function isPreset(p) {
-    var keys = pickedKeys();
-    return keys.length === p.keys.length && p.keys.every(function (k) { return LB.lists[k]; });
-  }
-
-  /* All of a division in, or — when it is already all in — all of it out.
-     A part-chosen division fills up rather than emptying, because "add the
-     rest" is the commoner meaning of pressing it then. */
-  function toggleDivision(d) {
+  /* The division pills are the usual way to choose clubs: All clubs, or any
+     mix of the three divisions. A division pill adds its whole division or,
+     when it is all in already, takes it out. Anything finer — all but two,
+     just these five — is Edit clubs. Every club chosen folds back to
+     All clubs, and nothing chosen is nothing sent. */
+  function pickDivision(d) {
+    if (d === 'all') { LB.scope = 'all'; LB.clubs = {}; return; }
+    if (LB.scope === 'all') { LB.scope = 'some'; LB.clubs = {}; }
     var pool = DIV_CLUBS[d] || [];
     var full = pool.every(function (n) { return LB.clubs[n]; });
     pool.forEach(function (n) { if (full) { delete LB.clubs[n]; } else { LB.clubs[n] = true; } });
+    normaliseScope();
+  }
+  function normaliseScope() {
+    if (LB.scope === 'some' && clubNames.every(function (n) { return LB.clubs[n]; })) {
+      LB.scope = 'all'; LB.clubs = {};
+    }
+  }
+  function chosenIn(d) {
+    if (LB.scope === 'all') { return (DIV_CLUBS[d] || []).length; }
+    return (DIV_CLUBS[d] || []).filter(function (n) { return LB.clubs[n]; }).length;
   }
 
-  function chosenIn(d) {
-    return (DIV_CLUBS[d] || []).filter(function (n) { return LB.clubs[n]; }).length;
+  /* Edit clubs: the directory's own crest wall, in pick mode, in a dialog.
+     It is the one club chooser this tool's readers already know, and it
+     makes "all but two" a matter of tapping two crests. Changes apply as
+     you tap and the list behind updates; Done just closes. */
+  function editClubs() {
+    if (LB.scope === 'all') {
+      LB.scope = 'some';
+      clubNames.forEach(function (n) { LB.clubs[n] = true; });
+    }
+    var body = document.createElement('div');
+    body.innerHTML =
+      '<div class="lb-wallbar">' +
+        '<div class="form-group lb-wallq">' +
+          '<input type="search" id="lbWallQ" placeholder="Find a club" aria-label="Find a club">' +
+        '</div>' +
+        '<span class="lb-wallbar__n" id="lbWallN"></span>' +
+      '</div>' +
+      NLDirectory.renderIndex({
+        roster: clubNames.map(function (n) { return { name: n, division: divOf(n) }; }),
+        isPicked: function (n) { return !!LB.clubs[n]; }
+      });
+    body.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-pickdiv]');
+      if (!b) { return; }
+      var pool = DIV_CLUBS[b.dataset.pickdiv] || [];
+      var full = pool.every(function (n) { return LB.clubs[n]; });
+      pool.forEach(function (n) { if (full) { delete LB.clubs[n]; } else { LB.clubs[n] = true; } });
+      syncWall(body);
+      drawLists();
+    });
+    body.querySelector('#lbWallQ').addEventListener('input', function () {
+      var q = this.value.trim().toLowerCase();
+      body.querySelectorAll('[data-tile]').forEach(function (li) {
+        li.hidden = !!q && li.dataset.tile.toLowerCase().indexOf(q) < 0;
+      });
+      body.querySelectorAll('.rd-div').forEach(function (sec) {
+        sec.hidden = !sec.querySelector('[data-tile]:not([hidden])');
+      });
+    });
+    syncWall(body);
+    NL.modal({
+      title: 'Choose clubs', width: 'wide', body: body,
+      buttons: [
+        { label: 'Clear all', className: 'btn--ghost', onClick: function () {
+          LB.clubs = {}; syncWall(body); drawLists();
+        } },
+        { label: 'Done', className: 'btn--navy', autofocus: true, onClick: function (c) { c.close(); } }
+      ],
+      footerSplit: true,
+      onClose: function () { normaliseScope(); drawLists(); }
+    });
+    /* Wired once the dialog is in the page: the wall's crests resolve
+       their src on insertion, not before. */
+    NLDirectory.wireIndex(body, function (n) {
+      if (LB.clubs[n]) { delete LB.clubs[n]; } else { LB.clubs[n] = true; }
+      syncWall(body);
+      drawLists();
+    });
+  }
+  function syncWall(body) {
+    body.querySelectorAll('[data-tile]').forEach(function (li) {
+      var on = !!LB.clubs[li.dataset.tile];
+      li.classList.toggle('is-picked', on);
+      li.querySelector('[data-club]').setAttribute('aria-pressed', String(on));
+    });
+    DIV_ORDER.forEach(function (d) {
+      var c = body.querySelector('[data-pickcount="' + d + '"]');
+      if (!c) { return; }
+      var n = chosenIn(d), of = DIV_CLUBS[d].length;
+      c.textContent = n + ' of ' + of;
+      body.querySelector('[data-pickdiv="' + d + '"]').textContent = n === of ? 'Remove all' : 'Add all';
+    });
+    var total = clubNames.filter(function (n) { return LB.clubs[n]; }).length;
+    body.querySelector('#lbWallN').textContent = total + ' of ' + clubNames.length + ' chosen';
   }
 
   /* -------------------------------------------------------------- drawing */
   function syncControls() {
-    /* Who. Each view's chip says how many it has picked, so a pick in the
-       view you are not looking at is never invisible. */
-    var nList = LIST_ORDER.filter(function (k) { return LB.lists[k]; }).length;
-    var nDept = pickedKeys().length - nList;
-    document.querySelectorAll('#lbView [data-view]').forEach(function (b) {
-      var on = b.dataset.view === LB.view;
-      var n = b.dataset.view === 'dept' ? nDept : nList;
-      b.classList.toggle('active', on);
-      b.setAttribute('aria-pressed', String(on));
-      b.querySelector('.lb-n').textContent = n ? ' · ' + n : '';
-    });
-    $('lbLists').hidden = LB.view !== 'list';
-    $('lbDepts').hidden = LB.view !== 'dept';
-    $('lbViewHint').textContent = VIEW_HINT[LB.view];
-    PRESETS.forEach(function (p) {
-      var b = document.querySelector('[data-preset="' + p.id + '"]');
-      var on = isPreset(p);
+    document.querySelectorAll('#lbSource [data-source]').forEach(function (b) {
+      var on = b.dataset.source === LB.source;
       b.classList.toggle('active', on);
       b.setAttribute('aria-pressed', String(on));
     });
+    $('lbListItems').hidden = LB.source !== 'list';
+    $('lbDeptItems').hidden = LB.source !== 'dept';
+    $('lbSourceHint').textContent = SOURCE_HINT[LB.source];
 
-    /* Counts are people at the clubs in scope, so they move with the club
-       choice — "Club secretary 61" no longer reads 61 once you have
-       narrowed to two clubs. */
+    /* Counts are people at the clubs in scope, so they move with the clubs. */
     var pool = clubNames.filter(inScope);
-    document.querySelectorAll('#pane-lists [data-list]').forEach(function (b) {
-      var k = b.dataset.list;
-      b.classList.toggle('active', !!LB.lists[k]);
-      b.setAttribute('aria-pressed', String(!!LB.lists[k]));
-      var n = pool.reduce(function (a, c) { return a + membersOf(ALL[c] || {}, k).length; }, 0);
-      b.querySelector('em').textContent = n;
+    document.querySelectorAll('#pane-lists [data-item]').forEach(function (i) {
+      var k = i.dataset.item;
+      i.checked = !!LB.lists[k];
+      i.closest('.lb-item').classList.toggle('is-on', i.checked);
+      document.querySelector('[data-itemn="' + k + '"]').textContent =
+        pool.reduce(function (a, c) { return a + membersOf(ALL[c] || {}, k).length; }, 0);
     });
 
-    /* Which clubs. */
-    document.querySelectorAll('#lbScope [data-scope]').forEach(function (b) {
-      var on = b.dataset.scope === LB.scope;
+    document.querySelectorAll('#lbDivs [data-div]').forEach(function (b) {
+      var d = b.dataset.div, on, em = b.querySelector('em');
+      if (d === 'all') { on = LB.scope === 'all'; }
+      else {
+        var n = LB.scope === 'all' ? 0 : chosenIn(d), of = DIV_CLUBS[d].length;
+        on = n === of;
+        em.textContent = n && n < of ? n + '/' + of : '';
+      }
       b.classList.toggle('active', on);
       b.setAttribute('aria-pressed', String(on));
     });
-    $('lbChoose').hidden = LB.scope !== 'some';
-    DIV_ORDER.forEach(function (d) {
-      var meta = document.querySelector('[data-divmeta="' + d + '"]');
-      if (!meta) { return; }
-      var n = chosenIn(d), of = DIV_CLUBS[d].length;
-      meta.textContent = n ? n + ' of ' + of + ' chosen' : 'none chosen';
-      document.querySelector('[data-divall="' + d + '"]').textContent =
-        n === of ? 'Remove all' : 'Add all ' + of;
-    });
-    document.querySelectorAll('#lbDivs input[data-club]').forEach(function (cb) {
-      cb.checked = !!LB.clubs[cb.dataset.club];
-    });
+    $('lbClubLine').textContent = describeClubs(true);
   }
 
-  /* The selection in one sentence, which is what sits in the bar while you
-     scroll — the controls that made it are a screen away by then. */
+  /* The selection in one sentence — what sits above the list it made. */
   function describe() {
-    var lists = LIST_ORDER.filter(function (k) { return LB.lists[k]; }).map(labelOf);
-    var depts = pickedKeys().filter(isDept).map(labelOf);
-    var who = [];
-    if (lists.length) {
-      who.push(joinAnd(lists) + ' (named contact' + (lists.length > 1 ? 's' : '') + ')');
-    }
-    if (depts.length) { who.push('everyone in ' + joinAnd(depts)); }
-    if (!who.length) { return ''; }
-    return capital(who.join(', and ')) + ' — ' + describeClubs();
+    var keys = pickedKeys();
+    if (!keys.length) { return ''; }
+    var labels = joinAnd(keys.map(labelOf));
+    var who = LB.source === 'dept' ? 'Everyone in ' + labels
+                                   : labels + (keys.length > 1 ? ' lists' : ' list');
+    return who + ' — ' + describeClubs();
   }
-  function describeClubs() {
+  function describeClubs(short) {
     if (LB.scope === 'all') { return 'all ' + clubNames.length + ' clubs'; }
     var total = clubNames.filter(inScope).length;
     if (!total) { return 'no clubs chosen'; }
+    if (short) { return total + ' of ' + clubNames.length + ' clubs'; }
     /* Whole divisions by name, part ones by count ("South and 23 North
-       clubs"), and one lone club by its own name. */
+       clubs"), one lone club by its own name. */
     var parts = [];
     DIV_ORDER.forEach(function (d) {
       var n = chosenIn(d);
@@ -1310,15 +1383,12 @@ window.TOOL = (function () {
       }
       parts.push(n + ' ' + (d === 'Other' ? 'other' : d) + ' club' + (n === 1 ? '' : 's'));
     });
-    /* The total only when the parts do not already say it — "23 North
-       clubs (23 clubs)" says it twice. */
     var said = parts.length === 1 && /^\d/.test(parts[0]);
     return joinAnd(parts) + (total > 1 && !said ? ' (' + total + ' clubs)' : '');
   }
   function joinAnd(a) {
     return a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1];
   }
-  function capital(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
   function drawLists() {
     syncControls();
@@ -1337,7 +1407,7 @@ window.TOOL = (function () {
     var none = LB.scope === 'some' && !clubNames.some(inScope);
     $('lbCount').textContent = reach.length;
     $('lbSummary').textContent = describe() ||
-      'Choose who to write to.';
+      'Choose a mailing list or department.';
     $('lbCountSub').innerHTML = !picked || none ? ''
       : (reach.length === 1 ? 'address' : 'addresses') +
         (kept.length - reach.length ? ' · ' + (kept.length - reach.length) + ' with no email' : '') +
@@ -1352,13 +1422,15 @@ window.TOOL = (function () {
 
     if (!picked || none) {
       $('lbTable').innerHTML = '<tbody><tr class="empty-row"><td>' +
-        (!picked ? 'Choose who to write to.'
-                 : 'No clubs chosen. Tick some, or switch to all clubs.') +
+        (!picked ? 'Choose a mailing list or department.'
+                 : 'No clubs chosen. Pick a division, or Edit clubs.') +
         '</td></tr></tbody>';
       return;
     }
 
-    $('lbTable').innerHTML = '<thead><tr><th></th><th>Picked for</th><th>Name</th>' +
+    /* "Picked for" only earns its column when there is more than one answer. */
+    var many = pickedKeys().length > 1;
+    $('lbTable').innerHTML = '<thead><tr><th></th>' + (many ? '<th>Picked for</th>' : '') + '<th>Name</th>' +
       '<th>Club</th><th>Email</th><th>Phone</th></tr></thead><tbody>' +
       rows.map(function (r) {
         var off = !!LB.omit[r.key];
@@ -1367,7 +1439,7 @@ window.TOOL = (function () {
             (off ? 'Put back ' : 'Drop ') + esc(r.name) + '" title="' +
             (off ? 'Put back' : 'Drop from this export') + '">' +
             (off ? '+' : '×') + '</button></td>' +
-          '<td>' + esc(r.lists.map(labelOf).join(', ')) + '</td>' +
+          (many ? '<td>' + esc(r.lists.map(labelOf).join(', ')) + '</td>' : '') +
           '<td>' + esc(r.name) +
             (r.kind === 'inbox' ? ' <span class="pill pill--info">shared mailbox</span>' : '') +
             (r.held ? ' <span class="pill pill--pending">has withheld details</span>' : '') +
@@ -1393,9 +1465,7 @@ window.TOOL = (function () {
   function drawWarnings() {
     var pool = clubNames.filter(inScope);
     var gaps = pickedKeys().map(function (k) {
-      return { k: k, missing: pool.filter(function (n) {
-        return !membersOf(ALL[n] || {}, k).length;
-      }) };
+      return { k: k, missing: pool.filter(function (n) { return !filled(ALL[n] || {}, k); }) };
     }).filter(function (g) { return g.missing.length; });
 
     var box = $('lbWarnings');
@@ -1407,11 +1477,11 @@ window.TOOL = (function () {
     box.hidden = false;
     box.innerHTML = '<details class="disclosure lb-gaps"' + open + '><summary>Coverage gaps' +
       '<span class="disclosure__meta">' + n + ' club' + (n === 1 ? ' has' : 's have') +
-      ' nobody for ' + joinAnd(gaps.map(function (g) { return labelOf(g.k); })) +
+      ' nobody we can email for ' + joinAnd(gaps.map(function (g) { return labelOf(g.k); })) +
       '</span></summary><div class="lb-gaps__body">' +
       gaps.map(function (g) {
         return '<div class="lb-warn__item"><b>' + g.missing.length + ' club' +
-          (g.missing.length === 1 ? '' : 's') + '</b> with nobody ' +
+          (g.missing.length === 1 ? '' : 's') + '</b> with nobody we can email ' +
           (isDept(g.k) ? 'in' : 'on') + ' <b>' + esc(labelOf(g.k)) +
           '</b><div class="lb-warn__crests">' +
           g.missing.map(function (c) {
@@ -1434,7 +1504,6 @@ window.TOOL = (function () {
     var p = [];
     var keys = pickedKeys();
     if (keys.length) { p.push('who=' + keys.map(encodeURIComponent).join(',')); }
-    if (LB.view === 'dept') { p.push('view=dept'); }
     if (LB.scope === 'some') {
       var parts = [];
       DIV_ORDER.forEach(function (d) {
@@ -1467,7 +1536,13 @@ window.TOOL = (function () {
     (q.who || '').split(',').map(decodeURIComponent).forEach(function (k) {
       if (valid.indexOf(k) > -1) { LB.lists[k] = true; }
     });
-    LB.view = q.view === 'dept' ? 'dept' : 'list';
+    /* One source per list. A link carrying both (hand-made, or from v1.11)
+       keeps whichever its first key belongs to. */
+    var first = Object.keys(LB.lists)[0];
+    LB.source = first && isDept(first) ? 'dept' : 'list';
+    Object.keys(LB.lists).forEach(function (k) {
+      if (isDept(k) !== (LB.source === 'dept')) { delete LB.lists[k]; }
+    });
     LB.clubs = {};
     LB.scope = q.clubs != null ? 'some' : 'all';
     (q.clubs || '').split(',').filter(Boolean).map(decodeURIComponent).forEach(function (c) {
@@ -1475,6 +1550,7 @@ window.TOOL = (function () {
         (DIV_CLUBS[c.slice(4)] || []).forEach(function (n) { LB.clubs[n] = true; });
       } else if (clubNames.indexOf(c) > -1) { LB.clubs[c] = true; }
     });
+    normaliseScope();
     LB.inboxes = q.inboxes !== '0';
     LB.held = q.held !== '0';
     $('lbInboxes').checked = LB.inboxes;
@@ -1550,17 +1626,11 @@ window.TOOL = (function () {
   }
 
   /* ------------------------------------------------------------ directory */
-  function ready(n) {
-    var s = (ALL[n] || {}).signedOff;
-    return !!(s && s.at);
-  }
-
   function wireDirectory() {
     /* Orgs above the clubs; `names` itself stays alphabetical for fromHash. */
     $('pick').innerHTML = NLDirectory.orgFirst(names, function (n) { return ALL[n]; })
       .map(function (n) {
-      return '<option value="' + esc(n) + '">' + esc(n) +
-        (ready(n) ? '' : ' — not yet checked') + '</option>';
+      return '<option value="' + esc(n) + '">' + esc(n) + '</option>';
     }).join('');
     $('pick').addEventListener('change', function () { draw(this.value); });
     $('q').addEventListener('input', onSearch);
@@ -1586,9 +1656,6 @@ window.TOOL = (function () {
     if (location.hash !== '#' + encodeURIComponent(name)) {
       history.replaceState(null, '', '#' + encodeURIComponent(name));
     }
-    var done = ready(name);
-    $('state').innerHTML = '<span class="pill pill--' + (done ? 'approved' : 'pending') + '">' +
-      (done ? 'Checked' : 'Not yet checked') + '</span>';
     $('out').innerHTML = NLDirectory.renderClub(rec, { showGaps: true });
     var crest = document.getElementById('cdCrest');
     if (crest) {
@@ -1603,7 +1670,6 @@ window.TOOL = (function () {
   function onSearch(e) {
     var hits = NLDirectory.search(ALL, e.target.value);
     if (!hits) { draw($('pick').value); return; }
-    $('state').innerHTML = '';
     if (!hits.length) { $('out').innerHTML = '<p class="cd-empty">Nothing matched that.</p>'; return; }
     var byClub = {};
     hits.forEach(function (h) { (byClub[h.club] = byClub[h.club] || []).push(h.person); });
