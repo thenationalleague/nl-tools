@@ -113,17 +113,29 @@ declares `levels: ["off","access"]`, so the value is dead either way. Set it to
 | **NLServices API** | `ops-nls-monitor` | Superadmin only |
 | **Style Guide** | `staff-style-guide` | Superadmin only |
 
-## Not a tool — Wellbeing
+## Not a tool — the Wellbeing Hub
 
-`/wellbeing/` is a **public page**, not a portal tool. No auth-guard, no
-topbar, no Firebase, nothing recorded — a standalone section built for a
-specific purpose that needs to be publicly reachable, on the club-contacts
-precedent.
+`/wellbeing-hub/` is a **public page**, not a portal tool. No auth-guard, no
+topbar, no Firebase — a standalone section built for a specific purpose that
+needs to be publicly reachable, on the club-contacts precedent. It is reached
+by its URL, and by the QR code on `/wellbeing-hub/poster.pdf`.
 
-It held an `ops-wellbeing` registry record until 17/08/2026, which put a card
-on the portal and carried per-role `defaults` that nothing enforced. The record
-is gone. Do not re-add one, and do not "fix" the page by adding auth-guard —
-being open is the point. It is reached by its URL.
+It replaced `/wellbeing/` on 08/10/2026. That directory is now a redirect stub
+and nothing else; what it held and why it went is in
+[`retired/wellbeing.md`](retired/wellbeing.md), including the two topics the
+hub deliberately does not carry.
+
+`/wellbeing/` held an `ops-wellbeing` registry record until 17/08/2026, which
+put a card on the portal and carried per-role `defaults` that nothing enforced.
+The record is gone. Do not re-add one for the hub either, and do not "fix" the
+page by adding auth-guard — being open is the point.
+
+**It is measured.** GA4 arrived on nl.tools on 08/10/2026 via
+`system/nl-analytics.js`, which loads from the canonical head on every page, so
+the old section's "nothing is recorded" promise is no longer true of the
+replacement and the page no longer makes it. Cookieless, no banner, no
+identity — and Google Signals must stay off, because which topic somebody
+opened is special-category health data under UK GDPR Art. 9.
 
 ## Parked — 3
 
