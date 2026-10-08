@@ -8,20 +8,16 @@
   read-only. Same map as /responsibilities/ (drawn by _map.js), without the
   Edit button or anything behind it.
 
-  WHO GETS IN. A named person on the National League record in Club Codes,
-  signing in with their own access code — the same code that opens the
-  directory reader and the handbook — AND ticked under Viewers on the
-  Responsibilities page. The code says who you are; the viewers list says
-  whether that includes this map. A club's code, or the League's shared
-  master code, signs in and then reads nothing.
+  WHO GETS IN. Anyone holding a viewer code — six digits, one per person,
+  kept at app-data/media-responsibilities/config/viewers and added by hand in
+  the Firebase console (see functions/responsibilities.js for the shape).
+  The code opens this map and nothing else.
 
   WHY THAT IS A BOUNDARY AND NOT A SCREEN. The code is checked server-side
-  (functions/club-code.js) and the map is gated by the RTDB rules, which
-  read people/ and functions/ only for a `club: "NL"` token whose uid is on
-  app-data/media-responsibilities/viewers. Nothing here decides access; a
-  visitor who should not see the map is refused by the database, not by
-  this page. Writes are superadmin-only in the rules, so read-only is
-  enforced there too, not by the absence of a button.
+  by functions/responsibilities.js, which mints a `resp: 'viewer'` claim;
+  the RTDB rules read people/ and functions/ for that claim and nothing
+  more. Nothing here decides access, and read-only is enforced by the rules
+  (every write is superadmin-only), not by the absence of a button.
 
   Storage (RTDB, read only):
     app-data/media-responsibilities/people
@@ -99,33 +95,21 @@
   var ROOT = 'app-data/media-responsibilities';
   var $ = function (id) { return document.getElementById(id); };
 
-  /* The League's access codes are alphanumeric, issued in Club Codes. The
-     tool name rides along so the Club Codes usage log can say which door a
-     person came in by. */
-  var verify = NL.codeGate.viaFunction('app-data/club-codes', { tool: 'responsibilities' });
-
-  NL.codeGate.resume('club').then(function (s) {
-    return s || NL.codeGate.open({
-      mount: $('gateWrap'),
-      title: 'Responsibilities',
-      sub: 'Enter your access code.',
-      numeric: false,
-      verify: verify
-    });
-  }).then(function () {
+  NL.codeGate.ensure({
+    mount: $('gateWrap'),
+    title: 'Responsibilities',
+    claim: 'resp',
+    verify: NL.codeGate.viaFunction(ROOT)
+  }).then(function (session) {
     /* codeGate leaves its card for the caller to take down. */
     $('gateWrap').hidden = true;
     $('app').hidden = false;
     $('signOut').addEventListener('click', function () {
       NL.codeGate.signOut().then(function () { location.reload(); });
     });
-    /* A named holder's own name rides in the token as `who`; the shared
-       club name is the fallback, and the bar says nothing rather than
-       guess. */
-    firebase.auth().currentUser.getIdTokenResult().then(function (t) {
-      var c = (t && t.claims) || {};
-      $('who').textContent = c.who || c.clubName || '';
-    }).catch(function () {});
+    /* The viewer's name rides in the token as respName, so a returning
+       visit still knows who it is. */
+    $('who').textContent = (session && session.name) || '';
 
     var map = RespMap.create($('rpHost'), { emptyText: 'Nothing has been added yet.' });
     var got = { people: null, functions: null };
@@ -139,8 +123,8 @@
         got[k] = snap.val() || {};
         if (got.people && got.functions) map.setData(got);
       }, function () {
-        /* PERMISSION_DENIED: a valid code that is not on the viewers list,
-           a club's code, or the League's shared master code. */
+        /* PERMISSION_DENIED: a session that is not a viewer's, or a code
+           revoked since the token was minted (claims last up to an hour). */
         if (denied) return;
         denied = true;
         $('rpHost').hidden = true;

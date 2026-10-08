@@ -22,19 +22,20 @@
   functions arrive at runtime from RTDB, and the starting data is loaded
   through the Import dialog, never committed.
 
-    app-data/media-responsibilities/viewers/{uid}
-        { name, at } — who may open /responsibilities/view/ (see below)
+    app-data/media-responsibilities/config/viewers/{key}
+        { name, code (six digits), revoked? } — viewer codes, added by hand
+        in the Firebase console; never readable by a viewer
 
   Access (auth-guard registry — see system/auth-guard.js):
     superadmin → admin. Every other role → off. RTDB rules allow
     superadmin read/write only, with one addition below.
 
   View-only door: /responsibilities/view/
-    For people with no portal account. They sign in with their own access
-    code from Club Codes (a named person on the National League record) and
-    must also be ticked under Viewers here. The rules open people/ and
-    functions/ — read only — to a `club: "NL"` token whose uid is on
-    viewers/. Writing stays superadmin-only.
+    For people with no portal account, each with their own six-digit code
+    under config/viewers. functions/responsibilities.js checks the code and
+    mints a `resp: 'viewer'` claim; the rules open people/ and functions/ —
+    read only — to that claim. Writing stays superadmin-only. The Viewers
+    button lists who holds a code and copies the link.
 
   The map itself is drawn by /responsibilities/_map.js and _map.css, shared
   with the view page. Everything that WRITES stays in this file.
@@ -42,9 +43,10 @@
   CHANGELOG
   v1.2 (08/10/2026)
     - View-only link for people without a portal account:
-      /responsibilities/view/, signed into with their own Club Codes access
-      code. Viewers button chooses which named National League holders may
-      open it, and copies the link.
+      /responsibilities/view/, signed into with a per-person six-digit code
+      kept under config/viewers (added by hand in Firebase) and checked by
+      functions/responsibilities.js. Viewers button lists who holds one and
+      copies the link.
     - The map's drawing and styles move to _map.js / _map.css, shared with
       the view page.
     - Import now replaces people and functions only, so the viewers list
@@ -115,7 +117,7 @@
         date: '08/10/2026',
         version: 'v1.2',
         items: [
-          'Viewers: share a read-only view with named people who have no portal account. They sign in at the view link with their own access code from Club Codes.',
+          'Viewers: a read-only view for people with no portal account, each signing in at the view link with their own six-digit code. The Viewers button lists who holds one and copies the link.',
           'On mid-size screens the detail panel no longer hides behind the top bar, and its Close button is no longer covered.'
         ]
       },
@@ -172,9 +174,7 @@
   /* This page's buttons, handed to the map's bar — the wrapper adds no box. */
   .rp-own { display: contents; }
   .rp-viewers { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 6px; }
-  .rp-viewers li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); }
-  .rp-viewers label { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; cursor: pointer; font-size: var(--text-sm); }
-  .rp-viewers input { width: 16px; height: 16px; flex: none; accent-color: var(--navy); }
+  .rp-viewers li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); font-size: var(--text-sm); }
   .rp-viewers .rp-viewers__off { color: var(--text-muted); font-size: var(--text-xs); }
   .rp-linkrow { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; }
   .rp-linkrow code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 8px 10px; background: var(--off-white); border-radius: var(--radius); font-size: var(--text-sm); }
@@ -509,7 +509,8 @@
        { people:    [{ initials, name, external, colour }],
          functions: [{ emoji, name, note, items: [{ text, group, sop, shares: { INITIALS: pct } }] }] }
      Shares are keyed by initials in the file and mapped to person ids here.
-     Writes people and functions only — viewers survive an import. */
+     Writes people and functions only — the viewer codes under config/
+     survive an import. */
   function importData() {
     var body = document.createElement('div');
     var ta = document.createElement('textarea');
@@ -554,7 +555,7 @@
             return;
           }
           /* people and functions, not the whole node: a set() on the root
-             would wipe the viewer list along with the old map. */
+             would wipe the viewer codes along with the old map. */
           NL.ensureAuth()
             .then(function () { return db.ref(ROOT).update({ people: out.people, functions: out.functions }); })
             .then(function () { map.reset(); NL.toast('Imported', 'success'); c.close(); })
@@ -582,95 +583,57 @@
   }
 
   /* ── Viewers ──────────────────────────────────────────────────────────
-     Who may open /responsibilities/view/. A viewer is a NAMED person on the
-     National League record in Club Codes — that is where their code is
-     issued, revoked and reset, the same code that opens the directory and
-     the handbook. This list only says which of them may also see this map.
-     It is stored as viewers/<uid> because the rule that reads it can only
-     see the visitor's uid and claims: a named League holder signs in as
-     cc-NL-<their id>, so that is the key.
-
-     Taking someone off here stops them at their next read — the rule checks
-     this list every time, not a claim baked into their token. Revoking their
-     code in Club Codes stops every tool. */
-  function viewerUid(id) { return 'cc-NL-' + id; }
-
+     Who holds a code for /responsibilities/view/, and the link to send
+     them. Codes are added, changed and revoked by hand in the Firebase
+     console under config/viewers — the shape is in the dialog and in
+     functions/responsibilities.js — so this lists them and edits nothing.
+     The codes themselves are not shown: the console is where they live. */
   function manageViewers() {
-    Promise.all([
-      NL.ensureAuth().then(function () { return db.ref('app-data/club-codes/nl').once('value'); }),
-      db.ref(ROOT + '/viewers').once('value')
-    ]).then(function (res) {
-      var nl = res[0].val() || {};
-      var users = nl.users || {};
-      var current = res[1].val() || {};
-      /* Live codes first, by name; revoked ones at the foot, still listed so a
-         tick left on one is visible and can be cleared. */
-      var ids = Object.keys(users).filter(function (id) { return users[id]; })
+    NL.ensureAuth().then(function () {
+      return db.ref(ROOT + '/config/viewers').once('value');
+    }).then(function (snap) {
+      var all = snap.val() || {};
+      var keys = Object.keys(all).filter(function (k) { return all[k]; })
         .sort(function (a, b) {
-          return (!!users[a].revoked - !!users[b].revoked) ||
-            String(users[a].name || '').localeCompare(String(users[b].name || ''));
+          return (!!all[a].revoked - !!all[b].revoked) ||
+            String(all[a].name || a).localeCompare(String(all[b].name || b));
         });
 
       var body = document.createElement('div');
       var row = document.createElement('div');
       row.className = 'rp-linkrow';
-      var code = document.createElement('code');
-      code.textContent = VIEW_URL;
-      row.appendChild(code);
+      var link = document.createElement('code');
+      link.textContent = VIEW_URL;
+      row.appendChild(link);
       row.appendChild(btn('Copy link', 'btn--ghost btn--sm', function () { NL.copy(VIEW_URL); }));
       body.appendChild(row);
 
-      var boxes = {};
-      if (!ids.length) {
-        var none = document.createElement('p');
-        none.className = 'rp-note';
-        none.innerHTML = 'Nobody yet. Give each person a code in <a href="/club-codes/" target="_blank" rel="noopener">Club Codes</a>, under National League, then tick them here.';
-        body.appendChild(none);
-      } else {
+      if (keys.length) {
         var ul = document.createElement('ul');
         ul.className = 'rp-viewers';
-        ids.forEach(function (id) {
-          var u = users[id];
-          var off = !!(u.revoked || nl.revoked);
+        keys.forEach(function (k) {
           var li = document.createElement('li');
-          var lab = document.createElement('label');
-          var cb = document.createElement('input');
-          cb.type = 'checkbox';
-          cb.checked = !!current[viewerUid(id)];
-          boxes[id] = cb;
-          lab.appendChild(cb);
-          lab.appendChild(document.createTextNode(u.name || 'Unnamed'));
-          if (off) {
+          li.appendChild(document.createTextNode(all[k].name || k));
+          if (all[k].revoked) {
             var o = document.createElement('span');
             o.className = 'rp-viewers__off';
-            o.textContent = 'code revoked';
-            lab.appendChild(o);
+            o.textContent = 'revoked';
+            li.appendChild(o);
           }
-          li.appendChild(lab);
           ul.appendChild(li);
         });
         body.appendChild(ul);
-        var hint = document.createElement('p');
-        hint.className = 'rp-note';
-        hint.innerHTML = 'Codes are issued and reset in <a href="/club-codes/" target="_blank" rel="noopener">Club Codes</a>, under National League.';
-        body.appendChild(hint);
       }
 
-      NL.modal({ title: 'Viewers', body: body, buttons: ids.length ? [
-        { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
-        { label: 'Save', className: 'btn--primary', onClick: function (c) {
-          var next = {};
-          ids.forEach(function (id) {
-            if (!boxes[id].checked) return;
-            var was = current[viewerUid(id)];
-            next[viewerUid(id)] = { name: users[id].name || '', at: (was && was.at) || firebase.database.ServerValue.TIMESTAMP };
-          });
-          NL.ensureAuth()
-            .then(function () { return db.ref(ROOT + '/viewers').set(Object.keys(next).length ? next : null); })
-            .then(function () { NL.toast('Viewers saved', 'success'); c.close(); })
-            .catch(function (err) { NL.toast('Not saved: ' + err.message, 'error'); });
-        } }
-      ] : [
+      var how = document.createElement('p');
+      how.className = 'rp-note';
+      how.innerHTML = (keys.length ? '' : 'Nobody has a code yet. ') +
+        'Add a viewer in the Firebase console at <b>' + ROOT + '/config/viewers/</b><i>key</i> ' +
+        'with <b>name</b> and a six-digit <b>code</b>. Set <b>revoked</b> to true to stop one ' +
+        '(it takes up to an hour to end a session already open).';
+      body.appendChild(how);
+
+      NL.modal({ title: 'Viewers', body: body, buttons: [
         { label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } }
       ] });
     }).catch(function (err) {
