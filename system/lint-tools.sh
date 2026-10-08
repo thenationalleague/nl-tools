@@ -49,6 +49,7 @@ CANON_BRAND=$(canonical_version "nl-brand.css")
 CANON_UTILS=$(canonical_version "nl-utils.js")
 CANON_TOPBAR=$(canonical_version "nl-topbar.js")
 CANON_GUARD=$(canonical_version "auth-guard.js")
+CANON_ANALYTICS=$(canonical_version "nl-analytics.js")
 
 # Read skip-list (slugs only, # comments stripped). A skipped slug is
 # exempt from EVERY check — a blunt instrument, for tools mid-rewrite.
@@ -177,6 +178,14 @@ for index in "${CANDIDATES[@]}"; do
   while IFS= read -r line; do
     [[ -n "$line" ]] && drift+=("$line")
   done < <(check_asset "auth-guard.js" "$slug" "$index" "$CANON_GUARD")
+  # nl-analytics.js is REQUIRED, not optional. The whole point of putting the
+  # GA4 tag in canon on 08/10/2026 was that a tool gets measured by being
+  # wired correctly rather than by somebody remembering a snippet — and the
+  # question it exists to answer ("is anyone still using this?") is only
+  # answerable if no tool is quietly missing from the data.
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && drift+=("$line")
+  done < <(check_asset "nl-analytics.js" "$slug" "$index" "$CANON_ANALYTICS")
 
   # Required globals
   grep -q "window\.NL_TOOL\s*=" "$index"     || drift+=("  $slug: missing window.NL_TOOL declaration")
@@ -313,7 +322,8 @@ while IFS= read -r page; do
   # file that IS loaded has to carry the canonical ?v=. Only nl-brand.css was
   # checked before, so a public page on a stale nl-utils.js went unreported.
   for pair in "nl-brand.css:$CANON_BRAND" "nl-utils.js:$CANON_UTILS" \
-              "nl-topbar.js:$CANON_TOPBAR" "auth-guard.js:$CANON_GUARD"; do
+              "nl-topbar.js:$CANON_TOPBAR" "auth-guard.js:$CANON_GUARD" \
+              "nl-analytics.js:$CANON_ANALYTICS"; do
     f="${pair%%:*}"; canon="${pair##*:}"
     loads_asset "${f/./\\.}" "$page" || continue
     if grep -q "$f?v=$canon" "$page"; then
@@ -335,7 +345,7 @@ while IFS= read -r page; do
 done < <(find . -name '*.html' -not -path '*/node_modules/*' | sort)
 
 echo "=== Tool wiring lint ==="
-echo "Canonical: nl-brand.css?v=$CANON_BRAND  nl-utils.js?v=$CANON_UTILS  nl-topbar.js?v=$CANON_TOPBAR  auth-guard.js?v=$CANON_GUARD"
+echo "Canonical: nl-brand.css?v=$CANON_BRAND  nl-utils.js?v=$CANON_UTILS  nl-analytics.js?v=$CANON_ANALYTICS  nl-topbar.js?v=$CANON_TOPBAR  auth-guard.js?v=$CANON_GUARD"
 echo
 if [[ "${warnings+x}" == "x" && ${#warnings[@]} -gt 0 ]]; then
   echo "Drift detected in $warn_count tool$( [[ $warn_count -ne 1 ]] && echo s ):"
