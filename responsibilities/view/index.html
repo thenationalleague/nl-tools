@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Responsibilities, view only
+  File: /responsibilities/view/index.html
+  Version: v1.0 (08/10/2026)
+
+  The department's responsibilities map for people with no portal account,
+  read-only. Same map as /responsibilities/ (drawn by _map.js), without the
+  Edit button or anything behind it.
+
+  WHO GETS IN. Anyone holding a viewer code — six digits, one per person,
+  kept at app-data/media-responsibilities/config/viewers and added by hand in
+  the Firebase console (see functions/responsibilities.js for the shape).
+  The code opens this map and nothing else.
+
+  WHY THAT IS A BOUNDARY AND NOT A SCREEN. The code is checked server-side
+  by functions/responsibilities.js, which mints a `resp: 'viewer'` claim;
+  the RTDB rules read people/ and functions/ for that claim and nothing
+  more. Nothing here decides access, and read-only is enforced by the rules
+  (every write is superadmin-only), not by the absence of a button.
+
+  Storage (RTDB, read only):
+    app-data/media-responsibilities/people
+    app-data/media-responsibilities/functions
+
+  CHANGELOG
+  v1.0 (08/10/2026) — First build.
+-->
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Responsibilities — The National League</title>
+  <!-- Favicons. Static, not injected: nl-topbar.js adds these too, but a
+       standalone page never loads it, and an icon that arrives with the JS
+       leaves the tab blank until it does. /favicon.ico at the root is the
+       backstop every browser asks for without being told. -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+
+<link rel="stylesheet" href="/system/nl-brand.css?v=67">
+<link rel="stylesheet" href="/responsibilities/_map.css?v=1">
+
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script src="/system/nl-utils.js?v=47"></script>
+<script src="/responsibilities/_map.js?v=1"></script>
+<script>
+  firebase.initializeApp({
+    apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+    authDomain:        "nl-tools.firebaseapp.com",
+    databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId:         "nl-tools",
+    storageBucket:     "nl-tools.firebasestorage.app",
+    messagingSenderId: "801354670005",
+    appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+  });
+</script>
+<style>
+  .rv-page { padding-top: 18px; }
+</style>
+</head>
+<body>
+
+<div id="gateWrap"></div>
+
+<div id="app" hidden>
+  <div class="nl-idbar">
+    <div class="nl-idbar__id">
+      <div class="nl-idbar__title">Responsibilities</div>
+      <div class="nl-idbar__sub" id="who"></div>
+    </div>
+    <div class="nl-idbar__actions">
+      <button class="nl-idbar__btn" id="signOut" type="button">Sign out</button>
+    </div>
+  </div>
+  <div class="page rv-page">
+    <div id="rpHost"></div>
+    <div class="empty-state" id="denied" hidden>
+      <div class="empty-state__icon">🔒</div>
+      <div class="empty-state__title">This code does not open Responsibilities</div>
+      <div class="empty-state__text">Sign out to try a different code.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var ROOT = 'app-data/media-responsibilities';
+  var $ = function (id) { return document.getElementById(id); };
+
+  NL.codeGate.ensure({
+    mount: $('gateWrap'),
+    title: 'Responsibilities',
+    claim: 'resp',
+    verify: NL.codeGate.viaFunction(ROOT)
+  }).then(function (session) {
+    /* codeGate leaves its card for the caller to take down. */
+    $('gateWrap').hidden = true;
+    $('app').hidden = false;
+    $('signOut').addEventListener('click', function () {
+      NL.codeGate.signOut().then(function () { location.reload(); });
+    });
+    /* The viewer's name rides in the token as respName, so a returning
+       visit still knows who it is. */
+    $('who').textContent = (session && session.name) || '';
+
+    var map = RespMap.create($('rpHost'), { emptyText: 'Nothing has been added yet.' });
+    var got = { people: null, functions: null };
+    var denied = false;
+
+    /* Two reads, not one: the rules open people/ and functions/ to a viewer
+       and nothing else under this node, so asking for the parent would be
+       refused outright. */
+    ['people', 'functions'].forEach(function (k) {
+      firebase.database().ref(ROOT + '/' + k).on('value', function (snap) {
+        got[k] = snap.val() || {};
+        if (got.people && got.functions) map.setData(got);
+      }, function () {
+        /* PERMISSION_DENIED: a session that is not a viewer's, or a code
+           revoked since the token was minted (claims last up to an hour). */
+        if (denied) return;
+        denied = true;
+        $('rpHost').hidden = true;
+        $('denied').hidden = false;
+      });
+    });
+    /* The sliding panel starts below the identity bar, whatever height it
+       wraps to on this screen. */
+    function barTop() {
+      var bar = document.querySelector('.nl-idbar');
+      document.documentElement.style.setProperty('--rp-fixed-top', (bar ? bar.offsetHeight : 0) + 'px');
+    }
+    barTop();
+    window.addEventListener('resize', barTop);
+    map.resize();
+  });
+})();
+</script>
+</body>
+</html>

@@ -113,3 +113,7 @@ Object.assign(exports, require("./handbook-pdf"));
 // The broadcast-selections access gate: a handful of audience codes for the
 // public travel page, same trigger shape as uw-promo/programme/club-code.
 Object.assign(exports, require("./broadcast-selections"));
+
+// The Responsibilities view-only gate: per-person six-digit viewer codes,
+// entered by hand under config/viewers, minting a read-only `resp` claim.
+Object.assign(exports, require("./responsibilities"));

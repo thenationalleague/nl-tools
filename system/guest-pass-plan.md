@@ -234,6 +234,10 @@ rather than in the moment.
 - `NL.codeGate` + `NL.codeGate.viaFunction()` — `system/nl-utils.js`
 - Four working passcode → claim functions — `functions/programme.js`,
   `club-directory.js`, `uw-promo.js`, `fan-widgets.js`
+- A fifth, added 08/10/2026 — `functions/responsibilities.js`: per-person
+  six-digit codes entered by hand under `config/`, minting a read-only claim
+  for one tool. Each new tool so far has written its own; the next one is
+  the point to build this shared mechanism instead.
 - The claim-reading rule patterns — `system/rtdb/rules.snapshot.json`
 - The settled role model this must not duplicate —
   `system/roles-and-access-plan.md`
