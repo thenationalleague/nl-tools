@@ -60,6 +60,40 @@ const path = require('path');
 
 const REPO = path.resolve(__dirname, '..');
 
+/* ── THIS GENERATOR CANNOT RUN ────────────────────────────────────────────
+   Both of its sources are gone. `wellbeing/index.html` was retired on
+   08/10/2026 and replaced by /wellbeing-hub/ — the directory now holds only a
+   redirect stub — and `wellbeing/concepts/wellbeing-navigation.html` had
+   already been removed before that.
+
+   It fails here rather than deeper in the parse, because a parse of a
+   redirect stub finds no `.view` sections and would happily write a map with
+   nothing in it over a good one.
+
+   The committed maps are unaffected and /wellbeing-map/ still works; they are
+   now a snapshot of a section that no longer exists.
+
+   TO REVIVE IT, point it at the hub — but that is a parser change, not a path
+   change. The old section used `.view` sections and `/wellbeing-hub/` uses
+   `.hub-view`, and the hub's shared blocks sit in different places. See
+   system/retired/wellbeing.md. */
+const MISSING = [
+  'wellbeing/index.html',
+  'wellbeing/concepts/wellbeing-navigation.html',
+].filter((p) => !fs.existsSync(path.join(REPO, p)) ||
+                fs.readFileSync(path.join(REPO, p), 'utf8').includes('RETIRED, redirect only'));
+if (MISSING.length) {
+  console.error(
+    'build-wellbeing-map.js cannot run — its source pages are retired:\n  ' +
+    MISSING.join('\n  ') +
+    '\n\n/wellbeing/ was replaced by /wellbeing-hub/ on 08/10/2026. The ' +
+    'committed maps in wellbeing-map/ still load; regenerating needs this ' +
+    'script repointed at the hub, which means teaching the parser .hub-view ' +
+    'instead of .view. See system/retired/wellbeing.md.'
+  );
+  process.exit(1);
+}
+
 /* Two starting maps, because there are two things worth arguing about: what the
    section is now, and what the parked concept proposed instead. They are
    genuinely different shapes, not a re-skin — the live section carries the topic

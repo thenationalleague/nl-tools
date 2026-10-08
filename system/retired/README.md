@@ -17,6 +17,7 @@ when someone asks for it, and when they do, this is where the thinking is.
 | [`chase-hq.md`](chase-hq.md) | 15/08/2026 | Commercial-chasing CRM, parked since July. Backend deleted; the unanswered question was ownership, not code. |
 | [`academy-alliance-fulltime-feed.md`](academy-alliance-fulltime-feed.md) | 11/09/2026 | The FA Full-Time feed behind the Academy & Alliance graphic. Cloudflare blocks every cloud address; the paste parsing is what survives. |
 | [`league-tables.md`](league-tables.md) | 28/08/2026 | Canvas table-graphic tool, superseded by the Broadsheet rebuild at `/graphics/table-graphic/`. Its position-band palette was canon's, and was wrong. |
+| [`wellbeing.md`](wellbeing.md) | 08/10/2026 | Sixteen-page public mental-health section, replaced by `/wellbeing-hub/`. Still a redirect stub, deliberately. Records which two topics the replacement does not carry, and the four-rule design contract for public pages. |
 
 ## Why one place
 
