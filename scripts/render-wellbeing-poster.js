@@ -43,7 +43,12 @@
 const fs = require('fs');
 const path = require('path');
 
-const URL_ = process.env.POSTER_URL || 'http://127.0.0.1:8899/wellbeing-hub/poster.html';
+// ?render=1 is the opt-out from the poster's own print blocker. Pressing
+// Ctrl+P on poster.html deliberately prints a line of instruction instead of
+// the sheet, because a browser's print settings wreck it — and page.pdf()
+// emulates print media, so without this the blocker would empty the very
+// file it exists to protect. The assertion below proves the opt-out took.
+const URL_ = process.env.POSTER_URL || 'http://127.0.0.1:8899/wellbeing-hub/poster.html?render=1';
 const OUT = path.join(__dirname, '..', 'wellbeing-hub', 'poster.pdf');
 
 (async () => {
@@ -63,6 +68,28 @@ const OUT = path.join(__dirname, '..', 'wellbeing-hub', 'poster.pdf');
 
     if (failed.length) {
       throw new Error('asset(s) failed to load — refusing to render a broken poster:\n  ' + failed.join('\n  '));
+    }
+
+    // Prove the print blocker is OFF for us before writing anything. A page
+    // count cannot catch this: the blocker's instruction sheet is also one
+    // page, so a silently-broken opt-out would ship a poster.pdf that reads
+    // "Print the PDF, not this page" and pass every check below.
+    await page.emulateMediaType('print');
+    const print = await page.evaluate(() => {
+      const d = (sel) => {
+        const el = document.querySelector(sel);
+        return el ? getComputedStyle(el).display : 'missing';
+      };
+      return { sheet: d('.sheet'), note: d('.printnote') };
+    });
+    if (print.sheet === 'none' || print.sheet === 'missing' || print.note !== 'none') {
+      throw new Error(
+        'the poster\'s print blocker is still on — refusing to render.\n' +
+        `  .sheet display in print media: ${print.sheet} (want anything but none)\n` +
+        `  .printnote display in print media: ${print.note} (want none)\n` +
+        '  The URL must carry ?render=1, and the script at the foot of ' +
+        'poster.html must set html.is-render from it.'
+      );
     }
 
     const pdf = await page.pdf({ preferCSSPageSize: true, printBackground: true });
