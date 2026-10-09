@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Data
+  Version: v0.1 (09/10/2026)
+  File: /data/index.html
+
+  How often each tool is opened, and by how many people. Asked for directly —
+  "I liked the idea of seeing eg how often programme packs was viewed" — and
+  it is the question system/tool-status-and-access.md exists to answer and
+  cannot. Three tools were retired on 15/08/2026 on judgement rather than
+  evidence, and the public-site tickers sat dead for five months because
+  nothing was counting.
+
+  IT COLLECTS NOTHING. Every number here comes from the `page_opened` audit
+  entry auth-guard has written on every tool open since v5.1, rolled up
+  nightly by functions/usage-rollup.js. This page only reads counters.
+
+  COUNTS, NEVER WHO. An audit entry carries uid, name and email. None of the
+  three survives the rollup: `users` is a Set's size, computed server-side and
+  discarded. "Nine people opened it" decides whether a tool lives; which nine
+  is a different question, and its answer stays in admin/audit behind the
+  rules already governing it. Do not add a drill-down here without deciding
+  that question on its own merits.
+
+  WHAT THE NUMBERS ARE NOT
+    - Not GA4. That measures public pages by path, cookielessly. This measures
+      gated tools by toolKey, from our own records. They will never agree and
+      are not meant to.
+    - Not views. auth-guard throttles page_opened to one per tool per tab per
+      five minutes, so a morning of flicking between tabs is a handful of
+      opens, not fifty. That is the right unit for "is this used" and the
+      wrong one for "how engaged are they".
+    - Not complete before auth-guard v5.1. Earlier days are empty because
+      nothing was written, not because nobody came.
+
+  Days are UTC — see the note in functions/usage-rollup.js.
+
+  Storage (RTDB):
+    app-data/ops-data/daily/<YYYY-MM-DD>/<toolKey>  { opens, users }
+    app-data/ops-data/meta                          { lastRun, ... }
+    tools/ops-data                                  tool registration
+
+  Rules: READ for superadmin + admin, WRITE false for everybody. The rollup
+  runs in the Admin SDK, which bypasses rules, so nothing in any browser can
+  write a counter — including this page.
+
+  Access: superadmin admin, admin access, everyone else off.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Data — NL Tools</title>
+  <!-- Favicons. Static, not injected: nl-topbar.js adds these too, but a
+       standalone page never loads it, and an icon that arrives with the JS
+       leaves the tab blank until it does. /favicon.ico at the root is the
+       backstop every browser asks for without being told. -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+
+  <!-- Brand stylesheet (lint canonical: ?v=66) -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=67">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'Data',
+      toolKey: 'ops-data'
+    };
+    var NL_TOOL_KEY = 'ops-data';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '09/10/2026',
+        version: 'v0.1',
+        items: [
+          'Initial build. Reads the nightly rollup of page_opened audit entries.',
+          'Filter by tool; 28 / 90 / 365-day ranges.',
+          'Retired and unregistered tools are shown, not hidden — a tool nobody can open any more is exactly what the history is for.'
+        ]
+      }
+    ];
+
+    /* auth-guard fires this once the session is verified + pageWrap is
+       revealed. Boot the main app from here so RTDB reads happen with a
+       live auth token. Do NOT read RTDB before this fires. */
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts (lint canonical: ?v=47 / ?v=1 / ?v=10 / ?v=16) -->
+  <script src="/system/nl-utils.js?v=47"></script>
+  <!-- GA4, one property for all of nl.tools. Cookieless, so no consent
+       banner on any page; page views by path, no identity. Tool events go
+       through NL.track(). See system/nl-analytics.js. -->
+  <script src="/system/nl-analytics.js?v=1"></script>
+  <script src="/system/nl-topbar.js?v=10"></script>
+  <script src="/system/auth-guard.js?v=16"></script>
+
+<style>
+  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
+     style.display = 'block'. Don't clear with '' — would re-trigger the
+     brand rule and re-hide the page. */
+
+  /* Controls. .nl-select and .section-head are canon; the row is local. */
+  .d-controls {
+    display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-end;
+    margin-bottom: 22px;
+  }
+  .d-field { display: flex; flex-direction: column; gap: 5px; }
+  .d-field > span {
+    font-size: var(--text-xs); font-weight: 700; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.1em;
+  }
+
+  /* Headline figures. Two numbers, not eight — a wall of tiles is a way of
+     avoiding the decision about which number matters. */
+  .d-tiles { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 24px; }
+  .d-tile {
+    flex: 1 1 180px; padding: 14px 16px;
+    background: var(--navy-50); border: 1px solid var(--navy-100);
+    border-radius: var(--radius-lg);
+  }
+  .d-tile b {
+    display: block; font-size: var(--text-xl); font-weight: 900;
+    color: var(--navy); line-height: 1.1;
+  }
+  .d-tile span { font-size: var(--text-sm); color: var(--text-muted); }
+
+  /* The bar is the point of the table: ranking by eye beats reading digits.
+     Width is set inline from the row's share of the busiest tool. */
+  .d-bar {
+    position: relative; min-width: 90px; height: 22px;
+    background: var(--navy-50); border-radius: 4px; overflow: hidden;
+  }
+  .d-bar i { position: absolute; inset: 0 auto 0 0; background: var(--navy-400); }
+
+  .d-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  /* A tool with no registry record. Retired, renamed, or never registered —
+     all three are findings rather than noise, so they are labelled and kept. */
+  .d-orphan code {
+    font-size: var(--text-xs); color: var(--text-muted);
+    background: var(--navy-50); padding: 1px 5px; border-radius: 3px;
+  }
+
+  /* Trend for one tool. An inline SVG rather than a library: one series, one
+     polyline, and a chart dependency for that is not worth a third-party
+     script on a page behind auth. One series means no legend — the filter
+     above already names it. */
+  .d-chart { position: relative; padding-top: 38px; }
+  .d-spark { width: 100%; height: 120px; display: block; }
+  .d-spark path { fill: none; stroke: var(--navy); stroke-width: 2; }
+  .d-spark .d-area { fill: var(--navy-100); stroke: none; }
+  .d-spark .d-base { stroke: var(--border); stroke-width: 1; }
+
+  /* The crosshair finds the X: readers aim at a date, not at a 2px line.
+     Hit-testing is on the whole plot and snaps to the nearest bucket, so
+     there is no pinpoint target to land on. */
+  .d-hair {
+    position: absolute; top: 38px; bottom: 0; width: 1px;
+    background: var(--navy-300); pointer-events: none; opacity: 0;
+  }
+  .d-tip {
+    position: absolute; top: 34px; transform: translate(-50%, -100%);
+    background: var(--navy); color: var(--white);
+    padding: 5px 9px; border-radius: 5px; white-space: nowrap;
+    font-size: var(--text-xs); line-height: 1.35;
+    pointer-events: none; opacity: 0;
+  }
+  .d-tip b { font-weight: 900; font-size: var(--text-sm); }
+  .d-chart.is-live .d-hair, .d-chart.is-live .d-tip { opacity: 1; }
+
+  .d-foot { margin-top: 26px; font-size: var(--text-sm); color: var(--text-muted); }
+  .d-foot code { font-size: var(--text-xs); }
+</style>
+</head>
+<body>
+
+<!-- Topbar — auto-rendered by /system/nl-topbar.js from window.NL_TOOL -->
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="page">
+
+    <!-- Page content goes here. The whole pageWrap stays hidden until
+         auth-guard reveals it, so you don't need to handle the
+         not-yet-authed state in markup. -->
+
+    <!-- Do NOT repeat the tool title here. nl-topbar.js already renders it
+         from window.NL_TOOL.title, so an <h1> in the page duplicates it and a
+         description paragraph describes something the user is looking at.
+         Start straight in with the tool's own content. If a heading is genuinely
+         needed above a group of controls, use the canon .section-head. -->
+
+    <div class="d-controls">
+      <label class="d-field">
+        <span>Range</span>
+        <select id="dRange" class="nl-select">
+          <option value="28">Last 28 days</option>
+          <option value="90" selected>Last 90 days</option>
+          <option value="365">Last 12 months</option>
+        </select>
+      </label>
+      <label class="d-field">
+        <span>Tool</span>
+        <select id="dTool" class="nl-select">
+          <option value="">All tools</option>
+        </select>
+      </label>
+    </div>
+
+    <div id="dTiles" class="d-tiles"></div>
+    <div id="dBody"></div>
+
+    <p class="d-foot" id="dFoot"></p>
+
+  </div>
+</div>
+
+<!-- Main app -->
+<script>
+(function () {
+  'use strict';
+
+  var STATE = { daily: {}, labels: {}, meta: {}, range: 90, tool: '' };
+
+  var elRange = document.getElementById('dRange');
+  var elTool  = document.getElementById('dTool');
+  var elTiles = document.getElementById('dTiles');
+  var elBody  = document.getElementById('dBody');
+  var elFoot  = document.getElementById('dFoot');
+
+  var DAY = 86400000;
+
+  /* UTC throughout, matching the rollup. Doing this in local time would put a
+     BST evening's opens on the wrong day for half the year and make the two
+     halves of the system disagree about what "yesterday" means. */
+  function dayKey(offset) {
+    return new Date(Date.now() - offset * DAY).toISOString().slice(0, 10);
+  }
+
+  function daysInRange() {
+    var out = [];
+    for (var i = STATE.range; i >= 1; i--) out.push(dayKey(i));
+    return out;
+  }
+
+  /* toolKey → something a human recognises. The registry at tools/ is
+     world-readable, so the labels come from the same record that drives the
+     portal card — no second list to drift. A key with no record is NOT
+     hidden: it is a retired tool, a renamed one, or one that was never
+     registered, and all three are findings. */
+  function label(key) {
+    if (STATE.labels[key]) return STATE.labels[key];
+    if (key.indexOf('path:') === 0) return '/' + key.slice(5) + '/';
+    return key;
+  }
+  function isOrphan(key) { return !STATE.labels[key]; }
+
+  /* Totals per tool across the range. `users` CANNOT be summed — the same
+     person on Monday and Tuesday is two daily ones and one person. The
+     rollup discards the uid set, so a true distinct count over a range is
+     not recoverable here; the honest figure is the BUSIEST DAY's count,
+     which is a floor on the real number and never overstates it. */
+  function aggregate(days) {
+    var byTool = {};
+    days.forEach(function (d) {
+      var row = STATE.daily[d] || {};
+      Object.keys(row).forEach(function (key) {
+        if (key === '_all') return;
+        var v = row[key] || {};
+        if (!byTool[key]) byTool[key] = { opens: 0, peakUsers: 0, lastDay: '' };
+        var t = byTool[key];
+        t.opens += (v.opens || 0);
+        t.peakUsers = Math.max(t.peakUsers, v.users || 0);
+        if (v.opens) t.lastDay = d;
+      });
+    });
+    return byTool;
+  }
+
+  function tile(value, caption) {
+    return '<div class="d-tile"><b>' + value + '</b><span>' +
+      NL.escHtml(caption) + '</span></div>';
+  }
+
+  function emptyState(title, text) {
+    return '<div class="empty-state">' +
+      '<div class="empty-state__title">' + NL.escHtml(title) + '</div>' +
+      '<div class="empty-state__text">' + NL.escHtml(text) + '</div></div>';
+  }
+
+  /* ── All tools: the ranking ───────────────────────────────────────────── */
+  function renderAll(days) {
+    var byTool = aggregate(days);
+    var keys = Object.keys(byTool).sort(function (a, b) {
+      return byTool[b].opens - byTool[a].opens || label(a).localeCompare(label(b));
+    });
+
+    var opens = keys.reduce(function (n, k) { return n + byTool[k].opens; }, 0);
+    elTiles.innerHTML =
+      tile(opens.toLocaleString(), 'opens in ' + days.length + ' days') +
+      tile(String(keys.length), 'tools opened at least once');
+
+    if (!keys.length) {
+      elBody.innerHTML = emptyState('Nothing counted yet',
+        'The rollup runs nightly at 03:20. If this is still empty tomorrow, ' +
+        'the function has not run — check its logs.');
+      return;
+    }
+
+    var max = byTool[keys[0]].opens || 1;
+    var rows = keys.map(function (k) {
+      var t = byTool[k];
+      var pct = Math.max(2, Math.round((t.opens / max) * 100));
+      return '<tr>' +
+        '<td>' + (isOrphan(k)
+          ? '<span class="d-orphan"><code>' + NL.escHtml(label(k)) + '</code></span>'
+          : NL.escHtml(label(k))) + '</td>' +
+        '<td><div class="d-bar"><i style="width:' + pct + '%"></i></div></td>' +
+        '<td class="d-num">' + t.opens.toLocaleString() + '</td>' +
+        '<td class="d-num">' + (t.peakUsers || '—') + '</td>' +
+        '<td class="d-num">' + (t.lastDay ? NL.formatDateShort(t.lastDay) : '—') + '</td>' +
+        '</tr>';
+    }).join('');
+
+    elBody.innerHTML =
+      '<div class="table-wrap"><table class="table table--compact">' +
+      '<thead><tr><th>Tool</th><th></th><th class="ta-right">Opens</th>' +
+      '<th class="ta-right">Most in a day</th><th class="ta-right">Last opened</th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+  }
+
+  /* ── One tool: the trend ──────────────────────────────────────────────── */
+
+  /* 365 daily points in a 1000-unit viewBox sit 2.7 units apart with a 2px
+     stroke, which renders as a navy blob — a year of data that answers no
+     question. Long ranges bucket into weeks: 52 readable points instead of
+     365 unreadable ones, and nobody asks "was the 14th busier than the
+     15th?" of a twelve-month view. 90 days stays daily, which is dense but
+     legible. */
+  function bucket(days, key) {
+    var opensOf = function (d) {
+      return ((STATE.daily[d] || {})[key] || {}).opens || 0;
+    };
+    var usersOf = function (d) {
+      return ((STATE.daily[d] || {})[key] || {}).users || 0;
+    };
+    if (days.length <= 120) {
+      return {
+        unit: 'day',
+        points: days.map(function (d) {
+          return { label: NL.formatDateShort(d), opens: opensOf(d), users: usersOf(d) };
+        })
+      };
+    }
+    var out = [];
+    for (var i = 0; i < days.length; i += 7) {
+      var week = days.slice(i, i + 7);
+      out.push({
+        label: 'w/c ' + NL.formatDateShort(week[0]),
+        opens: week.reduce(function (n, d) { return n + opensOf(d); }, 0),
+        users: week.reduce(function (n, d) { return Math.max(n, usersOf(d)); }, 0)
+      });
+    }
+    return { unit: 'week', points: out };
+  }
+
+  /* The hover layer. Values are ALSO in the table twin below, so the tooltip
+     enhances and never gates — nothing here is the only way to read a
+     number. Labels go in via textContent, not innerHTML. */
+  function wireCrosshair(wrap, points, unit) {
+    var hair = wrap.querySelector('.d-hair');
+    var tip = wrap.querySelector('.d-tip');
+    var plot = wrap.querySelector('.d-spark');
+
+    function show(e) {
+      var box = plot.getBoundingClientRect();
+      if (!box.width) return;
+      var x = Math.min(Math.max(e.clientX - box.left, 0), box.width);
+      var i = points.length > 1
+        ? Math.round((x / box.width) * (points.length - 1))
+        : 0;
+      var p = points[i];
+      var at = points.length > 1 ? (i / (points.length - 1)) * box.width : box.width / 2;
+
+      hair.style.left = at + 'px';
+
+      /* TEXT FIRST, THEN MEASURE. The label length varies with the bucket
+         unit and whether there is a people clause, so the clamp below has
+         to read the box back — but reading it BEFORE the text is written
+         measures the previous tooltip, and on the first hover an empty one
+         at zero width. That put the box 98px past the left edge of the
+         plot, which is how this was found. */
+      tip.textContent = '';
+      var b = document.createElement('b');
+      b.textContent = p.opens + (p.opens === 1 ? ' open' : ' opens');
+      tip.appendChild(b);
+      tip.appendChild(document.createTextNode(
+        ' ' + p.label + (p.users ? ' · ' + p.users +
+          (p.users === 1 ? ' person' : ' people') : '')
+      ));
+      wrap.classList.add('is-live');
+
+      var half = tip.offsetWidth / 2;
+      tip.style.left = Math.min(Math.max(at, half), box.width - half) + 'px';
+    }
+
+    wrap.addEventListener('pointermove', show);
+    wrap.addEventListener('pointerleave', function () {
+      wrap.classList.remove('is-live');
+    });
+    void unit;
+  }
+
+  function renderOne(days, key) {
+    var b = bucket(days, key);
+    var points = b.points;
+    var series = points.map(function (p) { return p.opens; });
+    var opens = series.reduce(function (a, c) { return a + c; }, 0);
+    var peak = days.reduce(function (n, d) {
+      return Math.max(n, ((STATE.daily[d] || {})[key] || {}).users || 0);
+    }, 0);
+    var active = days.filter(function (d) {
+      return (((STATE.daily[d] || {})[key] || {}).opens || 0) > 0;
+    }).length;
+
+    elTiles.innerHTML =
+      tile(opens.toLocaleString(), 'opens in ' + days.length + ' days') +
+      tile(String(peak || '—'), 'most people in one day') +
+      tile(active + ' / ' + days.length, 'days it was opened at all');
+
+    if (!opens) {
+      elBody.innerHTML = emptyState('Not opened in this range',
+        'Try a longer range. A tool with no opens over 12 months is the ' +
+        'answer to the retirement question.');
+      return;
+    }
+
+    /* One polyline and its fill in a 0–1000 × 0–100 viewBox, scaled by the
+       SVG. No pixel measuring, no resize handler. The baseline is drawn so a
+       run of zero days reads as zero rather than as missing. */
+    var max = Math.max.apply(null, series) || 1;
+    var step = series.length > 1 ? 1000 / (series.length - 1) : 0;
+    var pts = series.map(function (v, i) {
+      return (i * step).toFixed(1) + ',' + (100 - (v / max) * 92).toFixed(1);
+    });
+    var line = 'M' + pts.join(' L');
+
+    var rows = points.map(function (p) {
+      return '<tr><td>' + NL.escHtml(p.label) + '</td>' +
+        '<td class="d-num">' + p.opens + '</td>' +
+        '<td class="d-num">' + (p.users || '—') + '</td></tr>';
+    }).reverse().join('');
+
+    elBody.innerHTML =
+      '<div class="d-chart">' +
+        '<svg class="d-spark" viewBox="0 0 1000 100" preserveAspectRatio="none" ' +
+          'role="img" aria-label="Opens per ' + b.unit + ', ' +
+          NL.escHtml(label(key)) + ', peak ' + max + '">' +
+          '<path class="d-area" d="' + line + ' L1000,100 L0,100 Z"></path>' +
+          '<path d="' + line + '"></path>' +
+          '<path class="d-base" d="M0,100 L1000,100"></path>' +
+        '</svg>' +
+        '<div class="d-hair"></div><div class="d-tip"></div>' +
+      '</div>' +
+      '<p class="d-foot">Peak ' + max + ' opens in a ' + b.unit + ' · ' +
+        NL.escHtml(NL.formatDateShort(days[0])) + ' to ' +
+        NL.escHtml(NL.formatDateShort(days[days.length - 1])) +
+        (b.unit === 'week' ? ' · grouped by week' : '') + '</p>' +
+      '<details class="disclosure">' +
+        '<summary>The same figures as a table</summary>' +
+        '<div class="table-wrap"><table class="table table--compact">' +
+        '<thead><tr><th>' + (b.unit === 'week' ? 'Week' : 'Day') + '</th>' +
+        '<th class="ta-right">Opens</th><th class="ta-right">People</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
+      '</details>';
+
+    wireCrosshair(elBody.querySelector('.d-chart'), points, b.unit);
+  }
+
+  function render() {
+    var days = daysInRange();
+    if (STATE.tool) renderOne(days, STATE.tool); else renderAll(days);
+
+    var last = STATE.meta && STATE.meta.lastRun;
+    elFoot.innerHTML =
+      'Counted from the audit log auth-guard already writes — opens and a ' +
+      'number of people, never who. Days are UTC. One open per tool per tab ' +
+      'per five minutes, so these are visits, not page views. ' +
+      '\u201cMost in a day\u201d is the highest number of different people ' +
+      'who opened it on any single day in the range: a floor on the size of ' +
+      'the audience, never an overstatement.' +
+      (last ? ' Last counted ' + NL.escHtml(NL.timeAgo(last)) + '.' : '');
+  }
+
+  function fillToolFilter() {
+    var seen = {};
+    Object.keys(STATE.daily).forEach(function (d) {
+      Object.keys(STATE.daily[d] || {}).forEach(function (k) {
+        if (k !== '_all') seen[k] = true;
+      });
+    });
+    var keys = Object.keys(seen).sort(function (a, b) {
+      return label(a).localeCompare(label(b));
+    });
+    elTool.innerHTML = '<option value="">All tools</option>' +
+      keys.map(function (k) {
+        return '<option value="' + NL.escHtml(k) + '">' +
+          NL.escHtml(label(k)) + (isOrphan(k) ? ' (not registered)' : '') +
+          '</option>';
+      }).join('');
+    elTool.value = STATE.tool;
+  }
+
+  /* Public boot entry point — called by nlAuthReady once the session is
+     verified. Don't read RTDB before this fires. */
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function () {
+    NL.ensureAuth().then(function () {
+      return Promise.all([
+        db.ref('app-data/ops-data/daily').once('value'),
+        db.ref('app-data/ops-data/meta').once('value'),
+        db.ref('tools').once('value')
+      ]);
+    }).then(function (snaps) {
+      STATE.daily = snaps[0].val() || {};
+      STATE.meta  = snaps[1].val() || {};
+      var tools = snaps[2].val() || {};
+      Object.keys(tools).forEach(function (k) {
+        if (tools[k] && tools[k].label) STATE.labels[k] = tools[k].label;
+      });
+      fillToolFilter();
+      render();
+    }).catch(function (e) {
+      elBody.innerHTML = emptyState('Could not read the counters',
+        (e && e.code === 'PERMISSION_DENIED')
+          ? 'Your role cannot read app-data/ops-data. Superadmin and admin only.'
+          : (e && e.message) || 'Unknown error.');
+      if (window.console) console.warn('[data]', e);
+    });
+  };
+
+  elRange.addEventListener('change', function () {
+    STATE.range = parseInt(elRange.value, 10) || 90;
+    render();
+  });
+  elTool.addEventListener('change', function () {
+    STATE.tool = elTool.value;
+    render();
+  });
+
+  /* If auth-guard fired before this script loaded, replay the session. */
+  if (window._toolDeferredSession) {
+    window.TOOL.boot(window._toolDeferredSession);
+    delete window._toolDeferredSession;
+  }
+})();
+</script>
+
+</body>
+</html>

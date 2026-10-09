@@ -117,3 +117,10 @@ Object.assign(exports, require("./broadcast-selections"));
 // The Responsibilities view-only gate: per-person six-digit viewer codes,
 // entered by hand under config/viewers, minting a read-only `resp` claim.
 Object.assign(exports, require("./responsibilities"));
+
+// Nightly usage rollup (usageRollup) — counts page_opened audit entries into
+// per-day, per-tool counters under app-data/ops-data, which /data/ reads.
+// Collects nothing new: auth-guard has written those entries since v5.1. The
+// counters carry opens and a distinct-user NUMBER, never a uid, name or
+// email. See functions/usage-rollup.js.
+Object.assign(exports, require("./usage-rollup"));

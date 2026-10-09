@@ -110,6 +110,7 @@ declares `levels: ["off","access"]`, so the value is dead either way. Set it to
 | Tool | Key | Who |
 |---|---|---|
 | **Estate** | `ops-estate` | Superadmin only |
+| **Data** | `ops-data` | Superadmin admin, admin access |
 | **NLServices API** | `ops-nls-monitor` | Superadmin only |
 | **Style Guide** | `staff-style-guide` | Superadmin only |
 
