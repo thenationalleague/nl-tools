@@ -30,7 +30,9 @@
      ymdUK, koTime, koDay, dividerLabel, nlsDate, nlsTeamName(clubs, team)
 
    CHANGELOG
-     v1.1 09/10/2026  Up to 16 games per card (was 12) for Cup nights; 12 or
+     v1.1 09/10/2026  Cup guests NLS calls U21 print as PL2, matching the
+                      table graphic.
+                      Up to 16 games per card (was 12) for Cup nights; 12 or
                       fewer draw exactly as before.
                       Cup guests NLS calls "U21" (Ipswich, Birmingham, Norwich)
                       now find their PL2 record, so the crest draws. toPng
@@ -125,6 +127,11 @@
     var k = String(name || "").toLowerCase().trim();
     if (!k) return String(name || "");
     if (clubs.byName(k)) return clubs.byName(k).name;
+    /* A Cup guest prints under its cup-clubs-meta name: "Ipswich Town U21"
+       becomes "Ipswich Town PL2", the competition's own name for the side
+       and the spelling the table graphic already prints. */
+    var guest = guestFor(clubs, name);
+    if (guest) return guest.name;
     return ALIAS[k] || String(name || "").trim();
   }
   function teamDisplay(clubs, name, fit) {
