@@ -10,6 +10,9 @@
    means these assertions are made about the code that actually ships, and a
    rename of those markers fails loudly rather than silently testing nothing.
 
+   v2.0 of the tool (09/10/2026) replaced the Load button with a games list:
+   load() below does what loadGames does with a response, minus the fetch.
+
    Since 09/10/2026 the row-building lives in graphics/_shared/fixtures-card.js
    (shared with the scheduled batch). That file is loaded as shipped too and
    handed to the tool section as `C`, exactly as the page does.
@@ -35,6 +38,9 @@ function loadSection() {
   const a = src.indexOf(START), b = src.indexOf(END);
   assert.ok(a >= 0, `marker not found in fixtures-app.js: ${START}`);
   assert.ok(b > a,  `marker not found in fixtures-app.js: ${END}`);
+  /* The game-state helpers sit above the section, in the shipped file too. */
+  const helpers = src.slice(src.indexOf('  var period = function'), src.indexOf('  /* ---------------- the controls'));
+  assert.ok(helpers.includes('isDone'), 'helpers not found in fixtures-app.js');
 
   const status = [];
   const state = { division: 'National', mode: 'fixtures', rows: [] };
@@ -47,6 +53,7 @@ function loadSection() {
     var NLS_BASE = "";
     var COMPETITION_ID = C.COMPETITION_ID;
     var ymdUK = C.ymdUK;
+    var games = [], off = {};
     var NL = {
       clubs:  { meta: function () { return META; }, byOpta: function (id) { return OPTA[id] || null; } },
       season: { current: function (m) { return m && m.seasons && m.seasons.current; },
@@ -59,11 +66,22 @@ function loadSection() {
     function save() {}
     function render() {}
     function $() { return null; }
+    ${helpers}
     ${src.slice(a, b)}
-    return { applyMatches: applyMatches, koTime: C.koTime, koDay: C.koDay,
-             dividerLabel: C.dividerLabel,
+    /* What loadGames does with a response, minus the fetch and the DOM:
+       postponed games start unticked, the type follows the scores. */
+    function load(data, mode) {
+      games = data.map(function (m, i) { return Object.assign({ id: m.id || 'g' + i }, m); });
+      off = {};
+      games.forEach(function (m) { if (isPostponed(m)) off[m.id] = true; });
+      state.mode = mode || autoMode(games);
+      rebuild();
+    }
+    return { load: load, rebuild: rebuild, autoMode: autoMode, off: function () { return off; },
+             games: function () { return games; },
+             koTime: C.koTime, koDay: C.koDay, dividerLabel: C.dividerLabel,
              nlsTeamName: function (t) { return C.nlsTeamName(NL.clubs, t); },
-             dateOptionLabel: dateOptionLabel };
+             dateLabel: dateLabel };
   `;
   const api = new Function('META', 'OPTA', 'STATUS', 'state', 'CARD', body)(meta, optaIndex, status, state, win.NL_FIXTURES_CARD);
   return { ...api, state, status: () => status.join(' · ') };
@@ -113,14 +131,10 @@ test('a match is filed under its UK day, and dividers read as a date', () => {
 });
 
 test('date options stay short enough to read inside the select', () => {
-  const { dateOptionLabel } = loadSection();
-  assert.equal(dateOptionLabel('2026-08-29', { count: 12 }), 'Sat 29 Aug (12)');
-  assert.equal(dateOptionLabel('2026-08-25', { count: 1 }), 'Tue 25 Aug (1)');
-  assert.equal(dateOptionLabel('2026-08-25', null), 'Tue 25 Aug');
-  for (const n of [1, 12]) {
-    assert.ok(dateOptionLabel('2026-08-29', { count: n }).length <= 16,
-      'a longer label was being cut off mid-word in the panel');
-  }
+  const { dateLabel } = loadSection();
+  assert.equal(dateLabel('2026-08-29'), 'Sat 29 Aug');
+  assert.equal(dateLabel('2026-08-25'), 'Tue 25 Aug');
+  assert.ok(dateLabel('2026-12-26').length <= 16, 'a longer label was being cut off mid-word in the panel');
 });
 
 test('clubs resolve on optaID, so a crest never depends on the name NLS sends', () => {
@@ -140,34 +154,32 @@ test('every current-season club has an optaID for the feed to match on', () => {
 
 test('an ordinary Saturday prints no kick-off times', () => {
   const t = loadSection();
-  t.applyMatches(saturday());
+  t.load(saturday());
   assert.equal(t.state.rows.length, 6);
   assert.ok(t.state.rows.every(r => r.divider == null), 'one day needs no dividers');
   assert.ok(t.state.rows.every(r => r.koOn === false), 'nothing is unusual, so nothing is ticked');
-  assert.doesNotMatch(t.status(), /ticked/);
 });
 
 test('rows come out in the order a card lists them — earliest, then alphabetical', () => {
   const t = loadSection();
-  t.applyMatches(saturday());
+  t.load(saturday());
   const homes = t.state.rows.map(r => r.home);
   assert.deepEqual(homes, [...homes].sort((a, b) => a.localeCompare(b)));
 });
 
 test('the odd kick-off out is ticked, and only that one', () => {
   const t = loadSection();
-  t.applyMatches([...saturday(),
+  t.load([...saturday(),
     match(optaFor('Southend United'), optaFor('Woking'), '2026-08-29 11:30:00')]);
   const ticked = t.state.rows.filter(r => r.koOn);
   assert.equal(ticked.length, 1);
   assert.equal(ticked[0].ko, '12:30');
   assert.equal(t.state.rows[0].ko, '12:30', 'the early game leads the card');
-  assert.match(t.status(), /1 kick-off ticked/);
 });
 
 test('a card spanning several days gets a divider above each one', () => {
   const t = loadSection();
-  t.applyMatches([
+  t.load([
     match(optaFor('Aldershot Town'), optaFor('Altrincham'), '2026-08-28 18:45:00'),
     match(optaFor('Boston United'), optaFor('Barrow'), '2026-08-29 14:00:00'),
     match(optaFor('Carlisle United'), optaFor('Eastleigh'), '2026-08-29 14:00:00'),
@@ -181,14 +193,29 @@ test('a card spanning several days gets a divider above each one', () => {
   ]);
 });
 
-test('postponed matches are left off the card and counted in the status line', () => {
+test('a game the feed calls postponed starts unticked, and ticking it puts it back', () => {
   const t = loadSection();
-  t.applyMatches([
+  t.load([
     match(optaFor('Aldershot Town'), optaFor('Altrincham'), '2026-08-29 14:00:00'),
     match(optaFor('Boston United'), optaFor('Barrow'), '2026-08-29 14:00:00', null, null, 'Waterlogged pitch')
   ]);
   assert.equal(t.state.rows.length, 1);
-  assert.match(t.status(), /1 postponed left out/);
+  const pp = t.games().find(g => g.attributes.matchPeriod === 'Postponed');
+  delete t.off()[pp.id];
+  t.rebuild();
+  assert.equal(t.state.rows.length, 2, 'the feed was wrong; the game is back on the card');
+});
+
+/* The reason the public edition exists: a late postponement the feed has
+   not caught up with. Sam unticks it; the card drops it. */
+test('unticking a game leaves it off the card', () => {
+  const t = loadSection();
+  t.load(saturday());
+  const first = t.games()[0];
+  t.off()[first.id] = true;
+  t.rebuild();
+  assert.equal(t.state.rows.length, 5);
+  assert.ok(!t.state.rows.some(r => r.home === 'Aldershot Town'));
 });
 
 /* NLS keeps postponementReason on a game after it is rearranged. Seen live
@@ -197,7 +224,7 @@ test('postponed matches are left off the card and counted in the status line', (
 test('a rearranged game still carrying its old postponement reason stays on the card', () => {
   const t = loadSection();
   t.state.mode = 'results';
-  t.applyMatches([
+  t.load([
     match(optaFor('Aldershot Town'), optaFor('Altrincham'), '2026-10-06 18:45:00', 1, 0, 'Other', 'FullTime'),
     match(optaFor('Boston United'), optaFor('Barrow'), '2026-10-06 18:45:00', 2, 2)
   ]);
@@ -205,26 +232,29 @@ test('a rearranged game still carrying its old postponement reason stays on the 
   assert.doesNotMatch(t.status(), /postponed/);
 });
 
-test('results carry the real scoreline, and 0-0 is a score not a blank', () => {
+test('results carry the real scoreline, 0-0 is a score, and a game in progress shows no score', () => {
   const t = loadSection();
-  t.state.mode = 'results';
-  t.applyMatches([
-    match(optaFor('Aldershot Town'), optaFor('Altrincham'), '2026-08-29 14:00:00', 2, 1),
-    match(optaFor('Boston United'), optaFor('Barrow'), '2026-08-29 14:00:00', 0, 0),
-    match(optaFor('Carlisle United'), optaFor('Eastleigh'), '2026-08-29 14:00:00', null, null)
-  ]);
+  t.load([
+    match(optaFor('Aldershot Town'), optaFor('Altrincham'), '2026-08-29 14:00:00', 2, 1, null, 'FullTime'),
+    match(optaFor('Boston United'), optaFor('Barrow'), '2026-08-29 14:00:00', 0, 0, null, 'FullTime'),
+    match(optaFor('Carlisle United'), optaFor('Eastleigh'), '2026-08-29 14:00:00', 1, 0, null, 'SecondHalf')
+  ], 'results');
   const [a, b, c] = t.state.rows;
   assert.deepEqual([a.hs, a.as], ['2', '1']);
   assert.deepEqual([b.hs, b.as], ['0', '0']);
-  assert.deepEqual([c.hs, c.as], ['', '']);
-  assert.match(t.status(), /1 without a score/, 'an unplayed match must not pass as a blank scoreline');
+  assert.deepEqual([c.hs, c.as], ['', ''], 'a live score must never print as a result');
 });
 
-test('a results load with nothing played yet says so', () => {
+test('the card type follows the scores: none played, all played, some played', () => {
   const t = loadSection();
-  t.state.mode = 'results';
-  t.applyMatches(saturday());
-  assert.match(t.status(), /no scores yet/);
+  const ft = (h, a) => match(optaFor(h), optaFor(a), '2026-08-29 14:00:00', 1, 0, null, 'FullTime');
+  const pre = (h, a) => match(optaFor(h), optaFor(a), '2026-08-29 14:00:00');
+  assert.equal(t.autoMode([pre('Aldershot Town', 'Altrincham')]), 'fixtures');
+  assert.equal(t.autoMode([ft('Aldershot Town', 'Altrincham')]), 'results');
+  assert.equal(t.autoMode([ft('Aldershot Town', 'Altrincham'), pre('Boston United', 'Barrow')]), 'round');
+  assert.equal(t.autoMode([ft('Aldershot Town', 'Altrincham'),
+    match(optaFor('Boston United'), optaFor('Barrow'), '2026-08-29 14:00:00', null, null, 'Waterlogged pitch')]), 'results',
+    'a postponed game does not stop a day counting as played');
 });
 
 test('more matches than the graphic holds are trimmed, and the trim is reported', () => {
@@ -233,16 +263,7 @@ test('more matches than the graphic holds are trimmed, and the trim is reported'
   const pool = meta.clubs.filter(c => c.optaID).slice(0, 40);
   const many = [];
   for (let i = 0; i < 40; i += 2) many.push(match(pool[i].optaID, pool[i + 1].optaID, '2026-08-29 14:00:00'));
-  t.applyMatches(many);
+  t.load(many);
   assert.equal(t.state.rows.filter(r => r.divider == null).length, 16);
-  assert.match(t.status(), /trimmed to 16/);
-});
-
-test('an empty response leaves the current card alone', () => {
-  const t = loadSection();
-  t.applyMatches(saturday());
-  const before = t.state.rows;
-  t.applyMatches([]);
-  assert.equal(t.state.rows, before, 'a bad date must not wipe the card you were working on');
-  assert.match(t.status(), /No matches on that date/);
+  assert.match(t.status(), /first 16 games/);
 });

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* ============================================================
    build-fixtures-graphics.js
-   Version: v1.6 (09/10/2026)
+   Version: v1.7 (09/10/2026)
 
    Makes the fixtures and results cards that are due, without anyone
    pressing anything. Run by .github/workflows/fixtures-graphics.yml on a
@@ -81,6 +81,8 @@
      render offline.
 
    CHANGELOG
+     v1.7 09/10/2026  Round rules moved to graphics/_shared/rounds.js, shared
+                      with the Fixtures & Results tool.
      v1.6 09/10/2026  Matchday adds "Round so far" when an earlier day of the
                       round has been played.
      v1.5 09/10/2026  --mode matchday: today's games only, on the morning of
@@ -179,21 +181,9 @@ function loadRounds(label) {
   }
   return JSON.parse(fs.readFileSync(p, 'utf8'));
 }
-function roundFor(rounds, division, ymd) {
-  return (rounds[division] || []).find(r => r.from <= ymd && ymd <= r.to) || null;
-}
-/* The header text. League: "13" → MATCHDAY 13, "" → MATCHDAY. The Cup's
-   group rounds read "GROUP STAGE – MATCHDAY 3" (breaks at the dash) and a
-   group-stage date outside every window reads GROUP STAGE. */
-function cardTitle(rounds, division, ymd) {
-  const r = roundFor(rounds, division, ymd);
-  if (r && r.title) return r.title;
-  if (division !== 'Cup') return r ? String(r.round) : '';
-  if (r) return `GROUP STAGE – MATCHDAY ${r.round}`;
-  const group = rounds.Cup || [];
-  const lastGroupDay = group.length ? group[group.length - 1].to : '';
-  return ymd <= lastGroupDay ? 'GROUP STAGE' : '';
-}
+/* roundFor and cardTitle live in graphics/_shared/rounds.js, shared with the
+   Fixtures & Results tool so both title a card the same way. */
+const { roundFor, cardTitle } = require('../graphics/_shared/rounds.js');
 
 /* ---------- National League Services ---------- */
 
