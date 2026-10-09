@@ -1,7 +1,7 @@
 /* ============================================================
    Fixtures & Results Card — shared renderer
    File: /graphics/_shared/fixtures-card.js
-   Version: v1.4 (09/10/2026)
+   Version: v1.5 (09/10/2026)
 
    Single source of truth for the fixtures/results card artwork. Both the
    interactive tool (/graphics/fixtures-graphic/) and the scheduled batch
@@ -22,6 +22,7 @@
      toPng(gfx, format)            → Promise<{ blob, late, missing[] }>
                                      (needs png-export.js and html-to-image)
        card = { division, format, mode, matchday, fit, season, rows }
+       mode   fixtures | results | round (scores where played, v where not)
      buildRows(nlsData, clubs)     → { rows, total, postponed, trimmed, odd }
        NLS list-endpoint matches → card rows, with day dividers and the
        kick-off-time defaults (only the odd-one-out times are printed).
@@ -31,6 +32,10 @@
      ymdUK, koTime, koDay, dividerLabel, nlsDate, nlsTeamName(clubs, team)
 
    CHANGELOG
+     v1.5 09/10/2026  mode "round": a round so far — games played show their
+                      score, games to come show v — subtitled FIXTURES &
+                      RESULTS. For the Saturday-morning card that includes
+                      Friday's result.
      v1.4 09/10/2026  Abandoned games print A - A where the score goes
                       (buildRows; typing A and A by hand does the same).
                       A results row with no score prints its kick-off time
@@ -204,7 +209,10 @@
     gfx.setAttribute("data-mode", mode);
     gfx.setAttribute("data-fit", fit);
 
-    var sub = (DIV_NAME[div] + " " + (mode === "results" ? "RESULTS" : "FIXTURES")).toUpperCase();
+    /* round = the round so far: results where played, fixtures where not. */
+    var scored = mode === "results" || mode === "round";
+    var sub = (DIV_NAME[div] + " " +
+      (mode === "round" ? "FIXTURES & RESULTS" : mode === "results" ? "RESULTS" : "FIXTURES")).toUpperCase();
 
     var head = document.createElement("div");
     head.className = "gfx-head";
@@ -231,7 +239,7 @@
       }
       var homeCrest = crestUrl(crestKey(clubs, canonicalName(clubs, r.home)));
       var awayCrest = crestUrl(crestKey(clubs, canonicalName(clubs, r.away)));
-      var hasScore = mode === "results" && r.hs !== "" && r.hs != null && r.as !== "" && r.as != null;
+      var hasScore = scored && r.hs !== "" && r.hs != null && r.as !== "" && r.as != null;
       var mid;
       if (hasScore) {
         mid = '<span class="score">' + escapeHtml(r.hs) + '&nbsp;-&nbsp;' + escapeHtml(r.as) + '</span>';
@@ -247,7 +255,7 @@
            results card this is a game still to be played (the 17:30 on a
            card made when the 3pm games finished): buildRows ticks only the
            times that differ from the card's usual one. */
-        if (r.ko && r.koOn !== false && (mode !== "results" || r.koOn === true)) {
+        if (r.ko && r.koOn !== false && (!scored || r.koOn === true)) {
           mid += '<span class="ko">' + escapeHtml(r.ko) + '</span>';
         }
       }

@@ -197,7 +197,7 @@ test('the early card never prints a live score as a result', () => {
 
 test('a results row with no score prints its kick-off only when it is ticked', () => {
   const src = readFileSync(join(REPO, 'graphics/_shared/fixtures-card.js'), 'utf8');
-  assert.match(src, /mode !== "results" \|\| r\.koOn === true/);
+  assert.match(src, /!scored \|\| r\.koOn === true/);
 });
 
 test('once only, and a changed card goes again as the next version', () => {
@@ -288,12 +288,12 @@ test('every card due, fixtures and results alike, has a renderer', async () => {
    that spans more than one day, a card with that day's games only. A
    one-day round gets none — the round card already is that card. Same
    stand-in shapes as above. */
-test('matchday: Saturday without the Friday game; nothing for a one-day round', async () => {
+test('matchday: Saturday without the Friday game, the round so far with it; nothing for a one-day round', async () => {
   const http = await import('node:http');
   const { execFile } = await import('node:child_process');
   const games = {
-    '2026-10-09': [{ id: 'f1', attributes: { kickOffDateUTC: '2026-10-09 18:45:00', matchPeriod: 'PreMatch',
-      homeTeam: { name: 'Sutton United' }, awayTeam: { name: 'Boreham Wood' } } }],
+    '2026-10-09': [{ id: 'f1', attributes: { kickOffDateUTC: '2026-10-09 18:45:00', matchPeriod: 'FullTime',
+      homeTeam: { name: 'Sutton United', score: 2 }, awayTeam: { name: 'Boreham Wood', score: 1 } } }],
     '2026-10-10': [{ id: 's1', attributes: { kickOffDateUTC: '2026-10-10 14:00:00', matchPeriod: 'PreMatch',
       homeTeam: { name: 'Woking' }, awayTeam: { name: 'Yeovil Town' } } },
       { id: 's2', attributes: { kickOffDateUTC: '2026-10-10 14:00:00', matchPeriod: 'Postponed',
@@ -304,10 +304,11 @@ test('matchday: Saturday without the Friday game; nothing for a one-day round', 
   const server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://x');
     const pd = Object.fromEntries(Object.keys(games).map(d => [d, {}]));
-    const day = (u.searchParams.get('from') || '').slice(0, 10);
+    const from = (u.searchParams.get('from') || '').slice(0, 10), to = (u.searchParams.get('to') || '').slice(0, 10);
+    const list = Object.keys(games).filter(d => d >= from && d <= to).flatMap(d => games[d]);
     const body = u.searchParams.get('includePopulatedDates')
       ? { data: [], meta: { populatedDates: pd }, links: {} }
-      : { data: games[day] || [], meta: { totalCount: (games[day] || []).length }, links: {} };
+      : { data: list, meta: { totalCount: list.length }, links: {} };
     res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body));
   });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
@@ -320,7 +321,7 @@ test('matchday: Saturday without the Friday game; nothing for a one-day round', 
       for (const today of ['2026-10-09', '2026-10-10', '2026-10-13']) {
         const r = await m.dueCards({ mode: 'matchday', division: 'National', today, formats: ['4x5'] },
           ${JSON.stringify(rounds)}, 2026, new Map());
-        out[today] = r.cards.map(c => ({ id: c.id, kind: c.kind, games: c.data.map(g => g.id), title: c.matchday, file: c.files[0].file }));
+        out[today] = r.cards.map(c => ({ id: c.id, kind: c.kind, games: c.data.map(g => g.id), title: c.matchday, file: c.files[0].file, mode: c.mode }));
       }
       console.log(JSON.stringify(out));
     })().catch(e => { console.error(e.stack); process.exit(1); });`;
@@ -329,8 +330,12 @@ test('matchday: Saturday without the Friday game; nothing for a one-day round', 
     (err, out, errOut) => err ? reject(new Error(errOut || err.message)) : resolve(out)));
   server.close();
   const out = JSON.parse(stdout);
-  assert.deepEqual(out['2026-10-10'], [{ id: '2026-10-10 National Fixtures Sat', kind: 'fixtures', games: ['s1'],
-    title: '13', file: 'National Fixtures 10Oct26 Sat - 4x5.png' }], 'Saturday only, postponed game left off');
+  assert.deepEqual(out['2026-10-10'][0], { id: '2026-10-10 National Fixtures Sat', kind: 'fixtures', games: ['s1'],
+    title: '13', file: 'National Fixtures 10Oct26 Sat - 4x5.png', mode: 'fixtures' }, 'Saturday only, postponed game left off');
+  assert.deepEqual(out['2026-10-10'][1], { id: '2026-10-10 National Round so far', kind: 'fixtures', games: ['f1', 's1'],
+    title: '13', file: 'National Round so far 10Oct26 - 4x5.png', mode: 'round' }, 'and the round so far, Friday included');
+  assert.equal(out['2026-10-10'].length, 2);
+  assert.equal(out['2026-10-09'].length, 1, 'Friday: no earlier day, so no round-so-far card');
   assert.equal(out['2026-10-09'][0].id, '2026-10-09 National Fixtures Fri', 'the Friday of a two-day round gets its own');
   assert.deepEqual(out['2026-10-09'][0].games, ['f1']);
   assert.deepEqual(out['2026-10-13'], [], 'a one-day round: the round card already shows only today');
