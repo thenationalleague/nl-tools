@@ -78,10 +78,12 @@ test('it dispatches a workflow that exists, on main, as a real run', () => {
   }
   assert.equal(/const BRANCH = "([^"]+)"/.exec(SRC)[1], 'main');
   assert.match(CODE, /dry_run: "false"/, 'the workflow defaults to a dry run; this must turn it off');
-  assert.match(CODE, /mode: "results"/);
+  assert.match(CODE, /dispatch\("results"\)/, 'the full-time trigger asks for results');
+  assert.match(CODE, /dispatch\("fixtures"\)/, 'the 10am trigger asks for fixtures');
+  assert.match(CODE, /schedule: "0 10 \* \* \*",\s*timeZone: "Europe\/London"/, '10am UK, not UTC');
 });
 
 test('a refused dispatch is not recorded as asked, and nothing throws', () => {
-  assert.match(CODE, /if \(!\(await dispatch\(\)\)\) return;/);
+  assert.match(CODE, /if \(!\(await dispatch\("results"\)\)\) return;/);
   assert.doesNotMatch(CODE, /\bthrow\b(?! new Error\("NLS)/, 'only the NLS read may throw, and the tick catches it');
 });

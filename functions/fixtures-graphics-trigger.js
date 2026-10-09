@@ -45,6 +45,13 @@
  * expires this logs an error and the workflow's GitHub timer carries on as
  * before — later, but nothing breaks.
  *
+ * FIXTURES AT 10AM
+ * ----------------
+ * fixturesGraphicsAt10 asks for the day's fixtures cards at 10:00 UK, for
+ * the same reason: GitHub's own 10am timer can run hours late. Cloud
+ * Scheduler fires on the minute. The workflow's timer stays as the backup,
+ * and the once-only record means the two never make a card twice.
+ *
  * CHANGELOG
  *   v1.0 09/10/2026  First version.
  */
@@ -90,7 +97,7 @@ async function todaysMatches(competitionID, ymd) {
 
 /* ---------- GitHub ---------- */
 
-async function dispatch() {
+async function dispatch(mode) {
   const url = "https://api.github.com/repos/" + OWNER + "/" + REPO +
     "/actions/workflows/" + WORKFLOW + "/dispatches";
   const res = await fetch(url, {
@@ -103,7 +110,7 @@ async function dispatch() {
     },
     /* A real run: dry_run defaults to true for anyone pressing the button,
        so it is set off here explicitly. */
-    body: JSON.stringify({ ref: BRANCH, inputs: { mode: "results", division: "all", dry_run: "false" } }),
+    body: JSON.stringify({ ref: BRANCH, inputs: { mode, division: "all", dry_run: "false" } }),
   });
   if (res.status === 204) return true;
   const body = await res.text().catch(() => "");
@@ -127,7 +134,7 @@ async function tick(now) {
   if (go) {
     /* Only record the ask once GitHub has taken it, so a refused dispatch is
        tried again next tick rather than written off. */
-    if (!(await dispatch())) return;
+    if (!(await dispatch("results"))) return;
     logger.info("fixtures-graphics: asked for a results run", { day: ymd, fp, asks: write.asks });
   }
   if (write) await ref.set(write);
@@ -153,3 +160,17 @@ exports.fixturesGraphicsAtFullTime = onSchedule({
   catch (err) { logger.error("fixtures-graphics: tick failed", { message: err && err.message }); }
 });
 
+exports.fixturesGraphicsAt10 = onSchedule({
+  schedule: "0 10 * * *",
+  timeZone: "Europe/London",
+  region: "europe-west2",
+  memory: "256MiB",
+  timeoutSeconds: 60,
+  maxInstances: 1,
+  retryCount: 0,
+  serviceAccount: "firebase-adminsdk-fbsvc@nl-tools.iam.gserviceaccount.com",
+  secrets: [GITHUB_DISPATCH_TOKEN],
+}, async () => {
+  try { if (await dispatch("fixtures")) logger.info("fixtures-graphics: asked for the 10am fixtures run"); }
+  catch (err) { logger.error("fixtures-graphics: 10am dispatch failed", { message: err && err.message }); }
+});
