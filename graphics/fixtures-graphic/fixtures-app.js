@@ -1,89 +1,31 @@
 /* ============================================================
    Fixtures & Results Graphic — app logic.
+   Version: v1.12 (09/10/2026)
+
+   The card itself is drawn by /graphics/_shared/fixtures-card.js — the
+   same renderer the scheduled batch (scripts/build-fixtures-graphics.js)
+   uses, so a hand-made card and a timed one cannot drift. This file is
+   the tool around it: state, editor, paste box, the NLS date pickers,
+   preview scaling and the PNG download.
+
    Club roster, crests and lookups come from the canon (NL.clubs).
    Paste = home, [middle nuked], away. Editor adds scores + KO.
+
+   CHANGELOG
+     v1.12 09/10/2026  Card drawing moved to _shared/fixtures-card.js.
+                       Season eyebrow now read from clubs-meta instead of
+                       a hard-coded "2026-27". A title typed with a spaced
+                       en dash breaks onto two lines at the dash.
    ============================================================ */
 (function () {
   "use strict";
 
+  var C = window.NL_FIXTURES_CARD;
   var STORAGE_KEY = "nl-fixtures-gfx-v1";
-  var MAX_ROWS = 12;
-
-  var DIVISION_LOGO = {
-    National: "/assets/divisions/medium/National.png",
-    North:    "/assets/divisions/medium/North.png",
-    South:    "/assets/divisions/medium/South.png",
-    Cup:      "/assets/divisions/medium/NL%20Cup.png"
-  };
-  /* No LOGO_FALLBACK. A division badge that fails used to be replaced with the
-     generic National League logo, which published a graphic branded as the
-     wrong competition — worse than an obvious gap. Missing art now renders
-     blank (visibility:hidden keeps the header's spacing) and the export
-     warning names it. */
-  var SPONSOR_URL = "/assets/partners/TIC%20Health.png";
-
-  /* National League Services — the authoritative fixture/result feed. Public,
-     no auth, and already fetched straight from the browser by travel-planner
-     and the fan embeds, so no proxy is involved. competitionID values are firm
-     NLS codes; never derive them from a division name. */
-  var NLS_BASE = "https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2";
-  var COMPETITION_ID = { National: 89, North: 373, South: 372, Cup: 1275 };
-  var ROSE_WHITE = (window.__resources && window.__resources.roseWhite) || "/assets/crests/National%20League%20rose%20white.png";
-
-  var DIV_NAME = {
-    National: "Enterprise National League",
-    North: "Enterprise National League North",
-    South: "Enterprise National League South",
-    Cup: "National League Cup"
-  };
-
-  /* Names that always display shortened, in every fit mode. Keyed on the
-     canonical club name, lower-cased. */
-  var SHORTEN = {
-    "hampton & richmond borough": "Hampton & Richmond",
-    "hemel hempstead town": "Hemel Hempstead"
-  };
-
-  /* Accepted spellings that aren't the club's canonical name. Resolving
-     through here means the crest and the club record are found whichever
-     way the name was pasted. */
-  var ALIAS = {
-    "hemel hempstead": "Hemel Hempstead Town",
-    "hampton & richmond": "Hampton & Richmond Borough"
-  };
-
-  /* Crests are served same-origin on purpose. The PNG export draws every image
-     into a canvas, and a cross-origin image taints it — the crest is then
-     dropped from the export rather than drawn. NL.clubs.crestUrl points at
-     raw.githubusercontent.com, so it cannot be used on this path; the club
-     lookup still comes from the canon, only the URL is local. */
-  /* medium tier (256px). Row crests render small in a 1080-wide graphic, so
-     256px is comfortably oversampled, while the full-res originals average
-     524KB each (largest 5.4MB) — at 24 crests that is ~12.6MB of needless
-     transfer, and the slower the connection the more likely one of them fails
-     to arrive before export and is dropped. Medium averages 57KB. */
-  var CREST_BASE = "/assets/crests/medium/";
-  function crestUrl(name) {
-    return name ? CREST_BASE + encodeURIComponent(name) + ".png" : "";
-  }
-  /* Guest sides — the PL2 teams that enter the National League Cup — live in
-     their own file and carry a crestName pointing at the parent club's badge,
-     so no crest is duplicated. "Birmingham City PL2" is drawn with the
-     Birmingham City crest; without this it asked for a file that isn't there
-     and rendered a gap. */
-  function crestKey(name) {
-    var guest = NL.clubs.guestByName && NL.clubs.guestByName(name);
-    return (guest && guest.crestName) || name;
-  }
-
-  /* Any pasted spelling → the club's canonical name (used for crest lookup
-     and club record lookup). Unknown names pass through untouched. */
-  function canonicalName(name) {
-    var k = String(name || "").toLowerCase().trim();
-    if (!k) return String(name || "");
-    if (NL.clubs.byName(k)) return NL.clubs.byName(k).name;
-    return ALIAS[k] || String(name || "").trim();
-  }
+  var MAX_ROWS = C.MAX_ROWS;
+  var NLS_BASE = C.NLS_BASE;
+  var COMPETITION_ID = C.COMPETITION_ID;
+  var ymdUK = C.ymdUK;
 
   var SAMPLE = [
     "Brackley Town\tv\tSolihull Moors",
@@ -99,23 +41,10 @@
     format: "1x1",
     mode: "fixtures",          /* fixtures | results */
     source: "feed",            /* feed | manual — which entry card is shown */
-    matchday: "",              /* "" = MATCHDAY (no number) | "1".."46" */
-    fit: "wrap",               /* wrap | short | truncate | scale | kern */
-    rows: []                   /* {home, away, hs, as, ko} */
+    matchday: "",              /* "" = MATCHDAY (no number) | "1".."46" | free text */
+    fit: "wrap",               /* wrap | short */
+    rows: []                   /* {home, away, hs, as, ko, koOn} | {divider} */
   };
-
-  function modeLabel() {
-    return state.mode === "results" ? "RESULTS" : "FIXTURES";
-  }
-  function matchdayTitle() {
-    var m = (state.matchday || "").trim();
-    if (!m) return "MATCHDAY";
-    if (/^\d{1,2}$/.test(m)) return "MATCHDAY " + m;   /* bare number → MATCHDAY N */
-    return m;                                         /* free text verbatim */
-  }
-  function subLine() {
-    return (DIV_NAME[state.division] + " " + modeLabel()).toUpperCase();
-  }
 
   /* ---------------- elements ---------------- */
   var $ = function (id) { return document.getElementById(id); };
@@ -125,19 +54,6 @@
   function escapeHtml(s) {
     return String(s == null ? "" : s)
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  }
-  function teamDisplay(name) {
-    var canon = canonicalName(name);
-    /* short-name mode uses each club's short label from the DB */
-    if (state.fit === "short") {
-      var club = NL.clubs.byName(canon) ||
-                 (NL.clubs.guestByName && NL.clubs.guestByName(canon));
-      if (club && club.short) return club.short.toUpperCase();
-    }
-    /* a few names always shorten on arrival, every mode */
-    var k = canon.toLowerCase();
-    if (SHORTEN[k]) return SHORTEN[k].toUpperCase();
-    return canon.toUpperCase();
   }
   function save() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {} }
   function load() {
@@ -187,189 +103,25 @@
     return out;
   }
 
-  /* ---------------- render ---------------- */
+  /* ---------------- render ----------------
+     The eyebrow is the season clubs-meta calls current; until that file
+     lands, the clock's answer. */
+  function seasonText() {
+    var meta = NL.clubs.meta && NL.clubs.meta();
+    var y = (meta && NL.season && NL.season.current(meta)) || (NL.season && NL.season.fromDate(new Date()));
+    return state.sub || C.seasonLabel(y) || "";
+  }
   function render() {
-    var fc = 0;
-    var rows = state.rows.filter(function (r) {
-      if (r.divider != null) return true;
-      if (!((r.home || "").trim() || (r.away || "").trim())) return false;
-      fc++; return fc <= MAX_ROWS;
-    });
-    var n = rows.length || 1;
-    var div = state.division;
-
-    var gfx = document.createElement("div");
-    gfx.className = "gfx";
-    gfx.setAttribute("data-format", state.format);
-    gfx.setAttribute("data-mode", state.mode);
-    gfx.setAttribute("data-fit", state.fit);
-
-    /* header */
-    var head = document.createElement("div");
-    head.className = "gfx-head";
-    head.innerHTML =
-      '<div class="logo-tile"><img class="div-logo" crossorigin="anonymous" src="' + DIVISION_LOGO[div] +
-        '" onerror="this.onerror=null;this.style.visibility=\'hidden\'"></div>' +
-      '<div class="titles">' +
-        '<span class="eyebrow">' + escapeHtml(state.sub || "2026-27") + '</span>' +
-        '<h1 class="gfx-title">' + escapeHtml(matchdayTitle()) + '</h1>' +
-        '<p class="gfx-sub">' + escapeHtml(subLine()) + '</p>' +
-      '</div>' +
-      '<img class="rose-wm" crossorigin="anonymous" src="' + ROSE_WHITE + '">';
-
-    /* body */
-    var body = document.createElement("div");
-    body.className = "gfx-body";
-
-    rows.forEach(function (r) {
-      if (r.divider != null) {
-        var dv = document.createElement("div");
-        dv.className = "fx-divider";
-        dv.innerHTML = '<span class="dv-text">' + escapeHtml(r.divider) + '</span>';
-        body.appendChild(dv);
-        return;
-      }
-      var homeName = canonicalName(r.home), awayName = canonicalName(r.away);
-      var homeCrest = crestUrl(crestKey(homeName));
-      var awayCrest = crestUrl(crestKey(awayName));
-      var hasScore = state.mode === "results" && r.hs !== "" && r.hs != null && r.as !== "" && r.as != null;
-      var mid;
-      if (hasScore) {
-        mid = '<span class="score">' + escapeHtml(r.hs) + '&nbsp;-&nbsp;' + escapeHtml(r.as) + '</span>';
-      } else {
-        mid = '<span class="vs">v</span>';
-        /* koOn undefined = show (how every pasted row has always behaved);
-           only an explicit false hides a time the row is carrying. */
-        if (state.mode !== "results" && r.ko && r.koOn !== false) {
-          mid += '<span class="ko">' + escapeHtml(r.ko) + '</span>';
-        }
-      }
-      var row = document.createElement("div");
-      row.className = "fx";
-      row.innerHTML =
-        '<div class="crest home"><div class="tile">' + (homeCrest ? '<img crossorigin="anonymous" src="' + homeCrest + '" onerror="this.style.display=\'none\'">' : "") + '</div></div>' +
-        '<div class="bar home"><span class="nm">' + escapeHtml(teamDisplay(r.home)) + '</span></div>' +
-        '<div class="mid">' + mid + '</div>' +
-        '<div class="bar away"><span class="nm">' + escapeHtml(teamDisplay(r.away)) + '</span></div>' +
-        '<div class="crest away"><div class="tile">' + (awayCrest ? '<img crossorigin="anonymous" src="' + awayCrest + '" onerror="this.style.display=\'none\'">' : "") + '</div></div>';
-      body.appendChild(row);
-    });
-
-    gfx.appendChild(head);
-    gfx.appendChild(body);
-
-    gfxHost.innerHTML = "";
-    gfxHost.appendChild(gfx);
-
-    /* size rows to fill the body without overflow */
-    requestAnimationFrame(function () {
-      var avail = body.clientHeight;
-      var gap = 8;
-      var fixtureCount = rows.filter(function (r) { return r.divider == null; }).length;
-      var dividerCount = rows.length - fixtureCount;
-      var units = fixtureCount + dividerCount * 0.5;   /* dividers are half-height */
-      if (units <= 0) units = 1;
-      var rh = Math.floor((avail - gap * (rows.length - 1)) / units);
-      rh = Math.max(44, Math.min(rh, 98));
-      gfx.style.setProperty("--rh", rh + "px");
-      gfx.style.setProperty("--row-gap", gap + "px");
-      gfx.style.setProperty("--crest", rh + "px");
-      gfx.style.setProperty("--mid", Math.max(86, Math.round(rh * 1.3)) + "px");
-      /* fit the matchday/title: allow up to 2 lines, shrink if longer */
-      var titleEl = gfx.querySelector(".gfx-title");
-      if (titleEl) {
-        titleEl.style.fontSize = "";
-        var tsize = 66, tg = 0;
-        while (titleEl.scrollHeight > tsize * 0.9 * 2 + 6 && tsize > 34 && tg < 40) {
-          tsize -= 1.5; titleEl.style.fontSize = tsize + "px"; tg++;
-        }
-      }
-      fitNames(body);
-      fitStage();
-    });
-  }
-
-  /* ---------------- name fitting ----------------
-     One line is the goal: a name only wraps when it genuinely cannot fit on
-     one at the smallest size we allow.
-
-     The old version measured each name against its own bar's height. That bar
-     is a grid item sized by its content, so its height already included the
-     wrap — a name that had wrapped was measured as "fitting" and never got
-     shrunk, and the leftover two-line box is what read as a name sitting high
-     in the pill with an empty second line under it. Nothing here reads a
-     height that its own font-size decides; the only measurement is the name's
-     one-line width against the bar's width, which the grid fixes independently
-     of the text. */
-
-  /* How far the whole set is willing to shrink to keep everything on one line.
-     A name that still won't fit at this size is a genuine two-liner
-     (SCARBOROUGH ATHLETIC), and it wraps rather than dragging every other name
-     down with it. */
-  var MIN_RATIO = 0.82;
-
-  function barAvailWidth(nm) {
-    var bar = nm.parentNode, cs = getComputedStyle(bar);
-    return bar.clientWidth - parseFloat(cs.paddingLeft || 0) - parseFloat(cs.paddingRight || 0);
-  }
-
-  /* Largest size at or below `base` at which the name fits on one line. */
-  function oneLineSize(nm, base, floor) {
-    var avail = barAvailWidth(nm);
-    nm.style.whiteSpace = "nowrap";
-    var size = base, g = 0;
-    nm.style.fontSize = size + "px";
-    while (nm.scrollWidth > avail + 1 && size > floor && g < 120) {
-      size -= 0.5; nm.style.fontSize = size + "px"; g++;
-    }
-    return { size: size, fits: nm.scrollWidth <= avail + 1 };
-  }
-
-  function fitNames(body) {
-    var nms = [].slice.call(body.querySelectorAll(".fx .nm"));
-    if (!nms.length) return;
-    var canWrap = state.fit === "wrap" || state.fit === "short";
-
-    /* base size comes from --rh via CSS, so read it with our overrides cleared */
-    nms.forEach(function (nm) { nm.style.fontSize = ""; nm.style.letterSpacing = ""; nm.style.whiteSpace = ""; });
-    var base = parseFloat(getComputedStyle(nms[0]).fontSize) || 20;
-    var floor = base * MIN_RATIO;
-
-    /* Smallest one-line size any name needs, ignoring names that can't manage
-       one line even at the floor — those wrap instead, so they don't get to
-       shrink everyone else. */
-    var minSize = base;
-    nms.forEach(function (nm) {
-      var r = oneLineSize(nm, base, floor);
-      if (r.fits && r.size < minSize) minSize = r.size;
-    });
-
-    /* Apply the shared size, then decide per name whether it stays on one
-       line. nowrap is set explicitly, so a name that fits can never end up in
-       a two-line box. */
-    nms.forEach(function (nm) {
-      nm.style.fontSize = minSize + "px";
-      nm.style.whiteSpace = "nowrap";
-      if (nm.scrollWidth <= barAvailWidth(nm) + 1) return;
-      if (!canWrap) return;               /* truncate/scale/kern handle it in CSS */
-
-      nm.style.whiteSpace = "normal";     /* genuinely too long — two lines it is */
-      /* keep the wrapped name inside the row. The row's height is fixed by
-         --rh, so unlike the old code this measures something the font-size
-         cannot move. */
-      var row = nm.parentNode.parentNode;
-      var rowH = row ? row.clientHeight : 0;
-      var size = minSize, g = 0;
-      while (rowH && nm.scrollHeight > rowH - 2 && size > base * 0.5 && g < 60) {
-        size -= 0.5; nm.style.fontSize = size + "px"; g++;
-      }
-    });
+    return C.render(gfxHost, {
+      division: state.division, format: state.format, mode: state.mode,
+      matchday: state.matchday, fit: state.fit, season: seasonText(), rows: state.rows
+    }, NL.clubs).then(fitStage);
   }
 
   function fitStage() {
     var gfx = gfxHost.querySelector(".gfx");
     if (!gfx) return;
-    var h = (state.format === "1x1" ? 1080 : state.format === "4x5" ? 1350 : 1920);
+    var h = C.FORMAT_H[state.format];
     var availW = stageWrap.clientWidth - 24;
 
     /* The height budget must NOT be read from where the stage happens to sit.
@@ -538,35 +290,6 @@
   }
   function nlsUrl(params) { return NLS_BASE + "/matches/?" + params.join("&"); }
 
-  /* NLS timestamps are UTC and arrive either as "2026-08-29 14:00:00" (list)
-     or with a T and a Z. Normalise both, then read them back in UK time —
-     a 19:45 BST kick-off is 18:45Z, and printing the Z time would be wrong. */
-  function nlsDate(s) {
-    if (!s) return null;
-    var d = new Date(String(s).trim().replace(" ", "T").replace(/Z?$/, "Z"));
-    return isNaN(d.getTime()) ? null : d;
-  }
-  function ymdUK(d) { return d.toLocaleDateString("en-CA", { timeZone: "Europe/London" }); }
-  function koTime(s) {
-    var d = nlsDate(s);
-    return d ? d.toLocaleTimeString("en-GB", { timeZone: "Europe/London", hour: "2-digit", minute: "2-digit", hour12: false }) : "";
-  }
-  function koDay(s) { var d = nlsDate(s); return d ? ymdUK(d) : ""; }
-  function dividerLabel(ymd) {
-    var d = new Date(ymd + "T12:00:00Z");   /* midday: no DST edge either way */
-    return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })
-            .replace(/,/g, "").toUpperCase();
-  }
-  /* clubs-meta optaID IS the NLS teamID, so a club resolves on its code rather
-     than on its name — which is what makes the crest lookup reliable. Cup
-     guest sides have no optaID and fall back to the name NLS supplies. */
-  function nlsTeamName(t) {
-    if (!t) return "";
-    var club = t.teamID && NL.clubs.byOpta(t.teamID);
-    return (club && club.name) || t.name || "";
-  }
-  function nlsScore(t) { return (t && t.score != null) ? String(t.score) : ""; }
-
   function dateOptionLabel(ymd, info) {
     var d = new Date(ymd + "T12:00:00Z");
     var lab = d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }).replace(/,/g, "");
@@ -661,58 +384,16 @@
   }
 
   function applyMatches(data) {
-    var postponed = 0;
-    var matches = data.filter(function (m) {
-      if ((m.attributes || {}).postponementReason) { postponed++; return false; }
-      return true;
-    }).map(function (m) {
-      var a = m.attributes || {};
-      return {
-        home: nlsTeamName(a.homeTeam),
-        away: nlsTeamName(a.awayTeam),
-        hs: nlsScore(a.homeTeam),
-        as: nlsScore(a.awayTeam),
-        ko: koTime(a.kickOffDateUTC),
-        day: koDay(a.kickOffDateUTC)
-      };
-    }).filter(function (r) { return r.home && r.away; })
-      .sort(function (a, b) {
-        if (a.day !== b.day) return a.day < b.day ? -1 : 1;
-        if (a.ko !== b.ko) return a.ko < b.ko ? -1 : 1;
-        return a.home.localeCompare(b.home);
-      });
-
-    var trimmed = matches.length > MAX_ROWS;
-    matches = matches.slice(0, MAX_ROWS);
-    if (!matches.length) {
-      setStatus(postponed
-        ? "Nothing to load — all " + postponed + " postponed."
+    var built = C.buildRows(data, NL.clubs);
+    if (!built.total) {
+      setStatus(built.postponed
+        ? "Nothing to load — all " + built.postponed + " postponed."
         : "No matches on that date.", 5000);
       return;
     }
+    var matches = built.matches, postponed = built.postponed, odd = built.odd, trimmed = built.trimmed;
 
-    /* Tick the kick-offs that are NOT the day's usual time. A card where every
-       game is at 15:00 prints no times at all; the 12:30 and the 19:45 print
-       theirs. Show all / Hide all override it. */
-    var counts = {}, usual = "", most = 0;
-    matches.forEach(function (r) {
-      if (!r.ko) return;
-      counts[r.ko] = (counts[r.ko] || 0) + 1;
-      if (counts[r.ko] > most) { most = counts[r.ko]; usual = r.ko; }
-    });
-    var odd = 0;
-    matches.forEach(function (r) { r.koOn = !!(r.ko && r.ko !== usual); if (r.koOn) odd++; });
-
-    /* A card spanning more than one day gets a divider above each day. */
-    var days = [];
-    matches.forEach(function (r) { if (days.indexOf(r.day) < 0) days.push(r.day); });
-    var rows = [], lastDay = null;
-    matches.forEach(function (r) {
-      if (days.length > 1 && r.day !== lastDay) { rows.push({ divider: dividerLabel(r.day) }); lastDay = r.day; }
-      rows.push({ home: r.home, away: r.away, hs: r.hs, as: r.as, ko: r.ko, koOn: r.koOn });
-    });
-
-    state.rows = rows;
+    state.rows = built.rows;
     syncPasteFromRows(); buildGrid(); save(); render();
 
     var msg = "Loaded " + matches.length + " match" + (matches.length === 1 ? "" : "es");
@@ -784,86 +465,26 @@
     var gfx = gfxHost.querySelector(".gfx");
     if (!gfx || !window.htmlToImage) return;
     var prevT = gfx.style.transform, prevW = gfxHost.style.width, prevH = gfxHost.style.height;
-    var h = (state.format === "1x1" ? 1080 : state.format === "4x5" ? 1350 : 1920);
+    var h = C.FORMAT_H[state.format];
     gfx.style.transform = "none";
     gfxHost.style.width = "1080px"; gfxHost.style.height = h + "px";
     setStatus("Rendering PNG…");
-    var restore = function () {};
     try {
-      await (document.fonts && document.fonts.ready);
-      /* Wait for every crest and logo to finish loading FIRST. inlineImages can
-         only convert an image the browser already holds, so exporting before
-         they land silently drops them — which is what a colleague on a cold
-         cache or a slower connection was getting. */
-      var pending = [].slice.call(gfx.querySelectorAll("img"));
-      var loaded = await Promise.all(pending.map(function (img) { return whenImageReady(img, 10000); }));
-      var late = loaded.filter(function (ok) { return !ok; }).length;
-      restore = await inlineImages(gfx);   /* pre-inline so the canvas isn't cross-origin tainted */
-      var blob = await window.htmlToImage.toBlob(gfx, {
-        width: 1080, height: h, pixelRatio: 1, cacheBust: false,
-        backgroundColor: getComputedStyle(gfx).backgroundColor
-      });
+      var out = await C.toPng(gfx, state.format);
       var a = document.createElement("a");
-      a.href = URL.createObjectURL(blob); a.download = fileName();
+      a.href = URL.createObjectURL(out.blob); a.download = fileName();
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(a.href);
       /* never let a half-drawn graphic leave without saying so */
-      setStatus(late
-        ? "Downloaded — but " + late + " image" + (late === 1 ? "" : "s") + " didn't load. Check your connection and export again."
+      setStatus(out.late
+        ? "Downloaded — but " + out.late + " image" + (out.late === 1 ? "" : "s") + " didn't load. Check your connection and export again."
         : "Downloaded " + state.format);
     } catch (err) {
       console.error(err);
       setStatus("Export blocked — use a screenshot.");
     } finally {
-      try { restore(); } catch (e) {}
       gfx.style.transform = prevT; gfxHost.style.width = prevW; gfxHost.style.height = prevH;
     }
-  }
-  /* Resolve once an <img> has actually decoded, or once it's clear it won't.
-     Never rejects — the caller only needs to know whether it made it. */
-  function whenImageReady(img, ms) {
-    return new Promise(function (resolve) {
-      if (img.complete && img.naturalWidth) return resolve(true);
-      var settled = false;
-      function finish(ok) {
-        if (settled) return;
-        settled = true; clearTimeout(timer);
-        img.removeEventListener("load", onLoad);
-        img.removeEventListener("error", onError);
-        resolve(ok);
-      }
-      function onLoad() { finish(!!img.naturalWidth); }
-      function onError() { finish(false); }
-      var timer = setTimeout(function () { finish(false); }, ms || 10000);
-      img.addEventListener("load", onLoad);
-      img.addEventListener("error", onError);
-    });
-  }
-
-  /* Convert every <img> under root to a data URL via canvas so html-to-image
-     never has to fetch cross-origin (which is blocked in the file:// download).
-     Any image that can't be converted is blanked for the capture, so export
-     is never blocked by a tainted canvas. Returns a restore fn. */
-  async function inlineImages(root) {
-    var BLANK = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
-    var imgs = [].slice.call(root.querySelectorAll("img"));
-    var restores = [];
-    imgs.forEach(function (img) {
-      var src = img.getAttribute("src") || "";
-      if (!src || src.indexOf("data:") === 0) return;
-      var done = false;
-      try {
-        if (img.complete && img.naturalWidth) {
-          var c = document.createElement("canvas");
-          c.width = img.naturalWidth; c.height = img.naturalHeight;
-          c.getContext("2d").drawImage(img, 0, 0);
-          var url = c.toDataURL("image/png");   /* throws if tainted */
-          restores.push([img, src]); img.setAttribute("src", url); done = true;
-        }
-      } catch (e) {}
-      if (!done) { restores.push([img, src]); img.setAttribute("src", BLANK); }
-    });
-    return function () { restores.forEach(function (p) { p[0].setAttribute("src", p[1]); }); };
   }
   var statusT;
   function setStatus(m, ms) {

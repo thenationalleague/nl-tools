@@ -10,6 +10,10 @@
    means these assertions are made about the code that actually ships, and a
    rename of those markers fails loudly rather than silently testing nothing.
 
+   Since 09/10/2026 the row-building lives in graphics/_shared/fixtures-card.js
+   (shared with the scheduled batch). That file is loaded as shipped too and
+   handed to the tool section as `C`, exactly as the page does.
+
    Run with `npm test` (node --test). Zero dependencies, no network. */
 
 import test from 'node:test';
@@ -19,6 +23,7 @@ import { join } from 'node:path';
 import { REPO } from './load-canon.mjs';
 
 const APP = join(REPO, 'graphics/fixtures-graphic/fixtures-app.js');
+const CARD = join(REPO, 'graphics/_shared/fixtures-card.js');
 const START = '  /* ---------------- National League Services';
 const END   = '  /* ---------------- team roster';
 
@@ -33,10 +38,15 @@ function loadSection() {
 
   const status = [];
   const state = { division: 'National', mode: 'fixtures', rows: [] };
+  const win = {};
+  new Function('window', readFileSync(CARD, 'utf8'))(win);
+  assert.ok(win.NL_FIXTURES_CARD, 'fixtures-card.js did not define NL_FIXTURES_CARD');
   const body = `
-    var MAX_ROWS = 12;
+    var C = CARD;
+    var MAX_ROWS = C.MAX_ROWS;
     var NLS_BASE = "";
-    var COMPETITION_ID = { National: 89, North: 373, South: 372, Cup: 1275 };
+    var COMPETITION_ID = C.COMPETITION_ID;
+    var ymdUK = C.ymdUK;
     var NL = {
       clubs:  { meta: function () { return META; }, byOpta: function (id) { return OPTA[id] || null; } },
       season: { current: function (m) { return m && m.seasons && m.seasons.current; },
@@ -50,21 +60,23 @@ function loadSection() {
     function render() {}
     function $() { return null; }
     ${src.slice(a, b)}
-    return { applyMatches: applyMatches, koTime: koTime, koDay: koDay,
-             dividerLabel: dividerLabel, nlsTeamName: nlsTeamName,
+    return { applyMatches: applyMatches, koTime: C.koTime, koDay: C.koDay,
+             dividerLabel: C.dividerLabel,
+             nlsTeamName: function (t) { return C.nlsTeamName(NL.clubs, t); },
              dateOptionLabel: dateOptionLabel };
   `;
-  const api = new Function('META', 'OPTA', 'STATUS', 'state', body)(meta, optaIndex, status, state);
+  const api = new Function('META', 'OPTA', 'STATUS', 'state', 'CARD', body)(meta, optaIndex, status, state, win.NL_FIXTURES_CARD);
   return { ...api, state, status: () => status.join(' · ') };
 }
 
 /* An NLS list-endpoint match, trimmed to the fields the tool reads. */
-function match(homeID, awayID, kickOffUTC, homeScore = null, awayScore = null, postponed = null) {
+function match(homeID, awayID, kickOffUTC, homeScore = null, awayScore = null, postponed = null, period = null) {
   return { attributes: {
     homeTeam: { teamID: homeID, name: 'unused', score: homeScore },
     awayTeam: { teamID: awayID, name: 'unused', score: awayScore },
     kickOffDateUTC: kickOffUTC,
-    postponementReason: postponed
+    postponementReason: postponed,
+    matchPeriod: period || (postponed ? 'Postponed' : 'PreMatch')
   } };
 }
 const optaFor = name => {
@@ -177,6 +189,20 @@ test('postponed matches are left off the card and counted in the status line', (
   ]);
   assert.equal(t.state.rows.length, 1);
   assert.match(t.status(), /1 postponed left out/);
+});
+
+/* NLS keeps postponementReason on a game after it is rearranged. Seen live
+   09/10/2026 via the NL Data MCP: Ebbsfleet v Folkestone, played 06/10 —
+   FullTime, 1-0, crowd 1,177 — still carries reason "Other". */
+test('a rearranged game still carrying its old postponement reason stays on the card', () => {
+  const t = loadSection();
+  t.state.mode = 'results';
+  t.applyMatches([
+    match(optaFor('Aldershot Town'), optaFor('Altrincham'), '2026-10-06 18:45:00', 1, 0, 'Other', 'FullTime'),
+    match(optaFor('Boston United'), optaFor('Barrow'), '2026-10-06 18:45:00', 2, 2)
+  ]);
+  assert.equal(t.state.rows.length, 2);
+  assert.doesNotMatch(t.status(), /postponed/);
 });
 
 test('results carry the real scoreline, and 0-0 is a score not a blank', () => {

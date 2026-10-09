@@ -1,0 +1,174 @@
+name: Fixtures & results graphics
+
+# Makes the fixtures and results cards for National, North, South and the
+# NL Cup on its own, and drops them into the media Shared Drive
+# (Graphics/<date> <competition> <Fixtures|Results>/) and Firebase Storage.
+#
+#   Fixtures  10am UK, two days before a round's first game.
+#   Results   one card per day per competition, as soon as every game that
+#             day is full time — checked every 15 minutes from midday UK.
+#
+# Rules for round numbers: assets/data/rounds-<season>.json. Rendering:
+# scripts/build-fixtures-graphics.js. Delivery: scripts/deliver-fixtures-graphics.js.
+#
+# TO TEST: Actions → Fixtures & results graphics → Run workflow. Pick what,
+# which competition and a date to pretend is today. "Dry run" (on by
+# default) sends nothing anywhere: the PNGs are a download at the bottom of
+# the run page. A dry run also ignores what has already been delivered, so
+# a past date can be rendered again as often as you like.
+
+on:
+  schedule:
+    # GitHub's timer runs late around the top of the hour, so these sit off it.
+    # Fixtures: both lines fire; the job only proceeds in whichever is 10am UK
+    # (09:03 UTC in summer, 10:03 UTC in winter).
+    - cron: '3 9,10 * * *'
+    # Results: 12:07–23:52 UTC covers every finish, Sunday lunchtime to late midweek.
+    - cron: '7,22,37,52 12-23 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'What to make'
+        type: choice
+        options: [results, fixtures]
+        default: results
+      division:
+        description: 'Competition'
+        type: choice
+        options: [all, National, North, South, Cup]
+        default: all
+      today:
+        description: 'Pretend today is (YYYY-MM-DD). Leave blank for the real today. Fixtures are made for two days after this.'
+        required: false
+        default: ''
+      dry_run:
+        description: 'Dry run – make the PNGs but send nothing to Drive or Storage'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: fixtures-graphics
+  cancel-in-progress: false
+
+env:
+  # The "Graphics" folder in the media Shared Drive. Not a secret: the ID
+  # grants nothing on its own; the service account's Content manager role
+  # on that folder is what lets this job write there.
+  DRIVE_FOLDER_ID: 1v3jZ1HjJutR6JepAgh1kueaFm-CAArNg
+
+jobs:
+  graphics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Decide what this run is for
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          IN_MODE: ${{ inputs.mode }}
+          IN_DIVISION: ${{ inputs.division }}
+          IN_TODAY: ${{ inputs.today }}
+          IN_DRY: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            echo "mode=$IN_MODE" >> "$GITHUB_OUTPUT"
+            echo "division=$IN_DIVISION" >> "$GITHUB_OUTPUT"
+            echo "today=$IN_TODAY" >> "$GITHUB_OUTPUT"
+            echo "dry=$IN_DRY" >> "$GITHUB_OUTPUT"
+            echo "go=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "division=all" >> "$GITHUB_OUTPUT"
+          echo "today=" >> "$GITHUB_OUTPUT"
+          echo "dry=false" >> "$GITHUB_OUTPUT"
+          if [ "$SCHEDULE" = "3 9,10 * * *" ]; then
+            echo "mode=fixtures" >> "$GITHUB_OUTPUT"
+            # Only the run that lands in the 10 o'clock hour UK does anything.
+            if [ "$(TZ=Europe/London date +%H)" = "10" ]; then echo "go=true" >> "$GITHUB_OUTPUT"
+            else echo "Not 10am UK — the other fixtures line handles today."; echo "go=false" >> "$GITHUB_OUTPUT"; fi
+          else
+            echo "mode=results" >> "$GITHUB_OUTPUT"
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout (only what the cards need)
+        if: steps.plan.outputs.go == 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          sparse-checkout: |
+            graphics
+            scripts
+            system
+            assets/data
+            assets/divisions
+            assets/crests/medium
+
+      - name: Setup Node
+        if: steps.plan.outputs.go == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Same keyless federation as the other jobs. token_format: access_token
+      # with explicit scopes, because Drive is not covered by the default
+      # cloud-platform scope.
+      - name: Authenticate to Google
+        id: auth
+        if: steps.plan.outputs.go == 'true' && steps.plan.outputs.dry != 'true'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/drive,https://www.googleapis.com/auth/devstorage.read_write
+
+      - name: List cards already delivered
+        if: steps.plan.outputs.go == 'true' && steps.plan.outputs.dry != 'true'
+        env:
+          GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          TODAY: ${{ steps.plan.outputs.today }}
+        run: |
+          set -euo pipefail
+          SEASON=$(node -e "const m=require('./scripts/build-fixtures-graphics.js');const t=process.argv[1]||new Date().toLocaleDateString('en-CA',{timeZone:'Europe/London'});console.log(m.seasonLabel(m.seasonStart(m.addDays(t,2))))" "$TODAY")
+          node scripts/deliver-fixtures-graphics.js delivered "$SEASON" > done.txt
+          echo "$(wc -l < done.txt) cards already delivered for $SEASON"
+
+      - name: Make the cards that are due
+        id: make
+        if: steps.plan.outputs.go == 'true'
+        env:
+          MODE: ${{ steps.plan.outputs.mode }}
+          DIVISION: ${{ steps.plan.outputs.division }}
+          TODAY: ${{ steps.plan.outputs.today }}
+        run: |
+          set -euo pipefail
+          ARGS=(--mode "$MODE" --division "$DIVISION" --out build/fixtures-graphics)
+          [ -n "$TODAY" ] && ARGS+=(--today "$TODAY")
+          [ -f done.txt ] && ARGS+=(--done done.txt)
+          node scripts/build-fixtures-graphics.js "${ARGS[@]}"
+          echo "made=$(node -e "console.log(require('./build/fixtures-graphics/manifest.json').cards.length)")" >> "$GITHUB_OUTPUT"
+
+      # Most results checks find nothing due; only keep a download when a
+      # card was made, or when the run failed part-way and there is
+      # something to look at.
+      - name: Keep the PNGs on this run page
+        if: always() && steps.plan.outputs.go == 'true' && steps.make.outputs.made != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fixtures-graphics-${{ steps.plan.outputs.mode }}-${{ github.run_number }}
+          path: build/fixtures-graphics
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Send to Drive and Storage
+        if: steps.plan.outputs.go == 'true' && steps.plan.outputs.dry != 'true' && steps.make.outputs.made != '0'
+        env:
+          GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: node scripts/deliver-fixtures-graphics.js upload build/fixtures-graphics
