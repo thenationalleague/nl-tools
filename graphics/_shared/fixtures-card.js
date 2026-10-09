@@ -1,7 +1,7 @@
 /* ============================================================
    Fixtures & Results Card — shared renderer
    File: /graphics/_shared/fixtures-card.js
-   Version: v1.2 (09/10/2026)
+   Version: v1.3 (09/10/2026)
 
    Single source of truth for the fixtures/results card artwork. Both the
    interactive tool (/graphics/fixtures-graphic/) and the scheduled batch
@@ -31,6 +31,7 @@
      ymdUK, koTime, koDay, dividerLabel, nlsDate, nlsTeamName(clubs, team)
 
    CHANGELOG
+     v1.3 09/10/2026  Cup guests print without PL2 / U21 / U23.
      v1.2 09/10/2026  Penalty shootouts: a result row carrying hp/ap prints
                       "(5-6 pens)" under the score. buildRows fills them
                       from NLS penaltyScore.
@@ -139,15 +140,22 @@
     if (guest) return guest.name;
     return ALIAS[k] || String(name || "").trim();
   }
+  /* Cup guests print without their PL2 / U21 / U23 tag: the graphic already
+     says National League Cup, the crest is the parent club's, and the tag was
+     what forced long names onto two lines. Decided 09/10/2026. The tagged
+     name is still what crests and club records are looked up by. */
+  function printName(name) {
+    return String(name || "").replace(/\s+(PL2|U21|U23)$/i, "");
+  }
   function teamDisplay(clubs, name, fit) {
     var canon = canonicalName(clubs, name);
     if (fit === "short") {
       var club = clubs.byName(canon) || guestFor(clubs, canon);
-      if (club && club.short) return club.short.toUpperCase();
+      if (club && club.short) return printName(club.short).toUpperCase();
     }
     var k = canon.toLowerCase();
     if (SHORTEN[k]) return SHORTEN[k].toUpperCase();
-    return canon.toUpperCase();
+    return printName(canon).toUpperCase();
   }
 
   function escapeHtml(s) {
@@ -451,6 +459,7 @@
     COMPETITION_ID: COMPETITION_ID,
     render: render,
     crestKey: crestKey,
+    teamDisplay: teamDisplay,
     toPng: toPng,
     buildRows: buildRows,
     title: title,

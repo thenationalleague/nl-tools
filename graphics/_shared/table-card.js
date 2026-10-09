@@ -1,7 +1,7 @@
 /* ============================================================
    League Table Card — shared renderer
    File: /graphics/_shared/table-card.js
-   Version: v1.0 (09/10/2026)
+   Version: v1.1 (09/10/2026)
 
    Single source of truth for the league-table artwork. The League Table
    Graphic tool (/graphics/table-graphic/) and the scheduled batch
@@ -23,6 +23,7 @@
      title, FORMAT_H, COMPETITION_ID, CUP_ROUND, NLS_BASE
 
    CHANGELOG
+     v1.1 09/10/2026  Cup guests print without PL2 / U21 / U23.
      v1.0 09/10/2026  Lifted out of table-graphic/app.js v1.10 unchanged, so
                       the batch can draw the same table.
    ============================================================ */
@@ -101,12 +102,19 @@
     var g = clubs.guestByName(n);
     return g ? { guest: g } : null;
   }
+  /* Cup guests print without their PL2 / U21 / U23 tag: the graphic already
+     says National League Cup, the crest is the parent club's, and the tag was
+     what forced long names onto two lines. Decided 09/10/2026. The tagged
+     name is still what crests and club records are looked up by. */
+  function printName(name) {
+    return String(name || "").replace(/\s+(PL2|U21|U23)$/i, "");
+  }
   function teamDisplay(clubs, name) {
     var k = String(name || "").toLowerCase().trim();
     if (SHORTEN[k]) return SHORTEN[k].toUpperCase();
     var g = guestOf(clubs, name);
-    if (g && g.guest.short) return g.guest.short.toUpperCase();
-    return pl2Name(name).toUpperCase();
+    if (g && g.guest.short) return printName(g.guest.short).toUpperCase();
+    return printName(pl2Name(name)).toUpperCase();
   }
   /* Crest file for a printed name: a guest draws its parent club's badge. */
   function crestFor(clubs, name) {
@@ -318,6 +326,7 @@
     buildRows: buildRows,
     title: title,
     pl2Name: pl2Name,
+    teamDisplay: teamDisplay,
     nlsTeamName: nlsTeamName,
     gdText: gdText,
     numText: numText
