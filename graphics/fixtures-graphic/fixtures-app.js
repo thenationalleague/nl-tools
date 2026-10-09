@@ -1,6 +1,6 @@
 /* ============================================================
    Fixtures & Results Graphic — app logic.
-   Version: v1.12 (09/10/2026)
+   Version: v1.14 (09/10/2026)
 
    The card itself is drawn by /graphics/_shared/fixtures-card.js — the
    same renderer the scheduled batch (scripts/build-fixtures-graphics.js)
@@ -12,6 +12,8 @@
    Paste = home, [middle nuked], away. Editor adds scores + KO.
 
    CHANGELOG
+     v1.14 09/10/2026  Pens column in the editor (results only): "5-6" prints
+                       (5-6 PENS) under the score.
      v1.12 09/10/2026  Card drawing moved to _shared/fixtures-card.js.
                        Season eyebrow now read from clubs-meta instead of
                        a hard-coded "2026-27". A title typed with a spaced
@@ -166,13 +168,15 @@
       if (r.divider != null) {
         tr.className = "divider-row";
         tr.innerHTML = mv +
-          '<td colspan="5"><input class="g-div" data-i="' + i + '" data-k="divider" placeholder="Date divider e.g. TUE 19 AUG" value="' + escapeHtml(r.divider) + '"></td>' +
+          '<td colspan="6"><input class="g-div" data-i="' + i + '" data-k="divider" placeholder="Date divider e.g. TUE 19 AUG" value="' + escapeHtml(r.divider) + '"></td>' +
           del;
       } else {
         tr.innerHTML = ins +
           '<td>' + teamSelect(i, "home", r.home) + '</td>' +
           '<td class="col-score"><input class="g-sc" data-i="' + i + '" data-k="hs" value="' + escapeHtml(r.hs) + '"></td>' +
           '<td class="col-score"><input class="g-sc" data-i="' + i + '" data-k="as" value="' + escapeHtml(r.as) + '"></td>' +
+          '<td class="col-pens"><input class="g-pens" data-i="' + i + '" data-k="pens" placeholder="5-6" value="' +
+            escapeHtml(r.hp != null && r.hp !== "" ? r.hp + "-" + r.ap : "") + '"></td>' +
           '<td>' + teamSelect(i, "away", r.away) + '</td>' +
           '<td class="col-ko"><div class="kowrap">' +
             '<input type="checkbox" class="g-koon" data-i="' + i + '" data-k="koOn" title="Print this kick-off time"' +
@@ -200,6 +204,13 @@
     if (isNaN(i) || !state.rows[i]) return;
     var k = t.getAttribute("data-k");
     if (t.type === "checkbox") { state.rows[i][k] = t.checked; save(); render(); return; }
+    /* "5-6" → home 5, away 6 on pens; anything else clears the shootout */
+    if (k === "pens") {
+      var pm = String(t.value).match(/^\s*(\d{1,2})\s*[-\u2013:]\s*(\d{1,2})\s*$/);
+      if (pm) { state.rows[i].hp = pm[1]; state.rows[i].ap = pm[2]; }
+      else { delete state.rows[i].hp; delete state.rows[i].ap; }
+      save(); render(); return;
+    }
     state.rows[i][k] = t.value;
     /* typing a time means you want it printed; clearing it means you don't.
        The tick follows, so the two controls never disagree. */
