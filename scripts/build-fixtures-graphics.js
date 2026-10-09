@@ -27,6 +27,7 @@
                as the usual-time games are done, with the late game printed
                "v / 17:30"; the full card follows when it finishes. Card id
                "<date> <Division> Results early", tables likewise.
+               --before-late replays a past day as it stood at that point.
      corrected A results card or table already sent whose content has since
                changed (a score corrected after full time) goes again as
                "<id> v2", "v3"… the same day. Each delivered card records a
@@ -100,7 +101,8 @@ const FIXTURES_LEAD_DAYS = 2;
 
 function parseArgs(argv) {
   const a = { mode: null, division: 'all', today: null, out: path.join(REPO, 'build', 'fixtures-graphics'),
-              done: null, formats: FORMATS.slice(), chrome: null, noTables: false, tablesAnyway: false };
+              done: null, formats: FORMATS.slice(), chrome: null, noTables: false, tablesAnyway: false,
+              beforeLate: false };
   for (let i = 2; i < argv.length; i++) {
     const k = argv[i];
     if (k === '--mode') a.mode = argv[++i];
@@ -112,6 +114,7 @@ function parseArgs(argv) {
     else if (k === '--chrome') a.chrome = argv[++i];
     else if (k === '--no-tables') a.noTables = true;
     else if (k === '--tables-anyway') a.tablesAnyway = true;
+    else if (k === '--before-late') a.beforeLate = true;
     else if (k === '--help') { console.log('see header'); process.exit(0); }
     else throw new Error(`unknown argument: ${k}`);
   }
@@ -121,6 +124,7 @@ function parseArgs(argv) {
   }
   for (const f of a.formats) if (!FORMATS.includes(f)) throw new Error(`unknown --format ${f}`);
   if (a.today && !/^\d{4}-\d{2}-\d{2}$/.test(a.today)) throw new Error('--today must be YYYY-MM-DD');
+  if (a.beforeLate && !a.today) throw new Error('--before-late is for testing a past date: give --today too');
   return a;
 }
 
@@ -330,7 +334,14 @@ async function dueCards(args, rounds, season, done) {
       cards.push({ division, mode: 'fixtures', date: target, days: cardDays,
                    matchday: cardTitle(rounds, division, target), data });
     } else {
-      const all = await matchesBetween(season, division, today, today);
+      let all = await matchesBetween(season, division, today, today);
+      /* --before-late (testing only): replay a past day as it stood when its
+         usual-time games had finished and the late ones had not started. */
+      if (args.beforeLate) {
+        const { late } = splitLate(all.filter(m => !isPostponed(m)));
+        all = all.map(m => late.includes(m)
+          ? withoutLiveScores([{ ...m, attributes: { ...m.attributes, matchPeriod: 'PreMatch' } }])[0] : m);
+      }
       const data = all.filter(m => !isPostponed(m));
       if (!data.length) { skipped.push({ division, reason: `no games on ${today}` }); continue; }
       const card = { kind: 'fixtures', division, mode: 'results', date: today, days: [today],
