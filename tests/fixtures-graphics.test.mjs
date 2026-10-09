@@ -243,3 +243,43 @@ test('delivered lists each card once, with its fingerprint when it has one', asy
   assert.equal(done.get('2026-10-10 National Results'), 'abc123def456');
   assert.equal(done.get('2026-10-08 South Fixtures'), '');
 });
+
+/* Every card the batch decides to make must be one a renderer picks up.
+   Fixtures cards carried no `kind` from v1.2 to v1.3, so the renderer skipped
+   them and the first live fixtures run (09/10/2026) delivered three empty
+   Drive folders. NLS stand-in on port 0; shapes as the batch reads them —
+   meta.populatedDates for match days, data[].attributes for matches
+   (nls-data-structure skill). */
+test('every card due, fixtures and results alike, has a renderer', async () => {
+  const http = await import('node:http');
+  const { execFile } = await import('node:child_process');
+  const match = (id, ko, period, hs, as) => ({ id, attributes: { kickOffDateUTC: ko, matchPeriod: period,
+    homeTeam: { name: 'Woking', score: hs }, awayTeam: { name: 'Sutton United', score: as } } });
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://x');
+    if (u.pathname.startsWith('/league-tables')) { res.writeHead(404); return res.end('{}'); }
+    const from = (u.searchParams.get('from') || '').slice(0, 10);
+    const body = u.searchParams.get('includePopulatedDates')
+      ? { data: [], meta: { populatedDates: { '2026-10-10': {} } }, links: {} }
+      : { data: from <= '2026-10-10' ? [match('g1', '2026-10-10 14:00:00', 'FullTime', 1, 0)] : [], meta: { totalCount: 1 }, links: {} };
+    res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body));
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const script = `
+    const m = require(${JSON.stringify(join(REPO, 'scripts/build-fixtures-graphics.js'))});
+    (async () => {
+      const out = [];
+      for (const [mode, today] of [['fixtures', '2026-10-08'], ['results', '2026-10-10']]) {
+        const r = await m.dueCards({ mode, division: 'National', today, formats: ['1x1'], noTables: true }, {}, 2026, new Map());
+        out.push(...r.cards.map(c => ({ id: c.id, kind: c.kind })));
+      }
+      console.log(JSON.stringify({ cards: out, kinds: Object.keys(m.KIND) }));
+    })().catch(e => { console.error(e.stack); process.exit(1); });`;
+  const stdout = await new Promise((resolve, reject) => execFile(process.execPath, ['-e', script],
+    { env: { ...process.env, NLS_BASE: `http://127.0.0.1:${server.address().port}` } },
+    (err, out, errOut) => err ? reject(new Error(errOut || err.message)) : resolve(out)));
+  server.close();
+  const { cards, kinds } = JSON.parse(stdout);
+  assert.deepEqual(cards.map(c => c.id), ['2026-10-10 National Fixtures', '2026-10-10 National Results']);
+  for (const c of cards) assert.ok(kinds.includes(c.kind), `${c.id} has kind ${c.kind}, which nothing draws`);
+});
