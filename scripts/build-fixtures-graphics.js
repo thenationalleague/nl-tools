@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* ============================================================
    build-fixtures-graphics.js
-   Version: v1.5 (09/10/2026)
+   Version: v1.6 (09/10/2026)
 
    Makes the fixtures and results cards that are due, without anyone
    pressing anything. Run by .github/workflows/fixtures-graphics.yml on a
@@ -28,6 +28,10 @@
                days before still shows the whole round. A round played on
                one day gets no matchday card (it would repeat the round
                card). Card id "<date> <Division> Fixtures <Sat>".
+               When an earlier day of the round has been played, a second
+               card shows the round so far: Friday's result scored,
+               Saturday's games as v, subtitled FIXTURES & RESULTS. Card id
+               "<date> <Division> Round so far".
      early     A day with a late kick-off (two hours or more after the day's
                usual time — the 17:30 on a 3pm Saturday) gets a card as soon
                as the usual-time games are done, with the late game printed
@@ -77,6 +81,8 @@
      render offline.
 
    CHANGELOG
+     v1.6 09/10/2026  Matchday adds "Round so far" when an earlier day of the
+                      round has been played.
      v1.5 09/10/2026  --mode matchday: today's games only, on the morning of
                       each day of a round that spans more than one day.
      v1.4 09/10/2026  Fixtures cards were never drawn: since v1.2 the renderer
@@ -349,6 +355,17 @@ async function dueCards(args, rounds, season, done) {
       cards.push({ kind: 'fixtures', division, mode: 'fixtures', date: today, days: [today],
                    matchday: cardTitle(rounds, division, today), data,
                    id: `${today} ${division} Fixtures ${day}`, suffix: day });
+      /* The round so far: only when a day before today has had games. */
+      const before = roundDays.filter(d => d < today);
+      if (before.length) {
+        const all = (await matchesBetween(season, division, roundDays[0], roundDays[roundDays.length - 1]))
+          .filter(m => !isPostponed(m));
+        if (all.some(m => isDone(m))) {
+          cards.push({ kind: 'fixtures', division, mode: 'round', date: today, days: roundDays,
+                       matchday: cardTitle(rounds, division, today), data: withoutLiveScores(all),
+                       id: `${today} ${division} Round so far` });
+        }
+      }
     } else if (args.mode === 'fixtures') {
       const target = addDays(today, FIXTURES_LEAD_DAYS);
       const days = await populatedDates(season, division);
@@ -407,7 +424,8 @@ async function dueCards(args, rounds, season, done) {
   for (const c of cards) {
     if (!c.id) c.id = `${c.date} ${c.division} Fixtures`;
     if (!c.label) c.label = c.division;
-    const kindWord = c.kind === 'table' ? 'Table' : c.mode === 'results' ? 'Results' : 'Fixtures';
+    const kindWord = c.kind === 'table' ? 'Table' : c.mode === 'results' ? 'Results'
+      : c.mode === 'round' ? 'Round so far' : 'Fixtures';
     const tail = c.suffix ? ` ${c.suffix}` : '';
     c.files = args.formats.map(f => ({ format: f, file: `${c.label} ${kindWord} ${shortDate(c.date)}${tail} - ${f}.png` }));
   }
