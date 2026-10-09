@@ -4,7 +4,9 @@ name: Fixtures & results graphics
 # NL Cup on its own, and drops them into the media Shared Drive
 # (Graphics/<date> <competition> <Fixtures|Results>/) and Firebase Storage.
 #
-#   Fixtures  10am UK, two days before a round's first game.
+#   Fixtures  10am UK, two days before a round's first game: the whole round.
+#   Matchday  4am UK on each day of a round that spans more than one day:
+#             that day's games only (Saturday without the Friday game).
 #   Results   one card per day per competition, as soon as every game that
 #             day is full time or abandoned (A - A) — checked every 15
 #             minutes from midday UK. A day with a late kick-off (the 17:30
@@ -29,6 +31,9 @@ on:
     # Fixtures: both lines fire; the job proceeds in any that is 10am UK or
     # later (09:03 UTC is 10:03 in summer, too early in winter).
     - cron: '3 9,10 * * *'
+    # Matchday: today's games only, from 4am UK (03:03 UTC is 04:03 in
+    # summer, too early in winter). Same once-only record.
+    - cron: '3 3,4 * * *'
     # Results: 12:07–23:52 UTC covers every finish, Sunday lunchtime to late midweek.
     - cron: '7,22,37,52 12-23 * * *'
   workflow_dispatch:
@@ -36,7 +41,7 @@ on:
       mode:
         description: 'What to make'
         type: choice
-        options: [results, fixtures]
+        options: [results, fixtures, matchday]
         default: results
       division:
         description: 'Competition'
@@ -113,6 +118,10 @@ jobs:
             # stops the second making the card again.
             if [ "$(TZ=Europe/London date +%-H)" -ge 10 ]; then echo "go=true" >> "$GITHUB_OUTPUT"
             else echo "Before 10am UK — the later fixtures line handles today."; echo "go=false" >> "$GITHUB_OUTPUT"; fi
+          elif [ "$SCHEDULE" = "3 3,4 * * *" ]; then
+            echo "mode=matchday" >> "$GITHUB_OUTPUT"
+            if [ "$(TZ=Europe/London date +%-H)" -ge 4 ]; then echo "go=true" >> "$GITHUB_OUTPUT"
+            else echo "Before 4am UK — the later matchday line handles today."; echo "go=false" >> "$GITHUB_OUTPUT"; fi
           else
             echo "mode=results" >> "$GITHUB_OUTPUT"
             echo "go=true" >> "$GITHUB_OUTPUT"

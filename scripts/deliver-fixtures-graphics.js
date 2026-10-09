@@ -36,6 +36,7 @@
      and the Drive API must be enabled on the nl-tools project.
 
    CHANGELOG
+     v1.2 09/10/2026  Refuses to deliver a card with no PNGs.
      v1.1 09/10/2026  Records each card's fingerprint, and lists it back.
      v1.0 09/10/2026  First version.
    ============================================================ */
@@ -139,6 +140,10 @@ async function upload(outDir) {
   const driveParent = process.env.DRIVE_FOLDER_ID;
   if (!driveParent) throw new Error('DRIVE_FOLDER_ID is not set');
   if (!manifest.cards.length) { console.log('Nothing to deliver.'); return; }
+
+  /* Never deliver an empty folder: a card with no PNGs is a build fault. */
+  const empty = manifest.cards.filter(c => !c.files || !c.files.length);
+  if (empty.length) throw new Error(`refusing to deliver cards with no PNGs: ${empty.map(c => c.id).join(', ')}`);
 
   for (const card of manifest.cards) {
     const files = card.files.map(f => ({ name: f, buf: fs.readFileSync(path.join(outDir, card.id, f)) }));
