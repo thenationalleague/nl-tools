@@ -108,6 +108,7 @@ the PR body should say so.** A PR that adds a function needs nothing.
 | Build fixture feed cache | hourly, :17 | Fixture feed |
 | Render handbook PDF | hourly, :25 | Re-renders if stale |
 | Build predictor leaderboard | every 15 min | Fan predictor standings |
+| Fixtures & results graphics | 10am UK; every 15 min from midday UTC | Fixtures cards two days before each round, results cards as soon as a day's games are all full time. To Drive (media Shared Drive → Graphics) and Storage `graphics/fixtures/`. Round numbers from `assets/data/rounds-<season>.json` — a new one is needed each summer. Run workflow with **Dry run** ticked to test any date. |
 
 Plus the ones that run on push and keep generated artefacts current:
 **Build embed bundles** (`embeds/**`), **Build estate inventory**, **Build
