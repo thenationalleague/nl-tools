@@ -63,6 +63,7 @@ test('dates and seasons', () => {
   assert.equal(m.seasonStart('2027-04-24'), 2026);
   assert.equal(m.seasonLabel(2026), '2026-27');
   assert.equal(m.shortDate('2026-10-03'), '03Oct26');
+  assert.equal(m.shortDate('2026-09-08'), '08Sep26');
 });
 
 /* NLS names three Cup guests "U21" where cup-clubs-meta has "PL2" (live,

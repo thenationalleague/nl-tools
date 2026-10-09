@@ -145,7 +145,8 @@ const seasonLabel = y => `${y}-${String((y + 1) % 100).padStart(2, '0')}`;
 function shortDate(ymd) {
   const d = new Date(ymd + 'T12:00:00Z');
   return String(d.getUTCDate()).padStart(2, '0') +
-    d.toLocaleString('en-GB', { month: 'short', timeZone: 'UTC' }) + String(d.getUTCFullYear()).slice(2);
+    /* 3 letters: newer ICU spells September "Sept" in en-GB. */
+    d.toLocaleString('en-GB', { month: 'short', timeZone: 'UTC' }).slice(0, 3) + String(d.getUTCFullYear()).slice(2);
 }
 
 /* ---------- rounds ---------- */
