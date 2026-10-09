@@ -340,3 +340,33 @@ test('matchday: Saturday without the Friday game, the round so far with it; noth
   assert.deepEqual(out['2026-10-09'][0].games, ['f1']);
   assert.deepEqual(out['2026-10-13'], [], 'a one-day round: the round card already shows only today');
 });
+
+/* Two doors, one tool (09/10/2026). The gated page and the public page both
+   load the same tool script and stylesheets and hold no tool markup of their
+   own — the script builds the controls into #fxTool — so they cannot drift
+   the way the Article Composer's two hand-kept copies did. */
+test('the gated and public editions are the same tool', () => {
+  const gated = readFileSync(join(REPO, 'graphics/fixtures-graphic/index.html'), 'utf8');
+  const open = readFileSync(join(REPO, 'public/fixtures-graphic/index.html'), 'utf8');
+  const code = html => html.replace(/<!--[\s\S]*?-->/g, '');
+  const assets = html => [...code(html).matchAll(/(?:src|href)="([^"]+)"/g)].map(m => m[1].split('/').pop())
+    .filter(f => /fixtures-(app|tool|styles|card)|rounds|png-export|brand-graphic|html-to-image/.test(f)).sort();
+  assert.deepEqual(assets(open), assets(gated), 'both pages load the same tool files');
+  for (const [name, html] of [['gated', gated], ['public', open]]) {
+    assert.match(code(html), /<div id="fxTool"><\/div>/, `${name}: #fxTool missing`);
+    assert.doesNotMatch(code(html), /id="(dateSel|picks|gridBody|downloadBtn)"/, `${name}: tool markup belongs in fixtures-app.js`);
+  }
+  assert.doesNotMatch(code(open), /firebase|auth-guard|nl-topbar|pageWrap/, 'the public page carries no login machinery');
+  assert.match(code(open), /class="nl-idbar"/, 'a public page wears the white identity bar');
+  assert.match(code(open), /noindex/);
+});
+
+test('round rules load in the browser as NL_ROUNDS, the same object the batch requires', () => {
+  const win = {};
+  new Function('window', 'module', readFileSync(join(REPO, 'graphics/_shared/rounds.js'), 'utf8'))(win, undefined);
+  assert.equal(win.NL_ROUNDS.cardTitle(rounds, 'Cup', '2026-10-13'), 'GROUP STAGE – MATCHDAY 3');
+  assert.equal(win.NL_ROUNDS.cardTitle(rounds, 'National', '2026-10-10'), m.cardTitle(rounds, 'National', '2026-10-10'));
+  assert.deepEqual(win.NL_ROUNDS.roundDays(rounds, 'National', '2026-10-10', ['2026-10-03', '2026-10-09', '2026-10-10', '2026-10-13']),
+    ['2026-10-09', '2026-10-10']);
+  assert.deepEqual(win.NL_ROUNDS.roundDays(rounds, 'South', '2026-10-13', ['2026-10-13']), ['2026-10-13'], 'outside every round: just that day');
+});

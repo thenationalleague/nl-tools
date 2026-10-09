@@ -1,52 +1,61 @@
 /* ============================================================
-   Fixtures & Results Graphic — app logic.
-   Version: v1.14 (09/10/2026)
+   Fixtures & Results Graphic — the tool
+   File: /graphics/fixtures-graphic/fixtures-app.js
+   Version: v2.0 (09/10/2026)
 
-   The card itself is drawn by /graphics/_shared/fixtures-card.js — the
-   same renderer the scheduled batch (scripts/build-fixtures-graphics.js)
-   uses, so a hand-made card and a timed one cannot drift. This file is
-   the tool around it: state, editor, paste box, the NLS date pickers,
-   preview scaling and the PNG download.
+   ONE TOOL, TWO DOORS. This file is the whole tool and both editions load
+   it: /graphics/fixtures-graphic/ (behind a login) and
+   /public/fixtures-graphic/ (open, for freelancers without an account). It
+   builds its own controls into #fxTool, so the two pages hold no tool markup
+   of their own and cannot drift apart. Nothing here reads RTDB; clubs,
+   crests, rounds and fixtures are all public files or the public NLS API.
 
-   Club roster, crests and lookups come from the canon (NL.clubs).
-   Paste = home, [middle nuked], away. Editor adds scores + KO.
+   The card is drawn by /graphics/_shared/fixtures-card.js — the renderer
+   the scheduled batch uses — and titled by /graphics/_shared/rounds.js, the
+   batch's own round rules, so a card made here matches the automatic one.
+
+   HOW IT IS USED
+     Competition + date → the games load, the title fills in from the rounds
+     file and the card type is picked from the scores (all played: Results,
+     none: Fixtures, some: Round so far). Untick a game to leave it off — a
+     late postponement the feed has not caught up with. Download all sizes.
+     "Edit by hand" holds the full editor for anything else.
 
    CHANGELOG
-     v1.14 09/10/2026  Pens column in the editor (results only): "5-6" prints
-                       (5-6 PENS) under the score.
-     v1.12 09/10/2026  Card drawing moved to _shared/fixtures-card.js.
-                       Season eyebrow now read from clubs-meta instead of
-                       a hard-coded "2026-27". A title typed with a spaced
-                       en dash breaks onto two lines at the dash.
+     v2.0 09/10/2026  Rebuilt around the feed: pick a date, untick games,
+                      download all three sizes. Title from the rounds file.
+                      Round so far type. Whole-round or one-day choice. The
+                      paste box and grid moved under "Edit by hand". Builds
+                      its own controls so the public edition shares them.
+     v1.14 09/10/2026 Pens column in the editor (results only).
+     v1.12 09/10/2026 Card drawing moved to _shared/fixtures-card.js.
    ============================================================ */
 (function () {
   "use strict";
 
   var C = window.NL_FIXTURES_CARD;
-  var STORAGE_KEY = "nl-fixtures-gfx-v1";
+  var R = window.NL_ROUNDS;
+  var STORAGE_KEY = "nl-fixtures-gfx-v2";
   var MAX_ROWS = C.MAX_ROWS;
   var NLS_BASE = C.NLS_BASE;
   var COMPETITION_ID = C.COMPETITION_ID;
   var ymdUK = C.ymdUK;
-
-  var SAMPLE = [
-    "Brackley Town\tv\tSolihull Moors",
-    "Gateshead\tv\tWealdstone",
-    "Southend United\tv\tRochdale",
-    "Truro City\tv\tScunthorpe United",
-    "Woking\tv\tYeovil Town"
-  ].join("\n");
+  var FORMATS = ["1x1", "4x5", "9x16"];
+  var TYPE_WORD = { fixtures: "Fixtures", results: "Results", round: "Round so far" };
 
   /* ---------------- state ---------------- */
   var state = {
     division: "National",
-    format: "1x1",
-    mode: "fixtures",          /* fixtures | results */
-    source: "feed",            /* feed | manual — which entry card is shown */
-    matchday: "",              /* "" = MATCHDAY (no number) | "1".."46" | free text */
+    format: "4x5",             /* the size previewed; downloads are all three */
+    mode: "fixtures",          /* fixtures | results | round */
+    span: "day",               /* day | round — which games the card covers */
+    date: "",                  /* YYYY-MM-DD the card is for */
+    matchday: "",              /* the title: "13", "", "GROUP STAGE – MATCHDAY 3", free text */
     fit: "wrap",               /* wrap | short */
     rows: []                   /* {home, away, hs, as, ko, koOn} | {divider} */
   };
+  var games = [];              /* NLS matches for the chosen day or round */
+  var off = {};                /* match id → true: left off the card */
 
   /* ---------------- elements ---------------- */
   var $ = function (id) { return document.getElementById(id); };
@@ -57,17 +66,100 @@
     return String(s == null ? "" : s)
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
-  function save() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {} }
+  /* Only the choices persist. The games are always fetched fresh — a card
+     rebuilt from yesterday's copy of the feed is how a stale score ships. */
+  function save() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        division: state.division, format: state.format, fit: state.fit
+      }));
+    } catch (e) {}
+  }
   function load() {
     try {
       var d = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
       if (d && typeof d === "object") {
-        ["division", "format", "mode", "matchday", "fit", "source"].forEach(function (k) {
-          if (typeof d[k] === "string") state[k] = d[k];
-        });
-        if (Array.isArray(d.rows)) state.rows = d.rows;
+        if (COMPETITION_ID[d.division]) state.division = d.division;
+        if (FORMATS.indexOf(d.format) >= 0) state.format = d.format;
+        if (d.fit === "wrap" || d.fit === "short") state.fit = d.fit;
       }
     } catch (e) {}
+  }
+  var period = function (m) { return String(((m && m.attributes) || {}).matchPeriod || "").toLowerCase(); };
+  var isPostponed = function (m) { return period(m) === "postponed"; };
+  var isDone = function (m) { var p = period(m); return p === "fulltime" || p === "postmatch" || p === "abandoned"; };
+
+  /* ---------------- the controls ----------------
+     Built here rather than written into each page, so the gated and public
+     editions are the same tool by construction. Competitions and card types
+     are closed sets (four, three) and get pills; dates are a dropdown. */
+  function mount(root) {
+    root.innerHTML =
+      '<div class="tool">' +
+        '<div class="preview">' +
+          '<div class="preview-head">' +
+            '<span class="eyebrow">Preview</span>' +
+            '<div class="seg" id="sizeSeg">' + FORMATS.map(function (f) {
+              return '<button type="button" class="size-btn" data-fmt="' + f + '">' + f.replace("x", ":") + '</button>';
+            }).join("") + '</div>' +
+          '</div>' +
+          '<div class="stage-wrap" id="stageWrap"><div id="gfxHost"></div></div>' +
+        '</div>' +
+        '<div class="panel">' +
+          '<div class="card">' +
+            '<div class="row2">' +
+              '<div class="field"><label for="divisionSel">Competition</label>' +
+                '<select id="divisionSel">' +
+                  '<option value="National">National League</option>' +
+                  '<option value="North">National League North</option>' +
+                  '<option value="South">National League South</option>' +
+                  '<option value="Cup">National League Cup</option>' +
+                '</select></div>' +
+              '<div class="field"><label for="dateSel">Date</label>' +
+                '<select id="dateSel"><option value="">Loading dates…</option></select></div>' +
+            '</div>' +
+            '<div class="field hidden" id="spanField"><label>Games</label>' +
+              '<div class="seg" id="spanSeg">' +
+                '<button type="button" class="span-btn" data-span="day" id="spanDay">That day</button>' +
+                '<button type="button" class="span-btn" data-span="round">Whole round</button>' +
+              '</div></div>' +
+            '<div class="field"><label>Card</label>' +
+              '<div class="seg" id="modeSeg">' +
+                '<button type="button" class="mode-btn" data-mode="fixtures">Fixtures</button>' +
+                '<button type="button" class="mode-btn" data-mode="results">Results</button>' +
+                '<button type="button" class="mode-btn" data-mode="round">Round so far</button>' +
+              '</div></div>' +
+            '<div class="field"><label for="matchdayInput">Matchday or title</label>' +
+              '<input type="text" id="matchdayInput" placeholder="13 — or GROUP STAGE – MATCHDAY 3"></div>' +
+          '</div>' +
+          '<div class="card">' +
+            '<div class="picks" id="picks"><div class="picks-empty">Loading games…</div></div>' +
+          '</div>' +
+          '<div class="btns">' +
+            '<button type="button" class="btn btn--primary" id="downloadBtn">Download all sizes</button>' +
+          '</div>' +
+          '<details class="disclosure card" id="handEdit">' +
+            '<summary>Edit by hand</summary>' +
+            '<div class="hand">' +
+              '<div class="field"><label for="fitSel">Long names</label>' +
+                '<select id="fitSel"><option value="wrap">Wrap to two lines</option><option value="short">Short names</option></select></div>' +
+              '<div class="field"><label for="pasteIn">Paste matches</label>' +
+                '<textarea id="pasteIn" rows="6" placeholder="One match per line: Home [tab] Away"></textarea></div>' +
+              '<div class="grid-scroller"><table class="grid"><thead><tr>' +
+                '<th style="width:24px"></th><th>Home</th>' +
+                '<th class="col-score">H</th><th class="col-score">A</th><th class="col-pens" style="width:64px">Pens</th>' +
+                '<th>Away</th><th class="col-ko" style="width:96px">KO</th><th style="width:30px"></th>' +
+              '</tr></thead><tbody id="gridBody"></tbody></table></div>' +
+              '<div class="btns ko-bulk">' +
+                '<button type="button" class="btn btn--ghost" id="koAllBtn">Show all times</button>' +
+                '<button type="button" class="btn btn--ghost" id="koNoneBtn">Hide all times</button>' +
+              '</div>' +
+              '<div class="btns"><button type="button" class="btn btn--ghost" id="reloadBtn">Reload from the feed</button></div>' +
+            '</div>' +
+          '</details>' +
+          '<footer class="status"><span id="status">Ready</span></footer>' +
+        '</div>' +
+      '</div>';
   }
 
   /* ---------------- paste → rows (home, [nuked middle], away) ---------------- */
@@ -105,13 +197,11 @@
     return out;
   }
 
-  /* ---------------- render ----------------
-     The eyebrow is the season clubs-meta calls current; until that file
-     lands, the clock's answer. */
+  /* ---------------- render ---------------- */
   function seasonText() {
     var meta = NL.clubs.meta && NL.clubs.meta();
     var y = (meta && NL.season && NL.season.current(meta)) || (NL.season && NL.season.fromDate(new Date()));
-    return state.sub || C.seasonLabel(y) || "";
+    return C.seasonLabel(y) || "";
   }
   function render() {
     return C.render(gfxHost, {
@@ -276,7 +366,7 @@
       else if (pi < parsed.length) { result.push(parsed[pi]); pi++; }
     });
     while (pi < parsed.length) { result.push(parsed[pi]); pi++; }
-    state.rows = result.length ? result : parse(SAMPLE);
+    state.rows = result;
     buildGrid(); save(); render();
   }
   function syncPasteFromRows() {
@@ -285,139 +375,146 @@
     }).join("\n");
   }
 
-  /* ---------------- National League Services ----------------
-     One request builds a card. The same response carries kick-off times and
-     scores, so switching Fixtures ⇄ Results after a load needs no refetch —
-     the mode only decides which of the two the graphic prints. */
+  /* ---------------- National League Services ---------------- */
 
-  var _pdCache = {};   /* division → meta.populatedDates for the season */
+  var _pdCache = {};       /* division → meta.populatedDates for the season */
+  var _rounds = null;      /* rounds-<season>.json, once */
 
-  /* seasonID is the season's FIRST year ("2026" = 2026-27). clubs-meta is the
-     single source of truth for it; the clock-derived answer is the fallback
-     for the window between page load and clubs-meta arriving. */
   function nlsSeason() {
     var meta = NL.clubs.meta();
     return String((NL.season && NL.season.current(meta)) || NL.season.fromDate(new Date()));
   }
   function nlsUrl(params) { return NLS_BASE + "/matches/?" + params.join("&"); }
+  function getJSON(url) {
+    return fetch(url).then(function (r) {
+      if (r.status === 404) return null;      /* an empty window is a 404 */
+      if (!r.ok) throw new Error(r.status + " " + url);
+      return r.json();
+    });
+  }
+  function loadRounds() {
+    if (_rounds) return Promise.resolve(_rounds);
+    return getJSON("/assets/data/rounds-" + C.seasonLabel(nlsSeason()) + ".json")
+      .then(function (j) { _rounds = j || {}; return _rounds; })
+      .catch(function () { _rounds = {}; return _rounds; });
+  }
+  function matchDays() { return Object.keys(_pdCache[state.division] || {}).sort(); }
 
-  function dateOptionLabel(ymd, info) {
+  function dateLabel(ymd) {
     var d = new Date(ymd + "T12:00:00Z");
-    var lab = d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }).replace(/,/g, "");
-    /* Kept short on purpose: "Sat 29 Aug · 12 matches" was being cut off
-       mid-word inside the select at the panel's width. */
-    var n = info && info.count;
-    return lab + (n ? " (" + n + ")" : "");
+    return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" }).replace(/,/g, "");
   }
 
-  /* meta.populatedDates is the whole season's calendar and comes back whatever
-     window is asked for, so one narrow request fills both date pickers. */
-  function loadDates() {
-    var div = state.division, comp = COMPETITION_ID[div], from = $("nlsFrom");
-    if (!from || !comp) return;
-    if (_pdCache[div]) { fillDates(_pdCache[div]); return; }
-    from.innerHTML = '<option value="">Loading dates…</option>';
-    $("nlsTo").innerHTML = "";
-    var today = ymdUK(new Date());
-    fetch(nlsUrl([
-      "seasonID=" + encodeURIComponent(nlsSeason()),
-      "competitionID=" + comp,
+  /* meta.populatedDates is the whole season's calendar; one small request
+     fills the date list. Defaults to today, or the next day with games. */
+  function loadCalendar() {
+    var div = state.division, sel = $("dateSel");
+    var ready = _pdCache[div] ? Promise.resolve(_pdCache[div]) : getJSON(nlsUrl([
+      "seasonID=" + encodeURIComponent(nlsSeason()), "competitionID=" + COMPETITION_ID[div],
       "includePopulatedDates=true",
-      "from=" + encodeURIComponent(today + " 00:00:00Z"),
-      "to=" + encodeURIComponent(today + " 23:59:59Z"),
+      "from=" + encodeURIComponent(nlsSeason() + "-07-01 00:00:00Z"),
+      "to=" + encodeURIComponent((+nlsSeason() + 1) + "-06-30 23:59:59Z"),
       "page.number=1", "page.size=1"
-    ])).then(function (r) {
-      if (!r.ok) throw new Error("NLS " + r.status);
-      return r.json();
-    }).then(function (j) {
-      var pd = (j && j.meta && j.meta.populatedDates) || {};
-      _pdCache[div] = pd;
-      fillDates(pd);
+    ])).then(function (j) { return (_pdCache[div] = (j && j.meta && j.meta.populatedDates) || {}); });
+    sel.innerHTML = '<option value="">Loading dates…</option>';
+    return Promise.all([ready, loadRounds()]).then(function () {
+      var days = matchDays(), today = ymdUK(new Date());
+      if (!days.length) { sel.innerHTML = '<option value="">No dates listed</option>'; showGames(); return; }
+      var def = days[days.length - 1];
+      for (var i = 0; i < days.length; i++) { if (days[i] >= today) { def = days[i]; break; } }
+      if (state.date && days.indexOf(state.date) >= 0) def = state.date;
+      sel.innerHTML = days.map(function (k) {
+        return '<option value="' + k + '"' + (k === def ? " selected" : "") + '>' + escapeHtml(dateLabel(k)) + '</option>';
+      }).join("");
+      state.date = def;
+      return loadGames(true);
     }).catch(function (err) {
       console.error(err);
-      from.innerHTML = '<option value="">Dates unavailable</option>';
-      setStatus("Couldn't reach National League Services.", 5000);
+      sel.innerHTML = '<option value="">Dates unavailable</option>';
+      setStatus("Couldn't reach National League Services.", 6000);
     });
   }
 
-  function fillDates(pd) {
-    var keys = Object.keys(pd).sort(), from = $("nlsFrom");
-    if (!keys.length) {
-      from.innerHTML = '<option value="">No dates listed</option>';
-      $("nlsTo").innerHTML = '<option value="">—</option>';
-      return;
-    }
-    var today = ymdUK(new Date()), def = keys[keys.length - 1];
-    for (var i = 0; i < keys.length; i++) { if (keys[i] >= today) { def = keys[i]; break; } }
-    from.innerHTML = keys.map(function (k) {
-      return '<option value="' + k + '"' + (k === def ? " selected" : "") + '>' +
-             escapeHtml(dateOptionLabel(k, pd[k])) + '</option>';
-    }).join("");
-    fillToDates();
-  }
-
-  /* "Through to" only ever offers dates at or after the one chosen, so the
-     range cannot be inverted. Capped at a week's worth of matchdays — beyond
-     that the card is past the 12-match ceiling anyway. */
-  function fillToDates() {
-    var pd = _pdCache[state.division] || {}, fromVal = $("nlsFrom").value;
-    var later = Object.keys(pd).sort().filter(function (k) { return k >= fromVal; }).slice(0, 8);
-    $("nlsTo").innerHTML = later.map(function (k, i) {
-      return '<option value="' + k + '"' + (i === 0 ? " selected" : "") + '>' +
-             escapeHtml(i === 0 ? "Same day" : dateOptionLabel(k, pd[k])) + '</option>';
-    }).join("");
-  }
-
-  function loadFromNLS() {
-    var comp = COMPETITION_ID[state.division];
-    var from = $("nlsFrom").value, to = $("nlsTo").value || from;
-    if (!comp || !from) { setStatus("Pick a date first."); return; }
-    if (to < from) to = from;
-    var btn = $("nlsLoadBtn");
-    btn.disabled = true;
-    setStatus("Loading from National League Services…", 20000);
-    fetch(nlsUrl([
-      "seasonID=" + encodeURIComponent(nlsSeason()),
-      "competitionID=" + comp,
-      "from=" + encodeURIComponent(from + " 00:00:00Z"),
-      "to=" + encodeURIComponent(to + " 23:59:59Z"),
-      "sort=kickOffDateUTC",
-      "page.number=1", "page.size=100"
-    ])).then(function (r) {
-      if (!r.ok) throw new Error("NLS " + r.status);
-      return r.json();
-    }).then(function (j) {
-      applyMatches((j && j.data) || []);
+  /* fresh = a new date or competition: the span and title are picked again.
+     The card type is picked from the scores on every load, so switching to
+     Whole round on a Saturday with Friday's result in lands on Round so far;
+     a type chosen by hand holds until the next load. */
+  function loadGames(fresh) {
+    var days = R.roundDays(_rounds, state.division, state.date, matchDays());
+    var multi = days.length > 1;
+    $("spanField").classList.toggle("hidden", !multi);
+    if (fresh) state.span = "day";
+    var span = multi && state.span === "round" ? days : [state.date];
+    syncSeg(".span-btn", "data-span", state.span);
+    $("picks").innerHTML = '<div class="picks-empty">Loading games…</div>';
+    return getJSON(nlsUrl([
+      "seasonID=" + encodeURIComponent(nlsSeason()), "competitionID=" + COMPETITION_ID[state.division],
+      "from=" + encodeURIComponent(span[0] + " 00:00:00Z"),
+      "to=" + encodeURIComponent(span[span.length - 1] + " 23:59:59Z"),
+      "sort=kickOffDateUTC", "page.number=1", "page.size=1000"
+    ])).then(function (j) {
+      games = ((j && j.data) || []).slice();
+      off = {};
+      games.forEach(function (m) { if (isPostponed(m)) off[m.id] = true; });
+      setMode(autoMode(games), true);
+      if (fresh) {
+        state.matchday = R.cardTitle(_rounds, state.division, state.date);
+        $("matchdayInput").value = state.matchday;
+      }
+      showGames(); rebuild();
+      setStatus(games.length ? "Loaded " + games.length + " game" + (games.length === 1 ? "" : "s") : "No games that day", 5000);
     }).catch(function (err) {
       console.error(err);
-      setStatus("Couldn't reach National League Services.", 5000);
-    }).then(function () { btn.disabled = false; });
+      $("picks").innerHTML = '<div class="picks-empty">Couldn\'t reach National League Services.</div>';
+    });
   }
 
-  function applyMatches(data) {
+  /* All played: Results. None: Fixtures. Some: Round so far. */
+  function autoMode(list) {
+    var live = list.filter(function (m) { return !isPostponed(m); });
+    var done = live.filter(isDone).length;
+    return !done ? "fixtures" : done === live.length ? "results" : "round";
+  }
+
+  /* The games list. Ticked = on the card. A game the feed already calls
+     postponed starts unticked; tick it to put it back. */
+  function showGames() {
+    var el = $("picks");
+    if (!games.length) { el.innerHTML = '<div class="picks-empty">No games.</div>'; return; }
+    var lastDay = null, multi = state.span === "round";
+    el.innerHTML = games.map(function (m) {
+      var a = m.attributes || {};
+      var day = C.koDay(a.kickOffDateUTC), html = "";
+      if (multi && day !== lastDay) { html += '<div class="pick-day">' + escapeHtml(dateLabel(day)) + '</div>'; lastDay = day; }
+      var h = C.nlsTeamName(NL.clubs, a.homeTeam), w = C.nlsTeamName(NL.clubs, a.awayTeam);
+      var meta = isPostponed(m) ? '<span class="pill pill--postponed">P-P</span>'
+        : period(m) === "abandoned" ? "A-A"
+        : isDone(m) ? (a.homeTeam && a.homeTeam.score) + "-" + (a.awayTeam && a.awayTeam.score)
+        : C.koTime(a.kickOffDateUTC);
+      return html + '<label class="pick' + (off[m.id] ? " off" : "") + '">' +
+        '<input type="checkbox" data-id="' + escapeHtml(m.id) + '"' + (off[m.id] ? "" : " checked") + '>' +
+        '<span class="teams"><b>' + escapeHtml(h) + '</b> v <b>' + escapeHtml(w) + '</b></span>' +
+        '<span class="meta">' + meta + '</span></label>';
+    }).join("");
+  }
+
+  /* Ticked games → card rows. A ticked postponed game is treated as on (the
+     feed is wrong); on a Results or Round card a game not yet finished shows
+     v, never its live score. */
+  function rebuild() {
+    var data = games.filter(function (m) { return !off[m.id]; }).map(function (m) {
+      var a = m.attributes || {};
+      if (isPostponed(m)) a = Object.assign({}, a, { matchPeriod: "PreMatch" });
+      if (state.mode !== "fixtures" && !isDone(m)) {
+        var blank = function (t) { return t ? Object.assign({}, t, { score: null, penaltyScore: null }) : t; };
+        a = Object.assign({}, a, { homeTeam: blank(a.homeTeam), awayTeam: blank(a.awayTeam) });
+      }
+      return Object.assign({}, m, { attributes: a });
+    });
     var built = C.buildRows(data, NL.clubs);
-    if (!built.total) {
-      setStatus(built.postponed
-        ? "Nothing to load — all " + built.postponed + " postponed."
-        : "No matches on that date.", 5000);
-      return;
-    }
-    var matches = built.matches, postponed = built.postponed, odd = built.odd, trimmed = built.trimmed;
-
     state.rows = built.rows;
-    syncPasteFromRows(); buildGrid(); save(); render();
-
-    var msg = "Loaded " + matches.length + " match" + (matches.length === 1 ? "" : "es");
-    if (postponed) msg += " · " + postponed + " postponed left out";
-    if (trimmed) msg += " · trimmed to " + MAX_ROWS;
-    if (state.mode === "results") {
-      var scored = matches.filter(function (r) { return r.hs !== "" && r.as !== ""; }).length;
-      if (!scored) msg += " · no scores yet";
-      else if (scored < matches.length) msg += " · " + (matches.length - scored) + " without a score";
-    } else if (odd) {
-      msg += " · " + odd + " kick-off" + (odd === 1 ? "" : "s") + " ticked";
-    }
-    setStatus(msg, 8000);
+    if (built.trimmed) setStatus("Only the first " + MAX_ROWS + " games fit on a card", 6000);
+    syncPasteFromRows(); buildGrid(); render();
   }
 
   /* ---------------- team roster ----------------
@@ -465,38 +562,47 @@
            '</select>';
   }
 
-  /* ---------------- export ---------------- */
-  function fileName() {
-    var d = new Date();
-    var mmm = d.toLocaleString("en-GB", { month: "short" });
-    var ds = String(d.getDate()).padStart(2, "0") + mmm + String(d.getFullYear()).slice(2);
-    return (state.mode === "results" ? "Results " : "Fixtures ") + state.division + " " + ds + " - " + state.format + ".png";
+  /* ---------------- export ----------------
+     Named the way the automatic cards are: "National Results 10Oct26 - 4x5.png". */
+  function fileName(fmt) {
+    var d = new Date((state.date || ymdUK(new Date())) + "T12:00:00Z");
+    var ds = String(d.getUTCDate()).padStart(2, "0") +
+      d.toLocaleString("en-GB", { month: "short", timeZone: "UTC" }).slice(0, 3) + String(d.getUTCFullYear()).slice(2);
+    return state.division + " " + TYPE_WORD[state.mode] + " " + ds + " - " + fmt + ".png";
   }
-  async function downloadPNG() {
+  async function exportOne(fmt) {
+    state.format = fmt;
+    await render();
     var gfx = gfxHost.querySelector(".gfx");
-    if (!gfx || !window.htmlToImage) return;
     var prevT = gfx.style.transform, prevW = gfxHost.style.width, prevH = gfxHost.style.height;
-    var h = C.FORMAT_H[state.format];
     gfx.style.transform = "none";
-    gfxHost.style.width = "1080px"; gfxHost.style.height = h + "px";
-    setStatus("Rendering PNG…");
+    gfxHost.style.width = "1080px"; gfxHost.style.height = C.FORMAT_H[fmt] + "px";
     try {
-      var out = await C.toPng(gfx, state.format);
-      var a = document.createElement("a");
-      a.href = URL.createObjectURL(out.blob); a.download = fileName();
-      document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(a.href);
-      /* never let a half-drawn graphic leave without saying so */
-      setStatus(out.late
-        ? "Downloaded — but " + out.late + " image" + (out.late === 1 ? "" : "s") + " didn't load. Check your connection and export again."
-        : "Downloaded " + state.format);
-    } catch (err) {
-      console.error(err);
-      setStatus("Export blocked — use a screenshot.");
+      var out = await C.toPng(gfx, fmt);
+      NL.download(fileName(fmt), out.blob);
+      return out.late;
     } finally {
       gfx.style.transform = prevT; gfxHost.style.width = prevW; gfxHost.style.height = prevH;
     }
   }
+  async function downloadAll() {
+    if (!window.htmlToImage) return;
+    var btn = $("downloadBtn"), keep = state.format, late = 0;
+    btn.disabled = true;
+    setStatus("Making 3 PNGs…", 30000);
+    try {
+      for (var i = 0; i < FORMATS.length; i++) late += await exportOne(FORMATS[i]);
+      /* never let a half-drawn graphic leave without saying so */
+      setStatus(late ? late + " image" + (late === 1 ? "" : "s") + " didn't load — check your connection and download again"
+                     : "Downloaded 1:1, 4:5 and 9:16", late ? 10000 : 4000);
+    } catch (err) {
+      console.error(err);
+      setStatus("Export blocked — use a screenshot.", 6000);
+    } finally {
+      state.format = keep; syncSeg(".size-btn", "data-fmt", keep); render(); btn.disabled = false;
+    }
+  }
+
   var statusT;
   function setStatus(m, ms) {
     var el = $("status"); if (!el) return;
@@ -504,111 +610,83 @@
     statusT = setTimeout(function () { el.textContent = "Ready"; }, ms || 2200);
   }
 
-  /* ---------------- source + mode toggles ----------------
-     Source picks which half of the tool is on screen: the feed loader or the
-     paste box. The editor underneath belongs to both, so a card loaded from
-     the feed stays editable by hand after switching. */
-  function setSource(src) {
-    state.source = (src === "manual") ? "manual" : "feed";
-    document.querySelectorAll(".src-btn").forEach(function (b) {
-      b.classList.toggle("active", b.getAttribute("data-src") === state.source);
-    });
-    document.body.setAttribute("data-source", state.source);
-    save();
+  function syncSeg(sel, attr, val) {
+    document.querySelectorAll(sel).forEach(function (b) { b.classList.toggle("active", b.getAttribute(attr) === val); });
   }
-
-  /* ---------------- mode toggle ---------------- */
-  function setMode(m) {
+  /* quiet = picked automatically on load; the rows are rebuilt by the caller */
+  function setMode(m, quiet) {
     state.mode = m;
-    document.querySelectorAll(".mode-btn").forEach(function (b) {
-      b.classList.toggle("active", b.getAttribute("data-mode") === m);
-    });
+    syncSeg(".mode-btn", "data-mode", m);
     document.body.setAttribute("data-mode", m);
-    save(); render();
-  }
-
-  function syncSizeSeg() {
-    document.querySelectorAll(".size-btn").forEach(function (b) {
-      b.classList.toggle("active", b.getAttribute("data-fmt") === state.format);
-    });
+    if (!quiet) rebuild();
   }
 
   /* ---------------- init ---------------- */
   function init() {
+    var root = $("fxTool");
+    if (!root || root.getAttribute("data-mounted")) return;
+    root.setAttribute("data-mounted", "1");
+    mount(root);
     gfxHost = $("gfxHost"); stageWrap = $("stageWrap");
     pasteEl = $("pasteIn"); gridBody = $("gridBody");
 
     load();
-    if (["wrap", "short"].indexOf(state.fit) < 0) state.fit = "wrap";
-    if (!state.rows.length) state.rows = parse(SAMPLE);
-    syncPasteFromRows();
-    buildGrid();
-
     $("divisionSel").value = state.division;
-    syncSizeSeg();
-    $("matchdayInput").value = state.matchday;
-    if ($("fitSel")) $("fitSel").value = state.fit;
-    setSource(state.source);
-    setMode(state.mode);
+    $("fitSel").value = state.fit;
+    syncSeg(".size-btn", "data-fmt", state.format);
+    setMode(state.mode, true);
 
     $("divisionSel").addEventListener("change", function () {
-      state.division = this.value; save(); render();
-      loadDates();                       /* each competition has its own calendar */
+      state.division = this.value; state.date = ""; save(); loadCalendar();
     });
-    $("nlsFrom").addEventListener("change", fillToDates);
-    $("nlsLoadBtn").addEventListener("click", loadFromNLS);
-    $("koAllBtn").addEventListener("click", function () { setAllKo(true); });
-    $("koNoneBtn").addEventListener("click", function () { setAllKo(false); });
-    document.querySelectorAll(".size-btn").forEach(function (b) {
-      b.addEventListener("click", function () {
-        state.format = b.getAttribute("data-fmt"); syncSizeSeg(); save(); render();
-      });
+    $("dateSel").addEventListener("change", function () { state.date = this.value; loadGames(true); });
+    document.querySelectorAll(".span-btn").forEach(function (b) {
+      b.addEventListener("click", function () { state.span = b.getAttribute("data-span"); loadGames(false); });
     });
-    $("matchdayInput").addEventListener("input", function () { state.matchday = this.value; save(); render(); });
-    if ($("fitSel")) $("fitSel").addEventListener("change", function () { state.fit = this.value; save(); render(); });
     document.querySelectorAll(".mode-btn").forEach(function (b) {
       b.addEventListener("click", function () { setMode(b.getAttribute("data-mode")); });
     });
-    document.querySelectorAll(".src-btn").forEach(function (b) {
-      b.addEventListener("click", function () { setSource(b.getAttribute("data-src")); fitStage(); });
+    document.querySelectorAll(".size-btn").forEach(function (b) {
+      b.addEventListener("click", function () {
+        state.format = b.getAttribute("data-fmt"); syncSeg(".size-btn", "data-fmt", state.format); save(); render();
+      });
     });
-
+    $("matchdayInput").addEventListener("input", function () { state.matchday = this.value; render(); });
+    $("picks").addEventListener("change", function (e) {
+      var id = e.target.getAttribute("data-id"); if (!id) return;
+      if (e.target.checked) delete off[id]; else off[id] = true;
+      e.target.closest(".pick").classList.toggle("off", !e.target.checked);
+      rebuild();
+    });
+    $("fitSel").addEventListener("change", function () { state.fit = this.value; save(); render(); });
+    $("koAllBtn").addEventListener("click", function () { setAllKo(true); });
+    $("koNoneBtn").addEventListener("click", function () { setAllKo(false); });
+    $("reloadBtn").addEventListener("click", function () { loadGames(true); });
     var pt;
     pasteEl.addEventListener("input", function () { clearTimeout(pt); pt = setTimeout(syncRowsFromPaste, 140); });
     gridBody.addEventListener("input", gridChanged);
     gridBody.addEventListener("click", gridClicked);
-
-    $("downloadBtn").addEventListener("click", downloadPNG);
-    $("resetBtn").addEventListener("click", function () {
-      try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
-      state.rows = parse(SAMPLE); state.division = "National"; state.format = "1x1";
-      state.mode = "fixtures"; state.matchday = ""; state.source = "feed";
-      $("divisionSel").value = "National"; syncSizeSeg(); $("matchdayInput").value = "";
-      syncPasteFromRows(); buildGrid(); setSource("feed"); setMode("fixtures"); setStatus("Reset");
-    });
+    $("downloadBtn").addEventListener("click", downloadAll);
 
     window.addEventListener("resize", fitStage);
-    /* re-render once clubs-meta lands: short names, canonical-name resolution
-       and the optaID → club index all read NL.clubs, which is empty until
-       then — and the NLS date list needs seasons.current from the same file. */
-    NL.clubs.load().then(function () { render(); loadDates(); })
-      .catch(function () { loadDates(); });
-    /* The grid is built before the roster arrives, so rebuild it once the
-       options exist — and re-render, since guest crests and short names both
-       read cup-clubs-meta. */
+    /* clubs-meta carries the season and the optaID → club index the feed's
+       names resolve through, so nothing loads before it. */
+    NL.clubs.load().then(loadCalendar).catch(loadCalendar);
     buildTeamOptions().then(function () { buildGrid(); render(); }).catch(function () {});
-    render();
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(render);
-    /* re-fit after layout settles (fixes tiny 9x16 on first paint / in an iframe) */
     [80, 300, 700].forEach(function (t) { setTimeout(fitStage, t); });
     window.addEventListener("load", fitStage);
   }
 
-  /* Boot from auth-guard's nlAuthReady (wired in the shared head): #pageWrap
-     is hidden until the session is verified, and the preview fit logic needs
-     a visible container to measure. These tools read only localStorage and
-     public same-origin assets — no RTDB — so booting post-auth is safe. */
+  /* Two ways in. Behind a login, auth-guard reveals #pageWrap and calls
+     TOOL.boot once the session is verified — the preview needs a visible
+     container to measure. The public edition has no guard and boots on its
+     own. Nothing here reads RTDB, so neither waits on Firebase. */
   window.TOOL = window.TOOL || {};
   window.TOOL.boot = init;
   if (window._toolDeferredSession) { init(); delete window._toolDeferredSession; }
+  if (typeof window.NL_TOOL_KEY === "undefined") {
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
+    else init();
+  }
 })();
