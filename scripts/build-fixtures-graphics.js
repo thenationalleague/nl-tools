@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* ============================================================
    build-fixtures-graphics.js
-   Version: v1.0 (09/10/2026)
+   Version: v1.1 (09/10/2026)
 
    Makes the fixtures and results cards that are due, without anyone
    pressing anything. Run by .github/workflows/fixtures-graphics.yml on a
@@ -50,6 +50,9 @@
      render offline.
 
    CHANGELOG
+     v1.1 09/10/2026  A day with no games answers 404; read it as empty rather
+                      than failing the run. page.size 1000 + links.next +
+                      totalCount check. Season-wide window for populatedDates.
      v1.0 09/10/2026  First version.
    ============================================================ */
 
@@ -140,11 +143,17 @@ function cardTitle(rounds, division, ymd) {
 
 /* ---------- National League Services ---------- */
 
+/* An empty window is a 404, not an empty list. Seen 09/10/2026 on the first
+   live run: North on 03/10/2026 (no North games that day) answered 404. So a
+   404 is read as "no games" and only other failures are retried. */
 async function nls(params) {
-  const url = `${NLS_BASE}/matches/?${params.join('&')}`;
+  /* A single argument that is a URL (or path) is a links.next to follow. */
+  const url = /^(https?:)?\//.test(params[0]) ? new URL(params[0], NLS_BASE + '/').href
+                                              : `${NLS_BASE}/matches/?${params.join('&')}`;
   for (let attempt = 1; ; attempt++) {
     try {
       const r = await fetch(url);
+      if (r.status === 404) return { data: [], meta: {}, links: {}, empty: true };
       if (!r.ok) throw new Error(`NLS ${r.status}`);
       return await r.json();
     } catch (e) {
@@ -153,19 +162,36 @@ async function nls(params) {
     }
   }
 }
-/* Days with games this season: meta.populatedDates, which comes back
-   whatever window is asked for. */
+/* Days with games this season: meta.populatedDates. Asked over the whole
+   season so the window is never empty (an empty one would 404). */
 async function populatedDates(season, division) {
   const j = await nls([`seasonID=${season}`, `competitionID=${COMPETITION_ID[division]}`,
-    'includePopulatedDates=true', 'from=2000-01-01%2000:00:00Z', 'to=2000-01-01%2023:59:59Z',
+    'includePopulatedDates=true',
+    `from=${encodeURIComponent(season + '-07-01 00:00:00Z')}`,
+    `to=${encodeURIComponent((season + 1) + '-06-30 23:59:59Z')}`,
     'page.number=1', 'page.size=1']);
-  return Object.keys((j.meta && j.meta.populatedDates) || {}).sort();
+  const days = Object.keys((j.meta && j.meta.populatedDates) || {}).sort();
+  if (!days.length) console.warn(`  ! ${division}: NLS lists no match days for season ${season}`);
+  return days;
 }
+/* page.size: the documented 100 maximum is wrong (a 557-row request is
+   proven), so ask for 1000, follow links.next, and check the total against
+   meta.totalCount — see the nl-data-feed skill. A window here is a few days,
+   so this is one request in practice. */
 async function matchesBetween(season, division, from, to) {
-  const j = await nls([`seasonID=${season}`, `competitionID=${COMPETITION_ID[division]}`,
+  let j = await nls([`seasonID=${season}`, `competitionID=${COMPETITION_ID[division]}`,
     `from=${encodeURIComponent(from + ' 00:00:00Z')}`, `to=${encodeURIComponent(to + ' 23:59:59Z')}`,
-    'sort=kickOffDateUTC', 'page.number=1', 'page.size=100']);
-  return j.data || [];
+    'sort=kickOffDateUTC', 'page.number=1', 'page.size=1000']);
+  const rows = (j.data || []).slice();
+  const total = j.meta && j.meta.totalCount;
+  for (let guard = 0; j.links && j.links.next && guard < 20; guard++) {
+    j = await nls([j.links.next]);
+    rows.push(...(j.data || []));
+  }
+  if (typeof total === 'number' && rows.length !== total) {
+    throw new Error(`NLS returned ${rows.length} of ${total} matches for ${division} ${from}–${to}`);
+  }
+  return rows;
 }
 const period = m => String((m.attributes || {}).matchPeriod || '').toLowerCase();
 /* By matchPeriod only — NLS keeps postponementReason on a game after it is
