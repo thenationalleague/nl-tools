@@ -126,3 +126,23 @@ test('a shootout comes through as pens; a normal result carries none', () => {
   assert.equal(plain.hp, undefined);
   assert.equal(plain.ap, undefined);
 });
+
+/* Decided 09/10/2026: Cup academy sides print without PL2 / U21 / U23 (the
+   graphic already says National League Cup; the tag caused the wraps). The
+   tagged name still drives the crest lookup. */
+test('Cup guests print without their PL2 / U21 tag, on cards and tables', () => {
+  const guests = JSON.parse(readFileSync(join(REPO, 'assets/data/cup-clubs-meta.json'), 'utf8')).clubs;
+  const guestByName = n => guests.find(g => g.name.toLowerCase() === String(n).toLowerCase()) || null;
+  const load = f => { const w = {}; new Function('window', readFileSync(join(REPO, f), 'utf8'))(w); return w; };
+  const C = load('graphics/_shared/fixtures-card.js').NL_FIXTURES_CARD;
+  const T = load('graphics/_shared/table-card.js').NL_TABLE_CARD;
+  const clubs = { byName: () => null, guestByName };
+  assert.equal(C.teamDisplay(clubs, 'Fulham PL2', 'wrap'), 'FULHAM');
+  assert.equal(C.teamDisplay(clubs, 'Ipswich Town U21', 'wrap'), 'IPSWICH TOWN');
+  assert.equal(C.teamDisplay(clubs, 'West Bromwich Albion PL2', 'short'), 'WEST BROM');
+  assert.equal(C.teamDisplay(clubs, 'Woking', 'wrap'), 'WOKING');
+  assert.equal(C.crestKey(clubs, 'Ipswich Town U21'), 'Ipswich Town', 'the crest still comes from the tagged record');
+  assert.equal(T.teamDisplay(clubs, 'Wolverhampton Wanderers PL2'), 'WOLVES');
+  assert.equal(T.teamDisplay(clubs, 'Norwich City U21'), 'NORWICH');
+  assert.equal(T.teamDisplay(clubs, 'Gateshead'), 'GATESHEAD');
+});
