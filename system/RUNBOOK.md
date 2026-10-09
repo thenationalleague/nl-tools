@@ -58,7 +58,7 @@ Three categories, and knowing which one you are in tells you what a merge does.
   ⚠️ It runs `firebase deploy --only functions`, which deploys **every**
   function in the directory, not just the one you changed. There are around a
   dozen: `consumeInvite`, `submitAccessRequest`, `withdrawAccessRequest`,
-  `clubCodeAuth`, `clubDirectoryAuth`, `fanWidgetsAuth`, `handbookPdfOnPublish`,
+  `clubCodeAuth`, `clubDirectoryAuth`, `fanWidgetsAuth`, `fixturesGraphicsAtFullTime`, `handbookPdfOnPublish`,
   `nlsIngestTick`, `nlsIngestHourly`, `programmeAuth`, `uwPromoAuth`. A broken
   one takes the others with it.
 
@@ -108,7 +108,7 @@ the PR body should say so.** A PR that adds a function needs nothing.
 | Build fixture feed cache | hourly, :17 | Fixture feed |
 | Render handbook PDF | hourly, :25 | Re-renders if stale |
 | Build predictor leaderboard | every 15 min | Fan predictor standings |
-| Fixtures & results graphics | 10am UK; every 15 min from midday UTC | Fixtures cards two days before each round; results cards and league tables (Cup groups A–D in the group stage) as soon as a day's games are all full time. To Drive (media Shared Drive → Graphics) and Storage `graphics/fixtures/`. Round numbers from `assets/data/rounds-<season>.json` — a new one is needed each summer. Run workflow with **Dry run** ticked to test any date. |
+| Fixtures & results graphics | 10am UK; every 15 min from midday UTC — and started by the `fixturesGraphicsAtFullTime` function five minutes after the last game of the day ends, because GitHub's timer runs late | Fixtures cards two days before each round; results cards and league tables (Cup groups A–D in the group stage) as soon as a day's games are all full time. To Drive (media Shared Drive → Graphics) and Storage `graphics/fixtures/`. Round numbers from `assets/data/rounds-<season>.json` — a new one is needed each summer. Run workflow with **Dry run** ticked to test any date. |
 
 Plus the ones that run on push and keep generated artefacts current:
 **Build embed bundles** (`embeds/**`), **Build estate inventory**, **Build
