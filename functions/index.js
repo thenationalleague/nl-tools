@@ -113,8 +113,9 @@ Object.assign(exports, require("./handbook-pdf"));
 // Results graphics at the final whistle (fixturesGraphicsAtFullTime). Every
 // two minutes, 11:00–midnight UK, watches today's scores and asks GitHub to
 // run fixtures-graphics.yml five minutes after the last game ends — GitHub's
-// own timer for that workflow runs hours late on a bad day. Same token as
-// handbook-pdf above. See functions/fixtures-graphics-trigger.js.
+// own timer for that workflow runs hours late on a bad day. Plus
+// fixturesGraphicsAt10, which asks for the fixtures cards at 10:00 UK. Same
+// token as handbook-pdf above. See functions/fixtures-graphics-trigger.js.
 Object.assign(exports, require("./fixtures-graphics-trigger"));
 
 // The broadcast-selections access gate: a handful of audience codes for the
