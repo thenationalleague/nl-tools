@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* ============================================================
    build-fixtures-graphics.js
-   Version: v1.3 (09/10/2026)
+   Version: v1.4 (09/10/2026)
 
    Makes the fixtures and results cards that are due, without anyone
    pressing anything. Run by .github/workflows/fixtures-graphics.yml on a
@@ -71,6 +71,11 @@
      render offline.
 
    CHANGELOG
+     v1.4 09/10/2026  Fixtures cards were never drawn: since v1.2 the renderer
+                      picks cards by kind, and fixtures cards had none, so a
+                      fixtures run made empty folders. Every card now has a
+                      kind, and a card that comes out with no PNGs is an error
+                      rather than an empty delivery.
      v1.3 09/10/2026  Abandoned games count as done and print A - A. Early
                       card for the usual-time games on a day with a late
                       kick-off. Changed results and tables go again as v2, v3.
@@ -332,7 +337,7 @@ async function dueCards(args, rounds, season, done) {
       const data = (await matchesBetween(season, division, cardDays[0], cardDays[cardDays.length - 1]))
         .filter(m => !isPostponed(m) && !isAbandoned(m));
       if (!data.length) { skipped.push({ division, reason: `every game ${cardDays[0]} postponed` }); continue; }
-      cards.push({ division, mode: 'fixtures', date: target, days: cardDays,
+      cards.push({ kind: 'fixtures', division, mode: 'fixtures', date: target, days: cardDays,
                    matchday: cardTitle(rounds, division, target), data });
     } else {
       let all = await matchesBetween(season, division, today, today);
@@ -592,6 +597,10 @@ async function main() {
   }
   work.forEach(c => console.log(`  make        ${c.id}  (${c.kind === 'table' ? c.data.length + ' clubs' : c.data.length + ' games'}, title "${c.matchday || (c.kind === 'table' ? 'CURRENT STANDINGS' : 'MATCHDAY')}")`));
 
+  /* A card no renderer will pick up would go out as an empty folder. */
+  const orphan = work.filter(c => !KIND[c.kind]);
+  if (orphan.length) throw new Error(`no renderer for ${orphan.map(c => c.id).join(', ')} (kind ${orphan[0].kind})`);
+
   const state = { rendered: [], done: {} };
   const server = startServer(work, args.out, state);
   await new Promise(r => server.listen(0, '127.0.0.1', r));
@@ -614,6 +623,9 @@ async function main() {
     if (state.done[kind] == null) { server.close(); throw new Error(`${kind}: timed out with ${got}/${expected} rendered`); }
     if (state.done[kind].startsWith('ERROR')) { server.close(); throw new Error(`${kind}: render failed: ${state.done[kind]}`); }
     if (got !== expected) { server.close(); throw new Error(`${kind}: incomplete: ${got}/${expected}`); }
+    for (const c of mine) {
+      if (!state.rendered.some(r => r.card === c.id)) { server.close(); throw new Error(`${c.id}: no PNGs drawn`); }
+    }
   }
   server.close();
 
@@ -642,5 +654,5 @@ async function main() {
 if (require.main === module) {
   main().catch(e => { console.error(`\n  ${e.message}`); process.exit(1); });
 }
-module.exports = { addDays, seasonStart, seasonLabel, roundFor, cardTitle, shortDate,
+module.exports = { dueCards, KIND, addDays, seasonStart, seasonLabel, roundFor, cardTitle, shortDate,
   splitLate, withoutLiveScores, resultsSig, tableSig, parseDone, versionedId, isDone };
