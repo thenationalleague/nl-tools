@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* ============================================================
    build-fixtures-graphics.js
-   Version: v1.4 (09/10/2026)
+   Version: v1.5 (09/10/2026)
 
    Makes the fixtures and results cards that are due, without anyone
    pressing anything. Run by .github/workflows/fixtures-graphics.yml on a
@@ -22,6 +22,12 @@
                every game that day is full time or abandoned. Postponed games
                are left off; abandoned ones print A - A. Until the last one
                finishes the run does nothing, so it can be asked often.
+     matchday  Today (UK), at 4am: a card with only today's games, for each
+               competition whose round spans more than one day — the
+               Saturday card without the Friday game. The round card two
+               days before still shows the whole round. A round played on
+               one day gets no matchday card (it would repeat the round
+               card). Card id "<date> <Division> Fixtures <Sat>".
      early     A day with a late kick-off (two hours or more after the day's
                usual time — the 17:30 on a 3pm Saturday) gets a card as soon
                as the usual-time games are done, with the late game printed
@@ -71,6 +77,8 @@
      render offline.
 
    CHANGELOG
+     v1.5 09/10/2026  --mode matchday: today's games only, on the morning of
+                      each day of a round that spans more than one day.
      v1.4 09/10/2026  Fixtures cards were never drawn: since v1.2 the renderer
                       picks cards by kind, and fixtures cards had none, so a
                       fixtures run made empty folders. Every card now has a
@@ -123,7 +131,7 @@ function parseArgs(argv) {
     else if (k === '--help') { console.log('see header'); process.exit(0); }
     else throw new Error(`unknown argument: ${k}`);
   }
-  if (!['fixtures', 'results'].includes(a.mode)) throw new Error('--mode must be fixtures or results');
+  if (!['fixtures', 'results', 'matchday'].includes(a.mode)) throw new Error('--mode must be fixtures, results or matchday');
   if (a.division !== 'all' && !DIVISIONS.includes(a.division)) {
     throw new Error(`--division must be all or one of ${DIVISIONS.join(', ')}`);
   }
@@ -147,6 +155,7 @@ function seasonStart(ymd) {
   return m >= 7 ? y : y - 1;
 }
 const seasonLabel = y => `${y}-${String((y + 1) % 100).padStart(2, '0')}`;
+const dayName = ymd => new Date(ymd + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' });
 function shortDate(ymd) {
   const d = new Date(ymd + 'T12:00:00Z');
   return String(d.getUTCDate()).padStart(2, '0') +
@@ -324,7 +333,23 @@ async function dueCards(args, rounds, season, done) {
   const cards = [], skipped = [];
 
   for (const division of divisions) {
-    if (args.mode === 'fixtures') {
+    if (args.mode === 'matchday') {
+      const days = await populatedDates(season, division);
+      if (!days.includes(today)) { skipped.push({ division, reason: `no games on ${today}` }); continue; }
+      const r = roundFor(rounds, division, today);
+      const roundDays = r ? days.filter(d => r.from <= d && d <= r.to) : [today];
+      if (roundDays.length < 2) {
+        skipped.push({ division, reason: `${today} is the whole round — the round card already shows only today` });
+        continue;
+      }
+      const data = (await matchesBetween(season, division, today, today))
+        .filter(m => !isPostponed(m) && !isAbandoned(m));
+      if (!data.length) { skipped.push({ division, reason: `every game ${today} postponed` }); continue; }
+      const day = dayName(today);
+      cards.push({ kind: 'fixtures', division, mode: 'fixtures', date: today, days: [today],
+                   matchday: cardTitle(rounds, division, today), data,
+                   id: `${today} ${division} Fixtures ${day}`, suffix: day });
+    } else if (args.mode === 'fixtures') {
       const target = addDays(today, FIXTURES_LEAD_DAYS);
       const days = await populatedDates(season, division);
       if (!days.includes(target)) { skipped.push({ division, reason: `no games on ${target}` }); continue; }
@@ -568,7 +593,7 @@ function findChrome(explicit) {
 async function main() {
   const args = parseArgs(process.argv);
   const today = args.today || ukToday();
-  const target = args.mode === 'fixtures' ? addDays(today, FIXTURES_LEAD_DAYS) : today;
+  const target = args.mode === 'fixtures' ? addDays(today, FIXTURES_LEAD_DAYS) : today;   // matchday, results: today
   const season = seasonStart(target);
   const rounds = loadRounds(seasonLabel(season));
 
@@ -654,5 +679,5 @@ async function main() {
 if (require.main === module) {
   main().catch(e => { console.error(`\n  ${e.message}`); process.exit(1); });
 }
-module.exports = { dueCards, KIND, addDays, seasonStart, seasonLabel, roundFor, cardTitle, shortDate,
+module.exports = { dueCards, KIND, dayName, addDays, seasonStart, seasonLabel, roundFor, cardTitle, shortDate,
   splitLate, withoutLiveScores, resultsSig, tableSig, parseDone, versionedId, isDone };

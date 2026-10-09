@@ -283,3 +283,55 @@ test('every card due, fixtures and results alike, has a renderer', async () => {
   assert.deepEqual(cards.map(c => c.id), ['2026-10-10 National Fixtures', '2026-10-10 National Results']);
   for (const c of cards) assert.ok(kinds.includes(c.kind), `${c.id} has kind ${c.kind}, which nothing draws`);
 });
+
+/* Matchday cards (decided 09/10/2026): on the morning of each day of a round
+   that spans more than one day, a card with that day's games only. A
+   one-day round gets none — the round card already is that card. Same
+   stand-in shapes as above. */
+test('matchday: Saturday without the Friday game; nothing for a one-day round', async () => {
+  const http = await import('node:http');
+  const { execFile } = await import('node:child_process');
+  const games = {
+    '2026-10-09': [{ id: 'f1', attributes: { kickOffDateUTC: '2026-10-09 18:45:00', matchPeriod: 'PreMatch',
+      homeTeam: { name: 'Sutton United' }, awayTeam: { name: 'Boreham Wood' } } }],
+    '2026-10-10': [{ id: 's1', attributes: { kickOffDateUTC: '2026-10-10 14:00:00', matchPeriod: 'PreMatch',
+      homeTeam: { name: 'Woking' }, awayTeam: { name: 'Yeovil Town' } } },
+      { id: 's2', attributes: { kickOffDateUTC: '2026-10-10 14:00:00', matchPeriod: 'Postponed',
+      homeTeam: { name: 'Barrow' }, awayTeam: { name: 'Gateshead' } } }],
+    '2026-10-13': [{ id: 't1', attributes: { kickOffDateUTC: '2026-10-13 18:45:00', matchPeriod: 'PreMatch',
+      homeTeam: { name: 'Woking' }, awayTeam: { name: 'Barrow' } } }]
+  };
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://x');
+    const pd = Object.fromEntries(Object.keys(games).map(d => [d, {}]));
+    const day = (u.searchParams.get('from') || '').slice(0, 10);
+    const body = u.searchParams.get('includePopulatedDates')
+      ? { data: [], meta: { populatedDates: pd }, links: {} }
+      : { data: games[day] || [], meta: { totalCount: (games[day] || []).length }, links: {} };
+    res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body));
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const rounds = { National: [{ round: 13, main: '2026-10-10', from: '2026-10-09', to: '2026-10-11' },
+                              { round: 14, main: '2026-10-13', from: '2026-10-12', to: '2026-10-14' }] };
+  const script = `
+    const m = require(${JSON.stringify(join(REPO, 'scripts/build-fixtures-graphics.js'))});
+    (async () => {
+      const out = {};
+      for (const today of ['2026-10-09', '2026-10-10', '2026-10-13']) {
+        const r = await m.dueCards({ mode: 'matchday', division: 'National', today, formats: ['4x5'] },
+          ${JSON.stringify(rounds)}, 2026, new Map());
+        out[today] = r.cards.map(c => ({ id: c.id, kind: c.kind, games: c.data.map(g => g.id), title: c.matchday, file: c.files[0].file }));
+      }
+      console.log(JSON.stringify(out));
+    })().catch(e => { console.error(e.stack); process.exit(1); });`;
+  const stdout = await new Promise((resolve, reject) => execFile(process.execPath, ['-e', script],
+    { env: { ...process.env, NLS_BASE: `http://127.0.0.1:${server.address().port}` } },
+    (err, out, errOut) => err ? reject(new Error(errOut || err.message)) : resolve(out)));
+  server.close();
+  const out = JSON.parse(stdout);
+  assert.deepEqual(out['2026-10-10'], [{ id: '2026-10-10 National Fixtures Sat', kind: 'fixtures', games: ['s1'],
+    title: '13', file: 'National Fixtures 10Oct26 Sat - 4x5.png' }], 'Saturday only, postponed game left off');
+  assert.equal(out['2026-10-09'][0].id, '2026-10-09 National Fixtures Fri', 'the Friday of a two-day round gets its own');
+  assert.deepEqual(out['2026-10-09'][0].games, ['f1']);
+  assert.deepEqual(out['2026-10-13'], [], 'a one-day round: the round card already shows only today');
+});

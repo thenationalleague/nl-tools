@@ -1,6 +1,6 @@
 /**
  * NL Tools — results graphics at the final whistle (scheduled).
- * Version: v1.0 (09/10/2026)
+ * Version: v1.1 (09/10/2026)
  *
  * WHAT THIS IS
  * ------------
@@ -52,7 +52,11 @@
  * Scheduler fires on the minute. The workflow's timer stays as the backup,
  * and the once-only record means the two never make a card twice.
  *
+ * fixturesGraphicsAt4 does the same at 04:00 UK for the matchday cards:
+ * today's games only, on each day of a round that spans more than one day.
+ *
  * CHANGELOG
+ *   v1.1 09/10/2026  fixturesGraphicsAt4, the matchday cards.
  *   v1.0 09/10/2026  First version.
  */
 
@@ -173,4 +177,19 @@ exports.fixturesGraphicsAt10 = onSchedule({
 }, async () => {
   try { if (await dispatch("fixtures")) logger.info("fixtures-graphics: asked for the 10am fixtures run"); }
   catch (err) { logger.error("fixtures-graphics: 10am dispatch failed", { message: err && err.message }); }
+});
+
+exports.fixturesGraphicsAt4 = onSchedule({
+  schedule: "0 4 * * *",
+  timeZone: "Europe/London",
+  region: "europe-west2",
+  memory: "256MiB",
+  timeoutSeconds: 60,
+  maxInstances: 1,
+  retryCount: 0,
+  serviceAccount: "firebase-adminsdk-fbsvc@nl-tools.iam.gserviceaccount.com",
+  secrets: [GITHUB_DISPATCH_TOKEN],
+}, async () => {
+  try { if (await dispatch("matchday")) logger.info("fixtures-graphics: asked for the 4am matchday run"); }
+  catch (err) { logger.error("fixtures-graphics: 4am dispatch failed", { message: err && err.message }); }
 });

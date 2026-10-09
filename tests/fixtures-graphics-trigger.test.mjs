@@ -80,6 +80,9 @@ test('it dispatches a workflow that exists, on main, as a real run', () => {
   assert.match(CODE, /dry_run: "false"/, 'the workflow defaults to a dry run; this must turn it off');
   assert.match(CODE, /dispatch\("results"\)/, 'the full-time trigger asks for results');
   assert.match(CODE, /dispatch\("fixtures"\)/, 'the 10am trigger asks for fixtures');
+  assert.match(CODE, /dispatch\("matchday"\)/, 'the 4am trigger asks for the matchday cards');
+  assert.match(CODE, /schedule: "0 4 \* \* \*",\s*timeZone: "Europe\/London"/, '4am UK, not UTC');
+  assert.match(yml, /options: \[results, fixtures, matchday\]/, 'the workflow accepts every mode the function sends');
   assert.match(CODE, /schedule: "0 10 \* \* \*",\s*timeZone: "Europe\/London"/, '10am UK, not UTC');
 });
 
