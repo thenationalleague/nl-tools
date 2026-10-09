@@ -106,3 +106,23 @@ test('table rows come out in position order, signed GD, U21 guests as PL2', () =
   assert.equal(T.title('12'), 'MATCHDAY 12');
   assert.equal(T.title('final'), 'FINAL STANDINGS');
 });
+
+/* Cup ties level after 90 go straight to penalties. NLS list endpoint:
+   homeTeam/awayTeam.penaltyScore, null unless a shootout — live-confirmed in
+   the nls-data-structure skill (g2634031, Hemel Hempstead 1-1
+   Weston-super-Mare, 5-6 on pens, 28/04/2026). */
+test('a shootout comes through as pens; a normal result carries none', () => {
+  const win = {};
+  new Function('window', readFileSync(join(REPO, 'graphics/_shared/fixtures-card.js'), 'utf8'))(win);
+  const C = win.NL_FIXTURES_CARD;
+  const clubs = { byName: () => null, byOpta: () => null, guestByName: () => null };
+  const m = (h, a, hs, as, hp = null, ap = null) => ({ attributes: {
+    homeTeam: { name: h, score: hs, penaltyScore: hp }, awayTeam: { name: a, score: as, penaltyScore: ap },
+    kickOffDateUTC: '2026-09-08 18:00:00', matchPeriod: 'FullTime' } });
+  const built = C.buildRows([m('Woking', 'Fulham PL2', 1, 1, 5, 6), m('Chester', 'Everton PL2', 2, 0)], clubs);
+  const pens = built.rows.find(r => r.home === 'Woking');
+  const plain = built.rows.find(r => r.home === 'Chester');
+  assert.deepEqual([pens.hp, pens.ap], ['5', '6']);
+  assert.equal(plain.hp, undefined);
+  assert.equal(plain.ap, undefined);
+});

@@ -1,7 +1,7 @@
 /* ============================================================
    Fixtures & Results Card — shared renderer
    File: /graphics/_shared/fixtures-card.js
-   Version: v1.1 (09/10/2026)
+   Version: v1.2 (09/10/2026)
 
    Single source of truth for the fixtures/results card artwork. Both the
    interactive tool (/graphics/fixtures-graphic/) and the scheduled batch
@@ -31,6 +31,9 @@
      ymdUK, koTime, koDay, dividerLabel, nlsDate, nlsTeamName(clubs, team)
 
    CHANGELOG
+     v1.2 09/10/2026  Penalty shootouts: a result row carrying hp/ap prints
+                      "(5-6 pens)" under the score. buildRows fills them
+                      from NLS penaltyScore.
      v1.1 09/10/2026  Cup guests NLS calls U21 print as PL2, matching the
                       table graphic.
                       Export moved to graphics/_shared/png-export.js.
@@ -219,6 +222,12 @@
       var mid;
       if (hasScore) {
         mid = '<span class="score">' + escapeHtml(r.hs) + '&nbsp;-&nbsp;' + escapeHtml(r.as) + '</span>';
+        /* Cup ties level after 90 go straight to penalties (no extra time):
+           the shootout prints small under the score, the way a kick-off
+           time sits under the v. */
+        if (r.hp != null && r.hp !== "" && r.ap != null && r.ap !== "") {
+          mid += '<span class="pens">(' + escapeHtml(r.hp) + '-' + escapeHtml(r.ap) + ' pens)</span>';
+        }
       } else {
         mid = '<span class="vs">v</span>';
         /* koOn undefined = show; only an explicit false hides a time. */
@@ -368,6 +377,7 @@
     return (club && club.name) || t.name || "";
   }
   function nlsScore(t) { return (t && t.score != null) ? String(t.score) : ""; }
+  function nlsPens(t) { return (t && t.penaltyScore != null) ? String(t.penaltyScore) : ""; }
 
   function buildRows(data, clubs) {
     /* Postponed = matchPeriod "Postponed". NOT postponementReason: NLS keeps
@@ -387,6 +397,11 @@
         away: nlsTeamName(clubs, a.awayTeam),
         hs: nlsScore(a.homeTeam),
         as: nlsScore(a.awayTeam),
+        /* penaltyScore is null unless the tie went to a shootout. Live-
+           confirmed field (nls-data-structure skill: Hemel Hempstead 1-1
+           Weston-super-Mare, 5-6 on pens, 28/04/2026). */
+        hp: nlsPens(a.homeTeam),
+        ap: nlsPens(a.awayTeam),
         ko: koTime(a.kickOffDateUTC),
         day: koDay(a.kickOffDateUTC)
       };
@@ -419,7 +434,9 @@
     var rows = [], lastDay = null;
     matches.forEach(function (r) {
       if (days.length > 1 && r.day !== lastDay) { rows.push({ divider: dividerLabel(r.day) }); lastDay = r.day; }
-      rows.push({ home: r.home, away: r.away, hs: r.hs, as: r.as, ko: r.ko, koOn: r.koOn });
+      var row = { home: r.home, away: r.away, hs: r.hs, as: r.as, ko: r.ko, koOn: r.koOn };
+      if (r.hp !== "" && r.ap !== "") { row.hp = r.hp; row.ap = r.ap; }
+      rows.push(row);
     });
     return { rows: rows, matches: matches, total: total, postponed: postponed, trimmed: trimmed, odd: odd };
   }
