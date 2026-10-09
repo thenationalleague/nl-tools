@@ -19,7 +19,8 @@
 
    API (window.NL_FIXTURES_CARD)
      render(host, card, clubs)     → Promise<HTMLElement .gfx>
-     toPng(gfx, format)            → Promise<{ blob, late, missing[] }>  (needs html-to-image)
+     toPng(gfx, format)            → Promise<{ blob, late, missing[] }>
+                                     (needs png-export.js and html-to-image)
        card = { division, format, mode, matchday, fit, season, rows }
      buildRows(nlsData, clubs)     → { rows, total, postponed, trimmed, odd }
        NLS list-endpoint matches → card rows, with day dividers and the
@@ -32,6 +33,7 @@
    CHANGELOG
      v1.1 09/10/2026  Cup guests NLS calls U21 print as PL2, matching the
                       table graphic.
+                      Export moved to graphics/_shared/png-export.js.
                       Up to 16 games per card (was 12) for Cup nights; 12 or
                       fewer draw exactly as before.
                       Cup guests NLS calls "U21" (Ipswich, Birmingham, Norwich)
@@ -332,74 +334,10 @@
   }
 
   /* ---------------- export ----------------
-     One export path for the tool's Download button and the batch, so a
-     fix to how crests are captured lands in both at once. Needs
-     window.htmlToImage (html-to-image 1.11.11) on the page. The caller
-     must have the .gfx unscaled at full size before calling. */
+     graphics/_shared/png-export.js does the work (shared with the table
+     graphic); this only supplies the card's size. */
   function toPng(gfx, format) {
-    var h = FORMAT_H[format];
-    var restore = function () {};
-    return Promise.resolve(document.fonts && document.fonts.ready).then(function () {
-      /* Wait for every crest and logo to finish loading FIRST: inlineImages
-         can only convert an image the browser already holds, so exporting
-         before they land silently drops them. */
-      var pending = [].slice.call(gfx.querySelectorAll("img"));
-      return Promise.all(pending.map(function (img) { return whenImageReady(img, 10000); }))
-        .then(function (ok) { return { ok: ok, imgs: pending }; });
-    }).then(function (res) {
-      var missing = res.imgs.filter(function (img, i) { return !res.ok[i]; })
-        .map(function (img) { return decodeURIComponent(img.getAttribute("src") || "").split("/").pop(); });
-      var late = missing.length;
-      restore = inlineImages(gfx);   /* pre-inline so the canvas isn't tainted */
-      return root.htmlToImage.toBlob(gfx, {
-        width: 1080, height: h, pixelRatio: 1, cacheBust: false,
-        backgroundColor: getComputedStyle(gfx).backgroundColor
-      }).then(function (blob) { return { blob: blob, late: late, missing: missing }; });
-    }).then(function (r) { try { restore(); } catch (e) {} return r; },
-            function (err) { try { restore(); } catch (e) {} throw err; });
-  }
-  /* Resolve once an <img> has decoded, or once it's clear it won't. */
-  function whenImageReady(img, ms) {
-    return new Promise(function (resolve) {
-      if (img.complete && img.naturalWidth) return resolve(true);
-      var settled = false;
-      function finish(ok) {
-        if (settled) return;
-        settled = true; clearTimeout(timer);
-        img.removeEventListener("load", onLoad);
-        img.removeEventListener("error", onError);
-        resolve(ok);
-      }
-      function onLoad() { finish(!!img.naturalWidth); }
-      function onError() { finish(false); }
-      var timer = setTimeout(function () { finish(false); }, ms || 10000);
-      img.addEventListener("load", onLoad);
-      img.addEventListener("error", onError);
-    });
-  }
-  /* Convert every <img> to a data URL via canvas so html-to-image never
-     fetches cross-origin. An image that can't be converted is blanked for
-     the capture, so export is never blocked. Returns a restore fn. */
-  function inlineImages(rootEl) {
-    var BLANK = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
-    var imgs = [].slice.call(rootEl.querySelectorAll("img"));
-    var restores = [];
-    imgs.forEach(function (img) {
-      var src = img.getAttribute("src") || "";
-      if (!src || src.indexOf("data:") === 0) return;
-      var done = false;
-      try {
-        if (img.complete && img.naturalWidth) {
-          var c = document.createElement("canvas");
-          c.width = img.naturalWidth; c.height = img.naturalHeight;
-          c.getContext("2d").drawImage(img, 0, 0);
-          var url = c.toDataURL("image/png");   /* throws if tainted */
-          restores.push([img, src]); img.setAttribute("src", url); done = true;
-        }
-      } catch (e) {}
-      if (!done) { restores.push([img, src]); img.setAttribute("src", BLANK); }
-    });
-    return function () { restores.forEach(function (p) { p[0].setAttribute("src", p[1]); }); };
+    return root.NL_GFX_EXPORT.toPng(gfx, 1080, FORMAT_H[format]);
   }
 
   /* ---------------- National League Services ---------------- */

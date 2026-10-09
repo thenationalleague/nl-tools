@@ -10,6 +10,10 @@
    file by its comment markers and run verbatim against stubs. Renaming a
    marker fails these tests loudly rather than quietly testing nothing.
 
+   Since 09/10/2026 the row-building lives in graphics/_shared/table-card.js
+   (shared with the scheduled batch). That file is loaded as shipped too and
+   handed to the tool section as `T`, exactly as the page does.
+
    Run with `npm test` (node --test). Zero dependencies, no network. */
 
 import test from 'node:test';
@@ -19,6 +23,7 @@ import { join } from 'node:path';
 import { REPO } from './load-canon.mjs';
 
 const APP = join(REPO, 'graphics/table-graphic/app.js');
+const CARD = join(REPO, 'graphics/_shared/table-card.js');
 const START = '  /* ---------------- National League Services';
 const END   = '  /* ---------------- matchday options';
 
@@ -33,7 +38,11 @@ function loadSection() {
 
   const status = [];
   const state = { division: 'National', source: 'feed', rows: [] };
+  const win = {};
+  new Function('window', readFileSync(CARD, 'utf8'))(win);
+  assert.ok(win.NL_TABLE_CARD, 'table-card.js did not define NL_TABLE_CARD');
   const body = `
+    var T = TCARD;
     var COMPETITION_ID = { National: 89, North: 373, South: 372, CupA: 1275, CupB: 1275, CupC: 1275, CupD: 1275 };
     var CUP_ROUND = { CupA: "A", CupB: "B", CupC: "C", CupD: "D" };
     var CUP_QUALIFY = 2;
@@ -56,10 +65,12 @@ function loadSection() {
     function $() { return { disabled: false }; }   /* the Load button, as far as the section cares */
     ${src.slice(a, b)}
     return { applyTable: applyTable, fillZonesByPosition: fillZonesByPosition,
-             clearZones: clearZones, nlsTeamName: nlsTeamName, pl2Name: pl2Name, gdText: gdText,
+             clearZones: clearZones,
+             nlsTeamName: function (r) { return T.nlsTeamName(NL.clubs, r); },
+             pl2Name: T.pl2Name, gdText: T.gdText,
              nlsSeason: nlsSeason, loadFromNLS: loadFromNLS, fetched: function () { return FETCHED; } };
   `;
-  const api = new Function('META', 'OPTA', 'STATUS', 'state', body)(meta, optaIndex, status, state);
+  const api = new Function('META', 'OPTA', 'STATUS', 'state', 'TCARD', body)(meta, optaIndex, status, state, win.NL_TABLE_CARD);
   return { ...api, state, status: () => status.join(' · ') };
 }
 
