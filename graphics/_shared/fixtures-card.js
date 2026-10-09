@@ -1,7 +1,7 @@
 /* ============================================================
    Fixtures & Results Card — shared renderer
    File: /graphics/_shared/fixtures-card.js
-   Version: v1.0 (09/10/2026)
+   Version: v1.1 (09/10/2026)
 
    Single source of truth for the fixtures/results card artwork. Both the
    interactive tool (/graphics/fixtures-graphic/) and the scheduled batch
@@ -19,7 +19,7 @@
 
    API (window.NL_FIXTURES_CARD)
      render(host, card, clubs)     → Promise<HTMLElement .gfx>
-     toPng(gfx, format)            → Promise<{ blob, late }>  (needs html-to-image)
+     toPng(gfx, format)            → Promise<{ blob, late, missing[] }>  (needs html-to-image)
        card = { division, format, mode, matchday, fit, season, rows }
      buildRows(nlsData, clubs)     → { rows, total, postponed, trimmed, odd }
        NLS list-endpoint matches → card rows, with day dividers and the
@@ -30,6 +30,11 @@
      ymdUK, koTime, koDay, dividerLabel, nlsDate, nlsTeamName(clubs, team)
 
    CHANGELOG
+     v1.1 09/10/2026  Up to 16 games per card (was 12) for Cup nights; 12 or
+                      fewer draw exactly as before.
+                      Cup guests NLS calls "U21" (Ipswich, Birmingham, Norwich)
+                      now find their PL2 record, so the crest draws. toPng
+                      also names the images that failed to load.
      v1.0 09/10/2026  Lifted out of fixtures-app.js v1.11 unchanged, so the
                       batch can draw the same card. Two additions:
                       - a title containing " – " breaks at the dash onto two
@@ -45,7 +50,11 @@
 (function (root) {
   "use strict";
 
-  var MAX_ROWS = 12;
+  /* 16, not 12: a Cup group-stage night has 15 or 16 games (18/08/2026 had
+     15) and dropping some is worse than smaller rows. Up to 12 the card is
+     drawn exactly as before; past 12 the gaps tighten and rows may shrink
+     below the usual 44px floor. */
+  var MAX_ROWS = 16;
   var FORMAT_H = { "1x1": 1080, "4x5": 1350, "9x16": 1920 };
 
   var DIVISION_LOGO = {
@@ -98,9 +107,18 @@
   function crestUrl(name) {
     return name ? CREST_BASE + encodeURIComponent(name) + ".png" : "";
   }
-  /* Cup guest sides carry a crestName pointing at the parent club's badge. */
+  /* Cup guest sides carry a crestName pointing at the parent club's badge.
+     NLS names some of them "U21" where cup-clubs-meta says "PL2" — seen
+     09/10/2026 on the 18/08 Cup card: Ipswich Town U21, Birmingham City U21,
+     Norwich City U21 — so a U21/U23 name is also tried as its PL2 record.
+     Canon candidate: NL.clubs.guestByName could carry this for every tool. */
+  function guestFor(clubs, name) {
+    if (!clubs.guestByName || !name) return null;
+    return clubs.guestByName(name) ||
+      clubs.guestByName(String(name).replace(/\s+U2[13]$/i, " PL2"));
+  }
   function crestKey(clubs, name) {
-    var guest = clubs.guestByName && clubs.guestByName(name);
+    var guest = guestFor(clubs, name);
     return (guest && guest.crestName) || name;
   }
   function canonicalName(clubs, name) {
@@ -112,7 +130,7 @@
   function teamDisplay(clubs, name, fit) {
     var canon = canonicalName(clubs, name);
     if (fit === "short") {
-      var club = clubs.byName(canon) || (clubs.guestByName && clubs.guestByName(canon));
+      var club = clubs.byName(canon) || guestFor(clubs, canon);
       if (club && club.short) return club.short.toUpperCase();
     }
     var k = canon.toLowerCase();
@@ -219,13 +237,14 @@
     return new Promise(function (resolve) {
       requestAnimationFrame(function () {
         var avail = body.clientHeight;
-        var gap = 8;
         var fixtureCount = rows.filter(function (r) { return r.divider == null; }).length;
+        var dense = fixtureCount > 12;
+        var gap = dense ? 5 : 8;
         var dividerCount = rows.length - fixtureCount;
         var units = fixtureCount + dividerCount * 0.5;   /* dividers are half-height */
         if (units <= 0) units = 1;
         var rh = Math.floor((avail - gap * (rows.length - 1)) / units);
-        rh = Math.max(44, Math.min(rh, 98));
+        rh = Math.max(dense ? 30 : 44, Math.min(rh, 98));
         gfx.style.setProperty("--rh", rh + "px");
         gfx.style.setProperty("--row-gap", gap + "px");
         gfx.style.setProperty("--crest", rh + "px");
@@ -318,14 +337,17 @@
          can only convert an image the browser already holds, so exporting
          before they land silently drops them. */
       var pending = [].slice.call(gfx.querySelectorAll("img"));
-      return Promise.all(pending.map(function (img) { return whenImageReady(img, 10000); }));
-    }).then(function (loaded) {
-      var late = loaded.filter(function (ok) { return !ok; }).length;
+      return Promise.all(pending.map(function (img) { return whenImageReady(img, 10000); }))
+        .then(function (ok) { return { ok: ok, imgs: pending }; });
+    }).then(function (res) {
+      var missing = res.imgs.filter(function (img, i) { return !res.ok[i]; })
+        .map(function (img) { return decodeURIComponent(img.getAttribute("src") || "").split("/").pop(); });
+      var late = missing.length;
       restore = inlineImages(gfx);   /* pre-inline so the canvas isn't tainted */
       return root.htmlToImage.toBlob(gfx, {
         width: 1080, height: h, pixelRatio: 1, cacheBust: false,
         backgroundColor: getComputedStyle(gfx).backgroundColor
-      }).then(function (blob) { return { blob: blob, late: late }; });
+      }).then(function (blob) { return { blob: blob, late: late, missing: missing }; });
     }).then(function (r) { try { restore(); } catch (e) {} return r; },
             function (err) { try { restore(); } catch (e) {} throw err; });
   }
@@ -466,6 +488,7 @@
     NLS_BASE: NLS_BASE,
     COMPETITION_ID: COMPETITION_ID,
     render: render,
+    crestKey: crestKey,
     toPng: toPng,
     buildRows: buildRows,
     title: title,

@@ -64,3 +64,22 @@ test('dates and seasons', () => {
   assert.equal(m.seasonLabel(2026), '2026-27');
   assert.equal(m.shortDate('2026-10-03'), '03Oct26');
 });
+
+/* NLS names three Cup guests "U21" where cup-clubs-meta has "PL2" (live,
+   NL Data MCP 09/10/2026, Cup results 18/08: Ipswich Town U21, Birmingham
+   City U21, Norwich City U21). The batch held the whole card back for the
+   missing crests on its first Cup dry run. */
+test('a Cup guest named U21 by NLS still finds its parent crest', () => {
+  const win = {};
+  new Function('window', readFileSync(join(REPO, 'graphics/_shared/fixtures-card.js'), 'utf8'))(win);
+  const guests = JSON.parse(readFileSync(join(REPO, 'assets/data/cup-clubs-meta.json'), 'utf8')).clubs;
+  const clubs = {
+    byName: () => null,
+    guestByName: n => guests.find(g => g.name.toLowerCase() === String(n).toLowerCase()) || null
+  };
+  const C = win.NL_FIXTURES_CARD;
+  assert.equal(C.crestKey(clubs, 'Ipswich Town U21'), 'Ipswich Town');
+  assert.equal(C.crestKey(clubs, 'Birmingham City U21'), 'Birmingham City');
+  assert.equal(C.crestKey(clubs, 'Fulham PL2'), 'Fulham');
+  assert.equal(C.crestKey(clubs, 'Woking'), 'Woking');
+});

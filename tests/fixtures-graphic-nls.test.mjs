@@ -229,12 +229,13 @@ test('a results load with nothing played yet says so', () => {
 
 test('more matches than the graphic holds are trimmed, and the trim is reported', () => {
   const t = loadSection();
-  const pool = meta.clubs.filter(c => c.optaID).slice(0, 30);
+  /* 16 since 09/10/2026 — a Cup night has 15 or 16 games. */
+  const pool = meta.clubs.filter(c => c.optaID).slice(0, 40);
   const many = [];
-  for (let i = 0; i < 30; i += 2) many.push(match(pool[i].optaID, pool[i + 1].optaID, '2026-08-29 14:00:00'));
+  for (let i = 0; i < 40; i += 2) many.push(match(pool[i].optaID, pool[i + 1].optaID, '2026-08-29 14:00:00'));
   t.applyMatches(many);
-  assert.equal(t.state.rows.filter(r => r.divider == null).length, 12);
-  assert.match(t.status(), /trimmed to 12/);
+  assert.equal(t.state.rows.filter(r => r.divider == null).length, 16);
+  assert.match(t.status(), /trimmed to 16/);
 });
 
 test('an empty response leaves the current card alone', () => {
