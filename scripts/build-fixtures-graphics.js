@@ -279,7 +279,7 @@ function harnessHtml() {
         var out = await C.toPng(gfx, spec.format);
         var title = gfx.querySelector('.gfx-title').innerText.replace(/\\n/g, ' / ');
         await fetch('/__png?card=' + encodeURIComponent(j.id) + '&file=' + encodeURIComponent(spec.file) +
-          '&late=' + out.late + '&rows=' + built.matches.length + '&trimmed=' + (built.trimmed ? 1 : 0) +
+          '&late=' + out.late + '&missing=' + encodeURIComponent((out.missing || []).join('|')) + '&rows=' + built.matches.length + '&trimmed=' + (built.trimmed ? 1 : 0) +
           '&title=' + encodeURIComponent(title), { method: 'POST', body: out.blob });
       }
     }
@@ -316,6 +316,7 @@ function startServer(work, outDir, state) {
       fs.mkdirSync(path.join(outDir, card), { recursive: true });
       fs.writeFileSync(path.join(outDir, card, file), buf);
       state.rendered.push({ card, file, bytes: buf.length, late: +u.searchParams.get('late'),
+        missing: (u.searchParams.get('missing') || '').split('|').filter(Boolean),
         rows: +u.searchParams.get('rows'), trimmed: u.searchParams.get('trimmed') === '1',
         title: u.searchParams.get('title') });
       res.writeHead(204); return res.end();
@@ -411,7 +412,9 @@ async function main() {
   fs.writeFileSync(path.join(args.out, 'manifest.json'), JSON.stringify(manifest, null, 2));
   if (broken.size) {
     for (const id of broken) fs.rmSync(path.join(args.out, id), { recursive: true, force: true });
-    throw new Error(`${broken.size} card(s) had images that did not load and were held back: ${[...broken].join(', ')}`);
+    const names = [...new Set(state.rendered.filter(r => r.late > 0).flatMap(r => r.missing))];
+    throw new Error(`${broken.size} card(s) had images that did not load and were held back: ` +
+      `${[...broken].join(', ')}. Missing: ${names.join(', ') || 'unknown'}`);
   }
 }
 
