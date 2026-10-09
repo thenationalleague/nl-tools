@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* ============================================================
    build-fixtures-graphics.js
-   Version: v1.1 (09/10/2026)
+   Version: v1.2 (09/10/2026)
 
    Makes the fixtures and results cards that are due, without anyone
    pressing anything. Run by .github/workflows/fixtures-graphics.yml on a
@@ -22,6 +22,14 @@
                every game that day is marked full time. Postponed and
                abandoned games are left off. Until the last one finishes the
                run does nothing, so the workflow can poll every 15 minutes.
+     tables    With every results card: the league's table, or the four Cup
+               group tables after a group-stage day. Made only once the
+               feed's table has caught up with the scores (games played in
+               the table = twice the finished matches to date); until then
+               the run says "table not caught up yet" and the next check
+               tries again. --no-tables leaves them out; --tables-anyway
+               skips the catch-up check, for testing on a past date (the
+               table drawn is then today's).
 
    ROUND NUMBERS come from assets/data/rounds-<season>.json: a date inside a
    round's from–to window prints that round's number, whatever round the
@@ -37,7 +45,8 @@
 
    OUTPUT  --out (default build/fixtures-graphics)
      <out>/<card id>/<Division> <Fixtures|Results> <10Oct26> - <1x1|4x5|9x16>.png
-     <out>/manifest.json   what was made, what was skipped and why
+     <out>/<card id>/<Label> Table <10Oct26> - <size>.png   e.g. "Cup Group A Table"
+     <out>/manifest.json   what was made, held back, skipped, and why
    Output is never committed.
 
    RENDERING
@@ -50,6 +59,10 @@
      render offline.
 
    CHANGELOG
+     v1.2 09/10/2026  League tables after every results card, and Cup group
+                      tables A–D in the group stage, drawn by
+                      graphics/_shared/table-card.js. A card whose images
+                      fail is held back on its own; the others still go.
      v1.1 09/10/2026  A day with no games answers 404; read it as empty rather
                       than failing the run. page.size 1000 + links.next +
                       totalCount check. Season-wide window for populatedDates.
@@ -73,7 +86,7 @@ const FIXTURES_LEAD_DAYS = 2;
 
 function parseArgs(argv) {
   const a = { mode: null, division: 'all', today: null, out: path.join(REPO, 'build', 'fixtures-graphics'),
-              done: null, formats: FORMATS.slice(), chrome: null };
+              done: null, formats: FORMATS.slice(), chrome: null, noTables: false, tablesAnyway: false };
   for (let i = 2; i < argv.length; i++) {
     const k = argv[i];
     if (k === '--mode') a.mode = argv[++i];
@@ -83,6 +96,8 @@ function parseArgs(argv) {
     else if (k === '--done') a.done = argv[++i];
     else if (k === '--format') a.formats = argv[++i].split(',').map(s => s.trim()).filter(Boolean);
     else if (k === '--chrome') a.chrome = argv[++i];
+    else if (k === '--no-tables') a.noTables = true;
+    else if (k === '--tables-anyway') a.tablesAnyway = true;
     else if (k === '--help') { console.log('see header'); process.exit(0); }
     else throw new Error(`unknown argument: ${k}`);
   }
@@ -202,7 +217,7 @@ const isFinished = m => period(m) === 'fulltime' || period(m) === 'postmatch';
 
 /* ---------- what is due ---------- */
 
-async function dueCards(args, rounds, season) {
+async function dueCards(args, rounds, season, done) {
   const today = args.today || ukToday();
   const divisions = args.division === 'all' ? DIVISIONS : [args.division];
   const cards = [], skipped = [];
@@ -229,37 +244,93 @@ async function dueCards(args, rounds, season) {
       if (!data.length) { skipped.push({ division, reason: `no games on ${today}` }); continue; }
       const live = data.filter(m => !isFinished(m));
       if (live.length) { skipped.push({ division, reason: `${live.length} of ${data.length} not finished` }); continue; }
-      cards.push({ division, mode: 'results', date: today, days: [today],
+      cards.push({ kind: 'fixtures', division, mode: 'results', date: today, days: [today],
                    matchday: cardTitle(rounds, division, today), data,
-                   leftOff: all.length - data.length });
+                   leftOff: all.length - data.length,
+                   id: `${today} ${division} Results`, label: division });
+      if (!args.noTables) cards.push(...await tableCards(division, season, today, rounds, done, skipped, args.tablesAnyway));
     }
   }
 
   for (const c of cards) {
-    c.id = `${c.date} ${c.division} ${c.mode === 'results' ? 'Results' : 'Fixtures'}`;
-    c.files = args.formats.map(f => ({ format: f,
-      file: `${c.division} ${c.mode === 'results' ? 'Results' : 'Fixtures'} ${shortDate(c.date)} - ${f}.png` }));
+    if (!c.id) c.id = `${c.date} ${c.division} Fixtures`;
+    if (!c.label) c.label = c.division;
+    const kindWord = c.kind === 'table' ? 'Table' : c.mode === 'results' ? 'Results' : 'Fixtures';
+    c.files = args.formats.map(f => ({ format: f, file: `${c.label} ${kindWord} ${shortDate(c.date)} - ${f}.png` }));
   }
   return { today, cards, skipped };
 }
 
+/* ---------- league tables ----------
+   A table goes out after every results card: same trigger (every game that
+   day full time), one per league, and one per group A–D after a Cup
+   group-stage day. The feed's table can lag the scores, so a table is only
+   made once it has caught up: the games played across the table(s) must
+   equal twice the finished matches to date. Until then the run says so and
+   the next check tries again. */
+const CUP_GROUPS = ['A', 'B', 'C', 'D'];
+async function leagueTable(season, division, group) {
+  const j = await nls([`${NLS_BASE}/league-tables/?competitionID=${COMPETITION_ID[division]}` +
+    `&seasonID=${season}` + (group ? `&roundID=${group}` : '')]);
+  return j.data || [];
+}
+async function tableCards(division, season, today, rounds, done, skipped, anyway) {
+  const groups = division === 'Cup' ? CUP_GROUPS : [null];
+  const label = g => g ? `Cup Group ${g}` : division;
+  const id = g => `${today} ${label(g)} Table`;
+  if (division === 'Cup') {
+    const group = rounds.Cup || [];
+    const lastGroupDay = group.length ? group[group.length - 1].to : '';
+    if (!lastGroupDay || today > lastGroupDay) {
+      skipped.push({ division, reason: 'no Cup tables after the group stage' });
+      return [];
+    }
+  }
+  if (groups.every(g => done.has(id(g)))) return [];
+
+  const tables = [];
+  for (const g of groups) tables.push({ g, data: await leagueTable(season, division, g) });
+  const played = tables.reduce((n, t) => n + t.data.reduce((m, r) => m + (Number((r.attributes || {}).played) || 0), 0), 0);
+  const finished = (await matchesBetween(season, division, `${season}-07-01`, today)).filter(isFinished).length;
+  /* --tables-anyway (testing only): the live table is always today's, so a
+     pretend past date can never pass this check. */
+  if (played !== finished * 2 && !anyway) {
+    skipped.push({ division, reason: `table not caught up yet — ${played / 2} games in the table, ${finished} finished` });
+    return [];
+  }
+  const r = roundFor(rounds, division, today);
+  return tables.filter(t => !done.has(id(t.g)) && t.data.length).map(t => ({
+    kind: 'table', division, tableDivision: t.g ? `Cup${t.g}` : division, mode: 'table',
+    date: today, days: [today], matchday: r ? String(r.round) : '', data: t.data,
+    id: id(t.g), label: label(t.g)
+  }));
+}
+
 /* ---------- render harness ---------- */
 
-function harnessHtml() {
+const KIND = {
+  fixtures: { css: '/graphics/fixtures-graphic/fixtures-styles.css', js: '/graphics/_shared/fixtures-card.js' },
+  table:    { css: '/graphics/table-graphic/styles.css',            js: '/graphics/_shared/table-card.js' }
+};
+/* One page per kind: the two graphics' stylesheets both style .gfx, so they
+   are never loaded together. */
+function harnessHtml(kind) {
+  const k = KIND[kind];
   return `<!doctype html><meta charset="utf-8"><title>rendering</title>
 <link rel="stylesheet" href="/system/nl-brand.css">
 <link rel="stylesheet" href="/graphics/_shared/brand-graphic.css">
-<link rel="stylesheet" href="/graphics/fixtures-graphic/fixtures-styles.css">
+<link rel="stylesheet" href="${k.css}">
 <style>html,body{margin:0;background:#fff} #host{width:1080px}</style>
 <div id="host"></div>
 <script src="/__h2i.js"></script>
 <script src="/system/nl-utils.js"></script>
-<script src="/graphics/_shared/fixtures-card.js"></script>
+<script src="/graphics/_shared/png-export.js"></script>
+<script src="${k.js}"></script>
 <script>
 (async function(){
   var post = function(p, body){ return fetch(p, { method:'POST', body: body }); };
   try {
-    var work = await (await fetch('/__work')).json();
+    var work = await (await fetch('/__work?kind=${kind}')).json();
     await NL.clubs.load();
     await NL.clubs.guests().catch(function(){ return []; });
     /* Load every cut the card uses before anything is drawn, or the first
@@ -268,24 +339,31 @@ function harnessHtml() {
       return document.fonts.load('40px "' + f + '"');
     }));
     await document.fonts.ready;
-    var C = window.NL_FIXTURES_CARD, host = document.getElementById('host');
+    var host = document.getElementById('host');
+    var isTable = ${kind === 'table'};
+    var C = isTable ? window.NL_TABLE_CARD : window.NL_FIXTURES_CARD;
     for (var i = 0; i < work.length; i++) {
       var j = work[i];
-      var built = C.buildRows(j.data, NL.clubs);
+      var rows, count, trimmed = false;
+      if (isTable) { rows = C.buildRows(j.data, NL.clubs); count = rows.length; }
+      else { var built = C.buildRows(j.data, NL.clubs); rows = built.rows; count = built.matches.length; trimmed = built.trimmed; }
       for (var k = 0; k < j.files.length; k++) {
         var spec = j.files[k];
-        var gfx = await C.render(host, { division: j.division, format: spec.format, mode: j.mode,
-          matchday: j.matchday, fit: 'wrap', season: j.season, rows: built.rows }, NL.clubs);
+        var gfx = await C.render(host, isTable
+          ? { division: j.tableDivision, format: spec.format, dir: '1', matchday: j.matchday, season: j.season, rows: rows }
+          : { division: j.division, format: spec.format, mode: j.mode, matchday: j.matchday, fit: 'wrap', season: j.season, rows: rows },
+          NL.clubs);
         var out = await C.toPng(gfx, spec.format);
         var title = gfx.querySelector('.gfx-title').innerText.replace(/\\n/g, ' / ');
         await fetch('/__png?card=' + encodeURIComponent(j.id) + '&file=' + encodeURIComponent(spec.file) +
-          '&late=' + out.late + '&missing=' + encodeURIComponent((out.missing || []).join('|')) + '&rows=' + built.matches.length + '&trimmed=' + (built.trimmed ? 1 : 0) +
-          '&title=' + encodeURIComponent(title), { method: 'POST', body: out.blob });
+          '&late=' + out.late + '&missing=' + encodeURIComponent((out.missing || []).join('|')) +
+          '&rows=' + count + '&trimmed=' + (trimmed ? 1 : 0) + '&title=' + encodeURIComponent(title),
+          { method: 'POST', body: out.blob });
       }
     }
-    await post('/__done', 'ok');
+    await post('/__done?kind=${kind}', 'ok');
   } catch (err) {
-    await post('/__done', 'ERROR ' + (err && err.stack || err));
+    await post('/__done?kind=${kind}', 'ERROR ' + (err && err.stack || err));
   }
 })();
 </script>`;
@@ -301,14 +379,18 @@ function startServer(work, outDir, state) {
     const p = decodeURIComponent(u.pathname);
     const body = () => new Promise(r => { const c = []; req.on('data', d => c.push(d)); req.on('end', () => r(Buffer.concat(c))); });
 
-    if (p === '/' || p === '/__render') { res.writeHead(200, { 'Content-Type': 'text/html' }); return res.end(harnessHtml()); }
-    if (p === '/__work') { res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify(work)); }
+    const kind = u.searchParams.get('kind') || 'fixtures';
+    if (p === '/__render') { res.writeHead(200, { 'Content-Type': 'text/html' }); return res.end(harnessHtml(kind)); }
+    if (p === '/__work') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(work.filter(c => c.kind === kind)));
+    }
     if (p === '/__h2i.js') {
       try {
         if (!h2i) h2i = process.env.H2I_FILE ? fs.readFileSync(process.env.H2I_FILE)
                                              : Buffer.from(await (await fetch(H2I_CDN)).arrayBuffer());
         res.writeHead(200, { 'Content-Type': 'text/javascript' }); return res.end(h2i);
-      } catch (e) { state.done = `ERROR could not load html-to-image: ${e.message}`; res.writeHead(502); return res.end(); }
+      } catch (e) { state.done[kind] = `ERROR could not load html-to-image: ${e.message}`; res.writeHead(502); return res.end(); }
     }
     if (p === '/__png' && req.method === 'POST') {
       const buf = await body();
@@ -321,7 +403,7 @@ function startServer(work, outDir, state) {
         title: u.searchParams.get('title') });
       res.writeHead(204); return res.end();
     }
-    if (p === '/__done' && req.method === 'POST') { state.done = (await body()).toString(); res.writeHead(204); return res.end(); }
+    if (p === '/__done' && req.method === 'POST') { state.done[kind] = (await body()).toString(); res.writeHead(204); return res.end(); }
 
     const fp = path.join(REPO, p);
     if (!fp.startsWith(REPO) || !fs.existsSync(fp) || fs.statSync(fp).isDirectory()) { res.writeHead(404); return res.end(); }
@@ -357,9 +439,9 @@ async function main() {
   console.log(`  today       ${today}${args.today ? '  (pretend)' : ''}`);
   console.log(`  season      ${seasonLabel(season)}`);
 
-  const { cards, skipped } = await dueCards(args, rounds, season);
   const done = new Set(args.done && fs.existsSync(args.done)
     ? fs.readFileSync(args.done, 'utf8').split('\n').map(s => s.trim()).filter(Boolean) : []);
+  const { cards, skipped } = await dueCards(args, rounds, season, done);
   const work = [];
   for (const c of cards) {
     if (done.has(c.id)) skipped.push({ division: c.division, reason: `${c.id} already delivered` });
@@ -370,52 +452,59 @@ async function main() {
   fs.rmSync(args.out, { recursive: true, force: true });
   fs.mkdirSync(args.out, { recursive: true });
   const manifest = { generated: new Date().toISOString(), mode: args.mode, today,
-    pretend: !!args.today, season: seasonLabel(season), cards: [], skipped };
+    pretend: !!args.today, season: seasonLabel(season), cards: [], held: [], skipped };
 
   if (!work.length) {
     console.log('  nothing due');
     fs.writeFileSync(path.join(args.out, 'manifest.json'), JSON.stringify(manifest, null, 2));
     return;
   }
-  work.forEach(c => console.log(`  make        ${c.id}  (${c.data.length} games, title "${c.matchday || 'MATCHDAY'}")`));
+  work.forEach(c => console.log(`  make        ${c.id}  (${c.kind === 'table' ? c.data.length + ' clubs' : c.data.length + ' games'}, title "${c.matchday || (c.kind === 'table' ? 'CURRENT STANDINGS' : 'MATCHDAY')}")`));
 
-  const state = { rendered: [], done: null };
+  const state = { rendered: [], done: {} };
   const server = startServer(work, args.out, state);
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const port = server.address().port;
-  const proc = spawn(findChrome(args.chrome), ['--headless=new', '--disable-gpu', '--no-sandbox',
-    '--hide-scrollbars', '--force-device-scale-factor=1', '--disable-dev-shm-usage',
-    '--window-size=1200,2000', `http://127.0.0.1:${port}/__render`], { stdio: 'ignore' });
+  const chrome = findChrome(args.chrome);
 
-  const expected = work.reduce((n, c) => n + c.files.length, 0);
-  const started = Date.now();
-  while (state.done === null && Date.now() - started < Math.max(120000, expected * 15000)) {
-    await new Promise(r => setTimeout(r, 250));
+  for (const kind of Object.keys(KIND)) {
+    const mine = work.filter(c => c.kind === kind);
+    if (!mine.length) continue;
+    const proc = spawn(chrome, ['--headless=new', '--disable-gpu', '--no-sandbox',
+      '--hide-scrollbars', '--force-device-scale-factor=1', '--disable-dev-shm-usage',
+      '--window-size=1200,2000', `http://127.0.0.1:${port}/__render?kind=${kind}`], { stdio: 'ignore' });
+    const expected = mine.reduce((n, c) => n + c.files.length, 0);
+    const started = Date.now();
+    while (state.done[kind] == null && Date.now() - started < Math.max(120000, expected * 15000)) {
+      await new Promise(r => setTimeout(r, 250));
+    }
+    proc.kill();
+    const got = state.rendered.filter(r => mine.some(c => c.id === r.card)).length;
+    if (state.done[kind] == null) { server.close(); throw new Error(`${kind}: timed out with ${got}/${expected} rendered`); }
+    if (state.done[kind].startsWith('ERROR')) { server.close(); throw new Error(`${kind}: render failed: ${state.done[kind]}`); }
+    if (got !== expected) { server.close(); throw new Error(`${kind}: incomplete: ${got}/${expected}`); }
   }
-  proc.kill();
   server.close();
 
-  if (state.done === null) throw new Error(`timed out with ${state.rendered.length}/${expected} rendered`);
-  if (state.done.startsWith('ERROR')) throw new Error(`render failed: ${state.done}`);
-  if (state.rendered.length !== expected) throw new Error(`incomplete: ${state.rendered.length}/${expected}`);
-
-  /* A card with a crest or badge that never loaded is not published. */
+  /* A card with a crest or badge that never loaded is held back — the rest
+     still go out. The workflow fails the run afterwards so it is noticed. */
   const broken = new Set(state.rendered.filter(r => r.late > 0).map(r => r.card));
   for (const c of work) {
     const files = state.rendered.filter(r => r.card === c.id);
-    manifest.cards.push({ id: c.id, division: c.division, mode: c.mode, days: c.days,
-      title: files[0] && files[0].title, games: files[0] && files[0].rows,
-      trimmed: files.some(f => f.trimmed), leftOff: c.leftOff || 0,
-      files: files.map(f => f.file), missingImages: broken.has(c.id) });
-    console.log(`  made        ${c.id}  "${files[0] && files[0].title}"${broken.has(c.id) ? '  — MISSING IMAGES' : ''}`);
+    const entry = { id: c.id, kind: c.kind, division: c.division, mode: c.mode, days: c.days,
+      title: files[0] && files[0].title, rows: files[0] && files[0].rows,
+      trimmed: files.some(f => f.trimmed), leftOff: c.leftOff || 0, files: files.map(f => f.file) };
+    if (broken.has(c.id)) {
+      entry.missing = [...new Set(files.flatMap(f => f.missing))];
+      manifest.held.push(entry);
+      fs.rmSync(path.join(args.out, c.id), { recursive: true, force: true });
+      console.log(`  HELD BACK   ${c.id}  — images did not load: ${entry.missing.join(', ') || 'unknown'}`);
+    } else {
+      manifest.cards.push(entry);
+      console.log(`  made        ${c.id}  "${entry.title}"`);
+    }
   }
   fs.writeFileSync(path.join(args.out, 'manifest.json'), JSON.stringify(manifest, null, 2));
-  if (broken.size) {
-    for (const id of broken) fs.rmSync(path.join(args.out, id), { recursive: true, force: true });
-    const names = [...new Set(state.rendered.filter(r => r.late > 0).flatMap(r => r.missing))];
-    throw new Error(`${broken.size} card(s) had images that did not load and were held back: ` +
-      `${[...broken].join(', ')}. Missing: ${names.join(', ') || 'unknown'}`);
-  }
 }
 
 if (require.main === module) {

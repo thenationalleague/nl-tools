@@ -7,6 +7,8 @@ name: Fixtures & results graphics
 #   Fixtures  10am UK, two days before a round's first game.
 #   Results   one card per day per competition, as soon as every game that
 #             day is full time — checked every 15 minutes from midday UK.
+#   Tables    with every results card: the league table, or Cup groups A–D,
+#             once the feed's table has caught up with the scores.
 #
 # Rules for round numbers: assets/data/rounds-<season>.json. Rendering:
 # scripts/build-fixtures-graphics.js. Delivery: scripts/deliver-fixtures-graphics.js.
@@ -45,6 +47,10 @@ on:
         description: 'Dry run – make the PNGs but send nothing to Drive or Storage'
         type: boolean
         default: true
+      tables_anyway:
+        description: 'Testing a past date? Tick to draw the tables anyway (they show the current standings)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -74,6 +80,7 @@ jobs:
           IN_DIVISION: ${{ inputs.division }}
           IN_TODAY: ${{ inputs.today }}
           IN_DRY: ${{ inputs.dry_run }}
+          IN_TABLES_ANYWAY: ${{ inputs.tables_anyway }}
         run: |
           set -euo pipefail
           if [ "$EVENT" = "workflow_dispatch" ]; then
@@ -81,6 +88,7 @@ jobs:
             echo "division=$IN_DIVISION" >> "$GITHUB_OUTPUT"
             echo "today=$IN_TODAY" >> "$GITHUB_OUTPUT"
             echo "dry=$IN_DRY" >> "$GITHUB_OUTPUT"
+            echo "tables_anyway=$IN_TABLES_ANYWAY" >> "$GITHUB_OUTPUT"
             echo "go=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -147,11 +155,13 @@ jobs:
           MODE: ${{ steps.plan.outputs.mode }}
           DIVISION: ${{ steps.plan.outputs.division }}
           TODAY: ${{ steps.plan.outputs.today }}
+          TABLES_ANYWAY: ${{ steps.plan.outputs.tables_anyway }}
         run: |
           set -euo pipefail
           ARGS=(--mode "$MODE" --division "$DIVISION" --out build/fixtures-graphics)
           [ -n "$TODAY" ] && ARGS+=(--today "$TODAY")
           [ -f done.txt ] && ARGS+=(--done done.txt)
+          [ "${TABLES_ANYWAY:-}" = "true" ] && ARGS+=(--tables-anyway)
           node scripts/build-fixtures-graphics.js "${ARGS[@]}"
           echo "made=$(node -e "console.log(require('./build/fixtures-graphics/manifest.json').cards.length)")" >> "$GITHUB_OUTPUT"
 
@@ -172,3 +182,10 @@ jobs:
         env:
           GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
         run: node scripts/deliver-fixtures-graphics.js upload build/fixtures-graphics
+
+      # A card whose crest or badge never loaded was left out above. The rest
+      # have gone; this turns the run red so the email says something is wrong.
+      - name: Fail if a card was held back
+        if: steps.plan.outputs.go == 'true' && steps.make.outcome == 'success'
+        run: |
+          node -e "const m=require('./build/fixtures-graphics/manifest.json');if(m.held.length){m.held.forEach(h=>console.log('::error::Held back '+h.id+' – missing '+h.missing.join(', ')));process.exit(1)}"

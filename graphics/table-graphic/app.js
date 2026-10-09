@@ -1,5 +1,14 @@
 /* ============================================================
    App — controls, paste→grid sync, live render, PNG export.
+   Version: v1.11 (09/10/2026)
+
+   The table itself is drawn by /graphics/_shared/table-card.js, the same
+   renderer the scheduled batch uses; PNG export is
+   /graphics/_shared/png-export.js.
+
+   CHANGELOG
+     v1.11 09/10/2026  Drawing, NLS row-building and export moved to the
+                       shared files. No change to the graphic.
    ============================================================ */
 (function () {
   "use strict";
@@ -7,59 +16,14 @@
   var E = window.NLEngine;
   var STORAGE_KEY = "nl-table-gfx-v1";
 
-  var DIVISION_LOGO = {
-    National: "/assets/divisions/medium/National.png",
-    North:    "/assets/divisions/medium/North.png",
-    South:    "/assets/divisions/medium/South.png",
-    CupA: "/assets/divisions/medium/NL%20Cup.png",
-    CupB: "/assets/divisions/medium/NL%20Cup.png",
-    CupC: "/assets/divisions/medium/NL%20Cup.png",
-    CupD: "/assets/divisions/medium/NL%20Cup.png"
-  };
-  /* No LOGO_FALLBACK. A division badge that fails used to be replaced with the
-     generic National League logo, which published a graphic branded as the
-     wrong competition — worse than an obvious gap. Missing art now renders
-     blank (visibility:hidden keeps the header's spacing) and the export
-     warning names it. */
-  var SPONSOR_URL = "/assets/partners/TIC%20Health.png";
-
-  /* National League Services — the authoritative standings. Public, no auth,
-     and fetched straight from the browser as travel-planner and the fan embeds
-     already do, so no proxy is involved. competitionID values are firm NLS
-     codes; never derive them from a division name. */
-  var NLS_BASE = "https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2";
-  var COMPETITION_ID = { National: 89, North: 373, South: 372, CupA: 1275, CupB: 1275, CupC: 1275, CupD: 1275 };
-  /* The Cup's league-tables endpoint serves one group per call, chosen by
-     roundID (A–D; A when omitted) — confirmed against the live feed 11/09/2026. */
-  var CUP_ROUND = { CupA: "A", CupB: "B", CupC: "C", CupD: "D" };
+  /* Artwork, names and NLS codes live in /graphics/_shared/table-card.js —
+     the renderer shared with the scheduled batch. */
+  var T = window.NL_TABLE_CARD;
+  var NLS_BASE = T.NLS_BASE;
+  var COMPETITION_ID = T.COMPETITION_ID;
+  var CUP_ROUND = T.CUP_ROUND;
+  var CUP_QUALIFY = T.CUP_QUALIFY;
   function isCup(div) { return !!CUP_ROUND[div || state.division]; }
-  /* Top two in each group go through. No relegation, no play-off ladder. */
-  var CUP_QUALIFY = 2;
-
-  var ROSE_WHITE = "/assets/crests/National%20League%20rose%20white.png";
-
-  var DIV_EYEBROW = {
-    National: "Enterprise National League",
-    North: "Enterprise National League North",
-    South: "Enterprise National League South",
-    CupA: "National League Cup", CupB: "National League Cup", CupC: "National League Cup", CupD: "National League Cup"
-  };
-  /* Division name shown beneath the title */
-  var DIV_NAME = {
-    National: "Enterprise National League",
-    North: "Enterprise National League North",
-    South: "Enterprise National League South",
-    CupA: "National League Cup · Group A",
-    CupB: "National League Cup · Group B",
-    CupC: "National League Cup · Group C",
-    CupD: "National League Cup · Group D"
-  };
-
-  /* Long names that need shortening to fit the team column */
-  var SHORTEN = {
-    "hampton & richmond borough": "Hampton & Richmond",
-    "kidderminster harriers": "Kidderminster Harriers"
-  };
 
   var SAMPLE = [
     "C\tYork City\t46\t33\t9\t4\t114\t41\t+73\t108",
@@ -99,14 +63,6 @@
     rows: []
   };
 
-  /* Headline derived from the matchday selector */
-  function matchdayTitle() {
-    var m = state.matchday;
-    if (m === "final") return "FINAL STANDINGS";
-    if (!m) return "CURRENT STANDINGS";
-    return "MATCHDAY " + m;
-  }
-
   /* ---------------- elements ---------------- */
   var $ = function (id) { return document.getElementById(id); };
   var gfxHost = $("gfxHost");
@@ -115,30 +71,6 @@
   var gridBody = $("gridBody");
 
   /* ---------------- helpers ---------------- */
-  /* The Cup's guest sides. cup-clubs-meta lists them as "<club> PL2" with a
-     crestName pointing at the parent club's badge; NLS names some of them
-     "<club> U21" instead. Every such side prints as PL2 — the competition's
-     own name for them — and matches on the club part, so the crest is the
-     parent's whichever tag came in. */
-  function guestOf(name) {
-    var n = pl2Name(name);
-    if (!/\sPL2$/i.test(n) || !NL.clubs.guestByName) return null;
-    var g = NL.clubs.guestByName(n);
-    return g ? { guest: g } : null;
-  }
-  function teamDisplay(name) {
-    var k = String(name || "").toLowerCase().trim();
-    if (SHORTEN[k]) return SHORTEN[k].toUpperCase();
-    var g = guestOf(name);
-    if (g && g.guest.short) return g.guest.short.toUpperCase();
-    return pl2Name(name).toUpperCase();
-  }
-  /* Crest file for a printed name: a guest draws its parent club's badge. */
-  function crestFor(name) {
-    var g = guestOf(name);
-    return NL.clubs.crestUrl(g ? g.guest.crestName : name, 'medium');
-  }
-
   function save() {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
   }
@@ -158,152 +90,10 @@
 
   /* ---------------- render graphic ---------------- */
   function render() {
-    var rows = state.rows.filter(function (r) { return E.safeText(r.team); });
-    var n = rows.length || 1;
-    var div = state.division;
-
-    var gfx = document.createElement("div");
-    gfx.className = "gfx";
-    gfx.setAttribute("data-dir", state.dir);
-    gfx.setAttribute("data-format", state.format);
-
-    /* header */
-    var head = document.createElement("div");
-    head.className = "gfx-head";
-    head.innerHTML =
-      '<div class="logo-tile"><img class="div-logo" crossorigin="anonymous" src="' + DIVISION_LOGO[div] +
-        '" onerror="this.onerror=null;this.style.visibility=\'hidden\'"></div>' +
-      '<div class="titles">' +
-        '<span class="eyebrow">' + escapeHtml(state.sub) + '</span>' +
-        '<h1 class="gfx-title">' + escapeHtml(matchdayTitle()) + '</h1>' +
-        '<p class="gfx-sub">' + (DIV_NAME[div] || "National League").toUpperCase() + '</p>' +
-      '</div>' +
-      '<img class="rose-wm" crossorigin="anonymous" src="' + ROSE_WHITE + '">';
-
-    /* column set: square = full stats, portrait/story = minimal */
-    var COLS_FULL = [["P","p"],["W","w"],["D","d"],["L","l"],["F","f"],["A","a"],["GD","gd"],["PTS","pts"]];
-    var COLS_MIN  = [["P","p"],["GD","gd"],["PTS","pts"]];
-    var cols = state.format === "1x1" ? COLS_FULL : COLS_MIN;
-    gfx.setAttribute("data-cols", state.format === "1x1" ? "full" : "min");
-    gfx.setAttribute("data-rows", n <= 12 ? "short" : "long");
-
-    /* column header */
-    var colhead = document.createElement("div");
-    colhead.className = "gfx-colhead";
-    colhead.innerHTML =
-      '<span class="ch-pos">Pos</span><span></span>' +
-      '<span class="ch-team">Club</span>' +
-      cols.map(function (c) { return '<span class="ch-stat">' + c[0] + '</span>'; }).join("");
-
-    /* rows */
-    var rowsEl = document.createElement("div");
-    rowsEl.className = "gfx-rows";
-
-    /* TWO INDEPENDENT LAYERS:
-       • RAIL  = positional, fixed for the season (z-*) — always shows the
-         champion / SF / QF / relegation cut-offs by league position.
-       • BAND  = confirmed to date, driven by the CSV flag (is-*) — a club
-         lights up only once its tally guarantees the zone. */
-    function posZone(pos) {
-      /* Cup group: the two qualifying places, nothing else. They wear the
-         play-off treatment — same idea, a cut-off for going through. */
-      if (isCup()) return pos <= CUP_QUALIFY ? "po-sf" : "mid";
-      if (pos === 1) return "champ";
-      if (pos <= 3) return "po-sf";
-      if (pos <= 7) return "po-qf";
-      if (n > 11 && pos > n - 4) return "releg";
-      return "mid";
-    }
-    rows.forEach(function (r, i) {
-      var flag = (r.flag || "-").toUpperCase();
-      var rowEl = document.createElement("div");
-      var cls = "row z-" + posZone(i + 1);
-      if (flag === "C") cls += " is-champ";
-      else if (flag === "Q") cls += " is-po-sf";      /* qualified (cup) — same band as a confirmed semi-final place */
-      else if (flag === "SF") cls += " is-po-sf";
-      else if (flag === "QF") cls += " is-po-qf";
-      else if (flag === "R") cls += " is-releg";
-      rowEl.className = cls;
-
-      /* medium tier on purpose: 24 crests render at row height in a
-         1080-wide canvas, so 256px is comfortably oversampled and ~9x lighter
-         than the full-res originals — the difference between ~12.6MB and
-         ~1.4MB, which decides whether they all arrive on a slow connection. */
-      var crest = r.team ? crestFor(r.team) : null;
-      var statCells = cols.map(function (c) {
-        var cls = c[1] === "pts" ? "stat pts" : "stat";
-        return '<div class="' + cls + '">' + escapeHtml(r[c[1]] || "") + '</div>';
-      }).join("");
-      rowEl.innerHTML =
-        '<div class="rail"></div>' +
-        '<div class="pos">' + (i + 1) + '</div>' +
-        '<div class="crest-tile">' +
-          (crest ? '<img crossorigin="anonymous" src="' + crest + '" onerror="this.style.display=\'none\'">' : "") +
-        '</div>' +
-        '<div class="team">' + escapeHtml(teamDisplay(r.team)) + '</div>' +
-        statCells;
-      rowsEl.appendChild(rowEl);
-    });
-
-    /* footer — sponsor logo, centred */
-    var legend = document.createElement("div");
-    legend.className = "gfx-foot";
-    legend.innerHTML =
-      '<div class="sponsor">' +
-        '<img class="sponsor-logo" crossorigin="anonymous" src="' + SPONSOR_URL + '" onerror="this.style.display=\'none\'">' +
-      '</div>';
-
-    /* column header + rows travel together, so a short table can sit
-       centred in the space a full division would fill */
-    var table = document.createElement("div");
-    table.className = "gfx-table";
-    table.appendChild(colhead);
-    table.appendChild(rowsEl);
-
-    /* assemble — dirs 3 & 4 wrap the table in a framed card on a navy field */
-    if (state.dir === "3" || state.dir === "4") {
-      var frame = document.createElement("div");
-      frame.className = "frame";
-      frame.appendChild(head);
-      frame.appendChild(table);
-      frame.appendChild(legend);
-      gfx.appendChild(frame);
-    } else {
-      gfx.appendChild(head);
-      gfx.appendChild(table);
-      gfx.appendChild(legend);
-    }
-
-    gfxHost.innerHTML = "";
-    gfxHost.appendChild(gfx);
-
-    /* size rows after layout */
-    requestAnimationFrame(function () {
-      /* rows are flex-sized (and capped for short tables), so read the
-         height they settled at rather than dividing the block by n */
-      var first = rowsEl.querySelector(".row");
-      var h = first ? first.clientHeight : (n ? rowsEl.clientHeight / n : 0);
-      if (h) gfx.style.setProperty("--rh", h + "px");
-      fitTeamColumn(rowsEl);
-      fitStage();
-    });
-  }
-
-  /* Shrink the team column's type until the longest printed name fits its
-     cell. Full names at a tall row's scale ("FC HALIFAX TOWN" in an
-     eight-row Cup group) overrun the column otherwise.
-     Canon candidate (11/09/2026): academy-alliance carries the same routine. */
-  function fitTeamColumn(rowsEl) {
-    var cells = [].slice.call(rowsEl.querySelectorAll(".row .team"));
-    if (!cells.length) return;
-    cells.forEach(function (c) { c.style.fontSize = ""; });
-    var base = parseFloat(getComputedStyle(cells[0]).fontSize) || 20;
-    var size = base, g = 0;
-    var overflows = function () { return cells.some(function (c) { return c.scrollWidth > c.clientWidth + 1; }); };
-    while (overflows() && size > base * 0.5 && g < 80) {
-      size -= 0.5; g++;
-      cells.forEach(function (c) { c.style.fontSize = size + "px"; });
-    }
+    return T.render(gfxHost, {
+      division: state.division, format: state.format, dir: state.dir,
+      matchday: state.matchday, season: state.sub, rows: state.rows
+    }, NL.clubs).then(fitStage);
   }
 
   /* Escaping is canon — NL.escHtml. The local copy this replaced was a fifth
@@ -412,87 +202,29 @@
     var gfx = gfxHost.querySelector(".gfx");
     if (!gfx || !window.htmlToImage) return;
     var prevT = gfx.style.transform, prevW = gfxHost.style.width, prevH = gfxHost.style.height;
-    var h = (state.format === "1x1" ? 1080 : state.format === "4x5" ? 1350 : 1920);
+    var h = T.FORMAT_H[state.format];
     gfx.style.transform = "none";
     gfxHost.style.width = "1080px";
     gfxHost.style.height = h + "px";
     setStatus("Rendering PNG…");
-    var restore = function () {};
     try {
-      await (document.fonts && document.fonts.ready);
-      /* Wait for every crest to finish loading FIRST. inlineImages can only
-         convert an image the browser already holds — anything still in flight
-         was replaced with a blank, so on a cold cache or a slow connection the
-         export came out with all but one of the 24 crests missing, and said
-         "Downloaded" regardless. Same fix as fixtures-graphic. */
-      var pending = [].slice.call(gfx.querySelectorAll("img"));
-      var loaded = await Promise.all(pending.map(function (img) { return whenImageReady(img, 10000); }));
-      var late = loaded.filter(function (ok) { return !ok; }).length;
-      restore = await inlineImages(gfx);   /* pre-inline crests so the canvas isn't cross-origin tainted */
-      var blob = await window.htmlToImage.toBlob(gfx, {
-        width: 1080, height: h, pixelRatio: 1, cacheBust: false,
-        backgroundColor: getComputedStyle(gfx).backgroundColor
-      });
+      var out = await T.toPng(gfx, state.format);
       var a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
+      a.href = URL.createObjectURL(out.blob);
       a.download = fileName();
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(a.href);
       /* never let a half-drawn graphic leave without saying so */
-      setStatus(late
-        ? "Downloaded — but " + late + " image" + (late === 1 ? "" : "s") + " didn't load. Check your connection and export again."
+      setStatus(out.late
+        ? "Downloaded — but " + out.late + " image" + (out.late === 1 ? "" : "s") + " didn't load. Check your connection and export again."
         : "Downloaded " + state.format);
     } catch (err) {
       console.error(err);
       setStatus("Export blocked — use a screenshot. (" + (err && err.message) + ")");
     } finally {
-      try { restore(); } catch (e) {}
       gfx.style.transform = prevT; gfxHost.style.width = prevW; gfxHost.style.height = prevH;
     }
   }
-  /* Resolve once an <img> has actually decoded, or once it's clear it won't.
-     Never rejects — the caller only needs to know whether it made it. */
-  function whenImageReady(img, ms) {
-    return new Promise(function (resolve) {
-      if (img.complete && img.naturalWidth) return resolve(true);
-      var settled = false;
-      function finish(ok) {
-        if (settled) return;
-        settled = true; clearTimeout(timer);
-        img.removeEventListener("load", onLoad);
-        img.removeEventListener("error", onError);
-        resolve(ok);
-      }
-      function onLoad() { finish(!!img.naturalWidth); }
-      function onError() { finish(false); }
-      var timer = setTimeout(function () { finish(false); }, ms || 10000);
-      img.addEventListener("load", onLoad);
-      img.addEventListener("error", onError);
-    });
-  }
-
-  async function inlineImages(root) {
-    var BLANK = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
-    var imgs = [].slice.call(root.querySelectorAll("img"));
-    var restores = [];
-    imgs.forEach(function (img) {
-      var src = img.getAttribute("src") || "";
-      if (!src || src.indexOf("data:") === 0) return;
-      var done = false;
-      try {
-        if (img.complete && img.naturalWidth) {
-          var c = document.createElement("canvas");
-          c.width = img.naturalWidth; c.height = img.naturalHeight;
-          c.getContext("2d").drawImage(img, 0, 0);
-          var url = c.toDataURL("image/png");
-          restores.push([img, src]); img.setAttribute("src", url); done = true;
-        }
-      } catch (e) {}
-      if (!done) { restores.push([img, src]); img.setAttribute("src", BLANK); }
-    });
-    return function () { restores.forEach(function (p) { p[0].setAttribute("src", p[1]); }); };
-  }
-
   var statusT;
   function setStatus(m, ms) {
     var el = $("status"); if (!el) return;
@@ -525,29 +257,6 @@
     return String((NL.season && NL.season.current(meta)) || NL.season.fromDate(new Date()));
   }
 
-  /* clubs-meta optaID IS the NLS teamID, so a club resolves on its code rather
-     than on its name — which is what keeps the crest lookup reliable. */
-  function nlsTeamName(row) {
-    var a = row.attributes || {};
-    var club = row.id && NL.clubs.byOpta(row.id);
-    return (club && club.name) || pl2Name(a.teamName || a.teamShortName || "");
-  }
-
-  /* A guest side is a PL2 side whatever NLS calls it: "<club> U21" and
-     "<club> U23" normalise to "<club> PL2" the moment a name comes in, so
-     every later step — crest, short name, the grid — sees one spelling. */
-  function pl2Name(name) {
-    return String(name || "").trim().replace(/\s+U2[13]$/i, " PL2");
-  }
-
-  /* The graphic prints GD with its sign, the way a table does. */
-  function gdText(v) {
-    var n = Number(v);
-    if (v == null || v === "" || isNaN(n)) return "";
-    return n > 0 ? "+" + n : String(n);
-  }
-  function numText(v) { return (v == null || v === "") ? "" : String(v); }
-
   function loadFromNLS() {
     var comp = COMPETITION_ID[state.division];
     if (!comp) { setStatus("No table for that competition."); return; }
@@ -575,21 +284,7 @@
   }
 
   function applyTable(data) {
-    var rows = data.filter(function (r) {
-      var a = (r && r.attributes) || {};
-      return r && r.id && (a.teamName || a.teamShortName) && a.position != null;
-    }).sort(function (x, y) {
-      return (x.attributes.position || 999) - (y.attributes.position || 999);
-    }).map(function (r) {
-      var a = r.attributes || {};
-      return {
-        team: nlsTeamName(r),
-        flag: E.FLAG_NONE,          /* the feed has no zones — see above */
-        p: numText(a.played), w: numText(a.won), d: numText(a.drawn), l: numText(a.lost),
-        f: numText(a.goalsFor), a: numText(a.goalsAgainst),
-        gd: gdText(a.goalDifference), pts: numText(a.points)
-      };
-    });
+    var rows = T.buildRows(data, NL.clubs);   /* the feed has no zones — see above */
 
     if (!rows.length) { setStatus("No table published yet.", 5000); return; }
 

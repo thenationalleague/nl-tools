@@ -83,3 +83,26 @@ test('a Cup guest named U21 by NLS still finds its parent crest', () => {
   assert.equal(C.crestKey(clubs, 'Fulham PL2'), 'Fulham');
   assert.equal(C.crestKey(clubs, 'Woking'), 'Woking');
 });
+
+/* League-table rows. Response shape as graphics/table-graphic reads it from
+   the live league-tables endpoint (data[].id = NLS teamID; attributes.
+   teamName, position, played, won, drawn, lost, goalsFor, goalsAgainst,
+   goalDifference, points) — the tool has loaded real tables with it since
+   11/09/2026. */
+test('table rows come out in position order, signed GD, U21 guests as PL2', () => {
+  const win = {};
+  new Function('window', readFileSync(join(REPO, 'graphics/_shared/table-card.js'), 'utf8'))(win);
+  const T = win.NL_TABLE_CARD;
+  const row = (id, teamName, position, gd, points) => ({ id, attributes: {
+    teamName, position, played: 3, won: 1, drawn: 1, lost: 1, goalsFor: 4, goalsAgainst: 4 - gd,
+    goalDifference: gd, points } });
+  const clubs = { byOpta: () => null };
+  const rows = T.buildRows([row('b', 'Woking', 2, 0, 4), row('a', 'Ipswich Town U21', 1, 3, 7),
+                            row('c', 'Hornchurch', 3, -2, 1)], clubs);
+  assert.deepEqual(rows.map(r => r.team), ['Ipswich Town PL2', 'Woking', 'Hornchurch']);
+  assert.deepEqual(rows.map(r => r.gd), ['+3', '0', '-2']);
+  assert.ok(rows.every(r => r.flag === '-'), 'the feed has no zones, so nothing is marked');
+  assert.equal(T.title(''), 'CURRENT STANDINGS');
+  assert.equal(T.title('12'), 'MATCHDAY 12');
+  assert.equal(T.title('final'), 'FINAL STANDINGS');
+});
