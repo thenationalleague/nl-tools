@@ -1,7 +1,7 @@
 /* ============================================================
    Fixtures & Results Card — shared renderer
    File: /graphics/_shared/fixtures-card.js
-   Version: v1.3 (09/10/2026)
+   Version: v1.4 (09/10/2026)
 
    Single source of truth for the fixtures/results card artwork. Both the
    interactive tool (/graphics/fixtures-graphic/) and the scheduled batch
@@ -31,6 +31,11 @@
      ymdUK, koTime, koDay, dividerLabel, nlsDate, nlsTeamName(clubs, team)
 
    CHANGELOG
+     v1.4 09/10/2026  Abandoned games print A - A where the score goes
+                      (buildRows; typing A and A by hand does the same).
+                      A results row with no score prints its kick-off time
+                      under the v when that time is ticked, so a card made
+                      before a late kick-off reads "v / 17:30".
      v1.3 09/10/2026  Cup guests print without PL2 / U21 / U23.
      v1.2 09/10/2026  Penalty shootouts: a result row carrying hp/ap prints
                       "(5-6 pens)" under the score. buildRows fills them
@@ -238,8 +243,11 @@
         }
       } else {
         mid = '<span class="vs">v</span>';
-        /* koOn undefined = show; only an explicit false hides a time. */
-        if (mode !== "results" && r.ko && r.koOn !== false) {
+        /* koOn undefined = show; only an explicit false hides a time. On a
+           results card this is a game still to be played (the 17:30 on a
+           card made when the 3pm games finished): buildRows ticks only the
+           times that differ from the card's usual one. */
+        if (r.ko && r.koOn !== false && (mode !== "results" || r.koOn === true)) {
           mid += '<span class="ko">' + escapeHtml(r.ko) + '</span>';
         }
       }
@@ -386,6 +394,11 @@
   }
   function nlsScore(t) { return (t && t.score != null) ? String(t.score) : ""; }
   function nlsPens(t) { return (t && t.penaltyScore != null) ? String(t.penaltyScore) : ""; }
+  /* matchPeriod "Abandoned" (nls-data-structure skill: FullTime, PostMatch,
+     Postponed, Abandoned are the list endpoint's end states). The score at
+     the moment it was called off is not a result, so it is not printed.
+     Decided 09/10/2026: A - A where the score goes, to show what happened. */
+  function isAbandoned(a) { return String((a || {}).matchPeriod || "").toLowerCase() === "abandoned"; }
 
   function buildRows(data, clubs) {
     /* Postponed = matchPeriod "Postponed". NOT postponementReason: NLS keeps
@@ -400,16 +413,17 @@
       return true;
     }).map(function (m) {
       var a = m.attributes || {};
+      var aa = isAbandoned(a);
       return {
         home: nlsTeamName(clubs, a.homeTeam),
         away: nlsTeamName(clubs, a.awayTeam),
-        hs: nlsScore(a.homeTeam),
-        as: nlsScore(a.awayTeam),
+        hs: aa ? "A" : nlsScore(a.homeTeam),
+        as: aa ? "A" : nlsScore(a.awayTeam),
         /* penaltyScore is null unless the tie went to a shootout. Live-
            confirmed field (nls-data-structure skill: Hemel Hempstead 1-1
            Weston-super-Mare, 5-6 on pens, 28/04/2026). */
-        hp: nlsPens(a.homeTeam),
-        ap: nlsPens(a.awayTeam),
+        hp: aa ? "" : nlsPens(a.homeTeam),
+        ap: aa ? "" : nlsPens(a.awayTeam),
         ko: koTime(a.kickOffDateUTC),
         day: koDay(a.kickOffDateUTC)
       };

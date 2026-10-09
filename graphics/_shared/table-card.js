@@ -109,11 +109,13 @@
   function printName(name) {
     return String(name || "").replace(/\s+(PL2|U21|U23)$/i, "");
   }
+  /* Full names for everyone, guests included (decided 09/10/2026): a table
+     printing WOLVES above FC HALIFAX TOWN mixed two naming schemes. The
+     guests' `short` field was written for tight spaces (SOTON, BORO) and is
+     not used here. */
   function teamDisplay(clubs, name) {
     var k = String(name || "").toLowerCase().trim();
     if (SHORTEN[k]) return SHORTEN[k].toUpperCase();
-    var g = guestOf(clubs, name);
-    if (g && g.guest.short) return printName(g.guest.short).toUpperCase();
     return printName(pl2Name(name)).toUpperCase();
   }
   /* Crest file for a printed name: a guest draws its parent club's badge. */

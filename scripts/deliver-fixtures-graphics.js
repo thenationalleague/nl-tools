@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* ============================================================
    deliver-fixtures-graphics.js
-   Version: v1.0 (09/10/2026)
+   Version: v1.1 (09/10/2026)
 
    The delivery half of the fixtures & results automation. Rendering is
    scripts/build-fixtures-graphics.js; this moves its output to where
@@ -21,7 +21,12 @@
      Storage is the record of what has been delivered. A card goes to Drive
      first and to Storage second, so a card is only marked done once it is
      in both; if Drive fails, the next run tries the whole card again.
-     `delivered` lists the card folders already in Storage for the season.
+     `delivered` lists the card folders already in Storage for the season,
+     one per line; a card that recorded a fingerprint of what it showed has
+     it after a tab. The fingerprint is an empty object named .sig-<hash>
+     beside the PNGs (Storage only, never Drive), so the list call that finds
+     the cards also finds what each one showed — no extra reads. The build
+     compares it, and sends a changed card again as v2, v3.
 
    AUTH
      GOOGLE_ACCESS_TOKEN — a bearer token for the deploy service account
@@ -31,6 +36,7 @@
      and the Drive API must be enabled on the nl-tools project.
 
    CHANGELOG
+     v1.1 09/10/2026  Records each card's fingerprint, and lists it back.
      v1.0 09/10/2026  First version.
    ============================================================ */
 
@@ -72,8 +78,9 @@ async function api(url, opts = {}) {
 
 /* ---------- Firebase Storage (Cloud Storage JSON API) ---------- */
 
+const SIG = '.sig-';
 async function delivered(season) {
-  const ids = new Set();
+  const ids = new Map();
   let pageToken = '';
   do {
     const q = new URLSearchParams({ prefix: `${PREFIX}/${season}/`, fields: 'items(name),nextPageToken' });
@@ -81,17 +88,19 @@ async function delivered(season) {
     const j = await api(`${STORAGE_API}/storage/v1/b/${BUCKET}/o?${q}`);
     for (const it of j.items || []) {
       const rest = it.name.slice(`${PREFIX}/${season}/`.length);
-      const id = rest.split('/')[0];
-      if (id) ids.add(id);
+      const [id, file] = rest.split('/');
+      if (!id) continue;
+      if (!ids.has(id)) ids.set(id, '');
+      if (file && file.startsWith(SIG)) ids.set(id, file.slice(SIG.length));
     }
     pageToken = j.nextPageToken || '';
   } while (pageToken);
-  return [...ids].sort();
+  return [...ids.keys()].sort().map(id => ids.get(id) ? `${id}\t${ids.get(id)}` : id);
 }
-async function storagePut(objectName, buf) {
+async function storagePut(objectName, buf, type = 'image/png') {
   const q = new URLSearchParams({ uploadType: 'media', name: objectName });
   return api(`${STORAGE_API}/upload/storage/v1/b/${BUCKET}/o?${q}`,
-    { method: 'POST', headers: { 'Content-Type': 'image/png' }, body: buf });
+    { method: 'POST', headers: { 'Content-Type': type }, body: buf });
 }
 
 /* ---------- Google Drive (v3 REST, Shared Drive aware) ---------- */
@@ -136,13 +145,14 @@ async function upload(outDir) {
     const folderId = await driveFolder(driveParent, card.id);
     for (const f of files) await driveUpload(folderId, f.name, f.buf);
     for (const f of files) await storagePut(`${PREFIX}/${manifest.season}/${card.id}/${f.name}`, f.buf);
+    if (card.sig) await storagePut(`${PREFIX}/${manifest.season}/${card.id}/${SIG}${card.sig}`, Buffer.alloc(0), 'text/plain');
     console.log(`delivered  ${card.id}  (${files.length} files)  https://drive.google.com/drive/folders/${folderId}`);
   }
 }
 
 async function main() {
   const [cmd, arg] = process.argv.slice(2);
-  if (cmd === 'delivered' && arg) { (await delivered(arg)).forEach(id => console.log(id)); return; }
+  if (cmd === 'delivered' && arg) { (await delivered(arg)).forEach(line => console.log(line)); return; }
   if (cmd === 'upload' && arg) return upload(path.resolve(arg));
   throw new Error('usage: delivered <season> | upload <out dir>');
 }
