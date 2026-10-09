@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* ============================================================
    build-fixtures-graphics.js
-   Version: v1.2 (09/10/2026)
+   Version: v1.3 (09/10/2026)
 
    Makes the fixtures and results cards that are due, without anyone
    pressing anything. Run by .github/workflows/fixtures-graphics.yml on a
@@ -19,9 +19,19 @@
                midweek — gets its own card two days before, titled plain
                MATCHDAY.
      results   Today (UK), one card per day per competition, made as soon as
-               every game that day is marked full time. Postponed and
-               abandoned games are left off. Until the last one finishes the
-               run does nothing, so the workflow can poll every 15 minutes.
+               every game that day is full time or abandoned. Postponed games
+               are left off; abandoned ones print A - A. Until the last one
+               finishes the run does nothing, so it can be asked often.
+     early     A day with a late kick-off (two hours or more after the day's
+               usual time — the 17:30 on a 3pm Saturday) gets a card as soon
+               as the usual-time games are done, with the late game printed
+               "v / 17:30"; the full card follows when it finishes. Card id
+               "<date> <Division> Results early", tables likewise.
+               --before-late replays a past day as it stood at that point.
+     corrected A results card or table already sent whose content has since
+               changed (a score corrected after full time) goes again as
+               "<id> v2", "v3"… the same day. Each delivered card records a
+               fingerprint of what it showed (see --done).
      tables    With every results card: the league's table, or the four Cup
                group tables after a group-stage day. Made only once the
                feed's table has caught up with the scores (games played in
@@ -38,9 +48,11 @@
    the wording, for the Cup's knockout rounds.
 
    ONCE ONLY
-     --done <file> lists card ids already delivered, one per line (the
+     --done <file> lists card ids already delivered, one per line, each
+     optionally followed by a tab and the fingerprint of what it showed (the
      workflow builds it from what is already in Firebase Storage). A card
-     whose id is listed is skipped. Card id = output folder name:
+     whose id is listed is skipped, unless its fingerprint has changed.
+     Card id = output folder name:
        "2026-10-10 National Results"   "2026-10-08 South Fixtures"
 
    OUTPUT  --out (default build/fixtures-graphics)
@@ -59,6 +71,9 @@
      render offline.
 
    CHANGELOG
+     v1.3 09/10/2026  Abandoned games count as done and print A - A. Early
+                      card for the usual-time games on a day with a late
+                      kick-off. Changed results and tables go again as v2, v3.
      v1.2 09/10/2026  League tables after every results card, and Cup group
                       tables A–D in the group stage, drawn by
                       graphics/_shared/table-card.js. A card whose images
@@ -86,7 +101,8 @@ const FIXTURES_LEAD_DAYS = 2;
 
 function parseArgs(argv) {
   const a = { mode: null, division: 'all', today: null, out: path.join(REPO, 'build', 'fixtures-graphics'),
-              done: null, formats: FORMATS.slice(), chrome: null, noTables: false, tablesAnyway: false };
+              done: null, formats: FORMATS.slice(), chrome: null, noTables: false, tablesAnyway: false,
+              beforeLate: false };
   for (let i = 2; i < argv.length; i++) {
     const k = argv[i];
     if (k === '--mode') a.mode = argv[++i];
@@ -98,6 +114,7 @@ function parseArgs(argv) {
     else if (k === '--chrome') a.chrome = argv[++i];
     else if (k === '--no-tables') a.noTables = true;
     else if (k === '--tables-anyway') a.tablesAnyway = true;
+    else if (k === '--before-late') a.beforeLate = true;
     else if (k === '--help') { console.log('see header'); process.exit(0); }
     else throw new Error(`unknown argument: ${k}`);
   }
@@ -107,6 +124,7 @@ function parseArgs(argv) {
   }
   for (const f of a.formats) if (!FORMATS.includes(f)) throw new Error(`unknown --format ${f}`);
   if (a.today && !/^\d{4}-\d{2}-\d{2}$/.test(a.today)) throw new Error('--today must be YYYY-MM-DD');
+  if (a.beforeLate && !a.today) throw new Error('--before-late is for testing a past date: give --today too');
   return a;
 }
 
@@ -127,7 +145,8 @@ const seasonLabel = y => `${y}-${String((y + 1) % 100).padStart(2, '0')}`;
 function shortDate(ymd) {
   const d = new Date(ymd + 'T12:00:00Z');
   return String(d.getUTCDate()).padStart(2, '0') +
-    d.toLocaleString('en-GB', { month: 'short', timeZone: 'UTC' }) + String(d.getUTCFullYear()).slice(2);
+    /* 3 letters: newer ICU spells September "Sept" in en-GB. */
+    d.toLocaleString('en-GB', { month: 'short', timeZone: 'UTC' }).slice(0, 3) + String(d.getUTCFullYear()).slice(2);
 }
 
 /* ---------- rounds ---------- */
@@ -214,6 +233,83 @@ const period = m => String((m.attributes || {}).matchPeriod || '').toLowerCase()
 const isPostponed = m => period(m) === 'postponed';
 const isAbandoned = m => period(m) === 'abandoned';
 const isFinished = m => period(m) === 'fulltime' || period(m) === 'postmatch';
+const isDone = m => isFinished(m) || isAbandoned(m);
+
+/* ---------- late kick-offs ----------
+   The day's usual kick-off is the most common one. A game two hours or
+   more after it is late: on a 3pm Saturday the 17:30 is late, a 15:30 is
+   not. Kick-off times are read in UK time, the way the card prints them. */
+const LATE_GAP_MIN = 120;
+function koMinutes(m) {
+  const s = String((m.attributes || {}).kickOffDateUTC || '').trim();
+  if (!s) return null;
+  const d = new Date(s.replace(' ', 'T').replace(/Z?$/, 'Z'));
+  if (isNaN(d)) return null;
+  const [h, mi] = d.toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit',
+    minute: '2-digit', hour12: false }).split(':').map(Number);
+  return h * 60 + mi;
+}
+function splitLate(data) {
+  const counts = {};
+  let usual = null, most = 0;
+  for (const m of data) {
+    const k = koMinutes(m);
+    if (k == null) continue;
+    counts[k] = (counts[k] || 0) + 1;
+    if (counts[k] > most || (counts[k] === most && k < usual)) { most = counts[k]; usual = k; }
+  }
+  if (usual == null) return { early: data, late: [] };
+  const late = data.filter(m => koMinutes(m) != null && koMinutes(m) >= usual + LATE_GAP_MIN);
+  return { early: data.filter(m => !late.includes(m)), late };
+}
+/* The early card prints only what is decided. A late game the run catches
+   already under way must show "v", not its live score as a result. */
+function withoutLiveScores(data) {
+  return data.map(m => {
+    if (isDone(m)) return m;
+    const a = m.attributes || {};
+    const blank = t => t ? { ...t, score: null, penaltyScore: null } : t;
+    return { ...m, attributes: { ...a, homeTeam: blank(a.homeTeam), awayTeam: blank(a.awayTeam) } };
+  });
+}
+
+/* ---------- once only, and corrections ----------
+   A fingerprint is a short hash of exactly what a card shows: for results,
+   every game's score, shootout and state; for a table, every row. A card
+   already sent with the same fingerprint is not sent again; a different one
+   goes as the next version. A card recorded without a fingerprint (sent
+   before v1.3) is never re-sent. */
+const crypto = require('crypto');
+const hash = parts => crypto.createHash('sha1').update(parts.join('\n')).digest('hex').slice(0, 12);
+function resultsSig(data) {
+  return hash(data.map(m => {
+    const a = m.attributes || {}, h = a.homeTeam || {}, w = a.awayTeam || {};
+    return [m.id, period(m), h.score, w.score, h.penaltyScore, w.penaltyScore].join(':');
+  }).sort());
+}
+function tableSig(rows) {
+  return hash(rows.map(r => {
+    const a = r.attributes || {};
+    return [r.id, a.position, a.played, a.won, a.drawn, a.lost, a.goalsFor, a.goalsAgainst, a.points].join(':');
+  }));
+}
+function parseDone(text) {
+  const done = new Map();
+  for (const line of String(text || '').split('\n')) {
+    const [id, sig] = line.split('\t').map(s => (s || '').trim());
+    if (id) done.set(id, sig || '');
+  }
+  return done;
+}
+/* The id this content should go out under, or null if it already has. */
+function versionedId(base, sig, done) {
+  let n = 1, last = done.has(base) ? base : null;
+  for (let v = 2; done.has(`${base} v${v}`); v++) { n = v; last = `${base} v${v}`; }
+  if (!last) return { id: base, version: 1 };
+  const was = done.get(last);
+  if (!was || was === sig) return null;
+  return { id: `${base} v${n + 1}`, version: n + 1 };
+}
 
 /* ---------- what is due ---------- */
 
@@ -239,16 +335,42 @@ async function dueCards(args, rounds, season, done) {
       cards.push({ division, mode: 'fixtures', date: target, days: cardDays,
                    matchday: cardTitle(rounds, division, target), data });
     } else {
-      const all = await matchesBetween(season, division, today, today);
-      const data = all.filter(m => !isPostponed(m) && !isAbandoned(m));
+      let all = await matchesBetween(season, division, today, today);
+      /* --before-late (testing only): replay a past day as it stood when its
+         usual-time games had finished and the late ones had not started. */
+      if (args.beforeLate) {
+        const { late } = splitLate(all.filter(m => !isPostponed(m)));
+        all = all.map(m => late.includes(m)
+          ? withoutLiveScores([{ ...m, attributes: { ...m.attributes, matchPeriod: 'PreMatch' } }])[0] : m);
+      }
+      const data = all.filter(m => !isPostponed(m));
       if (!data.length) { skipped.push({ division, reason: `no games on ${today}` }); continue; }
-      const live = data.filter(m => !isFinished(m));
-      if (live.length) { skipped.push({ division, reason: `${live.length} of ${data.length} not finished` }); continue; }
-      cards.push({ kind: 'fixtures', division, mode: 'results', date: today, days: [today],
-                   matchday: cardTitle(rounds, division, today), data,
-                   leftOff: all.length - data.length,
-                   id: `${today} ${division} Results`, label: division });
-      if (!args.noTables) cards.push(...await tableCards(division, season, today, rounds, done, skipped, args.tablesAnyway));
+      const card = { kind: 'fixtures', division, mode: 'results', date: today, days: [today],
+                     matchday: cardTitle(rounds, division, today), leftOff: all.length - data.length,
+                     label: division };
+      const live = data.filter(m => !isDone(m));
+      if (!live.length) {
+        const base = `${today} ${division} Results`;
+        const sig = resultsSig(data);
+        const v = versionedId(base, sig, done);
+        if (!v) { skipped.push({ division, reason: `${base} already delivered, unchanged` }); }
+        else {
+          cards.push({ ...card, data, id: v.id, sig, version: v.version,
+                       suffix: v.version > 1 ? `v${v.version}` : '' });
+        }
+        if (!args.noTables) cards.push(...await tableCards(division, season, today, rounds, done, skipped, args.tablesAnyway, ''));
+        continue;
+      }
+      const { early, late } = splitLate(data);
+      if (late.length && early.every(isDone) && late.some(m => !isDone(m))) {
+        const id = `${today} ${division} Results early`;
+        if (!done.has(id)) {
+          cards.push({ ...card, data: withoutLiveScores(data), id, suffix: 'early', early: true });
+        } else skipped.push({ division, reason: `${id} already delivered; waiting for ${live.length} late game(s)` });
+        if (!args.noTables) cards.push(...await tableCards(division, season, today, rounds, done, skipped, args.tablesAnyway, 'early'));
+        continue;
+      }
+      skipped.push({ division, reason: `${live.length} of ${data.length} not finished` });
     }
   }
 
@@ -256,7 +378,8 @@ async function dueCards(args, rounds, season, done) {
     if (!c.id) c.id = `${c.date} ${c.division} Fixtures`;
     if (!c.label) c.label = c.division;
     const kindWord = c.kind === 'table' ? 'Table' : c.mode === 'results' ? 'Results' : 'Fixtures';
-    c.files = args.formats.map(f => ({ format: f, file: `${c.label} ${kindWord} ${shortDate(c.date)} - ${f}.png` }));
+    const tail = c.suffix ? ` ${c.suffix}` : '';
+    c.files = args.formats.map(f => ({ format: f, file: `${c.label} ${kindWord} ${shortDate(c.date)}${tail} - ${f}.png` }));
   }
   return { today, cards, skipped };
 }
@@ -274,10 +397,10 @@ async function leagueTable(season, division, group) {
     `&seasonID=${season}` + (group ? `&roundID=${group}` : '')]);
   return j.data || [];
 }
-async function tableCards(division, season, today, rounds, done, skipped, anyway) {
+async function tableCards(division, season, today, rounds, done, skipped, anyway, stage) {
   const groups = division === 'Cup' ? CUP_GROUPS : [null];
   const label = g => g ? `Cup Group ${g}` : division;
-  const id = g => `${today} ${label(g)} Table`;
+  const id = g => `${today} ${label(g)} Table` + (stage ? ` ${stage}` : '');
   if (division === 'Cup') {
     const group = rounds.Cup || [];
     const lastGroupDay = group.length ? group[group.length - 1].to : '';
@@ -286,7 +409,9 @@ async function tableCards(division, season, today, rounds, done, skipped, anyway
       return [];
     }
   }
-  if (groups.every(g => done.has(id(g)))) return [];
+  /* An early table goes once. The day's table is checked again on every
+     run, so a correction that moves it is sent as the next version. */
+  if (stage && groups.every(g => done.has(id(g)))) return [];
 
   const tables = [];
   for (const g of groups) tables.push({ g, data: await leagueTable(season, division, g) });
@@ -299,11 +424,18 @@ async function tableCards(division, season, today, rounds, done, skipped, anyway
     return [];
   }
   const r = roundFor(rounds, division, today);
-  return tables.filter(t => !done.has(id(t.g)) && t.data.length).map(t => ({
-    kind: 'table', division, tableDivision: t.g ? `Cup${t.g}` : division, mode: 'table',
-    date: today, days: [today], matchday: r ? String(r.round) : '', data: t.data,
-    id: id(t.g), label: label(t.g)
-  }));
+  const out = [];
+  for (const t of tables) {
+    if (!t.data.length) continue;
+    const sig = tableSig(t.data);
+    const v = stage ? (done.has(id(t.g)) ? null : { id: id(t.g), version: 1 }) : versionedId(id(t.g), sig, done);
+    if (!v) continue;
+    out.push({ kind: 'table', division, tableDivision: t.g ? `Cup${t.g}` : division, mode: 'table',
+      date: today, days: [today], matchday: r ? String(r.round) : '', data: t.data,
+      id: v.id, label: label(t.g), sig, version: v.version,
+      suffix: [stage, v.version > 1 ? `v${v.version}` : ''].filter(Boolean).join(' ') });
+  }
+  return out;
 }
 
 /* ---------- render harness ---------- */
@@ -439,8 +571,7 @@ async function main() {
   console.log(`  today       ${today}${args.today ? '  (pretend)' : ''}`);
   console.log(`  season      ${seasonLabel(season)}`);
 
-  const done = new Set(args.done && fs.existsSync(args.done)
-    ? fs.readFileSync(args.done, 'utf8').split('\n').map(s => s.trim()).filter(Boolean) : []);
+  const done = parseDone(args.done && fs.existsSync(args.done) ? fs.readFileSync(args.done, 'utf8') : '');
   const { cards, skipped } = await dueCards(args, rounds, season, done);
   const work = [];
   for (const c of cards) {
@@ -492,6 +623,7 @@ async function main() {
   for (const c of work) {
     const files = state.rendered.filter(r => r.card === c.id);
     const entry = { id: c.id, kind: c.kind, division: c.division, mode: c.mode, days: c.days,
+      sig: c.sig || '', version: c.version || 1, early: !!c.early,
       title: files[0] && files[0].title, rows: files[0] && files[0].rows,
       trimmed: files.some(f => f.trimmed), leftOff: c.leftOff || 0, files: files.map(f => f.file) };
     if (broken.has(c.id)) {
@@ -510,4 +642,5 @@ async function main() {
 if (require.main === module) {
   main().catch(e => { console.error(`\n  ${e.message}`); process.exit(1); });
 }
-module.exports = { addDays, seasonStart, seasonLabel, roundFor, cardTitle, shortDate };
+module.exports = { addDays, seasonStart, seasonLabel, roundFor, cardTitle, shortDate,
+  splitLate, withoutLiveScores, resultsSig, tableSig, parseDone, versionedId, isDone };

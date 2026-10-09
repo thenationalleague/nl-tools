@@ -63,6 +63,7 @@ test('dates and seasons', () => {
   assert.equal(m.seasonStart('2027-04-24'), 2026);
   assert.equal(m.seasonLabel(2026), '2026-27');
   assert.equal(m.shortDate('2026-10-03'), '03Oct26');
+  assert.equal(m.shortDate('2026-09-08'), '08Sep26');
 });
 
 /* NLS names three Cup guests "U21" where cup-clubs-meta has "PL2" (live,
@@ -142,7 +143,103 @@ test('Cup guests print without their PL2 / U21 tag, on cards and tables', () => 
   assert.equal(C.teamDisplay(clubs, 'West Bromwich Albion PL2', 'short'), 'WEST BROM');
   assert.equal(C.teamDisplay(clubs, 'Woking', 'wrap'), 'WOKING');
   assert.equal(C.crestKey(clubs, 'Ipswich Town U21'), 'Ipswich Town', 'the crest still comes from the tagged record');
-  assert.equal(T.teamDisplay(clubs, 'Wolverhampton Wanderers PL2'), 'WOLVES');
-  assert.equal(T.teamDisplay(clubs, 'Norwich City U21'), 'NORWICH');
+  /* Full names on tables too, guests included (09/10/2026) — not their
+     tight-space short names, which mixed WOLVES with FC HALIFAX TOWN. */
+  assert.equal(T.teamDisplay(clubs, 'Wolverhampton Wanderers PL2'), 'WOLVERHAMPTON WANDERERS');
+  assert.equal(T.teamDisplay(clubs, 'Norwich City U21'), 'NORWICH CITY');
+  assert.equal(T.teamDisplay(clubs, 'FC Halifax Town'), 'FC HALIFAX TOWN');
   assert.equal(T.teamDisplay(clubs, 'Gateshead'), 'GATESHEAD');
+});
+
+/* ---------- v1.3: abandoned, late kick-offs, corrections ----------
+   Match shapes are the NLS list endpoint's as the batch already reads them:
+   attributes.kickOffDateUTC "YYYY-MM-DD HH:MM:SS" (UTC), matchPeriod
+   (FullTime / PostMatch / Postponed / Abandoned, nls-data-structure skill),
+   homeTeam/awayTeam.score and .penaltyScore. */
+const g = (id, ko, period, hs = null, as = null, extra = {}) => ({ id, attributes: {
+  kickOffDateUTC: ko, matchPeriod: period,
+  homeTeam: { name: 'Home ' + id, score: hs, penaltyScore: null },
+  awayTeam: { name: 'Away ' + id, score: as, penaltyScore: null }, ...extra } });
+
+test('an abandoned game prints A - A, and a shootout is not printed for it', () => {
+  const win = {};
+  new Function('window', readFileSync(join(REPO, 'graphics/_shared/fixtures-card.js'), 'utf8'))(win);
+  const C = win.NL_FIXTURES_CARD;
+  const clubs = { byName: () => null, byOpta: () => null, guestByName: () => null };
+  const built = C.buildRows([g('1', '2026-10-10 14:00:00', 'Abandoned', 1, 0), g('2', '2026-10-10 14:00:00', 'FullTime', 2, 2)], clubs);
+  const aa = built.rows.find(r => r.home === 'Home 1');
+  assert.deepEqual([aa.hs, aa.as], ['A', 'A']);
+  assert.equal(aa.hp, undefined);
+  assert.equal(built.rows.find(r => r.home === 'Home 2').hs, '2');
+  assert.ok(m.isDone({ attributes: { matchPeriod: 'Abandoned' } }), 'an abandoned game does not hold the card up');
+});
+
+test('a 17:30 on a 3pm Saturday is late; a 15:30 and a 12:30 are not', () => {
+  // 14:00Z = 15:00 BST; 16:30Z = 17:30 BST
+  const day = [g('a', '2026-10-10 14:00:00', 'FullTime', 1, 0), g('b', '2026-10-10 14:00:00', 'FullTime', 0, 0),
+               g('c', '2026-10-10 14:30:00', 'FullTime', 2, 1), g('d', '2026-10-10 11:30:00', 'FullTime', 3, 3),
+               g('e', '2026-10-10 16:30:00', 'PreMatch')];
+  const { early, late } = m.splitLate(day);
+  assert.deepEqual(late.map(x => x.id), ['e']);
+  assert.deepEqual(early.map(x => x.id), ['a', 'b', 'c', 'd']);
+  assert.deepEqual(m.splitLate(day.slice(0, 4)).late, [], 'no late game, no early card');
+  // in winter the same 15:00 / 17:30 is 15:00Z / 17:30Z
+  assert.deepEqual(m.splitLate([g('a', '2026-12-12 15:00:00', 'FullTime'), g('b', '2026-12-12 15:00:00', 'FullTime'),
+                                g('c', '2026-12-12 17:30:00', 'PreMatch')]).late.map(x => x.id), ['c']);
+});
+
+test('the early card never prints a live score as a result', () => {
+  const out = m.withoutLiveScores([g('a', '2026-10-10 14:00:00', 'FullTime', 2, 1), g('e', '2026-10-10 16:30:00', 'SecondHalf', 1, 0)]);
+  assert.equal(out[0].attributes.homeTeam.score, 2);
+  assert.equal(out[1].attributes.homeTeam.score, null);
+  assert.equal(out[1].attributes.awayTeam.score, null);
+});
+
+test('a results row with no score prints its kick-off only when it is ticked', () => {
+  const src = readFileSync(join(REPO, 'graphics/_shared/fixtures-card.js'), 'utf8');
+  assert.match(src, /mode !== "results" \|\| r\.koOn === true/);
+});
+
+test('once only, and a changed card goes again as the next version', () => {
+  const sigA = m.resultsSig([g('1', 'x', 'FullTime', 1, 0)]);
+  const sigB = m.resultsSig([g('1', 'x', 'FullTime', 1, 1)]);
+  assert.notEqual(sigA, sigB, 'a corrected score changes the fingerprint');
+  assert.equal(sigA, m.resultsSig([g('1', 'x', 'PostMatch', 1, 0)].map(x => ({ ...x, attributes: { ...x.attributes, matchPeriod: 'FullTime' } }))));
+  const base = '2026-10-10 National Results';
+  assert.deepEqual(m.versionedId(base, sigA, new Map()), { id: base, version: 1 });
+  assert.equal(m.versionedId(base, sigA, m.parseDone(`${base}\t${sigA}\n`)), null);
+  assert.deepEqual(m.versionedId(base, sigB, m.parseDone(`${base}\t${sigA}\n`)), { id: `${base} v2`, version: 2 });
+  assert.deepEqual(m.versionedId(base, sigA, m.parseDone(`${base}\t${sigA}\n${base} v2\t${sigB}\n`)), { id: `${base} v3`, version: 3 },
+    'compared with the latest version, not the first');
+  assert.equal(m.versionedId(base, sigB, m.parseDone(`${base}\n`)), null, 'a card sent before fingerprints is never re-sent');
+});
+
+/* delivered: reads a card's fingerprint back from the same list call.
+   Response shape: Cloud Storage JSON API objects.list —
+   https://cloud.google.com/storage/docs/json_api/v1/objects/list
+   ({ items: [{ name }], nextPageToken }). A local stand-in on port 0. */
+test('delivered lists each card once, with its fingerprint when it has one', async () => {
+  const http = await import('node:http');
+  const { execFile } = await import('node:child_process');
+  const P = 'graphics/fixtures/2026-27/';
+  const pages = [
+    { items: [{ name: P + '2026-10-10 National Results/National Results 10Oct26 - 1x1.png' },
+              { name: P + '2026-10-10 National Results/.sig-abc123def456' }], nextPageToken: 't2' },
+    { items: [{ name: P + '2026-10-08 South Fixtures/South Fixtures 08Oct26 - 1x1.png' }] }
+  ];
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://x');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(u.searchParams.get('pageToken') === 't2' ? pages[1] : pages[0]));
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const out = await new Promise((resolve, reject) => execFile(process.execPath,
+    [join(REPO, 'scripts/deliver-fixtures-graphics.js'), 'delivered', '2026-27'],
+    { env: { ...process.env, STORAGE_API: `http://127.0.0.1:${server.address().port}`, GOOGLE_ACCESS_TOKEN: 'test' } },
+    (err, stdout, stderr) => err ? reject(new Error(stderr || err.message)) : resolve(stdout)));
+  server.close();
+  assert.deepEqual(out.trim().split('\n'), ['2026-10-08 South Fixtures', '2026-10-10 National Results\tabc123def456']);
+  const done = m.parseDone(out);
+  assert.equal(done.get('2026-10-10 National Results'), 'abc123def456');
+  assert.equal(done.get('2026-10-08 South Fixtures'), '');
 });

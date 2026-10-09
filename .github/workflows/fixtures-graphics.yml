@@ -6,7 +6,11 @@ name: Fixtures & results graphics
 #
 #   Fixtures  10am UK, two days before a round's first game.
 #   Results   one card per day per competition, as soon as every game that
-#             day is full time — checked every 15 minutes from midday UK.
+#             day is full time or abandoned (A - A) — checked every 15
+#             minutes from midday UK. A day with a late kick-off (the 17:30
+#             on a 3pm Saturday) also gets an "early" card once the 3pm games
+#             are done. A score corrected after a card has gone sends the
+#             card again as v2.
 #   Tables    with every results card: the league table, or Cup groups A–D,
 #             once the feed's table has caught up with the scores.
 #
@@ -51,6 +55,10 @@ on:
         description: 'Testing a past date? Tick to draw the tables anyway (they show the current standings)'
         type: boolean
         default: false
+      before_late:
+        description: 'Testing a past date with a late kick-off? Tick to make the early card, as if the late game had not started'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -81,6 +89,7 @@ jobs:
           IN_TODAY: ${{ inputs.today }}
           IN_DRY: ${{ inputs.dry_run }}
           IN_TABLES_ANYWAY: ${{ inputs.tables_anyway }}
+          IN_BEFORE_LATE: ${{ inputs.before_late }}
         run: |
           set -euo pipefail
           if [ "$EVENT" = "workflow_dispatch" ]; then
@@ -89,6 +98,7 @@ jobs:
             echo "today=$IN_TODAY" >> "$GITHUB_OUTPUT"
             echo "dry=$IN_DRY" >> "$GITHUB_OUTPUT"
             echo "tables_anyway=$IN_TABLES_ANYWAY" >> "$GITHUB_OUTPUT"
+            echo "before_late=$IN_BEFORE_LATE" >> "$GITHUB_OUTPUT"
             echo "go=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -162,12 +172,14 @@ jobs:
           DIVISION: ${{ steps.plan.outputs.division }}
           TODAY: ${{ steps.plan.outputs.today }}
           TABLES_ANYWAY: ${{ steps.plan.outputs.tables_anyway }}
+          BEFORE_LATE: ${{ steps.plan.outputs.before_late }}
         run: |
           set -euo pipefail
           ARGS=(--mode "$MODE" --division "$DIVISION" --out build/fixtures-graphics)
           [ -n "$TODAY" ] && ARGS+=(--today "$TODAY")
           [ -f done.txt ] && ARGS+=(--done done.txt)
           [ "${TABLES_ANYWAY:-}" = "true" ] && ARGS+=(--tables-anyway)
+          [ "${BEFORE_LATE:-}" = "true" ] && ARGS+=(--before-late)
           node scripts/build-fixtures-graphics.js "${ARGS[@]}"
           echo "made=$(node -e "console.log(require('./build/fixtures-graphics/manifest.json').cards.length)")" >> "$GITHUB_OUTPUT"
 
