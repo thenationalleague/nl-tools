@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* ============================================================
    deliver-fixtures-graphics.js
-   Version: v1.1 (09/10/2026)
+   Version: v1.2 (10/10/2026)
 
    The delivery half of the fixtures & results automation. Rendering is
    scripts/build-fixtures-graphics.js; this moves its output to where
@@ -11,9 +11,13 @@
      node scripts/deliver-fixtures-graphics.js upload <out dir>
 
    WHERE THINGS GO
-     Google Drive   a folder per card inside DRIVE_FOLDER_ID (the "Graphics"
-                    folder in the media Shared Drive), e.g.
-                    Graphics/2026-10-10 National Results/*.png
+     Google Drive   inside DRIVE_FOLDER_ID (the "Graphics" folder in the media
+                    Shared Drive), wherever the build said: each card in the
+                    manifest carries its destinations, e.g.
+                    Graphics/Main/National/2026-10-24 (Sat 24 Oct 2026) MD 14/
+                    Graphics/Extended/National/2026-10-24 (Sat 24 Oct 2026) MD 14/
+                    with the file names for each. Folders are made as needed.
+                    (Before 10/10/2026: one flat folder per card.)
      Firebase       gs://nl-tools.firebasestorage.app/graphics/fixtures/
      Storage        <season>/<card id>/*.png
 
@@ -36,6 +40,10 @@
      and the Drive API must be enabled on the nl-tools project.
 
    CHANGELOG
+     v1.2 10/10/2026  Main / Extended layout: uploads each card to every
+                      destination the build gives it, making nested folders as
+                      needed. A card with no destinations still gets the old
+                      flat folder.
      v1.2 09/10/2026  Refuses to deliver a card with no PNGs.
      v1.1 09/10/2026  Records each card's fingerprint, and lists it back.
      v1.0 09/10/2026  First version.
@@ -107,6 +115,18 @@ async function storagePut(objectName, buf, type = 'image/png') {
 /* ---------- Google Drive (v3 REST, Shared Drive aware) ---------- */
 
 const ALL_DRIVES = 'supportsAllDrives=true';
+/* Folder ids found or made this run, so a path shared by many cards is
+   looked up once. */
+const _folders = new Map();
+async function drivePath(parentId, names) {
+  let id = parentId;
+  for (const name of names) {
+    const key = id + '/' + name;
+    if (!_folders.has(key)) _folders.set(key, await driveFolder(id, name));
+    id = _folders.get(key);
+  }
+  return id;
+}
 async function driveFolder(parentId, name) {
   const q = `'${parentId}' in parents and name = '${name.replace(/'/g, "\\'")}' ` +
             `and mimeType = '${FOLDER_MIME}' and trashed = false`;
@@ -147,11 +167,22 @@ async function upload(outDir) {
 
   for (const card of manifest.cards) {
     const files = card.files.map(f => ({ name: f, buf: fs.readFileSync(path.join(outDir, card.id, f)) }));
-    const folderId = await driveFolder(driveParent, card.id);
-    for (const f of files) await driveUpload(folderId, f.name, f.buf);
+    const dests = card.dests && card.dests.length ? card.dests
+      : [{ path: [card.id], files: card.files.map(f => ({ name: f })) }];
+    const links = [];
+    for (const d of dests) {
+      const folderId = await drivePath(driveParent, d.path);
+      /* Match each rendered PNG to its name here by size: "… - 4x5.png". */
+      for (const f of files) {
+        const fmt = (f.name.match(/ - (\w+)\.png$/) || [])[1];
+        const named = d.files.find(x => x.format === fmt) || {};
+        await driveUpload(folderId, named.name || f.name, f.buf);
+      }
+      links.push(`${d.path.join('/')}  https://drive.google.com/drive/folders/${folderId}`);
+    }
     for (const f of files) await storagePut(`${PREFIX}/${manifest.season}/${card.id}/${f.name}`, f.buf);
     if (card.sig) await storagePut(`${PREFIX}/${manifest.season}/${card.id}/${SIG}${card.sig}`, Buffer.alloc(0), 'text/plain');
-    console.log(`delivered  ${card.id}  (${files.length} files)  https://drive.google.com/drive/folders/${folderId}`);
+    console.log(`delivered  ${card.id}  (${files.length} files)\n  ${links.join('\n  ')}`);
   }
 }
 
