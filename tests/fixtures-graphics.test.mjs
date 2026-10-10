@@ -471,6 +471,8 @@ test('round so far shows the morning position, even when replayed afterwards', a
     (err, out, errOut) => err ? reject(new Error(errOut || err.message)) : resolve(out)));
   server.close();
   assert.deepEqual(JSON.parse(stdout), [['f1', 'FullTime', 2], ['s1', 'PreMatch', null]]);
+});
+
 /* Safari is told apart from Chrome on a Mac, whose user agent also says
    "Safari". Only Safari gets the draw-twice workaround (10/10/2026). */
 test('png-export recognises Safari, and only Safari', () => {
