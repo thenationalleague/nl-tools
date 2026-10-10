@@ -53,7 +53,7 @@ on:
       mode:
         description: 'What to make'
         type: choice
-        options: [results, fixtures, matchday]
+        options: [results, fixtures, matchday, backfill]
         default: results
       division:
         description: 'Competition'
@@ -64,6 +64,14 @@ on:
         description: 'Pretend today is (YYYY-MM-DD). Leave blank for the real today. Fixtures are made for two days after this.'
         required: false
         default: ''
+      until:
+        description: 'Backfill only: the last day to fill in (YYYY-MM-DD). "Pretend today is" is the first.'
+        required: false
+        default: ''
+      redeliver:
+        description: 'Send cards again even if they have gone before (for a backfill into the new folders)'
+        type: boolean
+        default: false
       dry_run:
         description: 'Dry run – make the PNGs but send nothing to Drive or Storage'
         type: boolean
@@ -94,7 +102,7 @@ env:
 jobs:
   graphics:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - name: Decide what this run is for
         id: plan
@@ -107,6 +115,8 @@ jobs:
           IN_DRY: ${{ inputs.dry_run }}
           IN_TABLES_ANYWAY: ${{ inputs.tables_anyway }}
           IN_BEFORE_LATE: ${{ inputs.before_late }}
+          IN_UNTIL: ${{ inputs.until }}
+          IN_REDELIVER: ${{ inputs.redeliver }}
         run: |
           set -euo pipefail
           if [ "$EVENT" = "workflow_dispatch" ]; then
@@ -116,6 +126,8 @@ jobs:
             echo "dry=$IN_DRY" >> "$GITHUB_OUTPUT"
             echo "tables_anyway=$IN_TABLES_ANYWAY" >> "$GITHUB_OUTPUT"
             echo "before_late=$IN_BEFORE_LATE" >> "$GITHUB_OUTPUT"
+            echo "until=$IN_UNTIL" >> "$GITHUB_OUTPUT"
+            echo "redeliver=$IN_REDELIVER" >> "$GITHUB_OUTPUT"
             echo "go=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -197,11 +209,14 @@ jobs:
           TODAY: ${{ steps.plan.outputs.today }}
           TABLES_ANYWAY: ${{ steps.plan.outputs.tables_anyway }}
           BEFORE_LATE: ${{ steps.plan.outputs.before_late }}
+          UNTIL: ${{ steps.plan.outputs.until }}
+          REDELIVER: ${{ steps.plan.outputs.redeliver }}
         run: |
           set -euo pipefail
           ARGS=(--mode "$MODE" --division "$DIVISION" --out build/fixtures-graphics)
           [ -n "$TODAY" ] && ARGS+=(--today "$TODAY")
-          [ -f done.txt ] && ARGS+=(--done done.txt)
+          [ -f done.txt ] && [ "${REDELIVER:-}" != "true" ] && ARGS+=(--done done.txt)
+          [ -n "${UNTIL:-}" ] && ARGS+=(--until "$UNTIL")
           [ "${TABLES_ANYWAY:-}" = "true" ] && ARGS+=(--tables-anyway)
           [ "${BEFORE_LATE:-}" = "true" ] && ARGS+=(--before-late)
           node scripts/build-fixtures-graphics.js "${ARGS[@]}"

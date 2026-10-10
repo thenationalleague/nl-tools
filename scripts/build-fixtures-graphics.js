@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* ============================================================
    build-fixtures-graphics.js
-   Version: v1.8 (10/10/2026)
+   Version: v1.9 (10/10/2026)
 
    Makes the fixtures and results cards that are due, without anyone
    pressing anything. Run by .github/workflows/fixtures-graphics.yml on a
@@ -97,6 +97,9 @@
      render offline.
 
    CHANGELOG
+     v1.9 10/10/2026  --mode backfill --today A --until B: every card the
+                      runs would have made on each day in the range (no
+                      tables). Round so far shows the morning's position.
      v1.8 10/10/2026  Drive layout: Main (per day) and Extended (everything),
                       dated folders tagged MD n / Rearranged. Matchday cards
                       for every competition playing that day. Whole-round
@@ -143,7 +146,7 @@ const FIXTURES_LEAD_DAYS = 2;
 function parseArgs(argv) {
   const a = { mode: null, division: 'all', today: null, out: path.join(REPO, 'build', 'fixtures-graphics'),
               done: null, formats: FORMATS.slice(), chrome: null, noTables: false, tablesAnyway: false,
-              beforeLate: false };
+              beforeLate: false, until: null };
   for (let i = 2; i < argv.length; i++) {
     const k = argv[i];
     if (k === '--mode') a.mode = argv[++i];
@@ -156,10 +159,17 @@ function parseArgs(argv) {
     else if (k === '--no-tables') a.noTables = true;
     else if (k === '--tables-anyway') a.tablesAnyway = true;
     else if (k === '--before-late') a.beforeLate = true;
+    else if (k === '--until') a.until = argv[++i];
     else if (k === '--help') { console.log('see header'); process.exit(0); }
     else throw new Error(`unknown argument: ${k}`);
   }
-  if (!['fixtures', 'results', 'matchday'].includes(a.mode)) throw new Error('--mode must be fixtures, results or matchday');
+  if (!['fixtures', 'results', 'matchday', 'backfill'].includes(a.mode)) throw new Error('--mode must be fixtures, results, matchday or backfill');
+  if (a.mode === 'backfill') {
+    if (!a.today || !a.until || !/^\d{4}-\d{2}-\d{2}$/.test(a.until) || a.until < a.today) {
+      throw new Error('--mode backfill needs --today <first day> and --until <last day>');
+    }
+    a.noTables = true;   /* the feed only serves today's table */
+  }
   if (a.division !== 'all' && !DIVISIONS.includes(a.division)) {
     throw new Error(`--division must be all or one of ${DIVISIONS.join(', ')}`);
   }
@@ -270,6 +280,11 @@ const isDone = m => isFinished(m) || isAbandoned(m);
    more after it is late: on a 3pm Saturday the 17:30 is late, a 15:30 is
    not. Kick-off times are read in UK time, the way the card prints them. */
 const LATE_GAP_MIN = 120;
+const koDayUK = m => {
+  const s = String((m.attributes || {}).kickOffDateUTC || '').trim();
+  const d = new Date(s.replace(' ', 'T').replace(/Z?$/, 'Z'));
+  return isNaN(d) ? '' : d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+};
 function koMinutes(m) {
   const s = String((m.attributes || {}).kickOffDateUTC || '').trim();
   if (!s) return null;
@@ -368,9 +383,13 @@ async function dueCards(args, rounds, season, done) {
       if (before.length) {
         const all = (await matchesBetween(season, division, roundDays[0], roundDays[roundDays.length - 1]))
           .filter(m => !isPostponed(m));
-        if (all.some(m => isDone(m))) {
+        /* As it stood that morning: today's games not yet played. At 4am that
+           is simply true; on a backfill it has to be made so. */
+        const asOfMorning = all.map(m => koDayUK(m) >= today
+          ? withoutLiveScores([{ ...m, attributes: { ...m.attributes, matchPeriod: 'PreMatch' } }])[0] : m);
+        if (asOfMorning.some(m => isDone(m))) {
           cards.push({ kind: 'fixtures', division, mode: 'round', date: today, days: roundDays,
-                       matchday: cardTitle(rounds, division, today), data: withoutLiveScores(all),
+                       matchday: cardTitle(rounds, division, today), data: withoutLiveScores(asOfMorning),
                        id: `${today} ${division} Round so far`, main: false, ext: true });
         }
       }
@@ -688,11 +707,25 @@ async function main() {
   const rounds = loadRounds(seasonLabel(season));
 
   console.log(`Fixtures graphics — ${args.mode}`);
-  console.log(`  today       ${today}${args.today ? '  (pretend)' : ''}`);
+  console.log(`  today       ${today}${args.today ? '  (pretend)' : ''}${args.until ? ' to ' + args.until : ''}`);
   console.log(`  season      ${seasonLabel(season)}`);
 
   const done = parseDone(args.done && fs.existsSync(args.done) ? fs.readFileSync(args.done, 'utf8') : '');
-  const { cards, skipped } = await dueCards(args, rounds, season, done);
+  let cards = [], skipped = [];
+  if (args.mode === 'backfill') {
+    /* Every day in the range, as each run would have made it on the day:
+       the round card two days before, the 4am day card and round so far,
+       and the results once played. No tables — the feed only has today's. */
+    for (let d = today; d <= args.until; d = addDays(d, 1)) {
+      for (const [mode, asOf] of [['fixtures', addDays(d, -FIXTURES_LEAD_DAYS)], ['matchday', d], ['results', d]]) {
+        const r = await dueCards({ ...args, mode, today: asOf }, rounds, season, done);
+        cards.push(...r.cards.filter(c => !cards.some(x => x.id === c.id)));
+        skipped.push(...r.skipped.filter(x => !/no games on/.test(x.reason)));
+      }
+    }
+  } else {
+    ({ cards, skipped } = await dueCards(args, rounds, season, done));
+  }
   const work = [];
   for (const c of cards) {
     if (done.has(c.id)) skipped.push({ division: c.division, reason: `${c.id} already delivered` });

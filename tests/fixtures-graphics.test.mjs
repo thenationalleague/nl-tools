@@ -437,3 +437,38 @@ test('folder names sort by date and end with a tag anyone can read', () => {
     ['Extended/National/2026-10-24 (Sat 24 Oct 2026) MD 14 :: National Results 24Oct26 15.00 (Sat only) - 4x5.png'],
     'the card made before a late kick-off: Extended only, stamped');
 });
+
+/* Backfill (10/10/2026) replays a past Saturday after its games are played.
+   The round-so-far card must still show Saturday as it stood that morning:
+   Friday scored, Saturday "v" — never Saturday's final scores. */
+test('round so far shows the morning position, even when replayed afterwards', async () => {
+  const http = await import('node:http');
+  const { execFile } = await import('node:child_process');
+  const g = (id, ko, period, hs, as) => ({ id, attributes: { kickOffDateUTC: ko, matchPeriod: period,
+    homeTeam: { name: 'Woking', score: hs }, awayTeam: { name: 'Barrow', score: as } } });
+  const games = { '2026-10-09': [g('f1', '2026-10-09 18:45:00', 'FullTime', 2, 1)],
+                  '2026-10-10': [g('s1', '2026-10-10 14:00:00', 'FullTime', 3, 3)] };
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://x');
+    const from = (u.searchParams.get('from') || '').slice(0, 10), to = (u.searchParams.get('to') || '').slice(0, 10);
+    const list = Object.keys(games).filter(d => d >= from && d <= to).flatMap(d => games[d]);
+    const body = u.searchParams.get('includePopulatedDates')
+      ? { data: [], meta: { populatedDates: { '2026-10-09': {}, '2026-10-10': {} } }, links: {} }
+      : { data: list, meta: { totalCount: list.length }, links: {} };
+    res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body));
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const rounds = { National: [{ round: 13, main: '2026-10-10', from: '2026-10-09', to: '2026-10-11' }] };
+  const script = `
+    const m = require(${JSON.stringify(join(REPO, 'scripts/build-fixtures-graphics.js'))});
+    m.dueCards({ mode: 'matchday', division: 'National', today: '2026-10-10', formats: ['4x5'] },
+      ${JSON.stringify(rounds)}, 2026, new Map()).then(r => {
+        const c = r.cards.find(x => x.mode === 'round');
+        console.log(JSON.stringify(c.data.map(x => [x.id, x.attributes.matchPeriod, x.attributes.homeTeam.score])));
+      }).catch(e => { console.error(e.stack); process.exit(1); });`;
+  const stdout = await new Promise((resolve, reject) => execFile(process.execPath, ['-e', script],
+    { env: { ...process.env, NLS_BASE: `http://127.0.0.1:${server.address().port}` } },
+    (err, out, errOut) => err ? reject(new Error(errOut || err.message)) : resolve(out)));
+  server.close();
+  assert.deepEqual(JSON.parse(stdout), [['f1', 'FullTime', 2], ['s1', 'PreMatch', null]]);
+});
