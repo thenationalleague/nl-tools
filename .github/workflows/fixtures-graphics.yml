@@ -1,20 +1,30 @@
 name: Fixtures & results graphics
 
 # Makes the fixtures and results cards for National, North, South and the
-# NL Cup on its own, and drops them into the media Shared Drive
-# (Graphics/<date> <competition> <Fixtures|Results>/) and Firebase Storage.
+# NL Cup on its own, and drops them into the media Shared Drive and Firebase
+# Storage. In Drive, under Graphics/ (decided 10/10/2026):
 #
-#   Fixtures  10am UK, two days before a round's first game: the whole round.
-#   Matchday  4am UK on each day of a round that spans more than one day:
-#             that day's games only (Saturday without the Friday game).
-#             Plus "Round so far" once an earlier day has been played:
-#             Friday's result scored, Saturday's games as v.
+#   Main/<Competition>/2026-10-24 (Sat 24 Oct 2026) MD 14/
+#       the clean set, one folder per match day: that day's fixtures,
+#       results and table. Final cards only.
+#   Extended/<Competition>/2026-10-24 (Sat 24 Oct 2026) MD 14/
+#       everything, one folder per round, dated by its main day. A date
+#       outside every round gets its own folder tagged Rearranged.
+#
+#   Fixtures  10am UK, two days before a round's first game: the whole
+#             round (Extended).
+#   Matchday  4am UK on every match day: that day's games only (Main, and
+#             Extended labelled "(Sat only)" when the round spans days).
+#             Plus "Round so far" once an earlier day has been played
+#             (Extended).
 #   Results   one card per day per competition, as soon as every game that
 #             day is full time or abandoned (A - A) — checked every 15
-#             minutes from midday UK. A day with a late kick-off (the 17:30
-#             on a 3pm Saturday) also gets an "early" card once the 3pm games
-#             are done. A score corrected after a card has gone sends the
-#             card again as v2.
+#             minutes from midday UK, and started at full time by the
+#             fixturesGraphicsAtFullTime function. On the last day of a
+#             round that spans days, the whole round's results too
+#             (Extended). Before a late kick-off, an early card stamped with
+#             the usual time, e.g. 15.00 (Extended). A score corrected after
+#             a card has gone sends it again as v2.
 #   Tables    with every results card: the league table, or Cup groups A–D,
 #             once the feed's table has caught up with the scores.
 #
@@ -43,7 +53,7 @@ on:
       mode:
         description: 'What to make'
         type: choice
-        options: [results, fixtures, matchday]
+        options: [results, fixtures, matchday, backfill]
         default: results
       division:
         description: 'Competition'
@@ -54,6 +64,14 @@ on:
         description: 'Pretend today is (YYYY-MM-DD). Leave blank for the real today. Fixtures are made for two days after this.'
         required: false
         default: ''
+      until:
+        description: 'Backfill only: the last day to fill in (YYYY-MM-DD). "Pretend today is" is the first.'
+        required: false
+        default: ''
+      redeliver:
+        description: 'Send cards again even if they have gone before (for a backfill into the new folders)'
+        type: boolean
+        default: false
       dry_run:
         description: 'Dry run – make the PNGs but send nothing to Drive or Storage'
         type: boolean
@@ -84,7 +102,7 @@ env:
 jobs:
   graphics:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - name: Decide what this run is for
         id: plan
@@ -97,6 +115,8 @@ jobs:
           IN_DRY: ${{ inputs.dry_run }}
           IN_TABLES_ANYWAY: ${{ inputs.tables_anyway }}
           IN_BEFORE_LATE: ${{ inputs.before_late }}
+          IN_UNTIL: ${{ inputs.until }}
+          IN_REDELIVER: ${{ inputs.redeliver }}
         run: |
           set -euo pipefail
           if [ "$EVENT" = "workflow_dispatch" ]; then
@@ -106,6 +126,8 @@ jobs:
             echo "dry=$IN_DRY" >> "$GITHUB_OUTPUT"
             echo "tables_anyway=$IN_TABLES_ANYWAY" >> "$GITHUB_OUTPUT"
             echo "before_late=$IN_BEFORE_LATE" >> "$GITHUB_OUTPUT"
+            echo "until=$IN_UNTIL" >> "$GITHUB_OUTPUT"
+            echo "redeliver=$IN_REDELIVER" >> "$GITHUB_OUTPUT"
             echo "go=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -187,11 +209,14 @@ jobs:
           TODAY: ${{ steps.plan.outputs.today }}
           TABLES_ANYWAY: ${{ steps.plan.outputs.tables_anyway }}
           BEFORE_LATE: ${{ steps.plan.outputs.before_late }}
+          UNTIL: ${{ steps.plan.outputs.until }}
+          REDELIVER: ${{ steps.plan.outputs.redeliver }}
         run: |
           set -euo pipefail
           ARGS=(--mode "$MODE" --division "$DIVISION" --out build/fixtures-graphics)
           [ -n "$TODAY" ] && ARGS+=(--today "$TODAY")
-          [ -f done.txt ] && ARGS+=(--done done.txt)
+          [ -f done.txt ] && [ "${REDELIVER:-}" != "true" ] && ARGS+=(--done done.txt)
+          [ -n "${UNTIL:-}" ] && ARGS+=(--until "$UNTIL")
           [ "${TABLES_ANYWAY:-}" = "true" ] && ARGS+=(--tables-anyway)
           [ "${BEFORE_LATE:-}" = "true" ] && ARGS+=(--before-late)
           node scripts/build-fixtures-graphics.js "${ARGS[@]}"

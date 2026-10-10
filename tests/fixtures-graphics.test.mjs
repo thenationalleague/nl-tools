@@ -288,7 +288,7 @@ test('every card due, fixtures and results alike, has a renderer', async () => {
    that spans more than one day, a card with that day's games only. A
    one-day round gets none — the round card already is that card. Same
    stand-in shapes as above. */
-test('matchday: Saturday without the Friday game, the round so far with it; nothing for a one-day round', async () => {
+test('matchday: Saturday without the Friday game, the round so far with it, each filed in Main or Extended', async () => {
   const http = await import('node:http');
   const { execFile } = await import('node:child_process');
   const games = {
@@ -321,7 +321,8 @@ test('matchday: Saturday without the Friday game, the round so far with it; noth
       for (const today of ['2026-10-09', '2026-10-10', '2026-10-13']) {
         const r = await m.dueCards({ mode: 'matchday', division: 'National', today, formats: ['4x5'] },
           ${JSON.stringify(rounds)}, 2026, new Map());
-        out[today] = r.cards.map(c => ({ id: c.id, kind: c.kind, games: c.data.map(g => g.id), title: c.matchday, file: c.files[0].file, mode: c.mode }));
+        out[today] = r.cards.map(c => ({ id: c.id, kind: c.kind, games: c.data.map(g => g.id), title: c.matchday, mode: c.mode,
+          dests: c.dests.map(d => d.path.join('/') + ' :: ' + d.files[0].name) }));
       }
       console.log(JSON.stringify(out));
     })().catch(e => { console.error(e.stack); process.exit(1); });`;
@@ -330,15 +331,29 @@ test('matchday: Saturday without the Friday game, the round so far with it; noth
     (err, out, errOut) => err ? reject(new Error(errOut || err.message)) : resolve(out)));
   server.close();
   const out = JSON.parse(stdout);
+  /* Where each goes (decided 10/10/2026): the day card to Main, and to
+     Extended labelled with what it covers when the round spans days; the
+     round so far to Extended only. */
   assert.deepEqual(out['2026-10-10'][0], { id: '2026-10-10 National Fixtures Sat', kind: 'fixtures', games: ['s1'],
-    title: '13', file: 'National Fixtures 10Oct26 Sat - 4x5.png', mode: 'fixtures' }, 'Saturday only, postponed game left off');
+    title: '13', mode: 'fixtures', dests: [
+      'Main/National/2026-10-10 (Sat 10 Oct 2026) MD 13 :: National Fixtures 10Oct26 - 4x5.png',
+      'Extended/National/2026-10-10 (Sat 10 Oct 2026) MD 13 :: National Fixtures 10Oct26 (Sat only) - 4x5.png'] },
+    'Saturday only, postponed game left off');
   assert.deepEqual(out['2026-10-10'][1], { id: '2026-10-10 National Round so far', kind: 'fixtures', games: ['f1', 's1'],
-    title: '13', file: 'National Round so far 10Oct26 - 4x5.png', mode: 'round' }, 'and the round so far, Friday included');
+    title: '13', mode: 'round', dests: [
+      'Extended/National/2026-10-10 (Sat 10 Oct 2026) MD 13 :: National Round so far 10Oct26 - 4x5.png'] },
+    'and the round so far, Friday included, Extended only');
   assert.equal(out['2026-10-10'].length, 2);
   assert.equal(out['2026-10-09'].length, 1, 'Friday: no earlier day, so no round-so-far card');
   assert.equal(out['2026-10-09'][0].id, '2026-10-09 National Fixtures Fri', 'the Friday of a two-day round gets its own');
   assert.deepEqual(out['2026-10-09'][0].games, ['f1']);
-  assert.deepEqual(out['2026-10-13'], [], 'a one-day round: the round card already shows only today');
+  assert.deepEqual(out['2026-10-09'][0].dests, [
+    'Main/National/2026-10-09 (Fri 9 Oct 2026) MD 13 :: National Fixtures 09Oct26 - 4x5.png',
+    'Extended/National/2026-10-10 (Sat 10 Oct 2026) MD 13 :: National Fixtures 09Oct26 (Fri only) - 4x5.png'],
+    'Main by its own day; Extended under the round, dated by its main day');
+  assert.deepEqual(out['2026-10-13'].map(c => c.dests), [[
+    'Main/National/2026-10-13 (Tue 13 Oct 2026) MD 14 :: National Fixtures 13Oct26 - 4x5.png']],
+    'a one-day round: Main gets its day card; Extended already has the round card');
 });
 
 /* Two doors, one tool (09/10/2026). The gated page and the public page both
@@ -369,4 +384,91 @@ test('round rules load in the browser as NL_ROUNDS, the same object the batch re
   assert.deepEqual(win.NL_ROUNDS.roundDays(rounds, 'National', '2026-10-10', ['2026-10-03', '2026-10-09', '2026-10-10', '2026-10-13']),
     ['2026-10-09', '2026-10-10']);
   assert.deepEqual(win.NL_ROUNDS.roundDays(rounds, 'South', '2026-10-13', ['2026-10-13']), ['2026-10-13'], 'outside every round: just that day');
+});
+
+/* Results on the last day of a round that spans days: the day's card to
+   Main and Extended, and the whole round's results to Extended only. */
+test('results: the day card for Main, the whole round for Extended', async () => {
+  const http = await import('node:http');
+  const { execFile } = await import('node:child_process');
+  const g = (id, ko, period, hs, as) => ({ id, attributes: { kickOffDateUTC: ko, matchPeriod: period,
+    homeTeam: { name: 'Woking', score: hs }, awayTeam: { name: 'Barrow', score: as } } });
+  const games = { '2026-10-09': [g('f1', '2026-10-09 18:45:00', 'FullTime', 2, 1)],
+                  '2026-10-10': [g('s1', '2026-10-10 14:00:00', 'FullTime', 1, 0), g('s2', '2026-10-10 14:00:00', 'Postponed', null, null)] };
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://x');
+    const from = (u.searchParams.get('from') || '').slice(0, 10), to = (u.searchParams.get('to') || '').slice(0, 10);
+    const list = Object.keys(games).filter(d => d >= from && d <= to).flatMap(d => games[d]);
+    const body = u.searchParams.get('includePopulatedDates')
+      ? { data: [], meta: { populatedDates: { '2026-10-09': {}, '2026-10-10': {} } }, links: {} }
+      : { data: list, meta: { totalCount: list.length }, links: {} };
+    res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body));
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const rounds = { National: [{ round: 13, main: '2026-10-10', from: '2026-10-09', to: '2026-10-11' }] };
+  const script = `
+    const m = require(${JSON.stringify(join(REPO, 'scripts/build-fixtures-graphics.js'))});
+    m.dueCards({ mode: 'results', division: 'National', today: '2026-10-10', formats: ['4x5'], noTables: true },
+      ${JSON.stringify(rounds)}, 2026, new Map()).then(r => console.log(JSON.stringify(r.cards.map(c => ({
+        id: c.id, games: c.data.map(x => x.id), dests: c.dests.map(d => d.path.join('/') + ' :: ' + d.files[0].name) })))))
+      .catch(e => { console.error(e.stack); process.exit(1); });`;
+  const stdout = await new Promise((resolve, reject) => execFile(process.execPath, ['-e', script],
+    { env: { ...process.env, NLS_BASE: `http://127.0.0.1:${server.address().port}` } },
+    (err, out, errOut) => err ? reject(new Error(errOut || err.message)) : resolve(out)));
+  server.close();
+  assert.deepEqual(JSON.parse(stdout), [
+    { id: '2026-10-10 National Results', games: ['s1'], dests: [
+      'Main/National/2026-10-10 (Sat 10 Oct 2026) MD 13 :: National Results 10Oct26 - 4x5.png',
+      'Extended/National/2026-10-10 (Sat 10 Oct 2026) MD 13 :: National Results 10Oct26 (Sat only) - 4x5.png'] },
+    { id: '2026-10-10 National Round results', games: ['f1', 's1'], dests: [
+      'Extended/National/2026-10-10 (Sat 10 Oct 2026) MD 13 :: National Results 10Oct26 (whole round) - 4x5.png'] }
+  ]);
+});
+
+test('folder names sort by date and end with a tag anyone can read', () => {
+  assert.equal(m.folderName(rounds, 'National', '2026-10-24'), '2026-10-24 (Sat 24 Oct 2026) MD 14');
+  assert.equal(m.folderName(rounds, 'South', '2026-10-20'), '2026-10-20 (Tue 20 Oct 2026) Rearranged');
+  assert.equal(m.folderName(rounds, 'Cup', '2026-10-13'), '2026-10-13 (Tue 13 Oct 2026) GS MD 3');
+  assert.equal(m.folderName({ Cup: [{ round: 5, main: '2027-01-12', from: '2027-01-11', to: '2027-01-13', tag: 'QF' }] },
+    'Cup', '2027-01-12'), '2027-01-12 (Tue 12 Jan 2027) QF', 'a knockout round carries its own tag');
+  assert.equal(m.stampOf(15 * 60), '15.00', 'no colon: Windows and Drive for desktop reject it');
+  const early = { label: 'National', division: 'National', date: '2026-10-24', main: false, ext: true, stamp: '15.00', scope: 'day' };
+  assert.deepEqual(m.cardDests(early, rounds, 'Results', ['4x5']).map(d => d.path.join('/') + ' :: ' + d.files[0].name),
+    ['Extended/National/2026-10-24 (Sat 24 Oct 2026) MD 14 :: National Results 24Oct26 15.00 (Sat only) - 4x5.png'],
+    'the card made before a late kick-off: Extended only, stamped');
+});
+
+/* Backfill (10/10/2026) replays a past Saturday after its games are played.
+   The round-so-far card must still show Saturday as it stood that morning:
+   Friday scored, Saturday "v" — never Saturday's final scores. */
+test('round so far shows the morning position, even when replayed afterwards', async () => {
+  const http = await import('node:http');
+  const { execFile } = await import('node:child_process');
+  const g = (id, ko, period, hs, as) => ({ id, attributes: { kickOffDateUTC: ko, matchPeriod: period,
+    homeTeam: { name: 'Woking', score: hs }, awayTeam: { name: 'Barrow', score: as } } });
+  const games = { '2026-10-09': [g('f1', '2026-10-09 18:45:00', 'FullTime', 2, 1)],
+                  '2026-10-10': [g('s1', '2026-10-10 14:00:00', 'FullTime', 3, 3)] };
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://x');
+    const from = (u.searchParams.get('from') || '').slice(0, 10), to = (u.searchParams.get('to') || '').slice(0, 10);
+    const list = Object.keys(games).filter(d => d >= from && d <= to).flatMap(d => games[d]);
+    const body = u.searchParams.get('includePopulatedDates')
+      ? { data: [], meta: { populatedDates: { '2026-10-09': {}, '2026-10-10': {} } }, links: {} }
+      : { data: list, meta: { totalCount: list.length }, links: {} };
+    res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body));
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const rounds = { National: [{ round: 13, main: '2026-10-10', from: '2026-10-09', to: '2026-10-11' }] };
+  const script = `
+    const m = require(${JSON.stringify(join(REPO, 'scripts/build-fixtures-graphics.js'))});
+    m.dueCards({ mode: 'matchday', division: 'National', today: '2026-10-10', formats: ['4x5'] },
+      ${JSON.stringify(rounds)}, 2026, new Map()).then(r => {
+        const c = r.cards.find(x => x.mode === 'round');
+        console.log(JSON.stringify(c.data.map(x => [x.id, x.attributes.matchPeriod, x.attributes.homeTeam.score])));
+      }).catch(e => { console.error(e.stack); process.exit(1); });`;
+  const stdout = await new Promise((resolve, reject) => execFile(process.execPath, ['-e', script],
+    { env: { ...process.env, NLS_BASE: `http://127.0.0.1:${server.address().port}` } },
+    (err, out, errOut) => err ? reject(new Error(errOut || err.message)) : resolve(out)));
+  server.close();
+  assert.deepEqual(JSON.parse(stdout), [['f1', 'FullTime', 2], ['s1', 'PreMatch', null]]);
 });
