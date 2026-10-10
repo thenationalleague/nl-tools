@@ -1,7 +1,7 @@
 /* ============================================================
    Fixtures & Results Graphic — the tool
    File: /graphics/fixtures-graphic/fixtures-app.js
-   Version: v2.0 (09/10/2026)
+   Version: v2.1 (10/10/2026)
 
    ONE TOOL, TWO DOORS. This file is the whole tool and both editions load
    it: /graphics/fixtures-graphic/ (behind a login) and
@@ -22,6 +22,8 @@
      "Edit by hand" holds the full editor for anything else.
 
    CHANGELOG
+     v2.1 10/10/2026  A size with an image that didn't load is not saved; a
+                      pop-up names the missing image.
      v2.0 09/10/2026  Rebuilt around the feed: pick a date, untick games,
                       download all three sizes. Title from the rounds file.
                       Round so far type. Whole-round or one-day choice. The
@@ -579,22 +581,29 @@
     gfxHost.style.width = "1080px"; gfxHost.style.height = C.FORMAT_H[fmt] + "px";
     try {
       var out = await C.toPng(gfx, fmt);
+      /* A card with a missing crest or logo is never saved (10/10/2026). */
+      if (out.late) return out.missing.length ? out.missing : ["an image"];
       NL.download(fileName(fmt), out.blob);
-      return out.late;
+      return [];
     } finally {
       gfx.style.transform = prevT; gfxHost.style.width = prevW; gfxHost.style.height = prevH;
     }
   }
   async function downloadAll() {
     if (!window.htmlToImage) return;
-    var btn = $("downloadBtn"), keep = state.format, late = 0;
+    var btn = $("downloadBtn"), keep = state.format, missing = [];
     btn.disabled = true;
     setStatus("Making 3 PNGs…", 30000);
     try {
-      for (var i = 0; i < FORMATS.length; i++) late += await exportOne(FORMATS[i]);
-      /* never let a half-drawn graphic leave without saying so */
-      setStatus(late ? late + " image" + (late === 1 ? "" : "s") + " didn't load — check your connection and download again"
-                     : "Downloaded 1:1, 4:5 and 9:16", late ? 10000 : 4000);
+      for (var i = 0; i < FORMATS.length; i++) {
+        var m = await exportOne(FORMATS[i]);
+        m.forEach(function (x) { if (missing.indexOf(x) < 0) missing.push(x); });
+      }
+      if (missing.length) {
+        var msg = "Not all sizes downloaded – " + missing.join(", ") +
+                  " didn't load. Check your connection and press Download again.";
+        NL.toast(msg, "error"); setStatus(msg, 15000);
+      } else setStatus("Downloaded 1:1, 4:5 and 9:16", 4000);
     } catch (err) {
       console.error(err);
       setStatus("Export blocked — use a screenshot.", 6000);

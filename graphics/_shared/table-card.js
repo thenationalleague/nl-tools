@@ -1,7 +1,7 @@
 /* ============================================================
    League Table Card — shared renderer
    File: /graphics/_shared/table-card.js
-   Version: v1.1 (09/10/2026)
+   Version: v1.2 (10/10/2026)
 
    Single source of truth for the league-table artwork. The League Table
    Graphic tool (/graphics/table-graphic/) and the scheduled batch
@@ -23,6 +23,7 @@
      title, FORMAT_H, COMPETITION_ID, CUP_ROUND, NLS_BASE
 
    CHANGELOG
+     v1.2 10/10/2026  Sponsor logo from a 480px copy (TIC Health 480.png).
      v1.1 09/10/2026  Cup guests print without PL2 / U21 / U23.
      v1.0 09/10/2026  Lifted out of table-graphic/app.js v1.10 unchanged, so
                       the batch can draw the same table.
@@ -43,7 +44,9 @@
   };
   /* No logo fallback: a badge that fails renders blank rather than branding
      the graphic as the wrong competition. */
-  var SPONSOR_URL = "/assets/partners/TIC%20Health.png";
+  /* 480px wide: drawn at most ~180px, and the 1,722px original was big
+     enough for Safari to drop it from exports (10/10/2026). */
+  var SPONSOR_URL = "/assets/partners/TIC%20Health%20480.png";
 
   /* National League Services — the authoritative standings. competitionID
      values are firm NLS codes; never derive them from a division name. */

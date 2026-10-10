@@ -1,12 +1,14 @@
 /* ============================================================
    App — controls, paste→grid sync, live render, PNG export.
-   Version: v1.11 (09/10/2026)
+   Version: v1.12 (10/10/2026)
 
    The table itself is drawn by /graphics/_shared/table-card.js, the same
    renderer the scheduled batch uses; PNG export is
    /graphics/_shared/png-export.js.
 
    CHANGELOG
+     v1.12 10/10/2026  A table with an image that didn't load is not downloaded:
+                       a pop-up names the missing image instead.
      v1.11 09/10/2026  Drawing, NLS row-building and export moved to the
                        shared files. No change to the graphic.
    ============================================================ */
@@ -209,15 +211,17 @@
     setStatus("Rendering PNG…");
     try {
       var out = await T.toPng(gfx, state.format);
-      var a = document.createElement("a");
-      a.href = URL.createObjectURL(out.blob);
-      a.download = fileName();
-      document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(a.href);
-      /* never let a half-drawn graphic leave without saying so */
-      setStatus(out.late
-        ? "Downloaded — but " + out.late + " image" + (out.late === 1 ? "" : "s") + " didn't load. Check your connection and export again."
-        : "Downloaded " + state.format);
+      /* A table missing its sponsor or a crest never leaves. Saying so in the
+         status line was not enough: on 10/10/2026 tables went out without
+         the TIC Health logo and nobody saw the line. */
+      if (out.late) {
+        var msg = "Not downloaded – " + (out.missing.join(", ") || out.late + " image") +
+                  " didn't load. Check your connection and press Download again.";
+        NL.toast(msg, "error"); setStatus(msg, 15000);
+        return;
+      }
+      NL.download(fileName(), out.blob);
+      setStatus("Downloaded " + state.format);
     } catch (err) {
       console.error(err);
       setStatus("Export blocked — use a screenshot. (" + (err && err.message) + ")");

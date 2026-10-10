@@ -1,7 +1,7 @@
 /* ============================================================
    Graphic PNG export — shared
    File: /graphics/_shared/png-export.js
-   Version: v1.0 (09/10/2026)
+   Version: v1.1 (10/10/2026)
 
    One export path for the DOM-drawn graphics (fixtures/results card,
    league table) and for the scheduled batch that renders them, so a fix
@@ -18,6 +18,18 @@
        missing  their file names, so an error can say which
 
    CHANGELOG
+     v1.1 10/10/2026  For Safari on a slow Mac, where the TIC Health logo was
+                      on screen but missing from every exported table:
+                      - each image is inlined at no more than twice the size
+                        it is drawn, not its full size (the 1,722px logo was
+                        a ~300KB data URL for a 180px slot; Safari drops large
+                        images when it draws the page into a picture);
+                      - in Safari the picture is drawn twice and the first
+                        thrown away — Safari only decodes images inside the
+                        page-as-picture on the first pass (html-to-image's
+                        known Safari issue);
+                      - a slow image gets 30 seconds, not 10, and an image
+                        that has already failed is not waited for at all.
      v1.0 09/10/2026  Lifted from graphics/_shared/fixtures-card.js v1.1,
                       which had it from fixtures-app.js v1.11.
    ============================================================ */
@@ -31,7 +43,7 @@
          can only convert an image the browser already holds, so exporting
          before they land silently drops them. */
       var pending = [].slice.call(el.querySelectorAll("img"));
-      return Promise.all(pending.map(function (img) { return whenImageReady(img, 10000); }))
+      return Promise.all(pending.map(function (img) { return whenImageReady(img, 30000); }))
         .then(function (ok) { return { ok: ok, imgs: pending }; });
     }).then(function (res) {
       var missing = res.imgs.filter(function (img, i) {
@@ -40,18 +52,28 @@
         return !res.ok[i];
       }).map(function (img) { return decodeURIComponent(img.getAttribute("src") || "").split("/").pop(); });
       restore = inlineImages(el);   /* pre-inline so the canvas isn't tainted */
-      return root.htmlToImage.toBlob(el, {
-        width: width, height: height, pixelRatio: 1, cacheBust: false,
-        backgroundColor: getComputedStyle(el).backgroundColor
-      }).then(function (blob) { return { blob: blob, late: missing.length, missing: missing }; });
+      var opts = { width: width, height: height, pixelRatio: 1, cacheBust: false,
+                   backgroundColor: getComputedStyle(el).backgroundColor };
+      var draw = function () { return root.htmlToImage.toBlob(el, opts); };
+      return (isSafari() ? draw().then(draw) : draw())
+        .then(function (blob) { return { blob: blob, late: missing.length, missing: missing }; });
     }).then(function (r) { try { restore(); } catch (e) {} return r; },
             function (err) { try { restore(); } catch (e) {} throw err; });
+  }
+
+  /* Safari, not Chrome-on-Mac (whose user agent also says Safari). */
+  function isSafari() {
+    var ua = (root.navigator && root.navigator.userAgent) || "";
+    return /AppleWebKit/.test(ua) && /Safari/.test(ua) && !/Chrome|Chromium|CriOS|FxiOS|Edg|OPR/.test(ua);
   }
 
   /* Resolve once an <img> has decoded, or once it's clear it won't. */
   function whenImageReady(img, ms) {
     return new Promise(function (resolve) {
       if (img.complete && img.naturalWidth) return resolve(true);
+      /* Already failed: complete with no pixels. Its error event has been and
+         gone, so waiting for one would just sit out the whole timeout. */
+      if (img.complete && img.getAttribute("src")) return resolve(false);
       var settled = false;
       function finish(ok) {
         if (settled) return;
@@ -81,9 +103,14 @@
       var done = false;
       try {
         if (img.complete && img.naturalWidth) {
+          /* No bigger than twice the size it is drawn: sharp at export size,
+             and small enough that Safari keeps it. */
+          var drawn = img.getBoundingClientRect().width || img.naturalWidth;
+          var scale = Math.min(1, (drawn * 2) / img.naturalWidth);
           var c = document.createElement("canvas");
-          c.width = img.naturalWidth; c.height = img.naturalHeight;
-          c.getContext("2d").drawImage(img, 0, 0);
+          c.width = Math.max(1, Math.round(img.naturalWidth * scale));
+          c.height = Math.max(1, Math.round(img.naturalHeight * scale));
+          c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
           var url = c.toDataURL("image/png");   /* throws if tainted */
           restores.push([img, src]); img.setAttribute("src", url); done = true;
         }
@@ -93,5 +120,5 @@
     return function () { restores.forEach(function (p) { p[0].setAttribute("src", p[1]); }); };
   }
 
-  root.NL_GFX_EXPORT = { VERSION: "v1.0", toPng: toPng, whenImageReady: whenImageReady, inlineImages: inlineImages };
+  root.NL_GFX_EXPORT = { VERSION: "v1.1", toPng: toPng, whenImageReady: whenImageReady, inlineImages: inlineImages, isSafari: isSafari };
 })(typeof window !== "undefined" ? window : this);
