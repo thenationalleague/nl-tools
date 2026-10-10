@@ -471,4 +471,14 @@ test('round so far shows the morning position, even when replayed afterwards', a
     (err, out, errOut) => err ? reject(new Error(errOut || err.message)) : resolve(out)));
   server.close();
   assert.deepEqual(JSON.parse(stdout), [['f1', 'FullTime', 2], ['s1', 'PreMatch', null]]);
+/* Safari is told apart from Chrome on a Mac, whose user agent also says
+   "Safari". Only Safari gets the draw-twice workaround (10/10/2026). */
+test('png-export recognises Safari, and only Safari', () => {
+  const load = ua => { const w = { navigator: { userAgent: ua } };
+    new Function('window', readFileSync(join(REPO, 'graphics/_shared/png-export.js'), 'utf8'))(w); return w.NL_GFX_EXPORT.isSafari(); };
+  assert.equal(load('Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Safari/605.1.15'), true);
+  assert.equal(load('Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1'), true);
+  assert.equal(load('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36'), false);
+  assert.equal(load('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.0.0'), false);
+  assert.equal(load('Mozilla/5.0 (Macintosh; Intel Mac OS X 14.6; rv:131.0) Gecko/20100101 Firefox/131.0'), false);
 });
