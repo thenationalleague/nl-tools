@@ -1,37 +1,45 @@
 <!DOCTYPE html>
 <!--
-  NL Tools — DAZN Viewing (club page)
-  Version: v3.0 (12/10/2026)
+  NL Tools — DAZN Viewing (staff)
+  Version: v6.0 (12/10/2026)
   File: /dazn/index.html
 
   CHANGELOG
-    v3.0 (12/10/2026) — First build. A club enters its access code and sees
-      its own DAZN figures for the season: views split UK and international,
-      minutes watched, every game DAZN showed with whether it was available
-      in the UK, and how it compares with its division's average.
+    v6.0 (12/10/2026) — Moved from /dazn/admin/ to /dazn/, and the club page
+      from /dazn/ to /dazn/reader/. The tool's own URL is the gated tool and
+      the access-code door is /reader/, as with the Handbook and the Club
+      Directory: when clubs reach this through the portal instead, the tool
+      stays where it is and /reader/ retires.
+    v3.0 (12/10/2026) — First build. Every club's DAZN season in one table;
+      open a club to see exactly what that club sees on /dazn/reader/. Admins
+      import a season by pasting the "Matches" sheet.
 
-  THE GATE. The one club access code (system/club-code-plan.md), checked
-  SERVER-SIDE: NL.codeGate.viaFunction posts it to the clubCodeAuth trigger
-  under app-data/club-codes, which mints a token carrying `club: '<CODE>'`.
-  The RTDB rules on app-data/media-dazn/seasons/<s>/clubs/$club open only
-  where $club equals that claim, so a club cannot read another club's games
-  however the page is tampered with. The gate is the screen; the rules are
-  the boundary.
+  The club-facing page is /dazn/reader/ (club access code). This is the League's
+  view of the same data, behind auth-guard.
 
-  What a club can read: its own club node, and each division's averages
-  (bench/), which hold averages and game counts only — never another club's
-  games. DAZN has agreed clubs may see their own figures (12/10/2026).
+  IMPORT. Paste the Matches sheet, header row included. Nothing is written
+  until every row parses and every club name matches clubs-meta; the season
+  is derived from the dates rather than chosen from a dropdown, so a season
+  cannot be filed under the wrong year by a mis-click. A re-import REPLACES
+  that season — the sheet is the record, so the latest paste wins.
+  The source file never goes in this repo: it is DAZN-confidential, and the
+  repo is public.
 
-  A League holder of an access code (claim "NL") or a staff token ("*") has
-  no club node to read, so it is pointed at /dazn/admin/ instead.
-
-  No auth-guard: that gates NL accounts, and this page is entered by code.
+  Storage (RTDB) — shape documented in /dazn/_data.js:
+    app-data/media-dazn/seasons/<season>/...   matches, clubs, bench
+    app-data/media-dazn/index/<season>         season list for both pages
+    tools/media-dazn                           tool registration
+  Access (auth-guard registry — see system/auth-guard.js):
+    superadmin / admin → view + import
+    staff              → view
+    clubs              → off here; they use /dazn/reader/ with their access code
 -->
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>DAZN Viewing — The National League</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DAZN Viewing — NL Tools</title>
+
   <!-- Favicons. Static, not injected: nl-topbar.js adds these too, but a
        standalone page never loads it, and an icon that arrives with the JS
        leaves the tab blank until it does. /favicon.ico at the root is the
@@ -40,10 +48,16 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+
+  <!-- Brand stylesheet (lint canonical: ?v=67) -->
   <link rel="stylesheet" href="/system/nl-brand.css?v=67">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <!-- Firebase init -->
   <script>
     firebase.initializeApp({
       apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -54,131 +68,342 @@
       messagingSenderId: "801354670005",
       appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
     });
+    var db = firebase.database();
   </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'DAZN Viewing',
+      toolKey: 'media-dazn'
+    };
+    var NL_TOOL_KEY = 'media-dazn';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '12/10/2026',
+        version: 'v6.0',
+        items: [
+          'This page is now at nl.tools/dazn/, and the club page at nl.tools/dazn/reader/.'
+        ]
+      },
+      {
+        date: '12/10/2026',
+        version: 'v3.0',
+        items: [
+          'First version. Every club’s DAZN views, minutes watched and UK availability for the season, with each club’s own view one click away.',
+          'Admins import a season by pasting the Matches sheet from the DAZN workbook.'
+        ]
+      }
+    ];
+
+    /* auth-guard fires this once the session is verified + pageWrap is
+       revealed. Boot the main app from here so RTDB reads happen with a
+       live auth token. Do NOT read RTDB before this fires. */
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts (lint canonical: ?v=47 / ?v=1 / ?v=10 / ?v=16) -->
   <script src="/system/nl-utils.js?v=47"></script>
-  <!-- GA4 for nl.tools — cookieless, no banner, no identity. See system/nl-analytics.js -->
+  <!-- GA4, one property for all of nl.tools. Cookieless, so no consent
+       banner on any page; page views by path, no identity. Tool events go
+       through NL.track(). See system/nl-analytics.js. -->
   <script src="/system/nl-analytics.js?v=1"></script>
+  <script src="/system/nl-topbar.js?v=10"></script>
+  <script src="/system/auth-guard.js?v=16"></script>
+
   <link rel="stylesheet" href="/dazn/_view.css?v=1">
   <script src="/dazn/_data.js?v=1"></script>
   <script src="/dazn/_view.js?v=1"></script>
-  <style>
-    .dz-shell { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
-    .dz-bar { display: flex; justify-content: flex-end; margin-bottom: 16px; }
-  </style>
+
+<style>
+  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
+     style.display = 'block'. Don't clear with '' — would re-trigger the
+     brand rule and re-hide the page. */
+  .dza-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 20px; }
+  .dza-bar .dza-grow { flex: 1; }
+  .dza-clubs tbody tr { cursor: pointer; }
+  .dza-clubs tbody tr.is-open td { background: var(--blue-light) !important; }
+  .dza-club-head { display: flex; align-items: center; gap: 12px; margin: 32px 0 16px; }
+  .dza-club-head img { width: 40px; height: 40px; object-fit: contain; }
+  .dza-club-head h2 { color: var(--navy); font-size: var(--text-lg); }
+  .dza-import { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 28px; }
+  .dza-import textarea { width: 100%; min-height: 140px; font-family: var(--font-mono); font-size: var(--text-xs); }
+  .dza-import__actions { display: flex; gap: 10px; margin-top: 12px; }
+  .dza-preview { margin-top: 16px; font-size: var(--text-sm); }
+  .dza-preview ul { margin: 8px 0 0 18px; }
+</style>
 </head>
 <body>
-  <!-- White bar: no NL account is behind this page (nl-brand v2.51). -->
-  <header class="nl-idbar">
-    <img class="nl-idbar__crest" id="dzCrest" src="/assets/crests/National%20League%20rose.png"
-         alt="" width="42" height="42">
-    <div class="nl-idbar__id">
-      <div class="nl-idbar__title">DAZN Viewing</div>
-      <div class="nl-idbar__sub" id="dzClub">The National League</div>
-    </div>
-    <div class="nl-idbar__actions">
-      <button class="nl-idbar__btn" id="dzOut" type="button" hidden>Sign out</button>
-    </div>
-  </header>
 
-  <div class="gate" id="dzGate"></div>
+<!-- Topbar — auto-rendered by /system/nl-topbar.js from window.NL_TOOL -->
+<div id="nlTopbar"></div>
 
-  <main class="dz-shell" id="dzShell" hidden>
-    <div class="dz-bar" id="dzSeasonBar" hidden>
-      <select class="nl-select" id="dzSeason" aria-label="Season"></select>
+<div id="pageWrap">
+  <div class="page">
+
+    <div class="dza-bar">
+      <select class="nl-select" id="dzaSeason" aria-label="Season" hidden></select>
+      <span class="dza-grow"></span>
+      <a class="btn btn--ghost" href="/dazn/reader/" target="_blank" rel="noopener">Club page</a>
+      <button class="btn btn--navy" id="dzaImportBtn" type="button" hidden>Import a season</button>
     </div>
-    <div id="dzBody"></div>
-  </main>
 
+    <section class="dza-import" id="dzaImport" hidden>
+      <div class="section-head"><h2>Import a season</h2></div>
+      <div class="form-group">
+        <label for="dzaPaste">Matches sheet, header row included</label>
+        <textarea id="dzaPaste" spellcheck="false" placeholder="Select all on the Matches sheet, copy, paste here"></textarea>
+      </div>
+      <div class="dza-import__actions">
+        <button class="btn btn--ghost" id="dzaCheck" type="button">Check</button>
+        <button class="btn btn--primary" id="dzaWrite" type="button" disabled>Import</button>
+      </div>
+      <div class="dza-preview" id="dzaPreview"></div>
+    </section>
+
+    <div id="dzaBody"></div>
+    <div id="dzaClub"></div>
+
+  </div>
+</div>
+
+<!-- Main app -->
 <script>
 (function () {
   'use strict';
 
   var BASE = 'app-data/media-dazn';
-  var db = firebase.database();
+  var D = window.DAZNData;
   var $ = function (id) { return document.getElementById(id); };
-  var S = { code: null, names: {}, seasons: [] };
+  var esc = function (s) { return NL.escHtml(s); };
+  var whole = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 0 });
+  var oneDp = new Intl.NumberFormat('en-GB', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
-  function message(title, text) {
-    $('dzBody').innerHTML = '<div class="empty-state"><div class="empty-state__title">' +
-      NL.escHtml(title) + '</div>' + (text ? '<div class="empty-state__text">' + text + '</div>' : '') + '</div>';
+  var S = { session: null, isAdmin: false, meta: null, byName: {}, names: {},
+            index: {}, season: null, data: null, open: null, pending: null };
+
+  function loading(text) {
+    $('dzaBody').innerHTML = '<div class="empty-state"><div class="empty-state__title">' + esc(text) + '</div></div>';
+    $('dzaClub').innerHTML = '';
   }
 
-  /* CANON CANDIDATE (12/10/2026): NL.clubs has byName and byOpta but no
-     byCode. handbook/_reader.js, uw-promo and this page each build the same
-     code → club lookup. Promote with the next nl-utils change. */
-  function loadNames() {
-    return NL.clubs.load().then(function (meta) {
-      (meta.clubs || []).forEach(function (c) { S.names[c.code] = c.name; });
+  /* ---- Seasons ------------------------------------------------------ */
+  function loadIndex() {
+    return db.ref(BASE + '/index').once('value').then(function (snap) {
+      S.index = snap.val() || {};
+      var keys = Object.keys(S.index).sort().reverse();
+      var sel = $('dzaSeason');
+      sel.innerHTML = keys.map(function (k) {
+        return '<option value="' + esc(k) + '">' + esc(S.index[k].label || NL.season.label(S.meta, k)) + '</option>';
+      }).join('');
+      sel.hidden = keys.length < 2;
+      if (!keys.length) {
+        loading(S.isAdmin ? 'No seasons imported yet' : 'No figures yet');
+        return;
+      }
+      var want = keys.indexOf(S.season) !== -1 ? S.season : keys[0];
+      sel.value = want;
+      return showSeason(want);
     });
   }
 
   function showSeason(key) {
-    message('Loading…');
-    return db.ref(BASE + '/seasons/' + key + '/clubs/' + S.code).once('value').then(function (snap) {
-      var club = snap.val();
-      if (!club || !club.matches) { message('No DAZN games this season'); return; }
-      return db.ref(BASE + '/seasons/' + key + '/bench/' + club.div).once('value').then(function (b) {
-        DAZNView.render($('dzBody'), {
-          code: S.code, name: S.names[S.code], games: club.matches,
-          bench: b.val(), div: club.div,
-          nameOf: function (c) { return S.names[c]; }
-        });
-      });
-    }).catch(function (e) {
-      console.error('[dazn]', e);
-      message('Figures could not be loaded', 'Reload the page to try again.');
+    S.season = key;
+    S.open = null;
+    loading('Loading…');
+    return db.ref(BASE + '/seasons/' + key).once('value').then(function (snap) {
+      S.data = snap.val() || {};
+      drawClubs();
     });
   }
 
-  function start(session) {
-    $('dzGate').hidden = true;
-    $('dzShell').hidden = false;
-    $('dzOut').hidden = false;
+  /* ---- Every club --------------------------------------------------- */
+  function drawClubs() {
+    var clubs = S.data.clubs || {};
+    var rows = Object.keys(clubs).map(function (code) {
+      var s = D.summarise(clubs[code].matches, code);
+      return { code: code, name: S.names[code] || code, div: clubs[code].div, s: s };
+    }).sort(function (a, b) { return b.s.views - a.s.views; });
 
-    var code = session && session.role;
-    if (!code || code === '*' || code === 'NL') {
-      message('This page shows a club’s own figures',
-        'League staff: every club is on <a href="/dazn/admin/">the staff page</a>.');
-      return;
-    }
-    S.code = code;
+    var body = rows.map(function (r) {
+      return '<tr data-code="' + esc(r.code) + '"' + (S.open === r.code ? ' class="is-open"' : '') + '>' +
+        '<td><span class="dz-opp">' + NL.clubs.crestImgHtml(r.name, 'thumb', { className: 'dz-crest' }) +
+          '<span>' + esc(r.name) + '</span></span></td>' +
+        '<td>' + esc(D.DIV_LABEL[r.div] || r.div || '') + '</td>' +
+        '<td class="dz-num">' + r.s.games + '</td>' +
+        '<td class="dz-num">' + whole.format(r.s.ukViews) + '</td>' +
+        '<td class="dz-num">' + whole.format(r.s.intlViews) + '</td>' +
+        '<td class="dz-num dz-strong">' + whole.format(r.s.views) + '</td>' +
+        '<td class="dz-num">' + (r.s.avgUkPerUkShown == null ? '—' : whole.format(r.s.avgUkPerUkShown)) + '</td>' +
+        '<td class="dz-num">' + (r.s.avgMins == null ? '—' : oneDp.format(r.s.avgMins)) + '</td>' +
+      '</tr>';
+    }).join('');
 
-    loadNames().catch(function () {}).then(function () {
-      var name = S.names[code] || (session && session.name) || code;
-      $('dzClub').textContent = name;
-      var crest = $('dzCrest');
-      crest.src = NL.clubs.crestUrl(name, 'thumb');
-      NL.clubs.wireCrestImg(crest, name);
-      return db.ref(BASE + '/index').once('value');
-    }).then(function (snap) {
-      var idx = (snap && snap.val()) || {};
-      S.seasons = Object.keys(idx).sort().reverse();
-      if (!S.seasons.length) { message('No figures yet'); return; }
-      var sel = $('dzSeason');
-      sel.innerHTML = S.seasons.map(function (k) {
-        return '<option value="' + NL.escHtml(k) + '">' + NL.escHtml(idx[k].label || NL.season.label(null, k)) + '</option>';
-      }).join('');
-      $('dzSeasonBar').hidden = S.seasons.length < 2;
-      sel.onchange = function () { showSeason(sel.value); };
-      return showSeason(S.seasons[0]);
-    }).catch(function (e) {
-      console.error('[dazn]', e);
-      message('Figures could not be loaded', 'Reload the page to try again.');
-    });
+    $('dzaBody').innerHTML =
+      '<div class="section-head"><h2>Clubs</h2></div>' +
+      '<div class="table-wrap"><table class="table table--compact dz-table dza-clubs">' +
+        '<thead><tr><th>Club</th><th>Division</th><th class="dz-num">Games</th>' +
+          '<th class="dz-num">UK</th><th class="dz-num">International</th><th class="dz-num">Total</th>' +
+          '<th class="dz-num">UK per UK-shown game</th><th class="dz-num">Avg mins</th></tr></thead>' +
+        '<tbody>' + body + '</tbody></table></div>';
+    NL.clubs.wireCrestImgs($('dzaBody'));
   }
 
-  $('dzOut').addEventListener('click', function () {
-    NL.codeGate.signOut().then(function () { location.reload(); });
+  $('dzaBody').addEventListener('click', function (e) {
+    var tr = e.target.closest('tr[data-code]');
+    if (tr) openClub(tr.getAttribute('data-code'));
   });
 
-  NL.codeGate.ensure({
-    mount: $('dzGate'),
-    title: 'DAZN Viewing',
-    sub: 'Enter your access code.',
-    numeric: false,
-    verify: NL.codeGate.viaFunction('app-data/club-codes', { tool: 'dazn' }),
-    claim: 'club'
-  }).then(start);
+  /* ---- One club, exactly as the club sees it ------------------------- */
+  function openClub(code) {
+    S.open = code;
+    Array.prototype.forEach.call(document.querySelectorAll('.dza-clubs tr[data-code]'), function (tr) {
+      tr.classList.toggle('is-open', tr.getAttribute('data-code') === code);
+    });
+    var club = (S.data.clubs || {})[code];
+    var name = S.names[code] || code;
+    var host = $('dzaClub');
+    host.innerHTML =
+      '<div class="dza-club-head">' + NL.clubs.crestImgHtml(name, 'thumb', { eager: true }) +
+        '<h2>' + esc(name) + '</h2></div><div id="dzaClubBody"></div>';
+    NL.clubs.wireCrestImgs(host);
+    DAZNView.render($('dzaClubBody'), {
+      code: code, name: name, games: club.matches,
+      bench: (S.data.bench || {})[club.div] || null, div: club.div,
+      nameOf: function (c) { return S.names[c]; }
+    });
+    host.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  /* ---- Import -------------------------------------------------------- */
+  function codeOf(name) {
+    var c = NL.clubs.byName(name);
+    return c ? c.code : null;
+  }
+
+  function check() {
+    S.pending = null;
+    $('dzaWrite').disabled = true;
+    var out = $('dzaPreview');
+    var p = D.parsePaste($('dzaPaste').value);
+    if (p.errors.length) { out.innerHTML = problems('Fix these in the sheet and paste again:', p.errors); return; }
+
+    var b = D.buildSeason(p.rows, codeOf);
+    if (b.unmatched.length) {
+      out.innerHTML = problems('These club names are not in clubs-meta. Correct the spelling in the sheet:', b.unmatched);
+      return;
+    }
+    if (b.errors.length) { out.innerHTML = problems('Fix these in the sheet and paste again:', b.errors); return; }
+
+    /* The season comes from the dates, never from a control. One paste is
+       one season; a sheet that spans two is a mistake to fix at source. */
+    var seasons = {};
+    p.rows.forEach(function (r) { seasons[NL.season.fromDate(NL.parseDate(r.date))] = true; });
+    var keys = Object.keys(seasons);
+    if (keys.length !== 1) {
+      out.innerHTML = problems('The dates span more than one season (' +
+        keys.map(function (k) { return NL.season.label(S.meta, k); }).join(', ') + '). Import one season at a time.', []);
+      return;
+    }
+    var key = keys[0];
+    var dates = p.rows.map(function (r) { return r.date; }).sort();
+    var byDiv = {}, byAvail = { uk: 0, round: 0, moved: 0, intl: 0 };
+    p.rows.forEach(function (r) { byDiv[r.div] = (byDiv[r.div] || 0) + 1; byAvail[r.avail]++; });
+
+    S.pending = { key: key, season: b.season, games: p.rows.length };
+    out.innerHTML =
+      '<div class="banner banner--info"><strong>' + p.rows.length + ' games for ' + esc(NL.season.label(S.meta, key)) + '</strong>, ' +
+        esc(NL.formatDateShort(dates[0])) + ' to ' + esc(NL.formatDateShort(dates[dates.length - 1])) + ', ' +
+        Object.keys(b.season.clubs).length + ' clubs.' +
+        '<ul>' +
+          Object.keys(byDiv).map(function (d) { return '<li>' + esc(D.DIV_LABEL[d]) + ': ' + byDiv[d] + '</li>'; }).join('') +
+          '<li>Shown in UK: ' + (byAvail.uk + byAvail.round + byAvail.moved) + ' · Saturday 3pm, international only: ' + byAvail.intl + '</li>' +
+        '</ul>' +
+        (S.index[key] ? '<p>Replaces the ' + (S.index[key].games || '') + ' games already held for this season.</p>' : '') +
+      '</div>';
+    $('dzaWrite').disabled = false;
+  }
+
+  function problems(lead, list) {
+    return '<div class="banner banner--error">' + esc(lead) +
+      (list.length ? '<ul>' + list.slice(0, 20).map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') +
+        (list.length > 20 ? '<li>…and ' + (list.length - 20) + ' more</li>' : '') + '</ul>' : '') +
+    '</div>';
+  }
+
+  function write() {
+    var p = S.pending;
+    if (!p) return;
+    var label = NL.season.label(S.meta, p.key);
+    var ask = S.index[p.key]
+      ? NL.confirm('Replace ' + label + ' with these ' + p.games + ' games? Clubs see the new figures straight away.', { title: 'Replace season', variant: 'danger', confirmText: 'Replace' })
+      : NL.confirm('Import ' + p.games + ' games for ' + label + '? Clubs can see their figures straight away.', { title: 'Import season', confirmText: 'Import' });
+    ask.then(function (ok) {
+      if (!ok) return;
+      $('dzaWrite').disabled = true;
+      var up = {};
+      up['seasons/' + p.key] = p.season;
+      up['index/' + p.key] = { label: label, games: p.games, importedAt: firebase.database.ServerValue.TIMESTAMP };
+      return NL.ensureAuth().then(function () {
+        return db.ref(BASE).update(up);
+      }).then(function () {
+        NL.toast(label + ' imported: ' + p.games + ' games.', 'success');
+        S.pending = null;
+        $('dzaPaste').value = '';
+        $('dzaPreview').innerHTML = '';
+        $('dzaImport').hidden = true;
+        S.season = p.key;
+        return loadIndex();
+      });
+    }).catch(function (e) {
+      console.error('[dazn-admin]', e);
+      $('dzaWrite').disabled = false;
+      NL.toast('Import failed: ' + ((e && e.message) || 'unknown error'), 'error');
+    });
+  }
+
+  $('dzaImportBtn').addEventListener('click', function () {
+    var box = $('dzaImport');
+    box.hidden = !box.hidden;
+    if (!box.hidden) $('dzaPaste').focus();
+  });
+  $('dzaCheck').addEventListener('click', check);
+  $('dzaWrite').addEventListener('click', write);
+  $('dzaPaste').addEventListener('input', function () { S.pending = null; $('dzaWrite').disabled = true; });
+  $('dzaSeason').addEventListener('change', function () { showSeason(this.value); });
+
+  /* ---- Boot ---------------------------------------------------------- */
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function (session) {
+    S.session = session;
+    var role = NL.roles.norm(session && session.role);
+    S.isAdmin = role === 'admin' || role === 'superadmin';
+    $('dzaImportBtn').hidden = !S.isAdmin;
+    loading('Loading…');
+    NL.clubs.load().then(function (meta) {
+      S.meta = meta;
+      (meta.clubs || []).forEach(function (c) { S.names[c.code] = c.name; });
+      return NL.ensureAuth();
+    }).then(loadIndex).catch(function (e) {
+      console.error('[dazn-admin]', e);
+      loading('Figures could not be loaded. Reload the page to try again.');
+    });
+  };
+
+  if (window._toolDeferredSession) {
+    window.TOOL.boot(window._toolDeferredSession);
+    delete window._toolDeferredSession;
+  }
 })();
 </script>
 </body>

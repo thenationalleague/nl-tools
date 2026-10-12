@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — DAZN Viewing (club page)
+  Version: v6.0 (12/10/2026)
+  File: /dazn/reader/index.html
+
+  CHANGELOG
+    v6.0 (12/10/2026) — Moved from /dazn/ to /dazn/reader/, the access-code
+      door beside the gated tool, as with the Handbook and Club Directory
+      readers. /dazn/ is now the staff tool.
+    v3.0 (12/10/2026) — First build. A club enters its access code and sees
+      its own DAZN figures for the season: views split UK and international,
+      minutes watched, every game DAZN showed with whether it was available
+      in the UK, and how it compares with its division's average.
+
+  THE GATE. The one club access code (system/club-code-plan.md), checked
+  SERVER-SIDE: NL.codeGate.viaFunction posts it to the clubCodeAuth trigger
+  under app-data/club-codes, which mints a token carrying `club: '<CODE>'`.
+  The RTDB rules on app-data/media-dazn/seasons/<s>/clubs/$club open only
+  where $club equals that claim, so a club cannot read another club's games
+  however the page is tampered with. The gate is the screen; the rules are
+  the boundary.
+
+  What a club can read: its own club node, and each division's averages
+  (bench/), which hold averages and game counts only — never another club's
+  games. DAZN has agreed clubs may see their own figures (12/10/2026).
+
+  A League holder of an access code (claim "NL") or a staff token ("*") has
+  no club node to read, so it is pointed at /dazn/ (the staff tool) instead.
+
+  No auth-guard: that gates NL accounts, and this page is entered by code.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DAZN Viewing — The National League</title>
+  <!-- Favicons. Static, not injected: nl-topbar.js adds these too, but a
+       standalone page never loads it, and an icon that arrives with the JS
+       leaves the tab blank until it does. /favicon.ico at the root is the
+       backstop every browser asks for without being told. -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="/system/nl-brand.css?v=67">
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+  </script>
+  <script src="/system/nl-utils.js?v=47"></script>
+  <!-- GA4 for nl.tools — cookieless, no banner, no identity. See system/nl-analytics.js -->
+  <script src="/system/nl-analytics.js?v=1"></script>
+  <link rel="stylesheet" href="/dazn/_view.css?v=1">
+  <script src="/dazn/_data.js?v=1"></script>
+  <script src="/dazn/_view.js?v=1"></script>
+  <style>
+    .dz-shell { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+    .dz-bar { display: flex; justify-content: flex-end; margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+  <!-- White bar: no NL account is behind this page (nl-brand v2.51). -->
+  <header class="nl-idbar">
+    <img class="nl-idbar__crest" id="dzCrest" src="/assets/crests/National%20League%20rose.png"
+         alt="" width="42" height="42">
+    <div class="nl-idbar__id">
+      <div class="nl-idbar__title">DAZN Viewing</div>
+      <div class="nl-idbar__sub" id="dzClub">The National League</div>
+    </div>
+    <div class="nl-idbar__actions">
+      <button class="nl-idbar__btn" id="dzOut" type="button" hidden>Sign out</button>
+    </div>
+  </header>
+
+  <div class="gate" id="dzGate"></div>
+
+  <main class="dz-shell" id="dzShell" hidden>
+    <div class="dz-bar" id="dzSeasonBar" hidden>
+      <select class="nl-select" id="dzSeason" aria-label="Season"></select>
+    </div>
+    <div id="dzBody"></div>
+  </main>
+
+<script>
+(function () {
+  'use strict';
+
+  var BASE = 'app-data/media-dazn';
+  var db = firebase.database();
+  var $ = function (id) { return document.getElementById(id); };
+  var S = { code: null, names: {}, seasons: [] };
+
+  function message(title, text) {
+    $('dzBody').innerHTML = '<div class="empty-state"><div class="empty-state__title">' +
+      NL.escHtml(title) + '</div>' + (text ? '<div class="empty-state__text">' + text + '</div>' : '') + '</div>';
+  }
+
+  /* CANON CANDIDATE (12/10/2026): NL.clubs has byName and byOpta but no
+     byCode. handbook/_reader.js, uw-promo and this page each build the same
+     code → club lookup. Promote with the next nl-utils change. */
+  function loadNames() {
+    return NL.clubs.load().then(function (meta) {
+      (meta.clubs || []).forEach(function (c) { S.names[c.code] = c.name; });
+    });
+  }
+
+  function showSeason(key) {
+    message('Loading…');
+    return db.ref(BASE + '/seasons/' + key + '/clubs/' + S.code).once('value').then(function (snap) {
+      var club = snap.val();
+      if (!club || !club.matches) { message('No DAZN games this season'); return; }
+      return db.ref(BASE + '/seasons/' + key + '/bench/' + club.div).once('value').then(function (b) {
+        DAZNView.render($('dzBody'), {
+          code: S.code, name: S.names[S.code], games: club.matches,
+          bench: b.val(), div: club.div,
+          nameOf: function (c) { return S.names[c]; }
+        });
+      });
+    }).catch(function (e) {
+      console.error('[dazn]', e);
+      message('Figures could not be loaded', 'Reload the page to try again.');
+    });
+  }
+
+  function start(session) {
+    $('dzGate').hidden = true;
+    $('dzShell').hidden = false;
+    $('dzOut').hidden = false;
+
+    var code = session && session.role;
+    if (!code || code === '*' || code === 'NL') {
+      message('This page shows a club’s own figures',
+        'League staff: every club is on <a href="/dazn/">the staff page</a>.');
+      return;
+    }
+    S.code = code;
+
+    loadNames().catch(function () {}).then(function () {
+      var name = S.names[code] || (session && session.name) || code;
+      $('dzClub').textContent = name;
+      var crest = $('dzCrest');
+      crest.src = NL.clubs.crestUrl(name, 'thumb');
+      NL.clubs.wireCrestImg(crest, name);
+      return db.ref(BASE + '/index').once('value');
+    }).then(function (snap) {
+      var idx = (snap && snap.val()) || {};
+      S.seasons = Object.keys(idx).sort().reverse();
+      if (!S.seasons.length) { message('No figures yet'); return; }
+      var sel = $('dzSeason');
+      sel.innerHTML = S.seasons.map(function (k) {
+        return '<option value="' + NL.escHtml(k) + '">' + NL.escHtml(idx[k].label || NL.season.label(null, k)) + '</option>';
+      }).join('');
+      $('dzSeasonBar').hidden = S.seasons.length < 2;
+      sel.onchange = function () { showSeason(sel.value); };
+      return showSeason(S.seasons[0]);
+    }).catch(function (e) {
+      console.error('[dazn]', e);
+      message('Figures could not be loaded', 'Reload the page to try again.');
+    });
+  }
+
+  $('dzOut').addEventListener('click', function () {
+    NL.codeGate.signOut().then(function () { location.reload(); });
+  });
+
+  NL.codeGate.ensure({
+    mount: $('dzGate'),
+    title: 'DAZN Viewing',
+    sub: 'Enter your access code.',
+    numeric: false,
+    verify: NL.codeGate.viaFunction('app-data/club-codes', { tool: 'dazn' }),
+    claim: 'club'
+  }).then(start);
+})();
+</script>
+</body>
+</html>

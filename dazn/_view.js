@@ -7,8 +7,8 @@
      v3.0 (12/10/2026) — First build.
 
    Draws a club's season: headline figures, the comparison with its
-   division, and every game DAZN showed. The club page (/dazn/) and the staff
-   page (/dazn/admin/) both call this, so a club and the League are always
+   division, and every game DAZN showed. The club page (/dazn/reader/) and the staff
+   page (/dazn/) both call this, so a club and the League are always
    looking at the same numbers drawn the same way.
 
    Needs nl-utils.js (NL.escHtml, NL.formatDateShort, NL.clubs) and _data.js.

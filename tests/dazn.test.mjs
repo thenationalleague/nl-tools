@@ -121,7 +121,7 @@ test('rules: a club code reads its own club node and the averages, nothing else'
 });
 
 test('the club page checks the code server-side, against the one club code', () => {
-  const page = readFileSync(join(REPO, 'dazn/index.html'), 'utf8');
+  const page = readFileSync(join(REPO, 'dazn/reader/index.html'), 'utf8');
   assert.match(page, /NL\.codeGate\.viaFunction\('app-data\/club-codes'/);
   assert.match(page, /claim: 'club'/);
   assert.ok(!/auth-guard\.js/.test(page));
