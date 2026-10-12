@@ -1,9 +1,14 @@
 /* =============================================================================
    NL Tools — DAZN Viewing: data layer
    File: /dazn/_data.js
-   Version: v3.0 (12/10/2026)
+   Version: v9.0 (12/10/2026)
 
    CHANGELOG
+     v9.0 (12/10/2026) — Dates written out with a month name are accepted
+       ("Sat, 9 Aug 2025", "9 August 2025", "09-Aug-25"). The workbook's
+       Matches sheet displays its dates that way, so the first real paste
+       was refused on every row. A lone dash reads as 0, which is how the
+       sheet's number format displays zero.
      v3.0 (12/10/2026) — First build. Parses the "Matches" sheet as pasted
        from the spreadsheet, keys each game, files it under both clubs, and
        works out the per-division averages clubs are compared against.
@@ -74,27 +79,43 @@
 
   function normHead(s) { return String(s || '').trim().toLowerCase().replace(/\s+/g, ' '); }
 
-  /* "09/08/2025", "9/8/2025", "2025-08-09", "2025-08-09 00:00:00" → "2025-08-09".
-     Spreadsheets copy dates as they are DISPLAYED, so a UK-locale sheet gives
-     DD/MM/YYYY. Anything else is refused rather than guessed: a guessed
-     date files a game under the wrong fixture. */
+  /* "09/08/2025", "9/8/2025", "2025-08-09", "2025-08-09 00:00:00",
+     "Sat, 9 Aug 2025", "9 August 2025", "09-Aug-25" → "2025-08-09".
+     Spreadsheets copy dates as they are DISPLAYED, so the text depends on
+     the cell's format: a UK-locale sheet gives DD/MM/YYYY, and the DAZN
+     workbook's Matches sheet shows "Sat, 9 Aug 2025". Anything else is
+     refused rather than guessed: a guessed date files a game under the
+     wrong fixture. The weekday is ignored, not checked. */
   function parseDate(s) {
     s = String(s || '').trim();
     var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (m) return valid(+m[1], +m[2], +m[3]);
     m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
     if (m) return valid(m[3].length === 2 ? 2000 + +m[3] : +m[3], +m[2], +m[1]);
+    m = s.match(/^(?:[a-z]+,?\s+)?(\d{1,2})(?:st|nd|rd|th)?[\s-]+([a-z]+)\.?,?[\s-]+(\d{2}|\d{4})$/i);
+    if (m) {
+      var mo = MONTHS.indexOf(m[2].slice(0, 3).toLowerCase()) + 1;
+      if (mo && (m[2].length === 3 || MONTH_NAMES[mo - 1] === m[2].toLowerCase() || m[2].toLowerCase() === 'sept')) {
+        return valid(m[3].length === 2 ? 2000 + +m[3] : +m[3], mo, +m[1]);
+      }
+    }
     return null;
   }
+  var MONTH_NAMES = ['january', 'february', 'march', 'april', 'may', 'june', 'july',
+                     'august', 'september', 'october', 'november', 'december'];
+  var MONTHS = MONTH_NAMES.map(function (n) { return n.slice(0, 3); });
   function valid(y, mo, d) {
     var dt = new Date(Date.UTC(y, mo - 1, d));
     if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return null;
     return y + '-' + (mo < 10 ? '0' : '') + mo + '-' + (d < 10 ? '0' : '') + d;
   }
 
-  /* "15,211" and " 311 " are numbers; "" and "n/a" are not. */
+  /* "15,211" and " 311 " are numbers; "" and "n/a" are not. A lone dash is
+     ZERO: the workbook's number format (#,##0;-#,##0;–) displays 0 as "–",
+     and a paste carries the displayed text. */
   function parseNum(s) {
     var t = String(s == null ? '' : s).replace(/[,\s£]/g, '');
+    if (/^[\u2013\u2014-]$/.test(t)) return 0;
     if (t === '' || !/^-?\d*\.?\d+$/.test(t)) return null;
     var n = parseFloat(t);
     return n >= 0 ? n : null;
