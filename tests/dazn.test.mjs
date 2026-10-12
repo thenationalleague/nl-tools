@@ -160,3 +160,19 @@ test('games sort by date until a header is clicked, and nothing is labelled "mos
   assert.ok(!/Most watched/i.test(view), 'the "Most watched" pill is back');
   assert.ok(!/class="pill/.test(view));
 });
+
+test('filters narrow by UK availability, venue and month, and combine', () => {
+  const win = { DAZNData: D };
+  vm.runInNewContext(readFileSync(join(REPO, 'dazn/_view.js'), 'utf8'), { window: win, Intl });
+  const f = win.DAZNView.applyFilters;
+  const games = [...Object.values(D.buildSeason(D.parsePaste(SHEET).rows, codeOf).season.clubs.ALP.matches)];
+  const n = (F) => f(games, 'ALP', { uk: 'all', venue: 'all', month: 'all', ...F }).length;
+  assert.equal(n({}), 3);
+  assert.equal(n({ uk: 'intl' }), 1);                 // the Saturday 3pm game
+  assert.equal(n({ uk: 'uk' }), 2);                   // whole-round Saturday counts as shown
+  assert.equal(n({ venue: 'home' }), 1);
+  assert.equal(n({ venue: 'away' }), 2);
+  assert.equal(n({ uk: 'intl', venue: 'home' }), 0);
+  assert.equal(n({ month: '2025-08' }), 3);
+  assert.equal(n({ month: '2025-09' }), 0);
+});
