@@ -94,6 +94,7 @@ themselves, not inferred from the registry defaults.
 | **Attendance** | `ops-attendance` | edit all clubs; adjust neutral venues | view all | add own club's attendances (day-locked) | view own + anonymised others |
 | **Club Directory** | `ops-club-directory` | edit all club data | view all | edit own club's data | view all |
 | **Commercial Benchmarking** | `ops-commercial-benchmarking` | edit data | view benchmarks (club dropdown) | view output only | view output only |
+| **DAZN Viewing** | `media-dazn` | view all; import seasons | view all | own club only, at `/dazn/` by club access code (rules: `clubs/$club` = claim) | same as Club Admin |
 | **Handbook 2026-27** | `ops-handbook` | edit content | view | view | view |
 | **Judgements & Decisions** | `ops-judgements` | **Manage** — add / amend / remove all | view | view | view |
 | **Vacancies** | `ops-vacancies` | **Manage** — full CRUD + approve/reject | view all | add/edit own club's; every submission needs NL approval | view all |
