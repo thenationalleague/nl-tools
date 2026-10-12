@@ -1,10 +1,14 @@
 <!DOCTYPE html>
 <!--
   NL Tools — DAZN Viewing (staff)
-  Version: v6.0 (12/10/2026)
+  Version: v12.0 (12/10/2026)
   File: /dazn/index.html
 
   CHANGELOG
+    v12.0 (12/10/2026) — Clubs table sorts by any column (DAZNView.sortableTable),
+      total views first. The club view gains sortable games, stacked UK /
+      International bars and a three-across headline (see _view.js). Import
+      panel: the heading repeating its own button is gone.
     v6.0 (12/10/2026) — Moved from /dazn/admin/ to /dazn/, and the club page
       from /dazn/ to /dazn/reader/. The tool's own URL is the gated tool and
       the access-code door is /reader/, as with the Handbook and the Club
@@ -83,6 +87,15 @@
     window.NL_CHANGELOG = [
       {
         date: '12/10/2026',
+        version: 'v12.0',
+        items: [
+          'Click any column heading to sort, in the clubs table and in a club\u2019s games.',
+          'Each game shows its views as a bar, split UK and international.',
+          'The headline figures no longer spill out of their cards.'
+        ]
+      },
+      {
+        date: '12/10/2026',
         version: 'v6.0',
         items: [
           'This page is now at nl.tools/dazn/, and the club page at nl.tools/dazn/reader/.'
@@ -121,9 +134,9 @@
   <script src="/system/nl-topbar.js?v=10"></script>
   <script src="/system/auth-guard.js?v=16"></script>
 
-  <link rel="stylesheet" href="/dazn/_view.css?v=1">
+  <link rel="stylesheet" href="/dazn/_view.css?v=2">
   <script src="/dazn/_data.js?v=2"></script>
-  <script src="/dazn/_view.js?v=1"></script>
+  <script src="/dazn/_view.js?v=2"></script>
 
 <style>
   /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
@@ -159,9 +172,8 @@
     </div>
 
     <section class="dza-import" id="dzaImport" hidden>
-      <div class="section-head"><h2>Import a season</h2></div>
       <div class="form-group">
-        <label for="dzaPaste">Matches sheet, header row included</label>
+        <label for="dzaPaste">Matches sheet</label>
         <textarea id="dzaPaste" spellcheck="false" placeholder="Select all on the Matches sheet, copy, paste here"></textarea>
       </div>
       <div class="dza-import__actions">
@@ -231,32 +243,39 @@
   function drawClubs() {
     var clubs = S.data.clubs || {};
     var rows = Object.keys(clubs).map(function (code) {
-      var s = D.summarise(clubs[code].matches, code);
-      return { code: code, name: S.names[code] || code, div: clubs[code].div, s: s };
-    }).sort(function (a, b) { return b.s.views - a.s.views; });
-
-    var body = rows.map(function (r) {
-      return '<tr data-code="' + esc(r.code) + '"' + (S.open === r.code ? ' class="is-open"' : '') + '>' +
-        '<td><span class="dz-opp">' + NL.clubs.crestImgHtml(r.name, 'thumb', { className: 'dz-crest' }) +
-          '<span>' + esc(r.name) + '</span></span></td>' +
-        '<td>' + esc(D.DIV_LABEL[r.div] || r.div || '') + '</td>' +
-        '<td class="dz-num">' + r.s.games + '</td>' +
-        '<td class="dz-num">' + whole.format(r.s.ukViews) + '</td>' +
-        '<td class="dz-num">' + whole.format(r.s.intlViews) + '</td>' +
-        '<td class="dz-num dz-strong">' + whole.format(r.s.views) + '</td>' +
-        '<td class="dz-num">' + (r.s.avgUkPerUkShown == null ? '—' : whole.format(r.s.avgUkPerUkShown)) + '</td>' +
-        '<td class="dz-num">' + (r.s.avgMins == null ? '—' : oneDp.format(r.s.avgMins)) + '</td>' +
-      '</tr>';
-    }).join('');
-
-    $('dzaBody').innerHTML =
-      '<div class="section-head"><h2>Clubs</h2></div>' +
-      '<div class="table-wrap"><table class="table table--compact dz-table dza-clubs">' +
-        '<thead><tr><th>Club</th><th>Division</th><th class="dz-num">Games</th>' +
-          '<th class="dz-num">UK</th><th class="dz-num">International</th><th class="dz-num">Total</th>' +
-          '<th class="dz-num">UK per UK-shown game</th><th class="dz-num">Avg mins</th></tr></thead>' +
-        '<tbody>' + body + '</tbody></table></div>';
-    NL.clubs.wireCrestImgs($('dzaBody'));
+      return { code: code, name: S.names[code] || code, div: clubs[code].div,
+               s: D.summarise(clubs[code].matches, code) };
+    });
+    var num = function (k) { return function (r) { return r.s[k]; }; };
+    $('dzaBody').innerHTML = '<div class="section-head"><h2>Clubs</h2></div><div id="dzaClubs"></div>';
+    DAZNView.sortableTable($('dzaClubs'), {
+      sort: { key: 'views', dir: -1 },
+      tableClass: 'dza-clubs',
+      cols: [
+        { key: 'name', label: 'Club', get: function (r) { return r.name; } },
+        { key: 'div', label: 'Division', get: function (r) { return D.DIV_LABEL[r.div] || r.div || ''; } },
+        { key: 'games', label: 'Games', num: true, get: num('games') },
+        { key: 'uk', label: 'UK', num: true, get: num('ukViews') },
+        { key: 'intl', label: 'INT', num: true, get: num('intlViews') },
+        { key: 'views', label: 'Total', num: true, get: num('views') },
+        { key: 'ukper', label: 'UK per UK-shown game', num: true, get: num('avgUkPerUkShown') },
+        { key: 'mins', label: 'Avg mins', num: true, get: num('avgMins') }
+      ],
+      rows: rows,
+      row: function (r) {
+        return '<tr data-code="' + esc(r.code) + '"' + (S.open === r.code ? ' class="is-open"' : '') + '>' +
+          '<td><span class="dz-opp">' + NL.clubs.crestImgHtml(r.name, 'thumb', { className: 'dz-crest' }) +
+            '<span>' + esc(r.name) + '</span></span></td>' +
+          '<td>' + esc(D.DIV_LABEL[r.div] || r.div || '') + '</td>' +
+          '<td class="dz-num">' + r.s.games + '</td>' +
+          '<td class="dz-num">' + whole.format(r.s.ukViews) + '</td>' +
+          '<td class="dz-num">' + whole.format(r.s.intlViews) + '</td>' +
+          '<td class="dz-num dz-strong">' + whole.format(r.s.views) + '</td>' +
+          '<td class="dz-num">' + (r.s.avgUkPerUkShown == null ? '\u2014' : whole.format(r.s.avgUkPerUkShown)) + '</td>' +
+          '<td class="dz-num">' + (r.s.avgMins == null ? '\u2014' : oneDp.format(r.s.avgMins)) + '</td>' +
+        '</tr>';
+      }
+    });
   }
 
   $('dzaBody').addEventListener('click', function (e) {
