@@ -11,7 +11,8 @@
        is a marker on the club's bar rather than a second grey bar, which
        failed the chart colour checks (too grey, under 3:1 contrast) and
        would have clashed with the blue the games bars use for UK. Copy
-       trimmed. sortableTable() added for both DAZN pages.
+       trimmed, and "International" shortened to INT throughout.
+       sortableTable() added for both DAZN pages.
      v3.0 (12/10/2026) — First build.
 
    Draws a club's season: headline figures, the comparison with its
@@ -118,7 +119,7 @@
       stat(n0(s.games), 'Games on DAZN', gamesSub) +
       stat(n0(s.views), 'Total views') +
       stat(n0(s.ukViews), 'UK views') +
-      stat(n0(s.intlViews), 'International views') +
+      stat(n0(s.intlViews), 'INT views') +
       stat(compact.format(s.mins), 'Minutes watched', null, whole.format(s.mins) + ' minutes') +
       stat(n1(s.avgMins), 'Avg minutes per view') +
     '</div>';
@@ -149,7 +150,7 @@
     if (!bench) return '';
     var rows =
       benchRow('UK views per UK-shown game', s.avgUkPerUkShown, D.benchFigure(bench, 'avgUkPerUkShown'), n0) +
-      benchRow('International views per game', s.avgIntlPerGame, D.benchFigure(bench, 'avgIntlPerGame'), n0) +
+      benchRow('INT views per game', s.avgIntlPerGame, D.benchFigure(bench, 'avgIntlPerGame'), n0) +
       benchRow('Average minutes per view', s.avgMins, D.benchFigure(bench, 'avgMins'), n1);
     if (!rows) return '';
     return '<section class="dz-section">' +
@@ -164,7 +165,7 @@
   function viewsBar(g, max) {
     var total = g.ukViews + g.intlViews;
     var uk = max ? g.ukViews / max * 100 : 0, intl = max ? g.intlViews / max * 100 : 0;
-    return '<div class="dz-vbar" title="' + esc('UK ' + n0(g.ukViews) + ' · International ' + n0(g.intlViews)) + '">' +
+    return '<div class="dz-vbar" title="' + esc('UK ' + n0(g.ukViews) + ' · INT ' + n0(g.intlViews)) + '">' +
       '<div class="dz-vbar__track">' +
         (g.ukViews ? '<span class="dz-vbar__uk" style="width:' + uk.toFixed(1) + '%"></span>' : '') +
         (g.intlViews ? '<span class="dz-vbar__intl" style="width:' + intl.toFixed(1) + '%"></span>' : '') +
@@ -189,7 +190,7 @@
         { key: 'avail', label: 'Shown in UK', cls: 'dz-sm-hide', get: function (r) { return r.g.avail === 'intl' ? 'No' : 'Yes'; } },
         { key: 'total', label: 'Views', num: true, cls: 'dz-vcol', get: function (r) { return r.total; } },
         { key: 'uk', label: 'UK', num: true, cls: 'dz-sm-hide', get: function (r) { return r.g.ukViews; } },
-        { key: 'intl', label: 'International', num: true, cls: 'dz-sm-hide', get: function (r) { return r.g.intlViews; } },
+        { key: 'intl', label: 'INT', num: true, cls: 'dz-sm-hide', get: function (r) { return r.g.intlViews; } },
         { key: 'mins', label: 'Avg mins', num: true, cls: 'dz-sm-hide', get: function (r) { return r.avg; } }
       ],
       rows: rows,
@@ -221,7 +222,7 @@
       '<section class="dz-section">' +
         '<div class="section-head"><h2>Games</h2>' +
           '<div class="dz-key"><span class="dz-key__sw dz-key__sw--uk"></span>UK' +
-          '<span class="dz-key__sw dz-key__sw--intl"></span>International</div></div>' +
+          '<span class="dz-key__sw dz-key__sw--intl"></span>INT</div></div>' +
         '<div data-games></div>' +
         '<p class="dz-foot">Someone who watched three games counts as three views.</p>' +
       '</section>';
