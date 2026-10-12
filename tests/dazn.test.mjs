@@ -149,3 +149,14 @@ test('a lone dash is zero, because that is how the sheet displays zero', () => {
   assert.equal(D.parseNum('--'), null);
   assert.equal(D.parseNum(''), null);
 });
+
+test('games sort by date until a header is clicked, and nothing is labelled "most watched"', () => {
+  /* The biggest game is the longest bar; a pill saying so was asked to go
+     (12/10/2026). Date order is the default because a season reads in order. */
+  const view = readFileSync(join(REPO, 'dazn/_view.js'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '');   // code, not the changelog
+  assert.match(view, /sort: \{ key: 'date', dir: 1 \}/);
+  assert.match(view, /aria-sort/);
+  assert.ok(!/Most watched/i.test(view), 'the "Most watched" pill is back');
+  assert.ok(!/class="pill/.test(view));
+});
