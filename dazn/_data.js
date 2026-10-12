@@ -7,7 +7,8 @@
      v9.0 (12/10/2026) — Dates written out with a month name are accepted
        ("Sat, 9 Aug 2025", "9 August 2025", "09-Aug-25"). The workbook's
        Matches sheet displays its dates that way, so the first real paste
-       was refused on every row.
+       was refused on every row. A lone dash reads as 0, which is how the
+       sheet's number format displays zero.
      v3.0 (12/10/2026) — First build. Parses the "Matches" sheet as pasted
        from the spreadsheet, keys each game, files it under both clubs, and
        works out the per-division averages clubs are compared against.
@@ -109,9 +110,12 @@
     return y + '-' + (mo < 10 ? '0' : '') + mo + '-' + (d < 10 ? '0' : '') + d;
   }
 
-  /* "15,211" and " 311 " are numbers; "" and "n/a" are not. */
+  /* "15,211" and " 311 " are numbers; "" and "n/a" are not. A lone dash is
+     ZERO: the workbook's number format (#,##0;-#,##0;–) displays 0 as "–",
+     and a paste carries the displayed text. */
   function parseNum(s) {
     var t = String(s == null ? '' : s).replace(/[,\s£]/g, '');
+    if (/^[\u2013\u2014-]$/.test(t)) return 0;
     if (t === '' || !/^-?\d*\.?\d+$/.test(t)) return null;
     var n = parseFloat(t);
     return n >= 0 ? n : null;

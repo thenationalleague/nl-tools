@@ -141,3 +141,11 @@ test('dates are read however the sheet displays them, and never guessed', () => 
     assert.equal(D.parseDate(s), null, s);
   }
 });
+
+test('a lone dash is zero, because that is how the sheet displays zero', () => {
+  /* Number format #,##0;-#,##0;– — the third section is the zero case.
+     Two Saturday 3pm games with no UK views pasted as "–" and were refused. */
+  for (const s of ['\u2013', '\u2014', '-', ' \u2013 ']) assert.equal(D.parseNum(s), 0, JSON.stringify(s));
+  assert.equal(D.parseNum('--'), null);
+  assert.equal(D.parseNum(''), null);
+});
