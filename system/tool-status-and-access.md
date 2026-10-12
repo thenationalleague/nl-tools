@@ -94,16 +94,9 @@ themselves, not inferred from the registry defaults.
 | **Attendance** | `ops-attendance` | edit all clubs; adjust neutral venues | view all | add own club's attendances (day-locked) | view own + anonymised others |
 | **Club Directory** | `ops-club-directory` | edit all club data | view all | edit own club's data | view all |
 | **Commercial Benchmarking** | `ops-commercial-benchmarking` | edit data | view benchmarks (club dropdown) | view output only | view output only |
-| **Fixtures** | `ops-fixtures` | all clubs | all clubs | own club | own club |
 | **Handbook 2026-27** | `ops-handbook` | edit content | view | view | view |
 | **Judgements & Decisions** | `ops-judgements` | **Manage** — add / amend / remove all | view | view | view |
 | **Vacancies** | `ops-vacancies` | **Manage** — full CRUD + approve/reject | view all | add/edit own club's; every submission needs NL approval | view all |
-
-**One registry oddity, harmless but worth tidying:** `ops-fixtures` sets
-`defaults.staff = "admin"` where all fifteen other records use `"access"`.
-Fixtures does not read the level at all — it decides from role — and it
-declares `levels: ["off","access"]`, so the value is dead either way. Set it to
-`"access"` next time the file is opened.
 
 ### Meta audience — tooling about the estate (3)
 

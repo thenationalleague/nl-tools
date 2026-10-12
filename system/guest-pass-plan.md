@@ -91,10 +91,10 @@ actually need. The admin console is never eligible.
 
 Tooling about the estate itself. Superadmin in practice.
 
-### Candidates — club audience (7)
+### Candidates — club audience (6)
 
 `ops-attendance` · `ops-club-directory` · `ops-commercial-benchmarking` ·
-`ops-fixtures` · `ops-handbook` · `ops-judgements` · `ops-vacancies`
+`ops-handbook` · `ops-judgements` · `ops-vacancies`
 
 Candidates, not approvals. Three carry data that needs a decision of its own
 before a pass can name them:
