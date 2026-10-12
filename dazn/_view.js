@@ -1,9 +1,16 @@
 /* =============================================================================
    NL Tools — DAZN Viewing: one club's season
    File: /dazn/_view.js
-   Version: v12.0 (12/10/2026)
+   Version: v16.0 (12/10/2026)
 
    CHANGELOG
+     v16.0 (12/10/2026) — Filters: Shown in UK / INT only, Home / Away, and
+       month. They recalculate the headline cards and the games table; the
+       division comparison stays season-wide and says so while a filter is
+       on. The comparison is now % above or below the average, out from a
+       centre line on one scale for all rows: the bar-plus-marker drew each
+       row on its own scale, so every bar looked full and the marker
+       wandered.
      v12.0 (12/10/2026) — Games table: every column sorts on click (date
        first by default), and a stacked UK / International bar per game
        replaces the "Most watched" pill — the biggest game is the longest
@@ -22,10 +29,9 @@
 
    COLOUR. One meaning per colour across the page, checked with the dataviz
    palette validator (both pairs pass every check on the white surface):
-     --primary  the club itself (comparison bar)
+     --primary  the club itself (comparison bars, either side of average)
      --blue     UK views          --amber  International views
-   The division average is an ink marker, not a hue — it is a reference
-   line, not a series.
+   The average is the ink centre line, not a hue: a reference, not a series.
 
    Needs nl-utils.js (NL.escHtml, NL.formatDateShort, NL.clubs) and _data.js.
 
@@ -113,8 +119,8 @@
   }
 
   function headline(s) {
-    var gamesSub = s.home + ' home · ' + s.away + ' away' +
-      (s.intlOnly ? ' · ' + s.intlOnly + ' not shown in UK' : '');
+    var gamesSub = [s.home && s.home + ' home', s.away && s.away + ' away',
+      s.intlOnly && s.intlOnly + ' not shown in UK'].filter(Boolean).join(' · ');
     return '<div class="stats dz-stats">' +
       stat(n0(s.games), 'Games on DAZN', gamesSub) +
       stat(n0(s.views), 'Total views') +
@@ -126,38 +132,49 @@
   }
 
   /* ---- Against the division --------------------------------------------
-     The club is a bar; the division average is a marker on the same scale.
-     The scale runs a little past the larger of the two so neither sits
-     hard against the edge. */
-  function benchRow(label, mine, theirs, fmt) {
-    if (mine == null || theirs == null) return '';
-    var max = Math.max(mine, theirs) * 1.1 || 1;
-    var diff = theirs ? Math.round((mine - theirs) / theirs * 100) : 0;
-    var diffText = diff === 0 ? 'Level' : (diff > 0 ? diff + '% above' : Math.abs(diff) + '% below');
-    return '<div class="dz-bench__row">' +
-      '<div class="dz-bench__label">' + esc(label) + '</div>' +
-      '<div class="dz-bench__track" title="' + esc('You ' + fmt(mine) + ' · division average ' + fmt(theirs)) + '">' +
-        '<div class="dz-bench__bar" style="width:' + (mine / max * 100).toFixed(1) + '%"></div>' +
-        '<div class="dz-bench__mark" style="left:' + (theirs / max * 100).toFixed(1) + '%"></div>' +
-      '</div>' +
-      '<div class="dz-bench__vals"><strong>' + fmt(mine) + '</strong>' +
-        '<span class="dz-bench__avg">avg ' + fmt(theirs) + '</span>' +
-        '<span class="dz-bench__diff ' + (diff >= 0 ? 'dz-up' : 'dz-down') + '">' + esc(diffText) + '</span></div>' +
-    '</div>';
+     How far above or below the division average the club is, as a bar out
+     from a centre line at the average. All rows share one scale, so a row
+     reads against the others as well as against the average. The scale is
+     the largest gap on show, never less than ±50%, so a club a few percent
+     off average gets a short bar rather than one blown up to full width.
+     Season-wide always: the filters narrow the club's games, but the
+     average was stored for the whole season, so the comparison says so. */
+  function benchRows(s, bench) {
+    var defs = [
+      ['UK views per UK-shown game', s.avgUkPerUkShown, D.benchFigure(bench, 'avgUkPerUkShown'), n0],
+      ['INT views per game', s.avgIntlPerGame, D.benchFigure(bench, 'avgIntlPerGame'), n0],
+      ['Average minutes per view', s.avgMins, D.benchFigure(bench, 'avgMins'), n1]
+    ];
+    return defs.filter(function (d) { return d[1] != null && d[2]; })
+      .map(function (d) { return { label: d[0], mine: d[1], avg: d[2], fmt: d[3], diff: (d[1] - d[2]) / d[2] }; });
   }
 
   function benchmark(s, bench, div) {
     if (!bench) return '';
-    var rows =
-      benchRow('UK views per UK-shown game', s.avgUkPerUkShown, D.benchFigure(bench, 'avgUkPerUkShown'), n0) +
-      benchRow('INT views per game', s.avgIntlPerGame, D.benchFigure(bench, 'avgIntlPerGame'), n0) +
-      benchRow('Average minutes per view', s.avgMins, D.benchFigure(bench, 'avgMins'), n1);
-    if (!rows) return '';
+    var rows = benchRows(s, bench);
+    if (!rows.length) return '';
+    var scale = Math.max(0.5, Math.max.apply(null, rows.map(function (r) { return Math.abs(r.diff); })));
+    var body = rows.map(function (r) {
+      var w = (Math.abs(r.diff) / scale * 100).toFixed(1);
+      var pct = Math.round(r.diff * 100);
+      return '<div class="dz-bench__row">' +
+        '<div class="dz-bench__label">' + esc(r.label) + '</div>' +
+        '<div class="dz-div" title="' + esc('You ' + r.fmt(r.mine) + ' · division average ' + r.fmt(r.avg)) + '">' +
+          '<div class="dz-div__half dz-div__half--neg">' + (r.diff < 0 ? '<span style="width:' + w + '%"></span>' : '') + '</div>' +
+          '<div class="dz-div__half dz-div__half--pos">' + (r.diff > 0 ? '<span style="width:' + w + '%"></span>' : '') + '</div>' +
+        '</div>' +
+        '<div class="dz-bench__vals"><strong>' + (pct > 0 ? '+' : pct < 0 ? '−' : '') + Math.abs(pct) + '%</strong>' +
+          '<span class="dz-bench__avg">' + r.fmt(r.mine) + ' · avg ' + r.fmt(r.avg) + '</span></div>' +
+      '</div>';
+    }).join('');
     return '<section class="dz-section">' +
-      '<div class="section-head"><h2>Against the ' + esc(D.DIV_LABEL[div] || div) + ' average</h2>' +
-        '<div class="dz-key"><span class="dz-key__sw dz-key__sw--club"></span>You' +
-        '<span class="dz-key__mark"></span>Division average</div></div>' +
-      '<div class="dz-bench">' + rows + '</div>' +
+      '<div class="section-head"><h2>Season against the ' + esc(D.DIV_LABEL[div] || div) + ' average</h2>' +
+        '<span class="dz-filtered-note" data-bench-note hidden>Whole season. Filters don’t apply.</span></div>' +
+      '<div class="dz-bench">' +
+        '<div class="dz-bench__row dz-bench__row--head"><div></div>' +
+          '<div class="dz-div__labels"><span>Below average</span><span>Above average</span></div><div></div></div>' +
+        body +
+      '</div>' +
     '</section>';
   }
 
@@ -211,14 +228,55 @@
     });
   }
 
+  /* ---- Filters ------------------------------------------------------------
+     Closed sets, so segmented chips (canon .chip-group); months run to ten
+     or so a season, so a select. They narrow the cards and the games; the
+     division comparison stays season-wide (see benchmark). */
+  var MONTH = new Intl.DateTimeFormat('en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+
+  function chips(key, opts, on) {
+    return '<div class="chip-group" role="group" data-f="' + key + '">' + opts.map(function (o) {
+      return '<button type="button" class="chip' + (o[0] === on ? ' active' : '') + '" data-v="' + o[0] + '"' +
+        ' aria-pressed="' + (o[0] === on) + '">' + esc(o[1]) + '</button>';
+    }).join('') + '</div>';
+  }
+
+  function filterBar(list, F) {
+    var months = {};
+    list.forEach(function (g) { months[g.date.slice(0, 7)] = true; });
+    var opts = Object.keys(months).sort().map(function (m) {
+      var label = MONTH.format(new Date(m + '-01T00:00:00Z'));
+      return '<option value="' + m + '"' + (F.month === m ? ' selected' : '') + '>' + esc(label) + '</option>';
+    }).join('');
+    return '<div class="dz-filters">' +
+      chips('uk', [['all', 'All games'], ['uk', 'Shown in UK'], ['intl', 'INT only']], F.uk) +
+      chips('venue', [['all', 'Home & away'], ['home', 'Home'], ['away', 'Away']], F.venue) +
+      '<select class="nl-select" data-f="month" aria-label="Month"><option value="all">All months</option>' + opts + '</select>' +
+    '</div>';
+  }
+
+  function applyFilters(list, code, F) {
+    return list.filter(function (g) {
+      if (F.uk === 'uk' && g.avail === 'intl') return false;
+      if (F.uk === 'intl' && g.avail !== 'intl') return false;
+      if (F.venue === 'home' && g.home !== code) return false;
+      if (F.venue === 'away' && g.home === code) return false;
+      if (F.month !== 'all' && g.date.slice(0, 7) !== F.month) return false;
+      return true;
+    });
+  }
+
   function render(el, o) {
     var list = D.values(o.games);
     if (!list.length) {
       el.innerHTML = '<div class="empty-state"><div class="empty-state__title">No DAZN games this season</div></div>';
       return;
     }
-    var s = D.summarise(list, o.code);
-    el.innerHTML = headline(s) + benchmark(s, o.bench, o.div) +
+    var F = { uk: 'all', venue: 'all', month: 'all' };
+    var nameOf = o.nameOf || function () { return ''; };
+    el.innerHTML = filterBar(list, F) +
+      '<div data-cards></div>' +
+      benchmark(D.summarise(list, o.code), o.bench, o.div) +
       '<section class="dz-section">' +
         '<div class="section-head"><h2>Games</h2>' +
           '<div class="dz-key"><span class="dz-key__sw dz-key__sw--uk"></span>UK' +
@@ -226,8 +284,42 @@
         '<div data-games></div>' +
         '<p class="dz-foot">Someone who watched three games counts as three views.</p>' +
       '</section>';
-    games(el.querySelector('[data-games]'), list, o.code, o.nameOf || function () { return ''; });
+
+    var cards = el.querySelector('[data-cards]');
+    var gamesHost = el.querySelector('[data-games]');
+    var note = el.querySelector('[data-bench-note]');
+
+    function draw() {
+      var shown = applyFilters(list, o.code, F);
+      var filtered = F.uk !== 'all' || F.venue !== 'all' || F.month !== 'all';
+      if (note) note.hidden = !filtered;
+      if (!shown.length) {
+        cards.innerHTML = '';
+        gamesHost.innerHTML = '<div class="empty-state"><div class="empty-state__title">No games match these filters</div></div>';
+        return;
+      }
+      cards.innerHTML = headline(D.summarise(shown, o.code));
+      games(gamesHost, shown, o.code, nameOf);
+    }
+
+    el.querySelector('.dz-filters').addEventListener('click', function (e) {
+      var b = e.target.closest('.chip[data-v]');
+      if (!b) return;
+      var group = b.parentNode;
+      F[group.getAttribute('data-f')] = b.getAttribute('data-v');
+      Array.prototype.forEach.call(group.querySelectorAll('.chip'), function (c) {
+        var on = c === b;
+        c.classList.toggle('active', on);
+        c.setAttribute('aria-pressed', String(on));
+      });
+      draw();
+    });
+    el.querySelector('select[data-f="month"]').addEventListener('change', function () {
+      F.month = this.value;
+      draw();
+    });
+    draw();
   }
 
-  window.DAZNView = { render: render, sortableTable: sortableTable };
+  window.DAZNView = { render: render, sortableTable: sortableTable, applyFilters: applyFilters };
 })();
