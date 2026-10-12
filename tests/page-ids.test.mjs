@@ -35,7 +35,6 @@ import { REPO } from './load-canon.mjs';
    tool, and each is a latent version of the handbook bug: whichever element
    the code reaches for, it will always get the first. */
 const KNOWN = {
-  'fixtures/index.html': ['fxEffD', 'fxEffT', 'fxNote'],
   'holiday-lieu/index.html': ['alStart', 'lieuStart'],
   'travel-planner/index.html': ['routeMap'],
   'vacancies/index.html': ['vacTableBody', 'sfName', 'sfRole', 'sfEmail'],
