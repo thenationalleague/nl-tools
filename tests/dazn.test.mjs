@@ -126,3 +126,18 @@ test('the club page checks the code server-side, against the one club code', () 
   assert.match(page, /claim: 'club'/);
   assert.ok(!/auth-guard\.js/.test(page));
 });
+
+test('dates are read however the sheet displays them, and never guessed', () => {
+  /* The workbook's Matches sheet displays "Sat, 9 Aug 2025", and the first
+     real paste was refused on every row because only numeric dates were
+     read. A spreadsheet copies the DISPLAYED text, so every format a cell
+     might be set to has to be understood. */
+  for (const s of ['Sat, 9 Aug 2025', 'Sat 9 Aug 2025', '9 Aug 2025', '9 August 2025',
+                   '09-Aug-25', '9th Aug 2025', '09/08/2025', '9/8/2025', '2025-08-09', '2025-08-09 00:00:00']) {
+    assert.equal(D.parseDate(s), '2025-08-09', s);
+  }
+  assert.equal(D.parseDate('Tue, 30 Sept 2025'), '2025-09-30');
+  for (const s of ['31 Feb 2026', '9 Agu 2025', '9 Augus 2025', 'Aug 9', 'next Saturday', '']) {
+    assert.equal(D.parseDate(s), null, s);
+  }
+});
