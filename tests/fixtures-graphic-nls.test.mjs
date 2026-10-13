@@ -177,6 +177,31 @@ test('the odd kick-off out is ticked, and only that one', () => {
   assert.equal(t.state.rows[0].ko, '12:30', 'the early game leads the card');
 });
 
+test('a weeknight hides 19:45 and prints anything else', () => {
+  const t = loadSection();
+  t.load([
+    match(optaFor('Boston United'), optaFor('Barrow'), '2026-10-13 18:00:00'),
+    match(optaFor('Gateshead'), optaFor('Harrogate Town'), '2026-10-13 18:45:00'),
+    match(optaFor('Aldershot Town'), optaFor('Altrincham'), '2026-10-13 18:45:00')
+  ]);
+  assert.deepEqual(t.state.rows.map(r => [r.ko, r.koOn]),
+    [['19:00', true], ['19:45', false], ['19:45', false]]);
+});
+
+test('a Cup card prints every time, the most common one included', () => {
+  /* 13/10/2026 Cup night: 19:00 was the commonest time, so the old rule hid
+     it and those games went out with no time at all. */
+  const t = loadSection();
+  t.state.division = 'Cup';
+  t.load([
+    match(optaFor('Boston United'), optaFor('Barrow'), '2026-10-13 18:00:00'),
+    match(optaFor('Gateshead'), optaFor('Harrogate Town'), '2026-10-13 18:00:00'),
+    match(optaFor('Aldershot Town'), optaFor('Altrincham'), '2026-10-13 18:45:00')
+  ]);
+  assert.deepEqual(t.state.rows.map(r => [r.ko, r.koOn]),
+    [['19:00', true], ['19:00', true], ['19:45', true]]);
+});
+
 test('a card spanning several days gets a divider above each one', () => {
   const t = loadSection();
   t.load([

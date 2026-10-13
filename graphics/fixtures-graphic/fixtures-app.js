@@ -1,7 +1,7 @@
 /* ============================================================
    Fixtures & Results Graphic — the tool
    File: /graphics/fixtures-graphic/fixtures-app.js
-   Version: v2.1 (10/10/2026)
+   Version: v2.2 (13/10/2026)
 
    ONE TOOL, TWO DOORS. This file is the whole tool and both editions load
    it: /graphics/fixtures-graphic/ (behind a login) and
@@ -22,6 +22,9 @@
      "Edit by hand" holds the full editor for anything else.
 
    CHANGELOG
+     v2.2 13/10/2026  Kick-off times tick the way the timer's cards do: all
+                      but 15:00 at the weekend and 19:45 on a weeknight; every
+                      time on a Cup card.
      v2.1 10/10/2026  A size with an image that didn't load is not saved; a
                       pop-up names the missing image.
      v2.0 09/10/2026  Rebuilt around the feed: pick a date, untick games,
@@ -513,7 +516,7 @@
       }
       return Object.assign({}, m, { attributes: a });
     });
-    var built = C.buildRows(data, NL.clubs);
+    var built = C.buildRows(data, NL.clubs, { division: state.division });
     state.rows = built.rows;
     if (built.trimmed) setStatus("Only the first " + MAX_ROWS + " games fit on a card", 6000);
     syncPasteFromRows(); buildGrid(); render();

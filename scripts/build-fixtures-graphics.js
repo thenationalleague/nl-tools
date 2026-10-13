@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* ============================================================
    build-fixtures-graphics.js
-   Version: v1.9 (10/10/2026)
+   Version: v1.10 (13/10/2026)
 
    Makes the fixtures and results cards that are due, without anyone
    pressing anything. Run by .github/workflows/fixtures-graphics.yml on a
@@ -97,6 +97,8 @@
      render offline.
 
    CHANGELOG
+     v1.10 13/10/2026 Passes the division to buildRows, so a Cup card prints
+                      every kick-off time.
      v1.9 10/10/2026  --mode backfill --today A --until B: every card the
                       runs would have made on each day in the range (no
                       tables). Round so far shows the morning's position.
@@ -617,7 +619,7 @@ function harnessHtml(kind) {
       var j = work[i];
       var rows, count, trimmed = false;
       if (isTable) { rows = C.buildRows(j.data, NL.clubs); count = rows.length; }
-      else { var built = C.buildRows(j.data, NL.clubs); rows = built.rows; count = built.matches.length; trimmed = built.trimmed; }
+      else { var built = C.buildRows(j.data, NL.clubs, { division: j.division }); rows = built.rows; count = built.matches.length; trimmed = built.trimmed; }
       for (var k = 0; k < j.files.length; k++) {
         var spec = j.files[k];
         var gfx = await C.render(host, isTable

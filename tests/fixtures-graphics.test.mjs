@@ -484,3 +484,8 @@ test('png-export recognises Safari, and only Safari', () => {
   assert.equal(load('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.0.0'), false);
   assert.equal(load('Mozilla/5.0 (Macintosh; Intel Mac OS X 14.6; rv:131.0) Gecko/20100101 Firefox/131.0'), false);
 });
+
+test('the batch tells buildRows the competition, so a Cup card prints every kick-off', () => {
+  const src = readFileSync(new URL('../scripts/build-fixtures-graphics.js', import.meta.url), 'utf8');
+  assert.match(src, /C\.buildRows\(j\.data, NL\.clubs, \{ division: j\.division \}\)/);
+});
