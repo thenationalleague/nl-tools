@@ -48,8 +48,17 @@ const path = require('path');
 // the sheet, because a browser's print settings wreck it — and page.pdf()
 // emulates print media, so without this the blocker would empty the very
 // file it exists to protect. The assertion below proves the opt-out took.
-const URL_ = process.env.POSTER_URL || 'http://127.0.0.1:8899/wellbeing-hub/poster.html?render=1';
-const OUT = path.join(__dirname, '..', 'wellbeing-hub', 'poster.pdf');
+//
+// ONE POSTER PER EDITION, and the edition list comes from the Python
+// generator rather than being typed here — a slug in two places is a slug
+// that can disagree, and the symptom would be a PDF rendered from one
+// edition's HTML and written over another's file.
+const { execFileSync } = require('child_process');
+const REPO = path.join(__dirname, '..');
+const ORIGIN = process.env.POSTER_ORIGIN || 'http://127.0.0.1:8899';
+const EDITIONS = JSON.parse(execFileSync(
+  'python3', ['-I', path.join(__dirname, 'build-wellbeing-hub.py'), '--editions'],
+  { cwd: REPO, encoding: 'utf8' }));
 
 (async () => {
   if (!process.env.CHROME_PATH) throw new Error('CHROME_PATH not set');
@@ -59,45 +68,57 @@ const OUT = path.join(__dirname, '..', 'wellbeing-hub', 'poster.pdf');
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
   });
   try {
-    const page = await browser.newPage();
-    const failed = [];
-    page.on('requestfailed', (r) => failed.push(r.url()));
+    for (const ed of EDITIONS) {
+      const url = `${ORIGIN}/${ed.slug}/poster.html?render=1`;
+      const out = path.join(REPO, ed.slug, 'poster.pdf');
 
-    await page.goto(URL_, { waitUntil: 'networkidle0' });
-    await page.evaluate(() => document.fonts.ready);
+      const page = await browser.newPage();
+      const failed = [];
+      page.on('requestfailed', (r) => failed.push(r.url()));
 
-    if (failed.length) {
-      throw new Error('asset(s) failed to load — refusing to render a broken poster:\n  ' + failed.join('\n  '));
+      await page.goto(url, { waitUntil: 'networkidle0' });
+      await page.evaluate(() => document.fonts.ready);
+
+      if (failed.length) {
+        throw new Error(`${ed.key}: asset(s) failed to load — refusing to render `
+          + `a broken poster:\n  ${failed.join('\n  ')}`);
+      }
+
+      // Prove the print blocker is OFF for us before writing anything. A page
+      // count cannot catch this: the blocker's instruction sheet is also one
+      // page, so a silently-broken opt-out would ship a poster.pdf that reads
+      // "Print the PDF, not this page" and pass every check below.
+      await page.emulateMediaType('print');
+      const print = await page.evaluate(() => {
+        const d = (sel) => {
+          const el = document.querySelector(sel);
+          return el ? getComputedStyle(el).display : 'missing';
+        };
+        return { sheet: d('.sheet'), note: d('.printnote') };
+      });
+      if (print.sheet === 'none' || print.sheet === 'missing' || print.note !== 'none') {
+        throw new Error(
+          `${ed.key}: the poster's print blocker is still on — refusing to render.\n` +
+          `  .sheet display in print media: ${print.sheet} (want anything but none)\n` +
+          `  .printnote display in print media: ${print.note} (want none)\n` +
+          '  The URL must carry ?render=1, and the script at the foot of ' +
+          'poster.html must set html.is-render from it.'
+        );
+      }
+
+      const pdf = await page.pdf({ preferCSSPageSize: true, printBackground: true });
+      const pages = (Buffer.from(pdf).toString('latin1')
+        .match(/\/Type\s*\/Page[^s]/g) || []).length;
+      if (pages !== 1) {
+        throw new Error(`${ed.key}: expected 1 page, got ${pages} — `
+          + 'the poster has overflowed A4');
+      }
+
+      fs.writeFileSync(out, pdf);
+      console.log(`${ed.key}: wrote ${path.relative(REPO, out)}  `
+        + `${pdf.length} bytes, ${pages} page`);
+      await page.close();
     }
-
-    // Prove the print blocker is OFF for us before writing anything. A page
-    // count cannot catch this: the blocker's instruction sheet is also one
-    // page, so a silently-broken opt-out would ship a poster.pdf that reads
-    // "Print the PDF, not this page" and pass every check below.
-    await page.emulateMediaType('print');
-    const print = await page.evaluate(() => {
-      const d = (sel) => {
-        const el = document.querySelector(sel);
-        return el ? getComputedStyle(el).display : 'missing';
-      };
-      return { sheet: d('.sheet'), note: d('.printnote') };
-    });
-    if (print.sheet === 'none' || print.sheet === 'missing' || print.note !== 'none') {
-      throw new Error(
-        'the poster\'s print blocker is still on — refusing to render.\n' +
-        `  .sheet display in print media: ${print.sheet} (want anything but none)\n` +
-        `  .printnote display in print media: ${print.note} (want none)\n` +
-        '  The URL must carry ?render=1, and the script at the foot of ' +
-        'poster.html must set html.is-render from it.'
-      );
-    }
-
-    const pdf = await page.pdf({ preferCSSPageSize: true, printBackground: true });
-    const pages = (Buffer.from(pdf).toString('latin1').match(/\/Type\s*\/Page[^s]/g) || []).length;
-    if (pages !== 1) throw new Error(`expected 1 page, got ${pages} — the poster has overflowed A4`);
-
-    fs.writeFileSync(OUT, pdf);
-    console.log(`wrote ${OUT}  ${pdf.length} bytes, ${pages} page`);
   } finally {
     await browser.close();
   }
