@@ -23,18 +23,23 @@
                                      (needs png-export.js and html-to-image)
        card = { division, format, mode, matchday, fit, season, rows }
        mode   fixtures | results | round (scores where played, v where not)
-     buildRows(nlsData, clubs)     → { rows, total, postponed, trimmed, odd }
+     buildRows(nlsData, clubs[, { division }])
+                                   → { rows, total, postponed, trimmed, odd }
        NLS list-endpoint matches → card rows, with day dividers and the
-       kick-off-time defaults (every time is printed except 15:00).
+       kick-off-time defaults (every time prints except 15:00 at the
+       weekend and 19:45 on a weeknight; a Cup card prints every time).
      title(matchday)               → the header text
      seasonLabel(startYear)        → "2026-27"
      FORMAT_H, MAX_ROWS, COMPETITION_ID, NLS_BASE, DIVISION_LOGO, DIV_NAME
      ymdUK, koTime, koDay, dividerLabel, nlsDate, nlsTeamName(clubs, team)
 
    CHANGELOG
-     v1.6 13/10/2026  Every kick-off time prints except 15:00. It used to
-                      hide the card's most common time, so a Cup night's
-                      eight 19:00 games went out with no time on them.
+     v1.6 13/10/2026  Kick-off times: every time prints except the assumed
+                      one — 15:00 at the weekend, 19:45 on a weeknight — and
+                      a Cup card prints every time. It used to hide the
+                      card's most common time, so a Cup night's eight 19:00
+                      games went out with no time on them. buildRows takes
+                      an optional { division }.
      v1.5 09/10/2026  mode "round": a round so far — games played show their
                       score, games to come show v — subtitled FIXTURES &
                       RESULTS. For the Saturday-morning card that includes
@@ -76,8 +81,15 @@
      drawn exactly as before; past 12 the gaps tighten and rows may shrink
      below the usual 44px floor. */
   var MAX_ROWS = 16;
-  /* The only kick-off a card leaves unprinted (see buildRows). */
-  var DEFAULT_KO = "15:00";
+  /* The kick-off a reader assumes, so the card leaves it unprinted: 15:00 at
+     the weekend, 19:45 on a weeknight. The Cup has no assumed time — its
+     nights mix 19:00, 19:30 and 19:45 — so a Cup card prints every one.
+     Decided with Richard 13/10/2026. */
+  function assumedKo(ymd, division) {
+    if (division === "Cup" || !ymd) return "";
+    var dow = new Date(ymd + "T12:00:00Z").getUTCDay();   /* 0 Sun … 6 Sat */
+    return (dow === 0 || dow === 6) ? "15:00" : "19:45";
+  }
   var FORMAT_H = { "1x1": 1080, "4x5": 1350, "9x16": 1920 };
 
   var DIVISION_LOGO = {
@@ -413,7 +425,7 @@
      Decided 09/10/2026: A - A where the score goes, to show what happened. */
   function isAbandoned(a) { return String((a || {}).matchPeriod || "").toLowerCase() === "abandoned"; }
 
-  function buildRows(data, clubs) {
+  function buildRows(data, clubs, opts) {
     /* Postponed = matchPeriod "Postponed". NOT postponementReason: NLS keeps
        the reason on a game after it is rearranged, so filtering on it drops
        the rearranged game from its new date. Seen 09/10/2026: Ebbsfleet v
@@ -451,14 +463,17 @@
     var trimmed = matches.length > MAX_ROWS;
     matches = matches.slice(0, MAX_ROWS);
 
-    /* Every kick-off prints except 15:00, the one time a reader assumes.
-       Until v1.6 the card hid whichever time was most common, which on a
-       Cup night (13/10/2026: eight at 19:00, one at 19:30, three at 19:45)
-       left the eight 19:00 games with no time at all — and nothing on the
-       card said what the unprinted time was. Decided with Richard
-       13/10/2026: all need times. */
+    /* Every kick-off prints except the one a reader assumes for that day
+       (assumedKo). Until v1.6 the card hid whichever time was most common,
+       which on a Cup night (13/10/2026: eight at 19:00, one at 19:30,
+       three at 19:45) left the eight 19:00 games with no time at all — and
+       nothing on the card said what the unprinted time was. */
+    var division = (opts && opts.division) || "";
     var odd = 0;
-    matches.forEach(function (r) { r.koOn = !!(r.ko && r.ko !== DEFAULT_KO); if (r.koOn) odd++; });
+    matches.forEach(function (r) {
+      r.koOn = !!(r.ko && r.ko !== assumedKo(r.day, division));
+      if (r.koOn) odd++;
+    });
 
     /* A card spanning more than one day gets a divider above each day. */
     var days = [];
@@ -486,6 +501,7 @@
     teamDisplay: teamDisplay,
     toPng: toPng,
     buildRows: buildRows,
+    assumedKo: assumedKo,
     title: title,
     seasonLabel: seasonLabel,
     nlsDate: nlsDate,
