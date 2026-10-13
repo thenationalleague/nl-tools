@@ -14,8 +14,12 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { REPO } from './load-canon.mjs';
 
-const HTML = 'wellbeing-hub/poster.html';
-const PDF = 'wellbeing-hub/poster.pdf';
+/* Every edition, from the generator's own list — a slug typed here as well is
+   a slug that can disagree with the one the pages are built at, and a new
+   edition would silently get no poster guard at all. */
+const EDITIONS = JSON.parse(execFileSync(
+  'python3', ['-I', 'scripts/build-wellbeing-hub.py', '--editions'],
+  { cwd: REPO, encoding: 'utf8' }));
 
 /* Last commit to touch a path, as a unix timestamp. */
 function lastCommit(p) {
@@ -25,20 +29,36 @@ function lastCommit(p) {
   return out ? Number(out) : 0;
 }
 
-test('the poster PDF exists and is a single A4 page', () => {
-  const abs = join(REPO, PDF);
-  assert.ok(existsSync(abs), `${PDF} is missing — run scripts/render-wellbeing-poster.js`);
-  const buf = readFileSync(abs);
-  assert.equal(buf.subarray(0, 5).toString(), '%PDF-', `${PDF} is not a PDF`);
+for (const ed of EDITIONS) {
+  const PDF = `${ed.slug}/poster.pdf`;
 
-  const pages = (buf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) || []).length;
-  assert.equal(pages, 1,
-    `${PDF} has ${pages} pages — a dressing-room poster is one sheet; the layout has overflowed`);
-});
+  test(`${ed.key}: the poster PDF exists and is a single A4 page`, () => {
+    const abs = join(REPO, PDF);
+    assert.ok(existsSync(abs), `${PDF} is missing — run scripts/render-wellbeing-poster.js`);
+    const buf = readFileSync(abs);
+    assert.equal(buf.subarray(0, 5).toString(), '%PDF-', `${PDF} is not a PDF`);
+
+    const pages = (buf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) || []).length;
+    assert.equal(pages, 1,
+      `${PDF} has ${pages} pages — a dressing-room poster is one sheet; the layout has overflowed`);
+  });
+
+  test(`${ed.key}: a QR asset exists for the edition`, () => {
+    /* The poster references /assets/<slug>-qr.svg. A missing one prints as a
+       blank square on a wall, which is the fault nobody notices until a
+       player holds a phone up to it. */
+    assert.ok(existsSync(join(REPO, 'assets', `${ed.slug}-qr.svg`)),
+      `assets/${ed.slug}-qr.svg is missing — run scripts/build-wellbeing-qr.js`);
+  });
+}
 
 /* Timestamps come from git, not the filesystem: a fresh clone gives every
    file the checkout time, so mtimes would make this test pass always. */
-test('the poster PDF is not older than the HTML it was rendered from', () => {
+for (const ed of EDITIONS) {
+  const HTML = `${ed.slug}/poster.html`;
+  const PDF = `${ed.slug}/poster.pdf`;
+
+  test(`${ed.key}: the poster PDF is not older than the HTML it came from`, () => {
   const html = lastCommit(HTML);
   const pdf = lastCommit(PDF);
 
@@ -52,4 +72,5 @@ test('the poster PDF is not older than the HTML it was rendered from', () => {
     `  npm install --no-save puppeteer-core\n` +
     `  python3 -m http.server 8899 --bind 127.0.0.1\n` +
     `  CHROME_PATH=<chrome> node scripts/render-wellbeing-poster.js`);
-});
+  });
+}

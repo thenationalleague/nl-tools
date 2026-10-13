@@ -34,9 +34,275 @@ import html as H
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(REPO, 'wellbeing-hub', '_src', 'content.json')
-OUT = os.path.join(REPO, 'wellbeing-hub', 'index.html')
 
 d = json.load(open(DATA, encoding='utf-8'))
+
+# ── Editions ──────────────────────────────────────────────────────────────
+#
+# ONE content file, two sites. Asked for on 13/10/2026: Benny Watson worked on
+# the hub and wanted a Trident Leagues copy for his 300-plus clubs, with the
+# requirement that "we only ever update a single data source and they sync
+# properly".
+#
+# So everything below is the ONLY thing that differs. The copy, the topics, the
+# helplines, the layout and the behaviour are shared by construction rather
+# than by discipline — there is no second template to keep in step, and
+# tests/wellbeing-hub-build.test.mjs fails the build if either committed
+# edition has drifted from this file.
+#
+# A new edition is a dict in this list. Nothing else should need touching.
+#
+#   lead_first  surname of the safeguarding lead who goes FIRST. Keyed by
+#               surname, not index, for the same reason LEAD_PHOTOS is: an
+#               edition that reordered by position could silently pair the
+#               wrong face or title with the wrong person.
+#   accent      None keeps the brand navy masthead. A dict overrides it —
+#               Trident's teal is far too light for white text (about 1.3:1),
+#               and Trident's own logo is navy-on-teal, so the masthead
+#               inverts: teal ground, navy type. The value is the logo's own
+#               background colour, sampled from the supplied artwork, so the
+#               image sits on it without a seam.
+#   noindex     The two editions share nearly all their text. Two indexable
+#               near-copies is duplicate content and can suppress both, and
+#               the NL hub only became indexable on 08/10/2026. Clubs reach
+#               the Trident edition by Benny's link and the poster QR, so it
+#               is kept out of the index by ruling.
+EDITIONS = [
+    {
+        'key': 'nl',
+        'slug': 'wellbeing-hub',
+        'org': 'The National League',
+        # The masthead wants the article; the sentence "across ... football"
+        # does not. Two fields rather than one clever rule.
+        'org_short': 'National League',
+        'credit': 'Maintained by National League Safeguarding',
+        'logo': '/assets/crests/National League rose white.png',
+        'logo_fallback': '/assets/crests/National League rose.png',
+        'logo_w': 58,
+        'lead_first': 'Cannon',
+        # The rose is a wordless badge, so the organisation has to be said in
+        # type. The Trident logo IS the wordmark, so saying it again beside it
+        # is the restated-label waffle the house rule cuts.
+        'kicker': True,
+        'accent': None,
+        'noindex': False,
+        'leagues': [],
+    },
+    {
+        'key': 'trident',
+        'slug': 'trident-wellbeing',
+        'org': 'Trident Leagues',
+        'org_short': 'Trident Leagues',
+        'credit': 'Provided by National League Safeguarding',
+        # Sampled from the supplied artwork, not eyeballed: the lockup's
+        # background is #73f2f2 and its wordmark #14293b.
+        'logo': '/assets/wellbeing/trident-lockup.png',
+        'logo_fallback': '',
+        'logo_w': 190,
+        'lead_first': 'Watson',
+        'kicker': False,
+        'accent': {'bg': '#73f2f2', 'fg': '#14293b', 'muted': '#2d4a63'},
+        'noindex': True,
+        'leagues': [
+            ('Isthmian League', '/assets/wellbeing/trident-isthmian.png'),
+            ('Northern Premier League', '/assets/wellbeing/trident-npl.png'),
+            ('Southern League', '/assets/wellbeing/trident-southern.png'),
+        ],
+    },
+]
+
+
+def out_path(ed, name):
+    return os.path.join(REPO, ed['slug'], name)
+
+
+def resolve(ed, html):
+    """Resolve [[org]] / [[org_short]] tokens in the rendered output.
+
+    Shared copy sometimes has to name the organisation — "The National League
+    Wellbeing Hub provides..." — and on the Trident edition that sentence was
+    simply wrong. The alternative is a second copy of the paragraph per
+    edition, which is the thing this whole build exists to avoid.
+
+    Substitution happens on the FINISHED HTML rather than on the loaded
+    content, because several blocks of markup are built once at import time
+    and would otherwise carry the unsubstituted text. Doing it last catches
+    every path with one line.
+
+    [[ ]] rather than {{ }} on purpose: the page templates are f-strings whose
+    literal CSS and JS braces are written {{ }}, and reusing that delimiter
+    would make the token indistinguishable from them by eye.
+
+    The assert is the point. An unresolved token does not break a build — it
+    ships as the literal text "[[org_short]]" on a live wellbeing page, which
+    nobody would notice until a club did.
+    """
+    out = (html.replace('[[org_short]]', ed['org_short'])
+               .replace('[[org]]', ed['org']))
+    assert '[[' not in out, (
+        'unresolved token in the %s edition near: %s'
+        % (ed['key'], out[max(0, out.index('[[')) - 60:out.index('[[') + 60]))
+    return out
+
+
+def poster_accent_css(ed):
+    """The poster's masthead, per edition. A SEPARATE STYLESHEET from the page.
+
+    This was the bug: the lockup's width lived in the page's accent block, so
+    on the poster it fell through to `.hd img { width: 44px }` — the NL rose's
+    square-badge rule — and the Trident wordmark printed as an illegible
+    44px teal stamp on a navy bar. Two stylesheets need two accent blocks.
+
+    The bar inverts to teal with navy type for the same reason the page's
+    does, and here there is a second reason: the supplied lockup has its teal
+    background baked in with no alpha, so on a navy bar it reads as a sticker
+    stuck to the masthead.
+
+    55mm, inside the 65mm ceiling that the artwork's 842px sets at 300dpi.
+    See poster_logo().
+    """
+    a = ed['accent']
+    if not a:
+        return ''
+    return (
+        '\n  /* ' + ed['org'] + ' masthead. Teal ground, navy type — the page\n'
+        '     stylesheet does the same, and the supplied lockup carries its\n'
+        '     own teal background with no alpha, so any other ground shows a\n'
+        '     panel edge. 55mm keeps it inside the 300dpi ceiling the raster\n'
+        '     imposes; see poster_logo(). */\n'
+        '  .hd { background: ' + a['bg'] + '; color: ' + a['fg'] + '; }\n'
+        # `.hd img` is one class plus one type selector and therefore
+        # outranks a bare `.hd__lockup`, so the 44px square-badge rule
+        # kept winning and the wordmark printed illegibly small. Third
+        # time a selector in this project has quietly out-specified the
+        # rule meant to override it; qualify it and say so.
+        '  .hd img.hd__lockup { width: 55mm; height: auto; }\n'
+    )
+
+
+def brand_kicker(ed):
+    """The organisation name above WELLBEING HUB, where the logo does not
+    already say it. See the `kicker` note in EDITIONS."""
+    if not ed['kicker']:
+        return ''
+    return '\n        <span class="hub-brand__k">%s</span>' % esc(ed['org'])
+
+
+def poster_kicker(ed):
+    if not ed['kicker']:
+        return ''
+    return '\n      <i>%s</i>' % esc(ed['org'])
+
+
+def noindex_meta(ed):
+    return ('\n  <meta name="robots" content="noindex">'
+            if ed['noindex'] else '')
+
+
+def brand_logo(ed):
+    """The masthead logo.
+
+    The NL rose keeps its fallback; the Trident lockup has none to fall back
+    to, and an onerror pointing at a missing file is the infinite-retry
+    flicker the brand guidance warns about.
+    """
+    if ed['logo_fallback']:
+        return ('<img src="%s" alt=""\n           '
+                'onerror="this.onerror=null;this.src=\'%s\'">'
+                % (ed['logo'], ed['logo_fallback']))
+    return '<img src="%s" alt="">' % ed['logo']
+
+
+def poster_logo(ed):
+    """Same artwork, sized for print.
+
+    CAPPED AT 65mm, AND THAT IS A PHYSICAL CONSTRAINT RATHER THAN A CHOICE.
+    There is no vector of the Trident lockup and there will not be one — the
+    supplied artwork is 842px wide, which is 300dpi at 71mm. 65mm keeps a
+    margin above that floor so the sheet prints sharp. Widen it and the logo
+    softens.
+    """
+    if ed['key'] == 'nl':
+        return ('<img src="%s" alt=""\n         '
+                'onerror="this.onerror=null;this.src=\'%s\'">'
+                % (ed['logo'], ed['logo_fallback']))
+    return '<img class="hd__lockup" src="%s" alt="%s">' % (ed['logo'], esc(ed['org']))
+
+
+def league_row(ed):
+    """The constituent leagues, in the footer. Trident only.
+
+    Their supplied artwork has a white background baked in and no alpha, so it
+    can only sit on a light surface — which the footer is. They are not on the
+    poster: that sheet is already dense, and three more rasters on it was not
+    what was asked for.
+    """
+    if not ed['leagues']:
+        return ''
+    marks = '\n'.join(
+        '    <img src="%s" alt="%s" loading="lazy" decoding="async">' % (src, esc(name))
+        for name, src in ed['leagues'])
+    names = ', '.join(esc(n) for n, _ in ed['leagues'][:-1])
+    names += ' and ' + esc(ed['leagues'][-1][0])
+    return ('  <div class="hub-leagues">\n'
+            '    <span>Covering the %s</span>\n%s\n  </div>\n' % (names, marks))
+
+
+def accent_css(ed):
+    """Per-edition masthead colours.
+
+    Trident's teal is very light: white on it is about 1.3:1, nowhere near
+    readable, and their own logo is navy-on-teal. So the masthead INVERTS
+    rather than being recoloured — teal ground, navy type.
+
+    The background is the logo artwork's own sampled colour, which is also why
+    the logo is not keyed to transparency: keying an anti-aliased raster
+    leaves a pale fringe on any other ground, and matching the ground exactly
+    means there is no edge to see.
+
+    Returned as literal CSS. It is interpolated into an f-string, so its
+    braces are not re-parsed and do not need doubling.
+    """
+    a = ed['accent']
+    if not a:
+        return ''
+    return (
+        '\n  /* ' + ed['org'] + ' masthead — see accent_css() in '
+        'scripts/build-wellbeing-hub.py.\n'
+        '     Teal ground with navy type, inverting the brand navy masthead,\n'
+        '     because white on this teal is about 1.3:1. */\n'
+        '  .hub-top { background: ' + a['bg'] + '; color: ' + a['fg'] + '; }\n'
+        '  .hub-brand__tag { color: ' + a['muted'] + '; }\n'
+        # A wide wordmark, not a square badge. In CSS and not an inline
+        # style, so the base sheet's 560px breakpoint still applies — an
+        # inline width silently un-responsives the masthead, which is how
+        # the NL logo stopped shrinking on a phone in the first pass.
+        '  .hub-brand img { width: ' + str(ed['logo_w']) + 'px; height: auto; }\n'
+        '  @media (max-width: 560px) {\n'
+        '    .hub-brand img { width: 140px; }\n'
+        '  }\n'
+        '  .hub-exit { --exit-edge: ' + a['fg'] + '; }\n'
+        '  .hub-leagues {\n'
+        '    display: flex; flex-wrap: wrap; align-items: center; gap: 14px 22px;\n'
+        '    margin: 18px 0 0; padding-top: 16px;\n'
+        '    border-top: 1px solid var(--border);\n'
+        '  }\n'
+        '  .hub-leagues span {\n'
+        '    font-size: var(--text-xs); font-weight: 700; color: var(--text-muted);\n'
+        '    text-transform: uppercase; letter-spacing: 0.08em;\n'
+        '    flex: 1 1 100%; margin: 0;\n'
+        '  }\n'
+        '  .hub-leagues img { height: 58px; width: auto; }\n'
+    )
+
+
+def leads_for(ed):
+    """The two safeguarding leads, with this edition's own lead first."""
+    people = list(d['safeguarding'])
+    people.sort(key=lambda p: 0 if p['name'].endswith(ed['lead_first']) else 1)
+    assert people[0]['name'].endswith(ed['lead_first']), \
+        'no lead matching %r in content.json' % ed['lead_first']
+    return people
 
 # Topic order, with the one-line descriptor each card carries. "Helping someone
 # else" joins the grid as a topic, which is where it belongs — it was a
@@ -354,12 +620,6 @@ def lead_photo(name):
     return ''
 
 
-leads = '\n'.join(
-    '      <div class="hub-lead">%s<span class="hub-lead__t"><strong>%s</strong><span>%s</span>'
-    '<a href="mailto:%s">%s%s</a></span></div>'
-    % (lead_photo(p['name']), esc(p['name']), esc(p['role']),
-       esc(p['email']), icon('email', 'sm'), esc(p['email']))
-    for p in d['safeguarding'])
 
 # The route to support. Same five stages Martyn wrote, drawn as a flow.
 #
@@ -382,7 +642,21 @@ steps = '\n'.join(
        '' if i == len(d['pathway']['steps']) - 1 else icon('forward', 'sm'))
     for i, step in enumerate(d['pathway']['steps']))
 
-PAGE = f'''<!DOCTYPE html>
+
+def page(ed):
+    """One edition's index.html. Everything that varies is on `ed`."""
+    return resolve(ed, _page(ed))
+
+
+def _page(ed):
+    leads = '\n'.join(
+        '      <div class="hub-lead">%s<span class="hub-lead__t"><strong>%s</strong><span>%s</span>'
+        '<a href="mailto:%s">%s%s</a></span></div>'
+        % (lead_photo(p['name']), esc(p['name']), esc(p['role']),
+           esc(p['email']), icon('email', 'sm'), esc(p['email']))
+        for p in leads_for(ed))
+
+    return f'''<!DOCTYPE html>
 <!--
   NL Tools — Wellbeing Hub
   Version: v1.19 (08/10/2026)
@@ -753,8 +1027,8 @@ PAGE = f'''<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Wellbeing Hub — The National League</title>
-  <meta name="description" content="Information, practical advice and confidential support for players, staff and volunteers across National League football.">
+  <title>Wellbeing Hub — {ed['org']}</title>
+  <meta name="description" content="Information, practical advice and confidential support for players, staff and volunteers across {ed['org_short']} football.">{noindex_meta(ed)}
   <meta name="theme-color" content="#223b7c">
   <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
 
@@ -1436,7 +1710,7 @@ PAGE = f'''<!DOCTYPE html>
   @media print {{
     .hub-nav, .hub-bottom, .hub-exit, .hub-find {{ display: none !important; }}
     .hub-view {{ display: block !important; page-break-before: always; }}
-  }}
+  }}{accent_css(ed)}
   </style>
 </head>
 <body>
@@ -1444,10 +1718,8 @@ PAGE = f'''<!DOCTYPE html>
 <header class="hub-top">
   <div class="hub-top__in">
     <a class="hub-brand" href="#home" style="text-decoration:none;color:inherit">
-      <img src="/assets/crests/National League rose white.png" alt=""
-           onerror="this.onerror=null;this.src='/assets/crests/National League rose.png'">
-      <span class="hub-brand__t">
-        <span class="hub-brand__k">The National League</span>
+      {brand_logo(ed)}
+      <span class="hub-brand__t">{brand_kicker(ed)}
         <b>Wellbeing Hub</b>
         <span class="hub-brand__tag">Supporting you on and off the pitch</span>
       </span>
@@ -1593,9 +1865,9 @@ PAGE = f'''<!DOCTYPE html>
   <div class="hub-poster">
     <strong>{icon('download', 'sm')}Poster for the dressing room</strong>
     <p>A4 sheet: the helplines, the safeguarding inboxes and a QR code back to these pages.</p>
-    <a class="btn btn--navy btn--sm" href="/wellbeing-hub/poster.pdf" download>Download the poster (PDF)</a>
+    <a class="btn btn--navy btn--sm" href="/{ed['slug']}/poster.pdf" download>Download the poster (PDF)</a>
   </div>
-  <p class="hub-foot">The National League · Wellbeing Hub · Maintained by National League Safeguarding</p>
+{league_row(ed)}  <p class="hub-foot">{esc(ed['org'])} · Wellbeing Hub · {esc(ed['credit'])}</p>
  </div>
 </footer>
 
@@ -1717,7 +1989,15 @@ PAGE = f'''<!DOCTYPE html>
   /* Canon's NL.track is a no-op when the tag did not load — a bad id,
      localhost, a blocker — so every call site below is safe unguarded. */
   function track(name, params) {{
-    if (window.NL && window.NL.track) window.NL.track(name, params);
+    if (!window.NL || !window.NL.track) return;
+    /* Every event carries its edition, so the two sites can be reported on
+       separately. Without it a topic_open from Trident and one from the
+       National League are the same row, and neither organisation can see its
+       own readers. Register `edition` as a custom dimension in GA4 alongside
+       `topic` to break it down. */
+    var p = params || {{}};
+    p.edition = '{ed['key']}';
+    window.NL.track(name, p);
   }}
 
   /* The poster's QR carries ?src=poster, so a scan is distinguishable from
@@ -1794,7 +2074,11 @@ PAGE = f'''<!DOCTYPE html>
 
 # Written at the foot of the file by emit(), so --check can compare the
 # rendered output against what is on disk without writing anything.
-print('views:', len([t for t, *_ in TOPICS if t in d['views']]))
+# Every topic in TOPICS must have a view in the content, or a card would link
+# to a page that does not exist. Asserted rather than printed: it was a debug
+# line that wrote to stdout on import, which corrupted --editions JSON output.
+_missing = [t for t, *_ in TOPICS if t not in d['views']]
+assert not _missing, 'TOPICS without a view in content.json: %s' % _missing
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1810,7 +2094,6 @@ print('views:', len([t for t, *_ in TOPICS if t in d['views']]))
 # It is NOT a copy of the page. A poster is read by somebody standing in front
 # of a wall with no phone in their hand: it carries the code, the numbers and
 # what the site covers, and nothing else.
-POSTER_OUT = os.path.join(REPO, 'wellbeing-hub', 'poster.html')
 
 # 999 leads. It is not in the hub's own "Need to talk now?" block — that block
 # is about talking — but a sheet on a dressing-room wall has to carry the
@@ -1852,12 +2135,18 @@ poster_nums = '\n'.join(
 # printed sheet is wrong and nobody takes it down. The safeguarding@ addresses
 # are ROLE inboxes rather than personal ones, so dropping the names keeps the
 # route reachable and makes the sheet outlive whoever currently holds the post.
-poster_leads = '\n'.join(
-    '        <div class="sg__p"><b>%s</b>%s</div>'
-    % (esc(p['role']), esc(p['email']))
-    for p in d['safeguarding'])
+def poster(ed):
+    """One edition's A4 poster source. See render-wellbeing-poster.js."""
+    return resolve(ed, _poster(ed))
 
-POSTER = f'''<!DOCTYPE html>
+
+def _poster(ed):
+    poster_leads = '\n'.join(
+        '        <div class="sg__p"><b>%s</b>%s</div>'
+        % (esc(p['role']), esc(p['email']))
+        for p in leads_for(ed))
+
+    return f'''<!DOCTYPE html>
 <!--
   NL Tools — Wellbeing Hub poster (A4)
   Version: v1.5 (08/10/2026)
@@ -2099,13 +2388,13 @@ POSTER = f'''<!DOCTYPE html>
     }}
     .printnote b {{ display: block; font-size: 20pt; margin-bottom: 10px; }}
     .printnote code {{ font-size: 13pt; }}
-  }}
+  }}{poster_accent_css(ed)}
   </style>
 </head>
 <body>
 
 <p class="hint">
-  <a class="hint__dl" href="/wellbeing-hub/poster.pdf" download>{inline_symbol('download')}Download the A4 poster (PDF)</a>
+  <a class="hint__dl" href="/{ed['slug']}/poster.pdf" download>{inline_symbol('download')}Download the A4 poster (PDF)</a>
   <span>Print that file, not this page — a browser’s own print settings mangle the sheet. Below is a preview of it.</span>
 </p>
 
@@ -2113,18 +2402,16 @@ POSTER = f'''<!DOCTYPE html>
   <b>Print the PDF, not this page.</b>
   <p>This page is a preview. A browser’s print settings leave out the
     background colours and the QR code, so the sheet comes out unusable.</p>
-  <p>Open <code>https://nl.tools/wellbeing-hub/poster.pdf</code> and print that
+  <p>Open <code>https://nl.tools/{ed['slug']}/poster.pdf</code> and print that
     instead — or press the download button on this page.</p>
 </div>
 
 <div class="sheet">
 
   <div class="hd">
-    <img src="/assets/crests/National League rose white.png" alt=""
-         onerror="this.onerror=null;this.src='/assets/crests/National League rose.png'">
+    {poster_logo(ed)}
     <span>
-      <b>Wellbeing Hub</b>
-      <i>The National League</i>
+      <b>Wellbeing Hub</b>{poster_kicker(ed)}
     </span>
   </div>
 
@@ -2140,8 +2427,8 @@ POSTER = f'''<!DOCTYPE html>
       </ul>
     </div>
     <div class="qr">
-      <img src="/assets/wellbeing-hub-qr.svg" alt="QR code linking to nl.tools/wellbeing-hub">
-      <b>nl.tools/<br>wellbeing-hub</b>
+      <img src="/assets/{ed['slug']}-qr.svg" alt="QR code linking to nl.tools/{ed['slug']}">
+      <b>nl.tools/<br>{ed['slug']}</b>
       <span>Or type it into any browser</span>
     </div>
   </div>
@@ -2197,7 +2484,10 @@ def emit(check=False):
     source and an artefact that disagree. Both have a bad failure mode and
     neither is visible in a diff review.
     """
-    files = [(OUT, PAGE), (POSTER_OUT, POSTER)]
+    files = []
+    for ed in EDITIONS:
+        files.append((out_path(ed, 'index.html'), page(ed)))
+        files.append((out_path(ed, 'poster.html'), poster(ed)))
     if check:
         drift = []
         for path, rendered in files:
@@ -2211,19 +2501,29 @@ def emit(check=False):
                              % (os.path.relpath(path, REPO), len(on_disk), len(rendered)))
         if drift:
             sys.stderr.write(
-                'wellbeing-hub is out of sync with its source:\n  ' +
+                'the wellbeing hub editions are out of sync with their '
+                'source:\n  ' +
                 '\n  '.join(drift) +
                 '\n\nRun: python3 scripts/build-wellbeing-hub.py\n'
                 'Then commit the regenerated HTML. Do not edit it by hand — it '
                 'is overwritten.\n')
             return 1
-        print('wellbeing-hub: generated output matches the committed files')
+        print('wellbeing hub: all %d generated files match what is committed'
+              % len(files))
         return 0
     for path, rendered in files:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         io.open(path, 'w', encoding='utf-8').write(rendered)
         print('wrote', os.path.relpath(path, REPO), len(rendered), 'chars')
     return 0
 
 
 if __name__ == '__main__':
+    if '--editions' in sys.argv[1:]:
+        # The edition list, for tooling that is not Python — the QR builder and
+        # the tests read it from here so there is no second copy of the slugs
+        # to drift. One source, as asked.
+        print(json.dumps([{k: ed[k] for k in ('key', 'slug', 'org', 'noindex')}
+                          for ed in EDITIONS], indent=2))
+        sys.exit(0)
     sys.exit(emit(check='--check' in sys.argv[1:]))
