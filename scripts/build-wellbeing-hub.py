@@ -248,6 +248,61 @@ def league_row(ed):
             '    <span>Covering the %s</span>\n%s\n  </div>\n' % (names, marks))
 
 
+def _footer_css(ed):
+    """The footer as a second brand band, bookending the masthead.
+
+    TWO THINGS HERE ARE MEASURED RATHER THAN CHOSEN.
+
+    --text-muted (#5a6a82) on this teal is 4.11:1, which fails AA for body
+    text. The footer carries real sentences, not decoration, so the muted
+    colour is overridden to one that passes — #2d4a63 at 6.92:1. White would
+    be 1.34:1, which is why nothing here is white.
+
+    The three league marks have a white background baked into the artwork with
+    no alpha, so on a teal ground they would read as white rectangles. Keying
+    the white out is not available: the NPL logo is a football whose own
+    panels ARE white, so a key would eat the artwork. Each mark therefore gets
+    a deliberate white chip, which matches the topic glyph chips elsewhere on
+    the page and reads as a design decision instead of a rendering fault.
+
+    The band is full-bleed, so the max-width moves from the outer element to
+    the inner one — and with it the bottom padding and its 780px override,
+    because an unconditional `padding: 0` on the outer would otherwise cancel
+    a media query that appears earlier in the sheet.
+    """
+    a = ed['accent']
+    if not a:
+        return ''
+    return (
+        '\n  /* Footer as a second ' + ed['org'] + ' band. Contrast figures and\n'
+        '     the white chips are explained at _footer_css(). */\n'
+        '  .hub-footer {\n'
+        '    background: ' + a['bg'] + '; max-width: none; padding: 0;\n'
+        '    margin: clamp(30px, 4vw, 48px) 0 0;\n'
+        '  }\n'
+        '  .hub-footer__in {\n'
+        '    max-width: 1100px; margin: 0 auto;\n'
+        '    padding: 26px clamp(16px, 2.5vw, 32px) 96px;\n'
+        '    border-top: none;\n'
+        '  }\n'
+        '  @media (min-width: 780px) {\n'
+        '    .hub-footer__in { padding-bottom: 40px; }\n'
+        '  }\n'
+        '  .hub-purpose strong,\n'
+        '  .hub-poster strong { color: ' + a['fg'] + '; }\n'
+        '  .hub-purpose .hub-i,\n'
+        '  .hub-poster .hub-i { color: ' + a['fg'] + '; }\n'
+        '  .hub-purpose p,\n'
+        '  .hub-poster p,\n'
+        '  .hub-foot { color: ' + a['muted'] + '; }\n'
+        '  .hub-leagues { border-top-color: ' + a['muted'] + '; }\n'
+        '  .hub-leagues span { color: ' + a['muted'] + '; }\n'
+        '  .hub-leagues img {\n'
+        '    background: var(--white); padding: 7px 10px; border-radius: 7px;\n'
+        '  }\n'
+    )
+
+
 def accent_css(ed):
     """Per-edition masthead colours.
 
@@ -281,7 +336,6 @@ def accent_css(ed):
         '  @media (max-width: 560px) {\n'
         '    .hub-brand img { width: 140px; }\n'
         '  }\n'
-        '  .hub-exit { --exit-edge: ' + a['fg'] + '; }\n'
         '  .hub-leagues {\n'
         '    display: flex; flex-wrap: wrap; align-items: center; gap: 14px 22px;\n'
         '    margin: 18px 0 0; padding-top: 16px;\n'
@@ -293,6 +347,7 @@ def accent_css(ed):
         '    flex: 1 1 100%; margin: 0;\n'
         '  }\n'
         '  .hub-leagues img { height: 58px; width: auto; }\n'
+        + _footer_css(ed)
     )
 
 
