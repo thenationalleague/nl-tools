@@ -248,6 +248,61 @@ def league_row(ed):
             '    <span>Covering the %s</span>\n%s\n  </div>\n' % (names, marks))
 
 
+def _nav_css(ed):
+    """Both navs in the edition's colours — the desktop strip and the fixed
+    bottom bar on a phone.
+
+    URGENCY BECOMES A FILLED BLOCK, NOT A COLOUR, AND THAT IS THE WHOLE
+    POINT OF THIS FUNCTION. Both navs are built light-on-dark: muted text on
+    navy, the Urgent help item picked out in white. Invert them to teal and
+    the text has to go dark — at which point the brand red and the brand navy
+    sit 1.74:1 APART FROM EACH OTHER (1.08:1 against the muted step). On a
+    teal bar a dark red label and a dark navy label are the same label, and
+    "Urgent help" stops reading as urgent. Measured, not guessed.
+
+    So on teal the urgent item is a solid red field with white type —
+    unmistakable at a glance, and legible for somebody who cannot separate
+    the two hues at all. This is the one place on the page where the
+    semantic colour must win over the brand one.
+
+    A hairline between the masthead and the nav, because two adjacent teal
+    bands otherwise merge into one and the nav stops looking like a nav.
+    """
+    a = ed['accent']
+    if not a:
+        return ''
+    return (
+        '\n  /* Navs in ' + ed['org'] + ' colours. The urgent item is a filled\n'
+        '     red block rather than red text: on teal, red and navy text are\n'
+        '     1.74:1 apart and "Urgent help" would stop looking urgent.\n'
+        '     See _nav_css(). */\n'
+        '  .hub-nav {\n'
+        '    background: ' + a['bg'] + '; border-top: 1px solid ' + a['fg'] + ';\n'
+        '  }\n'
+        '  .hub-nav a { color: ' + a['muted'] + '; }\n'
+        '  .hub-nav a:hover {\n'
+        '    color: ' + a['fg'] + '; border-bottom-color: ' + a['fg'] + ';\n'
+        '  }\n'
+        '  .hub-nav a.is-urgent {\n'
+        '    background: var(--primary); color: var(--white);\n'
+        '    border-radius: 6px 6px 0 0;\n'
+        '  }\n'
+        '  .hub-nav a.is-urgent:hover {\n'
+        '    background: var(--primary-600); color: var(--white);\n'
+        '    border-bottom-color: var(--primary-600);\n'
+        '  }\n'
+        '  .hub-bottom {\n'
+        '    background: ' + a['bg'] + '; border-top-color: ' + a['fg'] + ';\n'
+        '  }\n'
+        '  .hub-bottom a { color: ' + a['muted'] + '; }\n'
+        '  .hub-bottom a:hover { color: ' + a['fg'] + '; }\n'
+        '  .hub-bottom a.is-urgent {\n'
+        '    background: var(--primary); color: var(--white);\n'
+        '  }\n'
+        '  .hub-bottom a.is-urgent .hub-i { color: var(--white); }\n'
+    )
+
+
 def _footer_css(ed):
     """The footer as a second brand band, bookending the masthead.
 
@@ -347,6 +402,7 @@ def accent_css(ed):
         '    flex: 1 1 100%; margin: 0;\n'
         '  }\n'
         '  .hub-leagues img { height: 58px; width: auto; }\n'
+        + _nav_css(ed)
         + _footer_css(ed)
     )
 
