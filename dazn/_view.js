@@ -1,9 +1,13 @@
 /* =============================================================================
    NL Tools — DAZN Viewing: one club's season, as a dashboard
    File: /dazn/_view.js
-   Version: v26.0 (15/10/2026)
+   Version: v27.0 (15/10/2026)
 
    CHANGELOG
+     v27.0 (15/10/2026) — The chart switches between By month and By game.
+       By game is one thin column per game in date order, scrolling sideways,
+       labelled with the opponent's code and (H) / (A). Top games says what
+       it is ranked over (season or month, plus any venue / UK slicer).
      v26.0 (15/10/2026) — Slicers say what they do: "UK availability: All
        games / Shown in UK / Not shown in UK" and "Venue: Home & away /
        Home / Away", each titled above its control in a white strip. Home
@@ -48,7 +52,8 @@
        games:  { <id>: record, ... },  the club's node from the season
        bench:  { ... } | null,         the division's season averages
        div:    'National',
-       nameOf: function (code) { return clubName; }
+       nameOf: function (code) { return clubName; },
+       seasonLabel: '2025-26'           names the season in Top games' context
      });
      DAZNView.grid(host, { cols, rows, sort, row, total, height, onRowClick })
      DAZNView.fmt.{ n0, n1, compact }
@@ -223,6 +228,27 @@
     }).join('') + '</div>';
   }
 
+  /* ---- Views by game: one thin column per game, scrolls sideways --------
+     Labelled with the opponent's clubs-meta code and (H) / (A), the way a
+     fixture list abbreviates; full detail in the tooltip. Takes every
+     slicer, month included, so "Home" shows the home run. Not clickable:
+     a single game is a row in the table, not a slice. */
+  function gameChart(rows) {
+    var list = rows.slice().sort(function (a, b) { return a.g.date < b.g.date ? -1 : a.g.date > b.g.date ? 1 : 0; });
+    var max = Math.max.apply(null, list.map(function (r) { return r.total; }).concat([1]));
+    return '<div class="dz-gamecols"><div class="dz-cols dz-cols--games">' + list.map(function (r) {
+      var g = r.g;
+      return '<div class="dz-col dz-col--game" title="' + esc(window.NL.formatDateShort(g.date) + ' · ' + r.oppName +
+          ' (' + (r.home ? 'H' : 'A') + ')\nUK ' + n0(g.ukViews) + ' · INT ' + n0(g.intlViews) + ' · ' + n0(r.total) + ' views') + '">' +
+        '<span class="dz-col__plot"><span class="dz-col__stack" style="height:' + (r.total / max * 100).toFixed(1) + '%">' +
+          (g.intlViews ? '<span class="dz-col__int" style="flex-grow:' + g.intlViews + '"></span>' : '') +
+          (g.ukViews ? '<span class="dz-col__uk" style="flex-grow:' + g.ukViews + '"></span>' : '') +
+        '</span></span>' +
+        '<span class="dz-col__lbl dz-col__lbl--game">' + esc(r.oppCode) + '<br>(' + (r.home ? 'H' : 'A') + ')</span>' +
+      '</div>';
+    }).join('') + '</div></div>';
+  }
+
   /* ---- Top games -------------------------------------------------------- */
   function topGames(rows) {
     var top = rows.slice().sort(function (a, b) { return b.total - a.total; }).slice(0, 5);
@@ -282,9 +308,9 @@
     });
   }
 
-  function panel(title, body, extra, cls) {
+  function panel(title, body, extra, cls, titleAttr) {
     return '<section class="form-panel dz-panel ' + (cls || '') + '">' +
-      '<div class="form-panel__head dz-panel__head"><span>' + esc(title) + '</span>' + (extra || '') + '</div>' +
+      '<div class="form-panel__head dz-panel__head"><span' + (titleAttr ? ' ' + titleAttr : '') + '>' + esc(title) + '</span>' + (extra || '') + '</div>' +
       '<div class="form-panel__body dz-panel__body">' + body + '</div></section>';
   }
 
@@ -298,13 +324,25 @@
     var nameOf = o.nameOf || function () { return ''; };
     var months = Object.keys(all.reduce(function (m, g) { m[g.date.slice(0, 7)] = 1; return m; }, {})).sort();
     var F = { uk: 'all', venue: 'all', month: 'all' };
+    var view = 'month';
+
+    /* What Top games is ranked over, so the list is never ambiguous:
+       "2025-26", "April 2026", "2025-26 · Home · Not shown in UK". */
+    function context() {
+      var bits = [F.month !== 'all' ? MONTH_LONG.format(new Date(F.month + '-01T00:00:00Z')) : (o.seasonLabel || 'Season')];
+      if (F.venue !== 'all') bits.push(F.venue === 'home' ? 'Home' : 'Away');
+      if (F.uk !== 'all') bits.push(F.uk === 'uk' ? 'Shown in UK' : 'Not shown in UK');
+      return bits.join(' \u00b7 ');
+    }
 
     el.innerHTML = '<div class="dz-dash">' +
       '<div data-slicers></div>' +
       '<div data-kpis></div>' +
       '<div class="dz-row">' +
-        panel('Views by month', '<div data-months></div>', legend()) +
-        panel('Top games', '<div data-top></div>') +
+        panel('Views by month', '<div data-chart></div>',
+          '<span class="dz-panel__tools">' + chips('chart', [['month', 'By month'], ['game', 'By game']], 'month') + legend() + '</span>',
+          '', 'data-chart-title') +
+        panel('Top games', '<div data-top></div>', '<span class="dz-panel__ctx" data-top-ctx></span>') +
       '</div>' +
       panel('Games', '<div data-games></div>', legend(), 'dz-panel--flush') +
       '<p class="form-hint">A view is counted per game, so someone who watched three games counts three times.</p>' +
@@ -315,10 +353,15 @@
     function draw() {
       q('[data-slicers]').innerHTML = slicers(months, F);
       var shown = applyFilters(all, o.code, F);
+      q('[data-chart-title]').textContent = view === 'game' ? 'Views by game' : 'Views by month';
+      q('[data-top-ctx]').textContent = context();
       /* The month chart takes every slicer except the month itself, so the
          other months stay visible to click across to. */
-      q('[data-months]').innerHTML = monthChart(applyFilters(all, o.code, { uk: F.uk, venue: F.venue, month: 'all' }), months, F);
+      if (view === 'month') {
+        q('[data-chart]').innerHTML = monthChart(applyFilters(all, o.code, { uk: F.uk, venue: F.venue, month: 'all' }), months, F);
+      }
       if (!shown.length) {
+        if (view === 'game') q('[data-chart]').innerHTML = '';
         q('[data-kpis]').innerHTML = '';
         q('[data-top]').innerHTML = '';
         q('[data-games]').innerHTML = '<div class="empty-state"><div class="empty-state__title">No games match these slicers</div></div>';
@@ -327,9 +370,10 @@
       var s = D.summarise(shown, o.code);
       var rows = shown.map(function (g) {
         var home = g.home === o.code, opp = home ? g.away : g.home, total = g.ukViews + g.intlViews;
-        return { g: g, home: home, oppName: nameOf(opp) || opp, total: total,
+        return { g: g, home: home, oppName: nameOf(opp) || opp, oppCode: opp, total: total,
                  avg: total ? (g.ukMins + g.intlMins) / total : null };
       });
+      if (view === 'game') q('[data-chart]').innerHTML = gameChart(rows);
       q('[data-kpis]').innerHTML = kpis(s, o.bench, !filtered(F));
       q('[data-top]').innerHTML = topGames(rows);
       window.NL.clubs.wireCrestImgs(q('[data-top]'));
@@ -339,6 +383,14 @@
     el.onclick = function (e) {
       var chip = e.target.closest('.dz-slicers .chip[data-v]');
       if (chip) { F[chip.parentNode.getAttribute('data-f')] = chip.getAttribute('data-v'); draw(); return; }
+      var sw = e.target.closest('[data-f="chart"] .chip[data-v]');
+      if (sw) {
+        view = sw.getAttribute('data-v');
+        Array.prototype.forEach.call(sw.parentNode.querySelectorAll('.chip'), function (c) {
+          var on = c === sw; c.classList.toggle('active', on); c.setAttribute('aria-pressed', String(on));
+        });
+        draw(); return;
+      }
       var col = e.target.closest('.dz-col[data-month]');
       if (col) { var m = col.getAttribute('data-month'); F.month = F.month === m ? 'all' : m; draw(); return; }
       if (e.target.closest('[data-reset]')) { F = { uk: 'all', venue: 'all', month: 'all' }; draw(); }
