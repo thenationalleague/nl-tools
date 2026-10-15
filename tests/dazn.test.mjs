@@ -303,3 +303,13 @@ test('the chart has a fixed height, so nothing beside it can stretch it', () => 
   assert.ok(!/height:\s*100%/.test(rule[1]), '.dz-chart fills its panel again');
   assert.match(css, /\.dz-panel__ctx\s*\{[^}]*white-space:\s*nowrap/);
 });
+
+test('By month always runs August to May; slicers appear only when they split the club', () => {
+  /* Months sat equidistant whatever their dates (Oct, Feb, Mar side by
+     side), and a club whose games were all shown in the UK was offered a
+     UK availability slicer that could only empty the page. 15/10/2026. */
+  const view = readFileSync(join(REPO, 'dazn/_view.js'), 'utf8');
+  assert.match(view, /for \(var k = 0; k < 10; k\+\+\)/, 'ten-month season axis');
+  assert.match(view, /var ukSplits = has\.uk && has\.intl/);
+  assert.match(view, /if \(!ukSplits && !venueSplits && months\.length < 2 && !filtered\(F\)\) return ''/);
+});
