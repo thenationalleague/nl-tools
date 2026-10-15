@@ -1,10 +1,28 @@
 <!DOCTYPE html>
 <!--
   NL Tools — DAZN Viewing (staff)
-  Version: v25.0 (15/10/2026)
+  Version: v28.0 (15/10/2026)
   File: /dazn/index.html
 
   CHANGELOG
+    v28.0 (15/10/2026) — Three tabs (canon .tabs, the Club Directory pattern):
+      League (division slicer, KPI row for the selection, every club), Club
+      (canon NL.clubPicker; exactly what the club sees, via the same
+      DAZNView.render), Admin (admin only: seasons held, streams left out as
+      not played, the import). Tab and club ride in the hash (#club=ROC).
+      The import now checks every stream against the NLS results for the
+      season and leaves out games not played on that date (postponed, or
+      abandoned and replayed); an abandoned game with no replay counts and
+      is flagged. A failed or short NLS fetch stops the import. The
+      "Club page" link and the click-to-open-below drill-down are gone.
+    v27.0 (15/10/2026) — Club view gains the By month / By game chart switch
+      and a context line on Top games (_view.js v27.0); passes the season
+      label for it.
+    v26.0 (15/10/2026) — The clubs list shows every club in clubs-meta for
+      the season, including those DAZN never showed (greyed, not clickable),
+      with a Division slicer. The Total row is labelled "Each game once":
+      each club's figure is the full audience of its games, so the club rows
+      add up to about twice the league.
     v25.0 (15/10/2026) — The club view is a one-screen dashboard (see
       _view.js v25.0). The clubs list is a fixed-height panel with a sticky
       header and a League total row (each game counted once, not once per
@@ -96,6 +114,26 @@
     window.NL_CHANGELOG = [
       {
         date: '15/10/2026',
+        version: 'v28.0',
+        items: [
+          'Three tabs: League for every club, Club to see exactly what one club sees, and Admin (admins only) for importing.',
+          'Importing checks every game against the League\u2019s results. Streams of games that were not played on that date are left out and listed in Admin.',
+          'An abandoned game that counts is marked Abandoned.'
+        ]
+      },
+      {
+        date: '15/10/2026',
+        version: 'v26.0',
+        items: [
+          'The chart switches between views by month and by game. By game shows every game in order, labelled with the opponent and (H) or (A).',
+          'Top games says what it covers, for example the season, a month, or home games only.',
+          'Every club in the season is listed, including clubs with no DAZN games, and the list can be filtered by division.',
+          'The slicers say what they do: UK availability (Shown in UK / Not shown in UK) and Venue (Home / Away).',
+          'Games show Home or Away in full.'
+        ]
+      },
+      {
+        date: '15/10/2026',
         version: 'v25.0',
         items: [
           'A club\u2019s figures are one dashboard: slicers, headline cards, views by month, top games and every game in one screen.',
@@ -160,9 +198,9 @@
   <script src="/system/nl-topbar.js?v=10"></script>
   <script src="/system/auth-guard.js?v=16"></script>
 
-  <link rel="stylesheet" href="/dazn/_view.css?v=4">
-  <script src="/dazn/_data.js?v=2"></script>
-  <script src="/dazn/_view.js?v=4"></script>
+  <link rel="stylesheet" href="/dazn/_view.css?v=6">
+  <script src="/dazn/_data.js?v=3"></script>
+  <script src="/dazn/_view.js?v=8"></script>
 
 <style>
   /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
@@ -170,11 +208,9 @@
      brand rule and re-hide the page. */
   /* Layout comes from canon (.toolbar, .form-panel, .form-group); the
      dashboard's own styles live in /dazn/_view.css. */
-  #dzaClubs tbody tr { cursor: pointer; }
-  #dzaClubs tbody tr.is-open td { background: var(--navy-50); }
-  .dza-section { margin-top: 24px; }
-  .dza-club-head { display: flex; align-items: center; gap: 12px; --crest-size: 40px; }
-  .dza-club-head h2 { color: var(--navy); font-size: var(--text-lg); }
+  #dzaClubs tbody tr[data-code] { cursor: pointer; }
+  .dza-section { margin-top: 16px; }
+  .dza-pick { min-width: 280px; }
   .dza-import textarea { font-family: var(--font-mono); font-size: var(--text-xs); }
   .dza-preview:empty { display: none; }
 </style>
@@ -187,32 +223,51 @@
 <div id="pageWrap">
   <div class="page">
 
+    <!-- Three jobs, three tabs (a closed set, so canon .tabs): the league
+         at a glance, one club exactly as that club sees it, and admin. The
+         season applies to all three. Tab and club ride in the hash, so a
+         reload or a shared link lands in the same place. -->
     <div class="toolbar">
       <div class="toolbar__left">
         <select class="nl-select" id="dzaSeason" aria-label="Season" hidden></select>
       </div>
-      <div class="toolbar__right">
-        <a class="btn btn--ghost" href="/dazn/reader/" target="_blank" rel="noopener">Club page</a>
-        <button class="btn btn--navy" id="dzaImportBtn" type="button" hidden>Import a season</button>
-      </div>
     </div>
 
-    <section class="form-panel dza-import" id="dzaImport" hidden>
-      <div class="form-panel__body">
-        <div class="form-group">
-          <label for="dzaPaste">Matches sheet</label>
-          <textarea id="dzaPaste" spellcheck="false" placeholder="Select all on the Matches sheet, copy, paste here"></textarea>
-        </div>
-        <div class="dza-preview" id="dzaPreview"></div>
-      </div>
-      <div class="form-panel__foot">
-        <button class="btn btn--ghost" id="dzaCheck" type="button">Check</button>
-        <button class="btn btn--primary" id="dzaWrite" type="button" disabled>Import</button>
-      </div>
-    </section>
+    <div class="tabs" id="dzaTabs" role="tablist">
+      <button class="tab active" type="button" role="tab" data-pane="league">League</button>
+      <button class="tab" type="button" role="tab" data-pane="club">Club</button>
+      <button class="tab" type="button" role="tab" data-pane="admin" id="dzaTabAdmin" hidden>Admin</button>
+    </div>
 
-    <div id="dzaBody"></div>
-    <div id="dzaClub"></div>
+    <div data-pane-body="league">
+      <div id="dzaBody"></div>
+    </div>
+
+    <div data-pane-body="club" hidden>
+      <div class="filter-bar dz-slicers">
+        <div class="dz-slicer"><span class="filter-label">Club</span><div class="dza-pick" id="dzaPicker"></div></div>
+      </div>
+      <div class="dza-section" id="dzaClubBody"></div>
+    </div>
+
+    <div data-pane-body="admin" hidden>
+      <div id="dzaSeasons"></div>
+
+      <section class="form-panel dza-import dza-section" id="dzaImport">
+        <div class="form-panel__head">Import a season</div>
+        <div class="form-panel__body">
+          <div class="form-group">
+            <label for="dzaPaste">Matches sheet</label>
+            <textarea id="dzaPaste" spellcheck="false" placeholder="Select all on the Matches sheet, copy, paste here"></textarea>
+          </div>
+          <div class="dza-preview" id="dzaPreview"></div>
+        </div>
+        <div class="form-panel__foot">
+          <button class="btn btn--ghost" id="dzaCheck" type="button">Check</button>
+          <button class="btn btn--primary" id="dzaWrite" type="button" disabled>Import</button>
+        </div>
+      </section>
+    </div>
 
   </div>
 </div>
@@ -237,7 +292,7 @@
 
   function loading(text) {
     $('dzaBody').innerHTML = '<div class="empty-state"><div class="empty-state__title">' + esc(text) + '</div></div>';
-    $('dzaClub').innerHTML = '';
+    $('dzaClubBody').innerHTML = '';
   }
 
   /* ---- Seasons ------------------------------------------------------ */
@@ -252,6 +307,8 @@
       sel.hidden = keys.length < 2;
       if (!keys.length) {
         loading(S.isAdmin ? 'No seasons imported yet' : 'No figures yet');
+        drawSeasons();
+        if (S.isAdmin) showPane('admin');
         return;
       }
       var want = keys.indexOf(S.season) !== -1 ? S.season : keys[0];
@@ -262,37 +319,72 @@
 
   function showSeason(key) {
     S.season = key;
-    S.open = null;
     loading('Loading…');
     return db.ref(BASE + '/seasons/' + key).once('value').then(function (snap) {
       S.data = snap.val() || {};
+      if (S.picker) S.picker.setSeason(key);
       drawClubs();
+      drawClub();
+      drawSeasons();
     });
   }
 
-  /* ---- Every club --------------------------------------------------- */
-  function drawClubs() {
-    var clubs = S.data.clubs || {};
-    var F = DAZNView.fmt;
-    var rows = Object.keys(clubs).map(function (code) {
-      return { code: code, name: nameOf(code) || code, div: clubs[code].div,
-               s: D.summarise(clubs[code].matches, code) };
+  /* ---- Every club ---------------------------------------------------
+     Every club in clubs-meta for the season, not only those DAZN showed:
+     a club with no games is a finding, not a gap to hide. Division is the
+     club's division that season, from clubs-meta. */
+  function seasonClubs() {
+    var clubs = (S.data && S.data.clubs) || {};
+    var seen = {};
+    var rows = NL.season.clubsFor(S.meta, S.season).map(function (c) {
+      seen[c.code] = true;
+      var d = clubs[c.code];
+      return { code: c.code, name: c.name, div: c.division, has: !!d,
+               s: d ? D.summarise(d.matches, c.code) : null };
     });
-    /* The Total row is the league, each game counted once: summing the club
-       rows would count every game twice, once for each side. */
-    var lg = D.summarise(S.data.matches || {});
-    var num = function (k) { return function (r) { return r.s[k]; }; };
+    /* A club with games but missing from that season's clubs-meta still
+       shows, under the division the import recorded for it. */
+    Object.keys(clubs).forEach(function (code) {
+      if (seen[code]) return;
+      rows.push({ code: code, name: nameOf(code) || code, div: clubs[code].div, has: true,
+                  s: D.summarise(clubs[code].matches, code) });
+    });
+    return rows;
+  }
+
+  function drawClubs() {
+    var F = DAZNView.fmt;
+    var div = S.div || 'all';
+    var rows = seasonClubs().filter(function (r) { return div === 'all' || r.div === div; });
+    var none = rows.filter(function (r) { return !r.has; }).length;
+    /* The Total row counts each game ONCE. Each club's figure is the whole
+       audience of its games, so the club rows add up to about twice the
+       league: every game is in two clubs' rows. */
+    var games = D.values(S.data.matches).filter(function (m) { return div === 'all' || m.div === div; });
+    var lg = D.summarise(games);
+    var num = function (k) { return function (r) { return r.s ? r.s[k] : null; }; };
+    var label = div === 'all' ? 'League' : (D.DIV_LABEL[div] || div);
+
     $('dzaBody').innerHTML =
+      '<div class="dz-dash">' +
+      '<div class="filter-bar dz-slicers">' +
+        DAZNView.slicer('Division', DAZNView.chips('div',
+          [['all', 'All'], ['National', 'National'], ['North', 'North'], ['South', 'South']], div)) +
+      '</div>' +
+      DAZNView.kpis(lg, null, false) +
       '<section class="form-panel dz-panel dz-panel--flush">' +
-        '<div class="form-panel__head dz-panel__head"><span>Clubs</span></div>' +
-        '<div class="form-panel__body dz-panel__body" id="dzaClubs"></div></section>';
+        '<div class="form-panel__head dz-panel__head"><span>Clubs</span>' +
+          '<span>' + rows.length + ' clubs' + (none ? ' · ' + none + ' with no DAZN games' : '') + '</span></div>' +
+        '<div class="form-panel__body dz-panel__body" id="dzaClubs"></div></section>' +
+      '</div>';
+
     DAZNView.grid($('dzaClubs'), {
-      height: 420,
+      height: 460,
       sort: { key: 'views', dir: -1 },
       cols: [
         { key: 'name', label: 'Club', get: function (r) { return r.name; } },
         { key: 'div', label: 'Division', cls: 'dz-sm-hide', get: function (r) { return D.DIV_LABEL[r.div] || r.div || ''; } },
-        { key: 'games', label: 'Games', num: true, get: num('games') },
+        { key: 'games', label: 'Games', num: true, get: function (r) { return r.s ? r.s.games : 0; } },
         { key: 'uk', label: 'UK', num: true, cls: 'dz-sm-hide', get: num('ukViews') },
         { key: 'intl', label: 'INT', num: true, cls: 'dz-sm-hide', get: num('intlViews') },
         { key: 'views', label: 'Views', num: true, get: num('views') },
@@ -301,19 +393,20 @@
       ],
       rows: rows,
       row: function (r) {
-        return '<tr data-code="' + esc(r.code) + '"' + (S.open === r.code ? ' class="is-open"' : '') + '>' +
+        var v = function (k, f) { return r.s ? F[f](r.s[k]) : '—'; };
+        return '<tr' + (r.has ? ' data-code="' + esc(r.code) + '" title="Open in the Club tab"' : ' class="dz-muted"') + '>' +
           '<td><span class="dz-opp">' + NL.clubs.crestImgHtml(r.name, 'thumb', { className: 'nl-crest' }) +
             '<span>' + esc(r.name) + '</span></span></td>' +
           '<td class="dz-sm-hide">' + esc(D.DIV_LABEL[r.div] || r.div || '') + '</td>' +
-          '<td class="ta-right">' + F.n0(r.s.games) + '</td>' +
-          '<td class="ta-right dz-sm-hide">' + F.n0(r.s.ukViews) + '</td>' +
-          '<td class="ta-right dz-sm-hide">' + F.n0(r.s.intlViews) + '</td>' +
-          '<td class="ta-right dz-strong">' + F.n0(r.s.views) + '</td>' +
-          '<td class="ta-right dz-sm-hide">' + F.n0(r.s.avgUkPerUkShown) + '</td>' +
-          '<td class="ta-right dz-sm-hide">' + F.n1(r.s.avgMins) + '</td>' +
+          '<td class="ta-right">' + (r.s ? F.n0(r.s.games) : '0') + '</td>' +
+          '<td class="ta-right dz-sm-hide">' + v('ukViews', 'n0') + '</td>' +
+          '<td class="ta-right dz-sm-hide">' + v('intlViews', 'n0') + '</td>' +
+          '<td class="ta-right dz-strong">' + v('views', 'n0') + '</td>' +
+          '<td class="ta-right dz-sm-hide">' + v('avgUkPerUkShown', 'n0') + '</td>' +
+          '<td class="ta-right dz-sm-hide">' + v('avgMins', 'n1') + '</td>' +
         '</tr>';
       },
-      total: '<tr><td>League</td><td class="dz-sm-hide">' + rows.length + ' clubs</td>' +
+      total: '<tr><td>' + esc(label) + '</td><td class="dz-sm-hide">Each game once</td>' +
         '<td class="ta-right">' + F.n0(lg.games) + '</td>' +
         '<td class="ta-right dz-sm-hide">' + F.n0(lg.ukViews) + '</td>' +
         '<td class="ta-right dz-sm-hide">' + F.n0(lg.intlViews) + '</td>' +
@@ -324,30 +417,149 @@
   }
 
   $('dzaBody').addEventListener('click', function (e) {
+    var chip = e.target.closest('.dz-slicers .chip[data-v]');
+    if (chip) { S.div = chip.getAttribute('data-v'); drawClubs(); }
+  });
+
+  $('dzaBody').addEventListener('click', function (e) {
     var tr = e.target.closest('tr[data-code]');
     if (tr) openClub(tr.getAttribute('data-code'));
   });
 
-  /* ---- One club, exactly as the club sees it ------------------------- */
-  function openClub(code) {
-    S.open = code;
-    Array.prototype.forEach.call(document.querySelectorAll('#dzaClubs tr[data-code]'), function (tr) {
-      tr.classList.toggle('is-open', tr.getAttribute('data-code') === code);
-    });
-    var club = (S.data.clubs || {})[code];
-    var name = nameOf(code) || code;
-    var host = $('dzaClub');
-    host.innerHTML =
-      '<div class="section-head dza-section"><div class="dza-club-head">' +
-        NL.clubs.crestImgHtml(name, 'medium', { eager: true, className: 'nl-crest' }) +
-        '<h2>' + esc(name) + '</h2></div></div><div id="dzaClubBody"></div>';
-    NL.clubs.wireCrestImgs(host);
-    DAZNView.render($('dzaClubBody'), {
-      code: code, name: name, games: club.matches,
+  /* ---- Club tab: one club, exactly as that club sees it --------------
+     The same DAZNView.render the club page calls, so this cannot drift
+     from what a club gets. The picker is the canon NL.clubPicker, scoped to
+     the season shown. */
+  function drawClub() {
+    var host = $('dzaClubBody');
+    if (!S.open) {
+      host.innerHTML = '<div class="empty-state"><div class="empty-state__title">Pick a club</div></div>';
+      return;
+    }
+    var club = (S.data.clubs || {})[S.open];
+    if (!club) {
+      host.innerHTML = '<div class="empty-state"><div class="empty-state__title">No DAZN games for ' +
+        esc(nameOf(S.open) || S.open) + ' this season</div></div>';
+      return;
+    }
+    DAZNView.render(host, {
+      code: S.open, name: nameOf(S.open), games: club.matches, notPlayed: club.notPlayed,
       bench: (S.data.bench || {})[club.div] || null, div: club.div,
+      seasonLabel: (S.index[S.season] && S.index[S.season].label) || NL.season.label(S.meta, S.season),
       nameOf: nameOf
     });
-    host.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function openClub(code) {
+    S.open = code;
+    var c = NL.clubs.byCode(code);
+    if (S.picker && c) S.picker.setValue(c.name);
+    drawClub();
+    showPane('club');
+  }
+
+  /* ---- Tabs ------------------------------------------------------------ */
+  function showPane(name) {
+    if (name === 'admin' && !S.isAdmin) name = 'league';
+    Array.prototype.forEach.call(document.querySelectorAll('#dzaTabs .tab'), function (t) {
+      var on = t.getAttribute('data-pane') === name;
+      t.classList.toggle('active', on);
+      t.setAttribute('aria-selected', String(on));
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-pane-body]'), function (p) {
+      p.hidden = p.getAttribute('data-pane-body') !== name;
+    });
+    var h = '#' + name + (name === 'club' && S.open ? '=' + S.open : '');
+    if (location.hash !== h) history.replaceState(null, '', h);
+  }
+
+  $('dzaTabs').addEventListener('click', function (e) {
+    var t = e.target.closest('.tab[data-pane]');
+    if (t) showPane(t.getAttribute('data-pane'));
+  });
+
+  /* ---- Admin: the seasons held --------------------------------------- */
+  function drawSeasons() {
+    var F = DAZNView.fmt;
+    var keys = Object.keys(S.index || {}).sort().reverse();
+    if (!keys.length) {
+      $('dzaSeasons').innerHTML = '<div class="empty-state"><div class="empty-state__title">No seasons imported yet</div></div>';
+      return;
+    }
+    $('dzaSeasons').innerHTML =
+      '<section class="form-panel dz-panel dz-panel--flush">' +
+        '<div class="form-panel__head dz-panel__head"><span>Seasons held</span></div>' +
+        '<div class="form-panel__body dz-panel__body"><div class="table-wrap"><table class="table table--compact">' +
+          '<thead><tr><th>Season</th><th class="ta-right">Games</th><th class="ta-right">Not played</th><th>Imported</th></tr></thead><tbody>' +
+          keys.map(function (k) {
+            var x = S.index[k];
+            return '<tr><td>' + esc(x.label || NL.season.label(S.meta, k)) + '</td>' +
+              '<td class="ta-right">' + F.n0(x.games) + '</td>' +
+              '<td class="ta-right">' + (x.notPlayed == null ? '\u2014' : F.n0(x.notPlayed)) + '</td>' +
+              '<td>' + (x.importedAt ? esc(NL.formatDateTime(x.importedAt)) : '\u2014') + '</td></tr>';
+          }).join('') +
+        '</tbody></table></div></div></section>' + notPlayedPanel();
+  }
+
+  /* The streams the import left out for the season shown, so a dropped
+     game is visible rather than silent. */
+  function notPlayedPanel() {
+    var F = DAZNView.fmt;
+    var np = (S.data && S.data.notPlayed) || {};
+    var ids = Object.keys(np).sort();
+    if (!ids.length) return '';
+    return '<section class="form-panel dz-panel dz-panel--flush dza-section">' +
+      '<div class="form-panel__head dz-panel__head"><span>Not played: left out of ' +
+        esc((S.index[S.season] && S.index[S.season].label) || '') + '</span></div>' +
+      '<div class="form-panel__body dz-panel__body"><div class="table-wrap"><table class="table table--compact">' +
+        '<thead><tr><th>Date</th><th>Game</th><th class="ta-right">Views</th><th class="ta-right">Avg mins</th></tr></thead><tbody>' +
+        ids.map(function (id) {
+          var m = np[id];
+          return '<tr><td>' + esc(NL.formatDateShort(m.date)) + '</td>' +
+            '<td>' + esc((nameOf(m.home) || m.home) + ' v ' + (nameOf(m.away) || m.away)) + '</td>' +
+            '<td class="ta-right">' + F.n0(m.views) + '</td>' +
+            '<td class="ta-right">' + F.n1(m.views ? m.mins / m.views : null) + '</td></tr>';
+        }).join('') +
+      '</tbody></table></div></div></section>';
+  }
+
+  /* ---- NLS results, to find streams of games that were never played ----
+     Every match of the season in the three divisions (play-offs included,
+     same competition IDs), straight from NLS: it answers CORS with *, and
+     neither RTDB feed cache holds a past season. A division that fails, or
+     comes back short of its own totalCount, stops the import: a partial
+     list would mark a whole division "not played".
+     CANON CANDIDATE (15/10/2026): brand-exposure/index.html loadResults
+     fetches the same endpoint per season. Note that one swallows a failed
+     competition, which is fine for its picker and fatal here. Promote a
+     season-results helper on the next use, with the strict behaviour. */
+  var NLS = 'https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2/matches/';
+  var NLS_COMPS = { 89: 'National League', 373: 'National League North', 372: 'National League South' };
+
+  function nlsSeason(seasonKey) {
+    return Promise.all(Object.keys(NLS_COMPS).map(function (comp) {
+      var all = [];
+      function page(n) {
+        var url = NLS + '?seasonID=' + encodeURIComponent(seasonKey) + '&competitionID=' + comp +
+          '&sort=kickOffDateUTC&page.number=' + n + '&page.size=100';
+        return fetch(url).then(function (r) {
+          if (!r.ok) throw new Error(NLS_COMPS[comp] + ' results: HTTP ' + r.status);
+          return r.json();
+        }).then(function (j) {
+          all = all.concat(j.data || []);
+          var total = j.meta && j.meta.totalCount;
+          if ((j.data || []).length && j.links && j.links.next && all.length < total) return page(n + 1);
+          if (total != null && all.length < total) throw new Error(NLS_COMPS[comp] + ' results came back incomplete (' + all.length + ' of ' + total + ').');
+          return all;
+        });
+      }
+      return page(1);
+    })).then(function (lists) { return [].concat.apply([], lists); });
+  }
+
+  function optaOf(name) {
+    var c = NL.clubs.byName(name);
+    return c ? c.optaID : null;
   }
 
   /* ---- Import -------------------------------------------------------- */
@@ -363,12 +575,12 @@
     var p = D.parsePaste($('dzaPaste').value);
     if (p.errors.length) { out.innerHTML = problems('Fix these in the sheet and paste again:', p.errors); return; }
 
-    var b = D.buildSeason(p.rows, codeOf);
-    if (b.unmatched.length) {
-      out.innerHTML = problems('These club names are not in clubs-meta. Correct the spelling in the sheet:', b.unmatched);
+    var first = D.buildSeason(p.rows, codeOf);
+    if (first.unmatched.length) {
+      out.innerHTML = problems('These club names are not in clubs-meta. Correct the spelling in the sheet:', first.unmatched);
       return;
     }
-    if (b.errors.length) { out.innerHTML = problems('Fix these in the sheet and paste again:', b.errors); return; }
+    if (first.errors.length) { out.innerHTML = problems('Fix these in the sheet and paste again:', first.errors); return; }
 
     /* The season comes from the dates, never from a control. One paste is
        one season; a sheet that spans two is a mistake to fix at source. */
@@ -381,22 +593,63 @@
       return;
     }
     var key = keys[0];
-    var dates = p.rows.map(function (r) { return r.date; }).sort();
-    var byDiv = {}, byAvail = { uk: 0, round: 0, moved: 0, intl: 0 };
-    p.rows.forEach(function (r) { byDiv[r.div] = (byDiv[r.div] || 0) + 1; byAvail[r.avail]++; });
 
-    S.pending = { key: key, season: b.season, games: p.rows.length };
-    out.innerHTML =
-      '<div class="banner banner--info"><strong>' + p.rows.length + ' games for ' + esc(NL.season.label(S.meta, key)) + '</strong>, ' +
-        esc(NL.formatDateShort(dates[0])) + ' to ' + esc(NL.formatDateShort(dates[dates.length - 1])) + ', ' +
-        Object.keys(b.season.clubs).length + ' clubs.' +
-        '<ul>' +
-          Object.keys(byDiv).map(function (d) { return '<li>' + esc(D.DIV_LABEL[d]) + ': ' + byDiv[d] + '</li>'; }).join('') +
-          '<li>Shown in UK: ' + (byAvail.uk + byAvail.round + byAvail.moved) + ' · Saturday 3pm, international only: ' + byAvail.intl + '</li>' +
-        '</ul>' +
-        (S.index[key] ? '<p>Replaces the ' + (S.index[key].games || '') + ' games already held for this season.</p>' : '') +
-      '</div>';
-    $('dzaWrite').disabled = false;
+    $('dzaCheck').disabled = true;
+    out.innerHTML = '<div class="banner banner--info">Checking every game against the NLS results…</div>';
+    nlsSeason(key).then(function (nls) {
+      var chk = D.checkPlayed(p.rows, optaOf, D.nlsIndex(nls));
+      var b = D.buildSeason(chk.played, codeOf);
+      if (!b.season) { out.innerHTML = problems('Fix these in the sheet and paste again:', b.errors); return; }
+      var F = DAZNView.fmt;
+      var notPlayed = {};
+      chk.notPlayed.forEach(function (r) {
+        notPlayed[D.matchId(r.date, codeOf(r.home), codeOf(r.away))] = {
+          date: r.date, home: codeOf(r.home), away: codeOf(r.away),
+          views: r.ukViews + r.intlViews, mins: r.ukMins + r.intlMins
+        };
+      });
+      b.season.notPlayed = chk.notPlayed.length ? notPlayed : null;
+      /* Each club also holds its own not-played streams, so the club page
+         (which can read only its own node) can name them. */
+      Object.keys(notPlayed).forEach(function (id) {
+        var m = notPlayed[id];
+        [m.home, m.away].forEach(function (c) {
+          if (!b.season.clubs[c]) return;
+          (b.season.clubs[c].notPlayed = b.season.clubs[c].notPlayed || {})[id] = m;
+        });
+      });
+
+      var rows = chk.played;
+      var dates = rows.map(function (r) { return r.date; }).sort();
+      var byDiv = {}, intl = 0;
+      rows.forEach(function (r) { byDiv[r.div] = (byDiv[r.div] || 0) + 1; if (r.avail === 'intl') intl++; });
+
+      S.pending = { key: key, season: b.season, games: rows.length, notPlayed: chk.notPlayed.length };
+      out.innerHTML =
+        '<div class="banner banner--info"><strong>' + rows.length + ' games for ' + esc(NL.season.label(S.meta, key)) + '</strong>, ' +
+          esc(NL.formatDateShort(dates[0])) + ' to ' + esc(NL.formatDateShort(dates[dates.length - 1])) + ', ' +
+          Object.keys(b.season.clubs).length + ' clubs.' +
+          '<ul>' +
+            Object.keys(byDiv).map(function (d) { return '<li>' + esc(D.DIV_LABEL[d]) + ': ' + byDiv[d] + '</li>'; }).join('') +
+            '<li>Shown in UK: ' + (rows.length - intl) + ' · not shown in UK: ' + intl + '</li>' +
+          '</ul>' +
+          (S.index[key] ? '<p>Replaces the ' + (S.index[key].games || '') + ' games already held for this season.</p>' : '') +
+        '</div>' +
+        (chk.notPlayed.length
+          ? '<div class="banner banner--amber">' + chk.notPlayed.length + ' streamed ' + (chk.notPlayed.length === 1 ? 'game was' : 'games were') +
+            ' not played on that date (postponed or abandoned and replayed) and will be left out:<ul>' +
+            chk.notPlayed.map(function (r) {
+              var v = r.ukViews + r.intlViews;
+              return '<li>' + esc(NL.formatDateShort(r.date)) + ' · ' + esc(r.home) + ' v ' + esc(r.away) + ' · ' +
+                F.n0(v) + ' views, ' + F.n1(v ? (r.ukMins + r.intlMins) / v : null) + ' avg mins</li>';
+            }).join('') + '</ul></div>'
+          : '') +
+        (chk.unchecked.length ? problems(chk.unchecked.length + ' games could not be checked (a club has no Opta ID in clubs-meta) and are kept.', []) : '');
+      $('dzaWrite').disabled = false;
+    }).catch(function (e) {
+      console.error('[dazn-admin]', e);
+      out.innerHTML = problems('The NLS results could not be checked, so nothing has been imported. Try again in a minute. ' + ((e && e.message) || ''), []);
+    }).then(function () { $('dzaCheck').disabled = false; });
   }
 
   function problems(lead, list) {
@@ -418,7 +671,7 @@
       $('dzaWrite').disabled = true;
       var up = {};
       up['seasons/' + p.key] = p.season;
-      up['index/' + p.key] = { label: label, games: p.games, importedAt: firebase.database.ServerValue.TIMESTAMP };
+      up['index/' + p.key] = { label: label, games: p.games, notPlayed: p.notPlayed, importedAt: firebase.database.ServerValue.TIMESTAMP };
       return NL.ensureAuth().then(function () {
         return db.ref(BASE).update(up);
       }).then(function () {
@@ -426,7 +679,6 @@
         S.pending = null;
         $('dzaPaste').value = '';
         $('dzaPreview').innerHTML = '';
-        $('dzaImport').hidden = true;
         S.season = p.key;
         return loadIndex();
       });
@@ -437,11 +689,6 @@
     });
   }
 
-  $('dzaImportBtn').addEventListener('click', function () {
-    var box = $('dzaImport');
-    box.hidden = !box.hidden;
-    if (!box.hidden) $('dzaPaste').focus();
-  });
   $('dzaCheck').addEventListener('click', check);
   $('dzaWrite').addEventListener('click', write);
   $('dzaPaste').addEventListener('input', function () { S.pending = null; $('dzaWrite').disabled = true; });
@@ -453,10 +700,25 @@
     S.session = session;
     var role = NL.roles.norm(session && session.role);
     S.isAdmin = role === 'admin' || role === 'superadmin';
-    $('dzaImportBtn').hidden = !S.isAdmin;
+    $('dzaTabAdmin').hidden = !S.isAdmin;
+    /* #league, #club=ROC, #admin — where a reload or a shared link lands. */
+    var h = (location.hash || '').replace(/^#/, '').split('=');
+    if (h[0] === 'club' && h[1]) S.open = h[1].toUpperCase();
+    showPane(h[0] === 'club' || h[0] === 'admin' ? h[0] : 'league');
     loading('Loading…');
     NL.clubs.load().then(function (meta) {
       S.meta = meta;
+      S.picker = NL.clubPicker($('dzaPicker'), {
+        mode: 'select', season: 'current', placeholder: 'Pick a club',
+        onSelect: function (sel) {
+          var c = (sel && sel.club) || NL.clubs.byName(sel && sel.name);
+          if (!c || !c.code) return;
+          S.open = c.code;
+          drawClub();
+          showPane('club');
+        }
+      });
+      if (S.open && NL.clubs.byCode(S.open)) S.picker.setValue(NL.clubs.byCode(S.open).name);
       return NL.ensureAuth();
     }).then(loadIndex).catch(function (e) {
       console.error('[dazn-admin]', e);

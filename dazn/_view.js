@@ -1,9 +1,23 @@
 /* =============================================================================
    NL Tools — DAZN Viewing: one club's season, as a dashboard
    File: /dazn/_view.js
-   Version: v25.0 (15/10/2026)
+   Version: v28.0 (15/10/2026)
 
    CHANGELOG
+     v28.0 (15/10/2026) — An abandoned game that counts carries a canon
+       match-state pill, "Abandoned". Streams left out as not played are
+       named in a line under the games, so a club that remembers one knows
+       where it went.
+     v27.0 (15/10/2026) — The chart switches between By month and By game.
+       By game is one thin column per game in date order, scrolling sideways,
+       labelled with the opponent's code and (H) / (A). Top games says what
+       it is ranked over (season or month, plus any venue / UK slicer).
+     v26.0 (15/10/2026) — Slicers say what they do: "UK availability: All
+       games / Shown in UK / Not shown in UK" and "Venue: Home & away /
+       Home / Away", each titled above its control in a white strip. Home
+       or away is written out: a Venue column in the games table and
+       "· Home" in Top games, replacing the grey H / A letters. slicer()
+       and chips() are exported so the staff page's division slicer matches.
      v25.0 (15/10/2026) — Rebuilt as a one-screen dashboard rather than a
        long page: slicers across the top, a row of KPI cards, then a
        views-by-month column chart beside the top games, then the games in
@@ -42,7 +56,9 @@
        games:  { <id>: record, ... },  the club's node from the season
        bench:  { ... } | null,         the division's season averages
        div:    'National',
-       nameOf: function (code) { return clubName; }
+       nameOf: function (code) { return clubName; },
+       seasonLabel: '2025-26',          names the season in Top games' context
+       notPlayed: { <id>: {date, home, away, views, mins} }   streams left out
      });
      DAZNView.grid(host, { cols, rows, sort, row, total, height, onRowClick })
      DAZNView.fmt.{ n0, n1, compact }
@@ -132,21 +148,23 @@
 
   function filtered(F) { return F.uk !== 'all' || F.venue !== 'all' || F.month !== 'all'; }
 
+  /* A slicer: its title above its control, as a report's slicer reads.
+     The strip they sit in is a white panel, so the controls read as
+     controls and not as loose text on the page background. */
+  function slicer(title, control) {
+    return '<div class="dz-slicer"><span class="filter-label">' + esc(title) + '</span>' + control + '</div>';
+  }
+
   function slicers(months, F) {
-    /* Each label sits with its control in a canon .filter-row, so a narrow
-       screen wraps whole slicers rather than leaving a label at a line end. */
     return '<div class="filter-bar dz-slicers">' +
-      '<div class="filter-row"><span class="filter-label">Shown in UK</span>' +
-      chips('uk', [['all', 'All'], ['uk', 'Yes'], ['intl', 'INT only']], F.uk) + '</div>' +
-      '<div class="filter-row"><span class="filter-label">Venue</span>' +
-      chips('venue', [['all', 'All'], ['home', 'Home'], ['away', 'Away']], F.venue) + '</div>' +
-      '<div class="filter-row"><span class="filter-label">Month</span>' +
-      '<select class="nl-select" data-f="month" aria-label="Month"><option value="all">All</option>' +
+      slicer('UK availability', chips('uk', [['all', 'All games'], ['uk', 'Shown in UK'], ['intl', 'Not shown in UK']], F.uk)) +
+      slicer('Venue', chips('venue', [['all', 'Home & away'], ['home', 'Home'], ['away', 'Away']], F.venue)) +
+      slicer('Month', '<select class="nl-select" data-f="month" aria-label="Month"><option value="all">All months</option>' +
         months.map(function (m) {
           return '<option value="' + m + '"' + (F.month === m ? ' selected' : '') + '>' +
             esc(MONTH_LONG.format(new Date(m + '-01T00:00:00Z'))) + '</option>';
-        }).join('') + '</select></div>' +
-      (filtered(F) ? '<button type="button" class="btn btn--ghost btn--sm" data-reset>Clear</button>' : '') +
+        }).join('') + '</select>') +
+      (filtered(F) ? '<button type="button" class="btn btn--ghost btn--sm dz-slicers__clear" data-reset>Clear</button>' : '') +
     '</div>';
   }
 
@@ -215,6 +233,27 @@
     }).join('') + '</div>';
   }
 
+  /* ---- Views by game: one thin column per game, scrolls sideways --------
+     Labelled with the opponent's clubs-meta code and (H) / (A), the way a
+     fixture list abbreviates; full detail in the tooltip. Takes every
+     slicer, month included, so "Home" shows the home run. Not clickable:
+     a single game is a row in the table, not a slice. */
+  function gameChart(rows) {
+    var list = rows.slice().sort(function (a, b) { return a.g.date < b.g.date ? -1 : a.g.date > b.g.date ? 1 : 0; });
+    var max = Math.max.apply(null, list.map(function (r) { return r.total; }).concat([1]));
+    return '<div class="dz-gamecols"><div class="dz-cols dz-cols--games">' + list.map(function (r) {
+      var g = r.g;
+      return '<div class="dz-col dz-col--game" title="' + esc(window.NL.formatDateShort(g.date) + ' · ' + r.oppName +
+          ' (' + (r.home ? 'H' : 'A') + ')\nUK ' + n0(g.ukViews) + ' · INT ' + n0(g.intlViews) + ' · ' + n0(r.total) + ' views') + '">' +
+        '<span class="dz-col__plot"><span class="dz-col__stack" style="height:' + (r.total / max * 100).toFixed(1) + '%">' +
+          (g.intlViews ? '<span class="dz-col__int" style="flex-grow:' + g.intlViews + '"></span>' : '') +
+          (g.ukViews ? '<span class="dz-col__uk" style="flex-grow:' + g.ukViews + '"></span>' : '') +
+        '</span></span>' +
+        '<span class="dz-col__lbl dz-col__lbl--game">' + esc(r.oppCode) + '<br>(' + (r.home ? 'H' : 'A') + ')</span>' +
+      '</div>';
+    }).join('') + '</div></div>';
+  }
+
   /* ---- Top games -------------------------------------------------------- */
   function topGames(rows) {
     var top = rows.slice().sort(function (a, b) { return b.total - a.total; }).slice(0, 5);
@@ -222,8 +261,8 @@
     return '<ol class="dz-top">' + top.map(function (r) {
       return '<li>' +
         window.NL.clubs.crestImgHtml(r.oppName, 'thumb', { className: 'nl-crest' }) +
-        '<span class="dz-top__id"><span class="dz-top__name">' + esc(r.oppName) + ' <span class="dz-ha">' + (r.home ? 'H' : 'A') + '</span></span>' +
-          '<span class="dz-top__date">' + esc(window.NL.formatDateShort(r.g.date)) + '</span></span>' +
+        '<span class="dz-top__id"><span class="dz-top__name">' + esc(r.oppName) + '</span>' +
+          '<span class="dz-top__date">' + esc(window.NL.formatDateShort(r.g.date)) + ' \u00b7 ' + (r.home ? 'Home' : 'Away') + '</span></span>' +
         '<span class="dz-top__val">' + n0(r.total) + '</span>' +
         '<span class="dz-top__bar">' + bar(r.g.ukViews, r.g.intlViews, max) + '</span>' +
       '</li>';
@@ -239,7 +278,8 @@
       cols: [
         { key: 'date', label: 'Date', get: function (r) { return r.g.date; } },
         { key: 'opp', label: 'Opponent', get: function (r) { return r.oppName; } },
-        { key: 'avail', label: 'In UK', cls: 'dz-sm-hide', get: function (r) { return r.g.avail === 'intl' ? 'No' : 'Yes'; } },
+        { key: 'venue', label: 'Venue', cls: 'dz-sm-hide', get: function (r) { return r.home ? 'Home' : 'Away'; } },
+        { key: 'avail', label: 'Shown in UK', cls: 'dz-sm-hide', get: function (r) { return r.g.avail === 'intl' ? 'No' : 'Yes'; } },
         { key: 'uk', label: 'UK', num: true, cls: 'dz-sm-hide', get: function (r) { return r.g.ukViews; } },
         { key: 'intl', label: 'INT', num: true, cls: 'dz-sm-hide', get: function (r) { return r.g.intlViews; } },
         { key: 'total', label: 'Views', num: true, get: function (r) { return r.total; } },
@@ -252,7 +292,10 @@
         return '<tr>' +
           '<td class="dz-nowrap">' + esc(window.NL.formatDateShort(g.date)) + '</td>' +
           '<td><span class="dz-opp">' + window.NL.clubs.crestImgHtml(r.oppName, 'thumb', { className: 'nl-crest' }) +
-            '<span>' + esc(r.oppName) + '</span> <span class="dz-ha">' + (r.home ? 'H' : 'A') + '</span></span></td>' +
+            '<span>' + esc(r.oppName) + '</span>' +
+            (g.abandoned ? ' <span class="pill pill--postponed" title="Abandoned. Counted: it was played and watched.">Abandoned</span>' : '') +
+            '</span></td>' +
+          '<td class="dz-sm-hide">' + (r.home ? 'Home' : 'Away') + '</td>' +
           '<td class="dz-sm-hide' + (intl ? ' dz-muted' : '') + '"' + (t ? ' title="' + esc(t) + '"' : '') + '>' + (intl ? 'No' : 'Yes') + '</td>' +
           '<td class="ta-right dz-sm-hide' + (intl ? ' dz-muted' : '') + '"' + (intl ? ' title="' + esc(AVAIL_TITLE.intl) + '"' : '') + '>' + n0(g.ukViews) + '</td>' +
           '<td class="ta-right dz-sm-hide">' + n0(g.intlViews) + '</td>' +
@@ -262,7 +305,7 @@
         '</tr>';
       },
       total: '<tr>' +
-        '<td>Total</td><td>' + n0(s.games) + ' games</td><td class="dz-sm-hide"></td>' +
+        '<td>Total</td><td>' + n0(s.games) + ' games</td><td class="dz-sm-hide"></td><td class="dz-sm-hide"></td>' +
         '<td class="ta-right dz-sm-hide">' + n0(s.ukViews) + '</td>' +
         '<td class="ta-right dz-sm-hide">' + n0(s.intlViews) + '</td>' +
         '<td class="ta-right">' + n0(s.views) + '</td>' +
@@ -272,10 +315,22 @@
     });
   }
 
-  function panel(title, body, extra, cls) {
+  function panel(title, body, extra, cls, titleAttr) {
     return '<section class="form-panel dz-panel ' + (cls || '') + '">' +
-      '<div class="form-panel__head dz-panel__head"><span>' + esc(title) + '</span>' + (extra || '') + '</div>' +
+      '<div class="form-panel__head dz-panel__head"><span' + (titleAttr ? ' ' + titleAttr : '') + '>' + esc(title) + '</span>' + (extra || '') + '</div>' +
       '<div class="form-panel__body dz-panel__body">' + body + '</div></section>';
+  }
+
+  /* Streams DAZN made of games that were not played on that date
+     (postponed, or abandoned and replayed). Left out of every figure, and
+     named here so a club that remembers the stream knows where it went. */
+  function notPlayedNote(np, nameOf, code) {
+    var list = D.values(np).sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+    if (!list.length) return '';
+    return '<p class="form-hint">Not counted: ' + list.map(function (m) {
+      var opp = m.home === code ? m.away : m.home;
+      return esc(window.NL.formatDateShort(m.date)) + ' v ' + esc(nameOf(opp) || opp) + ' (' + (m.home === code ? 'H' : 'A') + ')';
+    }).join(', ') + ' \u2014 not played on ' + (list.length === 1 ? 'that date' : 'those dates') + '.</p>';
   }
 
   /* ---- Render ------------------------------------------------------------ */
@@ -288,15 +343,28 @@
     var nameOf = o.nameOf || function () { return ''; };
     var months = Object.keys(all.reduce(function (m, g) { m[g.date.slice(0, 7)] = 1; return m; }, {})).sort();
     var F = { uk: 'all', venue: 'all', month: 'all' };
+    var view = 'month';
+
+    /* What Top games is ranked over, so the list is never ambiguous:
+       "2025-26", "April 2026", "2025-26 · Home · Not shown in UK". */
+    function context() {
+      var bits = [F.month !== 'all' ? MONTH_LONG.format(new Date(F.month + '-01T00:00:00Z')) : (o.seasonLabel || 'Season')];
+      if (F.venue !== 'all') bits.push(F.venue === 'home' ? 'Home' : 'Away');
+      if (F.uk !== 'all') bits.push(F.uk === 'uk' ? 'Shown in UK' : 'Not shown in UK');
+      return bits.join(' \u00b7 ');
+    }
 
     el.innerHTML = '<div class="dz-dash">' +
       '<div data-slicers></div>' +
       '<div data-kpis></div>' +
       '<div class="dz-row">' +
-        panel('Views by month', '<div data-months></div>', legend()) +
-        panel('Top games', '<div data-top></div>') +
+        panel('Views by month', '<div data-chart></div>',
+          '<span class="dz-panel__tools">' + chips('chart', [['month', 'By month'], ['game', 'By game']], 'month') + legend() + '</span>',
+          '', 'data-chart-title') +
+        panel('Top games', '<div data-top></div>', '<span class="dz-panel__ctx" data-top-ctx></span>') +
       '</div>' +
       panel('Games', '<div data-games></div>', legend(), 'dz-panel--flush') +
+      notPlayedNote(o.notPlayed, nameOf, o.code) +
       '<p class="form-hint">A view is counted per game, so someone who watched three games counts three times.</p>' +
     '</div>';
 
@@ -305,10 +373,15 @@
     function draw() {
       q('[data-slicers]').innerHTML = slicers(months, F);
       var shown = applyFilters(all, o.code, F);
+      q('[data-chart-title]').textContent = view === 'game' ? 'Views by game' : 'Views by month';
+      q('[data-top-ctx]').textContent = context();
       /* The month chart takes every slicer except the month itself, so the
          other months stay visible to click across to. */
-      q('[data-months]').innerHTML = monthChart(applyFilters(all, o.code, { uk: F.uk, venue: F.venue, month: 'all' }), months, F);
+      if (view === 'month') {
+        q('[data-chart]').innerHTML = monthChart(applyFilters(all, o.code, { uk: F.uk, venue: F.venue, month: 'all' }), months, F);
+      }
       if (!shown.length) {
+        if (view === 'game') q('[data-chart]').innerHTML = '';
         q('[data-kpis]').innerHTML = '';
         q('[data-top]').innerHTML = '';
         q('[data-games]').innerHTML = '<div class="empty-state"><div class="empty-state__title">No games match these slicers</div></div>';
@@ -317,9 +390,10 @@
       var s = D.summarise(shown, o.code);
       var rows = shown.map(function (g) {
         var home = g.home === o.code, opp = home ? g.away : g.home, total = g.ukViews + g.intlViews;
-        return { g: g, home: home, oppName: nameOf(opp) || opp, total: total,
+        return { g: g, home: home, oppName: nameOf(opp) || opp, oppCode: opp, total: total,
                  avg: total ? (g.ukMins + g.intlMins) / total : null };
       });
+      if (view === 'game') q('[data-chart]').innerHTML = gameChart(rows);
       q('[data-kpis]').innerHTML = kpis(s, o.bench, !filtered(F));
       q('[data-top]').innerHTML = topGames(rows);
       window.NL.clubs.wireCrestImgs(q('[data-top]'));
@@ -329,6 +403,14 @@
     el.onclick = function (e) {
       var chip = e.target.closest('.dz-slicers .chip[data-v]');
       if (chip) { F[chip.parentNode.getAttribute('data-f')] = chip.getAttribute('data-v'); draw(); return; }
+      var sw = e.target.closest('[data-f="chart"] .chip[data-v]');
+      if (sw) {
+        view = sw.getAttribute('data-v');
+        Array.prototype.forEach.call(sw.parentNode.querySelectorAll('.chip'), function (c) {
+          var on = c === sw; c.classList.toggle('active', on); c.setAttribute('aria-pressed', String(on));
+        });
+        draw(); return;
+      }
       var col = e.target.closest('.dz-col[data-month]');
       if (col) { var m = col.getAttribute('data-month'); F.month = F.month === m ? 'all' : m; draw(); return; }
       if (e.target.closest('[data-reset]')) { F = { uk: 'all', venue: 'all', month: 'all' }; draw(); }
@@ -340,7 +422,7 @@
   }
 
   window.DAZNView = {
-    render: render, grid: grid, applyFilters: applyFilters,
+    render: render, grid: grid, applyFilters: applyFilters, chips: chips, slicer: slicer, kpis: kpis,
     fmt: { n0: n0, n1: n1, compact: compact }
   };
 })();
