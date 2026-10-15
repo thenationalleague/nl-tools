@@ -87,6 +87,24 @@ Two tools carry a registry record but no row above: `ops-club-codes` and
 left rather than guessed at — their access models need reading off the tools
 themselves, not inferred from the registry defaults.
 
+### URL shape for a tool clubs use (settled 15/10/2026, Richard)
+
+**The tool's own address is the club's page; the League's console is
+`/admin/` on top.** Programme Packs is the model: `/programme/` for clubs by
+access code, `/programme/admin/` for staff behind auth-guard. When clubs later
+reach a tool through the portal instead of a code, the root page takes a
+portal session as well, and the address clubs hold never changes.
+
+| Tool | Shape |
+|---|---|
+| Programme Packs, DAZN Viewership | follows it |
+| Club Kits | no club page any more: the console is the root (public form retired 15/10/2026) |
+| Handbook, Club Directory | **undecided**: staff at the root, club page at `/reader/` |
+| Responsibilities (`/view/`), UW Promo | kept as they are, by decision |
+
+A page that moves leaves a redirect stub at its old address; clubs hold
+links this repo cannot see.
+
 ### Club audience — NL staff + clubs (7)
 
 | Tool | Key | League Admin | League Staff | Club Admin | Club Staff |
@@ -94,7 +112,7 @@ themselves, not inferred from the registry defaults.
 | **Attendance** | `ops-attendance` | edit all clubs; adjust neutral venues | view all | add own club's attendances (day-locked) | view own + anonymised others |
 | **Club Directory** | `ops-club-directory` | edit all club data | view all | edit own club's data | view all |
 | **Commercial Benchmarking** | `ops-commercial-benchmarking` | edit data | view benchmarks (club dropdown) | view output only | view output only |
-| **DAZN Viewership** | `media-dazn` | view all; import seasons | view all | own club only, at `/dazn/reader/` by club access code (rules: `clubs/$club` = claim) | same as Club Admin |
+| **DAZN Viewership** | `media-dazn` | view all; import seasons | view all | own club only, at `/dazn/` by club access code (rules: `clubs/$club` = claim) | same as Club Admin |
 | **Handbook 2026-27** | `ops-handbook` | edit content | view | view | view |
 | **Judgements & Decisions** | `ops-judgements` | **Manage** — add / amend / remove all | view | view | view |
 | **Vacancies** | `ops-vacancies` | **Manage** — full CRUD + approve/reject | view all | add/edit own club's; every submission needs NL approval | view all |

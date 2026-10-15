@@ -19,6 +19,7 @@ when someone asks for it, and when they do, this is where the thinking is.
 | [`league-tables.md`](league-tables.md) | 28/08/2026 | Canvas table-graphic tool, superseded by the Broadsheet rebuild at `/graphics/table-graphic/`. Its position-band palette was canon's, and was wrong. |
 | [`wellbeing.md`](wellbeing.md) | 08/10/2026 | Sixteen-page public mental-health section, replaced by `/wellbeing-hub/`. Still a redirect stub, deliberately. Records which two topics the replacement does not carry, and the four-rule design contract for public pages. |
 | [`fixtures.md`](fixtures.md) | 12/10/2026 | Hand-imported fixture list plus scheduling history. The list is now synced from NLS; the postponement model is what's worth keeping. |
+| [`photoshelter-onboarding.md`](photoshelter-onboarding.md) | 15/10/2026 | Open sign-up for the August 2026 PhotoShelter training. Its bookings (personal data) are still in RTDB and should be deleted. |
 
 ## Why one place
 

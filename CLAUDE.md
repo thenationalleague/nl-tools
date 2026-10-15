@@ -287,6 +287,8 @@ For async flows that need a live auth token mid-flight, use `NL.ensureAuth().the
 
 ## When you add a new tool
 
+If clubs will use the tool, its root is the club's page and the staff console is `/admin/` (the Programme Packs shape; see `system/tool-status-and-access.md`). Not `/reader/`.
+
 Use the `/new-tool <slug>` skill. It copies `system/_template/`, swaps the five placeholders, and runs the lint. The skill **does not** wire the tool into the system — two follow-ups remain, both RTDB config:
 
 1. **RTDB `tools/<toolKey>` record** (label, url, icon, department, `defaults` per role). One record = portal card + auth-guard access. Without it the page is superadmin-only and invisible on the portal. **Check `system/rtdb/tools-registry.snapshot.json` first — the record may already exist.** When adding one, update that snapshot in the same PR and tell the user to paste it into RTDB `tools/`.

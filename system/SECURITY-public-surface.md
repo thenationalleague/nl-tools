@@ -53,7 +53,7 @@ trade-off or verification task, no code fix required now.
 | `wellbeing/index.html` | A named support contact's phone/email, published on a deliberately-public page. | Review — see PII note |
 | `admin/invites/$token` (`.read:true`) | Invite name/email/role, readable with the UUID token. | Review (low) |
 | `ops-vacancies/analytics` (`.write:true`) | World-writable anonymous click node. | Review (low) |
-| `ops-club-kits/submissions` | Public read + fully unauthenticated create (colours only). | Review (doc) |
+| `ops-club-kits/submissions` | Public read; write admin-only since 15/10/2026, when the public form was retired (colours only). | Closed |
 | `admin/tool-requests` (`.write:"auth != null"`) | Any signed-in user can write the request queue. | Review (low) |
 | `ops-attendance/submissions` + `archive` (`.read:"auth != null"`) | Any authenticated principal can read across clubs. | Review (low) |
 | nl-widgets `users`/`predictions`/`motm` per `$jwtId` (`.read:"auth != null"`) | A fan can read another fan's forename/initial/team/prediction if they know the jwtId. | Review (low, minor PII) |
