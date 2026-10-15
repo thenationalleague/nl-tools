@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Matchday Live
+  Version: v1.0 (15/10/2026)
+  File: /matchday-live/index.html
+
+  The staff feed for contributor clips. Contributors at grounds record
+  20-second vertical updates on the capture page (/matchday-live/c/); each
+  lands here under its match, attached to the goal or card it is about, with
+  the score at the time. Review, approve, reject, re-tag and download.
+  Manage-level users also add contributors and issue their personal links.
+
+  Storage (RTDB, nl-tools):
+    app-data/media-matchday-live/matchdays/<ymd>/<matchId>  today's matches,
+                                    goals and cards — written ONLY by the
+                                    matchdayLiveSync function, read here live
+    app-data/media-matchday-live/clips/<ymd>/<clipId>       clip records
+    app-data/media-matchday-live/contributors/<id>          name, type, club,
+                                    outlet, credit, active — reviewers read,
+                                    Manage writes
+    app-data/media-matchday-live/secrets/<id>               { tokenHash }
+    app-data/media-matchday-live/keys/<hash>                → contributor id,
+                                    the trigger's lookup; write-only here
+    app-data/media-matchday-live/consent/<id>               { version, at }
+    app-data/media-matchday-live/config/consent             { version, text }
+    app-data/media-matchday-live/pace/<id>                  last clip time
+    tools/media-matchday-live                               registry record
+  Storage (Firebase Storage):
+    matchday-live/<ymd>/<contributorId>/<clipId>.<webm|mp4>
+
+  Access (auth-guard registry — tools/media-matchday-live):
+    superadmin → Manage · League Admin → Use · everyone else off by default.
+    Use    = review the feed (approve / reject / re-tag / download).
+    Manage = also the Contributors tab: add, edit, deactivate, issue links,
+             and the consent wording. The RTDB rules enforce the same split.
+
+  Link tokens are generated in this browser, shown once, and stored only as a
+  SHA-256 hash. Nothing — not this page, not a superadmin reading the database —
+  can show a working link again; a lost link is replaced by issuing a new one,
+  which kills the old one on the contributor's next read.
+
+  Technical changelog
+    v1.0  15/10/2026  Initial build: match cards with event timelines, clip
+                      review, live updates, gap flags, contributor admin with
+                      hashed personal links, editable consent wording.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Matchday Live — NL Tools</title>
+  <!-- Favicons. Static, not injected: nl-topbar.js adds these too, but a
+       standalone page never loads it, and an icon that arrives with the JS
+       leaves the tab blank until it does. /favicon.ico at the root is the
+       backstop every browser asks for without being told. -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+
+  <!-- Brand stylesheet (lint canonical: ?v=66) -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=67">
+
+  <!-- Firebase 10.12.0 SDK (compat) — storage for clip download URLs -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'Matchday Live',
+      toolKey: 'media-matchday-live'
+    };
+    var NL_TOOL_KEY = 'media-matchday-live';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '15/10/2026',
+        version: 'v1.0',
+        items: [
+          'Clips from contributors at grounds appear under their match as they arrive, filed against the goal or card they are about.',
+          'Approve, reject, download, copy share text, or move a clip to a different event.',
+          'Live matches with no clips yet are flagged.',
+          'Contributors tab (Manage): add people, issue or replace their personal link, and edit the consent wording.'
+        ]
+      }
+    ];
+
+    /* auth-guard fires this once the session is verified + pageWrap is
+       revealed. Boot the main app from here so RTDB reads happen with a
+       live auth token. Do NOT read RTDB before this fires. */
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts (lint canonical: ?v=48 / ?v=1 / ?v=10 / ?v=16) -->
+  <script src="/system/nl-utils.js?v=48"></script>
+  <!-- GA4, one property for all of nl.tools. Cookieless, so no consent
+       banner on any page; page views by path, no identity. Tool events go
+       through NL.track(). See system/nl-analytics.js. -->
+  <script src="/system/nl-analytics.js?v=1"></script>
+  <script src="/system/nl-topbar.js?v=10"></script>
+  <script src="/system/auth-guard.js?v=16"></script>
+
+<style>
+  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
+     style.display = 'block'. Don't clear with '' — would re-trigger the
+     brand rule and re-hide the page. */
+
+  .mdl-pane[hidden] { display: none; }
+  .mdl-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 16px 0; }
+  .mdl-bar input[type="date"] {
+    padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius);
+    font-family: var(--font); font-size: var(--text-sm); background: var(--white);
+  }
+
+  .mdl-match {
+    background: var(--white); border: 1px solid var(--border); border-radius: var(--radius-lg);
+    margin-bottom: 16px; overflow: hidden;
+  }
+  .mdl-match__head {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--off-white);
+  }
+  .mdl-match__teams { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0;
+    font-weight: 800; font-variation-settings: 'wght' 800; color: var(--navy); }
+  .mdl-match__teams img { width: 24px; height: 24px; object-fit: contain; }
+  .mdl-match__score { font-size: var(--text-lg); padding: 0 6px; white-space: nowrap; }
+  .mdl-match__div { font-size: var(--text-xs); color: var(--text-muted); }
+  .mdl-match__body { padding: 4px 16px 12px; }
+  .mdl-match__empty { padding: 12px 0; color: var(--text-muted); font-size: var(--text-sm); }
+
+  .mdl-row { padding: 10px 0; border-bottom: 1px solid var(--navy-50); }
+  .mdl-row:last-child { border-bottom: 0; }
+  .mdl-row__head { display: flex; gap: 10px; align-items: baseline; font-size: var(--text-sm); }
+  .mdl-row__min { min-width: 44px; font-weight: 800; font-variation-settings: 'wght' 800; color: var(--navy); }
+  .mdl-row__what { color: var(--text); }
+  .mdl-row__team { color: var(--text-muted); font-size: var(--text-xs); }
+  .mdl-clips { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0 0 54px; }
+
+  .mdl-clip { display: flex; gap: 12px; width: 540px; max-width: 100%;
+    border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; background: var(--white); }
+  .mdl-clip--new { border-color: var(--primary-300); }
+  .mdl-clip video, .mdl-clip__gone {
+    width: 108px; aspect-ratio: 9 / 16; background: var(--navy-900); border-radius: var(--radius-sm);
+    object-fit: cover; flex: 0 0 auto;
+  }
+  .mdl-clip__gone { display: flex; align-items: center; justify-content: center; text-align: center;
+    color: var(--navy-200); font-size: var(--text-xs); padding: 6px; }
+  .mdl-clip__meta { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1 1 auto; }
+  .mdl-clip__who { font-weight: 800; font-variation-settings: 'wght' 800; font-size: var(--text-sm); color: var(--navy); }
+  .mdl-clip__sub { font-size: var(--text-xs); color: var(--text-muted); }
+  .mdl-clip__caption { font-size: var(--text-sm); overflow-wrap: anywhere; }
+  .mdl-clip__actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: auto; }
+  .mdl-clip__actions select { font-size: var(--text-xs); max-width: 100%; }
+
+  .mdl-link { width: 100%; font-family: var(--font-mono); font-size: var(--text-xs); padding: 10px;
+    border: 1px solid var(--border); border-radius: var(--radius); background: var(--off-white); }
+
+  @media (max-width: 600px) {
+    .mdl-clips { margin-left: 0; }
+    .mdl-clip { width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Topbar — auto-rendered by /system/nl-topbar.js from window.NL_TOOL -->
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="page">
+
+    <div class="tabs" id="tabs" role="tablist" hidden>
+      <button class="tab active" type="button" data-pane="feed" role="tab">Feed</button>
+      <button class="tab" type="button" data-pane="people" role="tab">Contributors</button>
+    </div>
+
+    <!-- ── Feed ─────────────────────────────────────────────────────── -->
+    <section class="mdl-pane" id="pane-feed">
+      <div class="mdl-bar">
+        <input type="date" id="day" aria-label="Matchday">
+        <div class="chip-group" id="divs" role="group" aria-label="Division">
+          <button class="chip active" type="button" data-div="">All</button>
+          <button class="chip" type="button" data-div="nl">National</button>
+          <button class="chip" type="button" data-div="north">North</button>
+          <button class="chip" type="button" data-div="south">South</button>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><div class="stat__num" id="statNew">0</div><div class="stat__label">New</div></div>
+        <div class="stat"><div class="stat__num" id="statApproved">0</div><div class="stat__label">Approved</div></div>
+        <div class="stat"><div class="stat__num" id="statGaps">0</div><div class="stat__label">Live, no clips</div></div>
+      </div>
+
+      <div id="matches"></div>
+    </section>
+
+    <!-- ── Contributors (Manage only) ─────────────────────────────────── -->
+    <section class="mdl-pane" id="pane-people" hidden>
+      <div class="section-head">
+        <h2>Contributors</h2>
+        <button class="btn btn--primary" type="button" id="btnAdd">+ Add contributor</button>
+      </div>
+      <div class="table-wrap">
+        <table class="table table--compact">
+          <thead><tr><th>Name</th><th>Club / outlet</th><th>Credit</th><th>Status</th><th>Consent</th><th>Last clip</th><th></th></tr></thead>
+          <tbody id="people"></tbody>
+        </table>
+      </div>
+
+      <div class="section-head" style="margin-top:32px;">
+        <h2>Consent wording</h2>
+        <span class="pill pill--info" id="consentVer">—</span>
+      </div>
+      <div class="form-group">
+        <textarea id="consentText" rows="8" maxlength="4000" aria-label="Consent wording"></textarea>
+        <div class="form-hint">Saving creates a new version. Everyone is asked to agree again before their next clip.</div>
+      </div>
+      <button class="btn btn--navy" type="button" id="btnConsent">Save as new version</button>
+    </section>
+
+  </div>
+</div>
+
+<!-- Main app -->
+<script>
+(function () {
+  'use strict';
+
+  var ROOT = 'app-data/media-matchday-live';
+  var DIV_LABEL = { nl: 'National League', north: 'National League North', south: 'National League South' };
+  var KIND = { goal: '⚽ Goal', red: '🟥 Red card', yellow: '🟨 Yellow card' };
+  var GENERAL = { warmup: 'Warm-up', teamnews: 'Team news', halftime: 'Half-time', atmosphere: 'Atmosphere', fulltime: 'Full-time' };
+
+  var session = null, isManager = false;
+  var state = {
+    ymd: null, div: '',
+    matches: {}, clips: {}, people: {}, consent: {}, pace: {},
+    known: null           // clip ids seen at first load — anything after is "new arrival"
+  };
+  var refs = [];          // live listeners for the current day, detached on change
+  var urlCache = {};      // storagePath → download URL
+  var clipEls = {};       // clipId → { sig, el } — reused so a playing video survives a re-render
+  var renderQueued = false;
+
+  /* ── small DOM helper ─────────────────────────────────────────────── */
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function todayYmd() {
+    var d = new Date();
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  }
+  function minLabel(min, fm) {
+    if (fm) return String(fm).replace("'", '′');
+    return typeof min === 'number' ? min + '′' : '—';
+  }
+
+  /* ── boot ─────────────────────────────────────────────────────────── */
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function (s) {
+    session = s;
+    isManager = s && s.toolLevel === 'admin';
+    if (isManager) document.getElementById('tabs').hidden = false;
+    wireTabs();
+    wireFilters();
+    NL.clubs.load().catch(function () {}).then(function () {
+      return NL.ensureAuth();
+    }).then(function () {
+      db.ref(ROOT + '/contributors').on('value', function (snap) {
+        state.people = snap.val() || {};
+        queueRender();
+        if (isManager) renderPeople();
+      });
+      if (isManager) wireManage();
+      setDay(todayYmd());
+    }).catch(function (e) {
+      NL.toast('Could not load: ' + e.message, 'error');
+    });
+  };
+
+  function wireTabs() {
+    var tabs = document.querySelectorAll('#tabs .tab');
+    Array.prototype.forEach.call(tabs, function (t) {
+      t.addEventListener('click', function () {
+        Array.prototype.forEach.call(tabs, function (x) { x.classList.toggle('active', x === t); });
+        document.getElementById('pane-feed').hidden = t.getAttribute('data-pane') !== 'feed';
+        document.getElementById('pane-people').hidden = t.getAttribute('data-pane') !== 'people';
+      });
+    });
+  }
+
+  function wireFilters() {
+    var day = document.getElementById('day');
+    day.addEventListener('change', function () { if (day.value) setDay(day.value); });
+    var chips = document.querySelectorAll('#divs .chip');
+    Array.prototype.forEach.call(chips, function (c) {
+      c.addEventListener('click', function () {
+        Array.prototype.forEach.call(chips, function (x) { x.classList.toggle('active', x === c); });
+        state.div = c.getAttribute('data-div');
+        queueRender();
+      });
+    });
+  }
+
+  /* ── live data for one day ────────────────────────────────────────── */
+  function setDay(ymd) {
+    refs.forEach(function (r) { r.off(); });
+    refs = [];
+    state.ymd = ymd;
+    state.matches = {};
+    state.clips = {};
+    state.known = null;
+    document.getElementById('day').value = ymd;
+
+    var mRef = db.ref(ROOT + '/matchdays/' + ymd);
+    var cRef = db.ref(ROOT + '/clips/' + ymd);
+    refs.push(mRef, cRef);
+    mRef.on('value', function (snap) { state.matches = snap.val() || {}; queueRender(); },
+      function (e) { NL.toast('Matches: ' + e.message, 'error'); });
+    cRef.on('value', function (snap) {
+      var clips = snap.val() || {};
+      announceArrivals(clips);
+      state.clips = clips;
+      queueRender();
+    }, function (e) { NL.toast('Clips: ' + e.message, 'error'); });
+  }
+
+  function announceArrivals(clips) {
+    if (!state.known) {
+      state.known = {};
+      Object.keys(clips).forEach(function (id) { if (clips[id].status !== 'uploading') state.known[id] = true; });
+      return;
+    }
+    Object.keys(clips).forEach(function (id) {
+      var c = clips[id];
+      if (state.known[id] || c.status === 'uploading') return;
+      state.known[id] = true;
+      var m = state.matches[c.matchId];
+      var who = (state.people[c.contributorId] || {}).name || 'A contributor';
+      NL.toast('New clip: ' + who + (m ? ' · ' + m.home.name + ' v ' + m.away.name : ''), 'info');
+    });
+  }
+
+  function queueRender() {
+    if (renderQueued) return;
+    renderQueued = true;
+    requestAnimationFrame(function () { renderQueued = false; renderFeed(); });
+  }
+
+  /* ── feed render ──────────────────────────────────────────────────── */
+  function clipsByMatch() {
+    var out = {};
+    Object.keys(state.clips).forEach(function (id) {
+      var c = state.clips[id];
+      if (!c || c.status === 'uploading') return;
+      (out[c.matchId] || (out[c.matchId] = [])).push({ id: id, c: c });
+    });
+    return out;
+  }
+
+  function renderFeed() {
+    var wrap = document.getElementById('matches');
+    var byMatch = clipsByMatch();
+    var ids = Object.keys(state.matches).filter(function (id) {
+      return !state.div || state.matches[id].comp === state.div;
+    });
+
+    var nNew = 0, nApproved = 0, nGaps = 0;
+    ids.forEach(function (id) {
+      (byMatch[id] || []).forEach(function (x) {
+        if (x.c.status === 'new') nNew++;
+        if (x.c.status === 'approved') nApproved++;
+      });
+      if (state.matches[id].live && !(byMatch[id] || []).length) nGaps++;
+    });
+    document.getElementById('statNew').textContent = nNew;
+    document.getElementById('statApproved').textContent = nApproved;
+    document.getElementById('statGaps').textContent = nGaps;
+
+    /* Matches with clips first, then live, then the rest by kick-off. Gaps
+       float up within the live group so they are where the eye starts. */
+    ids.sort(function (a, b) {
+      var A = state.matches[a], B = state.matches[b];
+      var ra = (byMatch[a] ? 0 : A.live ? 1 : 2), rb = (byMatch[b] ? 0 : B.live ? 1 : 2);
+      if (ra !== rb) return ra - rb;
+      return String(A.ko || '').localeCompare(String(B.ko || '')) ||
+        String(A.home.name).localeCompare(String(B.home.name));
+    });
+
+    wrap.textContent = '';
+    if (!ids.length) {
+      var empty = el('div', 'empty-state');
+      empty.appendChild(el('div', 'empty-state__icon', '🎥'));
+      empty.appendChild(el('div', 'empty-state__msg',
+        Object.keys(state.matches).length ? 'No matches in this division.' : 'No matches on ' + NL.formatDate(state.ymd) + '.'));
+      wrap.appendChild(empty);
+      return;
+    }
+    ids.forEach(function (id) { wrap.appendChild(matchCard(id, state.matches[id], byMatch[id] || [])); });
+  }
+
+  function crestImg(team) {
+    var club = team && team.id ? NL.clubs.byOpta(team.id) : null;
+    var img = el('img');
+    img.alt = '';
+    img.src = NL.clubs.crestUrl(club ? club.name : team.name, 'thumb');
+    NL.clubs.wireCrestImg(img, club ? club.name : team.name, true);
+    return img;
+  }
+
+  function statusPill(m) {
+    var p = el('span', 'pill');
+    if (m.postponed) { p.className += ' pill--postponed'; p.textContent = 'Postponed'; }
+    else if (m.finished) { p.className += ' pill--info'; p.textContent = 'FT'; }
+    else if (m.period === 'halftime') { p.className += ' pill--pending'; p.textContent = 'HT'; }
+    else if (m.live) { p.className += ' pill--live'; p.textContent = minLabel(m.minute, m.fm); }
+    else { p.className += ' pill--soon'; p.textContent = m.ko ? NL.formatTime(m.ko) : 'Pre-match'; }
+    return p;
+  }
+
+  function matchCard(id, m, clips) {
+    var card = el('article', 'mdl-match');
+    var head = el('div', 'mdl-match__head');
+    var teams = el('div', 'mdl-match__teams');
+    teams.appendChild(crestImg(m.home));
+    teams.appendChild(el('span', null, m.home.name));
+    var score = (m.home.score != null && m.away.score != null) ? m.home.score + '–' + m.away.score : 'v';
+    teams.appendChild(el('span', 'mdl-match__score', score));
+    teams.appendChild(el('span', null, m.away.name));
+    teams.appendChild(crestImg(m.away));
+    head.appendChild(teams);
+    head.appendChild(el('span', 'mdl-match__div', DIV_LABEL[m.comp] || ''));
+    head.appendChild(statusPill(m));
+    if (m.live && !clips.length) head.appendChild(el('span', 'pill pill--pending', 'No clips yet'));
+    card.appendChild(head);
+
+    var body = el('div', 'mdl-match__body');
+    var rows = timeline(m, clips);
+    if (!rows.length) body.appendChild(el('div', 'mdl-match__empty', 'No goals, cards or clips yet.'));
+    rows.forEach(function (r) { body.appendChild(rowEl(id, m, r)); });
+    card.appendChild(body);
+    return card;
+  }
+
+  /* Events and clips on one minute-ordered list, newest first. A clip sits
+     under the event it is tagged to; a general update, a clip still waiting
+     for its event, or one whose event was retracted gets a row of its own at
+     its own minute. */
+  function timeline(m, clips) {
+    var events = m.events || {};
+    var rows = [], byEvent = {};
+    Object.keys(events).forEach(function (k) {
+      var r = { kind: 'event', key: k, e: events[k], minute: events[k].minute, clips: [] };
+      byEvent[k] = r;
+      rows.push(r);
+    });
+    clips.forEach(function (x) {
+      var c = x.c;
+      if (c.eventId && byEvent[c.eventId]) { byEvent[c.eventId].clips.push(x); return; }
+      rows.push({ kind: c.pendingEventMatch ? 'pending' : (c.eventId ? 'orphan' : 'general'),
+        minute: c.minute, clips: [x], c: c });
+    });
+    rows.forEach(function (r) { r.clips.sort(function (a, b) { return (b.c.createdAt || 0) - (a.c.createdAt || 0); }); });
+    rows.sort(function (a, b) {
+      var ma = typeof a.minute === 'number' ? a.minute : -1, mb = typeof b.minute === 'number' ? b.minute : -1;
+      if (ma !== mb) return mb - ma;
+      return (a.kind === 'event' ? 0 : 1) - (b.kind === 'event' ? 0 : 1);
+    });
+    return rows;
+  }
+
+  function eventText(e, m) {
+    var what = KIND[e.kind] || e.kind;
+    if (e.player) what += ' – ' + e.player;
+    if (e.pen) what += ' (pen)';
+    if (e.og) what += ' (og)';
+    return what;
+  }
+
+  function rowEl(matchId, m, r) {
+    var row = el('div', 'mdl-row');
+    var head = el('div', 'mdl-row__head');
+    if (r.kind === 'event') {
+      head.appendChild(el('span', 'mdl-row__min', minLabel(r.e.minute, r.e.fm)));
+      head.appendChild(el('span', 'mdl-row__what', eventText(r.e, m)));
+      var team = r.e.side === 'home' ? m.home.name : r.e.side === 'away' ? m.away.name : '';
+      if (team) head.appendChild(el('span', 'mdl-row__team', team));
+    } else {
+      head.appendChild(el('span', 'mdl-row__min', minLabel(r.minute)));
+      var label = r.kind === 'pending' ? 'Waiting for its event to reach the feed'
+        : r.kind === 'orphan' ? 'Its event was withdrawn — re-tag it'
+        : 'General update' + (r.c.generalKind && GENERAL[r.c.generalKind] ? ' · ' + GENERAL[r.c.generalKind] : '');
+      head.appendChild(el('span', 'mdl-row__what', label));
+    }
+    row.appendChild(head);
+    if (r.clips.length) {
+      var list = el('div', 'mdl-clips');
+      r.clips.forEach(function (x) { list.appendChild(clipEl(matchId, m, x.id, x.c)); });
+      row.appendChild(list);
+    }
+    return row;
+  }
+
+  /* ── one clip ─────────────────────────────────────────────────────── */
+  function personOf(c) { return state.people[c.contributorId] || {}; }
+  function creditOf(p) {
+    if (p.credit) return p.credit;
+    var where = p.type === 'club' ? p.club : p.outlet;
+    return (p.name || 'Contributor') + (where ? ' / ' + where : '');
+  }
+
+  function clipEl(matchId, m, id, c) {
+    var p = personOf(c);
+    /* Reuse the element when nothing it shows has changed, so a video someone
+       is watching is not torn down by an unrelated clip arriving. */
+    var events = m.events || {};
+    var sig = JSON.stringify([c.status, c.eventId || null, c.pendingEventMatch || false, c.caption || '',
+      c.purgedAt || 0, p.name, p.type, p.club, p.outlet, Object.keys(events).length]);
+    if (clipEls[id] && clipEls[id].sig === sig) return clipEls[id].el;
+    var keepVideo = clipEls[id] && clipEls[id].video;
+
+    var box = el('div', 'mdl-clip' + (c.status === 'new' ? ' mdl-clip--new' : ''));
+    var video = null;
+    if (c.purgedAt) {
+      box.appendChild(el('div', 'mdl-clip__gone', 'Video deleted after rejection'));
+    } else {
+      video = keepVideo || el('video');
+      if (!keepVideo) {
+        video.controls = true;
+        video.playsInline = true;
+        video.preload = 'metadata';
+        loadVideo(video, c.storagePath);
+      }
+      box.appendChild(video);
+    }
+
+    var meta = el('div', 'mdl-clip__meta');
+    meta.appendChild(el('div', 'mdl-clip__who', p.name || 'Unknown contributor'));
+    var sub = (p.type === 'media' ? 'Media' : 'Club') + ((p.type === 'club' ? p.club : p.outlet) ? ' · ' + (p.type === 'club' ? p.club : p.outlet) : '');
+    sub += ' · ' + minLabel(c.minute) + (c.scoreAtTime ? ' · ' + c.scoreAtTime : '');
+    meta.appendChild(el('div', 'mdl-clip__sub', sub));
+    if (c.caption) meta.appendChild(el('div', 'mdl-clip__caption', c.caption));
+
+    var pill = el('span', 'pill ' + (c.status === 'approved' ? 'pill--approved' : c.status === 'rejected' ? 'pill--rejected' : 'pill--pending'),
+      c.status === 'approved' ? 'Approved' : c.status === 'rejected' ? 'Rejected' : 'New');
+    var pillWrap = el('div');
+    pillWrap.appendChild(pill);
+    meta.appendChild(pillWrap);
+
+    var actions = el('div', 'mdl-clip__actions');
+    if (c.status !== 'approved') actions.appendChild(btn('Approve', 'btn--primary', function () { review(id, 'approved'); }));
+    if (c.status !== 'rejected') actions.appendChild(btn('Reject', 'btn--ghost', function () { review(id, 'rejected'); }));
+    if (!c.purgedAt) actions.appendChild(btn('Download', 'btn--ghost', function () { download(m, c, p); }));
+    actions.appendChild(btn('Copy share text', 'btn--ghost', function () {
+      NL.copy((c.caption ? c.caption + '\n\n' : '') + '🎥 ' + creditOf(p), { ok: 'Share text copied' });
+    }));
+    actions.appendChild(retagSelect(id, m, c));
+    meta.appendChild(actions);
+    box.appendChild(meta);
+
+    clipEls[id] = { sig: sig, el: box, video: video };
+    return box;
+  }
+
+  function btn(label, cls, fn) {
+    var b = el('button', 'btn btn--sm ' + cls, label);
+    b.type = 'button';
+    b.addEventListener('click', fn);
+    return b;
+  }
+
+  function loadVideo(video, path) {
+    if (!path) return;
+    var go = function (url) { video.src = url + '#t=0.1'; };
+    if (urlCache[path]) { go(urlCache[path]); return; }
+    firebase.storage().ref(path).getDownloadURL()
+      .then(function (url) { urlCache[path] = url; go(url); })
+      .catch(function () { video.replaceWith(el('div', 'mdl-clip__gone', 'Video not found')); });
+  }
+
+  function retagSelect(id, m, c) {
+    var s = el('select', 'nl-select');
+    s.setAttribute('aria-label', 'Filed under');
+    var events = m.events || {};
+    var keys = Object.keys(events).sort(function (a, b) { return (events[b].minute || 0) - (events[a].minute || 0); });
+    var opts = [['', 'General update']];
+    keys.forEach(function (k) { opts.push([k, minLabel(events[k].minute, events[k].fm) + ' ' + eventText(events[k], m)]); });
+    opts.forEach(function (o) {
+      var op = el('option', null, o[1]);
+      op.value = o[0];
+      s.appendChild(op);
+    });
+    if (c.pendingEventMatch) {
+      var w = el('option', null, 'Waiting for its event');
+      w.value = '__pending';
+      s.insertBefore(w, s.firstChild);
+    }
+    s.value = c.pendingEventMatch ? '__pending' : (c.eventId && events[c.eventId] ? c.eventId : '');
+    s.addEventListener('change', function () {
+      if (s.value === '__pending') return;
+      write('clips/' + state.ymd + '/' + id, {
+        eventId: s.value || null, pendingEventMatch: null, retaggedBy: session.uid || null
+      }, 'Moved');
+    });
+    return s;
+  }
+
+  function review(id, status) {
+    write('clips/' + state.ymd + '/' + id, {
+      status: status, reviewedBy: session.uid || null,
+      reviewedAt: firebase.database.ServerValue.TIMESTAMP
+    }, status === 'approved' ? 'Approved' : 'Rejected — the video is deleted in 7 days');
+  }
+
+  function write(path, data, okMsg) {
+    return NL.ensureAuth().then(function () {
+      return db.ref(ROOT + '/' + path).update(data);
+    }).then(function () { if (okMsg) NL.toast(okMsg, 'success'); })
+      .catch(function (e) { NL.toast('Not saved: ' + e.message, 'error'); });
+  }
+
+  function download(m, c, p) {
+    var ext = (c.storagePath || '').split('.').pop() || 'webm';
+    var safe = function (s) { return String(s || '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, ''); };
+    var name = [state.ymd, safe(m.home.name) + '-v-' + safe(m.away.name),
+      (typeof c.minute === 'number' ? c.minute + 'min' : 'gen'), safe(p.name)].join('_') + '.' + ext;
+    var get = urlCache[c.storagePath] ? Promise.resolve(urlCache[c.storagePath])
+      : firebase.storage().ref(c.storagePath).getDownloadURL();
+    get.then(function (url) {
+      return fetch(url).then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.blob();
+      }).then(function (blob) { NL.download(name, blob); })
+        ['catch'](function () { window.open(url, '_blank', 'noopener'); });
+    })['catch'](function (e) { NL.toast('Download failed: ' + e.message, 'error'); });
+  }
+
+  /* ── Contributors (Manage) ────────────────────────────────────────── */
+  function wireManage() {
+    db.ref(ROOT + '/consent').on('value', function (s) { state.consent = s.val() || {}; renderPeople(); });
+    db.ref(ROOT + '/pace').on('value', function (s) { state.pace = s.val() || {}; renderPeople(); });
+    db.ref(ROOT + '/config/consent').on('value', function (s) {
+      var v = s.val() || {};
+      state.consentCfg = v;
+      document.getElementById('consentVer').textContent = v.version ? 'Version ' + v.version : 'Not set';
+      var ta = document.getElementById('consentText');
+      if (document.activeElement !== ta) ta.value = v.text || '';
+    });
+    document.getElementById('btnAdd').addEventListener('click', function () { editPerson(null); });
+    document.getElementById('btnConsent').addEventListener('click', saveConsent);
+  }
+
+  function renderPeople() {
+    var tb = document.getElementById('people');
+    if (!tb) return;
+    tb.textContent = '';
+    var ids = Object.keys(state.people).sort(function (a, b) {
+      return String(state.people[a].name).localeCompare(String(state.people[b].name));
+    });
+    if (!ids.length) {
+      var tr = el('tr'), td = el('td', 'empty-state');
+      td.colSpan = 7;
+      td.appendChild(el('div', 'empty-state__msg', 'No contributors yet.'));
+      tr.appendChild(td);
+      tb.appendChild(tr);
+      return;
+    }
+    var cfgVer = (state.consentCfg || {}).version || 0;
+    ids.forEach(function (id) {
+      var p = state.people[id], tr = el('tr');
+      var name = el('td');
+      name.appendChild(el('div', null, p.name));
+      name.appendChild(el('div', 'mdl-clip__sub', p.type === 'media' ? 'Media' : 'Club media officer'));
+      tr.appendChild(name);
+      tr.appendChild(el('td', null, [p.club, p.outlet].filter(Boolean).join(' · ') || 'Any match'));
+      tr.appendChild(el('td', null, creditOf(p)));
+      var st = el('td');
+      st.appendChild(el('span', 'pill ' + (p.active ? 'pill--approved' : 'pill--expired'), p.active ? 'Active' : 'Off'));
+      tr.appendChild(st);
+      var con = state.consent[id];
+      tr.appendChild(el('td', null, !con ? 'Not yet'
+        : (con.version < cfgVer ? 'v' + con.version + ' (out of date)' : 'v' + con.version + ' · ' + NL.formatDate(con.at))));
+      tr.appendChild(el('td', null, state.pace[id] ? NL.timeAgo(state.pace[id]) : '—'));
+      var act = el('td');
+      act.appendChild(btn('Edit', 'btn--ghost', function () { editPerson(id); }));
+      act.appendChild(btn('New link', 'btn--ghost', function () { rotate(id); }));
+      act.appendChild(btn(p.active ? 'Deactivate' : 'Reactivate', 'btn--ghost', function () { toggleActive(id); }));
+      tr.appendChild(act);
+      tb.appendChild(tr);
+    });
+  }
+
+  function field(label, input, hint) {
+    var g = el('div', 'form-group');
+    var l = el('label', null, label);
+    g.appendChild(l);
+    g.appendChild(input);
+    if (hint) g.appendChild(el('div', 'form-hint', hint));
+    return g;
+  }
+
+  function editPerson(id) {
+    var p = id ? Object.assign({}, state.people[id]) : { type: 'club', active: true };
+    var form = el('div');
+    var name = el('input'); name.maxLength = 80; name.value = p.name || '';
+    var type = el('select');
+    [['club', 'Club media officer'], ['media', 'Local media']].forEach(function (o) {
+      var op = el('option', null, o[1]); op.value = o[0]; type.appendChild(op);
+    });
+    type.value = p.type || 'club';
+    var clubMount = el('div');
+    var outlet = el('input'); outlet.maxLength = 80; outlet.value = p.outlet || '';
+    var credit = el('input'); credit.maxLength = 80; credit.value = p.credit || '';
+    credit.placeholder = 'Defaults to name / club or outlet';
+
+    form.appendChild(field('Name', name));
+    form.appendChild(field('Type', type));
+    var clubField = field('Club', clubMount, 'Leave blank for a reporter covering any match.');
+    var outletField = field('Outlet', outlet);
+    form.appendChild(clubField);
+    form.appendChild(outletField);
+    form.appendChild(field('Credit line', credit));
+    function syncType() { outletField.hidden = type.value !== 'media'; }
+    type.addEventListener('change', syncType);
+    syncType();
+
+    var chosenClub = p.club || null;
+    var picker = NL.clubPicker(clubMount, {
+      mode: 'search', season: 'current', value: chosenClub,
+      onSelect: function (sel) { chosenClub = sel && sel.name ? sel.name : null; }
+    });
+
+    NL.modal({
+      title: id ? 'Edit contributor' : 'Add contributor',
+      body: form,
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: id ? 'Save' : 'Add and issue link', className: 'btn--primary', onClick: function (ctrl) {
+          var v = picker.getValue ? picker.getValue() : chosenClub;
+          var clubName = (v && v.name) || (typeof v === 'string' ? v : null) || null;
+          var rec = {
+            name: name.value.trim(),
+            type: type.value,
+            club: clubName,
+            clubOpta: clubName && NL.clubs.byName(clubName) ? (NL.clubs.byName(clubName).optaID || null) : null,
+            outlet: type.value === 'media' ? (outlet.value.trim() || null) : null,
+            credit: credit.value.trim() || null,
+            active: id ? p.active !== false : true
+          };
+          if (!rec.name) { NL.toast('Add a name', 'error'); return; }
+          ctrl.close();
+          if (id) {
+            write('contributors/' + id, rec, 'Saved');
+          } else {
+            rec.createdAt = firebase.database.ServerValue.TIMESTAMP;
+            rec.createdBy = session.uid || null;
+            createPerson(rec);
+          }
+        } }
+      ]
+    });
+  }
+
+  /* 24 random bytes → 32 base64url characters. The same shape the trigger
+     validates (functions/matchday-live-core.js validToken). */
+  function newToken() {
+    var b = new Uint8Array(24);
+    crypto.getRandomValues(b);
+    var s = '';
+    for (var i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function sha256hex(text) {
+    return crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)).then(function (buf) {
+      return Array.prototype.map.call(new Uint8Array(buf), function (x) { return ('0' + x.toString(16)).slice(-2); }).join('');
+    });
+  }
+
+  function createPerson(rec) {
+    var id = db.ref(ROOT + '/contributors').push().key;
+    var token = newToken();
+    sha256hex(token).then(function (hash) {
+      var u = {};
+      u['contributors/' + id] = rec;
+      u['secrets/' + id] = { tokenHash: hash, issuedAt: firebase.database.ServerValue.TIMESTAMP };
+      u['keys/' + hash] = id;
+      return NL.ensureAuth().then(function () { return db.ref(ROOT).update(u); });
+    }).then(function () { showLink(rec.name, token); })
+      ['catch'](function (e) { NL.toast('Not added: ' + e.message, 'error'); });
+  }
+
+  function rotate(id) {
+    var p = state.people[id] || {};
+    NL.confirm('Issue a new link for ' + p.name + '?', {
+      title: 'New link', confirmText: 'Issue new link', variant: 'danger',
+      detail: 'Their current link stops working straight away.'
+    }).then(function (ok) {
+      if (!ok) return;
+      var token = newToken();
+      return NL.ensureAuth().then(function () {
+        return Promise.all([db.ref(ROOT + '/secrets/' + id).once('value'), sha256hex(token)]);
+      }).then(function (r) {
+        var old = (r[0].val() || {}).tokenHash, hash = r[1], u = {};
+        if (old) u['keys/' + old] = null;
+        u['keys/' + hash] = id;
+        u['secrets/' + id] = { tokenHash: hash, issuedAt: firebase.database.ServerValue.TIMESTAMP };
+        return db.ref(ROOT).update(u);
+      }).then(function () { showLink(p.name, token); });
+    })['catch'](function (e) { NL.toast('Not issued: ' + e.message, 'error'); });
+  }
+
+  function toggleActive(id) {
+    var p = state.people[id] || {};
+    if (!p.active) { write('contributors/' + id, { active: true }, 'Reactivated'); return; }
+    NL.confirm('Deactivate ' + p.name + '?', {
+      title: 'Deactivate', confirmText: 'Deactivate', variant: 'danger',
+      detail: 'Their link stops working straight away. Their clips stay in the feed.'
+    }).then(function (ok) { if (ok) write('contributors/' + id, { active: false }, 'Deactivated'); });
+  }
+
+  function showLink(name, token) {
+    var url = location.origin + '/matchday-live/c/#' + token;
+    var body = el('div');
+    body.appendChild(el('p', null, 'Send this to ' + name + '. They open it on their phone and add it to their home screen.'));
+    var box = el('input', 'mdl-link');
+    box.readOnly = true;
+    box.value = url;
+    body.appendChild(box);
+    body.appendChild(el('p', 'form-hint', 'This is the only time the link is shown. If it is lost, issue a new one.'));
+    NL.modal({
+      title: 'Personal link', body: body, dismissable: false,
+      buttons: [
+        { label: 'Copy link', className: 'btn--primary', autofocus: true, onClick: function () { NL.copy(url, { ok: 'Link copied' }); } },
+        { label: 'Done', className: 'btn--ghost', onClick: function (c) { c.close(); } }
+      ]
+    });
+  }
+
+  function saveConsent() {
+    var text = document.getElementById('consentText').value.trim();
+    if (!text) { NL.toast('The wording is empty', 'error'); return; }
+    var next = ((state.consentCfg || {}).version || 0) + 1;
+    NL.confirm('Save this wording as version ' + next + '?', {
+      title: 'Consent wording', confirmText: 'Save',
+      detail: 'Every contributor is asked to agree again before their next clip.'
+    }).then(function (ok) {
+      if (!ok) return;
+      write('config/consent', {
+        version: next, text: text,
+        updatedAt: firebase.database.ServerValue.TIMESTAMP, updatedBy: session.uid || null
+      }, 'Saved as version ' + next);
+    });
+  }
+
+  /* If auth-guard fired before this script loaded, replay the session. */
+  if (window._toolDeferredSession) {
+    window.TOOL.boot(window._toolDeferredSession);
+    delete window._toolDeferredSession;
+  }
+})();
+</script>
+
+</body>
+</html>

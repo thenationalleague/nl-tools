@@ -133,3 +133,11 @@ Object.assign(exports, require("./responsibilities"));
 // counters carry opens and a distinct-user NUMBER, never a uid, name or
 // email. See functions/usage-rollup.js.
 Object.assign(exports, require("./usage-rollup"));
+
+// Matchday Live (matchdayLiveAuth / matchdayLiveSync / matchdayLiveRetention).
+// The contributor capture page's link token → an `mdl` claim, by the same
+// RTDB-trigger handshake as the passcode gates above and for the same
+// org-policy reason; a minute mirror of today's matches and goals out of the
+// NLS ingester's nl-widgets data; and the nightly retention sweep. See
+// functions/matchday-live.js.
+Object.assign(exports, require("./matchday-live"));

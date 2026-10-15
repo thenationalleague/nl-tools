@@ -1,0 +1,961 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Matchday Live: contributor capture page
+  Version: v1.0 (15/10/2026)
+  File: /matchday-live/c/index.html
+
+  Public, no login. A contributor opens their personal link
+  (https://nl.tools/matchday-live/c/#<token>), records a 20-second vertical
+  clip, taps what it is about, and sends it to the staff feed at
+  /matchday-live/.
+
+  HOW IT GETS IN
+    The token is in the fragment, so it never reaches a server log or a
+    Referer. The page signs in anonymously and hands the token to the
+    matchdayLiveAuth trigger through NL.codeGate.viaFunction — the same
+    handshake as the club-code pages — and gets back a session carrying
+    `mdl: <contributorId>` and `mdlGen` (the first 16 hex of the token's
+    hash). The RTDB rules check both against the stored hash on every read
+    and write, so a rotated or deactivated link stops working on its next
+    read. On the next visit the session is reused if its mdlGen still
+    matches this link; a different link on the same phone re-exchanges.
+
+  WHAT IT WRITES (all enforced by the rules, not by this page)
+    clips/<ymd>/<clipId>    created with status 'uploading', then 'new' once
+                            the video is in Storage — the only change a
+                            contributor may make to a clip
+    pace/<id>, quota/<ymd>/<id>  in the SAME update as the clip: at most one
+                            clip per 30 seconds and 20 a day
+    consent/<id>            { version, at } on first send of each version
+    Storage: matchday-live/<ymd>/<id>/<clipId>.<webm|mp4>, create only
+
+  SURVIVING BAD SIGNAL
+    A sent clip goes into IndexedDB first and leaves it only once the record
+    is 'new'. Every step is resumable: a record that already exists is
+    detected by reading it back, an upload refused because the object is
+    already there counts as done. The queue drains on load, on 'online' and
+    after every send.
+
+  ADD TO HOME SCREEN
+    The manifest deliberately has no start_url. With none, browsers install
+    the URL the person is on — fragment and all — which is the only way the
+    token comes along without putting it in a query string. The token is
+    also kept in localStorage as a fallback. Needs confirming on a real
+    iPhone and Android before the pilot (acceptance list in the PR).
+
+  Technical changelog
+    v1.0  15/10/2026  Initial build.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#9e0000">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Matchday Live">
+  <title>Matchday Live</title>
+  <link rel="manifest" href="/matchday-live/c/manifest.webmanifest">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+
+  <link rel="stylesheet" href="/system/nl-brand.css?v=67">
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+  </script>
+  <script src="/system/nl-utils.js?v=48"></script>
+
+<style>
+  html, body { background: var(--off-white); }
+  body { min-height: 100dvh; }
+  .cap { max-width: 480px; margin: 0 auto; padding: 16px 16px calc(24px + env(safe-area-inset-bottom)); }
+  .cap-screen[hidden] { display: none !important; }
+
+  .cap-match {
+    background: var(--white); border: 1px solid var(--border); border-radius: var(--radius-lg);
+    padding: 20px 16px; text-align: center; margin: 16px 0;
+  }
+  .cap-match__teams { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; }
+  .cap-match__side { display: flex; flex-direction: column; align-items: center; gap: 6px;
+    font-weight: 800; font-variation-settings: 'wght' 800; color: var(--navy); font-size: var(--text-sm); }
+  .cap-match__side img { width: 48px; height: 48px; object-fit: contain; }
+  .cap-match__score { font-size: var(--text-display); font-weight: 900; font-variation-settings: 'wght' 900; color: var(--navy); }
+  .cap-match__state { margin-top: 12px; }
+
+  .cap-big {
+    width: 100%; padding: 22px; font-size: var(--text-lg); border-radius: var(--radius-lg);
+  }
+  .cap-note { color: var(--text-muted); font-size: var(--text-sm); text-align: center; margin-top: 12px; }
+  .cap-list { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+  .cap-opt {
+    display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+    padding: 14px; border: 2px solid var(--border); border-radius: var(--radius);
+    background: var(--white); font-family: var(--font); font-size: var(--text-base); color: var(--text);
+  }
+  .cap-opt[aria-pressed="true"] { border-color: var(--primary); background: var(--primary-50); }
+  .cap-opt__min { min-width: 42px; font-weight: 800; font-variation-settings: 'wght' 800; color: var(--navy); }
+  .cap-opt--minor { font-size: var(--text-sm); padding: 10px 14px; }
+  .cap-sub { font-size: var(--text-xs); color: var(--text-muted); text-transform: uppercase;
+    letter-spacing: 0.08em; font-weight: 800; font-variation-settings: 'wght' 800; margin-top: 16px; }
+
+  /* ── camera ── */
+  .cam { position: fixed; inset: 0; background: var(--navy-900); display: flex; flex-direction: column;
+    align-items: center; justify-content: center; z-index: 1000; }
+  .cam[hidden] { display: none; }
+  .cam__frame { position: relative; height: min(100dvh - 140px, (100vw - 16px) * 16 / 9);
+    aspect-ratio: 9 / 16; border-radius: var(--radius-lg); overflow: hidden; background: var(--navy-800); }
+  .cam__frame video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .cam__frame video.is-mirrored { transform: scaleX(-1); }
+  /* Keep-clear guide: captions and logos sit in the top and bottom bands. */
+  .cam__guide { position: absolute; inset: 14% 6% 20% 6%; border: 1px dashed var(--navy-200);
+    border-radius: var(--radius); opacity: 0.45; pointer-events: none; }
+  .cam__top { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; justify-content: space-between; align-items: center; }
+  .cam__time { background: var(--navy-900); color: var(--white); padding: 4px 10px; border-radius: var(--radius-pill);
+    font-weight: 800; font-variation-settings: 'wght' 800; font-variant-numeric: tabular-nums; }
+  .cam__bar { position: absolute; left: 0; right: 0; bottom: 0; height: 6px; background: var(--navy-700); }
+  .cam__bar span { display: block; height: 100%; width: 0; background: var(--primary); }
+  .cam__controls { display: flex; align-items: center; justify-content: space-around; width: 100%;
+    max-width: 420px; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); }
+  .cam__rec { width: 72px; height: 72px; border-radius: 50%; border: 4px solid var(--white); background: var(--primary);
+    cursor: pointer; }
+  .cam__rec.is-on { border-radius: 16px; transform: scale(0.8); }
+  .cam__side { color: var(--white); background: transparent; border: 1px solid var(--navy-400); }
+  .cam__upright { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
+    background: var(--navy-900); color: var(--white); font-size: var(--text-lg); padding: 24px;
+    font-weight: 800; font-variation-settings: 'wght' 800; }
+  .cam__upright[hidden] { display: none; }
+
+  .cap-preview { display: block; margin: 0 auto; height: min(56dvh, 520px); aspect-ratio: 9 / 16;
+    background: var(--navy-900); border-radius: var(--radius-lg); object-fit: cover; }
+  .cap-row { display: flex; gap: 10px; margin-top: 16px; }
+  .cap-row__btn { flex: 1 1 0; padding-top: 16px; padding-bottom: 16px; }
+  .cap-consent { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px; margin-top: 16px; font-size: var(--text-sm); }
+  .cap-consent__text { white-space: pre-line; max-height: 30dvh; overflow: auto; margin-bottom: 10px; }
+  .cap-consent label { display: flex; gap: 10px; align-items: flex-start; font-weight: 700; font-variation-settings: 'wght' 700; }
+  .cap-consent input { width: 22px; height: 22px; flex: 0 0 auto; }
+  .cap-caption { width: 100%; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius);
+    font-family: var(--font); font-size: var(--text-base); margin-top: 8px; }
+  .cap-queue { margin-top: 12px; }
+</style>
+</head>
+<body>
+
+<header class="nl-idbar">
+  <img class="nl-idbar__crest" id="idCrest" src="/assets/crests/National%20League%20rose.png" alt="">
+  <div class="nl-idbar__id">
+    <div class="nl-idbar__title">Matchday Live</div>
+    <div class="nl-idbar__sub" id="idSub">The National League</div>
+  </div>
+</header>
+
+<main class="cap">
+
+  <section class="cap-screen" id="s-wait">
+    <div class="empty-state"><div class="spinner"></div><div class="empty-state__msg" id="waitMsg">Checking your link…</div></div>
+  </section>
+
+  <section class="cap-screen" id="s-stop" hidden>
+    <div class="empty-state">
+      <div class="empty-state__icon">🔒</div>
+      <div class="empty-state__msg" id="stopMsg"></div>
+    </div>
+  </section>
+
+  <!-- Screen 1: today's match -->
+  <section class="cap-screen" id="s-home" hidden>
+    <div id="matchBox"></div>
+    <button class="btn btn--primary cap-big" type="button" id="btnRecord">Record update</button>
+    <div class="cap-note" id="sentToday"></div>
+    <div class="banner banner--amber cap-queue" id="queueNote" hidden></div>
+    <button class="btn btn--ghost btn--sm" type="button" id="btnChangeMatch" hidden style="margin-top:16px;">Change match</button>
+  </section>
+
+  <!-- Reporters with no fixed club pick a match -->
+  <section class="cap-screen" id="s-pick" hidden>
+    <div class="section-head"><h2>Which match?</h2></div>
+    <div class="cap-list" id="pickList"></div>
+  </section>
+
+  <!-- Screen 3: preview + what's it about -->
+  <section class="cap-screen" id="s-review" hidden>
+    <video class="cap-preview" id="preview" playsinline controls loop></video>
+    <div class="banner banner--error" id="sidewaysNote" hidden style="margin-top:12px;">This came out sideways. Retake it holding the phone upright.</div>
+
+    <div class="cap-sub">What's it about?</div>
+    <div class="cap-list" id="tagList"></div>
+
+    <input class="cap-caption" id="caption" maxlength="80" placeholder="Caption (optional)" aria-label="Caption">
+
+    <div class="cap-consent" id="consentBox" hidden>
+      <div class="cap-consent__text" id="consentText"></div>
+      <label><input type="checkbox" id="consentTick"> <span>I agree</span></label>
+    </div>
+
+    <div class="cap-row">
+      <button class="btn btn--ghost cap-row__btn" type="button" id="btnRetake">Retake</button>
+      <button class="btn btn--primary cap-row__btn" type="button" id="btnSend">Send</button>
+    </div>
+  </section>
+
+</main>
+
+<!-- Screen 2: recording -->
+<div class="cam" id="cam" hidden>
+  <div class="cam__frame">
+    <video id="viewfinder" playsinline muted autoplay></video>
+    <div class="cam__guide"></div>
+    <div class="cam__top"><span class="cam__time" id="camTime">0:20</span></div>
+    <div class="cam__bar"><span id="camBar"></span></div>
+    <div class="cam__upright" id="upright" hidden>Hold your phone upright</div>
+  </div>
+  <div class="cam__controls">
+    <button class="btn cam__side" type="button" id="btnCamCancel">Cancel</button>
+    <button class="cam__rec" type="button" id="btnRec" aria-label="Start recording"></button>
+    <button class="btn cam__side" type="button" id="btnFlip">Flip</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var ROOT = 'app-data/media-matchday-live';
+  var MAX_MS = 20000;
+  var KIND = { goal: '⚽ Goal', red: '🟥 Red card', yellow: '🟨 Yellow card' };
+  var GENERAL = [['warmup', 'Warm-up'], ['teamnews', 'Team news'], ['halftime', 'Half-time'],
+    ['atmosphere', 'Atmosphere'], ['fulltime', 'Full-time']];
+  var TOKEN_RE = /^[A-Za-z0-9_-]{32}$/;
+  var LS_TOKEN = 'mdl.token';
+
+  var db = firebase.database();
+  var me = { id: null, rec: null };
+  var ymd = new Date().toISOString().slice(0, 10);   // the ingester files matches by UTC date
+  var matchId = null, match = null, matchRef = null;
+  var consentCfg = null, myConsent = null;
+  var take = null;          // { blob, mime, durationSec, minute, scoreAtTime }
+  var tag = null;           // { eventId } | { pending: true } | { general: kind|null }
+
+  function $(id) { return document.getElementById(id); }
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function show(id) {
+    ['s-wait', 's-stop', 's-home', 's-pick', 's-review'].forEach(function (s) { $(s).hidden = s !== id; });
+  }
+  function stop(msg) { $('stopMsg').textContent = msg; show('s-stop'); }
+  function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  function minLabel(min, fm) {
+    if (fm) return String(fm).replace("'", '′');
+    return typeof min === 'number' ? min + '′' : '';
+  }
+
+  /* ── sign in ──────────────────────────────────────────────────────── */
+  function sha256hex(text) {
+    return crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)).then(function (buf) {
+      return Array.prototype.map.call(new Uint8Array(buf), function (x) { return ('0' + x.toString(16)).slice(-2); }).join('');
+    });
+  }
+
+  function currentClaims() {
+    return new Promise(function (resolve) {
+      var off = firebase.auth().onAuthStateChanged(function (u) {
+        off();
+        if (!u || u.isAnonymous) { resolve(null); return; }
+        u.getIdTokenResult().then(function (t) { resolve(t.claims); }, function () { resolve(null); });
+      });
+    });
+  }
+
+  function exchange(token) {
+    $('waitMsg').textContent = 'Checking your link… the first time can take up to 20 seconds.';
+    return NL.codeGate.viaFunction(ROOT)(token).then(currentClaims);
+  }
+
+  function signIn() {
+    var fromHash = (location.hash || '').slice(1);
+    var token = TOKEN_RE.test(fromHash) ? fromHash : lsGet(LS_TOKEN);
+    if (!token || !TOKEN_RE.test(token)) {
+      return Promise.reject(new Error('Open the personal link you were sent. If you no longer have it, ask the National League for a new one.'));
+    }
+    lsSet(LS_TOKEN, token);
+    return sha256hex(token).then(function (hash) {
+      var gen = hash.slice(0, 16);
+      return currentClaims().then(function (c) {
+        if (c && c.mdl && c.mdlGen === gen) return c;
+        return firebase.auth().signOut().then(function () { return exchange(token); });
+      }).then(function (c) {
+        if (!c || !c.mdl) throw new Error('Something went wrong. Please try again.');
+        me.id = c.mdl;
+        return db.ref(ROOT + '/contributors/' + me.id).once('value')['catch'](function () {
+          /* Refused: this session was minted from a link that has since been
+             replaced. Try once more with the link in hand — if that link is
+             the replacement, it works; if not, the trigger says so. */
+          return firebase.auth().signOut().then(function () { return exchange(token); })
+            .then(function (c2) {
+              me.id = c2 && c2.mdl;
+              return db.ref(ROOT + '/contributors/' + me.id).once('value');
+            });
+        });
+      });
+    }).then(function (snap) {
+      me.rec = snap.val() || {};
+    });
+  }
+
+  /* ── boot ─────────────────────────────────────────────────────────── */
+  function boot() {
+    signIn().then(function () {
+      var club = me.rec.club;
+      $('idSub').textContent = 'Hi ' + String(me.rec.name || '').split(' ')[0] + (club ? ' · ' + club : '');
+      if (club) {
+        var crest = $('idCrest');
+        crest.src = NL.clubs.crestUrl(club, 'thumb');
+        NL.clubs.wireCrestImg(crest, club, false);
+      }
+      return Promise.all([
+        NL.clubs.load()['catch'](function () {}),
+        db.ref(ROOT + '/config/consent').once('value').then(function (s) { consentCfg = s.val(); }),
+        db.ref(ROOT + '/consent/' + me.id).once('value').then(function (s) { myConsent = s.val(); }),
+        db.ref(ROOT + '/matchdays/' + ymd).once('value')
+      ]);
+    }).then(function (r) {
+      if (!consentCfg || !consentCfg.text) {
+        stop('Matchday Live is not switched on yet. The National League will let you know when it is.');
+        return;
+      }
+      chooseMatch(r[3].val() || {});
+      wireButtons();
+      watchToday();
+      Queue.drain();
+    })['catch'](function (e) {
+      stop(e && e.message ? e.message : 'Something went wrong. Please try again.');
+    });
+  }
+
+  function myClubOpta() {
+    if (me.rec.clubOpta) return me.rec.clubOpta;
+    var c = me.rec.club && NL.clubs.byName ? NL.clubs.byName(me.rec.club) : null;
+    return c ? c.optaID : null;
+  }
+
+  function chooseMatch(day) {
+    var opta = myClubOpta();
+    var ids = Object.keys(day);
+    if (opta) {
+      matchId = ids.filter(function (id) { return day[id].home.id === opta || day[id].away.id === opta; })[0] || null;
+      $('btnChangeMatch').hidden = true;
+      return watchMatch();
+    }
+    /* No fixed club: the reporter's choice for today, or ask. */
+    var saved = null;
+    try { saved = sessionStorage.getItem('mdl.match.' + ymd); } catch (e) {}
+    if (saved && day[saved]) { matchId = saved; $('btnChangeMatch').hidden = false; return watchMatch(); }
+    renderPick(day);
+  }
+
+  function renderPick(day) {
+    var list = $('pickList');
+    list.textContent = '';
+    var ids = Object.keys(day).sort(function (a, b) {
+      var A = day[a], B = day[b];
+      if (A.live !== B.live) return A.live ? -1 : 1;
+      return String(A.ko).localeCompare(String(B.ko)) || String(A.home.name).localeCompare(String(B.home.name));
+    });
+    if (!ids.length) { stop('No National League matches today.'); return; }
+    ids.forEach(function (id) {
+      var m = day[id];
+      var b = el('button', 'cap-opt');
+      b.type = 'button';
+      b.appendChild(el('span', 'cap-opt__min', m.live ? minLabel(m.minute, m.fm) || 'Live' : (m.finished ? 'FT' : NL.formatTime(m.ko))));
+      b.appendChild(el('span', null, m.home.name + ' v ' + m.away.name));
+      b.addEventListener('click', function () {
+        try { sessionStorage.setItem('mdl.match.' + ymd, id); } catch (e) {}
+        matchId = id;
+        $('btnChangeMatch').hidden = false;
+        watchMatch();
+      });
+      list.appendChild(b);
+    });
+    show('s-pick');
+  }
+
+  function watchMatch() {
+    if (matchRef) matchRef.off();
+    matchRef = null;
+    match = null;
+    if (!matchId) { renderHome(); show('s-home'); return; }
+    matchRef = db.ref(ROOT + '/matchdays/' + ymd + '/' + matchId);
+    matchRef.on('value', function (s) { match = s.val(); renderHome(); });
+    show('s-home');
+  }
+
+  function watchToday() {
+    db.ref(ROOT + '/quota/' + ymd + '/' + me.id).on('value', function (s) {
+      var n = s.val() || 0;
+      $('sentToday').textContent = n ? n + (n === 1 ? ' clip' : ' clips') + ' sent today' : '';
+    });
+  }
+
+  /* ── Screen 1 ─────────────────────────────────────────────────────── */
+  function crest(team) {
+    var club = team && team.id ? NL.clubs.byOpta(team.id) : null;
+    var name = club ? club.name : team.name;
+    var img = el('img');
+    img.alt = '';
+    img.src = NL.clubs.crestUrl(name, 'medium');
+    NL.clubs.wireCrestImg(img, name, true);
+    return img;
+  }
+
+  function statusText(m) {
+    if (m.postponed) return ['pill--postponed', 'Postponed'];
+    if (m.finished) return ['pill--info', 'Full time'];
+    if (m.period === 'halftime') return ['pill--pending', 'Half time'];
+    if (m.live) return ['pill--live', minLabel(m.minute, m.fm) || 'Live'];
+    return ['pill--soon', 'Kick-off ' + NL.formatTime(m.ko)];
+  }
+
+  function renderHome() {
+    var box = $('matchBox');
+    box.textContent = '';
+    if (!match) {
+      var e = el('div', 'empty-state');
+      e.appendChild(el('div', 'empty-state__icon', '📅'));
+      e.appendChild(el('div', 'empty-state__msg', 'No ' + (me.rec.club || 'National League') + ' match today'));
+      box.appendChild(e);
+      $('btnRecord').disabled = true;
+      return;
+    }
+    $('btnRecord').disabled = false;
+    var card = el('div', 'cap-match');
+    var t = el('div', 'cap-match__teams');
+    var h = el('div', 'cap-match__side'); h.appendChild(crest(match.home)); h.appendChild(el('span', null, match.home.name));
+    var a = el('div', 'cap-match__side'); a.appendChild(crest(match.away)); a.appendChild(el('span', null, match.away.name));
+    var score = match.home.score != null && match.away.score != null ? match.home.score + '–' + match.away.score : 'v';
+    t.appendChild(h); t.appendChild(el('div', 'cap-match__score', score)); t.appendChild(a);
+    card.appendChild(t);
+    var st = statusText(match), sw = el('div', 'cap-match__state');
+    sw.appendChild(el('span', 'pill ' + st[0], st[1]));
+    card.appendChild(sw);
+    box.appendChild(card);
+  }
+
+  /* The match minute right now. The mirror refreshes once a minute at best,
+     so while a half is running the last known minute is carried forward by
+     the time since the ingester saw it — capped, so a stalled feed does not
+     invent stoppage time. */
+  function minuteNow(m) {
+    if (!m) return null;
+    if (m.period === 'halftime') return 45;
+    if (m.finished) return 90;
+    if (!m.live || typeof m.minute !== 'number') return null;
+    var drift = m.updatedAt ? Math.floor((Date.now() - m.updatedAt) / 60000) : 0;
+    return m.minute + Math.max(0, Math.min(drift, 3));
+  }
+
+  /* ── Screen 2: recording ──────────────────────────────────────────── */
+  var Cam = (function () {
+    var stream = null, rec = null, chunks = [], facing = 'environment', mime = '';
+    var started = 0, spent = 0, ticking = null, pausedForTilt = false, startMinute = null, startScore = null;
+    var landscape = window.matchMedia('(orientation: landscape)');
+
+    function pickMime() {
+      var list = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9,opus',
+        'video/webm;codecs=vp8,opus', 'video/webm'];
+      if (!window.MediaRecorder || !MediaRecorder.isTypeSupported) return '';
+      for (var i = 0; i < list.length; i++) if (MediaRecorder.isTypeSupported(list[i])) return list[i];
+      return '';
+    }
+
+    function open() {
+      if (!navigator.mediaDevices || !window.MediaRecorder) {
+        NL.alert('This phone\'s browser can\'t record video here. Try Chrome on Android or Safari on iPhone.');
+        return;
+      }
+      $('cam').hidden = false;
+      reset();
+      startStream();
+      tilt();
+    }
+
+    function startStream() {
+      if (stream) stream.getTracks().forEach(function (t) { t.stop(); });
+      navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: { facingMode: facing, width: { ideal: 1080 }, height: { ideal: 1920 }, frameRate: { ideal: 30 } }
+      }).then(function (s) {
+        stream = s;
+        var v = $('viewfinder');
+        v.srcObject = s;
+        v.classList.toggle('is-mirrored', facing === 'user');
+        v.play()['catch'](function () {});
+      })['catch'](function (e) {
+        close();
+        NL.alert(e && e.name === 'NotAllowedError'
+          ? 'Camera access is blocked. Allow the camera and microphone for this page in your phone\'s settings, then try again.'
+          : 'The camera could not start: ' + (e && e.message ? e.message : 'unknown error'));
+      });
+    }
+
+    function reset() {
+      chunks = []; rec = null; spent = 0; started = 0; pausedForTilt = false;
+      $('btnRec').classList.remove('is-on');
+      $('btnRec').setAttribute('aria-label', 'Start recording');
+      $('btnFlip').disabled = false;
+      draw();
+    }
+
+    function elapsed() { return spent + (started ? Date.now() - started : 0); }
+
+    function draw() {
+      var left = Math.max(0, MAX_MS - elapsed());
+      $('camTime').textContent = '0:' + ('0' + Math.ceil(left / 1000)).slice(-2);
+      $('camBar').style.width = Math.min(100, elapsed() / MAX_MS * 100) + '%';
+    }
+
+    function start() {
+      if (!stream || landscape.matches) return;
+      mime = pickMime();
+      try {
+        rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 5000000 } : undefined);
+      } catch (e) {
+        rec = new MediaRecorder(stream);
+      }
+      mime = rec.mimeType || mime || 'video/webm';
+      chunks = [];
+      rec.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+      rec.onstop = finish;
+      rec.start(1000);
+      started = Date.now();
+      startMinute = minuteNow(match);
+      startScore = match && match.home.score != null ? match.home.score + '–' + match.away.score : null;
+      $('btnRec').classList.add('is-on');
+      $('btnRec').setAttribute('aria-label', 'Stop recording');
+      $('btnFlip').disabled = true;
+      ticking = setInterval(function () {
+        draw();
+        if (elapsed() >= MAX_MS) end();
+      }, 100);
+    }
+
+    function end() {
+      if (!rec || rec.state === 'inactive') return;
+      if (started) { spent += Date.now() - started; started = 0; }
+      clearInterval(ticking);
+      rec.stop();
+    }
+
+    function finish() {
+      var blob = new Blob(chunks, { type: mime.split(';')[0] });
+      var dur = Math.min(20, Math.round(spent / 100) / 10);
+      shutdown();
+      if (!blob.size) { NL.alert('Nothing was recorded. Please try again.'); return; }
+      take = { blob: blob, mime: mime.split(';')[0], durationSec: dur, minute: startMinute, scoreAtTime: startScore };
+      Review.open();
+    }
+
+    /* Turned sideways: pause, so no landscape frames reach the file, and
+       stop the clock. Upright again: carry on. A browser that cannot pause
+       ends the take instead — the preview's sideways check is the backstop. */
+    function tilt() {
+      var side = landscape.matches;
+      $('upright').hidden = !side;
+      if (!rec || rec.state === 'inactive') return;
+      if (side && rec.state === 'recording') {
+        try { rec.pause(); pausedForTilt = true; spent += Date.now() - started; started = 0; }
+        catch (e) { end(); }
+      } else if (!side && pausedForTilt && rec.state === 'paused') {
+        rec.resume(); pausedForTilt = false; started = Date.now();
+      }
+    }
+
+    function shutdown() {
+      clearInterval(ticking);
+      if (stream) stream.getTracks().forEach(function (t) { t.stop(); });
+      stream = null;
+      $('viewfinder').srcObject = null;
+      $('cam').hidden = true;
+    }
+
+    function close() {
+      if (rec && rec.state !== 'inactive') { rec.onstop = null; try { rec.stop(); } catch (e) {} }
+      shutdown();
+    }
+
+    if (landscape.addEventListener) landscape.addEventListener('change', tilt);
+    else if (landscape.addListener) landscape.addListener(tilt);
+
+    return {
+      open: open,
+      toggle: function () { if (rec && rec.state !== 'inactive') end(); else start(); },
+      flip: function () { if (rec) return; facing = facing === 'environment' ? 'user' : 'environment'; startStream(); },
+      cancel: function () { close(); }
+    };
+  })();
+
+  /* ── Screen 3: preview + tag ──────────────────────────────────────── */
+  var Review = (function () {
+    var url = null;
+
+    function open() {
+      if (url) URL.revokeObjectURL(url);
+      url = URL.createObjectURL(take.blob);
+      var v = $('preview');
+      v.src = url;
+      $('sidewaysNote').hidden = true;
+      $('btnSend').disabled = false;
+      v.onloadedmetadata = function () {
+        var sideways = v.videoWidth && v.videoHeight && v.videoWidth > v.videoHeight;
+        $('sidewaysNote').hidden = !sideways;
+        $('btnSend').disabled = !!sideways;
+      };
+      $('caption').value = '';
+      renderTags();
+      renderConsent();
+      show('s-review');
+    }
+
+    function opt(minText, text, cls, sel, onPick) {
+      var b = el('button', 'cap-opt' + (cls ? ' ' + cls : ''));
+      b.type = 'button';
+      b.setAttribute('aria-pressed', sel ? 'true' : 'false');
+      if (minText != null) b.appendChild(el('span', 'cap-opt__min', minText));
+      b.appendChild(el('span', null, text));
+      b.addEventListener('click', function () {
+        Array.prototype.forEach.call($('tagList').querySelectorAll('.cap-opt'), function (x) {
+          x.setAttribute('aria-pressed', x === b ? 'true' : 'false');
+        });
+        onPick();
+      });
+      return b;
+    }
+
+    function evText(e) {
+      var side = e.side === 'home' ? match.home.name : e.side === 'away' ? match.away.name : '';
+      return (KIND[e.kind] || e.kind) + (e.player ? ' – ' + e.player : '') + (e.pen ? ' (pen)' : '') +
+        (e.og ? ' (og)' : '') + (side ? ' · ' + side : '');
+    }
+
+    /* The last five goals and red cards, yellows below them. The most recent
+       event from the five minutes before recording started is pre-selected,
+       because it is almost always the reason someone pressed record. */
+    function renderTags() {
+      var list = $('tagList');
+      list.textContent = '';
+      var events = (match && match.events) || {};
+      var keys = Object.keys(events).sort(function (a, b) {
+        return (events[b].minute || 0) - (events[a].minute || 0) || (events[b].at || 0) - (events[a].at || 0);
+      });
+      var major = keys.filter(function (k) { return events[k].kind !== 'yellow'; }).slice(0, 5);
+      var minor = keys.filter(function (k) { return events[k].kind === 'yellow'; }).slice(0, 3);
+      var at = take.minute;
+      var recent = function (k) { return typeof at === 'number' && typeof events[k].minute === 'number' && at - events[k].minute <= 5 && at - events[k].minute >= -1; };
+      var pre = major.filter(recent)[0] || minor.filter(recent)[0] || null;
+      tag = pre ? { eventId: pre } : { general: null };
+
+      major.forEach(function (k) {
+        list.appendChild(opt(minLabel(events[k].minute, events[k].fm), evText(events[k]), '', k === pre,
+          function () { tag = { eventId: k }; }));
+      });
+      if (match && match.live) {
+        list.appendChild(opt('', 'Just happened – not on the scores yet', '', false, function () { tag = { pending: true }; }));
+      }
+      list.appendChild(opt('', 'General update', '', !pre, function () { tag = { general: null }; }));
+      var chips = el('div', 'chip-group');
+      chips.style.flexWrap = 'wrap';
+      GENERAL.forEach(function (g) {
+        var c = el('button', 'chip', g[1]);
+        c.type = 'button';
+        c.addEventListener('click', function () {
+          Array.prototype.forEach.call(chips.children, function (x) { x.classList.toggle('active', x === c); });
+          Array.prototype.forEach.call(list.querySelectorAll('.cap-opt'), function (x) {
+            x.setAttribute('aria-pressed', x.textContent === 'General update' ? 'true' : 'false');
+          });
+          tag = { general: g[0] };
+        });
+        chips.appendChild(c);
+      });
+      list.appendChild(chips);
+      minor.forEach(function (k) {
+        list.appendChild(opt(minLabel(events[k].minute, events[k].fm), evText(events[k]), 'cap-opt--minor', k === pre,
+          function () { tag = { eventId: k }; }));
+      });
+    }
+
+    function needsConsent() {
+      return !myConsent || myConsent.version !== consentCfg.version;
+    }
+
+    function renderConsent() {
+      var need = needsConsent();
+      $('consentBox').hidden = !need;
+      $('consentText').textContent = consentCfg.text || '';
+      $('consentTick').checked = false;
+    }
+
+    function send() {
+      if (take.blob.size >= 40 * 1024 * 1024) {
+        NL.alert('That clip is too large to send. Please record it again.');
+        return;
+      }
+      if (needsConsent() && !$('consentTick').checked) {
+        NL.toast('Tick “I agree” to send', 'error');
+        return;
+      }
+      var clipId = db.ref(ROOT + '/clips/' + ymd).push().key;
+      var ext = /mp4/.test(take.mime) ? 'mp4' : 'webm';
+      var record = {
+        contributorId: me.id,
+        matchId: matchId,
+        storagePath: 'matchday-live/' + ymd + '/' + me.id + '/' + clipId + '.' + ext,
+        mimeType: take.mime,
+        durationSec: take.durationSec,
+        sizeBytes: take.blob.size
+      };
+      if (typeof take.minute === 'number') record.minute = take.minute;
+      if (take.scoreAtTime) record.scoreAtTime = take.scoreAtTime;
+      var cap = $('caption').value.trim().slice(0, 80);
+      if (cap) record.caption = cap;
+      if (tag.eventId) record.eventId = tag.eventId;
+      else if (tag.pending) record.pendingEventMatch = true;
+      else if (tag.general) record.generalKind = tag.general;
+
+      var item = { clipId: clipId, ymd: ymd, record: record, blob: take.blob, mime: take.mime,
+        stage: 'new', consentVersion: needsConsent() ? consentCfg.version : null };
+      if (item.consentVersion != null) myConsent = { version: consentCfg.version };
+      take = null;
+      if (url) { URL.revokeObjectURL(url); url = null; }
+      $('preview').removeAttribute('src');
+      show('s-home');
+      Queue.add(item);
+    }
+
+    return { open: open, send: send };
+  })();
+
+  /* ── the upload queue ─────────────────────────────────────────────── */
+  var Queue = (function () {
+    var idb = null, mem = {}, running = false, retryTimer = null, progress = {};
+
+    function openDb() {
+      if (idb) return Promise.resolve(idb);
+      return new Promise(function (resolve) {
+        try {
+          var r = indexedDB.open('matchday-live', 1);
+          r.onupgradeneeded = function () { r.result.createObjectStore('queue', { keyPath: 'clipId' }); };
+          r.onsuccess = function () { idb = r.result; resolve(idb); };
+          r.onerror = function () { resolve(null); };
+        } catch (e) { resolve(null); }
+      });
+    }
+    function tx(mode, fn) {
+      return openDb().then(function (d) {
+        if (!d) return fn(null);
+        return new Promise(function (resolve) {
+          var t = d.transaction('queue', mode), s = t.objectStore('queue');
+          var out = fn(s);
+          t.oncomplete = function () { resolve(out && out.result !== undefined ? out.result : out); };
+          t.onerror = t.onabort = function () { resolve(null); };
+        });
+      });
+    }
+    function put(item) {
+      mem[item.clipId] = item;
+      return tx('readwrite', function (s) { return s ? s.put(item) : null; });
+    }
+    function remove(id) {
+      delete mem[id];
+      return tx('readwrite', function (s) { return s ? s['delete'](id) : null; });
+    }
+    function all() {
+      return tx('readonly', function (s) { return s ? s.getAll() : null; }).then(function (rows) {
+        (rows || []).forEach(function (r) { if (!mem[r.clipId]) mem[r.clipId] = r; });
+        return Object.keys(mem).map(function (k) { return mem[k]; });
+      });
+    }
+
+    function note() {
+      var n = Object.keys(mem).length, box = $('queueNote');
+      if (!n) { box.hidden = true; return; }
+      var pct = Object.keys(progress).map(function (k) { return progress[k]; })[0];
+      box.hidden = false;
+      box.textContent = !navigator.onLine
+        ? (n === 1 ? '1 clip is' : n + ' clips are') + ' waiting for signal. It will send by itself — keep this page open if you can.'
+        : 'Sending' + (n > 1 ? ' ' + n + ' clips' : '') + (pct != null ? '… ' + pct + '%' : '…');
+    }
+
+    function later(ms) {
+      clearTimeout(retryTimer);
+      retryTimer = setTimeout(drain, ms);
+    }
+
+    function denied(e) { return e && /permission_denied|PERMISSION_DENIED/i.test(String(e.code || e.message)); }
+
+    /* Step 1: the record, the pace stamp and the day count in one write — the
+       rules refuse the clip without the other two. */
+    function create(item) {
+      var qRef = db.ref(ROOT + '/quota/' + item.ymd + '/' + me.id);
+      var clipRef = db.ref(ROOT + '/clips/' + item.ymd + '/' + item.clipId);
+      return clipRef.once('value').then(function (s) {
+        if (s.exists()) return 'created';
+        return qRef.once('value').then(function (q) {
+          var u = {}, TS = firebase.database.ServerValue.TIMESTAMP;
+          u['clips/' + item.ymd + '/' + item.clipId] = Object.assign({}, item.record, { status: 'uploading', createdAt: TS });
+          u['pace/' + me.id] = TS;
+          u['quota/' + item.ymd + '/' + me.id] = (q.val() || 0) + 1;
+          if (item.consentVersion != null) u['consent/' + me.id] = { version: item.consentVersion, at: TS };
+          return db.ref(ROOT).update(u).then(function () { return 'created'; }, function (e) {
+            if (!denied(e)) throw e;
+            /* Which limit? The day count is the one that will not clear by
+               waiting; anything else is the 30-second pace, so wait it out. */
+            if ((q.val() || 0) >= 20) return 'full';
+            if (item.consentVersion != null) {
+              /* The consent write is the other thing that can be refused (a
+                 server clock edge). Retry without bundling it. */
+              return db.ref(ROOT + '/consent/' + me.id).set({ version: item.consentVersion, at: TS })
+                .then(function () { item.consentVersion = null; return 'retry'; }, function () { return 'pace'; });
+            }
+            return 'pace';
+          });
+        });
+      });
+    }
+
+    /* Step 2: the video. Storage allows create only, so a retry of an upload
+       that did land is refused — ask whether the object is there before
+       treating the refusal as real. */
+    function upload(item) {
+      var ref = firebase.storage().ref(item.record.storagePath);
+      return new Promise(function (resolve, reject) {
+        var task = ref.put(item.blob, { contentType: item.mime });
+        task.on('state_changed', function (s) {
+          progress[item.clipId] = Math.round(s.bytesTransferred / Math.max(1, s.totalBytes) * 100);
+          note();
+        }, function (e) {
+          delete progress[item.clipId];
+          if (!e || e.code !== 'storage/unauthorized') { reject(e); return; }
+          ref.getMetadata().then(function () { resolve('uploaded'); }, function () {
+            var refused = new Error('refused');
+            refused.fatal = true;
+            reject(refused);
+          });
+        }, function () { delete progress[item.clipId]; resolve('uploaded'); });
+      });
+    }
+
+    /* Step 3. Refused means it is already past 'uploading' — done. */
+    function finishOne(item) {
+      var ref = db.ref(ROOT + '/clips/' + item.ymd + '/' + item.clipId);
+      return ref.child('status').set('new')['catch'](function (e) {
+        if (!denied(e)) throw e;
+        return ref.child('status').once('value').then(function (s) {
+          if (s.val() === 'uploading') throw e;
+        });
+      });
+    }
+
+    function step(item) {
+      if (item.stage === 'new') {
+        return create(item).then(function (r) {
+          if (r === 'created') { item.stage = 'created'; return put(item).then(function () { return step(item); }); }
+          if (r === 'retry') return put(item).then(function () { return step(item); });
+          if (r === 'full') {
+            return remove(item.clipId).then(function () {
+              NL.alert('That’s 20 clips today — the daily limit. This one was not sent.');
+            });
+          }
+          later(30000);
+          throw new Error('wait');
+        });
+      }
+      if (item.stage === 'created') {
+        return upload(item).then(function () {
+          item.stage = 'uploaded';
+          return put(item).then(function () { return step(item); });
+        }, function (e) {
+          if (e && e.fatal) {
+            return remove(item.clipId).then(function () {
+              NL.alert('A clip could not be sent — the upload was refused. If this keeps happening, tell the National League.');
+            });
+          }
+          item.tries = (item.tries || 0) + 1;
+          return put(item).then(function () { throw e; });
+        });
+      }
+      if (item.stage === 'uploaded') {
+        return finishOne(item).then(function () {
+          return remove(item.clipId).then(function () { NL.toast('Sent – thanks', 'success'); });
+        });
+      }
+      return remove(item.clipId);
+    }
+
+    function drain() {
+      if (running) return;
+      if (!navigator.onLine) { note(); return; }
+      running = true;
+      all().then(function (items) {
+        note();
+        items.sort(function (a, b) { return a.clipId < b.clipId ? -1 : 1; });
+        return items.reduce(function (p, item) {
+          return p.then(function () { return step(item); });
+        }, Promise.resolve());
+      }).then(function () {
+        running = false;
+        note();
+      }, function (e) {
+        running = false;
+        note();
+        if (!e || e.message !== 'wait') later(navigator.onLine ? 15000 : 60000);
+      });
+    }
+
+    window.addEventListener('online', drain);
+    window.addEventListener('offline', note);
+
+    return {
+      add: function (item) { put(item).then(function () { note(); drain(); }); },
+      drain: drain
+    };
+  })();
+
+  /* ── wiring ───────────────────────────────────────────────────────── */
+  function wireButtons() {
+    $('btnRecord').addEventListener('click', Cam.open);
+    $('btnRec').addEventListener('click', Cam.toggle);
+    $('btnFlip').addEventListener('click', Cam.flip);
+    $('btnCamCancel').addEventListener('click', Cam.cancel);
+    $('btnRetake').addEventListener('click', function () { take = null; Cam.open(); });
+    $('btnSend').addEventListener('click', Review.send);
+    $('btnChangeMatch').addEventListener('click', function () {
+      try { sessionStorage.removeItem('mdl.match.' + ymd); } catch (e) {}
+      db.ref(ROOT + '/matchdays/' + ymd).once('value').then(function (s) { renderPick(s.val() || {}); });
+    });
+  }
+
+  boot();
+})();
+</script>
+
+</body>
+</html>

@@ -59,7 +59,8 @@ Three categories, and knowing which one you are in tells you what a merge does.
   function in the directory, not just the one you changed. There are around a
   dozen: `consumeInvite`, `submitAccessRequest`, `withdrawAccessRequest`,
   `clubCodeAuth`, `clubDirectoryAuth`, `fanWidgetsAuth`, `fixturesGraphicsAtFullTime`, `handbookPdfOnPublish`,
-  `nlsIngestTick`, `nlsIngestHourly`, `programmeAuth`, `uwPromoAuth`. A broken
+  `nlsIngestTick`, `nlsIngestHourly`, `programmeAuth`, `uwPromoAuth`,
+  `matchdayLiveAuth`, `matchdayLiveSync`, `matchdayLiveRetention`. A broken
   one takes the others with it.
 
 ### 2. Ships only when you press the button
