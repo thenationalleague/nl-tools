@@ -1,10 +1,16 @@
 <!DOCTYPE html>
 <!--
   NL Tools — DAZN Viewing (staff)
-  Version: v16.0 (12/10/2026)
+  Version: v25.0 (15/10/2026)
   File: /dazn/index.html
 
   CHANGELOG
+    v25.0 (15/10/2026) — The club view is a one-screen dashboard (see
+      _view.js v25.0). The clubs list is a fixed-height panel with a sticky
+      header and a League total row (each game counted once, not once per
+      side). Page chrome moves onto canon: .toolbar for the season bar,
+      .form-panel for the import, .nl-crest for crests. The local number
+      formatters, which had drifted from the view's own, are gone.
     v16.0 (12/10/2026) — Club view (_view.js v16.0): filters for UK / INT,
       home / away and month; the division comparison as % either side of
       the average.
@@ -89,6 +95,15 @@
 
     window.NL_CHANGELOG = [
       {
+        date: '15/10/2026',
+        version: 'v25.0',
+        items: [
+          'A club\u2019s figures are one dashboard: slicers, headline cards, views by month, top games and every game in one screen.',
+          'Click a month\u2019s column to see just that month. Clear puts everything back.',
+          'The clubs list has a League total row.'
+        ]
+      },
+      {
         date: '12/10/2026',
         version: 'v16.0',
         items: [
@@ -145,26 +160,23 @@
   <script src="/system/nl-topbar.js?v=10"></script>
   <script src="/system/auth-guard.js?v=16"></script>
 
-  <link rel="stylesheet" href="/dazn/_view.css?v=3">
+  <link rel="stylesheet" href="/dazn/_view.css?v=4">
   <script src="/dazn/_data.js?v=2"></script>
-  <script src="/dazn/_view.js?v=3"></script>
+  <script src="/dazn/_view.js?v=4"></script>
 
 <style>
   /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
      style.display = 'block'. Don't clear with '' — would re-trigger the
      brand rule and re-hide the page. */
-  .dza-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 20px; }
-  .dza-bar .dza-grow { flex: 1; }
-  .dza-clubs tbody tr { cursor: pointer; }
-  .dza-clubs tbody tr.is-open td { background: var(--blue-light) !important; }
-  .dza-club-head { display: flex; align-items: center; gap: 12px; margin: 32px 0 16px; }
-  .dza-club-head img { width: 40px; height: 40px; object-fit: contain; }
+  /* Layout comes from canon (.toolbar, .form-panel, .form-group); the
+     dashboard's own styles live in /dazn/_view.css. */
+  #dzaClubs tbody tr { cursor: pointer; }
+  #dzaClubs tbody tr.is-open td { background: var(--navy-50); }
+  .dza-section { margin-top: 24px; }
+  .dza-club-head { display: flex; align-items: center; gap: 12px; --crest-size: 40px; }
   .dza-club-head h2 { color: var(--navy); font-size: var(--text-lg); }
-  .dza-import { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 28px; }
-  .dza-import textarea { width: 100%; min-height: 140px; font-family: var(--font-mono); font-size: var(--text-xs); }
-  .dza-import__actions { display: flex; gap: 10px; margin-top: 12px; }
-  .dza-preview { margin-top: 16px; font-size: var(--text-sm); }
-  .dza-preview ul { margin: 8px 0 0 18px; }
+  .dza-import textarea { font-family: var(--font-mono); font-size: var(--text-xs); }
+  .dza-preview:empty { display: none; }
 </style>
 </head>
 <body>
@@ -175,23 +187,28 @@
 <div id="pageWrap">
   <div class="page">
 
-    <div class="dza-bar">
-      <select class="nl-select" id="dzaSeason" aria-label="Season" hidden></select>
-      <span class="dza-grow"></span>
-      <a class="btn btn--ghost" href="/dazn/reader/" target="_blank" rel="noopener">Club page</a>
-      <button class="btn btn--navy" id="dzaImportBtn" type="button" hidden>Import a season</button>
+    <div class="toolbar">
+      <div class="toolbar__left">
+        <select class="nl-select" id="dzaSeason" aria-label="Season" hidden></select>
+      </div>
+      <div class="toolbar__right">
+        <a class="btn btn--ghost" href="/dazn/reader/" target="_blank" rel="noopener">Club page</a>
+        <button class="btn btn--navy" id="dzaImportBtn" type="button" hidden>Import a season</button>
+      </div>
     </div>
 
-    <section class="dza-import" id="dzaImport" hidden>
-      <div class="form-group">
-        <label for="dzaPaste">Matches sheet</label>
-        <textarea id="dzaPaste" spellcheck="false" placeholder="Select all on the Matches sheet, copy, paste here"></textarea>
+    <section class="form-panel dza-import" id="dzaImport" hidden>
+      <div class="form-panel__body">
+        <div class="form-group">
+          <label for="dzaPaste">Matches sheet</label>
+          <textarea id="dzaPaste" spellcheck="false" placeholder="Select all on the Matches sheet, copy, paste here"></textarea>
+        </div>
+        <div class="dza-preview" id="dzaPreview"></div>
       </div>
-      <div class="dza-import__actions">
+      <div class="form-panel__foot">
         <button class="btn btn--ghost" id="dzaCheck" type="button">Check</button>
         <button class="btn btn--primary" id="dzaWrite" type="button" disabled>Import</button>
       </div>
-      <div class="dza-preview" id="dzaPreview"></div>
     </section>
 
     <div id="dzaBody"></div>
@@ -209,13 +226,11 @@
   var D = window.DAZNData;
   var $ = function (id) { return document.getElementById(id); };
   var esc = function (s) { return NL.escHtml(s); };
-  var whole = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 0 });
   /* Club code → name, from clubs-meta (loaded at boot). */
   function nameOf(code) {
     var c = NL.clubs.byCode(code);
     return c ? c.name : '';
   }
-  var oneDp = new Intl.NumberFormat('en-GB', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
   var S = { session: null, isAdmin: false, meta: null, byName: {},
             index: {}, season: null, data: null, open: null, pending: null };
@@ -258,39 +273,53 @@
   /* ---- Every club --------------------------------------------------- */
   function drawClubs() {
     var clubs = S.data.clubs || {};
+    var F = DAZNView.fmt;
     var rows = Object.keys(clubs).map(function (code) {
       return { code: code, name: nameOf(code) || code, div: clubs[code].div,
                s: D.summarise(clubs[code].matches, code) };
     });
+    /* The Total row is the league, each game counted once: summing the club
+       rows would count every game twice, once for each side. */
+    var lg = D.summarise(S.data.matches || {});
     var num = function (k) { return function (r) { return r.s[k]; }; };
-    $('dzaBody').innerHTML = '<div class="section-head"><h2>Clubs</h2></div><div id="dzaClubs"></div>';
-    DAZNView.sortableTable($('dzaClubs'), {
+    $('dzaBody').innerHTML =
+      '<section class="form-panel dz-panel dz-panel--flush">' +
+        '<div class="form-panel__head dz-panel__head"><span>Clubs</span></div>' +
+        '<div class="form-panel__body dz-panel__body" id="dzaClubs"></div></section>';
+    DAZNView.grid($('dzaClubs'), {
+      height: 420,
       sort: { key: 'views', dir: -1 },
-      tableClass: 'dza-clubs',
       cols: [
         { key: 'name', label: 'Club', get: function (r) { return r.name; } },
-        { key: 'div', label: 'Division', get: function (r) { return D.DIV_LABEL[r.div] || r.div || ''; } },
+        { key: 'div', label: 'Division', cls: 'dz-sm-hide', get: function (r) { return D.DIV_LABEL[r.div] || r.div || ''; } },
         { key: 'games', label: 'Games', num: true, get: num('games') },
-        { key: 'uk', label: 'UK', num: true, get: num('ukViews') },
-        { key: 'intl', label: 'INT', num: true, get: num('intlViews') },
-        { key: 'views', label: 'Total', num: true, get: num('views') },
-        { key: 'ukper', label: 'UK per UK-shown game', num: true, get: num('avgUkPerUkShown') },
-        { key: 'mins', label: 'Avg mins', num: true, get: num('avgMins') }
+        { key: 'uk', label: 'UK', num: true, cls: 'dz-sm-hide', get: num('ukViews') },
+        { key: 'intl', label: 'INT', num: true, cls: 'dz-sm-hide', get: num('intlViews') },
+        { key: 'views', label: 'Views', num: true, get: num('views') },
+        { key: 'ukper', label: 'UK per UK game', num: true, cls: 'dz-sm-hide', get: num('avgUkPerUkShown') },
+        { key: 'mins', label: 'Avg mins', num: true, cls: 'dz-sm-hide', get: num('avgMins') }
       ],
       rows: rows,
       row: function (r) {
         return '<tr data-code="' + esc(r.code) + '"' + (S.open === r.code ? ' class="is-open"' : '') + '>' +
-          '<td><span class="dz-opp">' + NL.clubs.crestImgHtml(r.name, 'thumb', { className: 'dz-crest' }) +
+          '<td><span class="dz-opp">' + NL.clubs.crestImgHtml(r.name, 'thumb', { className: 'nl-crest' }) +
             '<span>' + esc(r.name) + '</span></span></td>' +
-          '<td>' + esc(D.DIV_LABEL[r.div] || r.div || '') + '</td>' +
-          '<td class="dz-num">' + r.s.games + '</td>' +
-          '<td class="dz-num">' + whole.format(r.s.ukViews) + '</td>' +
-          '<td class="dz-num">' + whole.format(r.s.intlViews) + '</td>' +
-          '<td class="dz-num dz-strong">' + whole.format(r.s.views) + '</td>' +
-          '<td class="dz-num">' + (r.s.avgUkPerUkShown == null ? '\u2014' : whole.format(r.s.avgUkPerUkShown)) + '</td>' +
-          '<td class="dz-num">' + (r.s.avgMins == null ? '\u2014' : oneDp.format(r.s.avgMins)) + '</td>' +
+          '<td class="dz-sm-hide">' + esc(D.DIV_LABEL[r.div] || r.div || '') + '</td>' +
+          '<td class="ta-right">' + F.n0(r.s.games) + '</td>' +
+          '<td class="ta-right dz-sm-hide">' + F.n0(r.s.ukViews) + '</td>' +
+          '<td class="ta-right dz-sm-hide">' + F.n0(r.s.intlViews) + '</td>' +
+          '<td class="ta-right dz-strong">' + F.n0(r.s.views) + '</td>' +
+          '<td class="ta-right dz-sm-hide">' + F.n0(r.s.avgUkPerUkShown) + '</td>' +
+          '<td class="ta-right dz-sm-hide">' + F.n1(r.s.avgMins) + '</td>' +
         '</tr>';
-      }
+      },
+      total: '<tr><td>League</td><td class="dz-sm-hide">' + rows.length + ' clubs</td>' +
+        '<td class="ta-right">' + F.n0(lg.games) + '</td>' +
+        '<td class="ta-right dz-sm-hide">' + F.n0(lg.ukViews) + '</td>' +
+        '<td class="ta-right dz-sm-hide">' + F.n0(lg.intlViews) + '</td>' +
+        '<td class="ta-right">' + F.n0(lg.views) + '</td>' +
+        '<td class="ta-right dz-sm-hide">' + F.n0(lg.avgUkPerUkShown) + '</td>' +
+        '<td class="ta-right dz-sm-hide">' + F.n1(lg.avgMins) + '</td></tr>'
     });
   }
 
@@ -302,15 +331,16 @@
   /* ---- One club, exactly as the club sees it ------------------------- */
   function openClub(code) {
     S.open = code;
-    Array.prototype.forEach.call(document.querySelectorAll('.dza-clubs tr[data-code]'), function (tr) {
+    Array.prototype.forEach.call(document.querySelectorAll('#dzaClubs tr[data-code]'), function (tr) {
       tr.classList.toggle('is-open', tr.getAttribute('data-code') === code);
     });
     var club = (S.data.clubs || {})[code];
     var name = nameOf(code) || code;
     var host = $('dzaClub');
     host.innerHTML =
-      '<div class="dza-club-head">' + NL.clubs.crestImgHtml(name, 'thumb', { eager: true }) +
-        '<h2>' + esc(name) + '</h2></div><div id="dzaClubBody"></div>';
+      '<div class="section-head dza-section"><div class="dza-club-head">' +
+        NL.clubs.crestImgHtml(name, 'medium', { eager: true, className: 'nl-crest' }) +
+        '<h2>' + esc(name) + '</h2></div></div><div id="dzaClubBody"></div>';
     NL.clubs.wireCrestImgs(host);
     DAZNView.render($('dzaClubBody'), {
       code: code, name: name, games: club.matches,
