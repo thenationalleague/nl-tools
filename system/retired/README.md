@@ -19,7 +19,7 @@ when someone asks for it, and when they do, this is where the thinking is.
 | [`league-tables.md`](league-tables.md) | 28/08/2026 | Canvas table-graphic tool, superseded by the Broadsheet rebuild at `/graphics/table-graphic/`. Its position-band palette was canon's, and was wrong. |
 | [`wellbeing.md`](wellbeing.md) | 08/10/2026 | Sixteen-page public mental-health section, replaced by `/wellbeing-hub/`. Still a redirect stub, deliberately. Records which two topics the replacement does not carry, and the four-rule design contract for public pages. |
 | [`fixtures.md`](fixtures.md) | 12/10/2026 | Hand-imported fixture list plus scheduling history. The list is now synced from NLS; the postponement model is what's worth keeping. |
-| [`photoshelter-onboarding.md`](photoshelter-onboarding.md) | 15/10/2026 | Open sign-up for the August 2026 PhotoShelter training. Its bookings (personal data) are still in RTDB and should be deleted. |
+| [`photoshelter-onboarding.md`](photoshelter-onboarding.md) | 15/10/2026 | Open sign-up for the August 2026 PhotoShelter training. Bookings deleted and rules removed the same day. |
 | [`club-contacts-and-signoff.md`](club-contacts-and-signoff.md) | 15/10/2026 | The summer 2026 collection and check that built the Club Directory. Submissions kept: the Directory editor reads them. Token links closed. |
 
 ## Why one place
@@ -77,8 +77,9 @@ already happened somewhere else.
 **club-contacts**, whose v2.8 absorbed the club-information capture as a wizard
 step and whose header has said "THIS IS THE UNIFIED FORM — supersedes the old
 club-data tool" since June. The two ran side by side for two months. RTDB
-`app-data/ops-club-data` still holds the collected returns; the rules stay
-until the data goes.
+`app-data/ops-club-data` still holds the collected returns, admin-read only:
+the invite-token rules that let a held link read a return were removed on
+15/10/2026, two months after the pages went.
 
 **graphics/fixtures-results**, deleted 15/08/2026. Superseded by
 graphics/fixtures-graphic, which said in its own header it was "intended to
