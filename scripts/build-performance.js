@@ -3,7 +3,7 @@
    Version: 2.0
    Date: 15/10/2026
 
-   Works out each article's views over its FIRST 7 DAYS for the Website
+   Works out each article's views over its FIRST 14 DAYS for the Website
    Archive's Performance tab, day by day, and writes them to a small feed
    the browser loads alongside the article index.
 
@@ -14,14 +14,14 @@
    Output:
      assets/data/performance.json
 
-   FIRST 7 DAYS
-     The publish day (UK time) plus the 6 days after it, in GA4's own
+   FIRST 14 DAYS
+     The publish day (UK time) plus the 13 days after it, in GA4's own
      day boundaries. GA4 reports days in the property's time zone, which is
      UK time, so an article published at 23:30 counts that half hour as
      day one - the same rule for every article, so comparisons stay fair.
 
      Only COMPLETE days are counted: up to and including yesterday, as of
-     the nightly run. An article younger than 7 complete days carries its
+     the nightly run. An article younger than 14 complete days carries its
      age (a) and its days so far; the page compares it with what a typical
      article had at the same age, from day 2 onwards.
 
@@ -38,12 +38,12 @@
        generatedAt, schemaVersion: 1, windowDays: 7,
        dataFrom:  "2024-11-08",   first day the sources archive covers
        lastDay:   "2026-10-14",   last complete day counted
-       settledTo: "2026-10-08",   last publish day with all 7 days in
+       settledTo: "2026-10-01",   last publish day with all 14 days in
        channels:  ["Organic Search", ...],
        items: {
-         "<postID>": { v: 412, d: [180, 95, ...one per complete day, up to 7],
+         "<postID>": { v: 412, d: [180, 95, ...one per complete day, up to 14],
                        s: { "0": 210, "3": 40 },
-                       a: 5 (complete days so far, only when under 7),
+                       a: 5 (complete days so far, only when under 14),
                        x: 1 (no GA rows joined, only when true) }
        }
      }
@@ -51,7 +51,7 @@
      are left out: there is no first-week data for them.
 
    CHANGELOG
-   v2.0 (15/10/2026) - Days are counted only once complete,
+   v2.0 (15/10/2026) - 14-day window (was 7). Days are counted only once complete,
                        and young articles carry their age so the page can
                        judge them against others at the same age.
                        schemaVersion 2.
@@ -67,7 +67,7 @@ const SOURCES_PATH = path.join(DATA_DIR, 'ga-sources-archive.json');
 const OUT_PATH = path.join(DATA_DIR, 'performance.json');
 // Must match PERF_WINDOW in website-archive/index.html. Up to 28 works with
 // no new fetch: fetch-ga-sources.js keeps 31 days per article.
-const WINDOW_DAYS = 7;
+const WINDOW_DAYS = 14;
 const COMPLETE_LAG_DAYS = 1;   // the run's own day is partial; yesterday counts
 const ID_RX = /-(\d{5,})$/;
 
