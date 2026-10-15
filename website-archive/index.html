@@ -3,10 +3,17 @@
 <head>
 <!--
   NL Tools — Website Archive
-  Version: 3.0
+  Version: 3.1
   Date: 15/10/2026
 
   CHANGELOG
+  v3.1 (15/10/2026)
+    - Performance tab never compares across the October 2025 site move. The
+      first real run showed first-week medians of ~500-1,500 on the old site
+      against ~200-300 since, so "same month last year" would have judged
+      every month from October 2026 against old-site numbers, and every
+      article would have shown red. Baselines and month-on-month changes
+      now stay on one side of PERF_NEW_SITE, and old-site months say so.
   v3.0 (15/10/2026)
     - New Performance tab beside Browse: a month at a glance, judged on each
       article's views in its first 7 days rather than lifetime totals.
@@ -275,6 +282,13 @@
   var NL_TOOL_KEY = 'staff-website-archive';
 
   window.NL_CHANGELOG = [
+    {
+      date: '15 October 2026',
+      version: 'v3.1',
+      items: [
+        'Performance tab: months on the current website are no longer compared with months on the old one (before October 2025), whose view counts are not like-for-like.'
+      ]
+    },
     {
       date: '15 October 2026',
       version: 'v3.0',
@@ -2808,6 +2822,12 @@ function showPane(name, fromHash) {
 var PERF_PATH = 'data/performance.json';
 var PERF_MIN_BASE_N = 15;      // articles a month needs before it can be the usual
 var PERF_WEAK_BASE = 5;        // a usual under this many views is too thin to colour by
+/* The website moved to a new platform in October 2025, and articles on the
+   old site drew roughly twice the first-week views of articles since. A
+   month is only ever compared with months from the same site, or every
+   month from October 2026 would be judged against old-site numbers. */
+var PERF_NEW_SITE = '2025-10';
+function perfSameSite(a, b) { return (a >= PERF_NEW_SITE) === (b >= PERF_NEW_SITE); }
 var PERF_NL = 'The National League';
 var PERF_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 var PERF_BANDS = [
@@ -3019,16 +3039,16 @@ function perfScoredVals(m) {
 }
 
 /* The usual for a month: same month last year, else the three months before,
-   else the month's own median. Fixed per month - it never moves as later
-   months arrive. */
+   else the month's own median - never reaching across the site move (see
+   PERF_NEW_SITE). Fixed per month: it never moves as later months arrive. */
 function perfBase(m) {
   var key = m + '|' + PERF.from;
   if (PERF.baseMemo[key]) return PERF.baseMemo[key];
-  var out, ly = perfShiftMonth(m, -12), lyVals = perfScoredVals(ly);
+  var out, ly = perfShiftMonth(m, -12), lyVals = perfSameSite(m, ly) ? perfScoredVals(ly) : [];
   if (lyVals.length >= PERF_MIN_BASE_N) {
     out = { v: perfMedian(lyVals), label: perfMonthName(ly) + ' (same month last year)' };
   } else {
-    var prior = [perfShiftMonth(m, -3), perfShiftMonth(m, -2), perfShiftMonth(m, -1)].filter(function(p) { return PERF.byMonth[p]; });
+    var prior = [perfShiftMonth(m, -3), perfShiftMonth(m, -2), perfShiftMonth(m, -1)].filter(function(p) { return PERF.byMonth[p] && perfSameSite(m, p); });
     var pool = [];
     prior.forEach(function(p) { pool = pool.concat(perfScoredVals(p)); });
     if (pool.length >= PERF_MIN_BASE_N) {
@@ -3090,6 +3110,10 @@ function perfRender() {
   $('perfNext').disabled = PERF.k >= PERF.months.length - 1;
   $('perfNote').textContent = PERF.k === 0
     ? 'Earliest month: first-7-day data starts ' + perfDdmm(PERF.feed.dataFrom) + '.'
+    : m < PERF_NEW_SITE
+      ? 'Old website. Compared only with other old-site months.'
+    : m === PERF_NEW_SITE
+      ? 'The new website launched this month. Earlier months are not compared with it.'
     : !perfMonthSettled(m)
       ? 'Month so far. Articles under 7 days old are shown dashed and not scored yet.'
       : 'Each article’s views in its first 7 days.';
@@ -3124,6 +3148,7 @@ function perfKpisHTML(m) {
   var pm = PERF.k > 0 ? PERF.months[PERF.k - 1] : null;
   var was = pm ? perfStats(pm) : null;
   if (was && was.none) was = null;
+  if (pm && !perfSameSite(m, pm)) was = null;   // no "on Sep" across the site move
   var lbl = pm ? perfMonthName(pm, true) : '';
   function kpi(label, value, delta) {
     return '<div class="perf-kpi"><dt>' + esc(label) + '</dt><dd><span class="perf-kpi__num">' + value + '</span>' + (delta || '') + '</dd></div>';
