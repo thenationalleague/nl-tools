@@ -99,7 +99,7 @@ portal session as well, and the address clubs hold never changes.
 |---|---|
 | Programme Packs, DAZN Viewership | follows it |
 | Club Kits | no club page any more: the console is the root (public form retired 15/10/2026) |
-| Handbook, Club Directory | **kept as they are** (15/10/2026). Already closest to the end state: the root is the full tool for anyone signed in to the portal, club roles included; `/reader/` is the access-code door for clubs not yet on the portal. When they all are, `/reader/` becomes a redirect to the root. |
+| Handbook, Club Directory | **as they are for now; planned, not scheduled** (Richard, 15/10/2026): the full portal tool moves to `/admin/`; the Directory's code-gated `/editor/` (a stopgap for editors without a portal login) retires; `/reader/` retires into a redirect. `/public/` (open, noindex) is unaffected. What then sits at the root is open, and by the rule above it is the club's page. |
 | Responsibilities (`/view/`), UW Promo | kept as they are, by decision |
 | Commercial Compliance | console moved to `/admin/` (15/10/2026); the root is reserved for the club view, and redirects to `/admin/` until it is built. |
 
