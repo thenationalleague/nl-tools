@@ -9,7 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { NL, REPO, stubEl } from './load-canon.mjs';
+import { NL, REPO, stubEl, freshCanon } from './load-canon.mjs';
 
 const meta = JSON.parse(readFileSync(join(REPO, 'assets/data/clubs-meta.json'), 'utf8'));
 
@@ -637,4 +637,31 @@ test('sortable is defensive: no host / no items', () => {
   const api = NL.sortable(host, {});
   assert.deepEqual(plain(api.order()), [], 'no items → an empty list');
   assert.equal(host.children[0].className, 'nl-sort', 'the shell still renders');
+});
+
+/* ── NL.clubs.byCode (v1.44) ───────────────────────────────────────────────
+   The `code` is what a club-code token carries as its claim, so code-gated
+   pages turn it back into a club with this. uw-promo/club called it before it
+   existed, and its gate never showed a crest. */
+
+test('clubs.byCode is null before load — on an NL that has never loaded', () => {
+  const cold = freshCanon();
+  assert.equal(typeof cold.clubs.byCode, 'function');
+  assert.equal(cold.clubs.byCode('ROC'), null, 'nothing loaded → null, not a throw');
+});
+
+test('clubs.byCode finds by code, case-blind, and answers null for the unknown', async () => {
+  await NL.clubs.load();
+  const roc = NL.clubs.byCode('ROC');
+  assert.ok(roc && roc.name === 'Rochdale', 'ROC → Rochdale');
+  assert.equal(NL.clubs.byCode('roc'), roc, 'lower case finds the same record');
+  assert.equal(NL.clubs.byCode('Roc'), roc, 'mixed case too');
+  assert.equal(NL.clubs.byCode('FYL').optaID, 't3360', 'agrees with byOpta');
+  assert.equal(NL.clubs.byCode('ZZZ'), null, 'unknown code → null');
+  assert.equal(NL.clubs.byCode(''), null, 'empty → null');
+  assert.equal(NL.clubs.byCode(null), null, 'null → null');
+  // Every club in the file is reachable by its own code.
+  for (const c of NL.clubs.meta().clubs) {
+    assert.equal(NL.clubs.byCode(c.code), c, `${c.code} → ${c.name}`);
+  }
 });

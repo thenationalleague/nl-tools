@@ -50,6 +50,9 @@ export function validateClubsMeta(repo = REPO) {
   const optaSeen = new Map();
   const fasSeen = new Map();
   const nameSeen = new Map();
+  /* Case-folded, because NL.clubs.byCode (nl-utils v1.44) looks codes up
+     case-blind: 'ROC' and 'roc' on two records would make one unreachable. */
+  const codeSeen = new Map();
   let currentRoster = 0;
 
   meta.clubs.forEach((c, i) => {
@@ -58,6 +61,7 @@ export function validateClubsMeta(repo = REPO) {
 
     if (!c.name || typeof c.name !== 'string') E(`${at}: missing/invalid "name"`);
     if (!c.code || typeof c.code !== 'string') E(`${at}: missing/invalid "code"`);
+    else codeSeen.set(c.code.toUpperCase(), (codeSeen.get(c.code.toUpperCase()) || 0) + 1);
     if (!c.optaID) W(`${at}: missing "optaID"`);
 
     // fasID — sister identifier to optaID. Only expected for clubs on the
@@ -120,6 +124,7 @@ export function validateClubsMeta(repo = REPO) {
   for (const [id, n] of optaSeen) if (n > 1) E(`duplicate optaID "${id}" on ${n} clubs`);
   for (const [id, n] of fasSeen) if (n > 1) E(`duplicate fasID "${id}" on ${n} clubs`);
   for (const [nm, n] of nameSeen) if (n > 1) E(`duplicate club name "${nm}" on ${n} records`);
+  for (const [cd, n] of codeSeen) if (n > 1) E(`duplicate code "${cd}" (case-blind) on ${n} clubs`);
 
   // ── roster sanity ────────────────────────────────────────────────────────
   if (seasons && seasons.current && currentRoster === 0) {

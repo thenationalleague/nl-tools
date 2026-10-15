@@ -64,7 +64,7 @@
       appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
     });
   </script>
-  <script src="/system/nl-utils.js?v=47"></script>
+  <script src="/system/nl-utils.js?v=48"></script>
   <!-- GA4 for nl.tools — cookieless, no banner, no identity. See system/nl-analytics.js -->
   <script src="/system/nl-analytics.js?v=1"></script>
   <link rel="stylesheet" href="/dazn/_view.css?v=3">
@@ -105,20 +105,16 @@
   var BASE = 'app-data/media-dazn';
   var db = firebase.database();
   var $ = function (id) { return document.getElementById(id); };
-  var S = { code: null, names: {}, seasons: [] };
+  var S = { code: null, seasons: [] };
 
   function message(title, text) {
     $('dzBody').innerHTML = '<div class="empty-state"><div class="empty-state__title">' +
       NL.escHtml(title) + '</div>' + (text ? '<div class="empty-state__text">' + text + '</div>' : '') + '</div>';
   }
 
-  /* CANON CANDIDATE (12/10/2026): NL.clubs has byName and byOpta but no
-     byCode. handbook/_reader.js, uw-promo and this page each build the same
-     code → club lookup. Promote with the next nl-utils change. */
-  function loadNames() {
-    return NL.clubs.load().then(function (meta) {
-      (meta.clubs || []).forEach(function (c) { S.names[c.code] = c.name; });
-    });
+  function nameOf(code) {
+    var c = NL.clubs.byCode(code);
+    return c ? c.name : '';
   }
 
   function showSeason(key) {
@@ -128,9 +124,9 @@
       if (!club || !club.matches) { message('No DAZN games this season'); return; }
       return db.ref(BASE + '/seasons/' + key + '/bench/' + club.div).once('value').then(function (b) {
         DAZNView.render($('dzBody'), {
-          code: S.code, name: S.names[S.code], games: club.matches,
+          code: S.code, name: nameOf(S.code), games: club.matches,
           bench: b.val(), div: club.div,
-          nameOf: function (c) { return S.names[c]; }
+          nameOf: nameOf
         });
       });
     }).catch(function (e) {
@@ -152,8 +148,8 @@
     }
     S.code = code;
 
-    loadNames().catch(function () {}).then(function () {
-      var name = S.names[code] || (session && session.name) || code;
+    NL.clubs.load().catch(function () {}).then(function () {
+      var name = nameOf(code) || (session && session.name) || code;
       $('dzClub').textContent = name;
       var crest = $('dzCrest');
       crest.src = NL.clubs.crestUrl(name, 'thumb');
