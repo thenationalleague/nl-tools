@@ -1,9 +1,11 @@
 /* =============================================================================
    NL Tools — DAZN Viewership: one club's season, as a dashboard
    File: /dazn/_view.js
-   Version: v33.0 (15/10/2026)
+   Version: v35.0 (15/10/2026)
 
    CHANGELOG
+     v35.0 (15/10/2026) — By game draws a dashed line at the average views
+       per game for the games shown, labelled "Avg".
      v33.0 (15/10/2026) — New headline cards: Total views, Views per game
        (vs division), UK share, Hours watched, Best game. The split UK / INT
        averages and the Games card are gone; the game count sits under
@@ -289,7 +291,7 @@
 
   /* cols: [{ uk, intl, label (html), title, value (text above, optional),
               attrs (extra attributes), cls, tag ('button'|'div') }] */
-  function chart(cols, scaleMax, extraCls, minInner) {
+  function chart(cols, scaleMax, extraCls, minInner, avg) {
     var tk = ticks(scaleMax), top = tk[tk.length - 1] || 1;
     var pct = function (v) { return (v / top * 100).toFixed(2) + '%'; };
     var grid = tk.map(function (t) { return '<span class="dz-chart__grid" style="bottom:' + pct(t) + '"></span>'; }).join('');
@@ -308,7 +310,9 @@
     return '<div class="dz-chart ' + (extraCls || '') + '">' +
       '<div class="dz-chart__y" aria-hidden="true">' + yl + '</div>' +
       '<div class="dz-chart__scroll"><div class="dz-chart__inner"' + (minInner ? ' style="min-width:' + minInner + 'px"' : '') + '>' +
-        '<div class="dz-chart__plot">' + grid + '<div class="dz-chart__cols">' + body + '</div></div>' +
+        '<div class="dz-chart__plot">' + grid + '<div class="dz-chart__cols">' + body + '</div>' +
+          (avg > 0 ? '<span class="dz-chart__avg" style="bottom:' + pct(avg) + '"><span class="dz-chart__avg-l">Avg ' + compact(avg) + '</span></span>' : '') +
+        '</div>' +
         '<div class="dz-chart__xrow">' + xl + '</div>' +
       '</div></div></div>';
   }
@@ -344,9 +348,14 @@
 
   /* By game: one thin column per game in date order, scrolling sideways,
      labelled with the opponent's code over (H) / (A) / (N). Not clickable:
-     a single game is a row in the table, not a slice. */
+     a single game is a row in the table, not a slice.
+     A dashed line marks the average of the games shown (the Views per game
+     card's figure), so each column reads as above or below it at a glance.
+     By game only: a month holds a varying number of games, so a line across
+     month totals would not be an average of anything. */
   function gameChart(rows, scaleMax) {
     var list = rows.slice().sort(function (a, b) { return a.g.date < b.g.date ? -1 : a.g.date > b.g.date ? 1 : 0; });
+    var avg = list.length > 1 ? list.reduce(function (n, r) { return n + r.total; }, 0) / list.length : 0;
     return chart(list.map(function (r) {
       var g = r.g;
       return {
@@ -356,7 +365,7 @@
         label: esc(r.oppCode) + '<br>(' + venueAbbr(r) + ')'
       };
     /* Columns share the width; past ~34px each they scroll instead. */
-    }), scaleMax, 'dz-chart--games', list.length * 34);
+    }), scaleMax, 'dz-chart--games', list.length * 34, avg);
   }
 
   /* ---- Top games -------------------------------------------------------- */
