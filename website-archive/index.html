@@ -8,6 +8,16 @@
 
   CHANGELOG
   v3.1 (15/10/2026)
+    - Performance tab measures each article over its first 28 days (was 7),
+      so pieces that pick up later are counted. Articles are coloured from
+      48 hours old: anything younger than 28 days is judged on its views so
+      far against what a typical article had at the same age. Needs
+      performance.json schemaVersion 2 (build-performance.js v2.0); an older
+      feed shows a "being rebuilt" message rather than wrong colours.
+    - Headline figures lead with share at or above usual and median vs
+      usual, which are fair across articles of different ages; median views
+      counts only articles that have had all 28 days. Lists are now best and
+      weakest against usual.
     - Performance tab never compares across the October 2025 site move. The
       first real run showed first-week medians of ~500-1,500 on the old site
       against ~200-300 since, so "same month last year" would have judged
@@ -295,6 +305,7 @@
       date: '15 October 2026',
       version: 'v3.1',
       items: [
+        'Performance tab now measures each article over its first 28 days, so articles that pick up later get credit. Articles are coloured from 48 hours old, compared with a typical article at the same age.',
         'Performance tab: months on the current website are no longer compared with months on the old one (before October 2025), whose view counts are not like-for-like.',
         'Simpler Performance tab: the "Views from" switcher and the recurring-formats panel are gone. Each article’s sources are still in the panel when you select it.'
       ]
@@ -570,7 +581,7 @@
 .perf-mini > div { background: var(--off-white); border-radius: var(--radius); padding: 10px; }
 .perf-mini__label { font-size: var(--text-xs); color: var(--text-muted); }
 .perf-mini__val { font-size: var(--text-md); font-weight: 900; font-variation-settings: 'wght' 900; font-variant-numeric: tabular-nums; }
-.perf-curve { display: flex; align-items: flex-end; gap: 4px; height: 72px; border-bottom: 1px solid var(--navy-200); }
+.perf-curve { display: flex; align-items: flex-end; gap: 2px; height: 72px; border-bottom: 1px solid var(--navy-200); }
 .perf-curve > div { flex: 1; background: var(--navy-400); border-radius: 3px 3px 0 0; min-height: 2px; }
 .perf-curve-labels { display: flex; justify-content: space-between; font-size: var(--text-xs); color: var(--text-muted); }
 .perf-aside .modal-sources { margin: 0; }
@@ -2803,18 +2814,26 @@ function showPane(name, fromHash) {
 }
 
 /* ============ PERFORMANCE TAB ============
-   First-7-day views per article, from data/performance.json (written nightly
-   by scripts/build-performance.js), joined to the index by postID. Each
-   article is coloured against the "usual" for its month: the median of the
-   same month last year when that month has enough articles, otherwise the
-   three months before. The usual is always site-wide, so filtering to one
-   author shows their articles against everyone's normal, not their own. */
+   Views per article over its first 28 days, from data/performance.json
+   (written nightly by scripts/build-performance.js), joined to the index by
+   postID. Each article is coloured against the "usual": the median 28-day
+   views of the comparison period - the same month last year when that month
+   has enough articles, otherwise the three months before.
+
+   An article younger than 28 days is judged on its views so far against
+   what the comparison articles had at the same age (day 2, day 5...), so a
+   three-day-old piece is not marked down for not having had 28 days. It is
+   coloured from 48 hours, when most articles have had most of their
+   readers. The usual is always site-wide, so filtering to one author shows
+   their articles against everyone's normal, not their own. */
 var PERF_PATH = 'data/performance.json';
+var PERF_WINDOW = 28;          // days counted per article
+var PERF_MIN_AGE = 2;          // complete days before an article is coloured
 var PERF_MIN_BASE_N = 15;      // articles a month needs before it can be the usual
 /* The website moved to a new platform in October 2025, and articles on the
-   old site drew roughly twice the first-week views of articles since. A
-   month is only ever compared with months from the same site, or every
-   month from October 2026 would be judged against old-site numbers. */
+   old site drew roughly twice the views of articles since. A month is only
+   ever compared with months from the same site, or every month from October
+   2026 would be judged against old-site numbers. */
 var PERF_NEW_SITE = '2025-10';
 function perfSameSite(a, b) { return (a >= PERF_NEW_SITE) === (b >= PERF_NEW_SITE); }
 var PERF_NL = 'The National League';
@@ -2831,7 +2850,7 @@ var PERF_BANDS = [
 var PERF = {
   started: false,
   feed: null,
-  rows: [],          // every article with first-week data, oldest first
+  rows: [],          // every article with data, oldest first
   byMonth: {},       // 'YYYY-MM' -> rows
   months: [],        // 'YYYY-MM', oldest first
   k: -1,             // index into months
@@ -2856,6 +2875,10 @@ function perfShiftMonth(m, k) {
   y += Math.floor(mo / 12); mo = ((mo % 12) + 12) % 12;
   return y + '-' + String(mo + 1).padStart(2, '0');
 }
+function perfShiftDay(day, k) {
+  var d = new Date(Date.UTC(+day.slice(0, 4), +day.slice(5, 7) - 1, +day.slice(8, 10) + k));
+  return d.toISOString().slice(0, 10);
+}
 function perfMedian(a) {
   if (!a.length) return 0;
   var s = a.slice().sort(function(x, y) { return x - y; });
@@ -2863,6 +2886,7 @@ function perfMedian(a) {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 function perfFmt(n) { return Math.round(n).toLocaleString('en-GB'); }
+function perfX(ratio) { return ratio.toFixed(ratio >= 1 ? 1 : 2) + '×'; }
 
 /* Bylines: blank and the League's own name both read as The National League;
    joint bylines count for each person; near-identical spellings (one letter
@@ -2926,14 +2950,15 @@ function perfOpen() {
   Promise.all([feedLoad, STATE.indexReady || Promise.resolve()])
     .then(function(res) {
       if (!STATE.articles.length) throw new Error('the article index has not loaded');
+      if (!res[0] || res[0].schemaVersion < 2) throw { code: 'perf/old-feed' };
       perfPrepare(res[0]);
       perfRender();
     })
     .catch(function(err) {
-      var missing = err && (err.code === 'storage/object-not-found');
+      var code = err && err.code;
       $('perfBody').innerHTML = '<div class="perf-card perf-empty">' +
-        (missing
-          ? 'The performance figures have not been built yet. The nightly Rebuild article index run writes them.'
+        (code === 'storage/object-not-found' || code === 'perf/old-feed'
+          ? 'The performance figures are being rebuilt. The nightly Rebuild article index run writes them.'
           : 'Couldn’t load the performance figures. ' + esc(err && err.message ? err.message : '')) +
         '</div>';
     });
@@ -2950,10 +2975,12 @@ function perfPrepare(feed) {
     if (!it) return;
     var day = perfUkDay(a.publishedDateTime);
     if (!day) return;
+    var age = it.a == null ? PERF_WINDOW : it.a;
     rows.push({
       a: a, id: String(a.postID), day: day, m: day.slice(0, 7), dn: +day.slice(8, 10),
-      authors: perfSplitByline(a.postAuthor), it: it,
-      scored: !it.p && !it.x
+      authors: perfSplitByline(a.postAuthor), it: it, age: age,
+      full: age === PERF_WINDOW && !it.x,
+      scored: !it.x && age >= PERF_MIN_AGE
     });
   });
   rows.sort(function(x, y) { return x.day < y.day ? -1 : x.day > y.day ? 1 : (y.it.v - x.it.v); });
@@ -2966,9 +2993,10 @@ function perfPrepare(feed) {
   var first = feed.dataFrom.slice(0, 7), now = perfUkDay(new Date().toISOString()).slice(0, 7);
   PERF.months = [];
   for (var m = first; m <= now; m = perfShiftMonth(m, 1)) PERF.months.push(m);
-  // Open on the latest month whose articles have all had their seven days.
+  // Open on this month once it has a handful of coloured articles, else last month.
   PERF.k = PERF.months.length - 1;
-  while (PERF.k > 0 && !perfMonthSettled(PERF.months[PERF.k])) PERF.k--;
+  var scoredNow = (PERF.byMonth[now] || []).filter(function(r) { return r.scored; }).length;
+  if (scoredNow < 10 && PERF.k > 0) PERF.k--;
 
   var sel = $('perfAuthor');
   sel.innerHTML = '<option value="">Any author</option>';
@@ -2978,14 +3006,6 @@ function perfPrepare(feed) {
     sel.appendChild(o);
   });
 }
-/* True once every article in the month has had its full seven days. */
-function perfMonthSettled(m) {
-  return perfShiftDay(perfShiftMonth(m, 1) + '-01', -1) <= PERF.feed.settledTo;
-}
-function perfShiftDay(day, k) {
-  var d = new Date(Date.UTC(+day.slice(0, 4), +day.slice(5, 7) - 1, +day.slice(8, 10) + k));
-  return d.toISOString().slice(0, 10);
-}
 
 function perfGo(k) {
   if (k < 0 || k >= PERF.months.length) return;
@@ -2993,38 +3013,56 @@ function perfGo(k) {
   perfRender();
 }
 
-function perfVal(r) { return r.it.v; }
-function perfScoredVals(m) {
-  return (PERF.byMonth[m] || []).filter(function(r) { return r.scored; }).map(perfVal);
+/* Views over an article's first `a` days (its views so far when younger). */
+function perfCum(r, a) {
+  var d = r.it.d || [], s = 0;
+  for (var i = 0; i < Math.min(a, d.length); i++) s += d[i];
+  return s;
+}
+function perfFullRows(m) { return (PERF.byMonth[m] || []).filter(function(r) { return r.full; }); }
+/* True once every article in the month has had all 28 days. */
+function perfMonthSettled(m) {
+  return perfShiftDay(perfShiftMonth(m, 1) + '-01', -1) <= PERF.feed.settledTo;
 }
 
-/* The usual for a month: same month last year, else the three months before,
-   else the month's own median - never reaching across the site move (see
-   PERF_NEW_SITE). Fixed per month: it never moves as later months arrive. */
+/* The usual for a month: built from the complete (28-day) articles of the
+   same month last year, else the three months before, else the month itself
+   - never reaching across the site move. at(age) is the median of what those
+   articles had after that many days, so young articles compare like with
+   like; at(28) is the headline usual. Fixed per month. */
 function perfBase(m) {
-  var key = m;
-  if (PERF.baseMemo[key]) return PERF.baseMemo[key];
-  var out, ly = perfShiftMonth(m, -12), lyVals = perfSameSite(m, ly) ? perfScoredVals(ly) : [];
-  if (lyVals.length >= PERF_MIN_BASE_N) {
-    out = { v: perfMedian(lyVals), label: perfMonthName(ly) + ' (same month last year)' };
+  if (PERF.baseMemo[m]) return PERF.baseMemo[m];
+  var pool, label, ly = perfShiftMonth(m, -12);
+  var lyRows = perfSameSite(m, ly) ? perfFullRows(ly) : [];
+  if (lyRows.length >= PERF_MIN_BASE_N) {
+    pool = lyRows; label = perfMonthName(ly) + ' (same month last year)';
   } else {
     var prior = [perfShiftMonth(m, -3), perfShiftMonth(m, -2), perfShiftMonth(m, -1)].filter(function(p) { return PERF.byMonth[p] && perfSameSite(m, p); });
-    var pool = [];
-    prior.forEach(function(p) { pool = pool.concat(perfScoredVals(p)); });
+    pool = [];
+    prior.forEach(function(p) { pool = pool.concat(perfFullRows(p)); });
     if (pool.length >= PERF_MIN_BASE_N) {
-      out = { v: perfMedian(pool), label: 'median of ' + (prior.length > 1 ? perfMonthName(prior[0], true) + '–' + perfMonthName(prior[prior.length - 1], true) : perfMonthName(prior[0], true)) };
+      label = 'median of ' + (prior.length > 1 ? perfMonthName(prior[0], true) + '–' + perfMonthName(prior[prior.length - 1], true) : perfMonthName(prior[0], true));
     } else {
-      out = { v: perfMedian(perfScoredVals(m)), label: 'this month’s own median (not enough earlier data)' };
+      pool = perfFullRows(m);
+      label = 'this month’s own median (not enough earlier data)';
     }
   }
-  out.v = Math.max(out.v, 1);
-  return (PERF.baseMemo[key] = out);
+  var memo = {};
+  var out = {
+    label: label,
+    at: function(age) {
+      if (memo[age] == null) memo[age] = Math.max(1, perfMedian(pool.map(function(r) { return perfCum(r, age); })));
+      return memo[age];
+    }
+  };
+  return (PERF.baseMemo[m] = out);
 }
+
+function perfRatio(r) { return r.it.v / perfBase(r.m).at(r.age); }
 
 function perfBand(r) {
   if (!r.scored) return 'pb-none';
-  var base = perfBase(r.m);
-  var ratio = perfVal(r) / base.v;
+  var ratio = perfRatio(r);
   for (var i = 0; i < PERF_BANDS.length; i++) if (ratio < PERF_BANDS[i].upto) return 'pb-' + i;
   return 'pb-6';
 }
@@ -3034,18 +3072,21 @@ function perfMonthRows(m) {
 }
 
 function perfStats(m) {
-  var rows = perfMonthRows(m), done = rows.filter(function(r) { return r.scored; });
-  if (!done.length) return { n: rows.length, prov: rows.length - done.length, none: true };
-  var base = perfBase(m);
-  var reads = done.map(function(r) { return r.a.metrics && r.a.metrics.avgEngagementTimeSecs; }).filter(function(t) { return t > 0; });
+  var rows = perfMonthRows(m);
+  var scored = rows.filter(function(r) { return r.scored; });
+  var full = rows.filter(function(r) { return r.full; });
+  var reads = scored.map(function(r) { return r.a.metrics && r.a.metrics.avgEngagementTimeSecs; }).filter(function(t) { return t > 0; });
   var ai = PERF.ch['AI Assistant'];
   return {
     n: rows.length,
-    prov: rows.length - done.length,
-    med: perfMedian(done.map(perfVal)),
-    above: Math.round(done.filter(function(r) { return perfVal(r) >= base.v; }).length / done.length * 100),
-    read: perfMedian(reads),
-    ai: ai == null ? 0 : done.reduce(function(s, r) { return s + (r.it.s[ai] || 0); }, 0)
+    young: rows.filter(function(r) { return !r.it.x && r.age < PERF_MIN_AGE; }).length,
+    nScored: scored.length,
+    nFull: full.length,
+    med: full.length ? perfMedian(full.map(function(r) { return r.it.v; })) : null,
+    above: scored.length ? Math.round(scored.filter(function(r) { return perfRatio(r) >= 1; }).length / scored.length * 100) : null,
+    ratio: scored.length ? perfMedian(scored.map(perfRatio)) : null,
+    read: reads.length ? perfMedian(reads) : null,
+    ai: ai == null ? 0 : scored.reduce(function(s, r) { return s + (r.it.s[ai] || 0); }, 0)
   };
 }
 
@@ -3059,7 +3100,6 @@ function perfDelta(now, was, pts, label) {
 function perfRender() {
   if (!PERF.feed) return;
   var m = PERF.months[PERF.k];
-  var base = perfBase(m);
   var rows = perfMonthRows(m);
   PERF.monthList = rows;
 
@@ -3067,69 +3107,68 @@ function perfRender() {
   $('perfPrev').disabled = PERF.k <= 0;
   $('perfNext').disabled = PERF.k >= PERF.months.length - 1;
   $('perfNote').textContent = PERF.k === 0
-    ? 'Earliest month: first-7-day data starts ' + perfDdmm(PERF.feed.dataFrom) + '.'
+    ? 'Earliest month: data starts ' + perfDdmm(PERF.feed.dataFrom) + '.'
     : m < PERF_NEW_SITE
       ? 'Old website. Compared only with other old-site months.'
     : m === PERF_NEW_SITE
       ? 'The new website launched this month. Earlier months are not compared with it.'
     : !perfMonthSettled(m)
-      ? 'Month so far. Articles under 7 days old are shown dashed and not scored yet.'
-      : 'Each article’s views in its first 7 days.';
+      ? 'Articles under 28 days old are judged on their views so far, against a typical article at the same age.'
+      : 'Each article’s views in its first 28 days.';
 
   if (!rows.length) {
     $('perfBody').innerHTML = '<div class="perf-card perf-empty">No articles ' + (PERF.who ? 'by ' + esc(PERF.who) + ' ' : '') + 'in ' + esc(perfMonthName(m)) + '.</div>';
     return;
   }
 
-  // Selected article: keep it if it is on screen, else the month's top scorer.
-  var scoredRows = rows.filter(function(r) { return r.scored; }).sort(function(a, b) { return perfVal(b) - perfVal(a); });
-  if (!PERF.sel || !rows.some(function(r) { return r.id === PERF.sel; })) PERF.sel = (scoredRows[0] || rows[0]).id;
+  // Selected article: keep it if it is on screen, else the month's best performer.
+  var ranked = rows.filter(function(r) { return r.scored; }).sort(function(a, b) { return perfRatio(b) - perfRatio(a); });
+  if (!PERF.sel || !rows.some(function(r) { return r.id === PERF.sel; })) PERF.sel = (ranked[0] || rows[0]).id;
 
   var html = '';
   html += '<section class="perf-card" aria-label="Month summary">';
   html += perfKpisHTML(m);
-  html += perfLegendHTML(base);
+  html += perfLegendHTML(m);
   html += '<div class="perf-main">' + perfCalendarHTML(m, rows) + perfAsideHTML(rows) + '</div>';
   html += '</section>';
-
   html += '<div class="perf-lists">';
-  html += perfListHTML('Most read', scoredRows.slice(0, 5));
-  html += perfListHTML('Least read', scoredRows.slice(-5).reverse());
+  html += perfListHTML('Best against usual', ranked.slice(0, 5));
+  html += perfListHTML('Weakest against usual', ranked.slice(-5).reverse());
   html += '</div>';
-
   $('perfBody').innerHTML = html;
 }
 
 function perfKpisHTML(m) {
   var st = perfStats(m);
   var pm = PERF.k > 0 ? PERF.months[PERF.k - 1] : null;
-  var was = pm ? perfStats(pm) : null;
-  if (was && was.none) was = null;
-  if (pm && !perfSameSite(m, pm)) was = null;   // no "on Sep" across the site move
+  var was = pm && perfSameSite(m, pm) ? perfStats(pm) : null;   // no "on Sep" across the site move
   var lbl = pm ? perfMonthName(pm, true) : '';
-  function kpi(label, value, delta) {
-    return '<div class="perf-kpi"><dt>' + esc(label) + '</dt><dd><span class="perf-kpi__num">' + value + '</span>' + (delta || '') + '</dd></div>';
+  function kpi(label, value, note) {
+    return '<div class="perf-kpi"><dt>' + esc(label) + '</dt><dd><span class="perf-kpi__num">' + value + '</span>' + (note || '') + '</dd></div>';
   }
+  function muted(t) { return '<span class="perf-delta perf-delta--muted">' + esc(t) + '</span>'; }
   var out = '<dl class="perf-kpis">';
-  if (st.none) {
-    out += kpi('Articles', perfFmt(st.n), st.prov ? '<span class="perf-delta perf-delta--muted">all under 7 days, not yet scored</span>' : '');
+  if (!st.nScored) {
+    out += kpi('Articles', perfFmt(st.n), st.young ? muted('all under 48 hours, not yet coloured') : '');
     return out + '</dl>';
   }
-  out += kpi('Median views', perfFmt(st.med), was && perfDelta(st.med, was.med, false, lbl));
   out += kpi('At or above usual', st.above + '%', was && perfDelta(st.above, was.above, true, lbl));
+  out += kpi('Median vs usual', perfX(st.ratio), was && was.ratio != null ? perfDelta(st.ratio, was.ratio, false, lbl) : '');
+  out += kpi('Median views, 28 days', st.med == null ? '—' : perfFmt(st.med),
+    st.nFull < st.nScored ? muted(st.nFull + ' of ' + st.nScored + ' articles have had 28 days') : (was && was.nFull === was.nScored ? perfDelta(st.med, was.med, false, lbl) : ''));
   out += kpi('Median read time', st.read ? formatDuration(st.read) : '—', was && perfDelta(st.read, was.read, false, lbl));
-  out += kpi('Articles', perfFmt(st.n), st.prov
-    ? '<span class="perf-delta perf-delta--muted">' + st.prov + ' under 7 days, not yet scored</span>'
-    : (was && perfDelta(st.n, was.n, false, lbl)));
-  if (PERF.ch['AI Assistant'] != null) out += kpi('From AI assistants', perfFmt(st.ai), was && perfDelta(st.ai, was.ai, false, lbl));
+  var monthOver = perfShiftMonth(m, 1) <= perfUkDay(new Date().toISOString()).slice(0, 7);
+  out += kpi('Articles', perfFmt(st.n), st.young ? muted(st.young + ' under 48 hours, not yet coloured') : (was && monthOver ? perfDelta(st.n, was.n, false, lbl) : ''));
+  if (PERF.ch['AI Assistant'] != null) out += kpi('From AI assistants', perfFmt(st.ai), was && perfMonthSettled(m) ? perfDelta(st.ai, was.ai, false, lbl) : '');
   return out + '</dl>';
 }
 
-function perfLegendHTML(base) {
+function perfLegendHTML(m) {
+  var base = perfBase(m);
   var out = '<div class="perf-legend"><span class="perf-legend__label">Against the usual</span><span class="perf-legend__swatches">';
   PERF_BANDS.forEach(function(b, i) { out += '<span class="perf-swatch pb-' + i + '">' + b.label + '</span>'; });
-  out += '<span class="perf-swatch pb-none">Under 7 days</span></span>';
-  out += '<span>Usual = ' + perfFmt(base.v) + ' views, ' + esc(base.label) + '</span>';
+  out += '<span class="perf-swatch pb-none">Under 48 hours</span></span>';
+  out += '<span>Usual = ' + perfFmt(base.at(PERF_WINDOW)) + ' views over 28 days, ' + esc(base.label) + '</span>';
   return out + '</div>';
 }
 
@@ -3139,7 +3178,7 @@ function perfCalendarHTML(m, rows) {
   var dim = new Date(Date.UTC(y, mo + 1, 0)).getUTCDate();
   var byDay = {};
   rows.forEach(function(r) { (byDay[r.dn] = byDay[r.dn] || []).push(r); });
-  var totals = Object.keys(byDay).map(function(d) { return byDay[d].reduce(function(s, r) { return s + perfVal(r); }, 0); }).sort(function(a, b) { return a - b; });
+  var totals = Object.keys(byDay).map(function(d) { return byDay[d].reduce(function(s, r) { return s + r.it.v; }, 0); }).sort(function(a, b) { return a - b; });
   var cap = totals.length ? totals[Math.min(totals.length - 1, Math.floor(totals.length * 0.95))] || 1 : 1;
 
   var out = '<div class="perf-cal-wrap"><div class="perf-cal">';
@@ -3149,14 +3188,15 @@ function perfCalendarHTML(m, rows) {
     var dt = new Date(Date.UTC(y, mo, 1 - lead + i));
     var inMonth = dt.getUTCMonth() === mo, n = dt.getUTCDate();
     if (!inMonth) { out += '<div class="perf-day perf-day--out" aria-hidden="true"><div class="perf-day__head"><span class="perf-day__num">' + n + '</span></div></div>'; continue; }
-    var list = (byDay[n] || []).slice().sort(function(a, b) { return perfVal(b) - perfVal(a); });
-    var t = list.reduce(function(s, r) { return s + perfVal(r); }, 0);
+    var list = (byDay[n] || []).slice().sort(function(a, b) { return b.it.v - a.it.v; });
+    var t = list.reduce(function(s, r) { return s + r.it.v; }, 0);
     var shade = t ? Math.max(1, Math.ceil(4 * Math.min(1, t / cap))) : 0;
     out += '<div class="perf-day' + (shade ? ' perf-day--s' + shade : '') + '">';
     out += '<div class="perf-day__head"><span class="perf-day__num">' + n + '</span><span class="perf-day__total">' + (t ? perfFmt(t) : '') + '</span></div>';
     list.slice(0, 4).forEach(function(r) {
       var cls = 'perf-chip' + (r.scored ? '' : ' perf-chip--prov') + (r.id === PERF.sel ? ' is-sel' : '');
-      var title = (r.a.postTitle || '') + ' · ' + r.authors.join(' & ') + ' · ' + (r.it.x ? 'no GA data' : perfFmt(perfVal(r)) + ' views' + (r.it.p ? ' so far' : ''));
+      var title = (r.a.postTitle || '') + ' · ' + r.authors.join(' & ') + ' · ' +
+        (r.it.x ? 'no GA data' : perfFmt(r.it.v) + ' views' + (r.age < PERF_WINDOW ? ' in ' + r.age + ' day' + (r.age === 1 ? '' : 's') + ' so far' : ''));
       out += '<button type="button" class="' + cls + '" data-pick="' + esc(r.id) + '" title="' + esc(title) + '">' +
         '<span class="perf-dot ' + perfBand(r) + '" aria-hidden="true"></span><span class="perf-chip__t">' + esc(r.a.postTitle || '') + '</span></button>';
     });
@@ -3169,24 +3209,27 @@ function perfCalendarHTML(m, rows) {
 function perfAsideHTML(rows) {
   var r = rows.filter(function(x) { return x.id === PERF.sel; })[0];
   if (!r) return '';
-  var base = perfBase(r.m), v = perfVal(r);
-  var vs = r.it.x ? 'No data' : !r.scored ? 'Not yet' : (v / base.v).toFixed(v / base.v >= 1 ? 1 : 2) + '×';   // same unit as the legend, above and below
+  var vs = r.it.x ? 'No data' : !r.scored ? 'Not yet' : perfX(perfRatio(r));
   var read = r.a.metrics && r.a.metrics.avgEngagementTimeSecs;
+  var young = r.age < PERF_WINDOW;
   var out = '<aside class="perf-aside" aria-label="Selected article">';
   out += '<div class="perf-aside__eyebrow">Selected article</div>';
   out += '<div class="perf-aside__title">' + esc(r.a.postTitle || '') + '</div>';
   out += '<div class="perf-aside__meta">' + perfDdmm(r.day) + ' · ' + esc(r.authors.join(' & ')) + (r.a.newsCategory ? ' · ' + esc(r.a.newsCategory) : '') + '</div>';
   out += '<div class="perf-mini">' +
-    '<div><div class="perf-mini__label">First 7 days</div><div class="perf-mini__val">' + (r.it.x ? '—' : perfFmt(v)) + '</div></div>' +
-    '<div><div class="perf-mini__label">vs usual</div><div class="perf-mini__val">' + vs + '</div></div>' +
+    '<div><div class="perf-mini__label">' + (young ? 'First ' + r.age + ' day' + (r.age === 1 ? '' : 's') + ' so far' : 'First 28 days') + '</div><div class="perf-mini__val">' + (r.it.x ? '—' : perfFmt(r.it.v)) + '</div></div>' +
+    '<div><div class="perf-mini__label">vs usual' + (young && r.scored ? ' at ' + r.age + ' days' : '') + '</div><div class="perf-mini__val">' + vs + '</div></div>' +
     '<div><div class="perf-mini__label">Read time</div><div class="perf-mini__val">' + (read ? formatDuration(read) : '—') + '</div></div>' +
     '</div>';
-  if (!r.it.x) {
-    var d = r.it.d || [], mx = Math.max.apply(null, d.concat([1]));
+  var d = r.it.d || [];
+  if (!r.it.x && d.length) {
+    var mx = Math.max.apply(null, d.concat([1]));
     out += '<div><div class="perf-mini__label">Views by day</div><div class="perf-curve" role="img" aria-label="' +
       esc(d.map(function(x, i) { return 'Day ' + (i + 1) + ': ' + x; }).join(', ')) + '">';
     d.forEach(function(x, i) { out += '<div style="height:' + Math.round(100 * x / mx) + '%" title="Day ' + (i + 1) + ': ' + perfFmt(x) + ' views"></div>'; });
-    out += '</div><div class="perf-curve-labels"><span>Day 1</span><span>' + (r.it.v ? Math.round(100 * (d[0] || 0) / r.it.v) + '% on day 1' : '') + '</span><span>Day 7</span></div></div>';
+    var early = (d[0] || 0) + (d[1] || 0);
+    out += '</div><div class="perf-curve-labels"><span>Day 1</span><span>' +
+      (r.it.v && d.length >= 2 ? Math.round(100 * early / r.it.v) + '% in the first 2 days' : '') + '</span><span>Day ' + d.length + '</span></div></div>';
     var named = {};
     Object.keys(r.it.s || {}).forEach(function(ci) { named[PERF.feed.channels[ci] || 'Unknown'] = r.it.s[ci]; });
     out += buildTrafficSourceBar(named, r.it.v);
@@ -3203,13 +3246,14 @@ function perfOpenSelected() {
 
 function perfListHTML(title, list) {
   var out = '<section class="perf-card" aria-label="' + esc(title) + '"><h3>' + esc(title) + '</h3>';
-  if (!list.length) return out + '<div class="perf-empty">Nothing scored yet this month.</div></section>';
+  if (!list.length) return out + '<div class="perf-empty">Nothing coloured yet this month.</div></section>';
   out += '<ol class="perf-list">';
   list.forEach(function(r) {
     out += '<li><button type="button" class="perf-row" data-pick="' + esc(r.id) + '">' +
       '<span class="perf-dot ' + perfBand(r) + '" aria-hidden="true"></span>' +
-      '<span style="min-width:0"><span class="perf-row__t">' + esc(r.a.postTitle || '') + '</span><span class="perf-row__m">' + perfDdmm(r.day) + ' · ' + esc(r.authors.join(' & ')) + '</span></span>' +
-      '<span class="perf-row__n">' + perfFmt(perfVal(r)) + '</span></button></li>';
+      '<span style="min-width:0"><span class="perf-row__t">' + esc(r.a.postTitle || '') + '</span><span class="perf-row__m">' + perfDdmm(r.day) + ' · ' + esc(r.authors.join(' & ')) +
+      ' · ' + perfFmt(r.it.v) + ' views' + (r.age < PERF_WINDOW ? ' in ' + r.age + ' days' : '') + '</span></span>' +
+      '<span class="perf-row__n">' + perfX(perfRatio(r)) + '</span></button></li>';
   });
   return out + '</ol></section>';
 }

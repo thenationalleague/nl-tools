@@ -1,11 +1,11 @@
 /* =======================================================================
    NL Website Archive - Performance feed
-   Version: 1.0
+   Version: 2.0
    Date: 15/10/2026
 
-   Works out each article's FIRST-7-DAY views for the Website Archive's
-   Performance tab, and writes them to a small feed the browser loads
-   alongside the article index.
+   Works out each article's views over its FIRST 28 DAYS for the Website
+   Archive's Performance tab, day by day, and writes them to a small feed
+   the browser loads alongside the article index.
 
    Inputs (both produced earlier in the same nightly job):
      assets/data/articles-index.json      the article index
@@ -14,15 +14,16 @@
    Output:
      assets/data/performance.json
 
-   FIRST 7 DAYS
-     The publish day (UK time) plus the six days after it, in GA4's own
+   FIRST 28 DAYS
+     The publish day (UK time) plus the 27 days after it, in GA4's own
      day boundaries. GA4 reports days in the property's time zone, which is
      UK time, so an article published at 23:30 counts that half hour as
      day one - the same rule for every article, so comparisons stay fair.
 
-     An article is SETTLED once its seventh day is at least two days in
-     the past (GA4 is still filling in yesterday). Unsettled articles are
-     marked provisional and the page shows them but does not score them.
+     Only COMPLETE days are counted: up to and including yesterday, as of
+     the nightly run. An article younger than 28 complete days carries its
+     age (a) and its days so far; the page compares it with what a typical
+     article had at the same age, from day 2 onwards.
 
    JOIN
      Same rule as rebuild-index.js: every GA path ending in the article's
@@ -36,11 +37,13 @@
      {
        generatedAt, schemaVersion: 1, windowDays: 7,
        dataFrom:  "2024-11-08",   first day the sources archive covers
-       settledTo: "2026-10-13",   last publish day that counts as settled
+       lastDay:   "2026-10-14",   last complete day counted
+       settledTo: "2026-09-17",   last publish day with all 28 days in
        channels:  ["Organic Search", ...],
        items: {
-         "<postID>": { v: 412, d: [180, 95, ...7], s: { "0": 210, "3": 40 },
-                       p: 1 (provisional, only when true),
+         "<postID>": { v: 412, d: [180, 95, ...one per complete day, up to 28],
+                       s: { "0": 210, "3": 40 },
+                       a: 5 (complete days so far, only when under 28),
                        x: 1 (no GA rows joined, only when true) }
        }
      }
@@ -48,6 +51,11 @@
      are left out: there is no first-week data for them.
 
    CHANGELOG
+   v2.0 (15/10/2026) - 28-day window rather than 7, so articles that pick up
+                       late are counted. Days are counted only once complete,
+                       and young articles carry their age so the page can
+                       judge them against others at the same age.
+                       schemaVersion 2.
    v1.0 (15/10/2026) - Initial build.
 ======================================================================= */
 
@@ -58,8 +66,8 @@ const DATA_DIR = path.join(__dirname, '..', 'assets', 'data');
 const INDEX_PATH = path.join(DATA_DIR, 'articles-index.json');
 const SOURCES_PATH = path.join(DATA_DIR, 'ga-sources-archive.json');
 const OUT_PATH = path.join(DATA_DIR, 'performance.json');
-const WINDOW_DAYS = 7;
-const SETTLE_LAG_DAYS = 2;
+const WINDOW_DAYS = 28;
+const COMPLETE_LAG_DAYS = 1;   // the run's own day is partial; yesterday counts
 const ID_RX = /-(\d{5,})$/;
 
 function log(msg) {
@@ -115,12 +123,12 @@ function pathsFor(slug, daily, byId) {
 }
 
 /**
- * First-7-day views for one article from its GA paths.
+ * Views over an article's first `days` complete days from its GA paths.
  * Returns { v, d, s, rows } where rows counts GA rows that fell in the window.
  */
-function firstWeek(paths, daily, pubDay) {
-  const end = addDays(pubDay, WINDOW_DAYS - 1);
-  const d = new Array(WINDOW_DAYS).fill(0);
+function firstDays(paths, daily, pubDay, days) {
+  const end = addDays(pubDay, days - 1);
+  const d = new Array(days).fill(0);
   const s = {};
   let v = 0, rows = 0;
   paths.forEach(p => {
@@ -141,43 +149,46 @@ function build(index, sources, now) {
   const byId = indexPaths(daily);
   const dataFrom = isoToDay(sources.firstSeenDate);
   const endDay = isoToDay(sources.endDate || isoDay(now));
-  const settledTo = addDays(endDay, -(SETTLE_LAG_DAYS + WINDOW_DAYS - 1));
+  const lastDay = addDays(endDay, -COMPLETE_LAG_DAYS);
+  const settledTo = addDays(lastDay, -(WINDOW_DAYS - 1));
 
   const items = {};
-  let scored = 0, provisional = 0, noData = 0, skipped = 0;
+  let full = 0, young = 0, noData = 0, skipped = 0;
   (index.articles || []).forEach(a => {
     const pub = ukDay(a.publishedDateTime);
     if (!a.postID || !pub || pub < dataFrom || pub > endDay) { skipped++; return; }
-    const fw = firstWeek(pathsFor(a.postSlug, daily, byId), daily, pub);
+    const age = Math.max(0, Math.min(WINDOW_DAYS, Math.round((dayToDate(lastDay) - dayToDate(pub)) / 86400000) + 1));
+    const fw = firstDays(pathsFor(a.postSlug, daily, byId), daily, pub, age);
     const item = { v: fw.v, d: fw.d, s: fw.s };
-    if (pub > settledTo) { item.p = 1; provisional++; }
-    if (!fw.rows) { item.x = 1; noData++; }
-    else if (!item.p) scored++;
+    if (age < WINDOW_DAYS) { item.a = age; young++; }
+    if (!fw.rows && age > 0) { item.x = 1; noData++; }
+    else if (age === WINDOW_DAYS) full++;
     items[String(a.postID)] = item;
   });
 
   return {
     feed: {
       generatedAt: now.toISOString(),
-      schemaVersion: 1,
+      schemaVersion: 2,
       windowDays: WINDOW_DAYS,
       dataFrom: dayToIso(dataFrom),
+      lastDay: dayToIso(lastDay),
       settledTo: dayToIso(settledTo),
       channels: sources.channels || [],
       items
     },
-    counts: { scored, provisional, noData, skipped }
+    counts: { full, young, noData, skipped }
   };
 }
 
 function isoDay(d) { return d.toISOString().slice(0, 10); }
 
-/** Per-month count, total and median of settled first-7-day views, for the run summary. */
+/** Per-month count, total and median of complete 28-day views, for the run summary. */
 function monthlySummary(index, feed) {
   const months = {};
   (index.articles || []).forEach(a => {
     const it = feed.items[String(a.postID)];
-    if (!it || it.p || it.x) return;
+    if (!it || it.a != null || it.x) return;
     const m = String(ukDay(a.publishedDateTime)).slice(0, 6);
     (months[m] = months[m] || []).push(it.v);
   });
@@ -201,20 +212,20 @@ function main() {
   fs.renameSync(tmp, OUT_PATH);
   const sizeKB = Math.round(fs.statSync(OUT_PATH).size / 1024);
 
-  log('PERFORMANCE FEED v1.0');
-  log('  data from:    ' + feed.dataFrom + '   settled to: ' + feed.settledTo);
-  log('  scored:       ' + counts.scored);
-  log('  provisional:  ' + counts.provisional);
+  log('PERFORMANCE FEED v2.0');
+  log('  data from:    ' + feed.dataFrom + '   last day: ' + feed.lastDay + '   all 28 days to: ' + feed.settledTo);
+  log('  complete:     ' + counts.full);
+  log('  under 28 days: ' + counts.young);
   log('  no GA rows:   ' + counts.noData + '  (published in range but nothing joined)');
   log('  file size:    ' + sizeKB + 'KB');
   const months = monthlySummary(index, feed);
   log('');
-  log('  month     articles   total 7-day views   median');
+  log('  month     articles   total 28-day views   median');
   months.forEach(r => log('  ' + r.month + '   ' + String(r.n).padStart(8) + '   ' + String(r.total).padStart(17) + '   ' + String(r.median).padStart(6)));
 
   if (process.env.GITHUB_ACTIONS) {
-    console.log('::notice title=Performance feed::' + counts.scored + ' scored, ' + counts.provisional +
-      ' provisional, ' + counts.noData + ' with no GA rows, data from ' + feed.dataFrom + ', ' + sizeKB + 'KB');
+    console.log('::notice title=Performance feed::' + counts.full + ' with all 28 days, ' + counts.young +
+      ' younger, ' + counts.noData + ' with no GA rows, data from ' + feed.dataFrom + ', ' + sizeKB + 'KB');
     // Annotations carry one line only when read back through the API, so the
     // monthly table goes in as a single compact line.
     console.log('::notice title=Performance by month (articles/median)::' +
@@ -232,4 +243,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { ukDay, addDays, pathsFor, indexPaths, firstWeek, build, monthlySummary };
+module.exports = { ukDay, addDays, pathsFor, indexPaths, firstDays, build, monthlySummary };
