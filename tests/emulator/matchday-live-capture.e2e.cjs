@@ -105,7 +105,11 @@ async function until(fn, ms, label) {
   assert.match(await page.textContent('#matchBox'), /63′/);
   console.log('signed in, match shown');
 
-  // 3. Record ~3s, stop
+  // 3. What it's about is chosen BEFORE recording: the goal a minute ago is
+  //    already picked on the match screen. Then record ~3s and stop.
+  const pressed = await page.textContent('#tagList .cap-opt[aria-pressed="true"]');
+  assert.match(pressed, /A Striker/, 'recent goal pre-selected on the match screen, got: ' + pressed);
+  assert.match(await page.textContent('#tagList'), /Just happened/);
   await page.click('#btnRecord');
   await page.waitForSelector('#cam:not([hidden])');
   await sleep(1500);
@@ -119,10 +123,8 @@ async function until(fn, ms, label) {
   console.log('recorded', dims.join('x'));
   assert.deepEqual(dims, [720, 1280], 'drawn onto the fixed upright frame');
   assert.equal(await page.isDisabled('#btnSend'), false);
-  const pressed = await page.textContent('.cap-opt[aria-pressed="true"]');
-  assert.match(pressed, /A Striker/, 'recent goal pre-selected, got: ' + pressed);
+  assert.equal(await page.inputValue('#tagSelect'), 'e:m1_t1_goal_0', 'review dropdown carries the choice');
   assert.equal(await page.isVisible('#consentBox'), true);
-  assert.match(await page.textContent('#tagList'), /Just happened/);
 
   // 4. Send without consent → refused; with → sent
   await page.fill('#caption', 'Back post header');
@@ -154,7 +156,7 @@ async function until(fn, ms, label) {
   await page.click('#btnRec'); await sleep(2000); await page.click('#btnRec');
   await page.waitForSelector('#s-review:not([hidden])');
   assert.equal(await page.isVisible('#consentBox'), false, 'consent not asked twice');
-  await page.click('.cap-opt >> text=General update');
+  await page.selectOption('#tagSelect', 'g:');
   await ctx.setOffline(true);
   await page.click('#btnSend');
   await page.waitForFunction(() => /waiting for signal/.test(document.getElementById('queueNote').textContent), null, { timeout: 5000 });
@@ -175,14 +177,28 @@ async function until(fn, ms, label) {
   await page.waitForFunction(() => document.getElementById('queueNote').hidden, null, { timeout: 10000 });
   console.log('back online: sent, queue empty');
 
-  // 6. Test link: pick a match from days ago, filed under that day, marked test
+  // 6. Test link: a match from days ago, found by standing at its ground.
+  //    Old Home plays at AFC Fylde's ground (opta t3360, coordinates from
+  //    clubs-meta). Location is already granted, so the page finds the match
+  //    without being asked — the picker never needs a tap.
   const OLD = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
   await db.ref(R + '/matchdays/' + OLD + '/old1').set({ comp: 'south', ko: OLD + 'T14:00:00.000Z', koMs: Date.parse(OLD + 'T14:00:00.000Z'),
-    period: 'fulltime', live: false, finished: true, home: { id: 't8', name: 'Old Home', score: 3 }, away: { id: 't9', name: 'Old Away', score: 3 } });
+    period: 'fulltime', live: false, finished: true, home: { id: 't3360', name: 'Old Home', score: 3 }, away: { id: 't9', name: 'Old Away', score: 3 } });
   await db.ref(R + '/contributors/c1/test').set(true);
+  await ctx.grantPermissions(['camera', 'microphone', 'geolocation'], { origin: 'http://127.0.0.1:8080' });
+  await ctx.setGeolocation({ latitude: 53.7975, longitude: -2.8890 });   // inside the ground
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('#s-pick:not([hidden])', { timeout: 30000 });
+  await page.waitForFunction(() => /Old Home/.test(document.getElementById('matchBox').textContent) &&
+    !document.getElementById('s-home').hidden, null, { timeout: 30000 });
+  console.log('location found the match at the ground');
+  await page.click('#btnChangeMatch');
+  await page.waitForSelector('#s-pick:not([hidden])');
   assert.match(await page.textContent('#pickList'), /Old Home 3–3 Old Away/);
+  await ctx.setGeolocation({ latitude: 51.5, longitude: -0.12 });         // miles away
+  await page.click('#btnFindMe');
+  await page.waitForFunction(() => /No open match at a ground near you/.test((document.querySelector('.toast') || {}).textContent || ''), null, { timeout: 10000 });
+  assert.equal(await page.isVisible('#s-pick'), true, 'far away: stays on the list');
+  console.log('location away from any ground leaves the list in charge');
   await page.click('.cap-opt >> text=Old Home');
   await page.waitForSelector('#s-home:not([hidden])');
   assert.equal(await page.isVisible('#testNote'), true);
