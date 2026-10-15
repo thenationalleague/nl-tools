@@ -1,4 +1,4 @@
-/* DAZN Viewing — the import parser, the per-club filing, the averages, and
+/* DAZN Viewership — the import parser, the per-club filing, the averages, and
    the rules that keep one club out of another's figures.
 
    All numbers here are invented. The real workbook is DAZN-confidential and
@@ -107,7 +107,7 @@ test('a division average built from too few games is not shown', () => {
 test('the division average carries averages and counts, never games', () => {
   const b = D.buildSeason(D.parsePaste(SHEET).rows, codeOf);
   assert.deepEqual([...Object.keys(b.season.bench.National)].sort(),
-    ['avgIntlPerGame', 'avgMins', 'avgUkPerUkShown', 'games', 'ukShownGames']);
+    ['avgIntlPerGame', 'avgMins', 'avgUkPerUkShown', 'avgViewsPerGame', 'games', 'ukShownGames']);
 });
 
 test('rules: a club code reads its own club node and the averages, nothing else', () => {
@@ -290,6 +290,27 @@ test('a club view with a neutral game: Venue Home and Away both leave it out, Al
   assert.equal(n('all'), 3);
   assert.equal(n('home'), 0);
   assert.equal(n('away'), 2);
+});
+
+test('headline cards: views per game against the division, UK share, best game named', () => {
+  const win = { DAZNData: D, NL: { formatDateShort: (d) => d, escHtml: (t) => String(t) } };
+  vm.runInNewContext(readFileSync(join(REPO, 'dazn/_view.js'), 'utf8'), { window: win, Intl });
+  const games = [
+    { date: '2025-08-09', home: 'ALP', away: 'BET', ukViews: 300, intlViews: 100, ukMins: 0, intlMins: 6000, avail: 'uk' },
+    { date: '2025-08-16', home: 'GAM', away: 'ALP', ukViews: 0, intlViews: 200, ukMins: 0, intlMins: 0, avail: 'intl' }
+  ];
+  const s = D.summarise(games, 'ALP');
+  const bench = { games: 10, ukShownGames: 10, avgViewsPerGame: 200 };
+  const html = win.DAZNView.kpis(s, bench, true, { code: 'ALP', nameOf: () => '' });
+  const labels = [...html.matchAll(/stat__label">([^<]*)</g)].map((m) => m[1]);
+  assert.deepEqual(labels, ['Total views', 'Views per game', 'UK share', 'Hours watched', 'Best game']);
+  assert.match(html, /\+50% vs division/, '300 per game against 200');
+  assert.match(html, />50%</, '300 UK of 600');
+  assert.match(html, /v BET \(H\)/);
+  assert.match(html, />100</, '6,000 minutes is 100 hours');
+  /* A slicer is on: no comparison, but the card still counts the games. */
+  assert.doesNotMatch(win.DAZNView.kpis(s, bench, false, { code: 'ALP' }), /vs division/);
+  assert.match(win.DAZNView.kpis(D.summarise(games), null, false), /ALP v BET/, 'League: home v away');
 });
 
 test('the chart has a fixed height, so nothing beside it can stretch it', () => {
