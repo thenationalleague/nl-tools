@@ -61,6 +61,11 @@ worth knowing:
   out of its retention window, so `ga-hourly-archive.json` is the only copy of
   anything older than that. The Action refuses to run if it is missing from the
   bucket rather than quietly rebuilding a 90-day file over the top of it.
+- **`ga-sources-archive.json`** (added 15/10/2026) holds views per news
+  article, per day, per channel, for the first 31 days after publish. It is
+  seeded by running the Action with a `seed_sources_from` date rather than
+  from git history, and its fetch step refuses to run if the archive did not
+  come down from the bucket and no seed date was given.
 - **The first run needs a seed.** [`seed-data-bucket.yml`](../../.github/workflows/seed-data-bucket.yml)
   restores all three from git history. It doubles as the recovery route if an
   object is ever deleted — but only while the history still holds them.
