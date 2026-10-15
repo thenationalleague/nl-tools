@@ -39,7 +39,7 @@ async function until(fn, ms, label) {
     keys: { [HASH]: 'c1' },
     config: { consent: { version: 1, text: 'Draft wording line one.\nLine two.' } },
     matchdays: { [YMD]: { m1: {
-      comp: 'nl', ko: YMD + 'T14:00:00.000Z', period: 'secondhalf', live: true, finished: false,
+      comp: 'nl', ko: YMD + 'T14:00:00.000Z', koMs: Date.now() - 70 * 60000, period: 'secondhalf', live: true, finished: false,
       minute: 63, fm: "63'", updatedAt: Date.now(),
       home: { id: 't1', name: 'Boreham Wood', score: 1 }, away: { id: 't2', name: 'Away Town', score: 0 },
       events: {
@@ -175,7 +175,45 @@ async function until(fn, ms, label) {
   await page.waitForFunction(() => document.getElementById('queueNote').hidden, null, { timeout: 10000 });
   console.log('back online: sent, queue empty');
 
-  // 6. Deactivate → the page refuses on next load
+  // 6. Test link: pick a match from days ago, filed under that day, marked test
+  const OLD = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
+  await db.ref(R + '/matchdays/' + OLD + '/old1').set({ comp: 'south', ko: OLD + 'T14:00:00.000Z', koMs: Date.parse(OLD + 'T14:00:00.000Z'),
+    period: 'fulltime', live: false, finished: true, home: { id: 't8', name: 'Old Home', score: 3 }, away: { id: 't9', name: 'Old Away', score: 3 } });
+  await db.ref(R + '/contributors/c1/test').set(true);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#s-pick:not([hidden])', { timeout: 30000 });
+  assert.match(await page.textContent('#pickList'), /Old Home 3–3 Old Away/);
+  await page.click('.cap-opt >> text=Old Home');
+  await page.waitForSelector('#s-home:not([hidden])');
+  assert.equal(await page.isVisible('#testNote'), true);
+  await sleep(31000);   // the 30-second pace from the last clip
+  await page.click('#btnRecord');
+  await page.waitForSelector('#cam:not([hidden])');
+  await sleep(1000);
+  await page.click('#btnRec'); await sleep(2000); await page.click('#btnRec');
+  await page.waitForSelector('#s-review:not([hidden])');
+  await page.click('#btnSend');
+  const old = await until(async () => {
+    const v = (await db.ref(R + '/clips/' + OLD).once('value')).val() || {};
+    const k = Object.keys(v).find((id) => v[id].status === 'new');
+    return k ? v[k] : null;
+  }, 30000, 'test clip new');
+  assert.equal(old.test, true); assert.equal(old.matchId, 'old1');
+  assert.match(old.storagePath, new RegExp('^matchday-live/' + OLD + '/'));
+  console.log('test link: past match filed under its own day, marked test');
+  await db.ref(R + '/contributors/c1/test').set(null);
+
+  // 7. No match yet → the page picks today's up when it arrives, no reload
+  await db.ref(R + '/matchdays/' + YMD).set(null);
+  await page.evaluate(() => sessionStorage.clear());
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => /No Boreham Wood match today/.test(document.getElementById('matchBox').textContent), null, { timeout: 30000 });
+  await db.ref(R + '/matchdays/' + YMD + '/m2').set({ comp: 'nl', ko: YMD + 'T19:45:00.000Z', koMs: Date.now() + 3600000,
+    period: 'prematch', live: false, finished: false, home: { id: 't1', name: 'Boreham Wood', score: null }, away: { id: 't3', name: 'Late Arrivals' } });
+  await page.waitForFunction(() => /Late Arrivals/.test(document.getElementById('matchBox').textContent), null, { timeout: 10000 });
+  console.log('fixtures arriving later are picked up without a reload');
+
+  // 8. Deactivate → the page refuses on next load
   await db.ref(R + '/contributors/c1/active').set(false);
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#s-stop:not([hidden])', { timeout: 60000 });

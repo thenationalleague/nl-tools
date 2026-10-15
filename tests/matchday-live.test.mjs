@@ -173,3 +173,27 @@ test('retention: the sweep looks back sixty UTC days and never at today', () => 
   assert.equal(days[59], '2026-08-16');
   assert.ok(days.every(C.validYmd));
 });
+
+/* ------------------------------------------------- late filing + test links */
+
+test('mirror: every match carries koMs for the late-filing rule', () => {
+  const md = C.buildMatchday({ nl: { m1: ROW('m1', 'nl') } }, {});
+  assert.equal(md.m1.koMs, Date.parse('2026-10-17T14:00:00.000Z'));
+  const bad = C.buildMatchday({ nl: { m1: ROW('m1', 'nl', { ko: 'not a date' }) } }, {});
+  assert.equal(bad.m1.koMs, null);
+});
+
+test('late filing: open until 26 hours after kick-off, then shut — unless a test link', () => {
+  const m = { koMs: 1000 };
+  assert.equal(C.openForClips(m, 1000 + C.LATE_WINDOW_MS - 1, false), true);
+  assert.equal(C.openForClips(m, 1000 + C.LATE_WINDOW_MS, false), false);
+  assert.equal(C.openForClips(m, 1000 + 30 * DAY, true), true);
+  assert.equal(C.openForClips({}, 0, false), false, 'no kick-off time, no clip');
+  assert.equal(C.LATE_WINDOW_MS, 93600000, 'the rules hard-code 93600000 — change both together');
+});
+
+test('backfill: the last seven UTC days, minus the ones already done', () => {
+  const now = Date.parse('2026-10-15T20:00:00Z');
+  assert.deepEqual(C.backfillDue(now, {}), ['2026-10-14', '2026-10-13', '2026-10-12', '2026-10-11', '2026-10-10', '2026-10-09', '2026-10-08']);
+  assert.deepEqual(C.backfillDue(now, { '2026-10-14': true, '2026-10-08': true }).length, 5);
+});

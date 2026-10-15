@@ -48,6 +48,10 @@
  *
  * CHANGELOG
  *   15/10/2026  v1.0  Initial build.
+ *   15/10/2026  v1.1  Mirrored matches carry koMs, which the rules use for
+ *                     the 26-hour late-filing window. The sync backfills the
+ *                     last 7 days from the ingester's fixture nodes so test
+ *                     contributors have finished matches to use.
  */
 const { onValueWritten } = require("firebase-functions/v2/database");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
@@ -216,6 +220,7 @@ async function runSync(now) {
   }
 
   const matched = await attachPending(db, ymd, matchday);
+  const backfilled = await backfill(db, wdb, now, ymd, prev.backfilled || {});
 
   await syncRef.set({
     sourceRun: meta.lastRun || null,
@@ -224,8 +229,39 @@ async function runSync(now) {
     matches: Object.keys(matchday).length,
     written: Object.keys(updates).length,
     hashes,
+    backfilled: backfilled.done,
   });
-  return { ran: true, written: Object.keys(updates).length, matched };
+  return { ran: true, written: Object.keys(updates).length, matched, backfilled: backfilled.wrote };
+}
+
+/* The past TEST_DAYS, so a test contributor has finished matches to file
+   against from the day this is deployed — the live mirror only ever writes
+   today. Built from the ingester's per-day fixture node (final scores) and that
+   day's events. Two days a run at most, so a run stays short; a day the live
+   mirror already wrote is left alone, because it is the richer copy. */
+async function backfill(db, wdb, now, todayYmd, done) {
+  const keep = {};
+  C.retentionDays(now, C.TEST_DAYS).forEach((d) => { if (done[d]) keep[d] = true; });
+  const due = C.backfillDue(now, keep).filter((d) => d !== todayYmd).slice(0, 2);
+  const wrote = [];
+  for (const d of due) {
+    const have = await db.ref(ROOT + "/matchdays/" + d).limitToFirst(1).once("value");
+    if (!have.exists()) {
+      const snaps = await Promise.all(
+        C.COMPS.map((c) => wdb.ref("nls/fixtures/" + c + "/" + d).once("value"))
+          .concat([wdb.ref("nls/events/" + d).once("value")])
+      );
+      const byComp = {};
+      C.COMPS.forEach((c, i) => { byComp[c] = snaps[i].val() || {}; });
+      const day = C.buildMatchday(byComp, snaps[C.COMPS.length].val() || {});
+      if (Object.keys(day).length) {
+        await db.ref(ROOT + "/matchdays/" + d).set(day);
+        wrote.push(d);
+      }
+    }
+    keep[d] = true;
+  }
+  return { done: keep, wrote };
 }
 
 /* Clips tagged "just happened" wait here for the event they were filmed for. */

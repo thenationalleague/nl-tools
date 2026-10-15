@@ -69,6 +69,7 @@ function ev(uid, val) {
   assert.equal(r.ran, true); assert.equal(r.written, 1); assert.equal(r.matched, 1);
   const md = (await db.ref(R + '/matchdays/' + YMD).once('value')).val();
   assert.deepEqual(Object.keys(md), ['m1']); assert.equal(md.m1.events.m1_t1_goal_0.player, 'A Striker');
+  assert.equal(md.m1.koMs, Date.parse(YMD + 'T14:00:00.000Z'));
   const clips = (await db.ref(R + '/clips/' + YMD).once('value')).val();
   assert.equal(clips.p1.eventId, 'm1_t1_goal_0'); assert.equal(clips.p1.pendingEventMatch, undefined);
   assert.equal(clips.p2.pendingEventMatch, true);
@@ -83,6 +84,29 @@ function ev(uid, val) {
   assert.equal(r.written, 1);
   assert.equal((await db.ref(R + '/matchdays/' + YMD + '/m1/home/score').once('value')).val(), 2);
   console.log('sync ok');
+
+  // --- backfill of past days from nls/fixtures + nls/events
+  const past = new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10);
+  const pastKo = past + 'T14:00:00.000Z';
+  await db.ref(R + '/meta/sync/backfilled').set(null);
+  await W.ref('nls/fixtures/south/' + past).set({ f1: { id: 'f1', compKey: 'south', ko: pastKo, period: 'fulltime', finished: true,
+    home: { id: 't5', name: 'South Home', score: 2 }, away: { id: 't6', name: 'South Away', score: 1 } } });
+  await W.ref('nls/events/' + past).set({ f1_t5_goal_0: { matchID: 'f1', type: 'goal', teamID: 't5', playerName: 'B Scorer', minute: 30, detectedAt: 3 } });
+  await W.ref('nls/meta/ingest/lastRun').set(444);
+  r = await M._internals.runSync(Date.now());
+  const back = (await db.ref(R + '/matchdays/' + past + '/f1').once('value')).val();
+  assert.ok(back, 'past day backfilled');
+  assert.equal(back.finished, true); assert.equal(back.home.score, 2); assert.equal(back.koMs, Date.parse(pastKo));
+  assert.equal(back.events.f1_t5_goal_0.player, 'B Scorer');
+  let sync = (await db.ref(R + '/meta/sync').once('value')).val();
+  assert.ok(Object.keys(sync.backfilled).length >= 1, 'progress recorded');
+  for (let i = 0; i < 4; i++) { await W.ref('nls/meta/ingest/lastRun').set(500 + i); await M._internals.runSync(Date.now()); }
+  sync = (await db.ref(R + '/meta/sync').once('value')).val();
+  assert.equal(Object.keys(sync.backfilled).length, 7, 'all seven days done, two a run');
+  await db.ref(R + '/matchdays/' + past + '/f1/home/score').set(9);
+  await W.ref('nls/meta/ingest/lastRun').set(999); await M._internals.runSync(Date.now());
+  assert.equal((await db.ref(R + '/matchdays/' + past + '/f1/home/score').once('value')).val(), 9, 'done days are not rewritten');
+  console.log('backfill ok');
 
   // --- retention
   const bucket = admin.storage().bucket('nl-tools.firebasestorage.app');

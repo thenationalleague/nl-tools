@@ -11,6 +11,8 @@
  * CHANGELOG
  *   15/10/2026  v1.0  Initial build: token hashing, the matchday mirror shape,
  *                     ±2 minute auto-match, retention plan.
+ *   15/10/2026  v1.1  koMs on every mirrored match; the 26-hour late-filing
+ *                     window; test contributors; backfill of the last 7 days.
  */
 
 'use strict';
@@ -37,6 +39,16 @@ const GEN_LEN = 16;
 
 /* Clip ↔ event matching window, in match minutes (handover §5). */
 const MATCH_WINDOW_MIN = 2;
+
+/* Late filing (decided 15/10/2026): a match stays open to clips until 26 hours
+   after kick-off — roughly 24 hours after full time — so a post-match
+   interview sent the next morning still files under the match. The RTDB rules
+   enforce the same number against the mirror's koMs; keep them in step. */
+const LATE_WINDOW_MS = 26 * 3600 * 1000;
+
+/* Test contributors may file against any match from this many past days, which
+   is also how far back the mirror backfills. */
+const TEST_DAYS = 7;
 
 /* Retention (decided 15/10/2026): rejected clips are deleted seven days after
    they were rejected. A clip still marked `uploading` a day later is an upload
@@ -125,9 +137,11 @@ function buildMatchday(indexByComp, events) {
       const r = rows[id];
       if (!r || !r.id) return;
       const home = side(r.home), away = side(r.away);
+      const koMs = r.ko ? Date.parse(r.ko) : NaN;
       out[String(r.id)] = {
         comp,
         ko: r.ko || null,
+        koMs: isNaN(koMs) ? null : koMs,
         period: r.period || null,
         live: r.live === true,
         finished: r.finished === true,
@@ -238,8 +252,23 @@ function retentionDays(now, span) {
   return days;
 }
 
+/* Is this match still open to a clip at `now`? Test contributors are not
+   bound by the window. Mirrors the clip-create rule. */
+function openForClips(match, now, isTest) {
+  if (isTest) return true;
+  const ko = match && typeof match.koMs === 'number' ? match.koMs : NaN;
+  return !isNaN(ko) && now < ko + LATE_WINDOW_MS;
+}
+
+/* The past days the mirror should backfill: the TEST_DAYS before today that it
+   has not already done. */
+function backfillDue(now, done) {
+  return retentionDays(now, TEST_DAYS).filter((d) => !(done && done[d]));
+}
+
 module.exports = {
   COMPS, GEN_LEN, MATCH_WINDOW_MIN, REJECTED_KEEP_MS, STALE_UPLOAD_MS,
+  LATE_WINDOW_MS, TEST_DAYS, openForClips, backfillDue,
   hashToken, validToken, validYmd, genOf, contributorUsable,
   cardKind, compactEvent, buildMatchday, contentHash,
   autoMatch, retentionPlan, retentionDays,

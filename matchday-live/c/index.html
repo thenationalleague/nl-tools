@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Matchday Live: contributor capture page
-  Version: v1.0 (15/10/2026)
+  Version: v1.1 (15/10/2026)
   File: /matchday-live/c/index.html
 
   Public, no login. A contributor opens their personal link
@@ -45,6 +45,12 @@
 
   Technical changelog
     v1.0  15/10/2026  Initial build.
+    v1.1  15/10/2026  A match stays open for 26 hours after kick-off, and a
+                      clip files under its match's day. Test links pick any
+                      match from the last 7 days and mark clips test. With no
+                      match yet, the page listens for today's fixtures rather
+                      than needing a reload; a page left open overnight
+                      reloads itself when it comes back into view.
 -->
 <html lang="en">
 <head>
@@ -179,6 +185,7 @@
 
   <!-- Screen 1: today's match -->
   <section class="cap-screen" id="s-home" hidden>
+    <div class="banner banner--info" id="testNote" hidden>Test link. Your clips are marked TEST and can't be published.</div>
     <div id="matchBox"></div>
     <button class="btn btn--primary cap-big" type="button" id="btnRecord">Record update</button>
     <div class="cap-note" id="sentToday"></div>
@@ -245,8 +252,12 @@
 
   var db = firebase.database();
   var me = { id: null, rec: null };
-  var ymd = new Date().toISOString().slice(0, 10);   // the ingester files matches by UTC date
-  var matchId = null, match = null, matchRef = null;
+  /* The ingester files matches by UTC date, so "today" is the UTC day. A
+     clip files under its MATCH's day, which may be yesterday's. */
+  var today = new Date().toISOString().slice(0, 10);
+  var LATE_MS = 26 * 3600 * 1000;   // keep in step with the clip-create rule
+  var isTest = false;
+  var matchId = null, matchYmd = null, match = null, matchRef = null;
   var consentCfg = null, myConsent = null;
   var take = null;          // { blob, mime, durationSec, minute, scoreAtTime }
   var tag = null;           // { eventId } | { pending: true } | { general: kind|null }
@@ -326,7 +337,9 @@
   function boot() {
     signIn().then(function () {
       var club = me.rec.club;
+      isTest = me.rec.test === true;
       $('idSub').textContent = 'Hi ' + String(me.rec.name || '').split(' ')[0] + (club ? ' · ' + club : '');
+      $('testNote').hidden = !isTest;
       if (club) {
         var crest = $('idCrest');
         crest.src = NL.clubs.crestUrl(club, 'thumb');
@@ -335,17 +348,16 @@
       return Promise.all([
         NL.clubs.load()['catch'](function () {}),
         db.ref(ROOT + '/config/consent').once('value').then(function (s) { consentCfg = s.val(); }),
-        db.ref(ROOT + '/consent/' + me.id).once('value').then(function (s) { myConsent = s.val(); }),
-        db.ref(ROOT + '/matchdays/' + ymd).once('value')
+        db.ref(ROOT + '/consent/' + me.id).once('value').then(function (s) { myConsent = s.val(); })
       ]);
-    }).then(function (r) {
+    }).then(function () {
       if (!consentCfg || !consentCfg.text) {
         stop('Matchday Live is not switched on yet. The National League will let you know when it is.');
         return;
       }
-      chooseMatch(r[3].val() || {});
       wireButtons();
       watchToday();
+      choose();
       Queue.drain();
     })['catch'](function (e) {
       stop(e && e.message ? e.message : 'Something went wrong. Please try again.');
@@ -358,59 +370,140 @@
     return c ? c.optaID : null;
   }
 
-  function chooseMatch(day) {
-    var opta = myClubOpta();
-    var ids = Object.keys(day);
-    if (opta) {
-      matchId = ids.filter(function (id) { return day[id].home.id === opta || day[id].away.id === opta; })[0] || null;
-      $('btnChangeMatch').hidden = true;
-      return watchMatch();
-    }
-    /* No fixed club: the reporter's choice for today, or ask. */
-    var saved = null;
-    try { saved = sessionStorage.getItem('mdl.match.' + ymd); } catch (e) {}
-    if (saved && day[saved]) { matchId = saved; $('btnChangeMatch').hidden = false; return watchMatch(); }
-    renderPick(day);
+  function utcDay(offset) { return new Date(Date.now() - offset * 86400000).toISOString().slice(0, 10); }
+
+  /* Which days to look in: today and yesterday for everyone (a match stays
+     open until 26 hours after kick-off), the last week for a test link. */
+  function loadDays() {
+    var days = [];
+    for (var i = 0; i <= (isTest ? 7 : 1); i++) days.push(utcDay(i));
+    return Promise.all(days.map(function (d) {
+      return db.ref(ROOT + '/matchdays/' + d).once('value').then(function (s) { return [d, s.val() || {}]; });
+    }));
   }
 
-  function renderPick(day) {
-    var list = $('pickList');
-    list.textContent = '';
-    var ids = Object.keys(day).sort(function (a, b) {
-      var A = day[a], B = day[b];
-      if (A.live !== B.live) return A.live ? -1 : 1;
-      return String(A.ko).localeCompare(String(B.ko)) || String(A.home.name).localeCompare(String(B.home.name));
+  /* Same test as the clip-create rule (and matchday-live-core.js openForClips). */
+  function openForClips(m) {
+    if (isTest) return true;
+    var ko = typeof m.koMs === 'number' ? m.koMs : Date.parse(m.ko);
+    return !isNaN(ko) && Date.now() < ko + LATE_MS;
+  }
+
+  function isMine(m) {
+    var opta = myClubOpta();
+    return !!opta && (m.home.id === opta || m.away.id === opta);
+  }
+
+  function candidates(days) {
+    var out = [];
+    days.forEach(function (pair) {
+      Object.keys(pair[1]).forEach(function (id) {
+        var m = pair[1][id];
+        if (m && m.home && m.away && openForClips(m)) out.push({ ymd: pair[0], id: id, m: m });
+      });
     });
-    if (!ids.length) { stop('No National League matches today.'); return; }
-    ids.forEach(function (id) {
-      var m = day[id];
+    return out;
+  }
+
+  /* A club contributor gets their club's match without being asked — today's
+     if there is one, otherwise yesterday's while it is still open. A reporter,
+     or anyone on a test link, picks. */
+  function choose() {
+    loadDays().then(function (days) {
+      var list = candidates(days);
+      if (myClubOpta() && !isTest) {
+        var mine = list.filter(function (c) { return isMine(c.m); }).sort(function (x, y) {
+          if ((x.ymd === today) !== (y.ymd === today)) return x.ymd === today ? -1 : 1;
+          return (y.m.koMs || 0) - (x.m.koMs || 0);
+        });
+        $('btnChangeMatch').hidden = true;
+        setMatch(mine[0] || null);
+        return;
+      }
+      var saved = null;
+      try { saved = sessionStorage.getItem('mdl.match'); } catch (e) {}
+      var hit = list.filter(function (c) { return c.ymd + '|' + c.id === saved; })[0];
+      if (hit) { $('btnChangeMatch').hidden = false; setMatch(hit); return; }
+      if (!list.length) { setMatch(null); return; }
+      renderPick(list);
+    })['catch'](function (e) { stop('Could not load matches: ' + e.message); });
+  }
+
+  function dayLabel(d) {
+    if (d === today) return 'Today';
+    if (d === utcDay(1)) return 'Yesterday';
+    return NL.formatDate(d);
+  }
+
+  function renderPick(list) {
+    var box = $('pickList');
+    box.textContent = '';
+    list.sort(function (x, y) {
+      if (x.ymd !== y.ymd) return x.ymd < y.ymd ? 1 : -1;
+      if (x.m.live !== y.m.live) return x.m.live ? -1 : 1;
+      return String(x.m.ko).localeCompare(String(y.m.ko)) || String(x.m.home.name).localeCompare(String(y.m.home.name));
+    });
+    var lastDay = null;
+    list.forEach(function (c) {
+      var m = c.m;
+      if (c.ymd !== lastDay) { box.appendChild(el('div', 'cap-sub', dayLabel(c.ymd))); lastDay = c.ymd; }
       var b = el('button', 'cap-opt');
       b.type = 'button';
-      b.appendChild(el('span', 'cap-opt__min', m.live ? minLabel(m.minute, m.fm) || 'Live' : (m.finished ? 'FT' : NL.formatTime(m.ko))));
-      b.appendChild(el('span', null, m.home.name + ' v ' + m.away.name));
+      b.appendChild(el('span', 'cap-opt__min', m.live ? minLabel(m.minute, m.fm) || 'Live'
+        : m.finished ? 'FT' : m.postponed ? 'P–P' : NL.formatTime(m.ko)));
+      var score = m.home.score != null && m.away.score != null ? ' ' + m.home.score + '–' + m.away.score + ' ' : ' v ';
+      b.appendChild(el('span', null, m.home.name + score + m.away.name));
       b.addEventListener('click', function () {
-        try { sessionStorage.setItem('mdl.match.' + ymd, id); } catch (e) {}
-        matchId = id;
+        try { sessionStorage.setItem('mdl.match', c.ymd + '|' + c.id); } catch (e) {}
         $('btnChangeMatch').hidden = false;
-        watchMatch();
+        setMatch(c);
       });
-      list.appendChild(b);
+      box.appendChild(b);
     });
     show('s-pick');
   }
 
-  function watchMatch() {
+  function setMatch(c) {
     if (matchRef) matchRef.off();
     matchRef = null;
     match = null;
-    if (!matchId) { renderHome(); show('s-home'); return; }
-    matchRef = db.ref(ROOT + '/matchdays/' + ymd + '/' + matchId);
+    matchId = c ? c.id : null;
+    matchYmd = c ? c.ymd : null;
+    if (!c) { renderHome(); show('s-home'); waitForToday(); return; }
+    matchRef = db.ref(ROOT + '/matchdays/' + matchYmd + '/' + matchId);
     matchRef.on('value', function (s) { match = s.val(); renderHome(); });
     show('s-home');
   }
 
+  /* Nothing to film yet. The day's fixtures reach the mirror on the morning
+     of the match, so keep listening rather than make someone reload at 14:55.
+     Listens to the day only while there is no match, and lets go once there is. */
+  var dayRef = null;
+  function waitForToday() {
+    if (dayRef) return;
+    dayRef = db.ref(ROOT + '/matchdays/' + today);
+    dayRef.on('value', function (s) {
+      var day = s.val() || {};
+      var useful = Object.keys(day).some(function (id) {
+        var m = day[id];
+        return m && m.home && m.away && openForClips(m) && (!myClubOpta() || isTest || isMine(m));
+      });
+      if (!useful) return;
+      dayRef.off(); dayRef = null;
+      choose();
+    });
+  }
+
+  /* A page left open overnight wakes up on the wrong day. Start again from
+     the link — the token is still in the address — unless mid-clip. */
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState !== 'visible' || utcDay(0) === today) return;
+    if (!$('cam').hidden || !$('s-review').hidden) return;
+    location.reload();
+  });
+
   function watchToday() {
-    db.ref(ROOT + '/quota/' + ymd + '/' + me.id).on('value', function (s) {
+    db.ref(ROOT + '/quota/' + today + '/' + me.id).on('value', function (s) {
       var n = s.val() || 0;
       $('sentToday').textContent = n ? n + (n === 1 ? ' clip' : ' clips') + ' sent today' : '';
     });
@@ -441,7 +534,9 @@
     if (!match) {
       var e = el('div', 'empty-state');
       e.appendChild(el('div', 'empty-state__icon', '📅'));
-      e.appendChild(el('div', 'empty-state__msg', 'No ' + (me.rec.club || 'National League') + ' match today'));
+      e.appendChild(el('div', 'empty-state__msg', myClubOpta() && !isTest
+        ? 'No ' + me.rec.club + ' match today'
+        : 'No matches open right now'));
       box.appendChild(e);
       $('btnRecord').disabled = true;
       return;
@@ -456,6 +551,7 @@
     card.appendChild(t);
     var st = statusText(match), sw = el('div', 'cap-match__state');
     sw.appendChild(el('span', 'pill ' + st[0], st[1]));
+    if (matchYmd !== today) sw.appendChild(el('div', 'cap-note', dayLabel(matchYmd)));
     card.appendChild(sw);
     box.appendChild(card);
   }
@@ -722,6 +818,7 @@
         NL.toast('Tick “I agree” to send', 'error');
         return;
       }
+      var ymd = matchYmd;
       var clipId = db.ref(ROOT + '/clips/' + ymd).push().key;
       var ext = /mp4/.test(take.mime) ? 'mp4' : 'webm';
       var record = {
@@ -736,6 +833,7 @@
       if (take.scoreAtTime) record.scoreAtTime = take.scoreAtTime;
       var cap = $('caption').value.trim().slice(0, 80);
       if (cap) record.caption = cap;
+      if (isTest) record.test = true;
       if (tag.eventId) record.eventId = tag.eventId;
       else if (tag.pending) record.pendingEventMatch = true;
       else if (tag.general) record.generalKind = tag.general;
@@ -948,8 +1046,8 @@
     $('btnRetake').addEventListener('click', function () { take = null; Cam.open(); });
     $('btnSend').addEventListener('click', Review.send);
     $('btnChangeMatch').addEventListener('click', function () {
-      try { sessionStorage.removeItem('mdl.match.' + ymd); } catch (e) {}
-      db.ref(ROOT + '/matchdays/' + ymd).once('value').then(function (s) { renderPick(s.val() || {}); });
+      try { sessionStorage.removeItem('mdl.match'); } catch (e) {}
+      loadDays().then(function (days) { renderPick(candidates(days)); });
     });
   }
 

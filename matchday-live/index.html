@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Matchday Live
-  Version: v1.0 (15/10/2026)
+  Version: v1.1 (15/10/2026)
   File: /matchday-live/index.html
 
   The staff feed for contributor clips. Contributors at grounds record
@@ -43,6 +43,10 @@
     v1.0  15/10/2026  Initial build: match cards with event timelines, clip
                       review, live updates, gap flags, contributor admin with
                       hashed personal links, editable consent wording.
+    v1.1  15/10/2026  TEST pill and no Approve for test clips, kept out of the
+                      counts and the gap flag; Test link switch on the
+                      contributor form. Late clips need nothing here — they
+                      file under their match's day, which the date picker shows.
 -->
 <html lang="en">
 <head>
@@ -99,6 +103,14 @@
           'Approve, reject, download, copy share text, or move a clip to a different event.',
           'Live matches with no clips yet are flagged.',
           'Contributors tab (Manage): add people, issue or replace their personal link, and edit the consent wording.'
+        ]
+      },
+      {
+        date: '15/10/2026',
+        version: 'v1.1',
+        items: [
+          'Clips can be sent up to a day after full time, and file under their match.',
+          'Test links: a contributor marked as test can film against any match from the last week. Their clips show TEST and cannot be approved.'
         ]
       }
     ];
@@ -397,11 +409,12 @@
 
     var nNew = 0, nApproved = 0, nGaps = 0;
     ids.forEach(function (id) {
-      (byMatch[id] || []).forEach(function (x) {
+      var real = (byMatch[id] || []).filter(function (x) { return !x.c.test; });
+      real.forEach(function (x) {
         if (x.c.status === 'new') nNew++;
         if (x.c.status === 'approved') nApproved++;
       });
-      if (state.matches[id].live && !(byMatch[id] || []).length) nGaps++;
+      if (state.matches[id].live && !real.length) nGaps++;
     });
     document.getElementById('statNew').textContent = nNew;
     document.getElementById('statApproved').textContent = nApproved;
@@ -450,6 +463,7 @@
 
   function matchCard(id, m, clips) {
     var card = el('article', 'mdl-match');
+    var realClips = clips.filter(function (x) { return !x.c.test; });
     var head = el('div', 'mdl-match__head');
     var teams = el('div', 'mdl-match__teams');
     teams.appendChild(crestImg(m.home));
@@ -461,7 +475,7 @@
     head.appendChild(teams);
     head.appendChild(el('span', 'mdl-match__div', DIV_LABEL[m.comp] || ''));
     head.appendChild(statusPill(m));
-    if (m.live && !clips.length) head.appendChild(el('span', 'pill pill--pending', 'No clips yet'));
+    if (m.live && !realClips.length) head.appendChild(el('span', 'pill pill--pending', 'No clips yet'));
     card.appendChild(head);
 
     var body = el('div', 'mdl-match__body');
@@ -544,7 +558,7 @@
     /* Reuse the element when nothing it shows has changed, so a video someone
        is watching is not torn down by an unrelated clip arriving. */
     var events = m.events || {};
-    var sig = JSON.stringify([c.status, c.eventId || null, c.pendingEventMatch || false, c.caption || '',
+    var sig = JSON.stringify([c.test || false, c.status, c.eventId || null, c.pendingEventMatch || false, c.caption || '',
       c.purgedAt || 0, p.name, p.type, p.club, p.outlet, Object.keys(events).length]);
     if (clipEls[id] && clipEls[id].sig === sig) return clipEls[id].el;
     var keepVideo = clipEls[id] && clipEls[id].video;
@@ -574,11 +588,12 @@
     var pill = el('span', 'pill ' + (c.status === 'approved' ? 'pill--approved' : c.status === 'rejected' ? 'pill--rejected' : 'pill--pending'),
       c.status === 'approved' ? 'Approved' : c.status === 'rejected' ? 'Rejected' : 'New');
     var pillWrap = el('div');
+    if (c.test) { pillWrap.appendChild(el('span', 'pill pill--info', 'Test')); pillWrap.appendChild(document.createTextNode(' ')); }
     pillWrap.appendChild(pill);
     meta.appendChild(pillWrap);
 
     var actions = el('div', 'mdl-clip__actions');
-    if (c.status !== 'approved') actions.appendChild(btn('Approve', 'btn--primary', function () { review(id, 'approved'); }));
+    if (c.status !== 'approved' && !c.test) actions.appendChild(btn('Approve', 'btn--primary', function () { review(id, 'approved'); }));
     if (c.status !== 'rejected') actions.appendChild(btn('Reject', 'btn--ghost', function () { review(id, 'rejected'); }));
     if (!c.purgedAt) actions.appendChild(btn('Download', 'btn--ghost', function () { download(m, c, p); }));
     actions.appendChild(btn('Copy share text', 'btn--ghost', function () {
@@ -700,7 +715,7 @@
       var p = state.people[id], tr = el('tr');
       var name = el('td');
       name.appendChild(el('div', null, p.name));
-      name.appendChild(el('div', 'mdl-clip__sub', p.type === 'media' ? 'Media' : 'Club media officer'));
+      name.appendChild(el('div', 'mdl-clip__sub', (p.type === 'media' ? 'Media' : 'Club media officer') + (p.test ? ' · Test link' : '')));
       tr.appendChild(name);
       tr.appendChild(el('td', null, [p.club, p.outlet].filter(Boolean).join(' · ') || 'Any match'));
       tr.appendChild(el('td', null, creditOf(p)));
@@ -750,6 +765,18 @@
     form.appendChild(clubField);
     form.appendChild(outletField);
     form.appendChild(field('Credit line', credit));
+    var test = el('input');
+    test.type = 'checkbox';
+    test.checked = p.test === true;
+    var testLabel = el('label');
+    testLabel.style.display = 'flex';
+    testLabel.style.gap = '8px';
+    testLabel.appendChild(test);
+    testLabel.appendChild(el('span', null, 'Test link'));
+    var testGroup = el('div', 'form-group');
+    testGroup.appendChild(testLabel);
+    testGroup.appendChild(el('div', 'form-hint', 'Can pick any match from the last 7 days. Clips are marked TEST and cannot be approved.'));
+    form.appendChild(testGroup);
     function syncType() { outletField.hidden = type.value !== 'media'; }
     type.addEventListener('change', syncType);
     syncType();
@@ -775,7 +802,8 @@
             clubOpta: clubName && NL.clubs.byName(clubName) ? (NL.clubs.byName(clubName).optaID || null) : null,
             outlet: type.value === 'media' ? (outlet.value.trim() || null) : null,
             credit: credit.value.trim() || null,
-            active: id ? p.active !== false : true
+            active: id ? p.active !== false : true,
+            test: test.checked ? true : null
           };
           if (!rec.name) { NL.toast('Add a name', 'error'); return; }
           ctrl.close();
