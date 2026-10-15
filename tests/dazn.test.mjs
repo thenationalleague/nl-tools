@@ -158,7 +158,9 @@ test('games sort by date until a header is clicked, and nothing is labelled "mos
   assert.match(view, /sort: \{ key: 'date', dir: 1 \}/);
   assert.match(view, /aria-sort/);
   assert.ok(!/Most watched/i.test(view), 'the "Most watched" pill is back');
-  assert.ok(!/class="pill/.test(view));
+  /* A pill is allowed for a match STATE (Abandoned, canon .pill--postponed);
+     what went was the decorative 'Most watched' label. */
+  assert.ok(!/pill--info/.test(view));
 });
 
 test('filters narrow by UK availability, venue and month, and combine', () => {
@@ -187,4 +189,54 @@ test('the dashboard styles never override canon with !important', () => {
     const re = new RegExp('(^|[\\s,}])\\' + cls + '\\s*\\{', 'm');
     assert.ok(!re.test(css), `dazn/_view.css restyles canon ${cls} directly`);
   }
+});
+
+/* NLS rows as the /v2/matches list returns them. Shape verified live on
+   15/10/2026 against
+   https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2/matches/?seasonID=2025&competitionID=89
+   (attributes.kickOffDateUTC "YYYY-MM-DD HH:MM:SS" in UTC with no zone
+   marker; matchPeriod "FullTime" | "Abandoned"; teamID = clubs-meta optaID). */
+const nlsRow = (utc, home, away, period) => ({ id: 'g1', attributes: {
+  kickOffDateUTC: utc, matchPeriod: period,
+  homeTeam: { teamID: home, name: home }, awayTeam: { teamID: away, name: away } } });
+const OPTA = { 'Alpha Town': 't1', 'Beta United': 't2', 'Gamma City': 't3' };
+
+test('kick-off dates are read in UK time, not UTC', () => {
+  assert.equal(D.londonDate('2026-02-03 19:45:00'), '2026-02-03');
+  assert.equal(D.londonDate('2025-08-09 23:30:00'), '2025-08-10');   // BST: 00:30 next day
+  assert.equal(D.londonDate('nonsense'), null);
+});
+
+test('a stream with no NLS match for those clubs on that date is not played', () => {
+  /* The 2025-26 cases: postponed fixtures appear in NLS once, on the date
+     they were finally played, so the streamed date has no row at all. */
+  const idx = D.nlsIndex([
+    nlsRow('2025-08-09 14:00:00', 't1', 't2', 'FullTime'),
+    nlsRow('2025-09-20 14:00:00', 't2', 't1', 'FullTime'),      // the 16 Aug game, rearranged
+    nlsRow('2025-08-19 18:45:00', 't3', 't1', 'Abandoned'),
+  ]);
+  const rows = D.parsePaste(SHEET).rows;
+  const r = D.checkPlayed(rows, (n) => OPTA[n], idx);
+  assert.equal(r.played.length, 2);
+  assert.deepEqual([...r.notPlayed.map((x) => x.date)], ['2025-08-16']);
+  assert.equal(r.unchecked.length, 0);
+  const ab = r.played.find((x) => x.date === '2025-08-19');
+  assert.equal(ab.abandoned, true, 'an abandoned game counts, flagged');
+  const b = D.buildSeason(r.played, codeOf);
+  assert.equal(b.season.matches['20250819-GAM-ALP'].abandoned, true);
+  assert.equal(b.season.matches['20250809-ALP-BET'].abandoned, undefined);
+});
+
+test('a postponement reason on its own does not make a game "not played"', () => {
+  const row = nlsRow('2025-08-09 14:00:00', 't1', 't2', 'FullTime');
+  row.attributes.postponementReason = 'Waterlogged Pitch';
+  const r = D.checkPlayed(D.parsePaste(SHEET).rows.slice(0, 1), (n) => OPTA[n], D.nlsIndex([row]));
+  assert.equal(r.played.length, 1);
+});
+
+test('a club with no Opta ID is kept and reported, never silently dropped', () => {
+  const r = D.checkPlayed(D.parsePaste(SHEET).rows, () => null, {});
+  assert.equal(r.played.length, 3);
+  assert.equal(r.unchecked.length, 3);
+  assert.equal(r.notPlayed.length, 0);
 });

@@ -1,9 +1,13 @@
 /* =============================================================================
    NL Tools — DAZN Viewing: data layer
    File: /dazn/_data.js
-   Version: v9.0 (12/10/2026)
+   Version: v27.0 (15/10/2026)
 
    CHANGELOG
+     v27.0 (15/10/2026) — nlsIndex / checkPlayed: streams of games that were
+       never played (postponed or rearranged) are found against the NLS
+       results and left out of the import. See the block above
+       root.DAZNData for the rule.
      v9.0 (12/10/2026) — Dates written out with a month name are accepted
        ("Sat, 9 Aug 2025", "9 August 2025", "09-Aug-25"). The workbook's
        Matches sheet displays its dates that way, so the first real paste
@@ -216,6 +220,7 @@
         ukViews: r.ukViews, intlViews: r.intlViews,
         ukMins: r.ukMins, intlMins: r.intlMins, avail: r.avail
       };
+      if (r.abandoned) rec.abandoned = true;
       matches[id] = rec;
       [h, a].forEach(function (code) {
         clubs[code] = clubs[code] || { matches: {} };
@@ -305,6 +310,67 @@
     return bench[key] == null ? null : bench[key];
   }
 
+  /* ---- Was the game played? (NLS cross-check, v27.0) ---------------------
+     DAZN streams games that never happened: a fixture postponed after the
+     stream was set up (Woking v Solihull, 25 Feb 2026: 2 views) or one that
+     did not complete and was rearranged (Altrincham v Morecambe, 3 Jan 2026:
+     7 average minutes). NLS keeps a postponed fixture ONCE, at the date it
+     was finally played, reusing the match ID, so the original date leaves
+     no trace. The test is therefore: is there an NLS row for these two
+     clubs ON THIS DATE?
+       - FullTime / PostMatch: played.
+       - Abandoned: counted too. It took place and was watched: Scunthorpe
+         v Wealdstone (6 Sep 2025) was abandoned with no replay, and DAZN's
+         viewers averaged 91 minutes of it.
+       - no row at all: not played, and the stream is left out entirely.
+     postponementReason is NOT a signal: it stays set on 161 games of
+     2025-26 that were rearranged and then played.
+     NLS teamID equals clubs-meta optaID for every club, so the join is on
+     IDs, never names. */
+  var LONDON = typeof Intl !== 'undefined'
+    ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' })
+    : null;
+
+  /* "2026-02-03 19:45:00" (UTC, no zone marker) → "2026-02-03" in London. */
+  function londonDate(utc) {
+    var t = Date.parse(String(utc || '').replace(' ', 'T') + 'Z');
+    if (isNaN(t)) return null;
+    return LONDON ? LONDON.format(new Date(t)) : new Date(t).toISOString().slice(0, 10);
+  }
+
+  var TOOK_PLACE = { fulltime: true, postmatch: true, abandoned: true };
+
+  /* NLS /v2/matches data[] → { 'YYYY-MM-DD|tHOME|tAWAY': matchPeriod } */
+  function nlsIndex(rows) {
+    var idx = {};
+    (rows || []).forEach(function (m) {
+      var a = m && m.attributes;
+      if (!a || !TOOK_PLACE[String(a.matchPeriod || '').toLowerCase()]) return;
+      var d = londonDate(a.kickOffDateUTC);
+      if (!d || !a.homeTeam || !a.awayTeam) return;
+      idx[d + '|' + a.homeTeam.teamID + '|' + a.awayTeam.teamID] = a.matchPeriod;
+    });
+    return idx;
+  }
+
+  /* Split parsed rows into played and not played. optaOf(name) → clubs-meta
+     optaID. A club with no optaID cannot be checked, so its games are kept
+     and reported, never silently dropped. */
+  function checkPlayed(rows, optaOf, idx) {
+    var played = [], notPlayed = [], unchecked = [];
+    rows.forEach(function (r) {
+      var h = optaOf(r.home), a = optaOf(r.away);
+      if (!h || !a) { unchecked.push(r); played.push(r); return; }
+      var period = idx[r.date + '|' + h + '|' + a];
+      if (!period) { notPlayed.push(r); return; }
+      /* Abandoned games count, but carry a flag so the club sees why the
+         game has no ordinary result. */
+      if (String(period).toLowerCase() === 'abandoned') r.abandoned = true;
+      played.push(r);
+    });
+    return { played: played, notPlayed: notPlayed, unchecked: unchecked };
+  }
+
   root.DAZNData = {
     MIN_BENCH_GAMES: MIN_BENCH_GAMES,
     DIV_LABEL: DIV_LABEL,
@@ -317,6 +383,9 @@
     summarise: summarise,
     benchOf: benchOf,
     benchFigure: benchFigure,
-    values: values
+    values: values,
+    londonDate: londonDate,
+    nlsIndex: nlsIndex,
+    checkPlayed: checkPlayed
   };
 })(typeof window !== 'undefined' ? window : globalThis);

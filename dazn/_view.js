@@ -1,9 +1,13 @@
 /* =============================================================================
    NL Tools — DAZN Viewing: one club's season, as a dashboard
    File: /dazn/_view.js
-   Version: v27.0 (15/10/2026)
+   Version: v28.0 (15/10/2026)
 
    CHANGELOG
+     v28.0 (15/10/2026) — An abandoned game that counts carries a canon
+       match-state pill, "Abandoned". Streams left out as not played are
+       named in a line under the games, so a club that remembers one knows
+       where it went.
      v27.0 (15/10/2026) — The chart switches between By month and By game.
        By game is one thin column per game in date order, scrolling sideways,
        labelled with the opponent's code and (H) / (A). Top games says what
@@ -53,7 +57,8 @@
        bench:  { ... } | null,         the division's season averages
        div:    'National',
        nameOf: function (code) { return clubName; },
-       seasonLabel: '2025-26'           names the season in Top games' context
+       seasonLabel: '2025-26',          names the season in Top games' context
+       notPlayed: { <id>: {date, home, away, views, mins} }   streams left out
      });
      DAZNView.grid(host, { cols, rows, sort, row, total, height, onRowClick })
      DAZNView.fmt.{ n0, n1, compact }
@@ -287,7 +292,9 @@
         return '<tr>' +
           '<td class="dz-nowrap">' + esc(window.NL.formatDateShort(g.date)) + '</td>' +
           '<td><span class="dz-opp">' + window.NL.clubs.crestImgHtml(r.oppName, 'thumb', { className: 'nl-crest' }) +
-            '<span>' + esc(r.oppName) + '</span></span></td>' +
+            '<span>' + esc(r.oppName) + '</span>' +
+            (g.abandoned ? ' <span class="pill pill--postponed" title="Abandoned. Counted: it was played and watched.">Abandoned</span>' : '') +
+            '</span></td>' +
           '<td class="dz-sm-hide">' + (r.home ? 'Home' : 'Away') + '</td>' +
           '<td class="dz-sm-hide' + (intl ? ' dz-muted' : '') + '"' + (t ? ' title="' + esc(t) + '"' : '') + '>' + (intl ? 'No' : 'Yes') + '</td>' +
           '<td class="ta-right dz-sm-hide' + (intl ? ' dz-muted' : '') + '"' + (intl ? ' title="' + esc(AVAIL_TITLE.intl) + '"' : '') + '>' + n0(g.ukViews) + '</td>' +
@@ -312,6 +319,18 @@
     return '<section class="form-panel dz-panel ' + (cls || '') + '">' +
       '<div class="form-panel__head dz-panel__head"><span' + (titleAttr ? ' ' + titleAttr : '') + '>' + esc(title) + '</span>' + (extra || '') + '</div>' +
       '<div class="form-panel__body dz-panel__body">' + body + '</div></section>';
+  }
+
+  /* Streams DAZN made of games that were not played on that date
+     (postponed, or abandoned and replayed). Left out of every figure, and
+     named here so a club that remembers the stream knows where it went. */
+  function notPlayedNote(np, nameOf, code) {
+    var list = D.values(np).sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+    if (!list.length) return '';
+    return '<p class="form-hint">Not counted: ' + list.map(function (m) {
+      var opp = m.home === code ? m.away : m.home;
+      return esc(window.NL.formatDateShort(m.date)) + ' v ' + esc(nameOf(opp) || opp) + ' (' + (m.home === code ? 'H' : 'A') + ')';
+    }).join(', ') + ' \u2014 not played on ' + (list.length === 1 ? 'that date' : 'those dates') + '.</p>';
   }
 
   /* ---- Render ------------------------------------------------------------ */
@@ -345,6 +364,7 @@
         panel('Top games', '<div data-top></div>', '<span class="dz-panel__ctx" data-top-ctx></span>') +
       '</div>' +
       panel('Games', '<div data-games></div>', legend(), 'dz-panel--flush') +
+      notPlayedNote(o.notPlayed, nameOf, o.code) +
       '<p class="form-hint">A view is counted per game, so someone who watched three games counts three times.</p>' +
     '</div>';
 
@@ -402,7 +422,7 @@
   }
 
   window.DAZNView = {
-    render: render, grid: grid, applyFilters: applyFilters, chips: chips, slicer: slicer,
+    render: render, grid: grid, applyFilters: applyFilters, chips: chips, slicer: slicer, kpis: kpis,
     fmt: { n0: n0, n1: n1, compact: compact }
   };
 })();
