@@ -99,8 +99,9 @@ portal session as well, and the address clubs hold never changes.
 |---|---|
 | Programme Packs, DAZN Viewership | follows it |
 | Club Kits | no club page any more: the console is the root (public form retired 15/10/2026) |
-| Handbook, Club Directory | **undecided**: staff at the root, club page at `/reader/` |
+| Handbook, Club Directory | **kept as they are** (15/10/2026). Already closest to the end state: the root is the full tool for anyone signed in to the portal, club roles included; `/reader/` is the access-code door for clubs not yet on the portal. When they all are, `/reader/` becomes a redirect to the root. |
 | Responsibilities (`/view/`), UW Promo | kept as they are, by decision |
+| Commercial Compliance | early concept, staff only today, on the Club Tools shelf. If it gains a club view, that view takes the root and the console moves to `/admin/`. |
 
 A page that moves leaves a redirect stub at its old address; clubs hold
 links this repo cannot see.
