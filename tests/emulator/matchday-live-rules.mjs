@@ -47,11 +47,16 @@ async function seed() {
       'app-data': { 'media-matchday-live': {
         contributors: {
           c1: { name: 'Test One', type: 'club', active: true },
+          t1: { name: 'Test Link', type: 'media', active: true, test: true },
           c2: { name: 'Test Two', type: 'media', active: false },
         },
-        secrets: { c1: { tokenHash: HASH }, c2: { tokenHash: HASH } },
+        secrets: { c1: { tokenHash: HASH }, c2: { tokenHash: HASH }, t1: { tokenHash: HASH } },
         keys: { [HASH]: 'c1' },
-        matchdays: { [YMD]: { m1: { comp: 'nl', home: { name: 'H' }, away: { name: 'A' } } } },
+        matchdays: { [YMD]: {
+          m1: { comp: 'nl', koMs: Date.now() - 3600000, home: { name: 'H' }, away: { name: 'A' } },
+          late: { comp: 'nl', koMs: Date.now() - 25 * 3600000, home: { name: 'H' }, away: { name: 'A' } },
+          shut: { comp: 'nl', koMs: Date.now() - 27 * 3600000, home: { name: 'H' }, away: { name: 'A' } },
+        } },
         config: { consent: { version: 1, text: 'x' } },
       } },
     });
@@ -144,6 +149,27 @@ test('contributor: 20 clips a day, not 21', async () => {
   await env.withSecurityRulesDisabled((ctx) => ctx.database().ref(R + '/pace/c1').set(1));
   const u2 = clipUpdate('c1', 'k21'); u2['quota/' + YMD + '/c1'] = 21;
   await assertFails(d.ref(R).update(u2));
+});
+
+test('late filing: open 26 hours after kick-off, shut after, never for a match that does not exist', async () => {
+  const d = contrib();
+  await assertSucceeds(d.ref(R).update(clipUpdate('c1', 'k1', { matchId: 'late' })));
+  await env.withSecurityRulesDisabled((ctx) => ctx.database().ref(R + '/pace/c1').set(1));
+  const shut = clipUpdate('c1', 'k2', { matchId: 'shut' }); shut['quota/' + YMD + '/c1'] = 2;
+  await assertFails(d.ref(R).update(shut));
+  const ghost = clipUpdate('c1', 'k3', { matchId: 'nope' }); ghost['quota/' + YMD + '/c1'] = 2;
+  await assertFails(d.ref(R).update(ghost));
+});
+
+test('test links: any mirrored match, always marked test, never approvable', async () => {
+  const t = contrib('t1');
+  await assertFails(t.ref(R).update(clipUpdate('t1', 'k1', { matchId: 'shut' })), 'unmarked test clip refused');
+  await assertSucceeds(t.ref(R).update(clipUpdate('t1', 'k1', { matchId: 'shut', test: true })));
+  await assertSucceeds(t.ref(R + '/clips/' + YMD + '/k1/status').set('new'));
+  await assertFails(contrib().ref(R).update(clipUpdate('c1', 'k2', { test: true })), 'real contributor cannot mark test');
+  const la = user('la');
+  await assertFails(la.ref(R + '/clips/' + YMD + '/k1').update({ status: 'approved' }));
+  await assertSucceeds(la.ref(R + '/clips/' + YMD + '/k1').update({ status: 'rejected' }));
 });
 
 test("contributor: cannot read someone else's clip", async () => {

@@ -22,6 +22,7 @@ starts from the answers.
 | Consent and licence wording | Editable in the Contributors tab, versioned in RTDB (`config/consent`). The feed pre-fills nothing. **The capture page will not send anything until a version is saved**, so unapproved wording cannot reach a contributor by accident. Saving a new version asks everyone to agree again. Who signs the wording off is still open. |
 | Blaze plan | Yes. The project already runs scheduled and triggered functions. |
 | Retention | Rejected clips: the video is deleted 7 days after rejection, the record kept (who sent what stays answerable). An upload unfinished after 24 hours is cleared. Approved and unreviewed clips are never deleted automatically. An end-of-season archive is not decided. |
+| Back-dating (asked the same evening) | Both. **Late filing**: any contributor can send a clip until 26 hours after kick-off (about a day after full time); it files under the match's own day. **Test links**: a contributor marked *Test link* can pick any match from the last 7 days; their clips carry `test: true`, show a TEST pill, stay out of the counts and gap flags, and the rules refuse to approve them. |
 | Pilot list | Not in the repo. Contributors are personal data and this repository is public; they are added in the Contributors tab. |
 
 ## Where the build departs from the brief, and why
@@ -70,15 +71,15 @@ All under `app-data/media-matchday-live/` in nl-tools RTDB; the rules are in
 `system/rtdb/rules.snapshot.json`.
 
 ```
-contributors/<id>     name, type club|media, club, clubOpta, outlet, credit, active
+contributors/<id>     name, type club|media, club, clubOpta, outlet, credit, active, test
 secrets/<id>          { tokenHash, issuedAt }          Manage only
 keys/<sha256>         <id>                              write-only; the trigger's lookup
 consent/<id>          { version, at }                   written by the contributor
 config/consent        { version, text }                 Manage
-matchdays/<ymd>/<id>  comp, ko, period, live, minute, home, away, events{}   function only
+matchdays/<ymd>/<id>  comp, ko, koMs, period, live, minute, home, away, events{}   function only
 clips/<ymd>/<clipId>  contributorId, matchId, eventId | pendingEventMatch | generalKind,
                       minute, scoreAtTime, caption, storagePath, mimeType, durationSec,
-                      sizeBytes, status uploading|new|approved|rejected, createdAt,
+                      sizeBytes, test, status uploading|new|approved|rejected, createdAt,
                       reviewedBy, reviewedAt, retaggedBy, autoMatchedAt, purgedAt
 pace/<id>             last clip time
 quota/<ymd>/<id>      clips sent that day
@@ -88,6 +89,16 @@ authRequests|authGrants/<uid>                           the handshake
 Storage: `matchday-live/<ymd>/<contributorId>/<clipId>.<mp4|webm>`.
 
 `<ymd>` is the **UTC** date the ingester files the match under, not the local date.
+A clip files under its **match's** day, which for a late clip is yesterday's.
+
+The clip-create rule checks that the named match exists in `matchdays/<ymd>`
+and that `now < koMs + 93600000` (26 hours) unless the contributor is a test
+link. `LATE_WINDOW_MS` in `functions/matchday-live-core.js` is the same number;
+a unit test fails if one changes without the other being looked at.
+
+The mirror backfills the last 7 days from `nls/fixtures/<comp>/<ymd>` and
+`nls/events/<ymd>`, two days per run, and leaves any day it already wrote
+live alone.
 
 ## Tests
 

@@ -55,6 +55,7 @@ const EMU = "\n    firebase.auth().useEmulator('http://127.0.0.1:9099', { disabl
         k2: clip({ pendingEventMatch: true, minute: 79, storagePath: 'matchday-live/' + YMD + '/c1/k2.mp4' }),
         k3: clip({ generalKind: 'halftime', minute: 45, status: 'approved', storagePath: 'matchday-live/' + YMD + '/c1/k3.mp4' }),
         k4: clip({ status: 'uploading', minute: 81, storagePath: 'matchday-live/' + YMD + '/c1/k4.mp4' }),
+        k5: clip({ matchId: 'm2', test: true, minute: 70, caption: 'Rehearsal', storagePath: 'matchday-live/' + YMD + '/c1/k5.mp4' }),
       } },
     } },
   });
@@ -107,7 +108,10 @@ const EMU = "\n    firebase.auth().useEmulator('http://127.0.0.1:9099', { disabl
   assert.match(cards[0], /Waiting for its event/);
   assert.match(cards[0], /General update · Half-time/);
   assert.match(cards[0], /Back post/);
-  assert.match(cards.join(' '), /No clips yet/);
+  assert.match(cards.join(' '), /No clips yet/, 'a test clip does not clear a gap');
+  const k5 = page.locator('.mdl-clip', { hasText: 'Rehearsal' });
+  assert.match(await k5.textContent(), /Test/);
+  assert.equal(await k5.locator('button', { hasText: 'Approve' }).count(), 0, 'test clips cannot be approved');
   await page.waitForFunction(() => Array.prototype.some.call(document.querySelectorAll('.mdl-clip video'), (v) => v.src.indexOf('127.0.0.1:9199') !== -1), null, { timeout: 15000 }).catch(async (e) => { console.log('VIDEOS', await page.evaluate(() => Array.prototype.map.call(document.querySelectorAll('.mdl-clip video, .mdl-clip__gone'), (v) => v.tagName + ':' + (v.src || v.textContent)))); console.log(errors.join('\n')); throw e; });
   console.log('feed renders: stats, ordering, timeline, gap flag, video URL');
 
