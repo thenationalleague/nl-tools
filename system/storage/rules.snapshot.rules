@@ -20,6 +20,7 @@
 //   data/**               the nightly pipeline's feeds, read-only to browsers
 //   brand-exposure/<id>/  per-match playback proxy + detections, staff accounts
 //   uploads/**            brand-exposure source footage, transient — see block
+//   matchday-live/<ymd>/<contributorId>/  Matchday Live contributor clips
 
 rules_version = '2';
 service firebase.storage {
@@ -203,6 +204,40 @@ service firebase.storage {
     // Delete is denied to clubs outright: the app soft-deletes by moving the
     // RTDB record into a trash node, and only the admin console (pClub '*')
     // empties it. A club cannot destroy bytes, its own or anyone else's.
+    // ── Matchday Live — contributor clips ─────────────────────────────────
+    // matchday-live/<ymd>/<contributorId>/<clipId>.<webm|mp4>
+    // Written by the capture page at /matchday-live/c/, signed in with the
+    // `mdl` claim matchdayLiveAuth mints from a contributor's link token. A
+    // contributor can only CREATE, only under their own id, only video, and
+    // only up to 40MB — a 20-second clip at the page's bitrate is ~10MB.
+    // Create only, and `resource == null` as well, because the emulator
+    // (13.35) let a second put through on `allow create` alone. A contributor
+    // cannot overwrite or delete a clip once it is in, approved or not.
+    //
+    // Storage rules cannot read RTDB, so a deactivated or rotated link is
+    // refused here only once its ID token expires (within the hour). It is
+    // refused by RTDB at once, and a clip with no RTDB record never reaches
+    // the feed — the worst a dead link can do in that hour is leave an
+    // orphan object, which the nightly retention sweep does not see but costs
+    // pennies. Accepted, and noted in the PR.
+    //
+    // Read: staff accounts (an email claim), as everywhere else in this file,
+    // and the contributor's own files.
+    // The feed fetches download URLs through the SDK; clip paths carry RTDB
+    // push ids and are not guessable.
+    match /matchday-live/{ymd}/{contributorId}/{file} {
+      // A contributor may read back their own objects: the capture page's
+      // retry asks "is my upload already there?" before marking a clip sent.
+      allow read: if request.auth != null
+        && (request.auth.token.email != null || request.auth.token.mdl == contributorId);
+      allow create: if request.auth != null
+        && request.auth.token.mdl == contributorId
+        && resource == null
+        && request.resource.size < 40 * 1024 * 1024
+        && request.resource.contentType.matches('video/.*');
+      allow delete: if request.auth != null && request.auth.token.email != null;
+    }
+
     match /programme/{club}/{allPaths=**} {
       // pClub != null, not just "signed in". Anonymous sign-in is a public
       // endpoint on this project — the client uses it before the passcode is

@@ -18,6 +18,14 @@ The functions in this directory:
   RTDB live ingester. **Scheduled**, not triggered, and the only functions here
   that write to a **different project's** database (`nl-widgets`). See the
   section below — they need one extra IAM grant that nothing else does.
+- **`matchdayLiveAuth`** / **`matchdayLiveSync`** / **`matchdayLiveRetention`**
+  (`matchday-live.js`) — Matchday Live. A contributor's link token → an `mdl`
+  claim (RTDB trigger, europe-west1, same shape as `programmeAuth`); a minute
+  job mirroring today's matches, goals and cards out of the ingester's
+  `nl-widgets` data into `app-data/media-matchday-live/matchdays/`; and a
+  nightly sweep deleting rejected clips' video after 7 days. The mirror only
+  **reads** nl-widgets, with the grant the ingester already needs — nothing new
+  to set up. See `matchday-live/README.md`.
 
 See the headers of `index.js` / `account.js` for details.
 
