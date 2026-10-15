@@ -774,7 +774,7 @@ def _page(ed):
   File: /wellbeing-hub/index.html
 
   A NON-GATED public page. No auth-guard, no nl-topbar, no Firebase, no RTDB —
-  the club-contacts and /wellbeing/ precedent for public pages: brand tokens
+  the pattern for a public page: brand tokens
   from /system/nl-brand.css, helpers from /system/nl-utils.js, everything else
   local.
 
