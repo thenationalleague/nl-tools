@@ -67,11 +67,11 @@ test('build counts complete days only, carries the age of young articles and ski
   };
   const { feed, counts } = build(index, sources, new Date('2026-10-13T03:00:00Z'));
   assert.equal(feed.lastDay, '2026-10-12');
-  assert.equal(feed.settledTo, '2026-10-06');
+  assert.equal(feed.settledTo, '2026-09-29');
   assert.equal(feed.items.old, undefined);
-  assert.equal(feed.items.done.v, 40);        // 28 and 29 September fall outside the 7 days
+  assert.equal(feed.items.done.v, 40);        // 28 and 29 September fall outside the 14 days
   assert.equal(feed.items.done.a, undefined);
-  assert.equal(feed.items.done.d.length, 7);
+  assert.equal(feed.items.done.d.length, 14);
   assert.equal(feed.items.young.a, 4);
   assert.equal(feed.items.young.v, 15);       // the run day's partial 7 views are not counted
   assert.equal(feed.items.lost.x, 1);
