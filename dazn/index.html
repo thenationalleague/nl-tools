@@ -1,10 +1,18 @@
 <!DOCTYPE html>
 <!--
   NL Tools — DAZN Viewing (staff)
-  Version: v28.0 (15/10/2026)
+  Version: v29.0 (15/10/2026)
   File: /dazn/index.html
 
   CHANGELOG
+    v29.0 (15/10/2026) — Admin gains Edit games: pick a club, then set a
+      neutral venue, correct UK availability, or leave a game out; the
+      not-played list gains Count it. Each save writes an override under
+      app-data/media-dazn/overrides/<season>/<id> (admin-only by the node's
+      existing rules) and rewrites the season with it applied; the import
+      re-applies every override, so a re-import never undoes an edit.
+      Not-played streams are now stored in full so they can be counted
+      back. The Season dropdown is always shown, even with one season.
     v28.0 (15/10/2026) — Three tabs (canon .tabs, the Club Directory pattern):
       League (division slicer, KPI row for the selection, every club), Club
       (canon NL.clubPicker; exactly what the club sees, via the same
@@ -114,6 +122,15 @@
     window.NL_CHANGELOG = [
       {
         date: '15/10/2026',
+        version: 'v29.0',
+        items: [
+          'Admins can edit a game: mark a neutral venue (the play-off final), correct UK availability, or leave a game out. Edits survive a re-import.',
+          'The chart has a y-axis and gridlines, and its scale no longer changes with the slicers.',
+          'The season is always shown, and the slicers start at All.'
+        ]
+      },
+      {
+        date: '15/10/2026',
         version: 'v28.0',
         items: [
           'Three tabs: League for every club, Club to see exactly what one club sees, and Admin (admins only) for importing.',
@@ -198,9 +215,9 @@
   <script src="/system/nl-topbar.js?v=10"></script>
   <script src="/system/auth-guard.js?v=16"></script>
 
-  <link rel="stylesheet" href="/dazn/_view.css?v=6">
-  <script src="/dazn/_data.js?v=3"></script>
-  <script src="/dazn/_view.js?v=8"></script>
+  <link rel="stylesheet" href="/dazn/_view.css?v=7">
+  <script src="/dazn/_data.js?v=4"></script>
+  <script src="/dazn/_view.js?v=9"></script>
 
 <style>
   /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
@@ -211,6 +228,9 @@
   #dzaClubs tbody tr[data-code] { cursor: pointer; }
   .dza-section { margin-top: 16px; }
   .dza-pick { min-width: 280px; }
+  .dza-editbar { border: 0; box-shadow: none; border-radius: 0; border-bottom: 1px solid var(--border); }
+  #dzaEdit td { vertical-align: middle; }
+  #dzaEdit tr.is-out td { color: var(--text-muted); }
   .dza-import textarea { font-family: var(--font-mono); font-size: var(--text-xs); }
   .dza-preview:empty { display: none; }
 </style>
@@ -229,7 +249,8 @@
          reload or a shared link lands in the same place. -->
     <div class="toolbar">
       <div class="toolbar__left">
-        <select class="nl-select" id="dzaSeason" aria-label="Season" hidden></select>
+        <span class="filter-label">Season</span>
+        <select class="nl-select" id="dzaSeason" aria-label="Season"></select>
       </div>
     </div>
 
@@ -252,6 +273,16 @@
 
     <div data-pane-body="admin" hidden>
       <div id="dzaSeasons"></div>
+
+      <section class="form-panel dz-panel dz-panel--flush dza-section">
+        <div class="form-panel__head dz-panel__head"><span>Edit games</span></div>
+        <div class="form-panel__body">
+          <div class="filter-bar dz-slicers dza-editbar">
+            <div class="dz-slicer"><span class="filter-label">Club</span><div class="dza-pick" id="dzaEditPicker"></div></div>
+          </div>
+          <div id="dzaEdit"></div>
+        </div>
+      </section>
 
       <section class="form-panel dza-import dza-section" id="dzaImport">
         <div class="form-panel__head">Import a season</div>
@@ -304,7 +335,7 @@
       sel.innerHTML = keys.map(function (k) {
         return '<option value="' + esc(k) + '">' + esc(S.index[k].label || NL.season.label(S.meta, k)) + '</option>';
       }).join('');
-      sel.hidden = keys.length < 2;
+      /* Shown even with one season: the figures always say which season. */
       if (!keys.length) {
         loading(S.isAdmin ? 'No seasons imported yet' : 'No figures yet');
         drawSeasons();
@@ -320,12 +351,19 @@
   function showSeason(key) {
     S.season = key;
     loading('Loading…');
-    return db.ref(BASE + '/seasons/' + key).once('value').then(function (snap) {
+    return Promise.all([
+      db.ref(BASE + '/seasons/' + key).once('value'),
+      S.isAdmin ? db.ref(BASE + '/overrides/' + key).once('value') : null
+    ]).then(function (got) {
+      var snap = got[0];
+      S.overrides = (got[1] && got[1].val()) || {};
       S.data = snap.val() || {};
       if (S.picker) S.picker.setSeason(key);
+      if (S.editPicker) S.editPicker.setSeason(key);
       drawClubs();
       drawClub();
       drawSeasons();
+      drawEdit();
     });
   }
 
@@ -512,15 +550,109 @@
       '<div class="form-panel__head dz-panel__head"><span>Not played: left out of ' +
         esc((S.index[S.season] && S.index[S.season].label) || '') + '</span></div>' +
       '<div class="form-panel__body dz-panel__body"><div class="table-wrap"><table class="table table--compact">' +
-        '<thead><tr><th>Date</th><th>Game</th><th class="ta-right">Views</th><th class="ta-right">Avg mins</th></tr></thead><tbody>' +
+        '<thead><tr><th>Date</th><th>Game</th><th class="ta-right">Views</th><th class="ta-right">Avg mins</th><th></th></tr></thead><tbody>' +
         ids.map(function (id) {
           var m = np[id];
           return '<tr><td>' + esc(NL.formatDateShort(m.date)) + '</td>' +
             '<td>' + esc((nameOf(m.home) || m.home) + ' v ' + (nameOf(m.away) || m.away)) + '</td>' +
             '<td class="ta-right">' + F.n0(m.views) + '</td>' +
-            '<td class="ta-right">' + F.n1(m.views ? m.mins / m.views : null) + '</td></tr>';
+            '<td class="ta-right">' + F.n1(m.views ? m.mins / m.views : null) + '</td>' +
+            '<td class="ta-right">' + (m.ukViews != null ? '<button type="button" class="btn btn--ghost btn--sm" data-restore="' + esc(id) + '">Count it</button>' : '') + '</td></tr>';
         }).join('') +
       '</tbody></table></div></div></section>';
+  }
+
+  /* ---- Admin: edit games --------------------------------------------
+     Corrections the sheet and the NLS check cannot know: a neutral venue
+     (the play-off final at Wembley), UK availability, and whether a game
+     counts. Each save writes an override under overrides/<season>/<id>,
+     which a re-import re-applies, and rewrites the season with the edit
+     applied (D.applyOverride keeps the game's three copies and the
+     division averages in step). */
+  function drawEdit() {
+    var host = $('dzaEdit');
+    if (!host) return;
+    if (!S.editClub) { host.innerHTML = '<div class="empty-state"><div class="empty-state__title">Pick a club</div></div>'; return; }
+    var code = S.editClub, F = DAZNView.fmt;
+    var mine = function (m) { return m.home === code || m.away === code; };
+    var rows = D.values(S.data.matches).filter(mine).map(function (m) { return { m: m, out: false }; })
+      .concat(D.values(S.data.notPlayed).filter(mine).map(function (m) { return { m: m, out: true }; }))
+      .sort(function (a, b) { return a.m.date < b.m.date ? -1 : a.m.date > b.m.date ? 1 : 0; });
+    var idOf = function (m) { return D.matchId(m.date, m.home, m.away); };
+    if (!rows.length) { host.innerHTML = '<div class="empty-state"><div class="empty-state__title">No DAZN games for ' + esc(nameOf(code) || code) + ' this season</div></div>'; return; }
+    host.innerHTML = '<div class="table-wrap"><table class="table table--compact"><thead><tr>' +
+      '<th>Date</th><th>Game</th><th class="ta-right">Views</th><th>Neutral venue</th><th>Shown in UK</th><th>Counted</th><th></th></tr></thead><tbody>' +
+      rows.map(function (r) {
+        var m = r.m, id = idOf(m), v = m.ukViews + m.intlViews, dis = r.out ? ' disabled' : '';
+        return '<tr data-id="' + esc(id) + '"' + (r.out ? ' class="is-out"' : '') + '>' +
+          '<td>' + esc(NL.formatDateShort(m.date)) + '</td>' +
+          '<td>' + esc((nameOf(m.home) || m.home) + ' v ' + (nameOf(m.away) || m.away)) + '</td>' +
+          '<td class="ta-right">' + F.n0(v) + '</td>' +
+          '<td><input type="checkbox" data-k="neutral" aria-label="Neutral venue"' + (m.neutral ? ' checked' : '') + dis + '></td>' +
+          '<td><select class="nl-select" data-k="avail" aria-label="Shown in UK"' + dis + '>' +
+            '<option value="uk"' + (m.avail !== 'intl' ? ' selected' : '') + '>Yes</option>' +
+            '<option value="intl"' + (m.avail === 'intl' ? ' selected' : '') + '>No</option></select></td>' +
+          '<td><input type="checkbox" data-k="counted" aria-label="Counted"' + (r.out ? '' : ' checked') + '></td>' +
+          '<td class="ta-right"><button type="button" class="btn btn--primary btn--sm" data-save disabled>Save</button></td>' +
+        '</tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+
+  $('dzaEdit').addEventListener('change', function (e) {
+    var tr = e.target.closest('tr[data-id]');
+    if (tr) tr.querySelector('[data-save]').disabled = false;
+  });
+
+  $('dzaEdit').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-save]');
+    if (!b) return;
+    var tr = b.closest('tr[data-id]'), id = tr.getAttribute('data-id');
+    var cur = (S.data.matches || {})[id], wasOut = !cur;
+    var counted = tr.querySelector('[data-k="counted"]').checked;
+    var delta = {};
+    if (wasOut && counted) { delta.restored = true; delta.excluded = false; }
+    if (!wasOut && !counted) delta.excluded = true;
+    if (!wasOut && counted) {
+      var neutral = tr.querySelector('[data-k="neutral"]').checked;
+      var avail = tr.querySelector('[data-k="avail"]').value;
+      if (!!cur.neutral !== neutral) delta.neutral = neutral;
+      if ((cur.avail === 'intl' ? 'intl' : 'uk') !== avail) delta.avail = avail;
+    }
+    if (!Object.keys(delta).length) { b.disabled = true; return; }
+    saveEdit(id, delta, b);
+  });
+
+  $('dzaSeasons').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-restore]');
+    if (b) saveEdit(b.getAttribute('data-restore'), { restored: true, excluded: false }, b);
+  });
+
+  function saveEdit(id, delta, btn) {
+    var key = S.season;
+    var next = JSON.parse(JSON.stringify(S.data));
+    D.applyOverride(next, id, delta);
+    var merged = {};
+    var prev = S.overrides[id] || {};
+    Object.keys(prev).forEach(function (k) { merged[k] = prev[k]; });
+    Object.keys(delta).forEach(function (k) { merged[k] = delta[k]; });
+    var up = {};
+    up['seasons/' + key] = next;
+    up['overrides/' + key + '/' + id] = merged;
+    up['index/' + key + '/games'] = Object.keys(next.matches || {}).length;
+    up['index/' + key + '/notPlayed'] = Object.keys(next.notPlayed || {}).length;
+    if (btn) btn.disabled = true;
+    NL.ensureAuth().then(function () { return db.ref(BASE).update(up); }).then(function () {
+      S.data = next;
+      S.overrides[id] = merged;
+      S.index[key].games = up['index/' + key + '/games'];
+      S.index[key].notPlayed = up['index/' + key + '/notPlayed'];
+      NL.toast('Saved. Clubs see the change straight away.', 'success');
+      drawClubs(); drawClub(); drawSeasons(); drawEdit();
+    }).catch(function (e) {
+      console.error('[dazn-admin]', e);
+      if (btn) btn.disabled = false;
+      NL.toast('Not saved: ' + ((e && e.message) || 'unknown error'), 'error');
+    });
   }
 
   /* ---- NLS results, to find streams of games that were never played ----
@@ -596,35 +728,31 @@
 
     $('dzaCheck').disabled = true;
     out.innerHTML = '<div class="banner banner--info">Checking every game against the NLS results…</div>';
-    nlsSeason(key).then(function (nls) {
+    Promise.all([nlsSeason(key), db.ref(BASE + '/overrides/' + key).once('value')]).then(function (got) {
+      var nls = got[0], overrides = got[1].val() || {};
       var chk = D.checkPlayed(p.rows, optaOf, D.nlsIndex(nls));
       var b = D.buildSeason(chk.played, codeOf);
       if (!b.season) { out.innerHTML = problems('Fix these in the sheet and paste again:', b.errors); return; }
       var F = DAZNView.fmt;
-      var notPlayed = {};
+      /* Not-played streams are kept in full (staff-only, and in each club's
+         own node so the club page can name them), so Admin can count one
+         back in if the check ever gets it wrong. */
       chk.notPlayed.forEach(function (r) {
-        notPlayed[D.matchId(r.date, codeOf(r.home), codeOf(r.away))] = {
-          date: r.date, home: codeOf(r.home), away: codeOf(r.away),
-          views: r.ukViews + r.intlViews, mins: r.ukMins + r.intlMins
-        };
+        var rec = { date: r.date, home: codeOf(r.home), away: codeOf(r.away), div: r.div,
+                    ukViews: r.ukViews, intlViews: r.intlViews, ukMins: r.ukMins, intlMins: r.intlMins, avail: r.avail };
+        D.setNotPlayed(b.season, D.matchId(rec.date, rec.home, rec.away), rec);
       });
-      b.season.notPlayed = chk.notPlayed.length ? notPlayed : null;
-      /* Each club also holds its own not-played streams, so the club page
-         (which can read only its own node) can name them. */
-      Object.keys(notPlayed).forEach(function (id) {
-        var m = notPlayed[id];
-        [m.home, m.away].forEach(function (c) {
-          if (!b.season.clubs[c]) return;
-          (b.season.clubs[c].notPlayed = b.season.clubs[c].notPlayed || {})[id] = m;
-        });
-      });
+      /* Edits made in Admin survive a re-import: re-apply each one. */
+      var edits = Object.keys(overrides);
+      edits.forEach(function (id) { D.applyOverride(b.season, id, overrides[id]); });
 
-      var rows = chk.played;
+      var rows = D.values(b.season.matches);
+      var npCount = Object.keys(b.season.notPlayed || {}).length;
       var dates = rows.map(function (r) { return r.date; }).sort();
       var byDiv = {}, intl = 0;
       rows.forEach(function (r) { byDiv[r.div] = (byDiv[r.div] || 0) + 1; if (r.avail === 'intl') intl++; });
 
-      S.pending = { key: key, season: b.season, games: rows.length, notPlayed: chk.notPlayed.length };
+      S.pending = { key: key, season: b.season, games: rows.length, notPlayed: npCount };
       out.innerHTML =
         '<div class="banner banner--info"><strong>' + rows.length + ' games for ' + esc(NL.season.label(S.meta, key)) + '</strong>, ' +
           esc(NL.formatDateShort(dates[0])) + ' to ' + esc(NL.formatDateShort(dates[dates.length - 1])) + ', ' +
@@ -634,6 +762,7 @@
             '<li>Shown in UK: ' + (rows.length - intl) + ' · not shown in UK: ' + intl + '</li>' +
           '</ul>' +
           (S.index[key] ? '<p>Replaces the ' + (S.index[key].games || '') + ' games already held for this season.</p>' : '') +
+          (edits.length ? '<p>' + edits.length + ' saved ' + (edits.length === 1 ? 'edit is' : 'edits are') + ' re-applied.</p>' : '') +
         '</div>' +
         (chk.notPlayed.length
           ? '<div class="banner banner--amber">' + chk.notPlayed.length + ' streamed ' + (chk.notPlayed.length === 1 ? 'game was' : 'games were') +
@@ -719,6 +848,17 @@
         }
       });
       if (S.open && NL.clubs.byCode(S.open)) S.picker.setValue(NL.clubs.byCode(S.open).name);
+      if (S.isAdmin) {
+        S.editPicker = NL.clubPicker($('dzaEditPicker'), {
+          mode: 'select', season: 'current', placeholder: 'Pick a club',
+          onSelect: function (sel) {
+            var c = (sel && sel.club) || NL.clubs.byName(sel && sel.name);
+            if (!c || !c.code) return;
+            S.editClub = c.code;
+            drawEdit();
+          }
+        });
+      }
       return NL.ensureAuth();
     }).then(loadIndex).catch(function (e) {
       console.error('[dazn-admin]', e);

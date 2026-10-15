@@ -1,9 +1,13 @@
 /* =============================================================================
    NL Tools — DAZN Viewing: data layer
    File: /dazn/_data.js
-   Version: v27.0 (15/10/2026)
+   Version: v29.0 (15/10/2026)
 
    CHANGELOG
+     v29.0 (15/10/2026) — Admin edits: applyOverride (neutral venue, UK
+       availability, leave out, count anyway), kept apart from the import so
+       a re-import re-applies them. Neutral games are neither home nor away
+       in summarise. benchAll split out so an edit can recompute averages.
      v27.0 (15/10/2026) — nlsIndex / checkPlayed: streams of games that were
        never played (postponed or rearranged) are found against the NLS
        results and left out of the import. See the block above
@@ -237,17 +241,107 @@
       clubs[code].div = homeDiv[code] || mostCommonDiv(clubs[code].matches);
     });
 
-    var bench = {};
-    Object.keys(DIV_LABEL).forEach(function (div) {
-      var inDiv = Object.keys(matches).map(function (id) { return matches[id]; })
-        .filter(function (m) { return m.div === div; });
-      if (inDiv.length) bench[div] = benchOf(inDiv);
-    });
-
     return {
-      season: { matches: matches, clubs: clubs, bench: bench },
+      season: { matches: matches, clubs: clubs, bench: benchAll(matches) },
       unmatched: [], errors: []
     };
+  }
+
+  /* Every division's averages, from the season's games (each game once). */
+  function benchAll(matches) {
+    var bench = {};
+    Object.keys(DIV_LABEL).forEach(function (div) {
+      var inDiv = values(matches).filter(function (m) { return m.div === div; });
+      if (inDiv.length) bench[div] = benchOf(inDiv);
+    });
+    return bench;
+  }
+
+  /* ---- Edits from the Admin tab (v29.0) ---------------------------------
+     An edit is an override, kept apart from the imported season under
+     overrides/<season>/<id>, so a re-import re-applies it instead of
+     losing it. One override, applied to a season object in place:
+       { neutral: true|false }        neither club was at home (a final at
+                                      Wembley): counts under All only
+       { avail: 'uk'|'intl' }         UK availability corrected by hand
+       { excluded: true }             leave a counted game out (not played)
+       { restored: true }             count a stream the NLS check left out
+     A game lives in three places (matches, and each club's copy), and the
+     division averages depend on it, so all three are kept in step and the
+     averages are recomputed. Returns the season. */
+  function placeGame(season, id, rec) {
+    season.matches = season.matches || {};
+    season.clubs = season.clubs || {};
+    season.matches[id] = rec;
+    [rec.home, rec.away].forEach(function (c) {
+      if (!season.clubs[c]) season.clubs[c] = { div: rec.div, matches: {} };
+      season.clubs[c].matches = season.clubs[c].matches || {};
+      season.clubs[c].matches[id] = clone(rec);
+    });
+  }
+
+  function dropGame(season, id) {
+    var rec = (season.matches || {})[id];
+    if (!rec) return null;
+    delete season.matches[id];
+    [rec.home, rec.away].forEach(function (c) {
+      var club = (season.clubs || {})[c];
+      if (club && club.matches) delete club.matches[id];
+    });
+    return rec;
+  }
+
+  function clone(o) { var c = {}; for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) c[k] = o[k]; return c; }
+
+  function setNotPlayed(season, id, rec) {
+    season.notPlayed = season.notPlayed || {};
+    var np = clone(rec);
+    np.views = rec.ukViews + rec.intlViews;
+    np.mins = rec.ukMins + rec.intlMins;
+    season.notPlayed[id] = np;
+    [rec.home, rec.away].forEach(function (c) {
+      var club = (season.clubs || {})[c];
+      if (club) (club.notPlayed = club.notPlayed || {})[id] = np;
+    });
+  }
+
+  function clearNotPlayed(season, id) {
+    var np = (season.notPlayed || {})[id];
+    if (!np) return null;
+    delete season.notPlayed[id];
+    [np.home, np.away].forEach(function (c) {
+      var club = (season.clubs || {})[c];
+      if (club && club.notPlayed) delete club.notPlayed[id];
+    });
+    return np;
+  }
+
+  function applyOverride(season, id, ov) {
+    if (!season || !ov) return season;
+    if (ov.restored) {
+      var np = clearNotPlayed(season, id);
+      if (np && np.ukViews != null) {
+        var back = clone(np); delete back.views; delete back.mins;
+        placeGame(season, id, back);
+      }
+    }
+    if (ov.excluded) {
+      var gone = dropGame(season, id);
+      if (gone) setNotPlayed(season, id, gone);
+    }
+    var rec = (season.matches || {})[id];
+    if (rec) {
+      if (ov.neutral != null) rec.neutral = !!ov.neutral;
+      if (ov.avail === 'uk' || ov.avail === 'intl') {
+        /* Keep the finer Saturday code when it is still true. */
+        if (ov.avail === 'intl') rec.avail = 'intl';
+        else if (rec.avail === 'intl') rec.avail = 'uk';
+      }
+      if (!rec.neutral) delete rec.neutral;
+      placeGame(season, id, rec);
+    }
+    season.bench = benchAll(season.matches || {});
+    return season;
   }
 
   function mostCommonDiv(byId) {
@@ -262,14 +356,14 @@
   function summarise(games, clubCode) {
     games = Array.isArray(games) ? games : values(games);
     var s = {
-      games: games.length, home: 0, away: 0, intlOnly: 0,
+      games: games.length, home: 0, away: 0, neutral: 0, intlOnly: 0,
       ukViews: 0, intlViews: 0, views: 0, mins: 0,
       ukShownGames: 0, ukShownViews: 0,
       avgMins: null, avgUkPerUkShown: null, avgIntlPerGame: null, avgViewsPerGame: null,
       top: null
     };
     games.forEach(function (g) {
-      if (clubCode) { if (g.home === clubCode) s.home++; else s.away++; }
+      if (clubCode) { if (g.neutral) s.neutral++; else if (g.home === clubCode) s.home++; else s.away++; }
       var v = g.ukViews + g.intlViews;
       s.ukViews += g.ukViews;
       s.intlViews += g.intlViews;
@@ -384,6 +478,9 @@
     benchOf: benchOf,
     benchFigure: benchFigure,
     values: values,
+    benchAll: benchAll,
+    applyOverride: applyOverride,
+    setNotPlayed: setNotPlayed,
     londonDate: londonDate,
     nlsIndex: nlsIndex,
     checkPlayed: checkPlayed

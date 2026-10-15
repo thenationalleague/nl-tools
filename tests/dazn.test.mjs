@@ -240,3 +240,54 @@ test('a club with no Opta ID is kept and reported, never silently dropped', () =
   assert.equal(r.unchecked.length, 3);
   assert.equal(r.notPlayed.length, 0);
 });
+
+/* ---- Admin edits (applyOverride, v29.0) --------------------------------- */
+const freshSeason = () => JSON.parse(JSON.stringify(D.buildSeason(D.parsePaste(SHEET).rows, codeOf).season));
+const ID = '20250809-ALP-BET';
+
+test('neutral venue is set on the game and both clubs’ copies, and is neither home nor away', () => {
+  const s = D.applyOverride(freshSeason(), ID, { neutral: true });
+  assert.equal(s.matches[ID].neutral, true);
+  assert.equal(s.clubs.ALP.matches[ID].neutral, true);
+  assert.equal(s.clubs.BET.matches[ID].neutral, true);
+  const a = D.summarise(s.clubs.ALP.matches, 'ALP');
+  assert.equal(a.neutral, 1);
+  assert.equal(a.home + a.away + a.neutral, a.games);
+  const off = D.applyOverride(s, ID, { neutral: false });
+  assert.equal(off.matches[ID].neutral, undefined);
+});
+
+test('leaving a game out moves it to not played, in full, and the averages follow', () => {
+  const before = freshSeason();
+  const s = D.applyOverride(freshSeason(), ID, { excluded: true });
+  assert.equal(s.matches[ID], undefined);
+  assert.equal(s.clubs.ALP.matches[ID], undefined);
+  assert.equal(s.notPlayed[ID].ukViews, 1000, 'kept in full so it can be counted back');
+  assert.ok(s.clubs.BET.notPlayed[ID]);
+  const J = (x) => JSON.stringify(x);
+  assert.notEqual(J(s.bench.National), J(before.bench.National));
+  const back = D.applyOverride(s, ID, { restored: true, excluded: false });
+  assert.equal(J(back.matches[ID]), J(before.matches[ID]));
+  assert.equal(back.notPlayed[ID], undefined);
+  assert.equal(J(back.bench), J(before.bench));
+});
+
+test('UK availability can be corrected, and a shown Saturday keeps its finer code', () => {
+  const s = D.applyOverride(freshSeason(), ID, { avail: 'intl' });
+  assert.equal(s.matches[ID].avail, 'intl');
+  assert.equal(s.clubs.BET.matches[ID].avail, 'intl');
+  assert.equal(D.applyOverride(s, ID, { avail: 'uk' }).matches[ID].avail, 'uk');
+  const keep = D.applyOverride(freshSeason(), ID, { avail: 'uk' });
+  assert.equal(keep.matches[ID].avail, 'round', 'already shown: stays "whole round"');
+});
+
+test('a club view with a neutral game: Venue Home and Away both leave it out, All keeps it', () => {
+  const win = { DAZNData: D };
+  vm.runInNewContext(readFileSync(join(REPO, 'dazn/_view.js'), 'utf8'), { window: win, Intl });
+  const s = D.applyOverride(freshSeason(), ID, { neutral: true });
+  const games = [...Object.values(s.clubs.ALP.matches)];
+  const n = (venue) => win.DAZNView.applyFilters(games, 'ALP', { uk: 'all', venue, month: 'all' }).length;
+  assert.equal(n('all'), 3);
+  assert.equal(n('home'), 0);
+  assert.equal(n('away'), 2);
+});
