@@ -1,9 +1,13 @@
 /* =============================================================================
    NL Tools — DAZN Viewership: one club's season, as a dashboard
    File: /dazn/_view.js
-   Version: v32.0 (15/10/2026)
+   Version: v33.0 (15/10/2026)
 
    CHANGELOG
+     v33.0 (15/10/2026) — New headline cards: Total views, Views per game
+       (vs division), UK share, Hours watched, Best game. The split UK / INT
+       averages and the Games card are gone; the game count sits under
+       Views per game.
      v32.0 (15/10/2026) — The Views card reads "Total views".
      v31.0 (15/10/2026) — By month runs August to May on a real calendar,
        empty months as empty slots. By game columns share the full width
@@ -221,23 +225,45 @@
       sign + Math.abs(pct) + '% vs division</div>';
   }
 
-  function kpis(s, bench, showBench) {
+  /* Five cards, each answering one question: how many watched, how a
+     game does against the division, where the audience is, how long they
+     stay, and the game that drew most. One comparison only (views per
+     game): it is the figure a club compares, and a UK share or minutes
+     "vs division" percentage reads as a different thing from a views one.
+     `who` names the club so Best game can say who it was against; the
+     League tab passes none and gets "HOME v AWAY". */
+  function kpis(s, bench, showBench, who) {
     var b = function (k) { return showBench ? D.benchFigure(bench, k) : null; };
     var card = function (num, label, extra, title) {
       return '<div class="stat"' + (title ? ' title="' + esc(title) + '"' : '') + '>' +
         '<div class="stat__num">' + num + '</div><div class="stat__label">' + esc(label) + '</div>' + (extra || '') + '</div>';
     };
     var sub = function (t) { return t ? '<div class="dz-sub">' + esc(t) + '</div>' : ''; };
+    var share = s.views ? Math.round(s.ukViews / s.views * 100) : null;
+    var t = s.top, code = who && who.code, nameOf = (who && who.nameOf) || function () { return ''; };
+    var best = '', bestTitle = '';
+    if (t) {
+      var when = window.NL.formatDateShort(t.date);
+      if (code) {
+        var opp = t.home === code ? t.away : t.home, v = t.neutral ? 'N' : t.home === code ? 'H' : 'A';
+        best = 'v ' + opp + ' (' + v + ') · ' + when;
+        bestTitle = 'v ' + (nameOf(opp) || opp) + ' (' + v + '), ' + when;
+      } else {
+        best = t.home + ' v ' + t.away + ' · ' + when;
+        bestTitle = (nameOf(t.home) || t.home) + ' v ' + (nameOf(t.away) || t.away) + ', ' + when;
+      }
+      bestTitle += ': ' + n0(t.ukViews + t.intlViews) + ' views';
+    }
     return '<div class="stats dz-kpis">' +
-      card(n0(s.games), 'Games',
-        sub([s.home && s.home + ' home', s.away && s.away + ' away', s.neutral && s.neutral + ' neutral'].filter(Boolean).join(' · '))) +
       card(compact(s.views), 'Total views',
         sub('UK ' + compact(s.ukViews) + ' · INT ' + compact(s.intlViews)), n0(s.views) + ' views') +
-      card(compact(s.avgUkPerUkShown), 'UK per UK game',
-        delta(s.avgUkPerUkShown, b('avgUkPerUkShown')) || sub(s.intlOnly ? s.intlOnly + ' not shown in UK' : '')) +
-      card(compact(s.avgIntlPerGame), 'INT per game', delta(s.avgIntlPerGame, b('avgIntlPerGame'))) +
-      card(n1(s.avgMins), 'Avg mins per view',
-        delta(s.avgMins, b('avgMins')) || sub(compact(s.mins) + ' minutes watched'), n0(s.mins) + ' minutes watched') +
+      card(compact(s.avgViewsPerGame), 'Views per game',
+        delta(s.avgViewsPerGame, b('avgViewsPerGame')) + sub(n0(s.games) + (s.games === 1 ? ' game' : ' games'))) +
+      card(share == null ? '—' : share + '%', 'UK share',
+        sub(s.intlOnly ? s.intlOnly + ' not shown in UK' : ''), n0(s.ukViews) + ' UK of ' + n0(s.views) + ' views') +
+      card(compact(s.mins / 60), 'Hours watched',
+        sub(n1(s.avgMins) + ' mins per view'), n0(s.mins) + ' minutes watched') +
+      card(t ? compact(t.ukViews + t.intlViews) : '—', 'Best game', sub(best), bestTitle) +
     '</div>';
   }
 
@@ -499,7 +525,7 @@
                  avg: total ? (g.ukMins + g.intlMins) / total : null };
       });
       if (view === 'game') q('[data-chart]').innerHTML = gameChart(rows, scale.game);
-      q('[data-kpis]').innerHTML = kpis(s, o.bench, !filtered(F));
+      q('[data-kpis]').innerHTML = kpis(s, o.bench, !filtered(F), { code: o.code, nameOf: nameOf });
       q('[data-top]').innerHTML = topGames(rows);
       window.NL.clubs.wireCrestImgs(q('[data-top]'));
       gamesGrid(q('[data-games]'), rows, s);

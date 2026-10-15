@@ -1,9 +1,11 @@
 /* =============================================================================
    NL Tools — DAZN Viewership: data layer
    File: /dazn/_data.js
-   Version: v29.0 (15/10/2026)
+   Version: v33.0 (15/10/2026)
 
    CHANGELOG
+     v33.0 (15/10/2026) — The division average also carries views per game
+       (avgViewsPerGame), for the Views per game card's comparison.
      v29.0 (15/10/2026) — Admin edits: applyOverride (neutral venue, UK
        availability, leave out, count anyway), kept apart from the import so
        a re-import re-applies them. Neutral games are neither home nor away
@@ -392,6 +394,7 @@
       ukShownGames: s.ukShownGames,
       avgUkPerUkShown: s.avgUkPerUkShown == null ? null : Math.round(s.avgUkPerUkShown),
       avgIntlPerGame: s.avgIntlPerGame == null ? null : Math.round(s.avgIntlPerGame),
+      avgViewsPerGame: s.avgViewsPerGame == null ? null : Math.round(s.avgViewsPerGame),
       avgMins: s.avgMins == null ? null : round1(s.avgMins)
     };
   }
