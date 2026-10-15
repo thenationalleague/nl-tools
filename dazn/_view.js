@@ -1,9 +1,15 @@
 /* =============================================================================
    NL Tools — DAZN Viewing: one club's season, as a dashboard
    File: /dazn/_view.js
-   Version: v25.0 (15/10/2026)
+   Version: v26.0 (15/10/2026)
 
    CHANGELOG
+     v26.0 (15/10/2026) — Slicers say what they do: "UK availability: All
+       games / Shown in UK / Not shown in UK" and "Venue: Home & away /
+       Home / Away", each titled above its control in a white strip. Home
+       or away is written out: a Venue column in the games table and
+       "· Home" in Top games, replacing the grey H / A letters. slicer()
+       and chips() are exported so the staff page's division slicer matches.
      v25.0 (15/10/2026) — Rebuilt as a one-screen dashboard rather than a
        long page: slicers across the top, a row of KPI cards, then a
        views-by-month column chart beside the top games, then the games in
@@ -132,21 +138,23 @@
 
   function filtered(F) { return F.uk !== 'all' || F.venue !== 'all' || F.month !== 'all'; }
 
+  /* A slicer: its title above its control, as a report's slicer reads.
+     The strip they sit in is a white panel, so the controls read as
+     controls and not as loose text on the page background. */
+  function slicer(title, control) {
+    return '<div class="dz-slicer"><span class="filter-label">' + esc(title) + '</span>' + control + '</div>';
+  }
+
   function slicers(months, F) {
-    /* Each label sits with its control in a canon .filter-row, so a narrow
-       screen wraps whole slicers rather than leaving a label at a line end. */
     return '<div class="filter-bar dz-slicers">' +
-      '<div class="filter-row"><span class="filter-label">Shown in UK</span>' +
-      chips('uk', [['all', 'All'], ['uk', 'Yes'], ['intl', 'INT only']], F.uk) + '</div>' +
-      '<div class="filter-row"><span class="filter-label">Venue</span>' +
-      chips('venue', [['all', 'All'], ['home', 'Home'], ['away', 'Away']], F.venue) + '</div>' +
-      '<div class="filter-row"><span class="filter-label">Month</span>' +
-      '<select class="nl-select" data-f="month" aria-label="Month"><option value="all">All</option>' +
+      slicer('UK availability', chips('uk', [['all', 'All games'], ['uk', 'Shown in UK'], ['intl', 'Not shown in UK']], F.uk)) +
+      slicer('Venue', chips('venue', [['all', 'Home & away'], ['home', 'Home'], ['away', 'Away']], F.venue)) +
+      slicer('Month', '<select class="nl-select" data-f="month" aria-label="Month"><option value="all">All months</option>' +
         months.map(function (m) {
           return '<option value="' + m + '"' + (F.month === m ? ' selected' : '') + '>' +
             esc(MONTH_LONG.format(new Date(m + '-01T00:00:00Z'))) + '</option>';
-        }).join('') + '</select></div>' +
-      (filtered(F) ? '<button type="button" class="btn btn--ghost btn--sm" data-reset>Clear</button>' : '') +
+        }).join('') + '</select>') +
+      (filtered(F) ? '<button type="button" class="btn btn--ghost btn--sm dz-slicers__clear" data-reset>Clear</button>' : '') +
     '</div>';
   }
 
@@ -222,8 +230,8 @@
     return '<ol class="dz-top">' + top.map(function (r) {
       return '<li>' +
         window.NL.clubs.crestImgHtml(r.oppName, 'thumb', { className: 'nl-crest' }) +
-        '<span class="dz-top__id"><span class="dz-top__name">' + esc(r.oppName) + ' <span class="dz-ha">' + (r.home ? 'H' : 'A') + '</span></span>' +
-          '<span class="dz-top__date">' + esc(window.NL.formatDateShort(r.g.date)) + '</span></span>' +
+        '<span class="dz-top__id"><span class="dz-top__name">' + esc(r.oppName) + '</span>' +
+          '<span class="dz-top__date">' + esc(window.NL.formatDateShort(r.g.date)) + ' \u00b7 ' + (r.home ? 'Home' : 'Away') + '</span></span>' +
         '<span class="dz-top__val">' + n0(r.total) + '</span>' +
         '<span class="dz-top__bar">' + bar(r.g.ukViews, r.g.intlViews, max) + '</span>' +
       '</li>';
@@ -239,7 +247,8 @@
       cols: [
         { key: 'date', label: 'Date', get: function (r) { return r.g.date; } },
         { key: 'opp', label: 'Opponent', get: function (r) { return r.oppName; } },
-        { key: 'avail', label: 'In UK', cls: 'dz-sm-hide', get: function (r) { return r.g.avail === 'intl' ? 'No' : 'Yes'; } },
+        { key: 'venue', label: 'Venue', cls: 'dz-sm-hide', get: function (r) { return r.home ? 'Home' : 'Away'; } },
+        { key: 'avail', label: 'Shown in UK', cls: 'dz-sm-hide', get: function (r) { return r.g.avail === 'intl' ? 'No' : 'Yes'; } },
         { key: 'uk', label: 'UK', num: true, cls: 'dz-sm-hide', get: function (r) { return r.g.ukViews; } },
         { key: 'intl', label: 'INT', num: true, cls: 'dz-sm-hide', get: function (r) { return r.g.intlViews; } },
         { key: 'total', label: 'Views', num: true, get: function (r) { return r.total; } },
@@ -252,7 +261,8 @@
         return '<tr>' +
           '<td class="dz-nowrap">' + esc(window.NL.formatDateShort(g.date)) + '</td>' +
           '<td><span class="dz-opp">' + window.NL.clubs.crestImgHtml(r.oppName, 'thumb', { className: 'nl-crest' }) +
-            '<span>' + esc(r.oppName) + '</span> <span class="dz-ha">' + (r.home ? 'H' : 'A') + '</span></span></td>' +
+            '<span>' + esc(r.oppName) + '</span></span></td>' +
+          '<td class="dz-sm-hide">' + (r.home ? 'Home' : 'Away') + '</td>' +
           '<td class="dz-sm-hide' + (intl ? ' dz-muted' : '') + '"' + (t ? ' title="' + esc(t) + '"' : '') + '>' + (intl ? 'No' : 'Yes') + '</td>' +
           '<td class="ta-right dz-sm-hide' + (intl ? ' dz-muted' : '') + '"' + (intl ? ' title="' + esc(AVAIL_TITLE.intl) + '"' : '') + '>' + n0(g.ukViews) + '</td>' +
           '<td class="ta-right dz-sm-hide">' + n0(g.intlViews) + '</td>' +
@@ -262,7 +272,7 @@
         '</tr>';
       },
       total: '<tr>' +
-        '<td>Total</td><td>' + n0(s.games) + ' games</td><td class="dz-sm-hide"></td>' +
+        '<td>Total</td><td>' + n0(s.games) + ' games</td><td class="dz-sm-hide"></td><td class="dz-sm-hide"></td>' +
         '<td class="ta-right dz-sm-hide">' + n0(s.ukViews) + '</td>' +
         '<td class="ta-right dz-sm-hide">' + n0(s.intlViews) + '</td>' +
         '<td class="ta-right">' + n0(s.views) + '</td>' +
@@ -340,7 +350,7 @@
   }
 
   window.DAZNView = {
-    render: render, grid: grid, applyFilters: applyFilters,
+    render: render, grid: grid, applyFilters: applyFilters, chips: chips, slicer: slicer,
     fmt: { n0: n0, n1: n1, compact: compact }
   };
 })();
