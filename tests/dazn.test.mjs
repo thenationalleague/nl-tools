@@ -176,3 +176,15 @@ test('filters narrow by UK availability, venue and month, and combine', () => {
   assert.equal(n({ month: '2025-08' }), 3);
   assert.equal(n({ month: '2025-09' }), 0);
 });
+
+test('the dashboard styles never override canon with !important', () => {
+  /* v16 forced the canon .stats grid and .table padding with !important,
+     and that is where "it ignores our canon" started. Canon is used through
+     its modifiers or not at all; what canon lacks is built under .dz-*. */
+  const css = readFileSync(join(REPO, 'dazn/_view.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(!/!important/.test(css), 'dazn/_view.css uses !important');
+  for (const cls of ['.stats', '.stat', '.table', '.chip', '.filter-bar', '.form-panel']) {
+    const re = new RegExp('(^|[\\s,}])\\' + cls + '\\s*\\{', 'm');
+    assert.ok(!re.test(css), `dazn/_view.css restyles canon ${cls} directly`);
+  }
+});
