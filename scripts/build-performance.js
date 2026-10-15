@@ -200,6 +200,20 @@ function monthlySummary(index, feed) {
   });
 }
 
+/** Median share of 28-day views that came in the first n days, for complete articles since `from`. */
+function earlyShare(index, feed, n, fromDay) {
+  const shares = [];
+  (index.articles || []).forEach(a => {
+    const it = feed.items[String(a.postID)];
+    if (!it || it.a != null || it.x || !it.v || ukDay(a.publishedDateTime) < fromDay) return;
+    shares.push(it.d.slice(0, n).reduce((x, y) => x + y, 0) / it.v);
+  });
+  shares.sort((x, y) => x - y);
+  if (!shares.length) return null;
+  const mid = Math.floor(shares.length / 2);
+  return shares.length % 2 ? shares[mid] : (shares[mid - 1] + shares[mid]) / 2;
+}
+
 function main() {
   if (!fs.existsSync(INDEX_PATH)) throw new Error('articles-index.json not found');
   if (!fs.existsSync(SOURCES_PATH)) throw new Error('ga-sources-archive.json not found - nothing to build from');
@@ -223,7 +237,13 @@ function main() {
   log('  month     articles   total 28-day views   median');
   months.forEach(r => log('  ' + r.month + '   ' + String(r.n).padStart(8) + '   ' + String(r.total).padStart(17) + '   ' + String(r.median).padStart(6)));
 
+  // How front-loaded readership is, on the current site (moved October 2025).
+  const pct = x => x == null ? '?' : Math.round(x * 100) + '%';
+  const early = [1, 2, 3, 7].map(n => 'day ' + n + ' ' + pct(earlyShare(index, feed, n, 20251001))).join(', ');
+  log('  share of 28-day views by: ' + early);
+
   if (process.env.GITHUB_ACTIONS) {
+    console.log('::notice title=Share of 28-day views by::' + early + ' (median article, since Oct 2025)');
     console.log('::notice title=Performance feed::' + counts.full + ' with all 28 days, ' + counts.young +
       ' younger, ' + counts.noData + ' with no GA rows, data from ' + feed.dataFrom + ', ' + sizeKB + 'KB');
     // Annotations carry one line only when read back through the API, so the
@@ -243,4 +263,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { ukDay, addDays, pathsFor, indexPaths, firstDays, build, monthlySummary };
+module.exports = { ukDay, addDays, pathsFor, indexPaths, firstDays, build, monthlySummary, earlyShare };
