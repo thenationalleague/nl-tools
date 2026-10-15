@@ -3,7 +3,7 @@
    Version: 2.0
    Date: 15/10/2026
 
-   Works out each article's views over its FIRST 28 DAYS for the Website
+   Works out each article's views over its FIRST 7 DAYS for the Website
    Archive's Performance tab, day by day, and writes them to a small feed
    the browser loads alongside the article index.
 
@@ -14,14 +14,14 @@
    Output:
      assets/data/performance.json
 
-   FIRST 28 DAYS
-     The publish day (UK time) plus the 27 days after it, in GA4's own
+   FIRST 7 DAYS
+     The publish day (UK time) plus the 6 days after it, in GA4's own
      day boundaries. GA4 reports days in the property's time zone, which is
      UK time, so an article published at 23:30 counts that half hour as
      day one - the same rule for every article, so comparisons stay fair.
 
      Only COMPLETE days are counted: up to and including yesterday, as of
-     the nightly run. An article younger than 28 complete days carries its
+     the nightly run. An article younger than 7 complete days carries its
      age (a) and its days so far; the page compares it with what a typical
      article had at the same age, from day 2 onwards.
 
@@ -38,12 +38,12 @@
        generatedAt, schemaVersion: 1, windowDays: 7,
        dataFrom:  "2024-11-08",   first day the sources archive covers
        lastDay:   "2026-10-14",   last complete day counted
-       settledTo: "2026-09-17",   last publish day with all 28 days in
+       settledTo: "2026-10-08",   last publish day with all 7 days in
        channels:  ["Organic Search", ...],
        items: {
-         "<postID>": { v: 412, d: [180, 95, ...one per complete day, up to 28],
+         "<postID>": { v: 412, d: [180, 95, ...one per complete day, up to 7],
                        s: { "0": 210, "3": 40 },
-                       a: 5 (complete days so far, only when under 28),
+                       a: 5 (complete days so far, only when under 7),
                        x: 1 (no GA rows joined, only when true) }
        }
      }
@@ -51,8 +51,7 @@
      are left out: there is no first-week data for them.
 
    CHANGELOG
-   v2.0 (15/10/2026) - 28-day window rather than 7, so articles that pick up
-                       late are counted. Days are counted only once complete,
+   v2.0 (15/10/2026) - Days are counted only once complete,
                        and young articles carry their age so the page can
                        judge them against others at the same age.
                        schemaVersion 2.
@@ -66,7 +65,9 @@ const DATA_DIR = path.join(__dirname, '..', 'assets', 'data');
 const INDEX_PATH = path.join(DATA_DIR, 'articles-index.json');
 const SOURCES_PATH = path.join(DATA_DIR, 'ga-sources-archive.json');
 const OUT_PATH = path.join(DATA_DIR, 'performance.json');
-const WINDOW_DAYS = 28;
+// Must match PERF_WINDOW in website-archive/index.html. Up to 28 works with
+// no new fetch: fetch-ga-sources.js keeps 31 days per article.
+const WINDOW_DAYS = 7;
 const COMPLETE_LAG_DAYS = 1;   // the run's own day is partial; yesterday counts
 const ID_RX = /-(\d{5,})$/;
 
@@ -183,7 +184,7 @@ function build(index, sources, now) {
 
 function isoDay(d) { return d.toISOString().slice(0, 10); }
 
-/** Per-month count, total and median of complete 28-day views, for the run summary. */
+/** Per-month count, total and median of complete-window views, for the run summary. */
 function monthlySummary(index, feed) {
   const months = {};
   (index.articles || []).forEach(a => {
@@ -200,7 +201,7 @@ function monthlySummary(index, feed) {
   });
 }
 
-/** Median share of 28-day views that came in the first n days, for complete articles since `from`. */
+/** Median share of full-window views that came in the first n days, for complete articles since `from`. */
 function earlyShare(index, feed, n, fromDay) {
   const shares = [];
   (index.articles || []).forEach(a => {
@@ -227,24 +228,24 @@ function main() {
   const sizeKB = Math.round(fs.statSync(OUT_PATH).size / 1024);
 
   log('PERFORMANCE FEED v2.0');
-  log('  data from:    ' + feed.dataFrom + '   last day: ' + feed.lastDay + '   all 28 days to: ' + feed.settledTo);
+  log('  data from:    ' + feed.dataFrom + '   last day: ' + feed.lastDay + '   full window to: ' + feed.settledTo);
   log('  complete:     ' + counts.full);
-  log('  under 28 days: ' + counts.young);
+  log('  younger:      ' + counts.young);
   log('  no GA rows:   ' + counts.noData + '  (published in range but nothing joined)');
   log('  file size:    ' + sizeKB + 'KB');
   const months = monthlySummary(index, feed);
   log('');
-  log('  month     articles   total 28-day views   median');
+  log('  month     articles   total views   median');
   months.forEach(r => log('  ' + r.month + '   ' + String(r.n).padStart(8) + '   ' + String(r.total).padStart(17) + '   ' + String(r.median).padStart(6)));
 
   // How front-loaded readership is, on the current site (moved October 2025).
   const pct = x => x == null ? '?' : Math.round(x * 100) + '%';
-  const early = [1, 2, 3, 7].map(n => 'day ' + n + ' ' + pct(earlyShare(index, feed, n, 20251001))).join(', ');
-  log('  share of 28-day views by: ' + early);
+  const early = [1, 2, 3].map(n => 'day ' + n + ' ' + pct(earlyShare(index, feed, n, 20251001))).join(', ');
+  log('  share of first-' + WINDOW_DAYS + '-day views by: ' + early);
 
   if (process.env.GITHUB_ACTIONS) {
-    console.log('::notice title=Share of 28-day views by::' + early + ' (median article, since Oct 2025)');
-    console.log('::notice title=Performance feed::' + counts.full + ' with all 28 days, ' + counts.young +
+    console.log('::notice title=Share of first-' + WINDOW_DAYS + '-day views by::' + early + ' (median article, since Oct 2025)');
+    console.log('::notice title=Performance feed::' + counts.full + ' with all ' + WINDOW_DAYS + ' days, ' + counts.young +
       ' younger, ' + counts.noData + ' with no GA rows, data from ' + feed.dataFrom + ', ' + sizeKB + 'KB');
     // Annotations carry one line only when read back through the API, so the
     // monthly table goes in as a single compact line.

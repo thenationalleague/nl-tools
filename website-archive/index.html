@@ -8,17 +8,19 @@
 
   CHANGELOG
   v3.1 (15/10/2026)
-    - Performance tab measures each article over its first 28 days (was 7),
-      so pieces that pick up later are counted. Articles are coloured from
-      48 hours old: anything younger than 28 days is judged on its views so
+    - Articles are coloured from 48 hours old rather than after 7 days:
+      anything younger than 7 days is judged on its views so
       far against what a typical article had at the same age. Needs
       performance.json schemaVersion 2 (build-performance.js v2.0); an older
       feed shows a "being rebuilt" message rather than wrong colours.
-    - Articles still inside their 28 days get a dashed ring: their colour
-      can still change. It locks at day 28.
+    - Articles still inside their 7 days get a dashed ring: their colour
+      can still change. It locks at day 7. (The window is one constant each
+      side - PERF_WINDOW here, WINDOW_DAYS in build-performance.js; the
+      sources archive holds 31 days, so it can go up to 28 with no new
+      fetch.)
     - Headline figures lead with share at or above usual and median vs
       usual, which are fair across articles of different ages; median views
-      counts only articles that have had all 28 days. Lists are now best and
+      counts only articles that have had all 7 days. Lists are now best and
       weakest against usual.
     - Performance tab never compares across the October 2025 site move. The
       first real run showed first-week medians of ~500-1,500 on the old site
@@ -307,7 +309,7 @@
       date: '15 October 2026',
       version: 'v3.1',
       items: [
-        'Performance tab now measures each article over its first 28 days, so articles that pick up later get credit. Articles are coloured from 48 hours old, compared with a typical article at the same age.',
+        'Performance tab: articles are coloured from 48 hours old, compared with a typical article at the same age, and lock at 7 days.',
         'Performance tab: months on the current website are no longer compared with months on the old one (before October 2025), whose view counts are not like-for-like.',
         'Simpler Performance tab: the "Views from" switcher and the recurring-formats panel are gone. Each article’s sources are still in the panel when you select it.'
       ]
@@ -573,7 +575,7 @@
 .perf-chip--prov { color: var(--text-muted); border: 1px dashed var(--navy-200); }
 .perf-chip__t { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .perf-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; box-shadow: inset 0 0 0 1px var(--navy-200); box-sizing: border-box; }
-/* Still inside its 28 days, so its colour can still change: a dashed ring. */
+/* Still inside its counting window, so its colour can still change: a dashed ring. */
 .perf-dot--live { outline: 1.5px dashed var(--navy-400); outline-offset: 1.5px; }
 .perf-swatch--live { display: inline-flex; align-items: center; gap: 6px; background: var(--white); border: 1px solid var(--border); color: var(--text-muted); }
 .perf-more { font-size: var(--text-xs); color: var(--text-muted); padding-left: 4px; }
@@ -2819,20 +2821,20 @@ function showPane(name, fromHash) {
 }
 
 /* ============ PERFORMANCE TAB ============
-   Views per article over its first 28 days, from data/performance.json
+   Views per article over its first PERF_WINDOW days, from data/performance.json
    (written nightly by scripts/build-performance.js), joined to the index by
-   postID. Each article is coloured against the "usual": the median 28-day
+   postID. Each article is coloured against the "usual": the median full-window
    views of the comparison period - the same month last year when that month
    has enough articles, otherwise the three months before.
 
-   An article younger than 28 days is judged on its views so far against
+   An article younger than the window is judged on its views so far against
    what the comparison articles had at the same age (day 2, day 5...), so a
-   three-day-old piece is not marked down for not having had 28 days. It is
+   two-day-old piece is not marked down for not having had the full week. It is
    coloured from 48 hours, when most articles have had most of their
    readers. The usual is always site-wide, so filtering to one author shows
    their articles against everyone's normal, not their own. */
 var PERF_PATH = 'data/performance.json';
-var PERF_WINDOW = 28;          // days counted per article
+var PERF_WINDOW = 7;           // days counted per article - must match WINDOW_DAYS in build-performance.js
 var PERF_MIN_AGE = 2;          // complete days before an article is coloured
 var PERF_MIN_BASE_N = 15;      // articles a month needs before it can be the usual
 /* The website moved to a new platform in October 2025, and articles on the
@@ -3025,16 +3027,16 @@ function perfCum(r, a) {
   return s;
 }
 function perfFullRows(m) { return (PERF.byMonth[m] || []).filter(function(r) { return r.full; }); }
-/* True once every article in the month has had all 28 days. */
+/* True once every article in the month has had its full window. */
 function perfMonthSettled(m) {
   return perfShiftDay(perfShiftMonth(m, 1) + '-01', -1) <= PERF.feed.settledTo;
 }
 
-/* The usual for a month: built from the complete (28-day) articles of the
+/* The usual for a month: built from the complete (full-window) articles of the
    same month last year, else the three months before, else the month itself
    - never reaching across the site move. at(age) is the median of what those
    articles had after that many days, so young articles compare like with
-   like; at(28) is the headline usual. Fixed per month. */
+   like; at(PERF_WINDOW) is the headline usual. Fixed per month. */
 function perfBase(m) {
   if (PERF.baseMemo[m]) return PERF.baseMemo[m];
   var pool, label, ly = perfShiftMonth(m, -12);
@@ -3120,8 +3122,8 @@ function perfRender() {
     : m === PERF_NEW_SITE
       ? 'The new website launched this month. Earlier months are not compared with it.'
     : !perfMonthSettled(m)
-      ? 'Articles under 28 days old are judged on their views so far, against a typical article at the same age.'
-      : 'Each article’s views in its first 28 days.';
+      ? 'Articles under ' + PERF_WINDOW + ' days old are judged on their views so far, against a typical article at the same age.'
+      : 'Each article’s views in its first ' + PERF_WINDOW + ' days.';
 
   if (!rows.length) {
     $('perfBody').innerHTML = '<div class="perf-card perf-empty">No articles ' + (PERF.who ? 'by ' + esc(PERF.who) + ' ' : '') + 'in ' + esc(perfMonthName(m)) + '.</div>';
@@ -3161,8 +3163,8 @@ function perfKpisHTML(m) {
   }
   out += kpi('At or above usual', st.above + '%', was && perfDelta(st.above, was.above, true, lbl));
   out += kpi('Median vs usual', perfX(st.ratio), was && was.ratio != null ? perfDelta(st.ratio, was.ratio, false, lbl) : '');
-  out += kpi('Median views, 28 days', st.med == null ? '—' : perfFmt(st.med),
-    st.nFull < st.nScored ? muted(st.nFull + ' of ' + st.nScored + ' articles have had 28 days') : (was && was.nFull === was.nScored ? perfDelta(st.med, was.med, false, lbl) : ''));
+  out += kpi('Median views, first ' + PERF_WINDOW + ' days', st.med == null ? '—' : perfFmt(st.med),
+    st.nFull < st.nScored ? muted(st.nFull + ' of ' + st.nScored + ' articles have had ' + PERF_WINDOW + ' days') : (was && was.nFull === was.nScored ? perfDelta(st.med, was.med, false, lbl) : ''));
   out += kpi('Median read time', st.read ? formatDuration(st.read) : '—', was && perfDelta(st.read, was.read, false, lbl));
   var monthOver = perfShiftMonth(m, 1) <= perfUkDay(new Date().toISOString()).slice(0, 7);
   out += kpi('Articles', perfFmt(st.n), st.young ? muted(st.young + ' under 48 hours, not yet coloured') : (was && monthOver ? perfDelta(st.n, was.n, false, lbl) : ''));
@@ -3175,8 +3177,8 @@ function perfLegendHTML(m) {
   var out = '<div class="perf-legend"><span class="perf-legend__label">Against the usual</span><span class="perf-legend__swatches">';
   PERF_BANDS.forEach(function(b, i) { out += '<span class="perf-swatch pb-' + i + '">' + b.label + '</span>'; });
   out += '<span class="perf-swatch pb-none">Under 48 hours</span>';
-  out += '<span class="perf-swatch perf-swatch--live"><span class="perf-dot pb-5 perf-dot--live" aria-hidden="true"></span>Still counting: colour can change until day 28</span></span>';
-  out += '<span>Usual = ' + perfFmt(base.at(PERF_WINDOW)) + ' views over 28 days, ' + esc(base.label) + '</span>';
+  out += '<span class="perf-swatch perf-swatch--live"><span class="perf-dot pb-5 perf-dot--live" aria-hidden="true"></span>Still counting: colour can change until day ' + PERF_WINDOW + '</span></span>';
+  out += '<span>Usual = ' + perfFmt(base.at(PERF_WINDOW)) + ' views over ' + PERF_WINDOW + ' days, ' + esc(base.label) + '</span>';
   return out + '</div>';
 }
 
@@ -3225,7 +3227,7 @@ function perfAsideHTML(rows) {
   out += '<div class="perf-aside__title">' + esc(r.a.postTitle || '') + '</div>';
   out += '<div class="perf-aside__meta">' + perfDdmm(r.day) + ' · ' + esc(r.authors.join(' & ')) + (r.a.newsCategory ? ' · ' + esc(r.a.newsCategory) : '') + '</div>';
   out += '<div class="perf-mini">' +
-    '<div><div class="perf-mini__label">' + (young ? 'First ' + r.age + ' day' + (r.age === 1 ? '' : 's') + ' so far' : 'First 28 days') + '</div><div class="perf-mini__val">' + (r.it.x ? '—' : perfFmt(r.it.v)) + '</div></div>' +
+    '<div><div class="perf-mini__label">' + (young ? 'First ' + r.age + ' day' + (r.age === 1 ? '' : 's') + ' so far' : 'First ' + PERF_WINDOW + ' days') + '</div><div class="perf-mini__val">' + (r.it.x ? '—' : perfFmt(r.it.v)) + '</div></div>' +
     '<div><div class="perf-mini__label">vs usual' + (young && r.scored ? ' at ' + r.age + ' days' : '') + '</div><div class="perf-mini__val">' + vs + '</div></div>' +
     '<div><div class="perf-mini__label">Read time</div><div class="perf-mini__val">' + (read ? formatDuration(read) : '—') + '</div></div>' +
     '</div>';
