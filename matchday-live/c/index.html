@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Matchday Live: contributor capture page
-  Version: v1.1 (15/10/2026)
+  Version: v1.3 (15/10/2026)
   File: /matchday-live/c/index.html
 
   Public, no login. A contributor opens their personal link
-  (https://nl.tools/matchday-live/c/#<token>), records a 20-second vertical
+  (https://nl.tools/matchday-live/c/#<token>), records a 30-second vertical
   clip, taps what it is about, and sends it to the staff feed at
   /matchday-live/.
 
@@ -51,6 +51,12 @@
                       match yet, the page listens for today's fixtures rather
                       than needing a reload; a page left open overnight
                       reloads itself when it comes back into view.
+    v1.3  15/10/2026  Clips are drawn onto a fixed 1080×1920 (or 720×1280)
+                      upright canvas and recorded from there, so the file
+                      carries no rotation flag and cannot arrive sideways.
+                      The camera is asked for its native wide 1080p, which
+                      ends the cropped "zoomed" look. 30-second cap.
+                      ?debug prints camera and file dimensions.
 -->
 <html lang="en">
 <head>
@@ -203,6 +209,7 @@
   <section class="cap-screen" id="s-review" hidden>
     <video class="cap-preview" id="preview" playsinline controls loop></video>
     <div class="banner banner--error" id="sidewaysNote" hidden style="margin-top:12px;">This came out sideways. Retake it holding the phone upright.</div>
+    <div class="cap-note" id="reviewDebug" hidden></div>
 
     <div class="cap-sub">What's it about?</div>
     <div class="cap-list" id="tagList"></div>
@@ -227,7 +234,7 @@
   <div class="cam__frame">
     <video id="viewfinder" playsinline muted autoplay></video>
     <div class="cam__guide"></div>
-    <div class="cam__top"><span class="cam__time" id="camTime">0:20</span></div>
+    <div class="cam__top"><span class="cam__time" id="camTime">0:30</span><span class="cam__time" id="camDebug" hidden></span></div>
     <div class="cam__bar"><span id="camBar"></span></div>
     <div class="cam__upright" id="upright" hidden>Hold your phone upright</div>
   </div>
@@ -243,7 +250,10 @@
   'use strict';
 
   var ROOT = 'app-data/media-matchday-live';
-  var MAX_MS = 20000;
+  var MAX_MS = 30000;
+  /* ?debug before the # prints the camera's real numbers on screen — the
+     quickest way to see what a particular phone is handing us. */
+  var DEBUG = /[?&]debug\b/.test(location.search);
   var KIND = { goal: '⚽ Goal', red: '🟥 Red card', yellow: '🟨 Yellow card' };
   var GENERAL = [['warmup', 'Warm-up'], ['teamnews', 'Team news'], ['halftime', 'Half-time'],
     ['atmosphere', 'Atmosphere'], ['fulltime', 'Full-time']];
@@ -572,6 +582,7 @@
   /* ── Screen 2: recording ──────────────────────────────────────────── */
   var Cam = (function () {
     var stream = null, rec = null, chunks = [], facing = 'environment', mime = '';
+    var canvas = null, drawing = false, recStream = null, composited = false;
     var started = 0, spent = 0, ticking = null, pausedForTilt = false, startMinute = null, startScore = null;
     var landscape = window.matchMedia('(orientation: landscape)');
 
@@ -598,13 +609,24 @@
       if (stream) stream.getTracks().forEach(function (t) { t.stop(); });
       navigator.mediaDevices.getUserMedia({
         audio: true,
-        video: { facingMode: facing, width: { ideal: 1080 }, height: { ideal: 1920 }, frameRate: { ideal: 30 } }
+        /* The camera's own wide 1080p mode. Asking for a tall 1080×1920 made
+           phones crop a tall slice out of the sensor — the "super zoomed"
+           look in v1.1. Upright framing is done by compositeStream, not by
+           the camera. */
+        video: { facingMode: facing, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } }
       }).then(function (s) {
         stream = s;
         var v = $('viewfinder');
         v.srcObject = s;
         v.classList.toggle('is-mirrored', facing === 'user');
         v.play()['catch'](function () {});
+        if (DEBUG) {
+          v.onloadedmetadata = function () {
+            var st = s.getVideoTracks()[0].getSettings ? s.getVideoTracks()[0].getSettings() : {};
+            $('camDebug').hidden = false;
+            $('camDebug').textContent = 'track ' + st.width + '×' + st.height + ' · video ' + v.videoWidth + '×' + v.videoHeight;
+          };
+        }
       })['catch'](function (e) {
         close();
         NL.alert(e && e.name === 'NotAllowedError'
@@ -625,17 +647,57 @@
 
     function draw() {
       var left = Math.max(0, MAX_MS - elapsed());
-      $('camTime').textContent = '0:' + ('0' + Math.ceil(left / 1000)).slice(-2);
+      var sec = Math.ceil(left / 1000);
+      $('camTime').textContent = Math.floor(sec / 60) + ':' + ('0' + (sec % 60)).slice(-2);
       $('camBar').style.width = Math.min(100, elapsed() / MAX_MS * 100) + '%';
+    }
+
+    /* The file is drawn, not taken straight from the camera. Phones store
+       camera video as a wide picture plus a "rotate on playback" flag, and
+       plenty of players — and v1.1's own upright check — ignore the flag, so
+       a clip shot upright arrived sideways. Drawing the viewfinder onto a
+       fixed 9:16 canvas gives a file that is upright with no flag at all, on
+       every phone, cropped exactly as the viewfinder showed it. Returns null
+       where the browser cannot capture a canvas; the camera is then recorded
+       directly and the sideways check below is the backstop. */
+    function compositeStream() {
+      var v = $('viewfinder');
+      if (!v.videoWidth || !HTMLCanvasElement.prototype.captureStream) return null;
+      var big = Math.min(v.videoWidth, v.videoHeight) >= 1080;
+      var W = big ? 1080 : 720, H = big ? 1920 : 1280;
+      canvas = canvas || document.createElement('canvas');
+      canvas.width = W;
+      canvas.height = H;
+      var ctx = canvas.getContext('2d');
+      drawing = true;
+      (function frame() {
+        if (!drawing) return;
+        var sw = v.videoWidth, sh = v.videoHeight;
+        if (sw && sh) {
+          var t = 9 / 16, cw, ch, sx, sy;
+          if (sw / sh > t) { ch = sh; cw = sh * t; sx = (sw - cw) / 2; sy = 0; }
+          else { cw = sw; ch = sw / t; sx = 0; sy = (sh - ch) / 2; }
+          ctx.drawImage(v, sx, sy, cw, ch, 0, 0, W, H);
+        }
+        if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(frame);
+        else requestAnimationFrame(frame);
+      })();
+      var out = canvas.captureStream(30);
+      stream.getAudioTracks().forEach(function (t) { out.addTrack(t); });
+      return out;
     }
 
     function start() {
       if (!stream || landscape.matches) return;
       mime = pickMime();
+      recStream = null;
+      try { recStream = compositeStream(); } catch (e) { drawing = false; recStream = null; }
+      composited = !!recStream;
+      if (!recStream) recStream = stream;
       try {
-        rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 5000000 } : undefined);
+        rec = new MediaRecorder(recStream, mime ? { mimeType: mime, videoBitsPerSecond: 5000000 } : undefined);
       } catch (e) {
-        rec = new MediaRecorder(stream);
+        rec = new MediaRecorder(recStream);
       }
       mime = rec.mimeType || mime || 'video/webm';
       chunks = [];
@@ -663,10 +725,11 @@
 
     function finish() {
       var blob = new Blob(chunks, { type: mime.split(';')[0] });
-      var dur = Math.min(20, Math.round(spent / 100) / 10);
+      var dur = Math.min(MAX_MS / 1000, Math.round(spent / 100) / 10);
       shutdown();
       if (!blob.size) { NL.alert('Nothing was recorded. Please try again.'); return; }
-      take = { blob: blob, mime: mime.split(';')[0], durationSec: dur, minute: startMinute, scoreAtTime: startScore };
+      take = { blob: blob, mime: mime.split(';')[0], durationSec: dur, minute: startMinute, scoreAtTime: startScore,
+        composited: composited };
       Review.open();
     }
 
@@ -687,6 +750,9 @@
 
     function shutdown() {
       clearInterval(ticking);
+      drawing = false;
+      if (composited && recStream) recStream.getVideoTracks().forEach(function (t) { t.stop(); });
+      recStream = null;
       if (stream) stream.getTracks().forEach(function (t) { t.stop(); });
       stream = null;
       $('viewfinder').srcObject = null;
@@ -720,8 +786,15 @@
       v.src = url;
       $('sidewaysNote').hidden = true;
       $('btnSend').disabled = false;
+      $('reviewDebug').hidden = !DEBUG;
       v.onloadedmetadata = function () {
-        var sideways = v.videoWidth && v.videoHeight && v.videoWidth > v.videoHeight;
+        if (DEBUG) {
+          $('reviewDebug').textContent = 'file ' + v.videoWidth + '×' + v.videoHeight + ' · ' + take.mime +
+            ' · ' + (take.composited ? 'drawn' : 'direct') + ' · ' + Math.round(take.blob.size / 1024) + 'KB';
+        }
+        /* A drawn file is upright by construction; only a direct recording
+           can come out wide. */
+        var sideways = !take.composited && v.videoWidth && v.videoHeight && v.videoWidth > v.videoHeight;
         $('sidewaysNote').hidden = !sideways;
         $('btnSend').disabled = !!sideways;
       };

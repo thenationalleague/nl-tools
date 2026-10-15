@@ -117,7 +117,7 @@ async function until(fn, ms, label) {
   await page.waitForFunction(() => document.getElementById('preview').videoHeight > 0, null, { timeout: 10000 });
   const dims = await page.evaluate(() => [document.getElementById('preview').videoWidth, document.getElementById('preview').videoHeight]);
   console.log('recorded', dims.join('x'));
-  assert.ok(dims[1] > dims[0], 'portrait output');
+  assert.deepEqual(dims, [720, 1280], 'drawn onto the fixed upright frame');
   assert.equal(await page.isDisabled('#btnSend'), false);
   const pressed = await page.textContent('.cap-opt[aria-pressed="true"]');
   assert.match(pressed, /A Striker/, 'recent goal pre-selected, got: ' + pressed);
@@ -219,6 +219,43 @@ async function until(fn, ms, label) {
   await page.waitForSelector('#s-stop:not([hidden])', { timeout: 60000 });
   assert.match(await page.textContent('#stopMsg'), /no longer active/);
   console.log('deactivated link refused');
+
+  // 9. A camera that hands over a WIDE picture (what phones do) still gives
+  //    an upright file and a usable Send button — the v1.1 bug.
+  await db.ref(R + '/contributors/c1/active').set(true);
+  await db.ref(R + '/matchdays/' + YMD + '/m2/koMs').set(Date.now() - 600000);
+  const wide = await chromium.launch({
+    executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
+    args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream',
+      '--use-file-for-fake-video-capture=' + path.join(__dirname, 'landscape.y4m'),
+      '--disable-features=LocalNetworkAccessChecks,BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessChecks,PrivateNetworkAccessSendPreflights'],
+  });
+  const wctx = await wide.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  await wctx.grantPermissions(['camera', 'microphone'], { origin: 'http://127.0.0.1:8080' });
+  const wp = await wctx.newPage();
+  await wp.route('https://use.typekit.net/**', (r) => r.abort());
+  await wp.route('https://www.gstatic.com/firebasejs/**', (r) => r.fulfill({ path: path.join(__dirname, 'node_modules/firebase', r.request().url().split('/').pop()), contentType: 'application/javascript' }));
+  await wp.route('**/matchday-live/c/?debug', async (route) => {
+    const resp = await route.fetch();
+    const html = (await resp.text()).replace(/(appId:\s*"[^"]+"\s*\n\s*\}\);)/,
+      "$1\n    firebase.auth().useEmulator('http://127.0.0.1:9099', { disableWarnings: true });" +
+      "\n    firebase.database().useEmulator('127.0.0.1', 9000);\n    firebase.storage().useEmulator('127.0.0.1', 9199);");
+    await route.fulfill({ response: resp, body: html });
+  });
+  await wp.goto('http://127.0.0.1:8080/matchday-live/c/?debug#' + TOKEN, { waitUntil: 'domcontentloaded' });
+  await wp.waitForSelector('#s-home:not([hidden])', { timeout: 60000 });
+  await wp.click('#btnRecord');
+  await wp.waitForFunction(() => /track/.test(document.getElementById('camDebug').textContent), null, { timeout: 10000 });
+  console.log('wide camera reports:', await wp.textContent('#camDebug'));
+  await wp.click('#btnRec'); await sleep(2000); await wp.click('#btnRec');
+  await wp.waitForSelector('#s-review:not([hidden])');
+  await wp.waitForFunction(() => document.getElementById('preview').videoHeight > 0, null, { timeout: 10000 });
+  const wdims = await wp.evaluate(() => [document.getElementById('preview').videoWidth, document.getElementById('preview').videoHeight]);
+  assert.deepEqual(wdims, [720, 1280], 'wide camera → upright file');
+  assert.equal(await wp.isVisible('#sidewaysNote'), false, 'no false sideways warning');
+  assert.equal(await wp.isDisabled('#btnSend'), false);
+  console.log('wide camera: upright 720x1280, Send enabled —', await wp.textContent('#reviewDebug'));
+  await wide.close();
 
   const real = errors.filter((e) => !/favicon|crests|Failed to load resource|ERR_INTERNET_DISCONNECTED/.test(e));
   if (real.length) console.log('page errors:\n' + real.join('\n'));
