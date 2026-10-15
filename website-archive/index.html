@@ -14,6 +14,12 @@
       every month from October 2026 against old-site numbers, and every
       article would have shown red. Baselines and month-on-month changes
       now stay on one side of PERF_NEW_SITE, and old-site months say so.
+    - Removed the "Views from" switcher: it changed every figure on the page
+      without making that visible. Sources stay in the selected-article
+      panel.
+    - Removed the recurring-formats drop-off panel. It grouped articles by
+      headline patterns we chose, which is the arbitrary categorisation we
+      agreed to drop; it comes back once articles carry our own tags.
     - "vs usual" in the selected-article panel is always a multiplier
       (0.45×, 2.3×), matching the legend. It showed a percentage below the
       usual and a multiplier above it.
@@ -289,7 +295,8 @@
       date: '15 October 2026',
       version: 'v3.1',
       items: [
-        'Performance tab: months on the current website are no longer compared with months on the old one (before October 2025), whose view counts are not like-for-like.'
+        'Performance tab: months on the current website are no longer compared with months on the old one (before October 2025), whose view counts are not like-for-like.',
+        'Simpler Performance tab: the "Views from" switcher and the recurring-formats panel are gone. Each article’s sources are still in the panel when you select it.'
       ]
     },
     {
@@ -502,7 +509,6 @@
 .perf-month button:disabled { opacity: .35; cursor: default; }
 .perf-month button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 #perfAuthor { min-width: 200px; min-height: 40px; }
-#perfFrom { flex-wrap: wrap; }
 .perf-note { margin-left: auto; align-self: center; max-width: 42ch; text-align: right; font-size: var(--text-xs); color: var(--text-muted); }
 
 .perf-card {
@@ -584,15 +590,6 @@
 .perf-row__n { font-weight: 900; font-variation-settings: 'wght' 900; font-variant-numeric: tabular-nums; }
 .perf-row .perf-dot { width: 12px; height: 12px; }
 
-.perf-formats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 16px; }
-.perf-format { border: 1px solid var(--navy-50); border-radius: var(--radius); padding: 12px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.perf-format__head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.perf-format__name { font-size: var(--text-base); font-weight: 900; font-variation-settings: 'wght' 900; }
-.perf-format__who { font-size: var(--text-xs); color: var(--text-muted); }
-.perf-format__chg { font-size: var(--text-lg); font-weight: 900; font-variation-settings: 'wght' 900; }
-.perf-bars { height: 130px; display: flex; align-items: flex-end; gap: 4px; border-bottom: 1px solid var(--navy-200); }
-.perf-bars > div { flex: 1; min-width: 6px; border-radius: 3px 3px 0 0; box-shadow: inset 0 0 0 1px var(--navy-100); }
-.perf-bars-labels { display: flex; justify-content: space-between; font-size: var(--text-xs); color: var(--text-muted); }
 .perf-empty { padding: 32px 12px; text-align: center; color: var(--text-muted); font-size: var(--text-sm); }
 
 @media (max-width: 560px) {
@@ -1523,16 +1520,6 @@
         <select class="nl-select" id="perfAuthor">
           <option value="">Any author</option>
         </select>
-      </div>
-      <div class="field">
-        <span class="field__label" id="perfFromLabel">Views from</span>
-        <div class="chip-group" id="perfFrom" role="radiogroup" aria-labelledby="perfFromLabel">
-          <button type="button" class="chip active" role="radio" aria-checked="true" data-from="all">All</button>
-          <button type="button" class="chip" role="radio" aria-checked="false" data-from="Organic Search">Search</button>
-          <button type="button" class="chip" role="radio" aria-checked="false" data-from="Organic Social">Social</button>
-          <button type="button" class="chip" role="radio" aria-checked="false" data-from="Direct">Direct</button>
-          <button type="button" class="chip" role="radio" aria-checked="false" data-from="Referral">Referral</button>
-        </div>
       </div>
       <div class="perf-note" id="perfNote"></div>
     </div>
@@ -2824,7 +2811,6 @@ function showPane(name, fromHash) {
    author shows their articles against everyone's normal, not their own. */
 var PERF_PATH = 'data/performance.json';
 var PERF_MIN_BASE_N = 15;      // articles a month needs before it can be the usual
-var PERF_WEAK_BASE = 5;        // a usual under this many views is too thin to colour by
 /* The website moved to a new platform in October 2025, and articles on the
    old site drew roughly twice the first-week views of articles since. A
    month is only ever compared with months from the same site, or every
@@ -2842,18 +2828,6 @@ var PERF_BANDS = [
   { upto: 2.8, label: '1.7–2.8×' },
   { upto: Infinity, label: '2.8×+' }
 ];
-var PERF_FROM_LABEL = { 'all': '', 'Organic Search': 'Search', 'Organic Social': 'Social', 'Direct': 'Direct', 'Referral': 'Referral' };
-/* Recurring formats, matched on headline, for the drop-off panel. A stand-in
-   until articles carry our own tags; add a line here to track a new one. */
-var PERF_FORMATS = [
-  { name: 'All the BIG questions', rx: /\bBIG questions\b/ },
-  { name: 'North weekend preview', rx: /National League North: The weekend preview/i },
-  { name: 'South weekend preview', rx: /National League South: The weekend preview/i },
-  { name: 'Team of the Week', rx: /Team of the Week/i },
-  { name: 'Dyno-Rod Review', rx: /Dyno-Rod (Enterprise National League )?Review/i },
-  { name: 'How to watch', rx: /^How to watch and follow/i }
-];
-
 var PERF = {
   started: false,
   feed: null,
@@ -2862,7 +2836,6 @@ var PERF = {
   months: [],        // 'YYYY-MM', oldest first
   k: -1,             // index into months
   who: '',
-  from: 'all',
   sel: null,         // postID of the selected article
   baseMemo: {},
   monthList: []      // rows currently on screen, for the reader's arrows
@@ -2939,17 +2912,6 @@ function perfOpen() {
   $('perfPrev').addEventListener('click', function() { perfGo(PERF.k - 1); });
   $('perfNext').addEventListener('click', function() { perfGo(PERF.k + 1); });
   $('perfAuthor').addEventListener('change', function() { PERF.who = this.value; PERF.sel = null; perfRender(); });
-  $('perfFrom').addEventListener('click', function(e) {
-    var b = e.target.closest('[data-from]');
-    if (!b) return;
-    PERF.from = b.getAttribute('data-from');
-    Array.prototype.forEach.call(this.querySelectorAll('[data-from]'), function(x) {
-      var on = x === b;
-      x.classList.toggle('active', on);
-      x.setAttribute('aria-checked', String(on));
-    });
-    perfRender();
-  });
   $('perfBody').addEventListener('click', function(e) {
     var pick = e.target.closest('[data-pick]');
     if (pick) { PERF.sel = pick.getAttribute('data-pick'); perfRender(); return; }
@@ -3031,12 +2993,7 @@ function perfGo(k) {
   perfRender();
 }
 
-/* Views for the chosen source: all of them, or one channel's share. */
-function perfVal(r) {
-  if (PERF.from === 'all') return r.it.v;
-  var i = PERF.ch[PERF.from];
-  return i == null ? 0 : (r.it.s[i] || 0);
-}
+function perfVal(r) { return r.it.v; }
 function perfScoredVals(m) {
   return (PERF.byMonth[m] || []).filter(function(r) { return r.scored; }).map(perfVal);
 }
@@ -3045,7 +3002,7 @@ function perfScoredVals(m) {
    else the month's own median - never reaching across the site move (see
    PERF_NEW_SITE). Fixed per month: it never moves as later months arrive. */
 function perfBase(m) {
-  var key = m + '|' + PERF.from;
+  var key = m;
   if (PERF.baseMemo[key]) return PERF.baseMemo[key];
   var out, ly = perfShiftMonth(m, -12), lyVals = perfSameSite(m, ly) ? perfScoredVals(ly) : [];
   if (lyVals.length >= PERF_MIN_BASE_N) {
@@ -3060,7 +3017,6 @@ function perfBase(m) {
       out = { v: perfMedian(perfScoredVals(m)), label: 'this month’s own median (not enough earlier data)' };
     }
   }
-  out.weak = out.v < PERF_WEAK_BASE;
   out.v = Math.max(out.v, 1);
   return (PERF.baseMemo[key] = out);
 }
@@ -3068,7 +3024,6 @@ function perfBase(m) {
 function perfBand(r) {
   if (!r.scored) return 'pb-none';
   var base = perfBase(r.m);
-  if (base.weak) return 'pb-3';
   var ratio = perfVal(r) / base.v;
   for (var i = 0; i < PERF_BANDS.length; i++) if (ratio < PERF_BANDS[i].upto) return 'pb-' + i;
   return 'pb-6';
@@ -3142,7 +3097,6 @@ function perfRender() {
   html += perfListHTML('Least read', scoredRows.slice(-5).reverse());
   html += '</div>';
 
-  html += perfFormatsHTML(m);
   $('perfBody').innerHTML = html;
 }
 
@@ -3156,13 +3110,12 @@ function perfKpisHTML(m) {
   function kpi(label, value, delta) {
     return '<div class="perf-kpi"><dt>' + esc(label) + '</dt><dd><span class="perf-kpi__num">' + value + '</span>' + (delta || '') + '</dd></div>';
   }
-  var src = PERF_FROM_LABEL[PERF.from];
   var out = '<dl class="perf-kpis">';
   if (st.none) {
     out += kpi('Articles', perfFmt(st.n), st.prov ? '<span class="perf-delta perf-delta--muted">all under 7 days, not yet scored</span>' : '');
     return out + '</dl>';
   }
-  out += kpi('Median views' + (src ? ' from ' + src : ''), perfFmt(st.med), was && perfDelta(st.med, was.med, false, lbl));
+  out += kpi('Median views', perfFmt(st.med), was && perfDelta(st.med, was.med, false, lbl));
   out += kpi('At or above usual', st.above + '%', was && perfDelta(st.above, was.above, true, lbl));
   out += kpi('Median read time', st.read ? formatDuration(st.read) : '—', was && perfDelta(st.read, was.read, false, lbl));
   out += kpi('Articles', perfFmt(st.n), st.prov
@@ -3176,10 +3129,7 @@ function perfLegendHTML(base) {
   var out = '<div class="perf-legend"><span class="perf-legend__label">Against the usual</span><span class="perf-legend__swatches">';
   PERF_BANDS.forEach(function(b, i) { out += '<span class="perf-swatch pb-' + i + '">' + b.label + '</span>'; });
   out += '<span class="perf-swatch pb-none">Under 7 days</span></span>';
-  var src = PERF_FROM_LABEL[PERF.from];
-  out += base.weak
-    ? '<span>Too few views from ' + esc(src) + ' for a reliable usual this month, so nothing is coloured.</span>'
-    : '<span>Usual = ' + perfFmt(base.v) + ' views' + (src ? ' from ' + esc(src) : '') + ', ' + esc(base.label) + '</span>';
+  out += '<span>Usual = ' + perfFmt(base.v) + ' views, ' + esc(base.label) + '</span>';
   return out + '</div>';
 }
 
@@ -3220,14 +3170,14 @@ function perfAsideHTML(rows) {
   var r = rows.filter(function(x) { return x.id === PERF.sel; })[0];
   if (!r) return '';
   var base = perfBase(r.m), v = perfVal(r);
-  var vs = r.it.x ? 'No data' : !r.scored ? 'Not yet' : base.weak ? '—' : (v / base.v).toFixed(v / base.v >= 1 ? 1 : 2) + '×';   // same unit as the legend, above and below
+  var vs = r.it.x ? 'No data' : !r.scored ? 'Not yet' : (v / base.v).toFixed(v / base.v >= 1 ? 1 : 2) + '×';   // same unit as the legend, above and below
   var read = r.a.metrics && r.a.metrics.avgEngagementTimeSecs;
   var out = '<aside class="perf-aside" aria-label="Selected article">';
   out += '<div class="perf-aside__eyebrow">Selected article</div>';
   out += '<div class="perf-aside__title">' + esc(r.a.postTitle || '') + '</div>';
   out += '<div class="perf-aside__meta">' + perfDdmm(r.day) + ' · ' + esc(r.authors.join(' & ')) + (r.a.newsCategory ? ' · ' + esc(r.a.newsCategory) : '') + '</div>';
   out += '<div class="perf-mini">' +
-    '<div><div class="perf-mini__label">First 7 days' + (PERF.from !== 'all' ? ' (' + esc(PERF_FROM_LABEL[PERF.from]) + ')' : '') + '</div><div class="perf-mini__val">' + (r.it.x ? '—' : perfFmt(v)) + '</div></div>' +
+    '<div><div class="perf-mini__label">First 7 days</div><div class="perf-mini__val">' + (r.it.x ? '—' : perfFmt(v)) + '</div></div>' +
     '<div><div class="perf-mini__label">vs usual</div><div class="perf-mini__val">' + vs + '</div></div>' +
     '<div><div class="perf-mini__label">Read time</div><div class="perf-mini__val">' + (read ? formatDuration(read) : '—') + '</div></div>' +
     '</div>';
@@ -3262,37 +3212,6 @@ function perfListHTML(title, list) {
       '<span class="perf-row__n">' + perfFmt(perfVal(r)) + '</span></button></li>';
   });
   return out + '</ol></section>';
-}
-
-/* Drop-off: each recurring format's editions this season, up to the month on
-   screen. The figure compares the first three editions with the latest three. */
-function perfFormatsHTML(m) {
-  var seasonStart = (+m.slice(5) >= 7 ? m.slice(0, 4) : String(+m.slice(0, 4) - 1)) + '-07';
-  var cards = '';
-  PERF_FORMATS.forEach(function(f) {
-    var eds = PERF.rows.filter(function(r) {
-      return r.scored && r.m >= seasonStart && r.m <= m && f.rx.test(r.a.postTitle || '') &&
-        (!PERF.who || r.authors.indexOf(PERF.who) >= 0);
-    });
-    if (eds.length < 4) return;
-    var vals = eds.map(perfVal), mx = Math.max.apply(null, vals.concat([1]));
-    var first = (vals[0] + vals[1] + vals[2]) / 3, last = (vals[vals.length - 3] + vals[vals.length - 2] + vals[vals.length - 1]) / 3;
-    var chg = first ? Math.round((last - first) / first * 100) : 0;
-    var who = {};
-    eds.forEach(function(r) { r.authors.forEach(function(n) { who[n] = (who[n] || 0) + 1; }); });
-    var mainWho = Object.keys(who).sort(function(a, b) { return who[b] - who[a]; })[0];
-    cards += '<div class="perf-format"><div class="perf-format__head"><div><div class="perf-format__name">' + esc(f.name) + '</div>' +
-      '<div class="perf-format__who">' + eds.length + ' editions · mostly ' + esc(mainWho) + '</div></div>' +
-      '<div class="perf-format__chg ' + (chg >= 0 ? 'perf-delta--up' : 'perf-delta--down') + '">' + (chg > 0 ? '+' : chg < 0 ? '−' : '±') + Math.abs(chg) + '%</div></div>' +
-      '<div class="perf-bars" role="img" aria-label="' + esc(f.name + ': ' + eds.map(function(r) { return perfDdmm(r.day) + ' ' + perfVal(r); }).join(', ')) + '">';
-    eds.forEach(function(r) {
-      cards += '<div class="' + perfBand(r) + '" style="height:' + Math.max(4, Math.round(100 * perfVal(r) / mx)) + '%" title="' + esc(perfDdmm(r.day) + ': ' + perfFmt(perfVal(r)) + ' views') + '"></div>';
-    });
-    cards += '</div><div class="perf-bars-labels"><span>' + perfDdmm(eds[0].day) + '</span><span>' + perfDdmm(eds[eds.length - 1].day) + '</span></div></div>';
-  });
-  var out = '<section class="perf-card" aria-label="Drop-off across recurring formats"><h3>Drop-off: do recurring formats keep their readers?</h3>' +
-    '<p class="perf-card__sub">This season, up to ' + esc(perfMonthName(m)) + '. The figure compares the first three editions with the latest three.</p>';
-  return out + (cards ? '<div class="perf-formats">' + cards + '</div>' : '<div class="perf-empty">No recurring format has four scored editions yet this season.</div>') + '</section>';
 }
 
 function onKeyDown(e) {
