@@ -361,18 +361,21 @@ config that belongs in git.
 
 ## Data pipelines (GitHub Actions)
 
-- `.github/workflows/rebuild-index.yml` — daily 03:00 UTC. Runs `fetch-ga-metrics.js` + `fetch-ga-hourly.js` + `rebuild-index.js`. Authenticates to GCP via Workload Identity Federation (no JSON key).
+- `.github/workflows/rebuild-index.yml` — daily 03:00 UTC. Runs `fetch-ga-metrics.js` + `fetch-ga-hourly.js` + `fetch-ga-sources.js` + `rebuild-index.js`. Authenticates to GCP via Workload Identity Federation (no JSON key).
 
-**The four feeds live in Firebase Storage under `data/`, not in git** (since
+**The feeds live in Firebase Storage under `data/`, not in git** (since
 15/08/2026). The job pulls them out of the bucket, rebuilds, and puts them back;
-it commits nothing and has `contents: read`. `.gitignore` covers all four, so a
+it commits nothing and has `contents: read`. `.gitignore` covers all of them, so a
 local run leaves untracked files rather than a 36MB staged diff. Between them
 they had been committed ~370 times at 9–36MB a go — the bulk of why a clone is
 489MB. Details and the recovery route: `system/storage/README.md`.
 
 `ga-hourly-archive.json` is the one that cannot be rebuilt — GA4 will not serve
 hours past its retention window — so the job **fails** rather than proceeding if
-the bucket copy is missing.
+the bucket copy is missing. `ga-sources-archive.json` (views per news article,
+per day, per channel, first 31 days after publish) is guarded the same way at
+step level: its fetch refuses to run without its archive unless the workflow
+is run with a `seed_sources_from` date.
 
 The club-news pipeline (`build-club-news.yml`, its debug twin, the two
 `widgets/club-news-*.js` consumers and `assets/data/club-news.json`) was

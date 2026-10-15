@@ -15,6 +15,11 @@ on:
         required: false
         default: false
         type: boolean
+      seed_sources_from:
+        description: 'Seed or re-seed the traffic-sources archive from this date (YYYY-MM-DD). Leave blank on normal runs.'
+        required: false
+        default: ''
+        type: string
 
 # Read-only on the repo. The four feeds this job produces go to Firebase
 # Storage, not to git — it has nothing to commit.
@@ -60,7 +65,7 @@ jobs:
           mkdir -p assets/data
           # ga-metrics.json is deliberately not pulled: fetch-ga-metrics.js
           # writes it fresh below and nothing reads it after this job ends.
-          for f in articles-index.json ga-hourly.json ga-hourly-archive.json; do
+          for f in articles-index.json ga-hourly.json ga-hourly-archive.json ga-sources-archive.json; do
             if gcloud storage cp "$BUCKET/$f" "assets/data/$f" 2>/dev/null; then
               # gcloud downloads stored bytes verbatim: an object uploaded with
               # Content-Encoding: gzip arrives compressed. Detect and unpack.
@@ -92,6 +97,18 @@ jobs:
         run: node scripts/fetch-ga-hourly.js
         continue-on-error: true
 
+      # Views per article, per day, per channel, for the Website Archive's
+      # Performance tab. Refuses to run if its archive did not come down from
+      # the bucket and no seed date was given, so a failed download can never
+      # replace the archive with less. A failure here produces no file, and the
+      # publish step below then leaves the bucket copy alone.
+      - name: Fetch GA traffic sources by day (Performance tab)
+        env:
+          GA_PROPERTY_ID: ${{ secrets.GA_PROPERTY_ID }}
+          SOURCES_FROM: ${{ inputs.seed_sources_from }}
+        run: node scripts/fetch-ga-sources.js
+        continue-on-error: true
+
       - name: Rebuild article index
         env:
           FORCE_FULL_REBUILD: ${{ github.event.inputs.force_full_rebuild || 'false' }}
@@ -121,7 +138,7 @@ jobs:
             --custom-metadata="firebaseStorageDownloadTokens=$(uuidgen)" \
             --content-type=application/json \
             --content-encoding=gzip
-          for f in ga-hourly.json ga-hourly-archive.json; do
+          for f in ga-hourly.json ga-hourly-archive.json ga-sources-archive.json; do
             [ -f "assets/data/$f" ] || { echo "::warning::$f was not produced, leaving the bucket copy alone"; continue; }
             gzip -9 -c "assets/data/$f" > "/tmp/$f.gz"
             gcloud storage cp "/tmp/$f.gz" "$BUCKET/$f" \
