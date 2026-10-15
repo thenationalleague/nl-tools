@@ -1,9 +1,13 @@
 /* =============================================================================
    NL Tools — DAZN Viewing: one club's season, as a dashboard
    File: /dazn/_view.js
-   Version: v30.0 (15/10/2026)
+   Version: v31.0 (15/10/2026)
 
    CHANGELOG
+     v31.0 (15/10/2026) — By month runs August to May on a real calendar,
+       empty months as empty slots. By game columns share the full width
+       until they would be thinner than ~30px, then scroll. A slicer shows
+       only when it would split the club's games.
      v30.0 (15/10/2026) — The chart keeps a fixed height whatever the
        slicers do; Top games' heading stays on one line (full text on hover).
      v29.0 (15/10/2026) — The chart has a y-axis and gridlines, and a FIXED
@@ -167,15 +171,26 @@
     return '<div class="dz-slicer"><span class="filter-label">' + esc(title) + '</span>' + control + '</div>';
   }
 
-  function slicers(months, F) {
+  /* A slicer appears only when it would split this club's games: a North
+     club whose games were all shown in the UK gets no UK availability
+     slicer, and a club with one game gets no venue slicer. The same rule
+     the month list already followed (no month with no games). */
+  function slicers(months, F, has) {
+    var venues = [['all', 'All']];
+    if (has.home) venues.push(['home', 'Home']);
+    if (has.away) venues.push(['away', 'Away']);
+    var ukSplits = has.uk && has.intl;
+    var venueSplits = (has.home ? 1 : 0) + (has.away ? 1 : 0) + (has.neutral ? 1 : 0) > 1 && venues.length > 2;
+    /* Nothing to split by (a one-game club): no strip at all. */
+    if (!ukSplits && !venueSplits && months.length < 2 && !filtered(F)) return '';
     return '<div class="filter-bar dz-slicers">' +
-      slicer('UK availability', chips('uk', [['all', 'All'], ['uk', 'Shown in UK'], ['intl', 'Not shown in UK']], F.uk)) +
-      slicer('Venue', chips('venue', [['all', 'All'], ['home', 'Home'], ['away', 'Away']], F.venue)) +
-      slicer('Month', '<select class="nl-select" data-f="month" aria-label="Month"><option value="all">All</option>' +
+      (ukSplits ? slicer('UK availability', chips('uk', [['all', 'All'], ['uk', 'Shown in UK'], ['intl', 'Not shown in UK']], F.uk)) : '') +
+      (venueSplits ? slicer('Venue', chips('venue', venues, F.venue)) : '') +
+      (months.length < 2 ? '' : slicer('Month', '<select class="nl-select" data-f="month" aria-label="Month"><option value="all">All</option>' +
         months.map(function (m) {
           return '<option value="' + m + '"' + (F.month === m ? ' selected' : '') + '>' +
             esc(MONTH_LONG.format(new Date(m + '-01T00:00:00Z'))) + '</option>';
-        }).join('') + '</select>') +
+        }).join('') + '</select>')) +
       (filtered(F) ? '<button type="button" class="btn btn--ghost btn--sm dz-slicers__clear" data-reset>Clear</button>' : '') +
     '</div>';
   }
@@ -247,7 +262,7 @@
 
   /* cols: [{ uk, intl, label (html), title, value (text above, optional),
               attrs (extra attributes), cls, tag ('button'|'div') }] */
-  function chart(cols, scaleMax, extraCls) {
+  function chart(cols, scaleMax, extraCls, minInner) {
     var tk = ticks(scaleMax), top = tk[tk.length - 1] || 1;
     var pct = function (v) { return (v / top * 100).toFixed(2) + '%'; };
     var grid = tk.map(function (t) { return '<span class="dz-chart__grid" style="bottom:' + pct(t) + '"></span>'; }).join('');
@@ -265,7 +280,7 @@
     var xl = cols.map(function (c) { return '<span class="dz-chart__x ' + (c.cls || '') + '">' + c.label + '</span>'; }).join('');
     return '<div class="dz-chart ' + (extraCls || '') + '">' +
       '<div class="dz-chart__y" aria-hidden="true">' + yl + '</div>' +
-      '<div class="dz-chart__scroll"><div class="dz-chart__inner">' +
+      '<div class="dz-chart__scroll"><div class="dz-chart__inner"' + (minInner ? ' style="min-width:' + minInner + 'px"' : '') + '>' +
         '<div class="dz-chart__plot">' + grid + '<div class="dz-chart__cols">' + body + '</div></div>' +
         '<div class="dz-chart__xrow">' + xl + '</div>' +
       '</div></div></div>';
@@ -279,11 +294,17 @@
   }
 
   /* By month: one column per month, click to slice to it. */
-  function monthChart(list, months, F, scaleMax) {
-    var by = byMonth(list, months);
-    return chart(months.map(function (m) {
+  /* By month: the whole season, August to May, every month in its real
+     place, so October, February and March are not drawn side by side. A
+     month with no games is an empty slot, not a column to click. */
+  function monthChart(list, axis, F, scaleMax, hasGames) {
+    var by = byMonth(list, axis);
+    return chart(axis.map(function (m) {
       var v = by[m], t = v.uk + v.intl, on = F.month === m, dim = F.month !== 'all' && !on;
       var d = new Date(m + '-01T00:00:00Z');
+      if (!hasGames[m]) {
+        return { uk: 0, intl: 0, cls: 'is-empty', title: MONTH_LONG.format(d) + ': no DAZN games', label: esc(MONTH.format(d)) };
+      }
       return {
         uk: v.uk, intl: v.intl, tag: 'button', value: t ? compact(t) : '',
         cls: (on ? 'is-on' : '') + (dim ? ' is-dim' : ''),
@@ -307,7 +328,8 @@
           n0(g.ukViews) + ' · INT ' + n0(g.intlViews) + ' · ' + n0(r.total) + ' views',
         label: esc(r.oppCode) + '<br>(' + venueAbbr(r) + ')'
       };
-    }), scaleMax, 'dz-chart--games');
+    /* Columns share the width; past ~34px each they scroll instead. */
+    }), scaleMax, 'dz-chart--games', list.length * 34);
   }
 
   /* ---- Top games -------------------------------------------------------- */
@@ -398,6 +420,24 @@
     }
     var nameOf = o.nameOf || function () { return ''; };
     var months = Object.keys(all.reduce(function (m, g) { m[g.date.slice(0, 7)] = 1; return m; }, {})).sort();
+    var hasGames = {};
+    months.forEach(function (m) { hasGames[m] = true; });
+    /* The chart's month axis: August to May of this season, plus any month
+       the data reaches outside it (a July friendly would still show). */
+    var first = months[0].split('-'), y0 = +first[1] >= 7 ? +first[0] : +first[0] - 1;
+    var axis = [];
+    for (var k = 0; k < 10; k++) {
+      var mm = 8 + k, yy = y0 + (mm > 12 ? 1 : 0); mm = ((mm - 1) % 12) + 1;
+      axis.push(yy + '-' + (mm < 10 ? '0' : '') + mm);
+    }
+    months.forEach(function (m) { if (axis.indexOf(m) === -1) axis.push(m); });
+    axis.sort();
+    /* What this club's games can be split by, for the slicers. */
+    var has = { uk: false, intl: false, home: false, away: false, neutral: false };
+    all.forEach(function (g) {
+      has[g.avail === 'intl' ? 'intl' : 'uk'] = true;
+      has[g.neutral ? 'neutral' : g.home === o.code ? 'home' : 'away'] = true;
+    });
     var F = { uk: 'all', venue: 'all', month: 'all' };
     var view = 'month';
     /* Fixed scales: the club's whole season, never the sliced subset. */
@@ -433,7 +473,7 @@
     var q = function (sel) { return el.querySelector(sel); };
 
     function draw() {
-      q('[data-slicers]').innerHTML = slicers(months, F);
+      q('[data-slicers]').innerHTML = slicers(months, F, has);
       var shown = applyFilters(all, o.code, F);
       q('[data-chart-title]').textContent = view === 'game' ? 'Views by game' : 'Views by month';
       var ctx = context();
@@ -442,7 +482,7 @@
       /* The month chart takes every slicer except the month itself, so the
          other months stay visible to click across to. */
       if (view === 'month') {
-        q('[data-chart]').innerHTML = monthChart(applyFilters(all, o.code, { uk: F.uk, venue: F.venue, month: 'all' }), months, F, scale.month);
+        q('[data-chart]').innerHTML = monthChart(applyFilters(all, o.code, { uk: F.uk, venue: F.venue, month: 'all' }), axis, F, scale.month, hasGames);
       }
       if (!shown.length) {
         if (view === 'game') q('[data-chart]').innerHTML = '';
