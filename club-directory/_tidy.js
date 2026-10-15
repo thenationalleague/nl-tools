@@ -64,14 +64,10 @@
    flag. `attention` is the second kind, and the editor renders it in red.
 
    The single implementation of every change the League makes to a club's
-   submission on its way into the directory. Two callers, and they must not
-   drift:
-
-     · club-signoff/index.html  states to the club what we intend to do
-     · club-directory/editor    actually does it, once, at bake time
-
-   If those ever came apart we would be promising 72 clubs one thing and
-   writing another, so the rules live here and nowhere else.
+   submission on its way into the directory. The directory editor applies it
+   at bake time and to "restore the club's original". (Until 15/10/2026 the
+   sign-off page also called it, to show a club what we intended to change;
+   that is why it is a file of its own.)
 
    Every pass takes an optional `log` collector and reports what it touched:
 
@@ -484,7 +480,7 @@
      explain to us , so it is fixed quietly and never flagged.
 
      The absorbed record's id is kept on the survivor. It is the only thing
-     that survives the collapse, and without it a club-signoff link or a later
+     that survives the collapse, and without it a later
      re-import pointing at the losing id resolves to nobody, silently. */
   function mergeByName(rec, log) {
     var seen = {}, out = [], merged = []; log = log || noop;
@@ -506,8 +502,8 @@
           .trim().toLowerCase();
       };
       /* Which of the person's jobs an entry is for. Mirrors NLDirectory
-         .sectionsOf, and is duplicated rather than imported because
-         club-signoff loads this file WITHOUT _directory.js. */
+         .sectionsOf, and is duplicated rather than imported so this file
+         stands alone without _directory.js. */
       var secs = function (e) {
         if (!e || typeof e === 'string') { return []; }
         if (e.sections) { return arr(e.sections).filter(Boolean); }

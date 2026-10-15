@@ -130,7 +130,7 @@ links this repo cannot see.
 
 `/wellbeing-hub/` is a **public page**, not a portal tool. No auth-guard, no
 topbar, no Firebase — a standalone section built for a specific purpose that
-needs to be publicly reachable, on the club-contacts precedent. It is reached
+needs to be publicly reachable. It is reached
 by its URL, and by the QR code on `/wellbeing-hub/poster.pdf`.
 
 It replaced `/wellbeing/` on 08/10/2026. That directory is now a redirect stub
