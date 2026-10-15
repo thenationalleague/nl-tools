@@ -363,7 +363,7 @@ config that belongs in git.
 
 ## Data pipelines (GitHub Actions)
 
-- `.github/workflows/rebuild-index.yml` — daily 03:00 UTC. Runs `fetch-ga-metrics.js` + `fetch-ga-hourly.js` + `fetch-ga-sources.js` + `rebuild-index.js`. Authenticates to GCP via Workload Identity Federation (no JSON key).
+- `.github/workflows/rebuild-index.yml` — daily 03:00 UTC. Runs `fetch-ga-metrics.js` + `fetch-ga-hourly.js` + `fetch-ga-sources.js` + `rebuild-index.js` + `build-performance.js`. Authenticates to GCP via Workload Identity Federation (no JSON key).
 
 **The feeds live in Firebase Storage under `data/`, not in git** (since
 15/08/2026). The job pulls them out of the bucket, rebuilds, and puts them back;

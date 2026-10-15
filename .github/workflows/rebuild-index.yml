@@ -114,7 +114,15 @@ jobs:
           FORCE_FULL_REBUILD: ${{ github.event.inputs.force_full_rebuild || 'false' }}
         run: node scripts/rebuild-index.js
 
-      # articles-index.json is the only one a browser reads. Firebase's
+      # First-7-day views per article for the Website Archive's Performance
+      # tab, from the index and the traffic-sources archive above. A failure
+      # here produces no file, and the publish step then leaves yesterday's
+      # copy in the bucket rather than blanking the tab.
+      - name: Build the performance feed (Performance tab)
+        run: node scripts/build-performance.js
+        continue-on-error: true
+
+      # articles-index.json and performance.json are the ones a browser reads. Firebase's
       # getDownloadURL() hands back a URL carrying the object's
       # firebaseStorageDownloadTokens value, and objects written by gcloud have
       # no such value unless it is set here — so the token is minted fresh on
@@ -138,6 +146,15 @@ jobs:
             --custom-metadata="firebaseStorageDownloadTokens=$(uuidgen)" \
             --content-type=application/json \
             --content-encoding=gzip
+          if [ -f assets/data/performance.json ]; then
+            gzip -9 -c assets/data/performance.json > /tmp/performance.json.gz
+            gcloud storage cp /tmp/performance.json.gz "$BUCKET/performance.json" \
+              --custom-metadata="firebaseStorageDownloadTokens=$(uuidgen)" \
+              --content-type=application/json \
+              --content-encoding=gzip
+          else
+            echo "::warning::performance.json was not produced, leaving the bucket copy alone"
+          fi
           for f in ga-hourly.json ga-hourly-archive.json ga-sources-archive.json; do
             [ -f "assets/data/$f" ] || { echo "::warning::$f was not produced, leaving the bucket copy alone"; continue; }
             gzip -9 -c "assets/data/$f" > "/tmp/$f.gz"

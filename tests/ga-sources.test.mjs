@@ -38,6 +38,12 @@ test('keepRow keeps news paths from the day before publish to 31 days after', ()
   assert.equal(keepRow(A, 20261004), false);
   assert.equal(keepRow('/news/undated', 20240101), true);
   assert.equal(keepRow('/', 20260902), false);
+  assert.equal(keepRow('/fixtures', 20260902), false);
+});
+
+test('keepRow keeps pre-migration /slug-12345 article paths whole', () => {
+  assert.equal(keepRow('/national-league-statement-morecambe-fc-83850', 20250101), true);
+  assert.equal(keepRow('/club/some-page-2', 20250101), false);
 });
 
 test('rowsToDaily normalises paths, sums collisions, drops non-news and grows the channel list', () => {
