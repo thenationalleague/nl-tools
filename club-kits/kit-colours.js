@@ -13,6 +13,8 @@
 
   The kit COLOUR TAXONOMY and the colour picker, shared by both pages of this
   tool: the public form (index.html) and the admin console (admin.html).
+  Since 15/10/2026 only the console (/club-kits/) uses it: the public form
+  was retired. It stays a separate file because the console is long enough.
 
   Extracted when the console gained in-place editing. Before that only the form
   needed the list, so it lived there; the moment a second page needed to let
