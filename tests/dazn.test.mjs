@@ -1,4 +1,4 @@
-/* DAZN Viewing — the import parser, the per-club filing, the averages, and
+/* DAZN Viewership — the import parser, the per-club filing, the averages, and
    the rules that keep one club out of another's figures.
 
    All numbers here are invented. The real workbook is DAZN-confidential and

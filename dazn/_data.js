@@ -1,5 +1,5 @@
 /* =============================================================================
-   NL Tools — DAZN Viewing: data layer
+   NL Tools — DAZN Viewership: data layer
    File: /dazn/_data.js
    Version: v29.0 (15/10/2026)
 

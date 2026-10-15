@@ -1,9 +1,10 @@
 /* =============================================================================
-   NL Tools — DAZN Viewing: one club's season, as a dashboard
+   NL Tools — DAZN Viewership: one club's season, as a dashboard
    File: /dazn/_view.js
-   Version: v31.0 (15/10/2026)
+   Version: v32.0 (15/10/2026)
 
    CHANGELOG
+     v32.0 (15/10/2026) — The Views card reads "Total views".
      v31.0 (15/10/2026) — By month runs August to May on a real calendar,
        empty months as empty slots. By game columns share the full width
        until they would be thinner than ~30px, then scroll. A slicer shows
@@ -230,7 +231,7 @@
     return '<div class="stats dz-kpis">' +
       card(n0(s.games), 'Games',
         sub([s.home && s.home + ' home', s.away && s.away + ' away', s.neutral && s.neutral + ' neutral'].filter(Boolean).join(' · '))) +
-      card(compact(s.views), 'Views',
+      card(compact(s.views), 'Total views',
         sub('UK ' + compact(s.ukViews) + ' · INT ' + compact(s.intlViews)), n0(s.views) + ' views') +
       card(compact(s.avgUkPerUkShown), 'UK per UK game',
         delta(s.avgUkPerUkShown, b('avgUkPerUkShown')) || sub(s.intlOnly ? s.intlOnly + ' not shown in UK' : '')) +
