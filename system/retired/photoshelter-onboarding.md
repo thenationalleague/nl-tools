@@ -17,11 +17,9 @@ completely wiped". Both pages were deleted. The rules for
 admin in the same PR, so the open form's create-only write path is shut
 whether or not anyone still holds the link.
 
-**The bookings are still in RTDB.** They are names and email addresses for
-people at 72 clubs, with no further use. Delete the node in the Firebase
-console (`app-data/ops-photoshelter-onboarding`) once nobody needs the list.
-There is no deploy path for RTDB data, by design. The rules entry can go
-after that.
+**The bookings are gone.** They were names and email addresses for people at
+72 clubs; Richard deleted the node in the Firebase console on 15/10/2026, and
+the rules entry was removed afterwards. Nothing of this tool remains in RTDB.
 
 ## Decisions worth keeping
 

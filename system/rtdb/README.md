@@ -74,7 +74,7 @@ Tightening them to `auth != null` would break a live feature. Leave them:
 | `uw-promo` (whole node) | UW partner page, club till page and master console are standalone (no auth-guard), gated by client-side passcodes over **anonymous Firebase auth** — reads public + writes `auth != null` is the working model. No personal data. Known accepted trade-off (25/07/2026): writes are spoofable by anonymous users; proper hardening (server-side passcode check via a callable, App Check) only if UW abuse ever matters. |
 | `ops-handbook/editions` + `publishedEditionId` | Published handbook is **public by intent** (confirmed by Richard 25/07/2026). Drafts and audit stay gated. |
 | `ops-vacancies/listings` + `analytics` | Jobs-board widget embedded on thenationalleague.org.uk reads listings and writes click analytics anonymously. |
-| `ops-club-data/*/submissions/$token` | Invite-token submission flow — access is gated by *token existence*, not login. (`ops-club-contacts` had the same shape until 15/10/2026, when its `$token` rules were removed with the tool; its submissions are admin-read only.) |
+| `ops-club-data`, `ops-club-contacts` | Retired invite-token flows. Their `$token` rules (a held link could read its club's submission) were removed 15/10/2026; what remains is admin read only. |
 | `ops-vacancies/analytics` | Public **write** for anonymous click tracking (by design). |
 | `ops-club-kits/submissions` | `club-kits/index.html`, the gated console. The public no-login form was retired 15/10/2026 and its unauthenticated create went with it: write is admin-only. Read stays public (colours only, no personal data). |
 

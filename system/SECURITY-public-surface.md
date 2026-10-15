@@ -44,8 +44,7 @@ trade-off or verification task, no code fix required now.
 | `ops-vacancies/listings` | Job listings — jobs-board embed. | Safe |
 | `ops-handbook/editions` + `publishedEditionId` | Published handbook (public by intent). | Safe |
 | `ops-commercial-benchmarking/aggregates` + `links/$token` | Anonymised aggregates + unguessable per-club token. | Safe |
-| `ops-club-data` `submissions/$token` | Token-gated submission (gated by token existence). | Safe |
-| `ops-club-contacts`, `ops-club-signoff` | Token rules removed 15/10/2026 with the tools; admin read only. | Closed |
+| `ops-club-data`, `ops-club-contacts`, `ops-club-signoff` | Retired token-link flows; token rules removed 15/10/2026, admin read only. | Closed |
 | Cloud Functions (`consumeInvite`, `submitAccessRequest`, `withdrawAccessRequest`) | Require a verified Firebase token; role server-minted from the invite, never from the request body. | Safe |
 | Cloud Functions (`programmeAuth`, `clubDirectoryAuth`, `uwPromoAuth`, `fanWidgetsAuth`) | RTDB-triggered; mint scoped claims after a server-side passcode/role check. | Safe |
 | Storage `data/**`, `programme/{club}/**`, catch-all | Reads require an email/club claim; writes own-prefix or false; the anonymous-signin `programme` hole was explicitly closed. | Safe |
