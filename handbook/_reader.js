@@ -1,7 +1,13 @@
 /* =========================================================================
    NL Tools — Handbook reader
    File: /handbook/_reader.js
-   Version: v1.1 (10/09/2026)
+   Version: v1.2 (14/10/2026)
+
+   v1.2 — the id bar names the club on a resumed session. clubLabel read
+          NL.clubs.all() as if it were an array; it is a promise, so the
+          lookup threw, was swallowed, and the bar showed the raw club key.
+          Now awaits NL.clubs.load() and uses NL.clubs.byCode (nl-utils
+          v1.44). An 'NL' claim reads "National League".
 
    v1.1 — search reads table cells as words, not markup. Cells carry
           bold, italic and lists from handbook v0.65, and a search that
@@ -77,18 +83,27 @@ window.NLHandbook = (function () {
      that is a deliberate, recorded choice — never tell clubs otherwise. */
   function clubLabel(session) {
     if (!session) return '';
-    if (session.role === '*') return 'National League';
+    /* 'NL' is what the League record's holders actually carry (see
+       functions/club-code.js); '*' is kept for any older token. */
+    if (session.role === '*' || session.role === 'NL') return 'National League';
     if (session.name) return session.name;
     /* Resume path: the token carries the club KEY, not its name — display data
        does not belong in a claim, or renaming a club would mean re-issuing 72
-       tokens. Resolve it from clubs-meta instead, which is the source of truth
-       for club names anyway.
-       CANON CANDIDATE: NL.clubs has byName and byOpta but no byCode, and this
-       is not the only place that wants one — the Programme admin console maps
-       the same keys to the same names. Promote on the next use. */
-    var all = (window.NL && NL.clubs && NL.clubs.all && NL.clubs.all()) || [];
-    var hit = all.filter(function (c) { return c.code === session.role; })[0];
+       tokens. Resolve it from clubs-meta with NL.clubs.byCode, which is sync
+       and answers null until NL.clubs.load() has resolved — setClubLabel
+       below waits for that. */
+    var hit = NL.clubs.byCode(session.role);
     return (hit && hit.name) || session.role;
+  }
+
+  /* Up to v1.1 this read NL.clubs.all() synchronously, but all() returns a
+     PROMISE: `.filter` on it threw, the try swallowed it, and a resumed
+     session's bar never showed the club name. Load first, then label. */
+  function setClubLabel(session) {
+    var sub = document.querySelector('.nl-idbar__sub');
+    if (!sub) return;
+    var put = function () { sub.textContent = clubLabel(session) || 'The National League'; };
+    NL.clubs.load().then(put, put);
   }
 
   /* THE GATED ENTRY. club-directory/public's sibling — handbook/public —
@@ -128,10 +143,8 @@ window.NLHandbook = (function () {
       document.getElementById('rdShell').hidden = false;
       load();
 
-      try {
-        var sub = document.querySelector('.nl-idbar__sub');
-        if (sub) sub.textContent = clubLabel(session) || 'The National League';
-      } catch (_) { /* the bar keeps its default; the handbook still opens */ }
+      try { setClubLabel(session); }
+      catch (_) { /* the bar keeps its default; the handbook still opens */ }
     });
   }
 

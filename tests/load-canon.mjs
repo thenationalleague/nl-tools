@@ -90,6 +90,10 @@ export const stubEl = (tag) => {
   return el;
 };
 
+/* A NEW sandbox per call: its own window, its own NL, its own module state.
+   The shared NL below is enough for almost everything; freshCanon() is for a
+   test that needs state no other test has touched — NL.clubs before load()
+   has ever been called, say — and must not depend on test order. */
 /* Inject the outer realm's intrinsics so any Date/Object the helpers return is
    the same realm the tests assert against (keeps `instanceof` honest).
 
@@ -99,47 +103,50 @@ export const stubEl = (tag) => {
    "same structure but not reference-equal". When a helper returns literals
    (e.g. NL.csvParse), normalise with JSON.parse(JSON.stringify(v)) in the test
    rather than loosening the assertion. */
-const sandbox = {
-  console, setTimeout, clearTimeout, setInterval, clearInterval,
-  Date, Math, JSON, Object, Array, String, Number, Boolean, RegExp, Error,
-  Promise, parseInt, parseFloat, isNaN, isFinite,
-  encodeURIComponent, decodeURIComponent,
-  document: {
-    addEventListener() {}, removeEventListener() {},
-    createElement: stubEl, getElementById() { return null; },
-    createElementNS: (ns, tag) => stubEl(tag),   /* NL.icon builds SVG this way */
-    querySelector() { return null; }, querySelectorAll() { return []; },
-    documentElement: { style: {} }, head: stubEl(), body: stubEl(),
-  },
-  navigator: { clipboard: null, userAgent: 'node-test' },
-  location: { search: '', href: '', hash: '' },
-  localStorage: memStore(),
-  sessionStorage: memStore(),
-  /* Serve the real clubs-meta.json and cup-clubs-meta.json off disk so
-     NL.clubs.load()/byName/byOpta and NL.clubs.guests()/guestByName can be
-     exercised; anything else is intentionally unstubbed.
-     Order matters: 'cup-clubs-meta.json' also ends with 'clubs-meta.json'. */
-  fetch: (url) => {
-    const u = String(url).split('?')[0];
-    const serve = (rel) => {
-      const body = readFileSync(join(REPO, rel), 'utf8');
-      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(JSON.parse(body)) });
-    };
-    if (u.endsWith('cup-clubs-meta.json')) return serve('assets/data/cup-clubs-meta.json');
-    if (u.endsWith('clubs-meta.json')) return serve('assets/data/clubs-meta.json');
-    return Promise.reject(new Error('unstubbed fetch in test sandbox: ' + url));
-  },
-};
-sandbox.window = sandbox;
-sandbox.globalThis = sandbox;
+export function freshCanon() {
+  const sandbox = {
+    console, setTimeout, clearTimeout, setInterval, clearInterval,
+    Date, Math, JSON, Object, Array, String, Number, Boolean, RegExp, Error,
+    Promise, parseInt, parseFloat, isNaN, isFinite,
+    encodeURIComponent, decodeURIComponent,
+    document: {
+      addEventListener() {}, removeEventListener() {},
+      createElement: stubEl, getElementById() { return null; },
+      createElementNS: (ns, tag) => stubEl(tag),   /* NL.icon builds SVG this way */
+      querySelector() { return null; }, querySelectorAll() { return []; },
+      documentElement: { style: {} }, head: stubEl(), body: stubEl(),
+    },
+    navigator: { clipboard: null, userAgent: 'node-test' },
+    location: { search: '', href: '', hash: '' },
+    localStorage: memStore(),
+    sessionStorage: memStore(),
+    /* Serve the real clubs-meta.json and cup-clubs-meta.json off disk so
+       NL.clubs.load()/byName/byOpta and NL.clubs.guests()/guestByName can be
+       exercised; anything else is intentionally unstubbed.
+       Order matters: 'cup-clubs-meta.json' also ends with 'clubs-meta.json'. */
+    fetch: (url) => {
+      const u = String(url).split('?')[0];
+      const serve = (rel) => {
+        const body = readFileSync(join(REPO, rel), 'utf8');
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(JSON.parse(body)) });
+      };
+      if (u.endsWith('cup-clubs-meta.json')) return serve('assets/data/cup-clubs-meta.json');
+      if (u.endsWith('clubs-meta.json')) return serve('assets/data/clubs-meta.json');
+      return Promise.reject(new Error('unstubbed fetch in test sandbox: ' + url));
+    },
+  };
+  sandbox.window = sandbox;
+  sandbox.globalThis = sandbox;
 
-vm.createContext(sandbox);
-vm.runInContext(readFileSync(join(REPO, 'system/nl-utils.js'), 'utf8'), sandbox, {
-  filename: 'nl-utils.js',
-});
+  vm.createContext(sandbox);
+  vm.runInContext(readFileSync(join(REPO, 'system/nl-utils.js'), 'utf8'), sandbox, {
+    filename: 'nl-utils.js',
+  });
 
-if (!sandbox.window.NL) {
-  throw new Error('nl-utils.js loaded but window.NL was not defined');
+  if (!sandbox.window.NL) {
+    throw new Error('nl-utils.js loaded but window.NL was not defined');
+  }
+  return sandbox.window.NL;
 }
 
-export const NL = sandbox.window.NL;
+export const NL = freshCanon();

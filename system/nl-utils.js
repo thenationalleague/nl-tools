@@ -1,21 +1,29 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.43 (03/09/2026)
+   Version: v1.44 (15/10/2026)
 
-   v1.43 — NL.sortable(host, {items, onOrder}): the reorderable list, paired
-   with .nl-sort in nl-brand v2.66. Promoted from the club-directory editor's
-   Reorder dialog (.ed-ord, editor v1.39) on Richard's review of that dialog:
-   the finished pattern is a grip that says "drag me", a row that lifts off
-   the page while held, swaps that glide instead of teleporting, and the
-   sprite's own up/down glyphs in place of text arrows. The drag is pointer
-   events, NOT the HTML5 draggable API — draggable has no touch support and
-   its browser-drawn ghost cannot do a real lift. The buttons stay: they are
-   the keyboard and assistive route, and the drag never replaces them.
-   Second caller: any tool with an ordered list.
-   Cache-bust ?v=46 -> ?v=47 in lockstep with nl-brand ?v=62 -> ?v=63.
+   v1.44 — NL.clubs.byCode(code): sync, case-insensitive, memoised lookup by
+   the clubs-meta `code`, the key a club-code token carries. uw-promo/club
+   already called it and it did not exist, so the till gate never showed the
+   club's crest. handbook/_reader.js and the dazn pages each hand-built the
+   same map; they now use this. Cache-bust ?v=47 -> ?v=48 (nl-brand
+   unchanged).
 
    Changelog
+   v1.43 (03/09/2026)
+     - NL.sortable(host, {items, onOrder}): the reorderable list, paired
+       with .nl-sort in nl-brand v2.66. Promoted from the club-directory editor's
+       Reorder dialog (.ed-ord, editor v1.39) on Richard's review of that dialog:
+       the finished pattern is a grip that says "drag me", a row that lifts off
+       the page while held, swaps that glide instead of teleporting, and the
+       sprite's own up/down glyphs in place of text arrows. The drag is pointer
+       events, NOT the HTML5 draggable API — draggable has no touch support and
+       its browser-drawn ghost cannot do a real lift. The buttons stay: they are
+       the keyboard and assistive route, and the drag never replaces them.
+       Second caller: any tool with an ordered list.
+       Cache-bust ?v=46 -> ?v=47 in lockstep with nl-brand ?v=62 -> ?v=63.
+
    v1.42 (26/08/2026)
      - NL.clubs.bandsHtml: the club's colours as the canon .nl-club-bands
        trim (nl-brand v2.63). Promoted with the component on its third use;
@@ -1982,6 +1990,7 @@
   var _clubsMeta    = null;
   var _clubsCb      = null;  /* per-session cache-buster, stamped once */
   var _optaIndex    = null;  /* lazy optaID → club map, built by byOpta */
+  var _codeIndex    = null;  /* lazy CODE → club map, built by byCode */
   var _guestsPromise = null;
   var _guestsMeta    = null;
   var CLUBS_URL     = '/assets/data/clubs-meta.json';
@@ -2098,7 +2107,7 @@
       if (!_clubsCb) _clubsCb = Date.now();
       _clubsPromise = fetch(CLUBS_URL + '?cb=' + _clubsCb, { cache: 'no-store' })
         .then(function(r) { if (!r.ok) throw new Error('clubs-meta ' + r.status); return r.json(); })
-        .then(function(data) { _clubsMeta = data; _optaIndex = null; return data; })
+        .then(function(data) { _clubsMeta = data; _optaIndex = null; _codeIndex = null; return data; })
         .catch(function(err) { _clubsPromise = null; throw err; }); /* soft: allow retry */
       return _clubsPromise;
     },
@@ -2174,6 +2183,22 @@
         (_clubsMeta.clubs || []).forEach(function(c) { if (c.optaID) _optaIndex[c.optaID] = c; });
       }
       return _optaIndex[id] || null;
+    },
+    /* Club record by clubs-meta `code` (e.g. 'ROC'), across ALL clubs.
+       Case-insensitive. Requires load() first; memoised like byOpta.
+       Returns null if not loaded or not found.
+       The code is the key a club-code token carries as its `club` claim, so
+       every code-gated page wants this to turn the claim back into a name
+       and crest. Before v1.44 they each hand-built a code → name map. */
+    byCode: function(code) {
+      if (!_clubsMeta || !code) return null;
+      if (!_codeIndex) {
+        _codeIndex = {};
+        (_clubsMeta.clubs || []).forEach(function(c) {
+          if (c.code) _codeIndex[String(c.code).toUpperCase()] = c;
+        });
+      }
+      return _codeIndex[String(code).toUpperCase()] || null;
     }
   };
 

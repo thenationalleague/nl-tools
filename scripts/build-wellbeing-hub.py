@@ -1144,7 +1144,7 @@ def _page(ed):
   <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
 
   <link rel="stylesheet" href="/system/nl-brand.css?v=67">
-  <script src="/system/nl-utils.js?v=47"></script>
+  <script src="/system/nl-utils.js?v=48"></script>
   <script src="/system/nl-analytics.js?v=1"></script>
 
   <!-- GA4 is canon now: system/nl-analytics.js, loaded above, carries the
