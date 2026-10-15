@@ -305,3 +305,50 @@ test('nextState cycles outstanding → compliant → non-compliant', () => {
   assert.equal(CC.nextState('non-compliant'), 'outstanding');
   assert.equal(CC.nextState(undefined), 'compliant');
 });
+
+/* ── club submissions (v36.0) ─────────────────────────────────────────── */
+
+test('claimState: none, pending, approved, rejected', () => {
+  assert.equal(CC.claimState(null), 'none');
+  assert.equal(CC.claimState({ at: 1, note: 'x' }), 'pending');
+  assert.equal(CC.claimState({ at: 1, review: { state: 'approved' } }), 'approved');
+  assert.equal(CC.claimState({ at: 1, review: { state: 'rejected', reason: 'blurred' } }), 'rejected');
+  /* A review in a state nobody writes reads as still waiting, not as judged. */
+  assert.equal(CC.claimState({ at: 1, review: { state: 'maybe' } }), 'pending');
+});
+
+test('pendingClaims: only unjudged claims, oldest first, across clubs', () => {
+  const claims = {
+    ALT: { o1: { season: { at: 30 }, q1: { at: 5, review: { state: 'approved' } } } },
+    YEO: { o1: { season: { at: 10 } }, o2: { '2026-09': { at: 20, review: { state: 'rejected' } } } },
+  };
+  const got = CC.pendingClaims(claims).map((p) => p.club + '/' + p.oid + '/' + p.period);
+  assert.deepEqual(JSON.parse(JSON.stringify(got)), ['YEO/o1/season', 'ALT/o1/season']);
+  assert.equal(CC.pendingClaims(null).length, 0);
+});
+
+/* The rules are the boundary for the club page, so pin the parts that keep
+   one club out of another's record and keep a judged submission judged. */
+test('rules: a club reads and writes only its own claims, never the review', () => {
+  const rules = JSON.parse(readFileSync(join(REPO, 'system/rtdb/rules.snapshot.json'), 'utf8'));
+  const n = rules.rules['app-data']['ops-commercial-compliance'];
+  const claim = n.claims.$club.$oid.$period;
+  assert.match(n.claims.$club['.read'], /auth\.token\.club === \$club/);
+  assert.match(claim['.write'], /auth\.token\.club === \$club/);
+  assert.match(claim['.write'], /val\(\) !== 'approved'/, 'an approved claim is locked');
+  assert.match(claim['.write'], /!newData\.child\('review'\)\.exists\(\)/, 'a club cannot write a review');
+  assert.match(claim.files.$fid.path['.validate'], /beginsWith\('commercial-compliance\/' \+ \$club \+ '\/'\)/);
+  assert.equal(claim.$other['.validate'], false);
+  /* Status is the League's: a club reads its own leaf and writes nothing. */
+  assert.match(n.status.$oid.$period.$club['.read'], /auth\.token\.club === \$club/);
+  assert.equal(n.status.$oid.$period.$club['.write'], undefined);
+  assert.equal(n.claims['.read'], undefined, 'no club can list every club');
+});
+
+test('storage: evidence files are per-club, capped, and never SVG', () => {
+  const s = readFileSync(join(REPO, 'system/storage/rules.snapshot.rules'), 'utf8');
+  const block = s.slice(s.indexOf('match /commercial-compliance/{club}'), s.indexOf('match /brand-exposure/{matchId}'));
+  assert.match(block, /allow create: if request\.auth != null && request\.auth\.token\.club == club/);
+  assert.match(block, /10 \* 1024 \* 1024/);
+  assert.match(block, /!request\.resource\.contentType\.matches\('image\/svg\.\*'\)/);
+});

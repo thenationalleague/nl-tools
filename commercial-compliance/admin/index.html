@@ -4,10 +4,15 @@
   Version: v36.0 (15/10/2026)
   File: /commercial-compliance/admin/index.html
   v36.0 (15/10/2026): MOVED from /commercial-compliance/ to /admin/. The
-    tool's own address is reserved for the club view (club code, own club's
-    obligations), the shape every club-facing tool now takes; this console is
-    the layer on top. Until the club view lands, the root redirects here.
-    Nothing on the page changed. Version jumps to the session's turn number.
+    tool's own address is now the club page: a club enters its access code,
+    sees its own obligations, and submits a period with a note, a link and
+    files. This console reviews them: a To review tab lists what is waiting,
+    and the tick-sheet shows each submission with Approve (records the period
+    Compliant, carrying the club's evidence) and Reject (with a reason the
+    club sees). A submission is never a status; only an approval writes one.
+    A period a club has submitted for drops off the Escalation list while it
+    waits, because the next move is ours. Version jumps to the session's
+    turn number.
   v2.1 (24/08/2026): dashboard defaults to a "needs attention" triage — an
     asset strip (per-asset behind-count, tap to focus) over a worst-first
     table of only the clubs with something outstanding, state chips per
@@ -123,7 +128,9 @@
         date: '15/10/2026',
         version: 'v36.0',
         items: [
-          'This page is now at nl.tools/commercial-compliance/admin/. The tool\u2019s own address will be the club view.'
+          'This page is now at nl.tools/commercial-compliance/admin/. Clubs use nl.tools/commercial-compliance/ with their access code.',
+          'Clubs can submit evidence for a period. New To review tab: approve to record it compliant, or reject with a reason the club sees.',
+          'A period a club has submitted for leaves the Escalation list while it waits for review.'
         ]
       },
       {
@@ -199,7 +206,7 @@
   <script src="/system/auth-guard.js?v=16"></script>
 
   <!-- Tool-local pure logic (periods, versioning, rollups) — tested in node -->
-  <script src="/commercial-compliance/_shared.js?v=1"></script>
+  <script src="/commercial-compliance/_shared.js?v=2"></script>
 
 <style>
   /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
@@ -248,6 +255,13 @@
   .cc-stateseg .active--out    { background: var(--navy); color: var(--white); }
   .cc-evidence { font-size: var(--text-xs); color: var(--text-muted); flex-basis: 100%; overflow-wrap: anywhere; }
   .cc-evidence a { color: var(--navy); }
+  /* A club's submission inside the tick-sheet: the evidence plus the two
+     decisions, on its own line under the period like evidence. */
+  .cc-claim { flex-basis: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--navy-50); font-size: var(--text-sm); }
+  .cc-claim__head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+  .cc-claim__files { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0; }
+  .cc-claim__files a { font-size: var(--text-xs); color: var(--navy); overflow-wrap: anywhere; }
+  .cc-claim__acts { display: flex; gap: 8px; margin-top: 8px; }
 
   /* Escalation list */
   .cc-esc-items { margin: 0; padding-left: 18px; }
@@ -328,6 +342,7 @@
       <button class="tab" data-tab="partners" role="tab">Partners</button>
       <button class="tab" data-tab="central" role="tab">NL Central</button>
       <button class="tab" data-tab="escalation" role="tab">Escalation</button>
+      <button class="tab" data-tab="review" role="tab">To review<span id="rvCount"></span></button>
     </div>
 
     <!-- ── Dashboard ─────────────────────────────────────────────────── -->
@@ -415,6 +430,19 @@
       </div>
     </section>
 
+    <!-- ── To review — club submissions waiting for a decision ─────────── -->
+    <section id="viewReview" style="display:none">
+      <div class="section-head">
+        <h2>Submitted by clubs, waiting for review</h2>
+      </div>
+      <div class="table-wrap">
+        <table class="table" id="rvTable">
+          <thead><tr><th>Club</th><th>Requirement</th><th>Period</th><th>Submitted</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
     <!-- ── Escalation ────────────────────────────────────────────────── -->
     <section id="viewEscalation" style="display:none">
       <div class="section-head">
@@ -457,9 +485,9 @@
     session: null, canEdit: false,
     seasonKey: null, seasonLabel: '',
     clubs: [],
-    assets: {}, partners: {}, obligations: {}, status: {},
+    assets: {}, partners: {}, obligations: {}, status: {}, claims: {},
     tab: 'dashboard', dashView: 'attention', fDivision: 'all', fAsset: 'all', fEscDiv: 'all',
-    loaded: { assets: false, partners: false, obligations: false, status: false }
+    loaded: { assets: false, partners: false, obligations: false, status: false, claims: false }
   };
 
   function esc(s) { return NL.escHtml(s); }
@@ -561,6 +589,10 @@
     });
     return out;
   }
+  function claimFor(oid, periodKey, clubCode) {
+    var c = STATE.claims[clubCode];
+    return (c && c[oid] && c[oid][periodKey]) || null;
+  }
   function obligationHasStatuses(oid) {
     var byPeriod = STATE.status[oid] || {};
     return Object.keys(byPeriod).some(function (pk) {
@@ -595,6 +627,7 @@
     renderPartners();
     renderCentral();
     renderEscalation();
+    renderReview();
   }
 
   /* ── NL Central — the League's own deliverables to partners ─────────── */
@@ -931,7 +964,9 @@
       var groups = [], total = 0;
       liveObligations('clubs').forEach(function (o) {
         if (!CC.appliesTo(o, club.division, club.code)) return;
-        var overdue = CC.overdueOpen(CC.periodsFor(o, STATE.seasonKey), statusMapFor(o.id, club.code), t);
+        /* A period the club has submitted for is waiting on us, not them. */
+        var overdue = CC.overdueOpen(CC.periodsFor(o, STATE.seasonKey), statusMapFor(o.id, club.code), t)
+          .filter(function (p) { return CC.claimState(claimFor(o.id, p.key, club.code)) !== 'pending'; });
         if (overdue.length) { groups.push({ oblig: o, periods: overdue }); total += overdue.length; }
       });
       if (total) rows.push({ club: club, groups: groups, total: total });
@@ -992,6 +1027,95 @@
         '<button class="btn btn--ghost btn--sm" data-esc-copy="' + i + '">Copy</button></td></tr>';
     }).join('');
     NL.clubs.wireCrestImgs(tbody);
+  }
+
+  /* ── To review — club submissions waiting for a decision ───────────── */
+
+  function renderReview() {
+    var tbody = document.getElementById('rvTable').querySelector('tbody');
+    var count = document.getElementById('rvCount');
+    if (!STATE.loaded.claims || !STATE.loaded.obligations) {
+      tbody.innerHTML = '<tr class="loading-row"><td colspan="5">Loading…</td></tr>';
+      return;
+    }
+    var rows = CC.pendingClaims(STATE.claims).filter(function (r) { return STATE.obligations[r.oid]; });
+    count.textContent = rows.length ? ' (' + rows.length + ')' : '';
+    if (!rows.length) {
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="5">Nothing waiting</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(function (r) {
+      var o = STATE.obligations[r.oid], club = clubFor(r.club) || { name: r.club, code: r.club };
+      var p = CC.periodsFor(o, STATE.seasonKey).filter(function (x) { return x.key === r.period; })[0];
+      return '<tr><td>' + NL.clubs.crestImgHtml(club.name, 'thumb', { className: 'cc-crest' }) + esc(club.name) + '</td>' +
+        '<td>' + esc(o.title) + '</td>' +
+        '<td>' + esc(p ? p.label : r.period) + '</td>' +
+        '<td>' + esc(r.claim.at ? NL.timeAgo(r.claim.at) : '') + '</td>' +
+        '<td class="ta-right"><button class="btn btn--primary btn--sm" data-review="' + esc(r.oid) + '" data-club="' + esc(r.club) + '">Review</button></td></tr>';
+    }).join('');
+    NL.clubs.wireCrestImgs(tbody);
+  }
+
+  /* Approve: the period becomes Compliant, carrying the club's evidence, and
+     the claim is stamped approved, in one multi-path write so the two never
+     disagree. The rules lock the club's record from then on. */
+  function approveClaim(oid, periodKey, clubCode, done) {
+    var claim = claimFor(oid, periodKey, clubCode);
+    if (!claim) return;
+    var s = stamp();
+    var files = claim.files ? Object.keys(claim.files).map(function (k) { return claim.files[k]; }) : [];
+    var rec = {
+      state: 'compliant',
+      version: (STATE.obligations[oid] && STATE.obligations[oid].version) || 1,
+      evidence: claim.link || (files[0] && files[0].url) || null,
+      note: claim.note || null,
+      files: claim.files || null,
+      fromClaim: true,
+      by: s.by, at: s.at
+    };
+    var up = {};
+    up['status/' + oid + '/' + periodKey + '/' + clubCode] = rec;
+    up['claims/' + clubCode + '/' + oid + '/' + periodKey + '/review'] = { state: 'approved', by: s.by, at: s.at };
+    dataRef('').update(up).then(function () { touchLocal(oid, periodKey, clubCode, rec); done(); })
+      .catch(function (e) { NL.toast('Failed: ' + e.message, 'error'); });
+  }
+
+  /* Reject: the claim carries the reason, which the club reads on its page;
+     the period stays as it was, and the club can resubmit. */
+  function rejectClaim(oid, periodKey, clubCode, done) {
+    NL.prompt('What needs fixing? The club sees this.', {
+      title: 'Reject submission', confirmText: 'Reject', placeholder: 'e.g. The photo does not show the fixture date'
+    }).then(function (reason) {
+      if (reason == null) return;
+      reason = String(reason).trim().slice(0, 500);
+      if (!reason) { NL.toast('Give the club a reason', 'error'); return; }
+      var s = stamp();
+      dataRef('claims/' + clubCode + '/' + oid + '/' + periodKey + '/review')
+        .set({ state: 'rejected', reason: reason, by: s.by, at: s.at })
+        .then(done)
+        .catch(function (e) { NL.toast('Failed: ' + e.message, 'error'); });
+    });
+  }
+
+  function claimHtml(o, p, club) {
+    var claim = claimFor(o.id, p.key, club.code);
+    var st = CC.claimState(claim);
+    if (st === 'none' || st === 'approved') return '';
+    var files = claim.files ? Object.keys(claim.files).map(function (k) { return claim.files[k]; }) : [];
+    var head = st === 'rejected'
+      ? '<span class="pill pill--rejected">Rejected</span><span>' + esc(claim.review.reason || '') + '</span>'
+      : '<span class="pill pill--info">Submitted by the club</span><span class="cc-version">' + esc(claim.at ? NL.formatDateTime(claim.at) : '') + '</span>';
+    return '<div class="cc-claim"><div class="cc-claim__head">' + head + '</div>' +
+      (claim.note ? '<div>' + esc(claim.note) + '</div>' : '') +
+      (claim.link ? '<div class="cc-claim__files"><a href="' + esc(claim.link) + '" target="_blank" rel="noopener">' + esc(claim.link) + '</a></div>' : '') +
+      (files.length ? '<div class="cc-claim__files">' + files.map(function (f) {
+        return '<a href="' + esc(f.url) + '" target="_blank" rel="noopener">' + esc(f.name) + '</a>';
+      }).join('') + '</div>' : '') +
+      (st === 'pending' && STATE.canEdit
+        ? '<div class="cc-claim__acts"><button class="btn btn--primary btn--sm" data-approve="' + esc(p.key) + '" data-oid="' + esc(o.id) + '">Approve</button>' +
+          '<button class="btn btn--ghost btn--sm" data-reject="' + esc(p.key) + '" data-oid="' + esc(o.id) + '">Reject</button></div>'
+        : '') +
+      '</div>';
   }
 
   /* ── CSV export ─────────────────────────────────────────────────────── */
@@ -1432,6 +1556,7 @@
       var upcomingLeft = 2;
       var shown = periods.filter(function (p) {
         if (!many || showAll[o.id]) return true;
+        if (CC.claimState(claimFor(o.id, p.key, club.code)) === 'pending') return true;
         var st = map[p.key] && map[p.key].state;
         if (CC.isOverdue(p, t)) return st !== 'compliant';
         if (upcomingLeft > 0) { upcomingLeft--; return true; }
@@ -1477,7 +1602,7 @@
         return '<div class="cc-period"><div class="cc-period__when"><strong>' + esc(p.label) + '</strong>' +
           '<div class="cc-period__due' + (overdue ? ' is-overdue' : '') + '">' + (p.planned ? 'planned ' : 'due ') + esc(NL.formatDateShort(CC.ymd(p.due))) + (overdue ? ' — past deadline' : '') + '</div>' +
           slotInput + '</div>' +
-          seg + evid + '</div>';
+          seg + evid + claimHtml(o, p, club) + '</div>';
       }).join('');
     }
 
@@ -1494,6 +1619,9 @@
       wirePartnerLogos(body);
     }
     draw();
+    /* A submission arriving (or judged in another tab) while the sheet is
+       open redraws it; dropped once the modal has closed. */
+    STATE.redrawModal = function () { if (document.body.contains(body)) draw(); else STATE.redrawModal = null; };
 
     /* Quota slot planned-date edits — scheduling, so written straight to the
        obligation without a version bump (see _shared.js). */
@@ -1523,7 +1651,11 @@
         return;
       }
       var evBtn = e.target.closest('[data-evidence]');
-      if (evBtn) openEvidenceModal(evBtn.getAttribute('data-oid'), evBtn.getAttribute('data-evidence'), club.code, draw);
+      if (evBtn) { openEvidenceModal(evBtn.getAttribute('data-oid'), evBtn.getAttribute('data-evidence'), club.code, draw); return; }
+      var ap = e.target.closest('[data-approve]');
+      if (ap) { approveClaim(ap.getAttribute('data-oid'), ap.getAttribute('data-approve'), club.code, draw); return; }
+      var rj = e.target.closest('[data-reject]');
+      if (rj) rejectClaim(rj.getAttribute('data-oid'), rj.getAttribute('data-reject'), club.code, draw);
     });
   }
 
@@ -1619,6 +1751,7 @@
     document.getElementById('viewPartners').style.display = name === 'partners' ? '' : 'none';
     document.getElementById('viewCentral').style.display = name === 'central' ? '' : 'none';
     document.getElementById('viewEscalation').style.display = name === 'escalation' ? '' : 'none';
+    document.getElementById('viewReview').style.display = name === 'review' ? '' : 'none';
   }
 
   function wireStatic() {
@@ -1689,6 +1822,11 @@
       if (act === 'edit') openPartnerModal(id);
       else if (act === 'delete') deletePartner(id);
     });
+    document.getElementById('rvTable').addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-review]'); if (!btn) return;
+      var o = STATE.obligations[btn.getAttribute('data-review')], club = clubFor(btn.getAttribute('data-club'));
+      if (o && club) openComplianceModal([o], club, club.name + ' — ' + o.title);
+    });
     document.getElementById('escDivChips').addEventListener('click', function (e) {
       var chip = e.target.closest('.chip'); if (!chip) return;
       STATE.fEscDiv = chip.getAttribute('data-escdiv');
@@ -1722,7 +1860,7 @@
           '). If this tool is newly added, the RTDB rules publish has not run yet.';
         b.style.display = '';
       }
-      STATE.loaded.assets = STATE.loaded.partners = STATE.loaded.obligations = STATE.loaded.status = true;
+      STATE.loaded.assets = STATE.loaded.partners = STATE.loaded.obligations = STATE.loaded.status = STATE.loaded.claims = true;
       scheduleRender();
     }
     dataRef('assets').on('value', function (snap) {
@@ -1736,6 +1874,10 @@
     }, onDenied);
     dataRef('status').on('value', function (snap) {
       STATE.status = snap.val() || {}; STATE.loaded.status = true; scheduleRender();
+    }, onDenied);
+    dataRef('claims').on('value', function (snap) {
+      STATE.claims = snap.val() || {}; STATE.loaded.claims = true; scheduleRender();
+      if (STATE.redrawModal) STATE.redrawModal();
     }, onDenied);
   }
 

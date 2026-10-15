@@ -15,6 +15,7 @@
 //   footage/**            retired tool, files not yet cleared (see below)
 //   newsletter/library/** shared image library, staff accounts only
 //   partner-logos/**      commercial-compliance partner logos, staff accounts
+//   commercial-compliance/<CODE>/**  club evidence for compliance submissions, per-club
 //   programme/<CODE>/**   matchday programme packs, per-club
 //   data/**               the nightly pipeline's feeds, read-only to browsers
 //   brand-exposure/<id>/  per-match playback proxy + detections, staff accounts
@@ -74,6 +75,29 @@ service firebase.storage {
       allow write: if request.auth != null && request.auth.token.email != null
         && request.resource.size < 1 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
+    }
+
+    // ── Commercial Compliance — club evidence ─────────────────────────────
+    // Photos and PDFs a club attaches to a submission on /commercial-compliance/,
+    // under commercial-compliance/<CODE>/<oid>/<period>/. The club-code session
+    // carries `club: '<CODE>'`, compared against the path, so a club writes and
+    // reads its own folder and nothing else. Staff read through any portal
+    // account (an email claim); the console shows the files when reviewing.
+    // Delete is the club's (withdrawing a file before review) or staff's.
+    // The RTDB record is separately locked once approved, so a deleted file
+    // there leaves a dead link rather than rewriting what was judged.
+    match /commercial-compliance/{club}/{allPaths=**} {
+      allow read: if request.auth != null
+        && (request.auth.token.email != null || request.auth.token.club == club);
+      allow create: if request.auth != null && request.auth.token.club == club
+        && request.resource.size < 10 * 1024 * 1024
+        && (request.resource.contentType.matches('image/.*')
+            || request.resource.contentType == 'application/pdf')
+        // Not SVG: it executes when its download URL is opened inline from
+        // the bucket's own origin (the programme block below says the same).
+        && !request.resource.contentType.matches('image/svg.*');
+      allow delete: if request.auth != null
+        && (request.auth.token.email != null || request.auth.token.club == club);
     }
 
     // ── Brand Exposure ────────────────────────────────────────────────────

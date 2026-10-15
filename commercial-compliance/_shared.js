@@ -1,6 +1,13 @@
 /* Commercial Compliance — pure logic shared by the page and tests/commercial-compliance.test.mjs.
-   Version: v2.0 (24/08/2026)
+   Version: v36.0 (15/10/2026)
    File: /commercial-compliance/_shared.js
+   v36.0 (15/10/2026): club SUBMISSIONS. A club answers a period from the
+     club page (/commercial-compliance/) with a note, a link and files; the
+     record lives at claims/<club>/<oid>/<period> and carries a `review`
+     once the League has judged it. CC.claimState names its state and
+     CC.pendingClaims lists what is waiting for the League. A submission is
+     never a status: only an approval writes one, so every figure on the
+     dashboard is still the League's own judgement.
    v2.0 (24/08/2026): requirement kinds — 'recurring' (cadence as before),
      'quota' (N deliveries per season, slots q1..qN all due at season end),
      'standing' (always-true requirement verified by monthly spot-check).
@@ -259,6 +266,36 @@
       var rec = statusMap[p.key];
       return CC.isOverdue(p, today) && !(rec && rec.state);
     });
+  };
+
+  /* ── club submissions ───────────────────────────────────────────────── */
+
+  /* A claim's state: 'none' (no claim), 'pending' (submitted, not judged —
+     also a resubmission after a rejection, which drops the old review),
+     'approved' or 'rejected'. */
+  CC.claimState = function (claim) {
+    if (!claim) return 'none';
+    var r = claim.review && claim.review.state;
+    return r === 'approved' || r === 'rejected' ? r : 'pending';
+  };
+
+  /* Every pending claim, oldest first, from the claims tree
+     { club: { oid: { period: claim } } }.
+     → [{ club, oid, period, claim }] */
+  CC.pendingClaims = function (claims) {
+    var out = [];
+    Object.keys(claims || {}).forEach(function (club) {
+      var byO = claims[club] || {};
+      Object.keys(byO).forEach(function (oid) {
+        var byP = byO[oid] || {};
+        Object.keys(byP).forEach(function (period) {
+          if (CC.claimState(byP[period]) === 'pending') {
+            out.push({ club: club, oid: oid, period: period, claim: byP[period] });
+          }
+        });
+      });
+    });
+    return out.sort(function (a, b) { return (a.claim.at || 0) - (b.claim.at || 0); });
   };
 
   root.CC = CC;

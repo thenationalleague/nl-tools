@@ -1,29 +1,420 @@
 <!DOCTYPE html>
 <!--
-  NL Tools — redirect stub
+  NL Tools — Commercial Compliance (club page)
   Version: v36.0 (15/10/2026)
   File: /commercial-compliance/index.html
 
-  Reserved for the club view of Commercial Compliance: a club enters its
-  access code and sees, and answers, its own obligations. Until that page is
-  built, this address forwards to the League's console at /admin/, where the
-  tool lived until 15/10/2026.
-  GitHub Pages cannot send a 301, so this is a meta refresh plus a script
-  that keeps any query or hash, with a real link for a browser that
-  ignores both. No stylesheet, no script from /system/: a redirect that
-  waits on an asset can fail to happen.
+  CHANGELOG
+    v36.0 (15/10/2026) — First build. A club enters its access code and sees
+      the commercial obligations it owes this season, period by period, with
+      where each one stands. For any period not yet done it submits a note, a
+      link and files (photos or PDFs); the League approves (the period is
+      recorded compliant) or rejects with a reason shown here, and the club
+      can resubmit. Until this page existed the address forwarded to the
+      League's console, which is now /commercial-compliance/admin/.
+
+  THE GATE. The one club access code (system/club-code-plan.md), checked
+  server-side by NL.codeGate.viaFunction, which mints a token carrying
+  `club: '<CODE>'`. The RTDB rules on app-data/ops-commercial-compliance
+  open, to that claim:
+    · assets, partners, obligations         read (what is owed, to whom)
+    · status/<oid>/<period>/<CODE>          read, one leaf at a time — the
+                                            League's own record of the period
+    · claims/<CODE>/<oid>/<period>          read + write, never `review`, and
+                                            never once the review is approved
+  Storage: commercial-compliance/<CODE>/... for the files, same claim.
+  The gate is the screen; the rules are the boundary.
+
+  A SUBMISSION IS NOT A STATUS. What a club sends sits in claims/ until the
+  League judges it, so nothing a club does on this page changes a figure on
+  the League's dashboard. Approval writes the status.
+
+  A League holder of an access code (claim "NL") owes nothing as a club and
+  is pointed at the console instead.
+
+  No auth-guard: that gates NL accounts, and this page is entered by code.
 -->
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Commercial Compliance — The National League</title>
-  <meta http-equiv="refresh" content="0; url=/commercial-compliance/admin/">
-  <meta name="robots" content="noindex">
+  <!-- Favicons. Static, not injected: nl-topbar.js adds these too, but a
+       standalone page never loads it, and an icon that arrives with the JS
+       leaves the tab blank until it does. /favicon.ico at the root is the
+       backstop every browser asks for without being told. -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
-  <script>location.replace('/commercial-compliance/admin/' + location.search + location.hash);</script>
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="/system/nl-brand.css?v=67">
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+  </script>
+  <script src="/system/nl-utils.js?v=48"></script>
+  <!-- GA4 for nl.tools — cookieless, no banner, no identity. See system/nl-analytics.js -->
+  <script src="/system/nl-analytics.js?v=1"></script>
+  <script src="/commercial-compliance/_shared.js?v=2"></script>
+  <style>
+    /* One panel per obligation. The body is a list of periods: when, where
+       it stands, and the one thing to do about it. */
+    .cp-meta { font-size: var(--text-xs); color: var(--text-muted); margin-bottom: 8px; }
+    .cp-criteria { font-size: var(--text-sm); color: var(--text); margin: 0 0 4px; }
+    .cp-period {
+      display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px 12px; align-items: center;
+      padding: 10px 0; border-top: 1px solid var(--border);
+    }
+    .cp-period__when strong { display: block; font-size: var(--text-sm); }
+    .cp-period__due { font-size: var(--text-xs); color: var(--text-muted); }
+    .cp-period__note { grid-column: 1 / -1; font-size: var(--text-xs); color: var(--text-muted); }
+    .cp-period__note b { color: var(--text); }
+    .cp-earlier { font-size: var(--text-xs); color: var(--text-muted); padding-top: 10px; border-top: 1px solid var(--border); }
+    .cp-files { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+    .cp-file { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); }
+    .cp-file a { color: var(--navy); overflow-wrap: anywhere; }
+    .cp-section { margin-top: 16px; }
+    @media (max-width: 560px) {
+      .cp-period { grid-template-columns: minmax(0, 1fr) auto; }
+      .cp-period__act { grid-column: 1 / -1; justify-self: start; }
+    }
+  </style>
 </head>
 <body>
-  <p>This page has moved to <a href="/commercial-compliance/admin/">nl.tools/commercial-compliance/admin/</a>.</p>
+  <!-- White bar: no NL account is behind this page (nl-brand v2.51). -->
+  <header class="nl-idbar">
+    <img class="nl-idbar__crest" id="cpCrest" src="/assets/crests/National%20League%20rose.png"
+         alt="" width="42" height="42">
+    <div class="nl-idbar__id">
+      <div class="nl-idbar__title">Commercial Compliance</div>
+      <div class="nl-idbar__sub" id="cpClub">The National League</div>
+    </div>
+    <div class="nl-idbar__actions">
+      <button class="nl-idbar__btn" id="cpOut" type="button" hidden>Sign out</button>
+    </div>
+  </header>
+
+  <div class="gate" id="cpGate"></div>
+
+  <main class="page" id="cpShell" hidden>
+    <div id="cpBody"></div>
+  </main>
+
+<script>
+(function () {
+  'use strict';
+
+  var BASE = 'app-data/ops-commercial-compliance/';
+  var MAX_BYTES = 10 * 1024 * 1024;   /* the Storage rule's cap */
+  var db = firebase.database();
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return NL.escHtml(s); };
+  var S = { code: null, division: null, seasonKey: null, seasonLabel: '', obs: [], partners: {}, status: {}, claims: {} };
+
+  function message(title, html) {
+    $('cpBody').innerHTML = '<div class="empty-state"><div class="empty-state__title">' + esc(title) + '</div>' +
+      (html ? '<div class="empty-state__text">' + html + '</div>' : '') + '</div>';
+  }
+
+  /* ── where a period stands, from the club's side ──────────────────────
+     The League's record wins; then the club's own submission; then the
+     calendar. `act` is the button label, or null when nothing is owed. */
+  function standing(rec, claim, period, today) {
+    var cs = CC.claimState(claim);
+    if (rec && rec.state === 'compliant') return { pill: 'approved', label: 'Done', act: null };
+    if (cs === 'pending') return { pill: 'info', label: 'Awaiting review', act: 'Edit' };
+    if (cs === 'rejected') return { pill: 'rejected', label: 'Rejected', act: 'Resubmit', reason: claim.review.reason };
+    if (rec && rec.state === 'non-compliant') return { pill: 'rejected', label: 'Not met', act: 'Submit' };
+    if (CC.isOverdue(period, today)) return { pill: 'expired', label: 'Overdue', act: 'Submit' };
+    return { pill: 'pending', label: 'To do', act: 'Submit' };
+  }
+
+  /* Which periods to list. Weekly cadences run to 53 rows, so: everything
+     still owed up to today, anything with a submission, and the next two
+     upcoming (every slot, for a quota). Periods already done before the window are counted, not
+     listed. */
+  function windowFor(o, today) {
+    var periods = CC.periodsFor(o, S.seasonKey), upcoming = 2, shown = [], doneEarlier = 0;
+    periods.forEach(function (p) {
+      var rec = S.status[o.id] && S.status[o.id][p.key];
+      var claim = S.claims[o.id] && S.claims[o.id][p.key];
+      var done = rec && rec.state === 'compliant';
+      if (CC.isOverdue(p, today)) {
+        if (done && CC.claimState(claim) !== 'pending') doneEarlier++;
+        else shown.push(p);
+      } else if (o.kind === 'quota' || claim || done || upcoming > 0) {
+        /* A quota's slots are few and all due together: list every one. */
+        shown.push(p);
+        if (!claim && !done) upcoming--;
+      }
+    });
+    return { shown: shown, doneEarlier: doneEarlier, all: periods };
+  }
+
+  function partnerLine(o) {
+    return Object.keys(o.partnerIds || {}).filter(function (k) { return o.partnerIds[k]; })
+      .map(function (pid) { return (S.partners[pid] && S.partners[pid].name) || ''; })
+      .filter(Boolean).sort().join(', ');
+  }
+
+  function render() {
+    var today = new Date();
+    var counts = { act: 0, waiting: 0, done: 0 };
+    var panels = S.obs.map(function (o) {
+      var w = windowFor(o, today);
+      w.all.forEach(function (p) {
+        var st = standing(S.status[o.id] && S.status[o.id][p.key], S.claims[o.id] && S.claims[o.id][p.key], p, today);
+        if (st.label === 'Done') counts.done++;
+        else if (st.label === 'Awaiting review') counts.waiting++;
+        else if (st.label !== 'To do') counts.act++;
+      });
+      var rows = w.shown.map(function (p) {
+        var claim = S.claims[o.id] && S.claims[o.id][p.key];
+        var st = standing(S.status[o.id] && S.status[o.id][p.key], claim, p, today);
+        return '<div class="cp-period">' +
+          '<div class="cp-period__when"><strong>' + esc(p.label) + '</strong>' +
+            '<span class="cp-period__due">Due ' + esc(NL.formatDateShort(CC.ymd(p.due))) + '</span></div>' +
+          '<span class="pill pill--' + st.pill + '">' + esc(st.label) + '</span>' +
+          (st.act ? '<button type="button" class="btn btn--sm cp-period__act ' + (st.act === 'Edit' ? 'btn--ghost' : 'btn--primary') + '" data-oid="' +
+            esc(o.id) + '" data-period="' + esc(p.key) + '">' + esc(st.act) + '</button>' : '<span></span>') +
+          (st.reason ? '<div class="cp-period__note"><b>What needs fixing:</b> ' + esc(st.reason) + '</div>' : '') +
+        '</div>';
+      }).join('');
+      var partners = partnerLine(o);
+      return '<section class="form-panel cp-section">' +
+        '<div class="form-panel__head">' + esc(o.title) + '</div>' +
+        '<div class="form-panel__body">' +
+          '<div class="cp-meta">' + esc([partners, kindLabel(o)].filter(Boolean).join(' · ')) + '</div>' +
+          (o.criteria ? '<p class="cp-criteria">' + esc(o.criteria) + '</p>' : '') +
+          rows +
+          (w.doneEarlier ? '<div class="cp-earlier">' + w.doneEarlier + ' earlier ' + (w.doneEarlier === 1 ? 'period' : 'periods') + ' done</div>' : '') +
+        '</div></section>';
+    }).join('');
+    $('cpBody').innerHTML =
+      '<div class="section-head"><h2>' + esc(S.seasonLabel) + ' season</h2></div>' +
+      '<div class="stats">' +
+        '<div class="stat"><div class="stat__num">' + counts.act + '</div><div class="stat__label">Needs action</div></div>' +
+        '<div class="stat"><div class="stat__num">' + counts.waiting + '</div><div class="stat__label">Awaiting review</div></div>' +
+        '<div class="stat"><div class="stat__num">' + counts.done + '</div><div class="stat__label">Done</div></div>' +
+      '</div>' + panels;
+  }
+
+  function kindLabel(o) {
+    if (o.kind === 'quota') return Math.max(1, (o.quotaTarget | 0) || 1) + ' this season';
+    if (o.kind === 'standing') return 'Checked monthly';
+    return { season: 'Once a season', monthly: 'Monthly', weekly: 'Weekly' }[o.cadence || 'season'] || '';
+  }
+
+  /* ── submitting ──────────────────────────────────────────────────────── */
+
+  function safeName(name) {
+    return String(name || 'file').replace(/[^A-Za-z0-9._-]+/g, '-').slice(-80);
+  }
+
+  function openSubmit(oid, periodKey) {
+    var o = S.obs.filter(function (x) { return x.id === oid; })[0];
+    var p = o && CC.periodsFor(o, S.seasonKey).filter(function (x) { return x.key === periodKey; })[0];
+    if (!o || !p) return;
+    var prev = (S.claims[oid] && S.claims[oid][periodKey]) || {};
+    var kept = {};
+    Object.keys(prev.files || {}).forEach(function (k) { kept[k] = prev.files[k]; });
+
+    var body = document.createElement('div');
+    body.innerHTML =
+      (o.criteria ? '<p class="cp-criteria">' + esc(o.criteria) + '</p>' : '') +
+      '<div class="form-group"><label for="cpNote">Note</label>' +
+        '<textarea id="cpNote" maxlength="1000">' + esc(prev.note || '') + '</textarea></div>' +
+      '<div class="form-group"><label for="cpLink">Link</label>' +
+        '<input id="cpLink" type="url" maxlength="500" placeholder="https://" value="' + esc(prev.link || '') + '"></div>' +
+      '<div class="form-group"><label for="cpFiles">Photos or PDFs</label>' +
+        '<input id="cpFiles" type="file" multiple accept="image/jpeg,image/png,image/webp,image/heic,application/pdf">' +
+        '<div class="form-hint">Up to 10MB each.</div>' +
+        '<div class="cp-files" id="cpKept"></div></div>';
+
+    function drawKept() {
+      body.querySelector('#cpKept').innerHTML = Object.keys(kept).map(function (k) {
+        return '<div class="cp-file"><a href="' + esc(kept[k].url) + '" target="_blank" rel="noopener">' + esc(kept[k].name) + '</a>' +
+          '<button type="button" class="btn btn--ghost btn--sm" data-drop="' + esc(k) + '">Remove</button></div>';
+      }).join('');
+    }
+    drawKept();
+    body.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-drop]');
+      if (b) { delete kept[b.getAttribute('data-drop')]; drawKept(); }
+    });
+
+    var ctrl = NL.modal({
+      title: o.title + ' — ' + p.label,
+      body: body,
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Submit', className: 'btn--primary', onClick: function (c) { send(c); } }
+      ]
+    });
+
+    function send(c) {
+      var note = body.querySelector('#cpNote').value.trim();
+      var link = body.querySelector('#cpLink').value.trim();
+      var picked = Array.prototype.slice.call(body.querySelector('#cpFiles').files || []);
+      if (link && !/^https?:\/\//i.test(link)) { NL.toast('The link must start with https://', 'error'); return; }
+      var big = picked.filter(function (f) { return f.size >= MAX_BYTES; })[0];
+      if (big) { NL.toast(big.name + ' is over 10MB', 'error'); return; }
+      if (!note && !link && !picked.length && !Object.keys(kept).length) {
+        NL.toast('Add a note, a link or a file', 'error'); return;
+      }
+      var btns = c.el.querySelectorAll('.modal__footer button');
+      Array.prototype.forEach.call(btns, function (b) { b.disabled = true; });
+      var go = btns[btns.length - 1], go0 = go.textContent;
+
+      /* One at a time, so the button can say which file is going up and a
+         refusal names the file that caused it.
+         CANON CANDIDATE (15/10/2026): a club page uploading into its own
+         Storage folder with progress and a named refusal is the second of its
+         kind (Programme Packs is the first). A third should promote it. */
+      var files = {}, i = 0;
+      Object.keys(kept).forEach(function (k) { files[k] = kept[k]; });
+      function next() {
+        if (i >= picked.length) return Promise.resolve();
+        var f = picked[i++];
+        go.textContent = 'Uploading ' + i + ' of ' + picked.length + '…';
+        var fid = Date.now().toString(36) + i;
+        var path = 'commercial-compliance/' + S.code + '/' + oid + '/' + periodKey + '/' + fid + '-' + safeName(f.name);
+        var type = f.type || (/\.pdf$/i.test(f.name) ? 'application/pdf' : 'application/octet-stream');
+        var ref = firebase.storage().ref(path);
+        return ref.put(f, { contentType: type }).then(function () { return ref.getDownloadURL(); })
+          .then(function (url) {
+            files[fid] = { name: f.name.slice(0, 160), path: path, url: url, size: f.size, type: type.slice(0, 100) };
+            return next();
+          }, function (err) {
+            throw new Error(err && err.code === 'storage/unauthorized'
+              ? f.name + ' was refused (photos and PDFs only, under 10MB)'
+              : 'Upload failed: ' + ((err && err.message) || err));
+          });
+      }
+      next().then(function () {
+        go.textContent = 'Saving…';
+        var rec = { at: firebase.database.ServerValue.TIMESTAMP };
+        if (note) rec.note = note;
+        if (link) rec.link = link;
+        if (Object.keys(files).length) rec.files = files;
+        /* set, not update: a resubmission replaces the whole record, which
+           is what drops the old rejection. */
+        return db.ref(BASE + 'claims/' + S.code + '/' + oid + '/' + periodKey).set(rec);
+      }).then(function () {
+        c.close();
+        NL.toast('Submitted. The League will review it.', 'success');
+      }).catch(function (err) {
+        Array.prototype.forEach.call(btns, function (b) { b.disabled = false; });
+        go.textContent = go0;
+        NL.toast((err && err.message) || 'Could not submit', 'error');
+      });
+    }
+  }
+
+  /* ── loading ─────────────────────────────────────────────────────────── */
+
+  /* The League's record, one leaf per period the page lists: the rules open
+     status/<oid>/<period>/<CODE> and nothing wider, so there is no single
+     read that returns a club's statuses. Every period of the season is
+     read, so the counts at the top cover the whole season. */
+  function loadStatus() {
+    var reads = [];
+    S.obs.forEach(function (o) {
+      S.status[o.id] = {};
+      CC.periodsFor(o, S.seasonKey).forEach(function (p) {
+        reads.push(db.ref(BASE + 'status/' + o.id + '/' + p.key + '/' + S.code).once('value').then(function (snap) {
+          if (snap.val()) S.status[o.id][p.key] = snap.val();
+        }));
+      });
+    });
+    return Promise.all(reads);
+  }
+
+  function start(session) {
+    $('cpGate').hidden = true;
+    $('cpShell').hidden = false;
+    $('cpOut').hidden = false;
+
+    var code = session && session.role;
+    if (!code || code === '*' || code === 'NL') {
+      message('This page is for a club’s own obligations',
+        'League staff: every club is on <a href="/commercial-compliance/admin/">the console</a>.');
+      return;
+    }
+    S.code = code;
+    message('Loading…');
+
+    NL.clubs.load().then(function (meta) {
+      S.seasonKey = NL.season.current(meta) || String(NL.season.fromDate());
+      S.seasonLabel = CC.seasonLabel(S.seasonKey);
+      return NL.clubs.forSeason();
+    }).then(function (clubs) {
+      var me = clubs.filter(function (c) { return c.code === code; })[0];
+      var name = (me && me.name) || (session && session.name) || code;
+      S.division = me && me.division;
+      $('cpClub').textContent = name;
+      var crest = $('cpCrest');
+      crest.src = NL.clubs.crestUrl(name, 'thumb');
+      NL.clubs.wireCrestImg(crest, name);
+      return Promise.all([
+        db.ref(BASE + 'obligations').once('value'),
+        db.ref(BASE + 'partners').once('value')
+      ]);
+    }).then(function (got) {
+      var all = got[0].val() || {};
+      S.partners = got[1].val() || {};
+      S.obs = Object.keys(all).map(function (id) { var o = all[id]; o.id = id; return o; })
+        .filter(function (o) {
+          return (o.state === 'active' || !o.state) && (o.scope || 'clubs') === 'clubs' &&
+            (!o.season || o.season === S.seasonKey) && CC.appliesTo(o, S.division, code);
+        })
+        .sort(function (a, b) { return String(a.title).localeCompare(String(b.title)); });
+      if (!S.obs.length) { message('Nothing owed this season'); return; }
+      return loadStatus().then(function () {
+        /* Live: a decision made in the console shows here without a reload. */
+        db.ref(BASE + 'claims/' + code).on('value', function (snap) {
+          S.claims = snap.val() || {};
+          render();
+        }, function (e) {
+          console.error('[compliance]', e);
+          message('Could not load your submissions', 'Reload the page to try again.');
+        });
+      });
+    }).catch(function (e) {
+      console.error('[compliance]', e);
+      message('Could not load', 'Reload the page to try again.');
+    });
+  }
+
+  $('cpBody').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-oid]');
+    if (b) openSubmit(b.getAttribute('data-oid'), b.getAttribute('data-period'));
+  });
+
+  $('cpOut').addEventListener('click', function () {
+    NL.codeGate.signOut().then(function () { location.reload(); });
+  });
+
+  NL.codeGate.ensure({
+    mount: $('cpGate'),
+    title: 'Commercial Compliance',
+    sub: 'Enter your access code.',
+    numeric: false,
+    verify: NL.codeGate.viaFunction('app-data/club-codes', { tool: 'compliance' }),
+    claim: 'club'
+  }).then(start);
+})();
+</script>
 </body>
 </html>

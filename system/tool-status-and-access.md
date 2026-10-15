@@ -101,7 +101,7 @@ portal session as well, and the address clubs hold never changes.
 | Club Kits | no club page any more: the console is the root (public form retired 15/10/2026) |
 | Handbook, Club Directory | **as they are for now; planned, not scheduled** (Richard, 15/10/2026): the full portal tool moves to `/admin/`; the Directory's code-gated `/editor/` (a stopgap for editors without a portal login) retires; `/reader/` retires into a redirect. `/public/` (open, noindex) is unaffected. What then sits at the root is open, and by the rule above it is the club's page. |
 | Responsibilities (`/view/`), UW Promo | kept as they are, by decision |
-| Commercial Compliance | console moved to `/admin/` (15/10/2026); the root is reserved for the club view, and redirects to `/admin/` until it is built. |
+| Commercial Compliance | follows it (15/10/2026): the root is the club page (club access code; own obligations; submit a note, link and files per period), `/admin/` the console, which approves or rejects. |
 
 A page that moves leaves a redirect stub at its old address; clubs hold
 links this repo cannot see.
