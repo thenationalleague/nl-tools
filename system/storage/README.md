@@ -66,6 +66,11 @@ worth knowing:
   seeded by running the Action with a `seed_sources_from` date rather than
   from git history, and its fetch step refuses to run if the archive did not
   come down from the bucket and no seed date was given.
+- **`performance.json`** (added 15/10/2026) is first-7-day views per article,
+  built each night from the index and `ga-sources-archive.json` by
+  `build-performance.js`. The Website Archive's Performance tab reads it, so it
+  is uploaded with a download token like the index. It is rebuilt from scratch
+  every night, so it needs no seed and nothing is lost if it goes missing.
 - **The first run needs a seed.** [`seed-data-bucket.yml`](../../.github/workflows/seed-data-bucket.yml)
   restores all three from git history. It doubles as the recovery route if an
   object is ever deleted — but only while the history still holds them.

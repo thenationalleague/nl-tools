@@ -1,6 +1,6 @@
 /* =======================================================================
    NL Website Archive - GA Daily Traffic Sources
-   Version: 1.0
+   Version: 1.1
    Date: 15/10/2026
 
    Queries GA4 for news-article page views per day, per channel (Organic
@@ -16,11 +16,17 @@
      assets/data/ga-sources-archive.json   Accumulating archive
 
    WHAT IS KEPT
-     Only /news/ paths, and for those only the first KEEP_DAYS days after
-     the publish date in the URL (/news/2026/september/2/...). The
-     Performance tab measures launch performance, and without this cut the
-     archive would grow every night with long-tail views of years-old
-     articles. A /news/ path with no readable date is kept in full.
+     Article paths only:
+       - /news/ paths, for the first KEEP_DAYS days after the publish date
+         in the URL (/news/2026/september/2/...). Without this cut the
+         archive would grow every night with long-tail views of years-old
+         articles. A /news/ path with no readable date is kept in full.
+       - Pre-migration paths: before the October 2025 site move, articles
+         lived at the root as /slug-12345. Those carry no date, so they are
+         kept in full. GA4 holds them from November 2024 until the move, so
+         they are a fixed, finite set rather than something that grows.
+     rebuild-index.js joins both shapes to an article by the trailing
+     numeric ID, and build-performance.js does the same.
 
    RUN MODES
      Nightly (archive present):  re-fetch the last REFRESH_DAYS days and
@@ -65,6 +71,11 @@
      the range are left untouched.
 
    CHANGELOG
+   v1.1 (15/10/2026) - Keeps pre-migration /slug-12345 paths, which v1.0
+                       dropped, losing first-7-day views for everything
+                       published before the October 2025 site move. Prints
+                       a ::notice summary so the run page shows the result
+                       without opening the log.
    v1.0 (15/10/2026) - Initial build. Nightly 14-day refresh, monthly
                        chunked seeding from SOURCES_FROM, /news/ paths
                        only, first 31 days after publish only.
@@ -112,7 +123,10 @@ function publishDay(p) {
  * Keep news paths only, and only from the day before publish (time zones)
  * to KEEP_DAYS after it. Undated news paths are kept whole.
  */
+const LEGACY_RX = /^\/[^/]+-\d+$/;
+
 function keepRow(p, day) {
+  if (LEGACY_RX.test(p)) return true;
   if (!p.startsWith('/news/')) return false;
   const pub = publishDay(p);
   if (pub === null) return true;
@@ -294,10 +308,18 @@ async function main() {
   log('  points:        ' + pointCount.toLocaleString());
   log('  earliest data: ' + earliestIso);
   log('  file size:     ' + sizeMB + 'MB');
+
+  // A notice shows on the run's summary page, so the outcome can be read
+  // without opening the step log.
+  if (process.env.GITHUB_ACTIONS) {
+    console.log('::notice title=GA traffic sources::' + mode + ' ' + startDate + ' to ' + endDate +
+      ', data from ' + earliestIso + ', ' + payload.pathCount + ' paths, ' + pointCount + ' points, ' + sizeMB + 'MB');
+  }
 }
 
 if (require.main === module) {
   main().catch(err => {
+    if (process.env.GITHUB_ACTIONS) console.log('::error title=GA traffic sources::' + String(err.message).replace(/\r?\n/g, ' '));
     console.error('FATAL:', err.message);
     if (err.stack) console.error(err.stack);
     process.exit(1);

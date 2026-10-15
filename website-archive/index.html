@@ -3,10 +3,36 @@
 <head>
 <!--
   NL Tools — Website Archive
-  Version: 2.9
-  Date: 17/08/2026
+  Version: 3.0
+  Date: 15/10/2026
 
   CHANGELOG
+  v3.0 (15/10/2026)
+    - New Performance tab beside Browse: a month at a glance, judged on each
+      article's views in its first 7 days rather than lifetime totals.
+      Reads data/performance.json, written nightly by
+      scripts/build-performance.js from the daily traffic-sources archive.
+    - Every article is coloured against the "usual" for its month, on seven
+      steps from red through grey to green. The usual is the median of the
+      same month last year where that month has 15+ articles, otherwise the
+      three months before. It is site-wide, so filtering to one author shows
+      them against everyone's normal.
+    - Calendar of the month (day shading capped at the 95th percentile so
+      one big day does not wash out the rest), headline figures led by
+      medians, most and least read, and a drop-off panel for recurring
+      formats matched on headline (PERF_FORMATS - a stand-in until our own
+      tags exist).
+    - "Views from" switcher recolours everything by one source: Search,
+      Social, Direct or Referral. AI assistant referrals get their own
+      headline figure.
+    - Selected-article panel: views by day across the first week, sources
+      for the first week, and Open article into the existing reader, whose
+      arrows then step through that month.
+    - Bylines on this tab: blank reads as The National League, joint
+      bylines count for each person, and spellings one letter apart are
+      folded together.
+    - Article reader: AI Assistant and Organic Shopping get their own
+      colours in the traffic sources bar (both fell back to grey).
   v2.8 (17/08/2026)
     - Manage rights read session.toolLevel (auth-guard v6.5) instead of
       deriving them here. v2.7 fixed the entry SHAPE but kept the same blind
@@ -250,6 +276,15 @@
 
   window.NL_CHANGELOG = [
     {
+      date: '15 October 2026',
+      version: 'v3.0',
+      items: [
+        'New Performance tab: a calendar month at a glance, with every article coloured against the usual for that month, based on its views in its first 7 days.',
+        'Switch the colours to one source (Search, Social, Direct or Referral), filter by author, and see how recurring formats hold their readers across the season.',
+        'Visits from AI assistants now have their own colour in the article’s traffic sources, and their own figure on the Performance tab.'
+      ]
+    },
+    {
       date: '17 August 2026',
       version: 'v2.8',
       items: [
@@ -404,6 +439,148 @@
   outline: none;
   border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(158,0,0,0.10);
+}
+
+/* ============ TABS (Browse | Performance) ============ */
+.archive-tabs { max-width: 420px; }
+
+/* ============ PERFORMANCE TAB ============
+   Seven bands against the usual for the month: red below, grey on par,
+   green above. Built from the system hues rather than new tokens - these
+   are this tool's states (see the policy block atop nl-brand.css). The two
+   ends are dark and the middle light, so the order still reads for anyone
+   who can't separate red from green. */
+.perf {
+  --pb-0: var(--red);
+  --pb-1: color-mix(in srgb, var(--red) 62%, white);
+  --pb-2: color-mix(in srgb, var(--red) 28%, white);
+  --pb-3: var(--navy-100);
+  --pb-4: color-mix(in srgb, var(--green) 28%, white);
+  --pb-5: color-mix(in srgb, var(--green) 62%, white);
+  --pb-6: var(--green);
+}
+.pb-0 { background: var(--pb-0); color: var(--white); }
+.pb-1 { background: var(--pb-1); color: var(--text); }
+.pb-2 { background: var(--pb-2); color: var(--text); }
+.pb-3 { background: var(--pb-3); color: var(--text); }
+.pb-4 { background: var(--pb-4); color: var(--text); }
+.pb-5 { background: var(--pb-5); color: var(--text); }
+.pb-6 { background: var(--pb-6); color: var(--white); }
+.pb-none { background: var(--white); color: var(--text-muted); }
+
+.perf-bar {
+  background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 14px 18px; margin-bottom: 16px;
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px 24px;
+}
+.perf-month { display: flex; align-items: center; gap: 6px; }
+.perf-month h2 {
+  margin: 0; min-width: 11ch; text-align: center;
+  font-size: var(--text-lg); font-weight: 900; font-variation-settings: 'wght' 900;
+}
+.perf-month button {
+  width: 40px; height: 40px; border-radius: var(--radius); border: 1px solid var(--border);
+  background: var(--white); color: var(--navy); font-size: var(--text-lg); line-height: 1; cursor: pointer;
+}
+.perf-month button:disabled { opacity: .35; cursor: default; }
+.perf-month button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+#perfAuthor { min-width: 200px; min-height: 40px; }
+#perfFrom { flex-wrap: wrap; }
+.perf-note { margin-left: auto; align-self: center; max-width: 42ch; text-align: right; font-size: var(--text-xs); color: var(--text-muted); }
+
+.perf-card {
+  background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 16px; margin-bottom: 16px; min-width: 0;
+}
+.perf-card h3 { margin: 0 0 8px; font-size: var(--text-md); font-weight: 900; font-variation-settings: 'wght' 900; }
+.perf-card__sub { margin: -4px 0 12px; font-size: var(--text-sm); color: var(--text-muted); }
+
+.perf-kpis { margin: 0 0 14px; display: flex; flex-wrap: wrap; gap: 12px 36px; }
+.perf-kpi dt { font-size: var(--text-xs); font-weight: 800; font-variation-settings: 'wght' 800; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); }
+.perf-kpi dd { margin: 2px 0 0; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.perf-kpi__num { font-size: var(--text-xl); font-weight: 900; font-variation-settings: 'wght' 900; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.perf-delta { font-size: var(--text-xs); font-weight: 800; font-variation-settings: 'wght' 800; }
+.perf-delta--up { color: var(--green); }
+.perf-delta--down { color: var(--red); }
+.perf-delta--muted { color: var(--text-muted); font-weight: 600; font-variation-settings: 'wght' 600; }
+
+.perf-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 14px; font-size: var(--text-xs); color: var(--text-muted); }
+.perf-legend__label { font-weight: 800; font-variation-settings: 'wght' 800; text-transform: uppercase; letter-spacing: .08em; }
+.perf-legend__swatches { display: flex; flex-wrap: wrap; gap: 4px; }
+.perf-swatch { font-size: var(--text-xs); font-weight: 800; font-variation-settings: 'wght' 800; padding: 3px 8px; border-radius: var(--radius-sm); }
+.perf-swatch.pb-none, .perf-dot.pb-none { border: 1.5px dashed var(--navy-300); }
+
+.perf-main { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+.perf-cal-wrap { flex: 999 1 640px; min-width: 0; overflow-x: auto; }
+.perf-cal { min-width: 640px; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.perf-dow { font-size: var(--text-xs); font-weight: 800; font-variation-settings: 'wght' 800; color: var(--text-muted); padding: 2px 6px; }
+.perf-day {
+  min-height: 116px; border-radius: var(--radius); padding: 6px; border: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 3px; background: var(--white); min-width: 0;
+}
+.perf-day--out { background: var(--off-white); border-color: var(--navy-50); color: var(--navy-300); }
+.perf-day--s1 { background: var(--navy-50); }
+.perf-day--s2 { background: color-mix(in srgb, var(--navy-100) 50%, var(--navy-50)); }
+.perf-day--s3 { background: var(--navy-100); }
+.perf-day--s4 { background: color-mix(in srgb, var(--navy-200) 45%, var(--navy-100)); }
+.perf-day__head { display: flex; justify-content: space-between; align-items: baseline; gap: 4px; }
+.perf-day__num { font-size: var(--text-sm); font-weight: 900; font-variation-settings: 'wght' 900; }
+.perf-day__total { font-size: var(--text-xs); color: var(--navy-600); font-variant-numeric: tabular-nums; }
+.perf-chip {
+  display: flex; align-items: center; gap: 5px; width: 100%; min-height: 24px; padding: 2px 5px;
+  border-radius: var(--radius-sm); border: 1px solid transparent; background: var(--white);
+  font-family: var(--font); font-size: var(--text-xs); text-align: left; color: var(--text); cursor: pointer;
+}
+.perf-chip:hover { border-color: var(--navy-200); }
+.perf-chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.perf-chip.is-sel { border-color: var(--primary); }
+.perf-chip--prov { color: var(--text-muted); border: 1px dashed var(--navy-200); }
+.perf-chip__t { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.perf-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; box-shadow: inset 0 0 0 1px var(--navy-200); box-sizing: border-box; }
+.perf-more { font-size: var(--text-xs); color: var(--text-muted); padding-left: 4px; }
+
+.perf-aside { flex: 1 1 280px; min-width: 0; border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.perf-aside__eyebrow { font-size: var(--text-xs); font-weight: 800; font-variation-settings: 'wght' 800; color: var(--primary); text-transform: uppercase; letter-spacing: .08em; }
+.perf-aside__title { font-size: var(--text-md); font-weight: 900; font-variation-settings: 'wght' 900; line-height: 1.3; }
+.perf-aside__meta { font-size: var(--text-sm); color: var(--text-muted); }
+.perf-mini { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.perf-mini > div { background: var(--off-white); border-radius: var(--radius); padding: 10px; }
+.perf-mini__label { font-size: var(--text-xs); color: var(--text-muted); }
+.perf-mini__val { font-size: var(--text-md); font-weight: 900; font-variation-settings: 'wght' 900; font-variant-numeric: tabular-nums; }
+.perf-curve { display: flex; align-items: flex-end; gap: 4px; height: 72px; border-bottom: 1px solid var(--navy-200); }
+.perf-curve > div { flex: 1; background: var(--navy-400); border-radius: 3px 3px 0 0; min-height: 2px; }
+.perf-curve-labels { display: flex; justify-content: space-between; font-size: var(--text-xs); color: var(--text-muted); }
+.perf-aside .modal-sources { margin: 0; }
+
+.perf-lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 16px; }
+.perf-lists .perf-card { margin-bottom: 16px; }
+.perf-list { margin: 0; padding: 0; list-style: none; }
+.perf-row {
+  width: 100%; display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 10px; align-items: center;
+  background: none; border: 0; border-bottom: 1px solid var(--navy-50); padding: 10px 4px; min-height: 44px;
+  text-align: left; cursor: pointer; color: var(--text); font-family: var(--font);
+}
+.perf-row:hover { background: var(--off-white); }
+.perf-row:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.perf-row__t { display: block; font-size: var(--text-sm); font-weight: 600; font-variation-settings: 'wght' 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.perf-row__m { font-size: var(--text-xs); color: var(--text-muted); }
+.perf-row__n { font-weight: 900; font-variation-settings: 'wght' 900; font-variant-numeric: tabular-nums; }
+.perf-row .perf-dot { width: 12px; height: 12px; }
+
+.perf-formats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 16px; }
+.perf-format { border: 1px solid var(--navy-50); border-radius: var(--radius); padding: 12px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.perf-format__head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.perf-format__name { font-size: var(--text-base); font-weight: 900; font-variation-settings: 'wght' 900; }
+.perf-format__who { font-size: var(--text-xs); color: var(--text-muted); }
+.perf-format__chg { font-size: var(--text-lg); font-weight: 900; font-variation-settings: 'wght' 900; }
+.perf-bars { height: 130px; display: flex; align-items: flex-end; gap: 4px; border-bottom: 1px solid var(--navy-200); }
+.perf-bars > div { flex: 1; min-width: 6px; border-radius: 3px 3px 0 0; box-shadow: inset 0 0 0 1px var(--navy-100); }
+.perf-bars-labels { display: flex; justify-content: space-between; font-size: var(--text-xs); color: var(--text-muted); }
+.perf-empty { padding: 32px 12px; text-align: center; color: var(--text-muted); font-size: var(--text-sm); }
+
+@media (max-width: 560px) {
+  .perf-note { margin-left: 0; text-align: left; }
+  #perfAuthor { min-width: 0; width: 100%; }
 }
 
 .scope {
@@ -1221,6 +1398,13 @@
 <div id="nlTopbar"></div>
 <div class="main" id="mainContent">
 
+  <div class="tabs archive-tabs" role="tablist" aria-label="Archive sections">
+    <button class="tab active" id="tabBrowse" role="tab" aria-selected="true" aria-controls="browsePane" data-pane="browse">Browse</button>
+    <button class="tab" id="tabPerf" role="tab" aria-selected="false" aria-controls="perfPane" data-pane="performance">Performance</button>
+  </div>
+
+  <div id="browsePane" role="tabpanel" aria-labelledby="tabBrowse">
+
   <!-- FILTERS -->
   <div class="filters">
     <div class="filters__row">
@@ -1301,6 +1485,42 @@
     <div class="loading">
       <div class="spinner-inline"></div>
       <div>Loading archive index…</div>
+    </div>
+  </div>
+
+  </div><!-- /browsePane -->
+
+  <!-- PERFORMANCE -->
+  <div id="perfPane" class="perf" role="tabpanel" aria-labelledby="tabPerf" hidden>
+    <div class="perf-bar">
+      <div class="field">
+        <span class="field__label">Month</span>
+        <div class="perf-month">
+          <button type="button" id="perfPrev" aria-label="Previous month">‹</button>
+          <h2 id="perfMonth">–</h2>
+          <button type="button" id="perfNext" aria-label="Next month">›</button>
+        </div>
+      </div>
+      <div class="field">
+        <label class="field__label" for="perfAuthor">Author</label>
+        <select class="nl-select" id="perfAuthor">
+          <option value="">Any author</option>
+        </select>
+      </div>
+      <div class="field">
+        <span class="field__label" id="perfFromLabel">Views from</span>
+        <div class="chip-group" id="perfFrom" role="radiogroup" aria-labelledby="perfFromLabel">
+          <button type="button" class="chip active" role="radio" aria-checked="true" data-from="all">All</button>
+          <button type="button" class="chip" role="radio" aria-checked="false" data-from="Organic Search">Search</button>
+          <button type="button" class="chip" role="radio" aria-checked="false" data-from="Organic Social">Social</button>
+          <button type="button" class="chip" role="radio" aria-checked="false" data-from="Direct">Direct</button>
+          <button type="button" class="chip" role="radio" aria-checked="false" data-from="Referral">Referral</button>
+        </div>
+      </div>
+      <div class="perf-note" id="perfNote"></div>
+    </div>
+    <div id="perfBody">
+      <div class="loading"><div class="spinner-inline"></div><div>Loading performance…</div></div>
     </div>
   </div>
 
@@ -1424,6 +1644,7 @@ var STATE = {
   filtered: [],
   view: 'grid',
   modalIndex: -1,
+  modalList: [],    // the list the modal steps through: Browse results, or a Performance month
   bodyCache: {},
   searchTimer: null,
   isAdmin: false,
@@ -1586,6 +1807,7 @@ function init() {
 
   wireControls();
   loadIndex();
+  wireTabs();
 }
 
 function wireControls() {
@@ -1654,7 +1876,7 @@ function wireControls() {
 
 /* ============ DATA LOAD ============ */
 function loadIndex() {
-  NL.ensureAuth()
+  STATE.indexReady = NL.ensureAuth()
     .then(function() { return firebase.storage().ref(INDEX_PATH).getDownloadURL(); })
     .then(function(url) { return fetch(url, { cache: 'no-cache' }); })
     .then(function(r) {
@@ -1956,7 +2178,14 @@ function applyViewToggleUI() {
 
 /* ============ MODAL ============ */
 function openModal(index) {
-  if (index < 0 || index >= STATE.filtered.length) return;
+  openModalFrom(STATE.filtered, index);
+}
+
+/* Open the reader on any list of index articles - the Performance tab passes
+   the month it is showing, so the arrow keys step through that month. */
+function openModalFrom(list, index) {
+  if (!list || index < 0 || index >= list.length) return;
+  STATE.modalList = list;
   STATE.modalIndex = index;
   $('modalBackdrop').classList.add('open');
   document.body.style.overflow = 'hidden';
@@ -1971,21 +2200,21 @@ function closeModal() {
 
 function navModal(delta) {
   var next = STATE.modalIndex + delta;
-  if (next < 0 || next >= STATE.filtered.length) return;
+  if (next < 0 || next >= STATE.modalList.length) return;
   STATE.modalIndex = next;
   renderModal();
   $('modalBody').scrollTop = 0;
 }
 
 function renderModal() {
-  var a = STATE.filtered[STATE.modalIndex];
+  var a = STATE.modalList[STATE.modalIndex];
   if (!a) return;
 
-  var metaText = (a.newsCategory || '—') + ' · ' + formatDateLong(a.publishedDateTime) + ' · ' + ((a.postAuthor || '').trim() || '—') + '   ·   ' + (STATE.modalIndex + 1) + ' of ' + STATE.filtered.length;
+  var metaText = (a.newsCategory || '—') + ' · ' + formatDateLong(a.publishedDateTime) + ' · ' + ((a.postAuthor || '').trim() || '—') + '   ·   ' + (STATE.modalIndex + 1) + ' of ' + STATE.modalList.length;
   $('modalMeta').textContent = metaText;
 
   $('prevBtn').disabled = STATE.modalIndex <= 0;
-  $('nextBtn').disabled = STATE.modalIndex >= STATE.filtered.length - 1;
+  $('nextBtn').disabled = STATE.modalIndex >= STATE.modalList.length - 1;
 
   var onSite = a.postSlug ? (SITE_BASE + a.postSlug) : '#';
   $('readOnSite').href = onSite;
@@ -2003,7 +2232,7 @@ function renderModal() {
   fetchArticleBody(a.postSlug).then(function(content) {
     STATE.bodyCache[a.postSlug] = { content: content, ts: Date.now() };
     persistBodyCache();
-    var current = STATE.filtered[STATE.modalIndex];
+    var current = STATE.modalList[STATE.modalIndex];
     if (current && current.postSlug === a.postSlug) {
       renderModalBody(a, content);
     }
@@ -2252,6 +2481,8 @@ function buildTrafficSourceBar(sources, totalViews) {
     'Email':                '#f57c00',
     'Display':              '#c2185b',
     'Organic Video':        '#d81b60',
+    'Organic Shopping':     '#9e9d24',
+    'AI Assistant':         '#b8860b',
     'Paid Video':           '#880e4f',
     'Cross-network':        '#6a1b9a',
     'Affiliates':           '#ad1457',
@@ -2542,6 +2773,500 @@ function downloadCSV(csv, format) {
 }
 
 
+/* ============ TABS ============ */
+function wireTabs() {
+  $('tabBrowse').addEventListener('click', function() { showPane('browse'); });
+  $('tabPerf').addEventListener('click', function() { showPane('performance'); });
+  window.addEventListener('hashchange', function() {
+    showPane(location.hash === '#performance' ? 'performance' : 'browse', true);
+  });
+  if (location.hash === '#performance') showPane('performance', true);
+}
+
+function showPane(name, fromHash) {
+  var perf = name === 'performance';
+  $('browsePane').hidden = perf;
+  $('perfPane').hidden = !perf;
+  $('tabBrowse').classList.toggle('active', !perf);
+  $('tabPerf').classList.toggle('active', perf);
+  $('tabBrowse').setAttribute('aria-selected', String(!perf));
+  $('tabPerf').setAttribute('aria-selected', String(perf));
+  if (!fromHash) {
+    var want = perf ? '#performance' : '';
+    if (location.hash !== want) history.replaceState(null, '', location.pathname + location.search + want);
+  }
+  if (perf) perfOpen();
+}
+
+/* ============ PERFORMANCE TAB ============
+   First-7-day views per article, from data/performance.json (written nightly
+   by scripts/build-performance.js), joined to the index by postID. Each
+   article is coloured against the "usual" for its month: the median of the
+   same month last year when that month has enough articles, otherwise the
+   three months before. The usual is always site-wide, so filtering to one
+   author shows their articles against everyone's normal, not their own. */
+var PERF_PATH = 'data/performance.json';
+var PERF_MIN_BASE_N = 15;      // articles a month needs before it can be the usual
+var PERF_WEAK_BASE = 5;        // a usual under this many views is too thin to colour by
+var PERF_NL = 'The National League';
+var PERF_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+var PERF_BANDS = [
+  { upto: 0.35, label: 'Under 0.35×' },
+  { upto: 0.6, label: '0.35–0.6×' },
+  { upto: 0.85, label: '0.6–0.85×' },
+  { upto: 1.2, label: 'Usual' },
+  { upto: 1.7, label: '1.2–1.7×' },
+  { upto: 2.8, label: '1.7–2.8×' },
+  { upto: Infinity, label: '2.8×+' }
+];
+var PERF_FROM_LABEL = { 'all': '', 'Organic Search': 'Search', 'Organic Social': 'Social', 'Direct': 'Direct', 'Referral': 'Referral' };
+/* Recurring formats, matched on headline, for the drop-off panel. A stand-in
+   until articles carry our own tags; add a line here to track a new one. */
+var PERF_FORMATS = [
+  { name: 'All the BIG questions', rx: /\bBIG questions\b/ },
+  { name: 'North weekend preview', rx: /National League North: The weekend preview/i },
+  { name: 'South weekend preview', rx: /National League South: The weekend preview/i },
+  { name: 'Team of the Week', rx: /Team of the Week/i },
+  { name: 'Dyno-Rod Review', rx: /Dyno-Rod (Enterprise National League )?Review/i },
+  { name: 'How to watch', rx: /^How to watch and follow/i }
+];
+
+var PERF = {
+  started: false,
+  feed: null,
+  rows: [],          // every article with first-week data, oldest first
+  byMonth: {},       // 'YYYY-MM' -> rows
+  months: [],        // 'YYYY-MM', oldest first
+  k: -1,             // index into months
+  who: '',
+  from: 'all',
+  sel: null,         // postID of the selected article
+  baseMemo: {},
+  monthList: []      // rows currently on screen, for the reader's arrows
+};
+
+var perfUkDate = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' });
+function perfUkDay(iso) {
+  var t = new Date(iso);
+  if (isNaN(t.getTime())) return '';
+  var p = {};
+  perfUkDate.formatToParts(t).forEach(function(x) { p[x.type] = x.value; });
+  return p.year + '-' + p.month + '-' + p.day;
+}
+function perfDdmm(day) { return day.slice(8, 10) + '/' + day.slice(5, 7) + '/' + day.slice(0, 4); }
+function perfMonthName(m, short) { var n = PERF_MONTHS[+m.slice(5) - 1]; return short ? n.slice(0, 3) : n + ' ' + m.slice(0, 4); }
+function perfShiftMonth(m, k) {
+  var y = +m.slice(0, 4), mo = +m.slice(5) - 1 + k;
+  y += Math.floor(mo / 12); mo = ((mo % 12) + 12) % 12;
+  return y + '-' + String(mo + 1).padStart(2, '0');
+}
+function perfMedian(a) {
+  if (!a.length) return 0;
+  var s = a.slice().sort(function(x, y) { return x - y; });
+  var m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+function perfFmt(n) { return Math.round(n).toLocaleString('en-GB'); }
+
+/* Bylines: blank and the League's own name both read as The National League;
+   joint bylines count for each person; near-identical spellings (one letter
+   apart) are folded into the more common one, so a typo'd byline does not
+   become a separate author. */
+function perfSplitByline(raw) {
+  var s = (raw || '').trim();
+  if (!s || /^\(?none\)?$/i.test(s)) return [PERF_NL];
+  return s.split(/\s*(?:,|&|\band\b)\s*/i)
+    .map(function(t) { return t.trim(); })
+    .filter(Boolean)
+    .map(function(t) { return /^(the )?national league$/i.test(t) ? PERF_NL : t; });
+}
+function perfOneApart(a, b) {
+  if (a === b || Math.abs(a.length - b.length) > 1) return false;
+  var i = 0, j = 0, edits = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (++edits > 1) return false;
+    if (a.length > b.length) i++; else if (b.length > a.length) j++; else { i++; j++; }
+  }
+  return edits + (a.length - i) + (b.length - j) <= 1;
+}
+function perfFoldNames(rows) {
+  var counts = {};
+  rows.forEach(function(r) { r.authors.forEach(function(n) { counts[n] = (counts[n] || 0) + 1; }); });
+  var names = Object.keys(counts).sort(function(a, b) { return counts[b] - counts[a]; });
+  var alias = {};
+  names.forEach(function(n, i) {
+    for (var j = 0; j < i; j++) {
+      var keep = names[j];
+      if (!alias[keep] && n.length >= 6 && perfOneApart(n.toLowerCase(), keep.toLowerCase())) { alias[n] = keep; break; }
+    }
+  });
+  rows.forEach(function(r) {
+    var seen = {};
+    r.authors = r.authors.map(function(n) { return alias[n] || n; }).filter(function(n) { return seen[n] ? false : (seen[n] = true); });
+  });
+  var out = {};
+  rows.forEach(function(r) { r.authors.forEach(function(n) { out[n] = (out[n] || 0) + 1; }); });
+  return out;
+}
+
+function perfOpen() {
+  if (PERF.started) { perfRender(); return; }
+  PERF.started = true;
+  $('perfPrev').addEventListener('click', function() { perfGo(PERF.k - 1); });
+  $('perfNext').addEventListener('click', function() { perfGo(PERF.k + 1); });
+  $('perfAuthor').addEventListener('change', function() { PERF.who = this.value; PERF.sel = null; perfRender(); });
+  $('perfFrom').addEventListener('click', function(e) {
+    var b = e.target.closest('[data-from]');
+    if (!b) return;
+    PERF.from = b.getAttribute('data-from');
+    Array.prototype.forEach.call(this.querySelectorAll('[data-from]'), function(x) {
+      var on = x === b;
+      x.classList.toggle('active', on);
+      x.setAttribute('aria-checked', String(on));
+    });
+    perfRender();
+  });
+  $('perfBody').addEventListener('click', function(e) {
+    var pick = e.target.closest('[data-pick]');
+    if (pick) { PERF.sel = pick.getAttribute('data-pick'); perfRender(); return; }
+    if (e.target.closest('[data-open]')) perfOpenSelected();
+  });
+
+  var feedLoad = NL.ensureAuth()
+    .then(function() { return firebase.storage().ref(PERF_PATH).getDownloadURL(); })
+    .then(function(url) { return fetch(url, { cache: 'no-cache' }); })
+    .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+
+  Promise.all([feedLoad, STATE.indexReady || Promise.resolve()])
+    .then(function(res) {
+      if (!STATE.articles.length) throw new Error('the article index has not loaded');
+      perfPrepare(res[0]);
+      perfRender();
+    })
+    .catch(function(err) {
+      var missing = err && (err.code === 'storage/object-not-found');
+      $('perfBody').innerHTML = '<div class="perf-card perf-empty">' +
+        (missing
+          ? 'The performance figures have not been built yet. The nightly Rebuild article index run writes them.'
+          : 'Couldn’t load the performance figures. ' + esc(err && err.message ? err.message : '')) +
+        '</div>';
+    });
+}
+
+function perfPrepare(feed) {
+  PERF.feed = feed;
+  var ch = {};
+  (feed.channels || []).forEach(function(c, i) { ch[c] = i; });
+  PERF.ch = ch;
+  var rows = [];
+  STATE.articles.forEach(function(a) {
+    var it = feed.items && feed.items[String(a.postID)];
+    if (!it) return;
+    var day = perfUkDay(a.publishedDateTime);
+    if (!day) return;
+    rows.push({
+      a: a, id: String(a.postID), day: day, m: day.slice(0, 7), dn: +day.slice(8, 10),
+      authors: perfSplitByline(a.postAuthor), it: it,
+      scored: !it.p && !it.x
+    });
+  });
+  rows.sort(function(x, y) { return x.day < y.day ? -1 : x.day > y.day ? 1 : (y.it.v - x.it.v); });
+  var authorCounts = perfFoldNames(rows);
+  PERF.rows = rows;
+  PERF.byMonth = {};
+  rows.forEach(function(r) { (PERF.byMonth[r.m] = PERF.byMonth[r.m] || []).push(r); });
+
+  // Every month from the first day of data to now, even an empty one.
+  var first = feed.dataFrom.slice(0, 7), now = perfUkDay(new Date().toISOString()).slice(0, 7);
+  PERF.months = [];
+  for (var m = first; m <= now; m = perfShiftMonth(m, 1)) PERF.months.push(m);
+  // Open on the latest month whose articles have all had their seven days.
+  PERF.k = PERF.months.length - 1;
+  while (PERF.k > 0 && !perfMonthSettled(PERF.months[PERF.k])) PERF.k--;
+
+  var sel = $('perfAuthor');
+  sel.innerHTML = '<option value="">Any author</option>';
+  Object.keys(authorCounts).sort(function(a, b) { return authorCounts[b] - authorCounts[a]; }).forEach(function(n) {
+    var o = document.createElement('option');
+    o.value = n; o.textContent = n + ' (' + authorCounts[n] + ')';
+    sel.appendChild(o);
+  });
+}
+/* True once every article in the month has had its full seven days. */
+function perfMonthSettled(m) {
+  return perfShiftDay(perfShiftMonth(m, 1) + '-01', -1) <= PERF.feed.settledTo;
+}
+function perfShiftDay(day, k) {
+  var d = new Date(Date.UTC(+day.slice(0, 4), +day.slice(5, 7) - 1, +day.slice(8, 10) + k));
+  return d.toISOString().slice(0, 10);
+}
+
+function perfGo(k) {
+  if (k < 0 || k >= PERF.months.length) return;
+  PERF.k = k; PERF.sel = null;
+  perfRender();
+}
+
+/* Views for the chosen source: all of them, or one channel's share. */
+function perfVal(r) {
+  if (PERF.from === 'all') return r.it.v;
+  var i = PERF.ch[PERF.from];
+  return i == null ? 0 : (r.it.s[i] || 0);
+}
+function perfScoredVals(m) {
+  return (PERF.byMonth[m] || []).filter(function(r) { return r.scored; }).map(perfVal);
+}
+
+/* The usual for a month: same month last year, else the three months before,
+   else the month's own median. Fixed per month - it never moves as later
+   months arrive. */
+function perfBase(m) {
+  var key = m + '|' + PERF.from;
+  if (PERF.baseMemo[key]) return PERF.baseMemo[key];
+  var out, ly = perfShiftMonth(m, -12), lyVals = perfScoredVals(ly);
+  if (lyVals.length >= PERF_MIN_BASE_N) {
+    out = { v: perfMedian(lyVals), label: perfMonthName(ly) + ' (same month last year)' };
+  } else {
+    var prior = [perfShiftMonth(m, -3), perfShiftMonth(m, -2), perfShiftMonth(m, -1)].filter(function(p) { return PERF.byMonth[p]; });
+    var pool = [];
+    prior.forEach(function(p) { pool = pool.concat(perfScoredVals(p)); });
+    if (pool.length >= PERF_MIN_BASE_N) {
+      out = { v: perfMedian(pool), label: 'median of ' + (prior.length > 1 ? perfMonthName(prior[0], true) + '–' + perfMonthName(prior[prior.length - 1], true) : perfMonthName(prior[0], true)) };
+    } else {
+      out = { v: perfMedian(perfScoredVals(m)), label: 'this month’s own median (not enough earlier data)' };
+    }
+  }
+  out.weak = out.v < PERF_WEAK_BASE;
+  out.v = Math.max(out.v, 1);
+  return (PERF.baseMemo[key] = out);
+}
+
+function perfBand(r) {
+  if (!r.scored) return 'pb-none';
+  var base = perfBase(r.m);
+  if (base.weak) return 'pb-3';
+  var ratio = perfVal(r) / base.v;
+  for (var i = 0; i < PERF_BANDS.length; i++) if (ratio < PERF_BANDS[i].upto) return 'pb-' + i;
+  return 'pb-6';
+}
+
+function perfMonthRows(m) {
+  return (PERF.byMonth[m] || []).filter(function(r) { return !PERF.who || r.authors.indexOf(PERF.who) >= 0; });
+}
+
+function perfStats(m) {
+  var rows = perfMonthRows(m), done = rows.filter(function(r) { return r.scored; });
+  if (!done.length) return { n: rows.length, prov: rows.length - done.length, none: true };
+  var base = perfBase(m);
+  var reads = done.map(function(r) { return r.a.metrics && r.a.metrics.avgEngagementTimeSecs; }).filter(function(t) { return t > 0; });
+  var ai = PERF.ch['AI Assistant'];
+  return {
+    n: rows.length,
+    prov: rows.length - done.length,
+    med: perfMedian(done.map(perfVal)),
+    above: Math.round(done.filter(function(r) { return perfVal(r) >= base.v; }).length / done.length * 100),
+    read: perfMedian(reads),
+    ai: ai == null ? 0 : done.reduce(function(s, r) { return s + (r.it.s[ai] || 0); }, 0)
+  };
+}
+
+function perfDelta(now, was, pts, label) {
+  if (was == null || now == null || (!pts && !was)) return '';
+  var d = pts ? Math.round(now - was) : Math.round((now - was) / was * 100);
+  var cls = d > 0 ? 'perf-delta--up' : d < 0 ? 'perf-delta--down' : 'perf-delta--muted';
+  return '<span class="perf-delta ' + cls + '">' + (d > 0 ? '+' : d < 0 ? '−' : '±') + Math.abs(d) + (pts ? ' pts' : '%') + ' on ' + esc(label) + '</span>';
+}
+
+function perfRender() {
+  if (!PERF.feed) return;
+  var m = PERF.months[PERF.k];
+  var base = perfBase(m);
+  var rows = perfMonthRows(m);
+  PERF.monthList = rows;
+
+  $('perfMonth').textContent = perfMonthName(m);
+  $('perfPrev').disabled = PERF.k <= 0;
+  $('perfNext').disabled = PERF.k >= PERF.months.length - 1;
+  $('perfNote').textContent = PERF.k === 0
+    ? 'Earliest month: first-7-day data starts ' + perfDdmm(PERF.feed.dataFrom) + '.'
+    : !perfMonthSettled(m)
+      ? 'Month so far. Articles under 7 days old are shown dashed and not scored yet.'
+      : 'Each article’s views in its first 7 days.';
+
+  if (!rows.length) {
+    $('perfBody').innerHTML = '<div class="perf-card perf-empty">No articles ' + (PERF.who ? 'by ' + esc(PERF.who) + ' ' : '') + 'in ' + esc(perfMonthName(m)) + '.</div>';
+    return;
+  }
+
+  // Selected article: keep it if it is on screen, else the month's top scorer.
+  var scoredRows = rows.filter(function(r) { return r.scored; }).sort(function(a, b) { return perfVal(b) - perfVal(a); });
+  if (!PERF.sel || !rows.some(function(r) { return r.id === PERF.sel; })) PERF.sel = (scoredRows[0] || rows[0]).id;
+
+  var html = '';
+  html += '<section class="perf-card" aria-label="Month summary">';
+  html += perfKpisHTML(m);
+  html += perfLegendHTML(base);
+  html += '<div class="perf-main">' + perfCalendarHTML(m, rows) + perfAsideHTML(rows) + '</div>';
+  html += '</section>';
+
+  html += '<div class="perf-lists">';
+  html += perfListHTML('Most read', scoredRows.slice(0, 5));
+  html += perfListHTML('Least read', scoredRows.slice(-5).reverse());
+  html += '</div>';
+
+  html += perfFormatsHTML(m);
+  $('perfBody').innerHTML = html;
+}
+
+function perfKpisHTML(m) {
+  var st = perfStats(m);
+  var pm = PERF.k > 0 ? PERF.months[PERF.k - 1] : null;
+  var was = pm ? perfStats(pm) : null;
+  if (was && was.none) was = null;
+  var lbl = pm ? perfMonthName(pm, true) : '';
+  function kpi(label, value, delta) {
+    return '<div class="perf-kpi"><dt>' + esc(label) + '</dt><dd><span class="perf-kpi__num">' + value + '</span>' + (delta || '') + '</dd></div>';
+  }
+  var src = PERF_FROM_LABEL[PERF.from];
+  var out = '<dl class="perf-kpis">';
+  if (st.none) {
+    out += kpi('Articles', perfFmt(st.n), st.prov ? '<span class="perf-delta perf-delta--muted">all under 7 days, not yet scored</span>' : '');
+    return out + '</dl>';
+  }
+  out += kpi('Median views' + (src ? ' from ' + src : ''), perfFmt(st.med), was && perfDelta(st.med, was.med, false, lbl));
+  out += kpi('At or above usual', st.above + '%', was && perfDelta(st.above, was.above, true, lbl));
+  out += kpi('Median read time', st.read ? formatDuration(st.read) : '—', was && perfDelta(st.read, was.read, false, lbl));
+  out += kpi('Articles', perfFmt(st.n), st.prov
+    ? '<span class="perf-delta perf-delta--muted">' + st.prov + ' under 7 days, not yet scored</span>'
+    : (was && perfDelta(st.n, was.n, false, lbl)));
+  if (PERF.ch['AI Assistant'] != null) out += kpi('From AI assistants', perfFmt(st.ai), was && perfDelta(st.ai, was.ai, false, lbl));
+  return out + '</dl>';
+}
+
+function perfLegendHTML(base) {
+  var out = '<div class="perf-legend"><span class="perf-legend__label">Against the usual</span><span class="perf-legend__swatches">';
+  PERF_BANDS.forEach(function(b, i) { out += '<span class="perf-swatch pb-' + i + '">' + b.label + '</span>'; });
+  out += '<span class="perf-swatch pb-none">Under 7 days</span></span>';
+  var src = PERF_FROM_LABEL[PERF.from];
+  out += base.weak
+    ? '<span>Too few views from ' + esc(src) + ' for a reliable usual this month, so nothing is coloured.</span>'
+    : '<span>Usual = ' + perfFmt(base.v) + ' views' + (src ? ' from ' + esc(src) : '') + ', ' + esc(base.label) + '</span>';
+  return out + '</div>';
+}
+
+function perfCalendarHTML(m, rows) {
+  var y = +m.slice(0, 4), mo = +m.slice(5) - 1;
+  var lead = (new Date(Date.UTC(y, mo, 1)).getUTCDay() + 6) % 7;
+  var dim = new Date(Date.UTC(y, mo + 1, 0)).getUTCDate();
+  var byDay = {};
+  rows.forEach(function(r) { (byDay[r.dn] = byDay[r.dn] || []).push(r); });
+  var totals = Object.keys(byDay).map(function(d) { return byDay[d].reduce(function(s, r) { return s + perfVal(r); }, 0); }).sort(function(a, b) { return a - b; });
+  var cap = totals.length ? totals[Math.min(totals.length - 1, Math.floor(totals.length * 0.95))] || 1 : 1;
+
+  var out = '<div class="perf-cal-wrap"><div class="perf-cal">';
+  ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].forEach(function(d) { out += '<div class="perf-dow">' + d + '</div>'; });
+  var count = Math.ceil((lead + dim) / 7) * 7;
+  for (var i = 0; i < count; i++) {
+    var dt = new Date(Date.UTC(y, mo, 1 - lead + i));
+    var inMonth = dt.getUTCMonth() === mo, n = dt.getUTCDate();
+    if (!inMonth) { out += '<div class="perf-day perf-day--out" aria-hidden="true"><div class="perf-day__head"><span class="perf-day__num">' + n + '</span></div></div>'; continue; }
+    var list = (byDay[n] || []).slice().sort(function(a, b) { return perfVal(b) - perfVal(a); });
+    var t = list.reduce(function(s, r) { return s + perfVal(r); }, 0);
+    var shade = t ? Math.max(1, Math.ceil(4 * Math.min(1, t / cap))) : 0;
+    out += '<div class="perf-day' + (shade ? ' perf-day--s' + shade : '') + '">';
+    out += '<div class="perf-day__head"><span class="perf-day__num">' + n + '</span><span class="perf-day__total">' + (t ? perfFmt(t) : '') + '</span></div>';
+    list.slice(0, 4).forEach(function(r) {
+      var cls = 'perf-chip' + (r.scored ? '' : ' perf-chip--prov') + (r.id === PERF.sel ? ' is-sel' : '');
+      var title = (r.a.postTitle || '') + ' · ' + r.authors.join(' & ') + ' · ' + (r.it.x ? 'no GA data' : perfFmt(perfVal(r)) + ' views' + (r.it.p ? ' so far' : ''));
+      out += '<button type="button" class="' + cls + '" data-pick="' + esc(r.id) + '" title="' + esc(title) + '">' +
+        '<span class="perf-dot ' + perfBand(r) + '" aria-hidden="true"></span><span class="perf-chip__t">' + esc(r.a.postTitle || '') + '</span></button>';
+    });
+    if (list.length > 4) out += '<div class="perf-more">+' + (list.length - 4) + ' more</div>';
+    out += '</div>';
+  }
+  return out + '</div></div>';
+}
+
+function perfAsideHTML(rows) {
+  var r = rows.filter(function(x) { return x.id === PERF.sel; })[0];
+  if (!r) return '';
+  var base = perfBase(r.m), v = perfVal(r);
+  var vs = r.it.x ? 'No data' : !r.scored ? 'Not yet' : base.weak ? '—' : (v / base.v >= 1 ? (v / base.v).toFixed(1) + '×' : Math.round(v / base.v * 100) + '%');
+  var read = r.a.metrics && r.a.metrics.avgEngagementTimeSecs;
+  var out = '<aside class="perf-aside" aria-label="Selected article">';
+  out += '<div class="perf-aside__eyebrow">Selected article</div>';
+  out += '<div class="perf-aside__title">' + esc(r.a.postTitle || '') + '</div>';
+  out += '<div class="perf-aside__meta">' + perfDdmm(r.day) + ' · ' + esc(r.authors.join(' & ')) + (r.a.newsCategory ? ' · ' + esc(r.a.newsCategory) : '') + '</div>';
+  out += '<div class="perf-mini">' +
+    '<div><div class="perf-mini__label">First 7 days' + (PERF.from !== 'all' ? ' (' + esc(PERF_FROM_LABEL[PERF.from]) + ')' : '') + '</div><div class="perf-mini__val">' + (r.it.x ? '—' : perfFmt(v)) + '</div></div>' +
+    '<div><div class="perf-mini__label">vs usual</div><div class="perf-mini__val">' + vs + '</div></div>' +
+    '<div><div class="perf-mini__label">Read time</div><div class="perf-mini__val">' + (read ? formatDuration(read) : '—') + '</div></div>' +
+    '</div>';
+  if (!r.it.x) {
+    var d = r.it.d || [], mx = Math.max.apply(null, d.concat([1]));
+    out += '<div><div class="perf-mini__label">Views by day</div><div class="perf-curve" role="img" aria-label="' +
+      esc(d.map(function(x, i) { return 'Day ' + (i + 1) + ': ' + x; }).join(', ')) + '">';
+    d.forEach(function(x, i) { out += '<div style="height:' + Math.round(100 * x / mx) + '%" title="Day ' + (i + 1) + ': ' + perfFmt(x) + ' views"></div>'; });
+    out += '</div><div class="perf-curve-labels"><span>Day 1</span><span>' + (r.it.v ? Math.round(100 * (d[0] || 0) / r.it.v) + '% on day 1' : '') + '</span><span>Day 7</span></div></div>';
+    var named = {};
+    Object.keys(r.it.s || {}).forEach(function(ci) { named[PERF.feed.channels[ci] || 'Unknown'] = r.it.s[ci]; });
+    out += buildTrafficSourceBar(named, r.it.v);
+  }
+  out += '<button type="button" class="btn btn--navy" data-open="1">Open article</button>';
+  return out + '</aside>';
+}
+
+function perfOpenSelected() {
+  var i = -1;
+  var list = PERF.monthList.map(function(r, j) { if (r.id === PERF.sel) i = j; return r.a; });
+  if (i >= 0) openModalFrom(list, i);
+}
+
+function perfListHTML(title, list) {
+  var out = '<section class="perf-card" aria-label="' + esc(title) + '"><h3>' + esc(title) + '</h3>';
+  if (!list.length) return out + '<div class="perf-empty">Nothing scored yet this month.</div></section>';
+  out += '<ol class="perf-list">';
+  list.forEach(function(r) {
+    out += '<li><button type="button" class="perf-row" data-pick="' + esc(r.id) + '">' +
+      '<span class="perf-dot ' + perfBand(r) + '" aria-hidden="true"></span>' +
+      '<span style="min-width:0"><span class="perf-row__t">' + esc(r.a.postTitle || '') + '</span><span class="perf-row__m">' + perfDdmm(r.day) + ' · ' + esc(r.authors.join(' & ')) + '</span></span>' +
+      '<span class="perf-row__n">' + perfFmt(perfVal(r)) + '</span></button></li>';
+  });
+  return out + '</ol></section>';
+}
+
+/* Drop-off: each recurring format's editions this season, up to the month on
+   screen. The figure compares the first three editions with the latest three. */
+function perfFormatsHTML(m) {
+  var seasonStart = (+m.slice(5) >= 7 ? m.slice(0, 4) : String(+m.slice(0, 4) - 1)) + '-07';
+  var cards = '';
+  PERF_FORMATS.forEach(function(f) {
+    var eds = PERF.rows.filter(function(r) {
+      return r.scored && r.m >= seasonStart && r.m <= m && f.rx.test(r.a.postTitle || '') &&
+        (!PERF.who || r.authors.indexOf(PERF.who) >= 0);
+    });
+    if (eds.length < 4) return;
+    var vals = eds.map(perfVal), mx = Math.max.apply(null, vals.concat([1]));
+    var first = (vals[0] + vals[1] + vals[2]) / 3, last = (vals[vals.length - 3] + vals[vals.length - 2] + vals[vals.length - 1]) / 3;
+    var chg = first ? Math.round((last - first) / first * 100) : 0;
+    var who = {};
+    eds.forEach(function(r) { r.authors.forEach(function(n) { who[n] = (who[n] || 0) + 1; }); });
+    var mainWho = Object.keys(who).sort(function(a, b) { return who[b] - who[a]; })[0];
+    cards += '<div class="perf-format"><div class="perf-format__head"><div><div class="perf-format__name">' + esc(f.name) + '</div>' +
+      '<div class="perf-format__who">' + eds.length + ' editions · mostly ' + esc(mainWho) + '</div></div>' +
+      '<div class="perf-format__chg ' + (chg >= 0 ? 'perf-delta--up' : 'perf-delta--down') + '">' + (chg > 0 ? '+' : chg < 0 ? '−' : '±') + Math.abs(chg) + '%</div></div>' +
+      '<div class="perf-bars" role="img" aria-label="' + esc(f.name + ': ' + eds.map(function(r) { return perfDdmm(r.day) + ' ' + perfVal(r); }).join(', ')) + '">';
+    eds.forEach(function(r) {
+      cards += '<div class="' + perfBand(r) + '" style="height:' + Math.max(4, Math.round(100 * perfVal(r) / mx)) + '%" title="' + esc(perfDdmm(r.day) + ': ' + perfFmt(perfVal(r)) + ' views') + '"></div>';
+    });
+    cards += '</div><div class="perf-bars-labels"><span>' + perfDdmm(eds[0].day) + '</span><span>' + perfDdmm(eds[eds.length - 1].day) + '</span></div></div>';
+  });
+  var out = '<section class="perf-card" aria-label="Drop-off across recurring formats"><h3>Drop-off: do recurring formats keep their readers?</h3>' +
+    '<p class="perf-card__sub">This season, up to ' + esc(perfMonthName(m)) + '. The figure compares the first three editions with the latest three.</p>';
+  return out + (cards ? '<div class="perf-formats">' + cards + '</div>' : '<div class="perf-empty">No recurring format has four scored editions yet this season.</div>') + '</section>';
+}
+
 function onKeyDown(e) {
   var modalOpen = $('modalBackdrop').classList.contains('open');
 
@@ -2550,7 +3275,7 @@ function onKeyDown(e) {
     else if (e.key === 'ArrowLeft') { e.preventDefault(); navModal(-1); }
     else if (e.key === 'ArrowRight') { e.preventDefault(); navModal(1); }
   } else {
-    if (e.key === '/' && document.activeElement && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT' && document.activeElement.tagName !== 'TEXTAREA') {
+    if (e.key === '/' && !$('browsePane').hidden && document.activeElement && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT' && document.activeElement.tagName !== 'TEXTAREA') {
       e.preventDefault();
       $('qInput').focus();
     }
