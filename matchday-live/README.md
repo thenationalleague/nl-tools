@@ -1,6 +1,6 @@
 # Matchday Live
 
-Contributors at grounds send 20-second vertical clips from their phones. The
+Contributors at grounds send 30-second vertical clips from their phones. The
 clips land in a staff feed, filed under the match and the goal or card they
 are about.
 
@@ -23,6 +23,7 @@ starts from the answers.
 | Blaze plan | Yes. The project already runs scheduled and triggered functions. |
 | Retention | Rejected clips: the video is deleted 7 days after rejection, the record kept (who sent what stays answerable). An upload unfinished after 24 hours is cleared. Approved and unreviewed clips are never deleted automatically. An end-of-season archive is not decided. |
 | Back-dating (asked the same evening) | Both. **Late filing**: any contributor can send a clip until 26 hours after kick-off (about a day after full time); it files under the match's own day. **Test links**: a contributor marked *Test link* can pick any match from the last 7 days; their clips carry `test: true`, show a TEST pill, stay out of the counts and gap flags, and the rules refuse to approve them. |
+| Clip length and shape (after the first phone test) | **30 seconds**, up from 20. Every clip is drawn onto a fixed upright 1080×1920 frame (720×1280 on cameras under 1080p) and recorded from that, so the file is upright with no rotation flag. The first build recorded the camera directly: phones store that as a wide picture plus a rotate flag, the upright check misread it, and asking the camera for a tall picture made it crop the sensor (the "zoomed" look). |
 | Pilot list | Not in the repo. Contributors are personal data and this repository is public; they are added in the Contributors tab. |
 
 ## Where the build departs from the brief, and why
