@@ -291,3 +291,15 @@ test('a club view with a neutral game: Venue Home and Away both leave it out, Al
   assert.equal(n('home'), 0);
   assert.equal(n('away'), 2);
 });
+
+test('the chart has a fixed height, so nothing beside it can stretch it', () => {
+  /* It filled its panel, and the row stretches to its tallest panel: a
+     Top games heading that wrapped made the chart taller, and a fixed
+     scale drawn taller reads as a moving scale (15/10/2026). */
+  const css = readFileSync(join(REPO, 'dazn/_view.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rule = css.match(/\.dz-chart\s*\{([^}]*)\}/);
+  assert.ok(rule, '.dz-chart rule missing');
+  assert.match(rule[1], /height:\s*\d+px/);
+  assert.ok(!/height:\s*100%/.test(rule[1]), '.dz-chart fills its panel again');
+  assert.match(css, /\.dz-panel__ctx\s*\{[^}]*white-space:\s*nowrap/);
+});

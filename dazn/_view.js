@@ -1,9 +1,11 @@
 /* =============================================================================
    NL Tools — DAZN Viewing: one club's season, as a dashboard
    File: /dazn/_view.js
-   Version: v29.0 (15/10/2026)
+   Version: v30.0 (15/10/2026)
 
    CHANGELOG
+     v30.0 (15/10/2026) — The chart keeps a fixed height whatever the
+       slicers do; Top games' heading stays on one line (full text on hover).
      v29.0 (15/10/2026) — The chart has a y-axis and gridlines, and a FIXED
        scale taken from the club's whole season: slicers no longer rescale
        it ("Not shown in UK" used to balloon to full height). Only the By
@@ -434,7 +436,9 @@
       q('[data-slicers]').innerHTML = slicers(months, F);
       var shown = applyFilters(all, o.code, F);
       q('[data-chart-title]').textContent = view === 'game' ? 'Views by game' : 'Views by month';
-      q('[data-top-ctx]').textContent = context();
+      var ctx = context();
+      q('[data-top-ctx]').textContent = ctx;
+      q('[data-top-ctx]').title = ctx;   /* in full when the heading is cut short */
       /* The month chart takes every slicer except the month itself, so the
          other months stay visible to click across to. */
       if (view === 'month') {
