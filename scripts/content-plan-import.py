@@ -4,8 +4,13 @@ Content Plan importer – turns the legacy "Content plan" Google Sheet (.xlsx ex
 into JSON for /app-data/media-content-plan/ in RTDB. Load the output through
 the tool's Settings → Import (superadmin), not the Firebase console.
 
-Version: v1.2 – 16/10/2026
+Version: v1.3 – 16/10/2026
 Changelog
+  v1.3 (16/10/2026) – Categories are the Content Plan's own list now, stored by key.
+                      The sheet's National / North / South / NL Cup become
+                      'football'; Awards, League, Statements, Trust, U19, 3UP map
+                      to their own keys. Social items with no category become
+                      'football' too (Richard: most social output is football).
   v1.2 (16/10/2026) – Website is a platform: every web item imports with
                       platforms {website: true}. Social platforms stay unset
                       (the sheet never recorded them).
@@ -51,6 +56,14 @@ except ImportError:
 CATEGORIES = ["Statements", "National", "Awards", "League", "NL Cup", "North", "South",
               "Trust", "U19", "3UP"]
 CATEGORY_KEYS = {c.lower(): re.sub(r"[^a-z0-9]", "", c.lower()) for c in CATEGORIES}
+# CMS name in the sheet -> Content Plan category key
+TOOL_CATEGORY = {"national": "football", "north": "football", "south": "football", "nl cup": "football",
+                 "awards": "awards", "league": "league", "statements": "statements",
+                 "trust": "trust", "u19": "u19", "3up": "3up"}
+
+
+def tool_category(label):
+    return TOOL_CATEGORY.get(label.lower()) if label else None
 
 DEFAULT_AUTHORS = ["SE", "TS", "RD", "NM", "MW", "GLR", "BH", "JW"]
 
@@ -217,7 +230,7 @@ def main():
                 title, initials = split_author(rest)
                 extra, a_reasons = resolve_authors(initials)
                 reasons += a_reasons
-                extra.update({"category": category, "title": title or raw})
+                extra.update({"category": tool_category(category), "title": title or raw})
                 add_item(cell, "web", title or raw, extra, reasons)
 
             # Social items
@@ -242,8 +255,9 @@ def main():
                     reasons.append("no format or platform prefix")
                 category, body2 = match_category(body)
                 if category:
-                    extra["category"] = category
+                    extra["category"] = tool_category(category)
                     body = body2 or body
+                extra.setdefault("category", "football")
                 add_item(cell, "social", body or raw, extra, reasons)
 
             # K / L – meaning read from each tab's header
