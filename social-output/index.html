@@ -1,0 +1,1253 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Social Output
+  Version: v1.0 (16/10/2026)
+  File: /social-output/index.html
+
+  Month-by-month record of what the league's social channels put out — own
+  posts and reshares — with cadence views, a post grid that opens the real
+  embedded post, and a monthly summary for the board.
+
+  Storage (RTDB):
+    app-data/media-social-output/posts/{channel}/{yyyy-mm}/{postKey}
+                                            one record per post (see _data.js)
+    app-data/media-social-output/status/{yyyy-mm}/{channel}
+                                            what has been imported for a month
+    app-data/media-social-output/imports/{pushKey}
+                                            import log: who, when, counts
+    app-data/media-social-output/config/categories/{channel}
+                                            ordered keyword rules
+    tools/media-social-output               registry record
+
+  Access: league roles only (registry audience 'league'). 'access' reads every
+  view; 'admin' also gets Import and Categories and can change a post's
+  category. Writes are enforced the same way in rules.snapshot.json.
+
+  Logic with no DOM lives in _data.js (tested: tests/social-output.test.mjs).
+
+  Changelog
+    v1.0 (16/10/2026) — Phase 1: X. Import tab reads the X Output Scraper CSV
+                        by column alias and previews new/updated/unchanged/
+                        skipped before writing. Overview (print-friendly),
+                        Cadence (per-day bars, 15-minute matchday heatmap),
+                        Posts (thumbnail grid; the embed loads only when a
+                        post is opened) and Categories (ordered rules, re-run
+                        that leaves manual categories alone). Embeds for the
+                        other five channels are wired so phases 2–4 only need
+                        data. Reshare numbers never enter a league total.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Social Output — NL Tools</title>
+  <!-- Favicons. Static, not injected: nl-topbar.js adds these too, but a
+       standalone page never loads it, and an icon that arrives with the JS
+       leaves the tab blank until it does. /favicon.ico at the root is the
+       backstop every browser asks for without being told. -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+
+  <!-- Brand stylesheet (lint canonical: ?v=66) -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=67">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'Social Output',
+      toolKey: 'media-social-output'
+    };
+    var NL_TOOL_KEY = 'media-social-output';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '16/10/2026',
+        version: 'v1.0',
+        items: [
+          'First release, covering X.',
+          'Overview gives each month\'s own posts, reshares and views on own posts, ready to print for the board.',
+          'Cadence shows posting day by day and through a matchday in 15-minute slots.',
+          'Posts shows every post as a card; open one to see the real post, video included.'
+        ]
+      }
+    ];
+
+    /* auth-guard fires this once the session is verified + pageWrap is
+       revealed. Boot the main app from here so RTDB reads happen with a
+       live auth token. Do NOT read RTDB before this fires. */
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts (lint canonical: ?v=48 / ?v=1 / ?v=10 / ?v=16) -->
+  <script src="/system/nl-utils.js?v=48"></script>
+  <!-- GA4, one property for all of nl.tools. Cookieless, so no consent
+       banner on any page; page views by path, no identity. Tool events go
+       through NL.track(). See system/nl-analytics.js. -->
+  <script src="/system/nl-analytics.js?v=1"></script>
+  <script src="/system/nl-topbar.js?v=10"></script>
+  <script src="/system/auth-guard.js?v=16"></script>
+
+  <script src="/social-output/_data.js?v=1"></script>
+
+<style>
+  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
+     style.display = 'block'. Don't clear with '' — would re-trigger the
+     brand rule and re-hide the page. */
+
+  /* Series identity. Own = brand red, reshare = blue: the pair passes the
+     colour-blind separation checks (navy against red did not — too dark
+     to sit in the same lightness band). */
+  :root {
+    --so-own: var(--primary);
+    --so-reshare: var(--blue);
+  }
+
+  .so-bar { margin-bottom: 16px; }
+  .so-month { min-width: 180px; }
+  /* Five tabs do not fit a phone; the strip scrolls sideways instead of
+     pushing the whole page wider than the screen. */
+  .so-tabs-scroll { overflow-x: auto; margin-bottom: 16px; }
+  .so-tabs-scroll > * { min-width: 520px; margin-bottom: 0 !important; }
+  .so-summary { font-size: var(--text-sm); }
+  .so-muted { color: var(--text-muted); font-size: var(--text-sm); }
+  .so-note { color: var(--text-muted); font-size: var(--text-sm); margin: -8px 0 20px; }
+
+  /* Overview */
+  .so-channel { margin-bottom: 36px; }
+  .so-delta { margin-top: 6px; font-size: var(--text-xs); color: var(--text-muted); }
+  .so-change { margin: 0 0 14px; font-size: var(--text-sm); }
+  .so-excerpt { max-width: 48ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .so-link { background: none; border: 0; padding: 0; font-family: var(--font); font-size: inherit; color: var(--navy); text-decoration: underline; cursor: pointer; text-align: left; }
+  .so-headline { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+  .so-headline h2 { font-size: var(--text-lg); color: var(--navy); }
+
+  /* Legend */
+  .so-legend { display: flex; gap: 16px; font-size: var(--text-sm); margin-bottom: 10px; }
+  .so-legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .so-swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+  .so-swatch--own { background: var(--so-own); }
+  .so-swatch--reshare { background: var(--so-reshare); }
+
+  /* Per-day bars */
+  .so-chart { position: relative; background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 16px 8px 44px; margin-bottom: 8px; }
+  .so-plot { position: relative; height: 220px; display: grid; gap: 4px; align-items: end; }
+  .so-grid { position: absolute; left: 0; right: 0; border-top: 1px solid var(--navy-50); pointer-events: none; }
+  .so-grid span { position: absolute; left: -36px; top: -8px; width: 30px; text-align: right; font-size: var(--text-xs); color: var(--text-muted); }
+  .so-day { height: 100%; display: flex; align-items: flex-end; justify-content: center; gap: 2px; cursor: default; }
+  .so-day:hover { background: var(--navy-50); }
+  .so-col { width: 42%; max-width: 12px; border-radius: 4px 4px 0 0; }
+  .so-col--own { background: var(--so-own); }
+  .so-col--reshare { background: var(--so-reshare); }
+  .so-xlabels { display: grid; gap: 4px; margin-top: 4px; }
+  .so-xlabels span { text-align: center; font-size: var(--text-xs); color: var(--text-muted); }
+  .so-xlabels span.is-sat { color: var(--text); font-variation-settings: 'wght' 800; }
+  .so-tip { position: fixed; z-index: 150; pointer-events: none; background: var(--navy-800); color: var(--white); font-size: var(--text-xs); padding: 6px 9px; border-radius: var(--radius-sm); box-shadow: var(--shadow); white-space: nowrap; }
+
+  /* Matchday heatmap */
+  .so-heat { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 16px; overflow-x: auto; }
+  .so-heat h3 { font-size: var(--text-sm); color: var(--navy); margin-bottom: 10px; }
+  .so-heat__row { display: grid; grid-template-columns: 80px repeat(72, minmax(9px, 1fr)); gap: 2px; align-items: center; min-width: 760px; margin-bottom: 2px; }
+  .so-heat__label { font-size: var(--text-xs); color: var(--text-muted); }
+  .so-heat__cell { height: 22px; border-radius: 2px; background: var(--off-white); }
+  .so-heat__hours span { font-size: var(--text-xs); color: var(--text-muted); grid-column: span 8; }
+  .so-h-own-1 { background: var(--primary-100); } .so-h-own-2 { background: var(--primary-200); }
+  .so-h-own-3 { background: var(--primary-300); } .so-h-own-4 { background: var(--primary-400); }
+  .so-h-own-5 { background: var(--primary-600); }
+  .so-h-rs-1 { background: var(--navy-100); } .so-h-rs-2 { background: var(--navy-200); }
+  .so-h-rs-3 { background: var(--navy-300); } .so-h-rs-4 { background: var(--navy-400); }
+  .so-h-rs-5 { background: var(--navy-600); }
+
+  /* Post grid */
+  .so-grid-posts { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+  .so-card { display: flex; flex-direction: column; text-align: left; background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; cursor: pointer; padding: 0; font-family: var(--font); color: var(--text); }
+  .so-card:hover { border-color: var(--navy-300); box-shadow: var(--shadow); }
+  .so-card:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .so-thumb { aspect-ratio: 16 / 9; background: var(--navy-50); display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .08em; overflow: hidden; }
+  .so-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .so-card__body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 6px; }
+  .so-card__meta { font-size: var(--text-xs); color: var(--text-muted); }
+  .so-card__pills { display: flex; flex-wrap: wrap; gap: 4px; }
+  .so-card__text { font-size: var(--text-sm); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .so-card__nums { font-size: var(--text-xs); color: var(--text); font-variation-settings: 'wght' 700; }
+  .so-more { display: flex; justify-content: center; margin-top: 18px; }
+
+  /* Post modal */
+  .so-embed { min-height: 120px; display: flex; justify-content: center; margin-bottom: 14px; }
+  .so-embed iframe { width: 100%; max-width: 560px; border: 0; }
+  .so-embed--video iframe { aspect-ratio: 16 / 9; height: auto; }
+  .so-facts { width: 100%; font-size: var(--text-sm); margin-bottom: 14px; }
+  .so-facts td { padding: 4px 0; vertical-align: top; }
+  .so-facts td:first-child { color: var(--text-muted); width: 130px; }
+  .so-cat-edit { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  /* Import */
+  .so-drop { margin-top: 12px; border: 2px dashed var(--navy-200); border-radius: var(--radius); padding: 22px; text-align: center; background: var(--navy-50); cursor: pointer; }
+  .so-drop.is-over { border-color: var(--primary); background: var(--primary-50); }
+  .so-steps { margin: 0 0 0 20px; font-size: var(--text-sm); line-height: 1.7; }
+  .so-steps li { list-style: decimal; }
+  .so-cols { font-size: var(--text-xs); color: var(--text-muted); margin-top: 6px; }
+
+  /* Categories */
+  .so-rules input, .so-rules select { width: 100%; font-family: var(--font); font-size: var(--text-sm) !important; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--white); color: var(--text); }
+  .so-rules td { vertical-align: middle; }
+  .so-rules .so-rule-actions { white-space: nowrap; }
+
+  .so-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+
+  @media (max-width: 600px) {
+    .so-cat-edit { grid-template-columns: 1fr; }
+    .so-chart { padding-left: 36px; }
+  }
+
+  /* Print: the Overview goes straight into a board pack on A4. Everything
+     that is a control disappears; each channel stays on one page. */
+  @page { size: A4; margin: 12mm; }
+  @media print {
+    #nlTopbar, .no-print { display: none !important; }
+    body, #pageWrap, #soPage { background: var(--white) !important; }
+    #soPage { padding: 0 !important; max-width: none !important; }
+    .so-channel { break-inside: avoid; page-break-inside: avoid; }
+    /* The canon stat grid wraps at 140px a card, which on A4 can push the
+       fourth card to its own row; these are this page's own hooks on the
+       same elements, so canon is untouched on screen. Print-only pixel
+       sizes: there is no viewport on paper for the fluid clamps to read. */
+    .so-stats { grid-template-columns: repeat(4, 1fr) !important; gap: 6px !important; }
+    .so-stat { box-shadow: none !important; padding: 10px 6px !important; }
+    .so-stat__num { font-size: 26px !important; }
+    .so-tablewrap { overflow: visible !important; box-shadow: none !important; }
+    .so-excerpt { white-space: normal; max-width: none; }
+    .so-link { text-decoration: none; color: var(--text); }
+  }
+</style>
+</head>
+<body>
+
+<!-- Topbar — auto-rendered by /system/nl-topbar.js from window.NL_TOOL -->
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="page" id="soPage">
+    <div class="toolbar so-bar no-print">
+      <div class="toolbar__left">
+        <select class="nl-select so-month" id="monthPick" aria-label="Month"></select>
+      </div>
+      <div class="toolbar__right">
+        <button class="btn btn--ghost btn--sm" id="printBtn" type="button">Print</button>
+      </div>
+    </div>
+    <div class="so-tabs-scroll no-print"><div class="tabs" id="tabs" role="tablist"></div></div>
+    <div id="view"></div>
+  </div>
+</div>
+
+<!-- Main app -->
+<script>
+(function () {
+  'use strict';
+
+  var SD = window.SocialData;
+  var BASE = 'app-data/media-social-output/';
+  var FIRST_MONTH = '2026-01';
+  var PAGE_SIZE = 60;
+  var DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  var state = {
+    session: null,
+    isAdmin: false,
+    month: null,
+    tab: 'overview',
+    cache: {},          /* 'channel|yyyy-mm' -> { postKey: record } */
+    status: {},         /* yyyy-mm -> { channel: info } */
+    rules: null,        /* { channel: [rule] } as saved; null until read */
+    cadenceChannel: 'all',
+    filters: { channel: '', kind: '', category: '', own: '', from: '', to: '', q: '' },
+    shown: PAGE_SIZE,
+    pending: null       /* import awaiting confirmation */
+  };
+
+  /* ── DOM helper ─────────────────────────────────────────────────────── */
+  /* el('div', {className:'x', onclick:fn}, [child, 'text']) */
+  function el(tag, attrs, kids) {
+    var n = document.createElement(tag);
+    if (attrs) Object.keys(attrs).forEach(function (k) {
+      var v = attrs[k];
+      if (v == null || v === false) return;
+      if (k === 'className') n.className = v;
+      else if (k === 'text') n.textContent = v;
+      else if (k === 'style') n.setAttribute('style', v);
+      else if (k.slice(0, 2) === 'on') n.addEventListener(k.slice(2), v);
+      else n.setAttribute(k, v === true ? '' : v);
+    });
+    (kids || []).forEach(function (c) {
+      if (c == null || c === false) return;
+      n.appendChild(typeof c === 'string' || typeof c === 'number' ? document.createTextNode(String(c)) : c);
+    });
+    return n;
+  }
+  function fmt(n) { return n == null ? '–' : Number(n).toLocaleString('en-GB'); }
+  function chLabel(key) {
+    for (var i = 0; i < SD.CHANNELS.length; i++) if (SD.CHANNELS[i].key === key) return SD.CHANNELS[i].label;
+    return key;
+  }
+  /* '2026-08-08 15:47' -> 'Sat 08/08/2026 15:47' */
+  function ukLocal(local, opts) {
+    if (!local) return '–';
+    var d = new Date(local.slice(0, 10) + 'T12:00:00Z');
+    var s = local.slice(8, 10) + '/' + local.slice(5, 7) + '/' + local.slice(0, 4);
+    if (opts && opts.short) s = local.slice(8, 10) + '/' + local.slice(5, 7);
+    return DOW[d.getUTCDay()] + ' ' + s + (opts && opts.dateOnly ? '' : ' ' + local.slice(11, 16));
+  }
+  function list(obj) {
+    return Object.keys(obj || {}).map(function (k) { var p = obj[k]; p._key = k; return p; });
+  }
+  function fail(err) {
+    console.error('[social-output]', err);
+    NL.toast((err && err.message) || 'Something went wrong', 'error');
+  }
+
+  /* ── Data ───────────────────────────────────────────────────────────── */
+
+  function loadMonth(channel, month, fresh) {
+    var k = channel + '|' + month;
+    if (!fresh && state.cache[k]) return Promise.resolve(state.cache[k]);
+    return NL.ensureAuth().then(function () {
+      return db.ref(BASE + 'posts/' + channel + '/' + month).once('value');
+    }).then(function (snap) {
+      state.cache[k] = snap.val() || {};
+      return state.cache[k];
+    });
+  }
+  function loadAll(month) {
+    return Promise.all(SD.CHANNELS.map(function (c) { return loadMonth(c.key, month); }))
+      .then(function (res) {
+        var out = {};
+        SD.CHANNELS.forEach(function (c, i) { out[c.key] = res[i]; });
+        return out;
+      });
+  }
+  function loadStatus(month) {
+    return NL.ensureAuth().then(function () {
+      return db.ref(BASE + 'status/' + month).once('value');
+    }).then(function (snap) {
+      state.status[month] = snap.val() || {};
+      return state.status[month];
+    });
+  }
+  function loadRules() {
+    if (state.rules) return Promise.resolve(state.rules);
+    return NL.ensureAuth().then(function () {
+      return db.ref(BASE + 'config/categories').once('value');
+    }).then(function (snap) {
+      state.rules = snap.val() || {};
+      return state.rules;
+    });
+  }
+  /* Saved rules for a channel, else the shipped defaults, else none. */
+  function rulesFor(channel) {
+    var saved = state.rules && state.rules[channel];
+    if (saved) return Array.isArray(saved) ? saved.filter(Boolean) : Object.keys(saved).sort(function (a, b) { return a - b; }).map(function (k) { return saved[k]; });
+    return (SD.DEFAULT_RULES[channel] || []).slice();
+  }
+
+  /* ── Tabs ───────────────────────────────────────────────────────────── */
+
+  var TABS = [
+    { key: 'overview', label: 'Overview', render: renderOverview },
+    { key: 'cadence', label: 'Cadence', render: renderCadence },
+    { key: 'posts', label: 'Posts', render: renderPosts },
+    { key: 'import', label: 'Import', render: renderImport, admin: true },
+    { key: 'categories', label: 'Categories', render: renderCategories, admin: true }
+  ];
+
+  function drawTabs() {
+    var wrap = document.getElementById('tabs');
+    wrap.innerHTML = '';
+    TABS.forEach(function (t) {
+      if (t.admin && !state.isAdmin) return;
+      wrap.appendChild(el('button', {
+        className: 'tab' + (state.tab === t.key ? ' active' : ''), type: 'button', role: 'tab',
+        'aria-selected': state.tab === t.key ? 'true' : 'false', text: t.label,
+        onclick: function () { go(t.key); }
+      }));
+    });
+    document.getElementById('printBtn').hidden = state.tab !== 'overview';
+  }
+
+  function go(tab) {
+    state.tab = tab;
+    try { history.replaceState(null, '', '#' + tab); } catch (e) {}
+    render();
+  }
+
+  function render() {
+    drawTabs();
+    var view = document.getElementById('view');
+    view.innerHTML = '';
+    view.appendChild(el('p', { className: 'so-muted' }, [el('span', { className: 'spinner' }), ' Loading…']));
+    var t = TABS.filter(function (x) { return x.key === state.tab; })[0] || TABS[0];
+    Promise.resolve(t.render(view)).catch(function (err) {
+      view.innerHTML = '';
+      view.appendChild(el('div', { className: 'banner banner--error' }, ['Could not load this view: ' + ((err && err.message) || err)]));
+      console.error(err);
+    });
+  }
+
+  /* ── Overview ───────────────────────────────────────────────────────── */
+
+  function delta(cur, prev, prevMonth) {
+    var p = SD.pct(cur, prev);
+    if (p == null) return el('div', { className: 'so-delta' }, ['no ' + SD.monthLabel(prevMonth).split(' ')[0] + ' figure']);
+    var s = p === 0 ? 'level' : (p > 0 ? '+' : '−') + Math.abs(p) + '%';
+    return el('div', { className: 'so-delta' }, [s + ' on ' + SD.monthLabel(prevMonth).split(' ')[0]]);
+  }
+
+  function stat(num, label, d) {
+    return el('div', { className: 'stat so-stat' }, [
+      el('div', { className: 'stat__num so-stat__num', text: fmt(num) }),
+      el('div', { className: 'stat__label', text: label }),
+      d
+    ]);
+  }
+
+  function renderOverview(view) {
+    var month = state.month, prev = SD.prevMonth(month);
+    return Promise.all([loadAll(month), loadAll(prev)]).then(function (res) {
+      var cur = res[0], before = res[1];
+      view.innerHTML = '';
+      var have = [], missing = [], latest = '';
+      SD.CHANNELS.forEach(function (c) {
+        if (Object.keys(cur[c.key]).length) have.push(c); else missing.push(c);
+        list(cur[c.key]).forEach(function (p) { if (p.metricsAt && p.metricsAt > latest) latest = p.metricsAt; });
+      });
+
+      view.appendChild(el('div', { className: 'so-headline' }, [
+        el('h2', { text: SD.monthLabel(month) }),
+        el('span', { className: 'so-muted' }, [latest ? 'Numbers read ' + NL.formatDate(latest) : ''])
+      ]));
+
+      if (missing.length) {
+        view.appendChild(el('div', { className: 'banner banner--info' }, [
+          el('strong', { text: 'Not in for this month: ' }), missing.map(function (c) { return c.label; }).join(', ') + '.'
+        ]));
+      }
+      if (!have.length) {
+        view.appendChild(el('div', { className: 'empty-state' }, [
+          el('div', { className: 'empty-state__title', text: 'Nothing imported for ' + SD.monthLabel(month) }),
+          state.isAdmin ? el('div', { className: 'empty-state__text' }, ['Upload the X file on the ', el('button', { className: 'so-link', type: 'button', text: 'Import tab', onclick: function () { go('import'); } }), '.']) : null
+        ]));
+        return;
+      }
+
+      have.forEach(function (c) {
+        var s = SD.summarise(cur[c.key]);
+        var ps = Object.keys(before[c.key]).length ? SD.summarise(before[c.key]) : null;
+        var sec = el('section', { className: 'so-channel' });
+        sec.appendChild(el('div', { className: 'section-head' }, [el('h2', { text: c.label })]));
+        sec.appendChild(el('div', { className: 'stats so-stats' }, [
+          stat(s.own, 'Own posts', delta(s.own, ps && ps.own, prev)),
+          stat(s.reshares, 'Reshares', delta(s.reshares, ps && ps.reshares, prev)),
+          stat(s.ownViews, 'Views on own posts', delta(s.ownViews, ps && ps.ownViews, prev)),
+          stat(s.medianViews, 'Median views per own post', delta(s.medianViews, ps && ps.medianViews, prev))
+        ]));
+        sec.appendChild(el('p', { className: 'so-change', text: SD.changeLine(c.label, s, ps) }));
+
+        var top = SD.topOwn(cur[c.key], 5);
+        if (top.length) {
+          var tbody = el('tbody');
+          top.forEach(function (p) {
+            tbody.appendChild(el('tr', null, [
+              el('td', { text: ukLocal(p.postedAtLocal) }),
+              el('td', null, [p.category || '–']),
+              el('td', { className: 'so-excerpt' }, [el('button', { className: 'so-link', type: 'button', text: p.text || '(no text)', onclick: function () { openPost(p); } })]),
+              el('td', { className: 'ta-right', text: fmt(p.metrics.views) }),
+              el('td', { className: 'ta-right', text: fmt(p.metrics.likes) })
+            ]));
+          });
+          sec.appendChild(el('div', { className: 'table-wrap so-tablewrap' }, [
+            el('table', { className: 'table table--compact' }, [
+              el('thead', null, [el('tr', null, [
+                el('th', { text: 'Top own posts' }), el('th', { text: 'Category' }), el('th', { text: 'Post' }),
+                el('th', { className: 'ta-right', text: 'Views' }), el('th', { className: 'ta-right', text: 'Likes' })
+              ])]),
+              tbody
+            ])
+          ]));
+        }
+        view.appendChild(sec);
+      });
+      view.appendChild(el('p', { className: 'so-muted' }, ['Views count own posts only. A reshare\'s numbers belong to the account that posted it.']));
+    });
+  }
+
+  /* ── Cadence ────────────────────────────────────────────────────────── */
+
+  var tip = null;
+  function showTip(e, text) {
+    if (!tip) { tip = el('div', { className: 'so-tip', role: 'tooltip' }); document.body.appendChild(tip); }
+    tip.textContent = text;
+    tip.hidden = false;
+    var x = Math.min(e.clientX + 12, window.innerWidth - tip.offsetWidth - 8);
+    tip.style.left = x + 'px';
+    tip.style.top = (e.clientY - 34) + 'px';
+  }
+  function hideTip() { if (tip) tip.hidden = true; }
+  function hoverable(node, text) {
+    node.addEventListener('mousemove', function (e) { showTip(e, text); });
+    node.addEventListener('mouseleave', hideTip);
+    node.setAttribute('aria-label', text);
+    return node;
+  }
+
+  function niceMax(n) {
+    if (n <= 5) return 5;
+    var step = Math.pow(10, Math.floor(Math.log10(n)));
+    var m = Math.ceil(n / step) * step;
+    return m / 2 >= n ? m / 2 : m;
+  }
+
+  function renderCadence(view) {
+    var month = state.month;
+    return loadAll(month).then(function (all) {
+      view.innerHTML = '';
+      var withData = SD.CHANNELS.filter(function (c) { return Object.keys(all[c.key]).length; });
+      if (state.cadenceChannel !== 'all' && !all[state.cadenceChannel]) state.cadenceChannel = 'all';
+
+      var chips = el('div', { className: 'chip-group', role: 'group', 'aria-label': 'Channel' });
+      [{ key: 'all', label: 'All channels' }].concat(withData).forEach(function (c) {
+        chips.appendChild(el('button', {
+          className: 'chip' + (state.cadenceChannel === c.key ? ' active' : ''), type: 'button', text: c.label,
+          'aria-pressed': state.cadenceChannel === c.key ? 'true' : 'false',
+          onclick: function () { state.cadenceChannel = c.key; render(); }
+        }));
+      });
+      view.appendChild(el('div', { className: 'toolbar' }, [el('div', { className: 'toolbar__left' }, [chips])]));
+
+      var posts = [];
+      SD.CHANNELS.forEach(function (c) {
+        if (state.cadenceChannel === 'all' || state.cadenceChannel === c.key) posts = posts.concat(list(all[c.key]));
+      });
+      if (!posts.length) {
+        view.appendChild(el('div', { className: 'empty-state' }, [el('div', { className: 'empty-state__title', text: 'Nothing imported for ' + SD.monthLabel(month) })]));
+        return;
+      }
+
+      var daily = SD.dailyCounts(posts, month);
+      var days = daily.days;
+      var max = niceMax(Math.max.apply(null, days.map(function (d) { return Math.max(d.own, d.reshare); })));
+      var cols = 'repeat(' + days.length + ', minmax(0, 1fr))';
+
+      view.appendChild(el('div', { className: 'section-head' }, [el('h2', { text: 'Posts per day' })]));
+      view.appendChild(el('div', { className: 'so-legend' }, [
+        el('span', null, [el('i', { className: 'so-swatch so-swatch--own' }), 'Own posts']),
+        el('span', null, [el('i', { className: 'so-swatch so-swatch--reshare' }), 'Reshares'])
+      ]));
+
+      var plot = el('div', { className: 'so-plot', style: 'grid-template-columns:' + cols });
+      [0, max / 2, max].forEach(function (v) {
+        plot.appendChild(el('div', { className: 'so-grid', style: 'bottom:' + (v / max * 100) + '%' }, [el('span', { text: fmt(v) })]));
+      });
+      days.forEach(function (d) {
+        var col = el('div', { className: 'so-day' }, [
+          el('div', { className: 'so-col so-col--own', style: 'height:' + (d.own / max * 100) + '%' }),
+          el('div', { className: 'so-col so-col--reshare', style: 'height:' + (d.reshare / max * 100) + '%' })
+        ]);
+        hoverable(col, DOW[d.dow] + ' ' + d.date.slice(8, 10) + '/' + d.date.slice(5, 7) + ': ' + d.own + ' own, ' + d.reshare + ' reshares');
+        plot.appendChild(col);
+      });
+      var xl = el('div', { className: 'so-xlabels', style: 'grid-template-columns:' + cols });
+      days.forEach(function (d) {
+        xl.appendChild(el('span', { className: d.dow === 6 ? 'is-sat' : '', text: String(d.day) }));
+      });
+      view.appendChild(el('div', { className: 'so-chart' }, [plot, xl]));
+      view.appendChild(el('p', { className: 'so-muted' }, [
+        'Saturdays in bold.' + (daily.undated ? ' ' + daily.undated + ' reshare' + (daily.undated === 1 ? '' : 's') +
+          ' of posts made before ' + SD.monthLabel(month) + ' are counted in the month but not on a day.' : '')
+      ]));
+
+      var tb = el('tbody');
+      days.forEach(function (d) {
+        tb.appendChild(el('tr', null, [
+          el('td', { text: DOW[d.dow] + ' ' + d.date.slice(8, 10) + '/' + d.date.slice(5, 7) + '/' + d.date.slice(0, 4) }),
+          el('td', { className: 'ta-right', text: String(d.own) }),
+          el('td', { className: 'ta-right', text: String(d.reshare) })
+        ]));
+      });
+      view.appendChild(el('details', { className: 'disclosure', style: 'margin-bottom:24px' }, [
+        el('summary', { className: 'so-summary', text: 'As a table' }),
+        el('div', { className: 'table-wrap' }, [el('table', { className: 'table table--compact' }, [
+          el('thead', null, [el('tr', null, [el('th', { text: 'Day' }), el('th', { className: 'ta-right', text: 'Own' }), el('th', { className: 'ta-right', text: 'Reshares' })])]),
+          tb
+        ])])
+      ]));
+
+      renderHeatmap(view, posts, month);
+    });
+  }
+
+  /* 15-minute matchday profile, 06:00 to midnight (slots 24–95). Each cell
+     is the average per matchday so a month with five Saturdays does not
+     look busier than one with four. Own and reshare are scaled separately:
+     reshares run ten to one against own posts on a Saturday, and on one
+     shared scale every own cell would read as empty. */
+  function renderHeatmap(view, posts, month) {
+    var prof = SD.matchdayProfile(posts, month);
+    view.appendChild(el('div', { className: 'section-head' }, [el('h2', { text: 'Matchday profile' })]));
+    if (!prof.sat.days.length && !prof.mid.days.length) {
+      view.appendChild(el('p', { className: 'so-muted', text: 'No matchdays found. A matchday is a day with at least one post categorised HT graphic or FT graphic.' }));
+      return;
+    }
+    function avg(arr, n) { return arr.map(function (v) { return n ? v / n : 0; }); }
+    var groups = [
+      { key: 'sat', title: 'Saturdays', g: prof.sat },
+      { key: 'mid', title: 'Other matchdays', g: prof.mid }
+    ].filter(function (x) { return x.g.days.length; });
+    var maxOwn = 0, maxRs = 0, early = 0;
+    groups.forEach(function (x) {
+      x.own = avg(x.g.own, x.g.days.length);
+      x.rs = avg(x.g.reshare, x.g.days.length);
+      for (var i = 0; i < 96; i++) {
+        if (i < 24) { early += x.g.own[i] + x.g.reshare[i]; continue; }
+        maxOwn = Math.max(maxOwn, x.own[i]); maxRs = Math.max(maxRs, x.rs[i]);
+      }
+    });
+    function step(v, max) { return v <= 0 || !max ? 0 : Math.max(1, Math.ceil(v / max * 5)); }
+    function slotName(i) {
+      var h = Math.floor(i / 4), m = (i % 4) * 15;
+      var e = i + 1, eh = Math.floor(e / 4) % 24, em = (e % 4) * 15;
+      return (h < 10 ? '0' : '') + h + ':' + (m ? m : '00') + '–' + (eh < 10 ? '0' : '') + eh + ':' + (em ? em : '00');
+    }
+
+    groups.forEach(function (x) {
+      var n = x.g.days.length;
+      var box = el('div', { className: 'so-heat' });
+      box.appendChild(el('h3', { text: x.title + ' (' + n + ')' }));
+      [['own', 'Own', x.own, x.g.own, maxOwn, 'own'], ['rs', 'Reshares', x.rs, x.g.reshare, maxRs, 'rs']].forEach(function (r) {
+        var row = el('div', { className: 'so-heat__row' }, [el('div', { className: 'so-heat__label', text: r[1] })]);
+        for (var i = 24; i < 96; i++) {
+          var s = step(r[2][i], r[4]);
+          var cell = el('div', { className: 'so-heat__cell' + (s ? ' so-h-' + r[5] + '-' + s : '') });
+          var noun = r[0] === 'own' ? 'own post' : 'reshare';
+          hoverable(cell, slotName(i) + ': ' + r[3][i] + ' ' + noun + (r[3][i] === 1 ? '' : 's') +
+            ' across ' + n + ' day' + (n === 1 ? '' : 's') + ' (' + (Math.round(r[2][i] * 10) / 10) + ' a day)');
+          row.appendChild(cell);
+        }
+        box.appendChild(row);
+      });
+      var hours = el('div', { className: 'so-heat__row so-heat__hours' }, [el('div')]);
+      for (var h = 6; h < 24; h += 2) hours.appendChild(el('span', { text: (h < 10 ? '0' : '') + h + ':00' }));
+      box.appendChild(hours);
+      view.appendChild(box);
+    });
+    view.appendChild(el('p', { className: 'so-muted' }, [
+      'Darker is busier. Own posts and reshares are shaded on separate scales.' +
+      (early ? ' ' + early + ' matchday post' + (early === 1 ? ' was' : 's were') + ' before 06:00 and are not shown.' : '')
+    ]));
+  }
+
+  /* ── Posts ──────────────────────────────────────────────────────────── */
+
+  function filterPosts(all) {
+    var f = state.filters, q = f.q.toLowerCase();
+    var out = [];
+    SD.CHANNELS.forEach(function (c) {
+      if (f.channel && f.channel !== c.key) return;
+      list(all[c.key]).forEach(function (p) {
+        if (f.kind && p.kind !== f.kind) return;
+        if (f.category && p.category !== f.category) return;
+        if (f.own === 'own' && !p.isOwn) return;
+        if (f.own === 'reshare' && p.isOwn) return;
+        var day = (p.postedAtLocal || '').slice(0, 10);
+        if (f.from && day < f.from) return;
+        if (f.to && day > f.to) return;
+        if (q && ((p.text || '') + ' ' + (p.author || '') + ' ' + (p.category || '')).toLowerCase().indexOf(q) < 0) return;
+        out.push(p);
+      });
+    });
+    out.sort(function (a, b) { return (b.postedAt || '').localeCompare(a.postedAt || ''); });
+    return out;
+  }
+
+  function select(opts, value, onchange, label) {
+    var s = el('select', { className: 'toolbar__filter', 'aria-label': label, onchange: function () { onchange(s.value); } });
+    opts.forEach(function (o) { s.appendChild(el('option', { value: o[0], text: o[1] })); });
+    s.value = value;
+    return s;
+  }
+
+  function renderPosts(view) {
+    var month = state.month;
+    return loadAll(month).then(function (all) {
+      view.innerHTML = '';
+      var f = state.filters;
+      var cats = {};
+      SD.CHANNELS.forEach(function (c) { list(all[c.key]).forEach(function (p) { if (p.category) cats[p.category] = 1; }); });
+      if (f.category && !cats[f.category]) f.category = '';
+      function set(k) { return function (v) { f[k] = v; state.shown = PAGE_SIZE; drawGrid(); }; }
+
+      var first = month + '-01', last = month + '-' + ('0' + SD.daysIn(month)).slice(-2);
+      var search = el('input', { className: 'toolbar__search', type: 'search', placeholder: 'Search text, author, category', value: f.q, 'aria-label': 'Search' });
+      search.addEventListener('input', function () { f.q = search.value; state.shown = PAGE_SIZE; drawGrid(); });
+      var from = el('input', { className: 'toolbar__filter', type: 'date', min: first, max: last, value: f.from, 'aria-label': 'From' });
+      var to = el('input', { className: 'toolbar__filter', type: 'date', min: first, max: last, value: f.to, 'aria-label': 'To' });
+      from.addEventListener('change', function () { set('from')(from.value); });
+      to.addEventListener('change', function () { set('to')(to.value); });
+
+      view.appendChild(el('div', { className: 'toolbar' }, [el('div', { className: 'toolbar__left' }, [
+        search,
+        select([['', 'All channels']].concat(SD.CHANNELS.map(function (c) { return [c.key, c.label]; })), f.channel, set('channel'), 'Channel'),
+        select([['', 'Own and reshares'], ['own', 'Own only'], ['reshare', 'Reshares only']], f.own, set('own'), 'Own or reshare'),
+        select([['', 'All kinds']].concat(SD.KINDS.map(function (k) { return [k, k.charAt(0).toUpperCase() + k.slice(1)]; })), f.kind, set('kind'), 'Kind'),
+        select([['', 'All categories']].concat(Object.keys(cats).sort().map(function (c) { return [c, c]; })), f.category, set('category'), 'Category'),
+        from, to
+      ])]));
+
+      var countLine = el('p', { className: 'so-muted', style: 'margin-bottom:12px' });
+      var grid = el('div', { className: 'so-grid-posts' });
+      var more = el('div', { className: 'so-more' });
+      view.appendChild(countLine); view.appendChild(grid); view.appendChild(more);
+
+      function drawGrid() {
+        var rows = filterPosts(all);
+        grid.innerHTML = ''; more.innerHTML = '';
+        countLine.textContent = fmt(rows.length) + ' post' + (rows.length === 1 ? '' : 's');
+        if (!rows.length) {
+          grid.appendChild(el('div', { className: 'empty-state', style: 'grid-column:1/-1' }, [el('div', { className: 'empty-state__title', text: 'No posts match' })]));
+          return;
+        }
+        rows.slice(0, state.shown).forEach(function (p) { grid.appendChild(card(p)); });
+        if (rows.length > state.shown) {
+          more.appendChild(el('button', { className: 'btn btn--ghost', type: 'button', text: 'Show ' + Math.min(PAGE_SIZE, rows.length - state.shown) + ' more',
+            onclick: function () { state.shown += PAGE_SIZE; drawGrid(); } }));
+        }
+      }
+      drawGrid();
+    });
+  }
+
+  function mediaLabel(p) {
+    return { none: 'Text', image: 'Image', images: 'Images', video: 'Video', gif: 'GIF', carousel: 'Carousel' }[p.media || 'none'] || 'Post';
+  }
+
+  function thumb(p) {
+    var box = el('div', { className: 'so-thumb' });
+    if (p.thumbUrl) {
+      var img = el('img', { src: p.thumbUrl, alt: '', loading: 'lazy', referrerpolicy: 'no-referrer' });
+      /* Meta thumbnail URLs expire; fall back to the media label. */
+      img.onerror = function () { this.onerror = null; box.innerHTML = ''; box.textContent = mediaLabel(p); };
+      box.appendChild(img);
+    } else {
+      box.textContent = mediaLabel(p);
+    }
+    return box;
+  }
+
+  function numbersLine(p) {
+    if (!p.isOwn) return 'Numbers belong to ' + (p.author ? '@' + p.author : 'the original account');
+    var m = p.metrics || {}, bits = [];
+    if (m.views != null) bits.push(fmt(m.views) + ' views');
+    if (m.likes != null) bits.push(fmt(m.likes) + ' likes');
+    if (m.reposts != null) bits.push(fmt(m.reposts) + ' reposts');
+    return bits.join(' · ') || 'No numbers read';
+  }
+
+  function card(p) {
+    return el('button', { className: 'so-card', type: 'button', onclick: function () { openPost(p); } }, [
+      thumb(p),
+      el('div', { className: 'so-card__body' }, [
+        el('div', { className: 'so-card__meta', text: chLabel(p.channel) + ' · ' + ukLocal(p.postedAtLocal, { short: true }) }),
+        el('div', { className: 'so-card__pills' }, [
+          el('span', { className: 'pill ' + (p.isOwn ? 'pill--approved' : 'pill--pending'), text: p.isOwn ? (p.kind === 'original' ? 'Own' : p.kind) : 'Reshare' }),
+          p.category ? el('span', { className: 'pill pill--info', text: p.category }) : null
+        ]),
+        el('div', { className: 'so-card__text', text: p.text || '(no text)' }),
+        el('div', { className: p.isOwn ? 'so-card__nums' : 'so-card__meta', text: numbersLine(p) })
+      ])
+    ]);
+  }
+
+  /* ── Embeds (loaded on demand, one post at a time) ─────────────────── */
+
+  var _scripts = {};
+  function loadScript(src) {
+    if (!_scripts[src]) {
+      _scripts[src] = new Promise(function (resolve, reject) {
+        var s = document.createElement('script');
+        s.src = src; s.async = true; s.charset = 'utf-8';
+        s.onload = resolve;
+        s.onerror = function () { delete _scripts[src]; reject(new Error('Could not load ' + src)); };
+        document.head.appendChild(s);
+      });
+    }
+    return _scripts[src];
+  }
+
+  function embedFallback(box, p, why) {
+    box.innerHTML = '';
+    box.appendChild(el('div', { className: 'banner banner--amber', style: 'width:100%' }, [
+      why + ' ', el('a', { href: p.url, target: '_blank', rel: 'noopener', text: 'Open on ' + chLabel(p.channel) })
+    ]));
+  }
+
+  function embed(box, p) {
+    box.innerHTML = '';
+    box.appendChild(el('span', { className: 'spinner' }));
+    var ch = p.channel;
+    if (ch === 'x') {
+      /* createTweet builds its iframe inside the holder while it loads, so
+         the holder goes into the page first, beside the spinner. */
+      var spin = box.firstChild;
+      var holder = el('div');
+      box.appendChild(holder);
+      loadScript('https://platform.twitter.com/widgets.js').then(function () {
+        var t = window.twttr;
+        return (t.ready ? new Promise(function (r) { t.ready(r); }) : Promise.resolve()).then(function () {
+          return window.twttr.widgets.createTweet(p.id, holder, { dnt: true, conversation: 'none', align: 'center' })
+            .then(function (made) {
+              if (!made) return embedFallback(box, p, 'X would not show this post — it may be deleted or protected.');
+              if (spin && spin.parentNode) spin.parentNode.removeChild(spin);
+            });
+        });
+      }).catch(function () { embedFallback(box, p, 'X\'s embed could not load (an ad or tracker blocker can stop it).'); });
+      return;
+    }
+    if (ch === 'instagram') {
+      box.innerHTML = '';
+      box.appendChild(el('blockquote', { className: 'instagram-media', 'data-instgrm-permalink': p.url, 'data-instgrm-version': '14', style: 'width:100%;max-width:540px' }));
+      loadScript('https://www.instagram.com/embed.js').then(function () {
+        if (window.instgrm) window.instgrm.Embeds.process();
+      }).catch(function () { embedFallback(box, p, 'Instagram\'s embed could not load.'); });
+      return;
+    }
+    if (ch === 'tiktok') {
+      box.innerHTML = '';
+      box.appendChild(el('blockquote', { className: 'tiktok-embed', cite: p.url, 'data-video-id': p.id, style: 'max-width:605px;min-width:325px' }, [el('section')]));
+      /* TikTok's script scans the page once when it runs, so it is re-added
+         for every post rather than cached. */
+      var s = document.createElement('script');
+      s.src = 'https://www.tiktok.com/embed.js'; s.async = true;
+      s.onerror = function () { embedFallback(box, p, 'TikTok\'s embed could not load.'); };
+      box.appendChild(s);
+      return;
+    }
+    var src = '', cls = 'so-embed';
+    if (ch === 'facebook') src = 'https://www.facebook.com/plugins/post.php?width=500&show_text=true&href=' + encodeURIComponent(p.url);
+    if (ch === 'youtube') { src = 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(p.id); cls += ' so-embed--video'; }
+    if (ch === 'linkedin') src = 'https://www.linkedin.com/embed/feed/update/' + encodeURIComponent(/^urn:/.test(p.id) ? p.id : 'urn:li:activity:' + p.id);
+    if (!src) return embedFallback(box, p, 'No embed for this channel.');
+    box.className = cls;
+    box.innerHTML = '';
+    box.appendChild(el('iframe', { src: src, loading: 'lazy', allow: 'autoplay; encrypted-media; picture-in-picture; fullscreen', allowfullscreen: true,
+      height: ch === 'youtube' ? null : '640', title: chLabel(ch) + ' post' }));
+  }
+
+  /* ── Post modal ─────────────────────────────────────────────────────── */
+
+  function knownCategories() {
+    var c = {};
+    SD.CHANNELS.forEach(function (ch) { rulesFor(ch.key).forEach(function (r) { if (r.category) c[r.category] = 1; }); });
+    Object.keys(state.cache).forEach(function (k) { list(state.cache[k]).forEach(function (p) { if (p.category) c[p.category] = 1; }); });
+    return Object.keys(c).sort();
+  }
+
+  function openPost(p) {
+    var month = state.month;
+    var body = el('div');
+    var box = el('div', { className: 'so-embed' });
+    body.appendChild(box);
+
+    var facts = el('table', { className: 'so-facts' });
+    function fact(k, v) { if (v != null && v !== '') facts.appendChild(el('tr', null, [el('td', { text: k }), el('td', null, [v])])); }
+    fact('Posted', ukLocal(p.postedAtLocal) + (p.timeIsOriginal ? ' (original post\'s time)' : ''));
+    fact('Kind', p.isOwn ? p.kind.charAt(0).toUpperCase() + p.kind.slice(1) : 'Reshare of @' + (p.author || '?'));
+    fact('Category', (p.category || '–') + (p.plannerType ? ' · ' + p.plannerType : '') + (p.categoryManual ? ' (set by hand)' : ''));
+    fact('Numbers', numbersLine(p) + (p.isOwn && p.metricsAt ? ' — read ' + NL.formatDate(p.metricsAt) : ''));
+    if (p.linkUrl) fact('Link', el('a', { href: p.linkUrl, target: '_blank', rel: 'noopener', text: p.linkDomain || p.linkUrl }));
+    fact('On ' + chLabel(p.channel), el('a', { href: p.url, target: '_blank', rel: 'noopener', text: 'Open the post' }));
+    body.appendChild(facts);
+
+    var buttons = [{ label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } }];
+    var catInput, typeSel;
+    if (state.isAdmin) {
+      var dl = el('datalist', { id: 'soCats' });
+      knownCategories().forEach(function (c) { dl.appendChild(el('option', { value: c })); });
+      catInput = el('input', { type: 'text', list: 'soCats', value: p.category || '' });
+      typeSel = el('select');
+      [['', '–']].concat(SD.PLANNER_TYPES.map(function (t) { return [t, t]; })).forEach(function (o) { typeSel.appendChild(el('option', { value: o[0], text: o[1] })); });
+      typeSel.value = p.plannerType || '';
+      body.appendChild(el('div', { className: 'so-cat-edit' }, [
+        el('div', { className: 'form-group' }, [el('label', { text: 'Category' }), catInput, dl]),
+        el('div', { className: 'form-group' }, [el('label', { text: 'Planner type' }), typeSel])
+      ]));
+      if (p.categoryManual) {
+        buttons.unshift({ label: 'Back to the rules', className: 'btn--ghost', onClick: function (c) {
+          var cat = SD.categorise(p, rulesFor(p.channel));
+          saveCategory(p, month, { category: cat.category, plannerType: cat.plannerType, categoryManual: false }, c);
+        } });
+      }
+      buttons.push({ label: 'Save category', className: 'btn--primary', onClick: function (c) {
+        var v = catInput.value.trim();
+        if (!v) { NL.toast('Give it a category', 'error'); return; }
+        saveCategory(p, month, { category: v, plannerType: typeSel.value, categoryManual: true }, c);
+      } });
+    }
+
+    NL.modal({ title: chLabel(p.channel) + ' · ' + ukLocal(p.postedAtLocal), body: body, width: 'wide', buttons: buttons, onClose: hideTip });
+    embed(box, p);
+  }
+
+  function saveCategory(p, month, patch, ctrl) {
+    NL.ensureAuth().then(function () {
+      return db.ref(BASE + 'posts/' + p.channel + '/' + month + '/' + p._key).update(patch);
+    }).then(function () {
+      Object.keys(patch).forEach(function (k) { p[k] = patch[k]; });
+      NL.toast('Category saved', 'success');
+      ctrl.close();
+      render();
+    }).catch(fail);
+  }
+
+  /* ── Import ─────────────────────────────────────────────────────────── */
+
+  function renderImport(view) {
+    if (!state.isAdmin) { go('overview'); return; }
+    var month = state.month;
+    return Promise.all([loadStatus(month), loadRules()]).then(function (res) {
+      var status = res[0];
+      view.innerHTML = '';
+
+      /* Checklist for the month */
+      var tb = el('tbody');
+      SD.CHANNELS.forEach(function (c) {
+        var s = status[c.key];
+        tb.appendChild(el('tr', null, [
+          el('td', { text: c.label }),
+          el('td', null, [s
+            ? el('span', { className: 'pill pill--approved', text: 'In' })
+            : el('span', { className: 'pill pill--pending', text: 'Missing' })]),
+          el('td', { className: 'so-muted', text: s
+            ? fmt(s.posts) + ' posts · ' + NL.formatDateShort(s.at) + (s.by ? ' by ' + s.by : '')
+            : c.route + (c.phase > 1 ? ' (phase ' + c.phase + ')' : '') })
+        ]));
+      });
+      view.appendChild(el('div', { className: 'section-head' }, [el('h2', { text: SD.monthLabel(month) + ' checklist' })]));
+      view.appendChild(el('div', { className: 'table-wrap', style: 'margin-bottom:12px' }, [el('table', { className: 'table table--compact' }, [
+        el('thead', null, [el('tr', null, [el('th', { text: 'Channel' }), el('th', { text: 'Status' }), el('th', { text: '' })])]), tb
+      ])]));
+      view.appendChild(el('details', { className: 'disclosure', style: 'margin-bottom:24px' }, [
+        el('summary', { className: 'so-summary', text: 'Monthly routine' }),
+        el('ol', { className: 'so-steps' }, [
+          el('li', { text: '1st–4th: run the X Output Scraper in Everything mode for last month. Your own account, never the league\'s.' }),
+          el('li', { text: '5th, 06:00: Apps Script pulls Instagram, Facebook and YouTube (from phase 2).' }),
+          el('li', { text: '5th onwards: upload the X file here, then TikTok and LinkedIn exports (from phase 4).' }),
+          el('li', { text: 'Share the Overview once nothing above says Missing.' })
+        ])
+      ]));
+
+      /* Upload */
+      var chSel = el('select', { className: 'nl-select', 'aria-label': 'Channel' });
+      SD.CHANNELS.forEach(function (c) {
+        chSel.appendChild(el('option', { value: c.key, disabled: c.key !== 'x', text: c.key === 'x' ? 'X — scraper CSV' : c.label + ' — ' + c.route + ', phase ' + c.phase }));
+      });
+      var file = el('input', { type: 'file', accept: '.csv,text/csv', hidden: true });
+      var drop = el('div', { className: 'so-drop', tabindex: '0', role: 'button' }, [
+        el('strong', { text: 'Drop the CSV here' }), ' or click to choose it'
+      ]);
+      var preview = el('div', { style: 'margin-top:16px' });
+      drop.addEventListener('click', function () { file.click(); });
+      drop.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); file.click(); } });
+      drop.addEventListener('dragover', function (e) { e.preventDefault(); drop.classList.add('is-over'); });
+      drop.addEventListener('dragleave', function () { drop.classList.remove('is-over'); });
+      drop.addEventListener('drop', function (e) {
+        e.preventDefault(); drop.classList.remove('is-over');
+        if (e.dataTransfer.files[0]) readFile(e.dataTransfer.files[0], chSel.value, preview);
+      });
+      file.addEventListener('change', function () { if (file.files[0]) readFile(file.files[0], chSel.value, preview); file.value = ''; });
+
+      view.appendChild(el('div', { className: 'form-panel' }, [
+        el('div', { className: 'form-panel__head' }, [el('h3', { text: 'Import into ' + SD.monthLabel(month) })]),
+        el('div', { className: 'form-panel__body' }, [
+          el('div', { className: 'form-group' }, [el('label', { text: 'Channel' }), chSel]),
+          drop, file, preview
+        ])
+      ]));
+    });
+  }
+
+  function readFile(f, channel, preview) {
+    var month = state.month;
+    preview.innerHTML = '';
+    preview.appendChild(el('p', { className: 'so-muted' }, [el('span', { className: 'spinner' }), ' Reading ' + f.name + '…']));
+    var reader = new FileReader();
+    reader.onerror = function () { fail(new Error('Could not read the file')); };
+    reader.onload = function () {
+      var rows = NL.csvParse(String(reader.result || ''), { header: true });
+      var parsed = SD.normaliseX(rows);
+      loadMonth(channel, month, true).then(function (existing) {
+        drawPreview(preview, f.name, channel, month, parsed, existing);
+      }).catch(fail);
+    };
+    reader.readAsText(f);
+  }
+
+  function drawPreview(preview, name, channel, month, parsed, existing) {
+    preview.innerHTML = '';
+    if (parsed.missing.length) {
+      preview.appendChild(el('div', { className: 'banner banner--error' }, [
+        el('strong', { text: 'Can\'t import ' + name + ': ' }), 'no column for ' + parsed.missing.join(' or ') + '.',
+        el('div', { className: 'so-cols', text: 'Columns in the file: ' + (parsed.columns.unrecognised.concat(parsed.columns.recognised).join(', ') || 'none') })
+      ]));
+      return;
+    }
+    var plan = SD.planImport(parsed.posts, existing, { month: month, rules: rulesFor(channel), now: new Date().toISOString() });
+    var st = plan.stats;
+    var skippedTotal = st.skipped + parsed.skipped.length;
+    var changes = st.created + st.updated;
+
+    preview.appendChild(el('div', { className: 'stats' }, [
+      stat(rows(parsed), 'Rows read'),
+      stat(st.created, 'New'),
+      stat(st.updated, 'Updated'),
+      stat(st.unchanged, 'Unchanged'),
+      stat(skippedTotal, 'Skipped')
+    ]));
+    if (parsed.columns.unrecognised.length) {
+      preview.appendChild(el('div', { className: 'banner banner--amber' }, [
+        el('strong', { text: 'Not read: ' }), parsed.columns.unrecognised.join(', ') + '. ',
+        'If one of these holds something the tool needs, the column name needs adding to the importer.'
+      ]));
+    }
+    var why = parsed.skipped.map(function (s) { return 'Row ' + s.line + ': ' + s.reason; })
+      .concat(plan.skipped.map(function (s) { return s.key + ': ' + s.reason; }));
+    if (why.length) {
+      var ul = el('ul', { className: 'so-steps' });
+      why.slice(0, 50).forEach(function (w) { ul.appendChild(el('li', { style: 'list-style:disc', text: w })); });
+      if (why.length > 50) ul.appendChild(el('li', { style: 'list-style:none', text: '…and ' + (why.length - 50) + ' more' }));
+      preview.appendChild(el('details', { className: 'disclosure' }, [el('summary', { className: 'so-summary', text: 'Why ' + why.length + ' skipped' }), ul]));
+    }
+    preview.appendChild(el('details', { className: 'disclosure' }, [
+      el('summary', { className: 'so-summary', text: 'Columns read' }),
+      el('div', { className: 'so-cols', text: parsed.columns.recognised.join(' · ') })
+    ]));
+
+    var actions = el('div', { className: 'so-actions' });
+    if (!changes) {
+      actions.appendChild(el('p', { className: 'so-muted', text: 'Nothing to write — everything in this file is already stored with the same numbers.' }));
+    } else {
+      actions.appendChild(el('button', { className: 'btn btn--primary', type: 'button',
+        text: 'Write ' + fmt(changes) + ' change' + (changes === 1 ? '' : 's') + ' to ' + SD.monthLabel(month),
+        onclick: function (e) {
+          e.target.disabled = true;
+          writeImport(channel, month, plan, rows(parsed), parsed.skipped.length).then(function () {
+            preview.innerHTML = '';
+            NL.toast(fmt(st.created) + ' new, ' + fmt(st.updated) + ' updated', 'success');
+            render();
+          }).catch(function (err) { e.target.disabled = false; fail(err); });
+        } }));
+    }
+    actions.appendChild(el('button', { className: 'btn btn--ghost', type: 'button', text: 'Cancel', onclick: function () { preview.innerHTML = ''; } }));
+    preview.appendChild(actions);
+  }
+  function rows(parsed) { return parsed.posts.length + parsed.skipped.length; }
+
+  function writeImport(channel, month, plan, read, parseSkipped) {
+    var now = new Date().toISOString();
+    var who = (state.session && (state.session.name || state.session.email)) || '';
+    return NL.ensureAuth().then(function () {
+      return db.ref(BASE + 'posts/' + channel + '/' + month).update(plan.updates);
+    }).then(function () {
+      return loadMonth(channel, month, true);
+    }).then(function (stored) {
+      var s = SD.summarise(stored);
+      var st = plan.stats;
+      return Promise.all([
+        db.ref(BASE + 'status/' + month + '/' + channel).set({
+          at: now, by: who, source: 'scraper', posts: s.total, own: s.own, reshares: s.reshares
+        }),
+        db.ref(BASE + 'imports').push({
+          at: now, by: who, channel: channel, month: month, read: read,
+          created: st.created, updated: st.updated, unchanged: st.unchanged, skipped: st.skipped + parseSkipped
+        })
+      ]);
+    });
+  }
+
+  /* ── Categories ─────────────────────────────────────────────────────── */
+
+  var catChannel = 'x';
+  var draft = null; /* rules being edited, for catChannel */
+
+  function renderCategories(view) {
+    if (!state.isAdmin) { go('overview'); return; }
+    return loadRules().then(function () {
+      view.innerHTML = '';
+      if (!draft) draft = JSON.parse(JSON.stringify(rulesFor(catChannel)));
+      var usingDefaults = !(state.rules && state.rules[catChannel]);
+
+      var chSel = el('select', { className: 'nl-select', 'aria-label': 'Channel', onchange: function () {
+        catChannel = chSel.value; draft = null; render();
+      } });
+      SD.CHANNELS.forEach(function (c) { chSel.appendChild(el('option', { value: c.key, text: c.label })); });
+      chSel.value = catChannel;
+      view.appendChild(el('div', { className: 'toolbar' }, [el('div', { className: 'toolbar__left' }, [chSel])]));
+      view.appendChild(el('p', { className: 'so-note', style: 'margin-top:0', text:
+        'First matching rule wins. Within a rule every filled box must match; inside a box any one value will do. ' +
+        'Keywords are whole words. Applied at import; a category set by hand is never changed.' +
+        (usingDefaults && SD.DEFAULT_RULES[catChannel] ? ' These are the starting rules — nothing saved yet.' : '') }));
+
+      var tb = el('tbody');
+      draft.forEach(function (r, i) {
+        function inp(k, ph) {
+          var v = Array.isArray(r[k]) ? r[k].join(', ') : (r[k] || '');
+          var n = el('input', { type: 'text', value: v, placeholder: ph || '', 'aria-label': k });
+          n.addEventListener('input', function () { r[k] = /keywords|domains|media|kinds/.test(k) ? SD.listOf(n.value) : n.value; });
+          return n;
+        }
+        function sel(k, opts) {
+          var s = el('select', { 'aria-label': k, onchange: function () { r[k] = s.value; } });
+          opts.forEach(function (o) { s.appendChild(el('option', { value: o[0], text: o[1] })); });
+          s.value = r[k] || opts[0][0];
+          return s;
+        }
+        function move(d) { return function () { var j = i + d; if (j < 0 || j >= draft.length) return; var t = draft[i]; draft[i] = draft[j]; draft[j] = t; render(); }; }
+        tb.appendChild(el('tr', null, [
+          el('td', { text: String(i + 1) }),
+          el('td', null, [inp('category')]),
+          el('td', null, [sel('plannerType', SD.PLANNER_TYPES.map(function (t) { return [t, t]; }))]),
+          el('td', null, [sel('scope', [['any', 'Both'], ['own', 'Own'], ['reshare', 'Reshares']])]),
+          el('td', null, [inp('keywords', 'any word')]),
+          el('td', null, [inp('domains', 'any link')]),
+          el('td', null, [inp('media', 'any media')]),
+          el('td', null, [inp('kinds', 'any kind')]),
+          el('td', { className: 'so-rule-actions' }, [
+            el('button', { className: 'btn btn--ghost btn--sm', type: 'button', 'aria-label': 'Move up', text: '↑', disabled: i === 0, onclick: move(-1) }), ' ',
+            el('button', { className: 'btn btn--ghost btn--sm', type: 'button', 'aria-label': 'Move down', text: '↓', disabled: i === draft.length - 1, onclick: move(1) }), ' ',
+            el('button', { className: 'btn btn--ghost btn--sm', type: 'button', 'aria-label': 'Delete rule', text: '✕', onclick: function () { draft.splice(i, 1); render(); } })
+          ])
+        ]));
+      });
+      view.appendChild(el('div', { className: 'table-wrap' }, [el('table', { className: 'table table--compact so-rules' }, [
+        el('thead', null, [el('tr', null, ['#', 'Category', 'Planner type', 'Applies to', 'Keywords', 'Link domains', 'Media', 'Kinds', ''].map(function (h) { return el('th', { text: h }); }))]),
+        tb
+      ])]));
+
+      view.appendChild(el('div', { className: 'so-actions' }, [
+        el('button', { className: 'btn btn--ghost', type: 'button', text: 'Add rule', onclick: function () { draft.push({ category: '', plannerType: 'routine', scope: 'any' }); render(); } }),
+        el('button', { className: 'btn btn--primary', type: 'button', text: 'Save rules', onclick: saveRules }),
+        SD.DEFAULT_RULES[catChannel] ? el('button', { className: 'btn btn--ghost', type: 'button', text: 'Back to starting rules', onclick: function () { draft = JSON.parse(JSON.stringify(SD.DEFAULT_RULES[catChannel])); render(); } }) : null,
+        el('button', { className: 'btn btn--navy', type: 'button', text: 'Re-run rules on ' + SD.monthLabel(state.month), onclick: rerun })
+      ]));
+    });
+  }
+
+  function cleanRules(rs) {
+    return rs.filter(function (r) { return r.category && r.category.trim(); }).map(function (r) {
+      var o = { category: r.category.trim(), plannerType: r.plannerType || 'routine', scope: r.scope || 'any' };
+      ['keywords', 'domains', 'media', 'kinds'].forEach(function (k) { var v = SD.listOf(r[k]); if (v.length) o[k] = v; });
+      return o;
+    });
+  }
+
+  function saveRules() {
+    var rs = cleanRules(draft);
+    NL.ensureAuth().then(function () {
+      return db.ref(BASE + 'config/categories/' + catChannel).set(rs);
+    }).then(function () {
+      state.rules = state.rules || {};
+      state.rules[catChannel] = rs;
+      draft = null;
+      NL.toast('Rules saved', 'success');
+      render();
+    }).catch(fail);
+  }
+
+  function rerun() {
+    var month = state.month, ch = catChannel;
+    var saved = JSON.stringify(cleanRules(rulesFor(ch))), editing = JSON.stringify(cleanRules(draft));
+    if (saved !== editing) { NL.toast('Save the rules first', 'error'); return; }
+    loadMonth(ch, month, true).then(function (existing) {
+      var plan = SD.planRerun(existing, rulesFor(ch));
+      if (!plan.count) { NL.toast('No changes — every post already matches the rules', 'info'); return null; }
+      return NL.confirm('Recategorise ' + fmt(plan.count) + ' ' + chLabel(ch) + ' post' + (plan.count === 1 ? '' : 's') + ' in ' + SD.monthLabel(month) + '?',
+        { title: 'Re-run rules', confirmText: 'Recategorise', detail: 'Categories set by hand stay as they are.' })
+        .then(function (ok) {
+          if (!ok) return null;
+          return NL.ensureAuth().then(function () {
+            return db.ref(BASE + 'posts/' + ch + '/' + month).update(plan.updates);
+          }).then(function () {
+            delete state.cache[ch + '|' + month];
+            NL.toast(fmt(plan.count) + ' recategorised', 'success');
+          });
+        });
+    }).catch(fail);
+  }
+
+  /* ── Boot ───────────────────────────────────────────────────────────── */
+
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function (session) {
+    state.session = session;
+    state.isAdmin = session && session.toolLevel === 'admin';
+
+    var now = SD.currentMonth();
+    var months = SD.monthsFrom(FIRST_MONTH, now);
+    /* Default to last month: this month is still being posted, and the
+       routine imports a month after it ends. */
+    state.month = SD.prevMonth(now) >= FIRST_MONTH ? SD.prevMonth(now) : now;
+    var pick = document.getElementById('monthPick');
+    pick.innerHTML = '';
+    months.forEach(function (m) { pick.appendChild(el('option', { value: m, text: SD.monthLabel(m) })); });
+    pick.value = state.month;
+    pick.addEventListener('change', function () {
+      state.month = pick.value; state.shown = PAGE_SIZE;
+      state.filters.from = ''; state.filters.to = '';
+      render();
+    });
+    document.getElementById('printBtn').addEventListener('click', function () { window.print(); });
+
+    var hash = (location.hash || '').slice(1);
+    if (TABS.some(function (t) { return t.key === hash && (!t.admin || state.isAdmin); })) state.tab = hash;
+
+    /* Rules are read up front so the post modal can offer them. */
+    loadRules().catch(function () {}).then(render);
+  };
+
+  /* If auth-guard fired before this script loaded, replay the session. */
+  if (window._toolDeferredSession) {
+    window.TOOL.boot(window._toolDeferredSession);
+    delete window._toolDeferredSession;
+  }
+})();
+</script>
+
+</body>
+</html>
