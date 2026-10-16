@@ -1,9 +1,12 @@
 /* =============================================================================
    NL Tools — DAZN Viewership: one club's season, as a dashboard
    File: /dazn/_view.js
-   Version: v35.0 (15/10/2026)
+   Version: v37.0 (16/10/2026)
 
    CHANGELOG
+     v37.0 (16/10/2026) — The y-axis stays level with the columns when By
+       game scrolls: the scrollbar's height is measured and the axis lifted
+       by it (alignAxis).
      v35.0 (15/10/2026) — By game draws a dashed line at the average views
        per game for the games shown, labelled "Avg".
      v33.0 (15/10/2026) — New headline cards: Total views, Views per game
@@ -508,6 +511,21 @@
 
     var q = function (sel) { return el.querySelector(sel); };
 
+    /* A horizontal scrollbar takes its height out of the scroll box, so the
+       columns' baseline rises while the y-axis beside it (outside the box)
+       stays put, and 0 sits below the baseline. Measure the bar and lift the
+       axis by it. Overlay scrollbars measure 0, so nothing moves there.
+       Re-measured on resize, when the bar can come or go. */
+    function alignAxis() {
+      var c = q('.dz-chart'), sc = c && c.querySelector('.dz-chart__scroll');
+      if (sc) c.style.setProperty('--dz-sb', Math.max(0, sc.offsetHeight - sc.clientHeight) + 'px');
+    }
+    var resizeTimer;
+    window.addEventListener('resize', function () {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(function () { if (document.body.contains(el)) alignAxis(); }, 100);
+    });
+
     function draw() {
       q('[data-slicers]').innerHTML = slicers(months, F, has);
       var shown = applyFilters(all, o.code, F);
@@ -525,6 +543,7 @@
         q('[data-kpis]').innerHTML = '';
         q('[data-top]').innerHTML = '';
         q('[data-games]').innerHTML = '<div class="empty-state"><div class="empty-state__title">No games match these slicers</div></div>';
+        alignAxis();
         return;
       }
       var s = D.summarise(shown, o.code);
@@ -538,6 +557,7 @@
       q('[data-top]').innerHTML = topGames(rows);
       window.NL.clubs.wireCrestImgs(q('[data-top]'));
       gamesGrid(q('[data-games]'), rows, s);
+      alignAxis();
     }
 
     el.onclick = function (e) {
