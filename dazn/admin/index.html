@@ -1,10 +1,16 @@
 <!DOCTYPE html>
 <!--
   NL Tools — DAZN Viewership (staff)
-  Version: v38.0 (16/10/2026)
+  Version: v39.0 (16/10/2026)
   File: /dazn/admin/index.html
 
   CHANGELOG
+    v39.0 (16/10/2026) — Club tab: the picker also lists clubs from the other
+      imported seasons, marked with their season (York City · 2025-26), and
+      picking one switches to that season. A club with no games in the season
+      on screen offers a button to the season it has. Before, a club only in
+      one season could be reached only by first changing season through a
+      club present in both.
     v38.0 (16/10/2026) — Dashboard tidy (_view v38.0): month totals no longer
       cut off, AVG on the y-axis, UK share card dropped, games table with
       kick-off times, venue pills and tick / cross. Import stores each game's
@@ -147,6 +153,13 @@
     var NL_TOOL_KEY = 'media-dazn';
 
     window.NL_CHANGELOG = [
+      {
+        date: '16/10/2026',
+        version: 'v39.0',
+        items: [
+          'Club tab: every club from every imported season is in the picker, marked with its season if it is not this one. Picking it switches season for you.'
+        ]
+      },
       {
         date: '16/10/2026',
         version: 'v38.0',
@@ -434,7 +447,7 @@
       var snap = got[0];
       S.overrides = (got[1] && got[1].val()) || {};
       S.data = snap.val() || {};
-      if (S.picker) S.picker.setSeason(key);
+      if (S.picker) S.picker.setSeason(key).setExtraClubs(otherSeasonClubs());
       if (S.editPicker) S.editPicker.setSeason(key);
       drawClubs();
       drawClub();
@@ -544,6 +557,33 @@
      The same DAZNView.render the club page calls, so this cannot drift
      from what a club gets. The picker is the canon NL.clubPicker, scoped to
      the season shown. */
+  /* ---- Clubs from the other seasons --------------------------------
+     The picker lists the selected season's clubs, so a club that was only
+     in the League in another season (York in 2025-26, Barrow from 2026-27)
+     could not be reached without first changing season through a club
+     present in both. Clubs from the other imported seasons are added to
+     the list, marked with their latest season; picking one switches to it.
+     Membership comes from clubs-meta, so no other season's data is read. */
+  function seasonsOf(code) {
+    return Object.keys(S.index || {}).sort().reverse().filter(function (k) {
+      return NL.season.clubsFor(S.meta, k).some(function (c) { return c.code === code; });
+    });
+  }
+  function otherSeasonClubs() {
+    var here = {}, out = [], seen = {};
+    NL.season.clubsFor(S.meta, S.season).forEach(function (c) { here[c.code] = true; });
+    Object.keys(S.index || {}).sort().reverse().forEach(function (k) {
+      if (k === S.season) return;
+      NL.season.clubsFor(S.meta, k).forEach(function (c) {
+        if (here[c.code] || seen[c.code]) return;
+        seen[c.code] = true;
+        var label = (S.index[k] && S.index[k].label) || NL.season.label(S.meta, k);
+        out.push({ name: c.name, code: c.code, division: label, seasonKey: k });
+      });
+    });
+    return out.sort(function (a, b) { return a.name.localeCompare(b.name); });
+  }
+
   function drawClub() {
     var host = $('dzaClubBody');
     if (!S.open) {
@@ -552,8 +592,14 @@
     }
     var club = (S.data.clubs || {})[S.open];
     if (!club) {
+      var other = seasonsOf(S.open).filter(function (k) { return k !== S.season; })[0];
       host.innerHTML = '<div class="empty-state"><div class="empty-state__title">No DAZN games for ' +
-        esc(nameOf(S.open) || S.open) + ' this season</div></div>';
+        esc(nameOf(S.open) || S.open) + ' this season</div>' +
+        (other ? '<div class="empty-state__text"><button type="button" class="btn btn--primary btn--sm" data-goto-season="' + esc(other) + '">Show ' +
+          esc((S.index[other] && S.index[other].label) || NL.season.label(S.meta, other)) + '</button></div>' : '') +
+        '</div>';
+      var go = host.querySelector('[data-goto-season]');
+      if (go) go.onclick = function () { switchSeason(go.getAttribute('data-goto-season')); };
       return;
     }
     DAZNView.render(host, {
@@ -564,12 +610,23 @@
     });
   }
 
-  function openClub(code) {
+  /* Open a club. seasonKey, when given, is a season the club was in that
+     is not the one on screen (a picker entry from another season): move
+     there first. */
+  function openClub(code, seasonKey) {
     S.open = code;
     var c = NL.clubs.byCode(code);
     if (S.picker && c) S.picker.setValue(c.name);
-    drawClub();
     showPane('club');
+    if (seasonKey && seasonKey !== S.season) { switchSeason(seasonKey); return; }
+    drawClub();
+  }
+  function switchSeason(key) {
+    $('dzaSeason').value = key;
+    return showSeason(key).then(function () {
+      var c = NL.clubs.byCode(S.open);
+      if (S.picker && c) S.picker.setValue(c.name);
+    });
   }
 
   /* ---- Tabs ------------------------------------------------------------ */
@@ -920,9 +977,7 @@
         onSelect: function (sel) {
           var c = (sel && sel.club) || NL.clubs.byName(sel && sel.name);
           if (!c || !c.code) return;
-          S.open = c.code;
-          drawClub();
-          showPane('club');
+          openClub(c.code, c.seasonKey);
         }
       });
       if (S.open && NL.clubs.byCode(S.open)) S.picker.setValue(NL.clubs.byCode(S.open).name);
