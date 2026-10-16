@@ -205,6 +205,9 @@ test('kick-off dates are read in UK time, not UTC', () => {
   assert.equal(D.londonDate('2026-02-03 19:45:00'), '2026-02-03');
   assert.equal(D.londonDate('2025-08-09 23:30:00'), '2025-08-10');   // BST: 00:30 next day
   assert.equal(D.londonDate('nonsense'), null);
+  assert.equal(D.londonTime('2026-08-08 14:00:00'), '15:00');          // BST
+  assert.equal(D.londonTime('2026-12-26 15:00:00'), '15:00');          // GMT
+  assert.equal(D.londonTime('nonsense'), null);
 });
 
 test('a stream with no NLS match for those clubs on that date is not played', () => {
@@ -225,6 +228,7 @@ test('a stream with no NLS match for those clubs on that date is not played', ()
   const b = D.buildSeason(r.played, codeOf);
   assert.equal(b.season.matches['20250819-GAM-ALP'].abandoned, true);
   assert.equal(b.season.matches['20250809-ALP-BET'].abandoned, undefined);
+  assert.equal(b.season.matches['20250809-ALP-BET'].ko, '15:00', 'the UK kick-off rides along from NLS');
 });
 
 test('a postponement reason on its own does not make a game "not played"', () => {
@@ -292,7 +296,7 @@ test('a club view with a neutral game: Venue Home and Away both leave it out, Al
   assert.equal(n('away'), 2);
 });
 
-test('headline cards: views per game against the division, UK share, best game named', () => {
+test('headline cards: views per game against the division, best game named, no UK share', () => {
   const win = { DAZNData: D, NL: { formatDateShort: (d) => d, escHtml: (t) => String(t) } };
   vm.runInNewContext(readFileSync(join(REPO, 'dazn/_view.js'), 'utf8'), { window: win, Intl });
   const games = [
@@ -303,9 +307,8 @@ test('headline cards: views per game against the division, UK share, best game n
   const bench = { games: 10, ukShownGames: 10, avgViewsPerGame: 200 };
   const html = win.DAZNView.kpis(s, bench, true, { code: 'ALP', nameOf: () => '' });
   const labels = [...html.matchAll(/stat__label">([^<]*)</g)].map((m) => m[1]);
-  assert.deepEqual(labels, ['Total views', 'Views per game', 'UK share', 'Hours watched', 'Best game']);
+  assert.deepEqual(JSON.parse(JSON.stringify(labels)), ['Total views', 'Views per game', 'Hours watched', 'Best game']);
   assert.match(html, /\+50% vs division/, '300 per game against 200');
-  assert.match(html, />50%</, '300 UK of 600');
   assert.match(html, /v BET \(H\)/);
   assert.match(html, />100</, '6,000 minutes is 100 hours');
   /* A slicer is on: no comparison, but the card still counts the games. */
@@ -333,4 +336,13 @@ test('By month always runs August to May; slicers appear only when they split th
   assert.match(view, /for \(var k = 0; k < 10; k\+\+\)/, 'ten-month season axis');
   assert.match(view, /var ukSplits = has\.uk && has\.intl/);
   assert.match(view, /if \(!ukSplits && !venueSplits && months\.length < 2 && !filtered\(F\)\) return ''/);
+});
+
+test('a month total printed above its column is never cut off by the top of the scale', () => {
+  /* 3,739 against a 4,000 top tick left the figure no room (16/10/2026):
+     labelled columns get 15% headroom, so the top tick clears it. */
+  const win = { DAZNData: D, NL: { formatDateShort: (d) => d, escHtml: (t) => String(t) } };
+  vm.runInNewContext(readFileSync(join(REPO, 'dazn/_view.js'), 'utf8'), { window: win, Intl });
+  const view = readFileSync(join(REPO, 'dazn/_view.js'), 'utf8');
+  assert.match(view, /ticks\(labelled \? scaleMax \* 1\.15 : scaleMax\)/);
 });

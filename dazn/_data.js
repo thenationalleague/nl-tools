@@ -1,9 +1,13 @@
 /* =============================================================================
    NL Tools — DAZN Viewership: data layer
    File: /dazn/_data.js
-   Version: v33.0 (15/10/2026)
+   Version: v38.0 (15/10/2026)
 
    CHANGELOG
+     v38.0 (16/10/2026) — Each game keeps its UK kick-off time (ko, "15:00"),
+       read off the NLS row the played-check already finds: nlsIndex holds
+       { period, ko }, checkPlayed copies ko onto the row, buildSeason onto
+       the record. A season imported before this has no ko until re-imported.
      v33.0 (15/10/2026) — The division average also carries views per game
        (avgViewsPerGame), for the Views per game card's comparison.
      v29.0 (15/10/2026) — Admin edits: applyOverride (neutral venue, UK
@@ -227,6 +231,7 @@
         ukMins: r.ukMins, intlMins: r.intlMins, avail: r.avail
       };
       if (r.abandoned) rec.abandoned = true;
+      if (r.ko) rec.ko = r.ko;
       matches[id] = rec;
       [h, a].forEach(function (code) {
         clubs[code] = clubs[code] || { matches: {} };
@@ -428,6 +433,17 @@
     ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' })
     : null;
 
+  var LONDON_T = typeof Intl !== 'undefined'
+    ? new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+    : null;
+
+  /* "2026-08-08 14:00:00" (UTC) → "15:00", the UK kick-off. */
+  function londonTime(utc) {
+    var t = Date.parse(String(utc || '').replace(' ', 'T') + 'Z');
+    if (isNaN(t) || !LONDON_T) return null;
+    return LONDON_T.format(new Date(t));
+  }
+
   /* "2026-02-03 19:45:00" (UTC, no zone marker) → "2026-02-03" in London. */
   function londonDate(utc) {
     var t = Date.parse(String(utc || '').replace(' ', 'T') + 'Z');
@@ -437,7 +453,7 @@
 
   var TOOK_PLACE = { fulltime: true, postmatch: true, abandoned: true };
 
-  /* NLS /v2/matches data[] → { 'YYYY-MM-DD|tHOME|tAWAY': matchPeriod } */
+  /* NLS /v2/matches data[] → { 'YYYY-MM-DD|tHOME|tAWAY': { period, ko } } */
   function nlsIndex(rows) {
     var idx = {};
     (rows || []).forEach(function (m) {
@@ -445,7 +461,7 @@
       if (!a || !TOOK_PLACE[String(a.matchPeriod || '').toLowerCase()]) return;
       var d = londonDate(a.kickOffDateUTC);
       if (!d || !a.homeTeam || !a.awayTeam) return;
-      idx[d + '|' + a.homeTeam.teamID + '|' + a.awayTeam.teamID] = a.matchPeriod;
+      idx[d + '|' + a.homeTeam.teamID + '|' + a.awayTeam.teamID] = { period: a.matchPeriod, ko: londonTime(a.kickOffDateUTC) };
     });
     return idx;
   }
@@ -458,8 +474,10 @@
     rows.forEach(function (r) {
       var h = optaOf(r.home), a = optaOf(r.away);
       if (!h || !a) { unchecked.push(r); played.push(r); return; }
-      var period = idx[r.date + '|' + h + '|' + a];
-      if (!period) { notPlayed.push(r); return; }
+      var hit = idx[r.date + '|' + h + '|' + a];
+      if (!hit) { notPlayed.push(r); return; }
+      var period = typeof hit === 'string' ? hit : hit.period;
+      if (hit.ko) r.ko = hit.ko;
       /* Abandoned games count, but carry a flag so the club sees why the
          game has no ordinary result. */
       if (String(period).toLowerCase() === 'abandoned') r.abandoned = true;
@@ -485,6 +503,7 @@
     applyOverride: applyOverride,
     setNotPlayed: setNotPlayed,
     londonDate: londonDate,
+    londonTime: londonTime,
     nlsIndex: nlsIndex,
     checkPlayed: checkPlayed
   };
