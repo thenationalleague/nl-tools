@@ -1,9 +1,11 @@
 /* =============================================================================
    NL Tools — DAZN Viewership: one club's season, as a dashboard
    File: /dazn/_view.js
-   Version: v38.0 (16/10/2026)
+   Version: v40.0 (16/10/2026)
 
    CHANGELOG
+     v40.0 (16/10/2026) — Games table: kick-off in its own column, written
+       7.45pm / 3pm; no hover text on Shown in UK or the faded UK figure.
      v38.0 (16/10/2026) — Month totals above the columns are no longer cut off
        at the top (the scale leaves room for them). The average reads "AVG"
        on the y-axis instead of a label inside the plot; a scale number it
@@ -113,6 +115,15 @@
   function venueOf(r) { return r.g.neutral ? 'Neutral' : r.home ? 'Home' : 'Away'; }
   function venueAbbr(r) { return r.g.neutral ? 'N' : r.home ? 'H' : 'A'; }
 
+  /* "19:45" → "7.45pm", "15:00" → "3pm": how a kick-off is written in
+     the UK. Tool-local: nothing else in the repo writes times this way. */
+  function koLabel(hhmm) {
+    var m = /^(\d{1,2}):(\d{2})$/.exec(hhmm || '');
+    if (!m) return '';
+    var h = +m[1], mm = m[2], h12 = h % 12 || 12;
+    return h12 + (mm === '00' ? '' : '.' + mm) + (h < 12 ? 'am' : 'pm');
+  }
+
   /* Tick or cross for Shown in UK, named for a screen reader. */
   function availIcon(intl) {
     var ic = window.NL.icon(intl ? 'close' : 'tick', 'sm');
@@ -120,12 +131,6 @@
     ic.setAttribute('aria-label', intl ? 'Not shown in the UK' : 'Shown in the UK');
     return ic.outerHTML;
   }
-
-  var AVAIL_TITLE = {
-    round: 'Saturday: the whole round was available in the UK',
-    moved: 'Saturday: moved kick-off',
-    intl:  'Saturday 3pm: not shown in the UK. Counted in totals, not in UK averages.'
-  };
 
   /* ---- Grid: scrolling table, sticky header and Total row -------------- */
   function grid(host, cfg) {
@@ -420,6 +425,7 @@
       sort: { key: 'date', dir: 1 },
       cols: [
         { key: 'date', label: 'Date', get: function (r) { return r.g.date + ' ' + (r.g.ko || ''); } },
+        { key: 'ko', label: 'Kick-off', cls: 'dz-sm-hide', get: function (r) { return r.g.ko || null; } },
         { key: 'opp', label: 'Opponent', get: function (r) { return r.oppName; } },
         { key: 'avail', label: 'Shown in UK', cls: 'dz-sm-hide ta-center', get: function (r) { return r.g.avail === 'intl' ? 'No' : 'Yes'; } },
         { key: 'uk', label: 'UK', num: true, cls: 'dz-sm-hide', get: function (r) { return r.g.ukViews; } },
@@ -430,21 +436,21 @@
       ],
       rows: rows,
       row: function (r) {
-        var g = r.g, intl = g.avail === 'intl', t = AVAIL_TITLE[g.avail];
+        var g = r.g, intl = g.avail === 'intl';
         return '<tr>' +
-          '<td class="dz-nowrap">' + esc(window.NL.formatDateShort(g.date)) +
-            (g.ko ? ' <span class="dz-muted">' + esc(g.ko) + '</span>' : '') + '</td>' +
+          '<td class="dz-nowrap">' + esc(window.NL.formatDateShort(g.date)) + '</td>' +
+          '<td class="dz-nowrap dz-sm-hide">' + esc(koLabel(g.ko)) + '</td>' +
           '<td><span class="dz-opp">' +
             '<span class="pill dz-venue dz-venue--' + venueAbbr(r).toLowerCase() + '" title="' + venueOf(r) + '">' + venueAbbr(r) + '</span>' +
             window.NL.clubs.crestImgHtml(r.oppName, 'thumb', { className: 'nl-crest' }) +
             '<span>' + esc(r.oppName) + '</span>' +
             (g.abandoned ? ' <span class="pill pill--postponed" title="Abandoned. Counted: it was played and watched.">Abandoned</span>' : '') +
             '</span></td>' +
-          '<td class="dz-sm-hide ta-center dz-avail dz-avail--' + (intl ? 'no' : 'yes') + '" title="' + esc(t || 'Shown in the UK') + '">' +
+          '<td class="dz-sm-hide ta-center dz-avail dz-avail--' + (intl ? 'no' : 'yes') + '">' +
             availIcon(intl) + '</td>' +
           /* Not shown in the UK: the UK figure is faded, so a handful of
              views reads as expected rather than as a failure. */
-          '<td class="ta-right dz-sm-hide' + (intl ? ' dz-faint' : '') + '"' + (intl ? ' title="' + esc(AVAIL_TITLE.intl) + '"' : '') + '>' + n0(g.ukViews) + '</td>' +
+          '<td class="ta-right dz-sm-hide' + (intl ? ' dz-faint' : '') + '">' + n0(g.ukViews) + '</td>' +
           '<td class="ta-right dz-sm-hide">' + n0(g.intlViews) + '</td>' +
           '<td class="ta-right dz-strong">' + n0(r.total) + '</td>' +
           '<td class="dz-grid__barcol">' + bar(g.ukViews, g.intlViews, max) + '</td>' +
@@ -452,7 +458,7 @@
         '</tr>';
       },
       total: '<tr>' +
-        '<td>Total</td><td>' + n0(s.games) + ' games</td><td class="dz-sm-hide"></td>' +
+        '<td>Total</td><td class="dz-sm-hide"></td><td>' + n0(s.games) + ' games</td><td class="dz-sm-hide"></td>' +
         '<td class="ta-right dz-sm-hide">' + n0(s.ukViews) + '</td>' +
         '<td class="ta-right dz-sm-hide">' + n0(s.intlViews) + '</td>' +
         '<td class="ta-right">' + n0(s.views) + '</td>' +
@@ -613,6 +619,6 @@
 
   window.DAZNView = {
     render: render, grid: grid, applyFilters: applyFilters, chips: chips, slicer: slicer, kpis: kpis,
-    fmt: { n0: n0, n1: n1, compact: compact }
+    fmt: { n0: n0, n1: n1, compact: compact, ko: koLabel }
   };
 })();
