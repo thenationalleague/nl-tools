@@ -250,3 +250,7 @@ test('known scraper columns the tool does not use are ignored, not reported as N
   assert.deepEqual(plain(p.columns.ignored), ['repostedBy', 'hashtags', 'scrapedAt', 'mode']);
   assert.deepEqual(plain(p.columns.unrecognised), ['Mystery']);
 });
+
+test('rule lists split on commas or semicolons', () => {
+  assert.deepEqual(plain(S.listOf('half-time; ht, half time')), ['half-time', 'ht', 'half time']);
+});

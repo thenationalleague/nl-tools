@@ -336,7 +336,7 @@
 
   function listOf(v) {
     if (Array.isArray(v)) return v.map(str).filter(Boolean);
-    return str(v).split(',').map(str).filter(Boolean);
+    return str(v).split(/[,;]/).map(str).filter(Boolean);
   }
   function escRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
   /* Whole-word, case-insensitive. A boundary is only added where the keyword
