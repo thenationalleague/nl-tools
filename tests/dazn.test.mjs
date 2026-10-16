@@ -346,3 +346,14 @@ test('a month total printed above its column is never cut off by the top of the 
   const view = readFileSync(join(REPO, 'dazn/_view.js'), 'utf8');
   assert.match(view, /ticks\(labelled \? scaleMax \* 1\.15 : scaleMax\)/);
 });
+
+test('kick-off times are written the UK way: 7.45pm, 3pm, 12.30pm', () => {
+  const win = { DAZNData: D, NL: {} };
+  vm.runInNewContext(readFileSync(join(REPO, 'dazn/_view.js'), 'utf8'), { window: win, Intl });
+  const ko = win.DAZNView.fmt.ko;
+  assert.equal(ko('19:45'), '7.45pm');
+  assert.equal(ko('15:00'), '3pm');
+  assert.equal(ko('12:30'), '12.30pm');
+  assert.equal(ko('11:30'), '11.30am');
+  assert.equal(ko(undefined), '', 'an import without times shows nothing');
+});
