@@ -1,7 +1,7 @@
 /* =========================================================================
    Social Output — data logic
    File: /social-output/_data.js
-   Version: v1.1 (16/10/2026)
+   Version: v1.2 (16/10/2026)
 
    Everything the page does to the numbers, with no DOM and no Firebase, so it
    can be tested in Node (tests/social-output.test.mjs). index.html loads this
@@ -25,6 +25,11 @@
      monthsFrom(start, end), prevMonth(m), monthLabel(m)
 
    Changelog
+     v1.2 (16/10/2026) — Gaps are judged on the stored month plus the file,
+                         so a month imported in parts only flags days still
+                         missing. Scraper columns the tool does not use
+                         (repostedBy, hashtags, scrapedAt…) are listed as
+                         ignored instead of tripping the Not read warning.
      v1.1 (16/10/2026) — Import flags without blocking: overspill (rows from
                          other months, rejected and counted per month),
                          reshares of older posts carried into the month,
@@ -216,18 +221,25 @@
     saves:        ['saves', 'savecount']
   };
 
-  function mapColumns(headers, aliases) {
+  /* Columns the scraper writes that this tool has no use for. Named so the
+     preview can tell "known, not needed" apart from "renamed or new", which
+     is the case the Not read warning exists for. */
+  var X_IGNORED = ['repostedby', 'quotedauthor', 'replyto', 'hashtags', 'mentions', 'dayqueried', 'scrapedat', 'mode'];
+
+  function mapColumns(headers, aliases, ignore) {
+    ignore = ignore || [];
     var lookup = {};
     Object.keys(aliases).forEach(function (field) {
       aliases[field].forEach(function (a) { if (!(a in lookup)) lookup[a] = field; });
     });
-    var map = {}, recognised = [], unrecognised = [];
+    var map = {}, recognised = [], unrecognised = [], ignored = [];
     headers.forEach(function (h) {
       var f = lookup[normHead(h)];
       if (f && !map[f]) { map[f] = h; recognised.push(h + ' → ' + f); }
+      else if (ignore.indexOf(normHead(h)) >= 0) ignored.push(h);
       else unrecognised.push(h);
     });
-    return { map: map, recognised: recognised, unrecognised: unrecognised };
+    return { map: map, recognised: recognised, unrecognised: unrecognised, ignored: ignored };
   }
 
   function normKind(raw, isRepost) {
@@ -255,7 +267,7 @@
   function normaliseX(rows) {
     rows = rows || [];
     var headers = rows.length ? Object.keys(rows[0]) : [];
-    var cols = mapColumns(headers, X_ALIASES);
+    var cols = mapColumns(headers, X_ALIASES, X_IGNORED);
     var M = cols.map;
     var missing = [];
     if (!M.id && !M.key && !M.url) missing.push('a post ID or URL');
@@ -470,8 +482,14 @@
       if (changed) stats.updated++; else stats.unchanged++;
     });
 
-    var kept = Object.keys(seen).map(function (k) { return seen[k]; });
-    return { stats: stats, updates: updates, skipped: skipped, overspill: overspill, gaps: gaps(kept, month) };
+    /* Gaps are judged on the month as it will stand after this import —
+       what is already stored plus this file — so a month loaded in parts
+       (1st–20th, then 21st–31st) only flags days that are still missing. */
+    var after = {};
+    Object.keys(existing).forEach(function (k) { after[k] = existing[k]; });
+    Object.keys(seen).forEach(function (k) { if (!after[k]) after[k] = seen[k]; });
+    var all = Object.keys(after).map(function (k) { return after[k]; });
+    return { stats: stats, updates: updates, skipped: skipped, overspill: overspill, gaps: gaps(all, month) };
   }
 
   /* Days of the month the file has nothing for, and days with reshares but
