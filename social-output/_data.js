@@ -1,7 +1,7 @@
 /* =========================================================================
    Social Output — data logic
    File: /social-output/_data.js
-   Version: v1.0 (16/10/2026)
+   Version: v1.1 (16/10/2026)
 
    Everything the page does to the numbers, with no DOM and no Firebase, so it
    can be tested in Node (tests/social-output.test.mjs). index.html loads this
@@ -25,6 +25,13 @@
      monthsFrom(start, end), prevMonth(m), monthLabel(m)
 
    Changelog
+     v1.1 (16/10/2026) — Import flags without blocking: overspill (rows from
+                         other months, rejected and counted per month),
+                         reshares of older posts carried into the month,
+                         and gaps (empty days, days with no own post). A
+                         reshare dated in a month the file also has own
+                         posts for is rejected rather than carried, so a
+                         multi-month export cannot count reshares twice.
      v1.0 (16/10/2026) — First build. X scraper CSV mapper (header aliases,
                          not fixed column names), re-import merge that only
                          touches metrics and non-manual categories, ordered
@@ -381,7 +388,11 @@
   /* posts:    normalised posts from one file
      existing: { postKey: record } already stored for that channel + month
      opts:     { month: 'YYYY-MM', rules: [...], now: ISO }
-     Returns a multi-path update relative to posts/{channel}/{month}.
+     Returns a multi-path update relative to posts/{channel}/{month}, plus
+     what the preview flags without blocking: overspill (rows from other
+     months, rejected and counted by month), carried (reshares of older
+     posts kept in this month) and gaps (days with nothing, days with no
+     own post).
 
      A post already stored keeps everything it has — text, time, kind, a
      person's category — and only its numbers move. That is what makes a
@@ -389,23 +400,33 @@
   function planImport(posts, existing, opts) {
     existing = existing || {};
     var month = opts.month, rules = opts.rules || [], now = opts.now || new Date().toISOString();
-    var stats = { read: posts.length, created: 0, updated: 0, unchanged: 0, skipped: 0, outside: 0, duplicate: 0 };
+    var stats = { read: posts.length, created: 0, updated: 0, unchanged: 0, skipped: 0, outside: 0, duplicate: 0, carried: 0 };
     var skipped = [];
     var updates = {};
     var seen = {};
+    var overspill = {};
+
+    /* Months the file holds own posts for. A reshare dated in one of those
+       months belongs to that month's import, not this one. */
+    var ownMonths = {};
+    posts.forEach(function (p) { if (p.kind !== 'repost') ownMonths[monthOf(p)] = true; });
 
     posts.forEach(function (p) {
       var key = postKey(p);
       var pm = monthOf(p);
       /* A repost carries the original's time, which can fall in an earlier
-         month even though the league reshared it in this one. File it here
-         rather than lose the reshare. An own post outside the month is in
-         the wrong file. */
-      if (pm !== month && !(p.kind === 'repost' && p.timeIsOriginal && pm < month)) {
+         month even though the league reshared it in this one, so it is kept
+         here. The exception is a file that also holds own posts for that
+         earlier month: then it is a multi-month export, the reshare is that
+         month's, and keeping it here would count it twice. Everything else
+         outside the month is rejected. */
+      var carried = pm !== month && p.kind === 'repost' && p.timeIsOriginal && pm < month && !ownMonths[pm];
+      if (pm !== month && !carried) {
         stats.outside++; stats.skipped++;
-        skipped.push({ key: key, reason: 'Dated ' + (p.postedAtLocal || '?') + ', outside ' + month });
+        overspill[pm || '?'] = (overspill[pm || '?'] || 0) + 1;
         return;
       }
+      if (carried) stats.carried++;
       if (seen[key]) {
         stats.duplicate++; stats.skipped++;
         skipped.push({ key: key, reason: 'Appears twice in the file; last row kept' });
@@ -449,7 +470,21 @@
       if (changed) stats.updated++; else stats.unchanged++;
     });
 
-    return { stats: stats, updates: updates, skipped: skipped };
+    var kept = Object.keys(seen).map(function (k) { return seen[k]; });
+    return { stats: stats, updates: updates, skipped: skipped, overspill: overspill, gaps: gaps(kept, month) };
+  }
+
+  /* Days of the month the file has nothing for, and days with reshares but
+     no own post. Flags for the preview: a scrape that stopped early or
+     started late shows up as a run of empty days at one end. */
+  function gaps(posts, month) {
+    var d = dailyCounts(posts, month);
+    var empty = [], noOwn = [];
+    d.days.forEach(function (x) {
+      if (!x.own && !x.reshare) empty.push(x.date);
+      else if (!x.own) noOwn.push(x.date);
+    });
+    return { empty: empty, noOwn: noOwn };
   }
 
   /* Re-run the rules over posts already stored. A category a person set is
@@ -615,7 +650,7 @@
     toLondon: toLondon, londonToIso: londonToIso,
     normaliseX: normaliseX, postKey: postKey, safeKey: safeKey,
     ruleMatches: ruleMatches, categorise: categorise, listOf: listOf,
-    planImport: planImport, planRerun: planRerun,
+    planImport: planImport, planRerun: planRerun, gaps: gaps,
     summarise: summarise, topOwn: topOwn, median: median,
     dailyCounts: dailyCounts, matchdayProfile: matchdayProfile,
     changeLine: changeLine, pct: pct,
