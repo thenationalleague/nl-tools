@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Content Plan
-  Version: v1.1 (16/10/2026)
+  Version: v1.2 (16/10/2026)
   File: /content-plan/index.html
 
   Plans and records everything the media team publishes: website stories,
@@ -12,6 +12,9 @@
     app-data/media-content-plan/items/{id}      one record per planned/published item
                                                  (indexed on date; queried by visible range)
     app-data/media-content-plan/days/{date}     notes + manualMatches {faCup, faTrophy}
+    app-data/media-content-plan/ideas/{id}      undated ideas: title, notes, kind, category,
+                                                 addedBy/addedByName, archived. Scheduling one
+                                                 creates an item and deletes the idea.
     app-data/media-content-plan/config/         categories, authors
                                                  (colour groups + kinds are fixed in code below)
 
@@ -44,7 +47,11 @@
                         drag starts. Time inputs step in 5 minutes.
                         Social items without a category get their own colour group
                         (--cp-social, slate); category is optional for social and
-                        the add form no longer carries a web category onto them.
+                        the add form no longer carries a remembered web category onto them.
+    v1.2 (16/10/2026) – No strikethrough: published = faded + green tick (the tick
+                        toggles for editors). Summary line keeps only counts that
+                        ask for action; per-author tallies wait for Reports.
+                        Ideas tab: undated ideas with Schedule / Edit / Archive.
 -->
 <html lang="en">
 <head>
@@ -94,12 +101,13 @@
     window.NL_CHANGELOG = [
       {
         date: '16 October 2026',
-        version: 'v1.1',
+        version: 'v1.2',
         items: [
           'The content plan now lives here instead of the Google Sheet.',
           'Month and week calendars: drag an item to another day, or onto an hour in week view.',
           'Give items a time, like 09:00, so everyone knows roughly when they go out.',
           'A list view for checking and tagging lots of items at once.',
+          'An Ideas tab for things without a date yet. Schedule one and it lands on the calendar.',
           'Pick category and author from fixed lists, with "Other…" for guest writers.',
           'Every item is one of Website, Social video, Social graphic or Club.',
           'Filter by kind, colour, type, author and status, including "My items" and "Unassigned".',
@@ -208,11 +216,13 @@
   .cp-item svg { width: 14px; height: 14px; flex: none; }
   .cp-item__flag { color: var(--amber); }
   .cp-item__star { color: var(--g); }
-  .cp-item.is-published .cp-item__t { text-decoration: line-through; }
+  /* Published = faded with a green tick. No strikethrough, by decision. */
   .cp-item.is-published, .cp-item.is-routine { opacity: .6; }
   .cp-item.is-published.is-routine { opacity: .5; }
   .cp-item.is-dropped { opacity: .4; }
-  .cp-item.is-dropped .cp-item__t { text-decoration: line-through; font-style: italic; }
+  .cp-item.is-dropped .cp-item__t { font-style: italic; }
+  .cp-item.is-published .cp-tick, .cp-done { color: var(--green); }
+  .cp-done { display: inline-flex; flex: none; }
   .cp-tick { background: none; border: none; padding: 0; color: var(--text-muted); cursor: pointer; display: inline-flex; flex: none; }
   .cp-tick:hover { color: var(--green); }
   .cp-tick:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-sm); }
@@ -260,11 +270,25 @@
   .cp-list-title button { background: none; border: none; padding: 0; text-align: left; font-family: var(--font); font-size: var(--text-sm); color: var(--navy); cursor: pointer; }
   .cp-list-title button:hover { text-decoration: underline; }
   .cp-listwrap select { padding-top: .25rem; padding-bottom: .25rem; }
+  /* Ideas */
+  .cp-ideas { display: grid; gap: 12px; }
+  .cp-idea-list { display: grid; gap: 6px; }
+  .cp-idea { --g: var(--cp-none); --g-bg: var(--cp-none-bg);
+    display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: start; padding: 10px 12px;
+    background: var(--g-bg); border: 1px solid var(--navy-100); border-left: 3px solid var(--g); border-radius: var(--radius-sm); min-width: 0; }
+  .cp-idea.is-archived { opacity: .55; }
+  .cp-idea__main { display: grid; gap: 4px; min-width: 0; }
+  .cp-idea__title { display: flex; gap: 6px; align-items: center; font-size: var(--text-sm); font-variation-settings: 'wght' 700; color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+  .cp-idea__notes { font-size: var(--text-sm); color: var(--text-muted); white-space: pre-line; overflow-wrap: anywhere; }
+  .cp-idea__meta { font-size: var(--text-xs); color: var(--text-muted); }
+  .cp-idea__actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
   .cp-loading { padding: 20px; color: var(--text-muted); display: flex; gap: 8px; align-items: center; }
 
   @media (max-width: 640px) {
     .cp-day { grid-template-columns: 1fr; gap: 6px; }
     .cp-item__name { display: none; }
+    .cp-idea { grid-template-columns: 1fr; }
+    .cp-idea__actions { justify-content: flex-start; }
     .cp-item__ini { display: inline; }
     .cp-dh { grid-template-columns: 1fr; }
     .cp-split { grid-template-columns: 1fr; }
@@ -284,6 +308,7 @@
     <div class="tabs" role="tablist" id="cpTabs">
       <button class="tab active" type="button" role="tab" data-view="calendar" aria-selected="true">Calendar</button>
       <button class="tab" type="button" role="tab" data-view="list" aria-selected="false">List</button>
+      <button class="tab" type="button" role="tab" data-view="ideas" aria-selected="false">Ideas</button>
     </div>
 
     <div class="cp-bar" id="cpBar"></div>
@@ -366,7 +391,8 @@
     session: null,
     canEdit: false,
     isSuper: false,
-    view: 'calendar',
+    view: 'calendar',         // calendar | list | ideas
+    ideas: {}, ideasRef: null, showArchived: false, ideaForm: null,
     mode: 'month',            // month | week
     split: false,
     cursor: null,             // Date inside the visible period
@@ -523,6 +549,17 @@
     var r = currentRange();
     if (S.itemsRef) S.itemsRef.off();
     if (S.daysRef) S.daysRef.off();
+    if (S.ideasRef) { S.ideasRef.off(); S.ideasRef = null; }
+    if (S.view === 'ideas') {
+      S.itemsRef = null; S.daysRef = null;
+      S.ideasRef = db.ref(ROOT + '/ideas');
+      S.ideasRef.on('value', function (snap) {
+        var out = {};
+        snap.forEach(function (ch) { var v = ch.val(); if (v && v.title) { v.id = ch.key; out[ch.key] = v; } });
+        S.ideas = out; queueRender();
+      }, fail);
+      return;
+    }
     S.items = {}; S.days = {};
     var loaded = { items: false, days: false };
     S.itemsRef = db.ref(ROOT + '/items').orderByChild('date').startAt(r.from).endAt(r.to);
@@ -673,6 +710,15 @@
         });
         right.appendChild(split);
       }
+    } else if (S.view === 'ideas') {
+      var arch = el('div', 'chip-group');
+      [[false, 'Open'], [true, 'Archived']].forEach(function (m) {
+        var b = el('button', 'chip' + (S.showArchived === m[0] ? ' active' : ''), m[1]); b.type = 'button';
+        b.setAttribute('aria-pressed', S.showArchived === m[0] ? 'true' : 'false');
+        b.addEventListener('click', function () { if (S.showArchived === m[0]) return; S.showArchived = m[0]; renderBar(); render(); });
+        arch.appendChild(b);
+      });
+      left.appendChild(arch);
     } else {
       var range = el('div', 'cp-list-range');
       var f = el('input', 'cp-in'); f.type = 'date'; f.value = S.listFrom; f.id = 'cpFrom'; f.setAttribute('aria-label', 'From');
@@ -694,10 +740,12 @@
       settings.appendChild(icon('settings')); settings.appendChild(document.createTextNode(' Settings'));
       settings.addEventListener('click', openSettings);
       right.appendChild(settings);
-      var add = el('button', 'btn btn--primary btn--sm'); add.type = 'button';
-      add.appendChild(icon('add')); add.appendChild(document.createTextNode(' Add item'));
-      add.addEventListener('click', function () { openEditor(null, defaultAddDate()); });
-      right.appendChild(add);
+      if (S.view !== 'ideas') {
+        var add = el('button', 'btn btn--primary btn--sm'); add.type = 'button';
+        add.appendChild(icon('add')); add.appendChild(document.createTextNode(' Add item'));
+        add.addEventListener('click', function () { openEditor(null, defaultAddDate()); });
+        right.appendChild(add);
+      }
     }
     bar.appendChild(left); bar.appendChild(right);
   }
@@ -750,20 +798,15 @@
   function renderSummary(all) {
     var box = document.getElementById('cpSummary');
     box.innerHTML = '';
-    var kinds = {}, authors = {}, guests = 0, unassigned = 0, review = 0, untyped = 0;
+    /* Only counts that ask for action. Who-wrote-what belongs in Reports. */
+    var unassigned = 0, review = 0, untyped = 0;
     all.forEach(function (it) {
-      var k = kindOf(it); kinds[k] = (kinds[k] || 0) + 1;
-      if (it.author) authors[it.author] = (authors[it.author] || 0) + 1;
-      else if (it.authorOther) guests++;
-      else if (it.lane === 'web') unassigned++;
+      if (!it.author && !it.authorOther && it.lane === 'web' && it.status === 'planned') unassigned++;
       if (it.needsReview) review++;
       if (!it.type) untyped++;
     });
     function part(label, n) { var s = el('span'); s.appendChild(el('b', null, String(n))); s.appendChild(document.createTextNode(' ' + label)); box.appendChild(s); }
     part(all.length === 1 ? 'item' : 'items', all.length);
-    KINDS.concat([KIND_UNSET]).forEach(function (k) { if (kinds[k.key]) part(k.label.toLowerCase().replace(/ \(.*\)$/, ''), kinds[k.key]); });
-    Object.keys(authors).sort().forEach(function (a) { part(authorName(a), authors[a]); });
-    if (guests) part('guest', guests);
     if (unassigned) part('unassigned', unassigned);
     if (review) part('need review', review);
     if (untyped) part('need type', untyped);
@@ -802,13 +845,18 @@
         c.classList.remove('is-dragging');
         var cal = document.querySelector('.cp-cal.is-dragging'); if (cal) cal.classList.remove('is-dragging');
       });
-      if (it.status !== 'published' && it.status !== 'dropped') {
+      if (it.status !== 'dropped') {
+        var pub = it.status === 'published';
         var tick = el('button', 'cp-tick'); tick.type = 'button';
-        tick.setAttribute('aria-label', 'Mark published'); tick.title = 'Mark published';
+        var tl = pub ? 'Published – click to put back to planned' : 'Mark published';
+        tick.setAttribute('aria-label', tl); tick.title = tl;
         tick.appendChild(icon('tick'));
         tick.addEventListener('click', function (e) { e.stopPropagation(); markPublished(it); });
         c.appendChild(tick);
       }
+    } else if (it.status === 'published') {
+      var done = el('span', 'cp-done'); done.title = 'Published'; done.appendChild(icon('tick'));
+      c.appendChild(done);
     }
     return c;
   }
@@ -1443,8 +1491,165 @@
     });
   }
 
+  /* ── Ideas: undated, scheduled onto the calendar when ready ─────────── */
+  function ideaForm() {
+    if (S.ideaForm) return S.ideaForm;
+    var form = el('form', 'cp-add');
+    form.setAttribute('aria-label', 'Add an idea');
+    var title = el('input', 'cp-add__title'); title.type = 'text'; title.id = 'cpIdeaTitle'; title.placeholder = 'An idea for content'; title.maxLength = 300;
+    form.appendChild(title);
+    var row = el('div', 'cp-add__row');
+    var notes = el('input'); notes.type = 'text'; notes.placeholder = 'Notes (optional)'; notes.maxLength = 1000; notes.style.flex = '1'; notes.setAttribute('aria-label', 'Notes');
+    var kind = sel(KINDS, '', 'Any kind'); kind.setAttribute('aria-label', 'Kind');
+    var cat = sel(categoryList().map(function (c) { return { key: c.label, label: c.label }; }), '', 'Category'); cat.setAttribute('aria-label', 'Category');
+    var save = el('button', 'btn btn--primary btn--sm', 'Add idea'); save.type = 'submit';
+    [notes, kind, cat, save].forEach(function (x) { row.appendChild(x); });
+    form.appendChild(row);
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var t = title.value.trim();
+      if (!t) { title.focus(); NL.toast('Add a title', 'error'); return; }
+      save.disabled = true;
+      NL.ensureAuth().then(function () {
+        var ref = db.ref(ROOT + '/ideas').push();
+        NL.writeAudit('content_plan_idea_add', { id: ref.key, title: t });
+        return ref.set({
+          title: t, notes: notes.value.trim(), kind: kind.value || null, category: cat.value || null,
+          addedBy: S.session.uid, addedByName: S.session.name || '', archived: false,
+          createdAt: firebase.database.ServerValue.TIMESTAMP
+        });
+      }).then(function () {
+        title.value = ''; notes.value = ''; kind.value = ''; cat.value = ''; save.disabled = false; title.focus();
+        NL.toast('Idea added');
+      }).catch(function (err) { save.disabled = false; fail(err); });
+    });
+    S.ideaForm = form;
+    return form;
+  }
+  function ideaGroup(idea) {
+    var c = idea.category ? categoryByLabel(idea.category) : null;
+    if (c) return c.colourGroup;
+    return (idea.kind === 'video' || idea.kind === 'graphic') ? 'social' : '';
+  }
+  function renderIdeas() {
+    var main = document.getElementById('cpMain');
+    var wrap = el('div', 'cp-ideas');
+    if (S.canEdit && !S.showArchived) wrap.appendChild(ideaForm());
+    var list = Object.keys(S.ideas).map(function (k) { return S.ideas[k]; })
+      .filter(function (i) { return !!i.archived === S.showArchived; })
+      .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+    if (!list.length) {
+      var es = el('div', 'empty-state');
+      es.appendChild(el('div', 'empty-state__title', S.showArchived ? 'Nothing archived' : 'No ideas yet'));
+      if (S.canEdit && !S.showArchived) es.appendChild(el('div', 'empty-state__text', 'Schedule an idea when it has a date and it moves onto the calendar.'));
+      wrap.appendChild(es);
+    }
+    var box = el('div', 'cp-idea-list');
+    list.forEach(function (idea) {
+      var g = ideaGroup(idea);
+      var card = el('div', 'cp-idea' + (g ? ' g-' + g : '') + (idea.archived ? ' is-archived' : ''));
+      var m = el('div', 'cp-idea__main');
+      var t = el('div', 'cp-idea__title');
+      if (idea.kind) t.appendChild(el('span', 'cp-badge', kindInfo(idea.kind).badge));
+      t.appendChild(el('span', null, idea.title));
+      m.appendChild(t);
+      if (idea.notes) m.appendChild(el('div', 'cp-idea__notes', idea.notes));
+      m.appendChild(el('div', 'cp-idea__meta', [idea.category, idea.addedByName ? 'Added by ' + idea.addedByName : '', idea.createdAt ? NL.timeAgo(idea.createdAt) : ''].filter(Boolean).join(' · ')));
+      card.appendChild(m);
+      if (S.canEdit) {
+        var acts = el('div', 'cp-idea__actions');
+        var btn = function (label, cls, fn) { var b = el('button', 'btn btn--sm ' + cls, label); b.type = 'button'; b.addEventListener('click', fn); acts.appendChild(b); };
+        if (!idea.archived) {
+          btn('Schedule', 'btn--primary', function () { scheduleIdea(idea); });
+          btn('Edit', 'btn--ghost', function () { editIdea(idea); });
+          btn('Archive', 'btn--ghost', function () { setIdeaArchived(idea, true); });
+        } else {
+          btn('Restore', 'btn--restore', function () { setIdeaArchived(idea, false); });
+          btn('Delete', 'btn--danger', function () { deleteIdea(idea); });
+        }
+        card.appendChild(acts);
+      }
+      box.appendChild(card);
+    });
+    wrap.appendChild(box);
+    main.innerHTML = '';
+    main.appendChild(wrap);
+  }
+  function setIdeaArchived(idea, on) {
+    NL.ensureAuth().then(function () { return db.ref(ROOT + '/ideas/' + idea.id).update({ archived: on }); })
+      .then(function () { NL.toast(on ? 'Archived' : 'Restored'); }).catch(fail);
+  }
+  function deleteIdea(idea) {
+    NL.confirm('Delete "' + idea.title + '" for good?', { title: 'Delete idea', confirmText: 'Delete', variant: 'danger' }).then(function (ok) {
+      if (!ok) return;
+      return NL.ensureAuth().then(function () {
+        NL.writeAudit('content_plan_idea_delete', { id: idea.id, title: idea.title });
+        return db.ref(ROOT + '/ideas/' + idea.id).remove();
+      }).then(function () { NL.toast('Deleted'); });
+    }).catch(fail);
+  }
+  function editIdea(idea) {
+    var form = el('div', 'form-grid');
+    var title = el('input'); title.type = 'text'; title.value = idea.title; title.maxLength = 300;
+    form.appendChild(field('Title', title, true));
+    var kind = sel(KINDS, idea.kind || '', 'Any kind');
+    form.appendChild(field('Kind', kind));
+    var cat = sel(categoryList().map(function (c) { return { key: c.label, label: c.label }; }), idea.category || '', 'None');
+    form.appendChild(field('Category', cat));
+    var notes = el('textarea'); notes.rows = 4; notes.maxLength = 1000; notes.value = idea.notes || '';
+    form.appendChild(field('Notes', notes, true));
+    NL.modal({ title: 'Edit idea', body: form, buttons: [
+      { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+      { label: 'Save', className: 'btn--primary', onClick: function (c) {
+        var t = title.value.trim();
+        if (!t) { title.focus(); NL.toast('Add a title', 'error'); return; }
+        NL.ensureAuth().then(function () {
+          return db.ref(ROOT + '/ideas/' + idea.id).update({ title: t, kind: kind.value || null, category: cat.value || null, notes: notes.value.trim() });
+        }).then(function () { NL.toast('Saved'); c.close(); }).catch(fail);
+      } }
+    ] });
+  }
+  /* Scheduling writes the item and removes the idea in one update, so the
+     idea never exists in both places. */
+  function scheduleIdea(idea) {
+    var form = el('div', 'form-grid');
+    var dateIn = el('input'); dateIn.type = 'date'; dateIn.value = todayYmd();
+    form.appendChild(field('Date', dateIn));
+    var timeIn = el('input'); timeIn.type = 'time'; timeIn.step = 300;
+    form.appendChild(field('Time', timeIn, false, 'Optional'));
+    var kind = sel(KINDS, idea.kind || 'web');
+    form.appendChild(field('Kind', kind));
+    var auth = sel(authorList(false).map(function (a) { return { key: a.key, label: a.label }; }), '', 'Unassigned');
+    form.appendChild(field('Author', auth));
+    NL.modal({ title: 'Schedule: ' + idea.title, body: form, buttons: [
+      { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+      { label: 'Schedule', className: 'btn--primary', onClick: function (c) {
+        if (!dateIn.value) { dateIn.focus(); NL.toast('Pick a date', 'error'); return; }
+        var item = blankItem(dateIn.value);
+        var kp = kindPatch(kind.value || 'web');
+        item.title = idea.title; item.notes = idea.notes || ''; item.category = idea.category || null;
+        item.lane = kp.lane; item.format = kp.format; item.time = timeIn.value || null;
+        item.author = auth.value || null; item.type = 'original';
+        item.createdBy = S.session.uid; item.createdAt = firebase.database.ServerValue.TIMESTAMP;
+        item.updatedBy = S.session.uid; item.updatedAt = firebase.database.ServerValue.TIMESTAMP;
+        NL.ensureAuth().then(function () {
+          var key = db.ref(ROOT + '/items').push().key;
+          var u = {};
+          u['items/' + key] = item;
+          u['ideas/' + idea.id] = null;
+          NL.writeAudit('content_plan_idea_scheduled', { idea: idea.id, item: key, date: item.date, title: item.title });
+          return db.ref(ROOT).update(u);
+        }).then(function () { NL.toast('Scheduled for ' + dayLabel(dateIn.value)); c.close(); }).catch(fail);
+      } }
+    ] });
+  }
+
   /* ── Render ────────────────────────────────────────────────────────── */
   function render() {
+    var ideas = S.view === 'ideas';
+    document.getElementById('cpFilters').hidden = ideas;
+    document.getElementById('cpSummary').hidden = ideas;
+    if (ideas) { document.getElementById('cpBulk').innerHTML = ''; renderIdeas(); return; }
     var all = Object.keys(S.items).map(function (k) { return S.items[k]; }).filter(passes);
     renderSummary(all);
     if (S.view === 'calendar') {
@@ -1467,7 +1672,7 @@
       var r = currentRangeFor('calendar');
       S.listFrom = r.from; S.listTo = r.to;
     }
-    S.addingOn = null; S.addForm = null; S.selected = {};
+    S.addingOn = null; S.addForm = null; S.ideaForm = null; S.selected = {};
     savePrefs(); renderBar(); listen();
   }
   function currentRangeFor(view) { var v = S.view; S.view = view; var r = currentRange(); S.view = v; return r; }
@@ -1479,7 +1684,7 @@
     if (!p) return;
     if (p.mode === 'week' || p.mode === 'month') S.mode = p.mode;
     S.split = !!p.split;
-    if (p.view === 'list') S.view = 'list';
+    if (p.view === 'list' || p.view === 'ideas') S.view = p.view;
     if (p.filters) Object.keys(S.filters).forEach(function (k) { if (p.filters[k] != null) S.filters[k] = p.filters[k]; });
   }
 
@@ -1514,7 +1719,7 @@
         renderFilters();
         if (firstLoad) {
           if (S.view === 'list') { var r = currentRangeFor('calendar'); S.listFrom = r.from; S.listTo = r.to; setView('list'); }
-          else setView('calendar');
+          else setView(S.view === 'ideas' ? 'ideas' : 'calendar');
         } else queueRender();
       }, fail);
     }).catch(fail);
