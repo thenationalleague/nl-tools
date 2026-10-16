@@ -1,0 +1,2301 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Content Plan
+  Version: v2.4 (16/10/2026)
+  File: /content-plan/index.html
+
+  Plans and records everything the media team publishes: website stories,
+  social-first posts, club obligations and (later) CRM. Replaces the
+  "Content plan" Google Sheet.
+
+  Storage (RTDB):
+    app-data/media-content-plan/items/{id}      one record per planned/published item
+                                                 (indexed on date; queried by visible range)
+    app-data/media-content-plan/days/{date}     notes + manualMatches {faCup, faTrophy}
+    app-data/media-content-plan/cupFixtures/{key}  FA Cup / FA Trophy fixtures pasted from a
+                                                 spreadsheet: date, time, round, comp
+                                                 (facup | fatrophy), home, away. Key =
+                                                 comp_round_home_v_away, so a re-paste updates.
+    app-data/media-content-plan/ideas/{id}      undated ideas: title, notes, kind, category,
+                                                 addedBy/addedByName, archived. Scheduling one
+                                                 creates an item and deletes the idea.
+    app-data/media-content-plan/config/         categories {key: {label, colour (#hex) | token, order}}, authors
+                                                 (kinds, platforms and statuses are fixed in code below)
+
+  Kind: one label per item — Article, Video, Graphic, Club, CRM. Where it goes
+  (website + social platforms) is separate: item.platforms.
+  Stored as lane (web | social | club | crm) + format (vid | gfx | ad | otd)
+  so the sheet's AD / OTD detail survives; the UI only shows the kind.
+    tools/media-content-plan                    tool registration (label, defaults)
+
+  Access (auth-guard → session.toolLevel):
+    admin  → add, edit, drag, mark published, settings
+    access → read-only calendar and list
+    superadmin also gets Settings → Import (one-off load of the sheet export).
+  Rules mirror this in system/rtdb/rules.snapshot.json.
+
+  Match counts: National / North / South / NL Cup are counted from the NLS
+  feed per season and held in memory only. FA Cup and FA Trophy are not in
+  that feed, so they are typed per day (days/{date}/manualMatches).
+
+  Technical changelog
+    v1.0 (16/10/2026) – First build (phase 1 of the content-plan spec v1.1).
+                        Calendar (month + week), list view with
+                        inline and bulk edit, filters, add/edit/delete, drag and
+                        drop, mark published, settings for categories and
+                        authors, superadmin JSON import, NLS match counts.
+                        No campaign highlight and no per-platform tracking, by
+                        decision (16/10/2026): kind says enough.
+    v1.1 (16/10/2026) – Week view is an hourly timeline (06:00–23:00) instead of
+                        five slots: dropping on an hour sets HH:00, an item already
+                        in that hour keeps its minutes. Empty hours hide until a
+                        drag starts. Time inputs step in 5 minutes.
+                        Social items without a category get their own colour group
+                        (--cp-social, slate); category is optional for social and
+                        the add form no longer carries a remembered web category onto them.
+    v1.2 (16/10/2026) – No strikethrough: published = faded + green tick (the tick
+                        toggles for editors). Summary line keeps only counts that
+                        ask for action; per-author tallies wait for Reports.
+                        Ideas tab: undated ideas with Schedule / Edit / Archive.
+    v1.3 (16/10/2026) – Chip carries one signal per thing: category = colour,
+                        kind = glyph (sprite v1.3: article, play, image, shield,
+                        email), published = green tick at full colour (no fade,
+                        no strike). Planned items show the tick on hover for
+                        editors. Initials only. Routine/original is recorded in
+                        the item only: no star, no fade, no type filters. Needs
+                        review removed from the UI; saving an item clears the
+                        flag the importer set.
+    v1.4 (16/10/2026) – Platforms back: platforms {x, facebook, instagram,
+                        tiktok, linkedin, youtube} as booleans. Grey logo row on the
+                        chip (sprite's filled brand marks), icon toggles in the add
+                        form / editor / list, a platform filter and a "Posted on"
+                        CSV column. New items default to X + Facebook, then the
+                        last-used set per user. Sheet imports carry none.
+    v1.5 (16/10/2026) – The website is a platform, not a kind: kind = what it is
+                        (Article, Video, Graphic, Club, CRM; key 'web' kept for
+                        Article so no data moves), platforms gain 'website'
+                        (sprite icon-website). Defaults follow the kind: Article →
+                        Website, social → X + Facebook; each user's last set is
+                        remembered per kind. Match counts are pills in the
+                        division colours (--div-*); FA Cup / Trophy pills are
+                        outlined because they are typed in, not fed.
+    v1.6 (16/10/2026) – Cup fixtures: paste FA Cup / FA Trophy rows from a spreadsheet
+                        (date & time, round, competition, home, blank, away), with a
+                        preview that says new / moved / unchanged / skipped and why.
+                        Saved fixtures can be edited or deleted one by one. FAC / FAT
+                        pills count them per day; the day window lists the ties.
+                        Typed-in counts from the sheet import still show where a
+                        day has no pasted fixtures. Day window loses its count boxes.
+    v1.7 (16/10/2026) – Three-letter competition codes everywhere: NAT, NOR,
+                        SOU, NLC, FAC, FAT. The paste also accepts FAC / FAT as the
+                        competition.
+    v1.8 (16/10/2026) – Colour groups revised: NL Cup joins Football (the
+                        Cups group goes; a stored 'cups' reads as football). League
+                        and Statements split. Two solid groups with white ink:
+                        Statements (--navy) and 3UP (--navy-900, effectively black).
+                        Trust is yellow (--yellow / --yellow-light, amber ink for
+                        contrast); U19 keeps the red as "Youth". Chip and idea text
+                        take --g-fg / --g-muted / --g-ink so solid groups invert.
+    v1.9 (16/10/2026) – Match pills recoloured to the team's spreadsheet, in pastels:
+                        NAT orange, NOR yellow, SOU blue, NLC purple, FAC pink-red,
+                        FAT grey. The --div-* division tokens no longer apply here.
+    v2.0 (16/10/2026) – Categories are the tool's own list, not the CMS's:
+                        Football, Awards, League, Statements, Trust, U19, 3UP, each
+                        with its own colour. Admins add, rename, recolour (colour
+                        picker) and remove them in Settings. Any item, any kind, can
+                        take any category. Every categorised item is a solid fill;
+                        ink flips white/dark by the fill's luminance. Items store the
+                        category KEY; older values (labels, and the sheet's National /
+                        North / South / NL Cup) resolve to Football. Colour groups and
+                        the colour filter are gone: the category is the colour.
+    v2.1 (16/10/2026) – Cup fixtures move into Settings as a tab (paste at the top,
+                        saved fixtures below) and off the calendar toolbar.
+    v2.2 (16/10/2026) – Canon review (tidy-tim) fixes: pills at --text-xs (12px floor);
+                        inputs keep the 16px phone floor (no !important); FAT pill ink
+                        --text-muted (not --proj-8); chip is a plain container with an
+                        inner <button> to open it, so the tick button is no longer
+                        nested in a role=button; .toolbar / .filter-bar / .form-hint /
+                        .btn--icon replace local look-alikes; selects inside .form-group
+                        drop .nl-select; on-screen dates via NL.formatDateShort and
+                        NL.parseDate; ink picked by contrast against --text and
+                        --white; sortable headers hold a button; Settings tabs carry
+                        tablist / tab / aria-selected; icons on the 16px ladder; no
+                        invisible spinner; waffle trimmed; changelog corrected.
+    v2.3 (16/10/2026) – Author picker: one dropdown plus a + that adds another (the new
+                        one leaves out anyone already picked), × to remove; "Other…"
+                        for a guest writer stays on the first. Used in the add form and
+                        the editor; replaces the co-author tick boxes.
+    v2.4 (16/10/2026) – Each author box is a typeahead on the canon .club-picker look:
+                        type to filter by name or initials, pick, or "Use … as
+                        entered" for a guest (replaces "Other…"). Picked authors are
+                        stored by key; typed names as written (co-authors too).
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Content Plan — NL Tools</title>
+  <!-- Favicons. Static, not injected: nl-topbar.js adds these too, but a
+       standalone page never loads it, and an icon that arrives with the JS
+       leaves the tab blank until it does. /favicon.ico at the root is the
+       backstop every browser asks for without being told. -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+
+  <!-- Brand stylesheet (lint canonical: ?v=66) -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=67">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'Content Plan',
+      toolKey: 'media-content-plan'
+    };
+    var NL_TOOL_KEY = 'media-content-plan';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '16 October 2026',
+        version: 'v2.4',
+        items: [
+          'The content plan now lives here instead of the Google Sheet.',
+          'Month and week calendars: drag an item to another day, or onto an hour in week view.',
+          'Give items a time, like 09:00, so everyone knows roughly when they go out.',
+          'A list view for checking and tagging lots of items at once.',
+          'An Ideas tab for things without a date yet. Schedule one and it lands on the calendar.',
+          'Pick a category (each has its own colour). Type an author\u2019s name to pick them, or keep what you typed for a guest writer; press + to add more authors.',
+          'Every item shows what it is with a symbol: article, video, graphic or club.',
+          'Tick an item when it\u2019s published.',
+          'Show where each item goes: the website, X, Facebook, Instagram, TikTok, LinkedIn or YouTube.',
+          'Match counts for each day as pills: NAT, NOR, SOU, NLC, FAC and FAT.',
+          'Paste FA Cup and FA Trophy fixtures from a spreadsheet in Settings, and edit them one by one.',
+          'Filter by kind, category, author, platform and status, including "My items" and "Unassigned".'
+        ]
+      }
+    ];
+
+    /* auth-guard fires this once the session is verified + pageWrap is
+       revealed. Boot the main app from here so RTDB reads happen with a
+       live auth token. Do NOT read RTDB before this fires. */
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts (lint canonical: ?v=48 / ?v=1 / ?v=10 / ?v=16) -->
+  <script src="/system/nl-utils.js?v=48"></script>
+  <!-- GA4, one property for all of nl.tools. Cookieless, so no consent
+       banner on any page; page views by path, no identity. Tool events go
+       through NL.track(). See system/nl-analytics.js. -->
+  <script src="/system/nl-analytics.js?v=1"></script>
+  <script src="/system/nl-topbar.js?v=10"></script>
+  <script src="/system/auth-guard.js?v=16"></script>
+
+<style>
+  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
+     style.display = 'block'. Don't clear with '' — would re-trigger the
+     brand rule and re-hide the page. */
+
+  /* ── Category colour ─────────────────────────────────────────────────
+     Each category carries its own colour (Settings → Categories). The chip
+     gets it inline as --g and a cp-on-dark / cp-on-light class chosen from
+     the colour's luminance, so any picked colour stays readable.
+     Defaults are brand tokens; a picked colour is stored as #hex in RTDB. */
+  :root {
+    --cp-none:         var(--navy-300); --cp-none-bg:     var(--white);
+  }
+
+  .cp-period { font-size: var(--text-md); font-variation-settings: 'wght' 800; color: var(--navy); min-width: 10ch; }
+  #cpFilters select { max-width: 100%; }
+  .cp-check { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-sm); color: var(--text-muted); cursor: pointer; }
+  .cp-summary { font-size: var(--text-xs); color: var(--text-muted); margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  .cp-summary b { color: var(--text); font-variation-settings: 'wght' 700; }
+
+  /* Calendar: one row per day, a single stack of items. */
+  .cp-cal { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); }
+  .cp-day { display: grid; grid-template-columns: minmax(96px, 150px) 1fr; gap: 10px; padding: 8px 12px; border-top: 1px solid var(--navy-100); min-width: 0; }
+  .cp-day:first-child { border-top: none; }
+  .cp-day.is-weekend { background: var(--navy-50); }
+  .cp-day.is-today { box-shadow: inset 3px 0 0 var(--primary); }
+  .cp-day.is-drop, .cp-slot.is-drop { outline: 2px dashed var(--navy-300); outline-offset: -2px; }
+  .cp-dh { display: grid; gap: 2px; align-content: start; font-size: var(--text-xs); color: var(--text-muted); min-width: 0; }
+  .cp-dh__top { display: flex; align-items: center; gap: 6px; }
+  .cp-dh__date { font-size: var(--text-sm); color: var(--text); font-variation-settings: 'wght' 800; font-variant-numeric: tabular-nums; }
+  .cp-day.is-today .cp-dh__date { color: var(--primary); }
+  /* Match pills: one pastel per competition (NAT orange, NOR yellow, SOU blue,
+     NLC purple, FAC pink-red, FAT grey), matching the team's spreadsheet. */
+  .cp-mpills { display: flex; flex-wrap: wrap; gap: 3px; }
+  .cp-mpill { display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px; border-radius: var(--radius-pill);
+    font-size: var(--text-xs); font-variation-settings: 'wght' 700; font-variant-numeric: tabular-nums; line-height: 1.5; white-space: nowrap;
+    background: var(--mp-bg); color: var(--mp-fg); border: 1px solid var(--mp-edge); }
+  /* Pastel pills in the competition colours from the media team's sheet. */
+  .cp-mpill--nl  { --mp-bg: var(--amber-light);  --mp-edge: var(--amber);    --mp-fg: var(--amber-deep); }
+  .cp-mpill--n   { --mp-bg: var(--yellow-light); --mp-edge: var(--yellow);   --mp-fg: var(--text); }
+  .cp-mpill--s   { --mp-bg: var(--blue-light);   --mp-edge: var(--blue);     --mp-fg: var(--blue); }
+  .cp-mpill--cup { --mp-bg: var(--purple-light); --mp-edge: var(--purple);   --mp-fg: var(--purple); }
+  .cp-mpill--fac { --mp-bg: var(--primary-50);   --mp-edge: var(--primary-400); --mp-fg: var(--primary); }
+  .cp-mpill--fat { --mp-bg: var(--off-white);    --mp-edge: var(--navy-300); --mp-fg: var(--text-muted); }
+  .cp-dh__notes { color: var(--text); overflow-wrap: anywhere; }
+  .cp-dh__btn { background: none; border: none; padding: 2px; cursor: pointer; color: var(--text-muted); border-radius: var(--radius-sm); display: inline-flex; }
+  .cp-dh__btn:hover { color: var(--primary); background: var(--off-white); }
+  .cp-dh__btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .cp-dh__btn svg { width: 16px; height: 16px; }
+  .cp-stack { display: grid; gap: 4px; align-content: start; min-width: 0; min-height: 26px; }
+  .cp-split { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; min-width: 0; }
+  .cp-split__col { display: grid; gap: 4px; align-content: start; min-width: 0; }
+  .cp-split__head { font-size: var(--text-xs); color: var(--text-muted); text-transform: uppercase; letter-spacing: var(--tracking-wide); }
+  .cp-empty-day { font-size: var(--text-xs); color: var(--navy-300); }
+
+  /* Week view: an hourly timeline inside each day. */
+  .cp-slots { display: grid; gap: 4px; min-width: 0; }
+  .cp-slot { display: grid; grid-template-columns: 64px 1fr; gap: 8px; align-items: start; padding: 3px 0; border-top: 1px dotted var(--navy-100); min-width: 0; }
+  .cp-slot:first-child { border-top: none; }
+  /* Empty hours only appear while something is being dragged, as drop targets. */
+  .cp-slot.is-empty { display: none; }
+  .cp-cal.is-dragging .cp-slot.is-empty { display: grid; }
+  .cp-slot__label { font-size: var(--text-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; padding-top: 4px; }
+
+  /* Item chip. Fill = category colour, glyph = kind, tick = published.
+     --g edge, --g-bg fill, --g-fg text, --g-muted secondary, --g-ink glyph, --g-tick done.
+     Uncategorised chips stay white; categorised ones are solid (see paint()). */
+  .cp-item, .cp-idea { --g: var(--cp-none); --g-bg: var(--cp-none-bg); --g-fg: var(--text); --g-muted: var(--text-muted); --g-ink: var(--g); --g-tick: var(--green); }
+  .cp-item {
+    display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: var(--radius-sm);
+    background: var(--g-bg); border: 1px solid var(--navy-100); border-left: 3px solid var(--g);
+    font-size: var(--text-sm); color: var(--g-fg); cursor: pointer; min-width: 0; text-align: left; width: 100%; font-family: var(--font); }
+  .cp-item:hover { border-color: var(--g); }
+  .cp-item:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .cp-item[draggable="true"] { cursor: grab; }
+  .cp-item.is-dragging { opacity: .4; }
+  .cp-item__t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cp-item__time { font-size: var(--text-xs); font-variant-numeric: tabular-nums; color: var(--g-muted); flex: none; }
+  .cp-plats { display: inline-flex; gap: 3px; flex: none; color: var(--g-muted, var(--text-muted)); }
+  .cp-plat-toggles { display: flex; flex-wrap: wrap; gap: 4px; }
+  .cp-plat { color: var(--navy-300); }
+  .cp-plat[aria-pressed="true"] { background: var(--navy); border-color: var(--navy); color: var(--white); }
+  .cp-item__ini { min-width: 3.2ch; text-align: right; font-size: var(--text-xs); font-variation-settings: 'wght' 800; color: var(--g-muted); flex: none; max-width: 9ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The chip is a plain container (draggable); this button opens the item. */
+  .cp-item__open { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; padding: 0; margin: 0;
+    background: none; border: none; color: inherit; text-align: left; cursor: pointer;
+    font-family: var(--font); font-size: inherit; }
+  .cp-item__open:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-sm); }
+  .cp-item svg { flex: none; }
+  /* Done = a green tick, at full colour. No fade, no strike (decided 16/10/2026).
+     Planned items show the tick only on hover/focus, for editors; always on touch. */
+  .cp-item.is-dropped { opacity: .45; }
+  .cp-item.is-dropped .cp-item__t { font-style: italic; }
+  .cp-tick { opacity: 0; }
+  .cp-item:hover .cp-tick, .cp-item:focus-within .cp-tick, .cp-item.is-published .cp-tick { opacity: 1; }
+  @media (hover: none) { .cp-tick { opacity: 1; } }
+  .cp-item.is-published .cp-tick, .cp-done { color: var(--g-tick, var(--green)); }
+  .cp-done { display: inline-flex; flex: none; }
+  .cp-tick { background: none; border: none; padding: 0; color: var(--g-muted); cursor: pointer; display: inline-flex; flex: none; }
+  .cp-tick:hover { color: var(--green); }
+  .cp-tick:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-sm); }
+
+  .cp-glyph { flex: none; color: var(--g-ink, var(--g, var(--navy))); }
+
+  .cp-cat.cp-item, .cp-cat.cp-idea { --g-bg: var(--g); border-color: var(--g); }
+  .cp-on-dark  { --g-fg: var(--white); --g-ink: var(--white); --g-tick: var(--white); --g-muted: color-mix(in srgb, var(--white) 78%, var(--g)); }
+  .cp-on-light { --g-fg: var(--text);  --g-ink: var(--text);  --g-tick: var(--text);  --g-muted: color-mix(in srgb, var(--text) 72%, var(--g)); }
+  .cp-swatch { width: 40px; height: 32px; padding: 2px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--white); cursor: pointer; }
+
+  /* Inline add form inside a day. */
+  .cp-add { display: grid; gap: 8px; padding: 10px; background: var(--white); border: 1px solid var(--navy-200); border-radius: var(--radius); min-width: 0; }
+  .cp-add__row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; }
+  .cp-add input[type="text"], .cp-add input[type="time"], .cp-in {
+    font-family: var(--font); font-size: var(--text-sm); color: var(--text);
+    border: 1px solid var(--border); border-radius: var(--radius); padding: .45rem .6rem; background: var(--white); min-width: 0; }
+  .cp-add input[type="text"]:focus, .cp-in:focus { outline: none; border-color: var(--primary); box-shadow: var(--focus-ring); }
+  .cp-add__title { width: 100%; }
+  .cp-grow { flex: 1; }
+  /* Canon's 16px phone floor, so iOS doesn't zoom on focus. */
+  @media (max-width: 700px) { .cp-in, .cp-add input { font-size: 16px; } }
+
+  /* Modals */
+  .cp-link-results { display: grid; gap: 2px; max-height: 180px; overflow-y: auto; margin-top: 6px; }
+  .cp-link-results button { text-align: left; background: var(--off-white); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 8px; font-family: var(--font); font-size: var(--text-sm); cursor: pointer; }
+  .cp-link-results button:hover { border-color: var(--navy-300); }
+  .cp-readonly dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; font-size: var(--text-sm); }
+  .cp-readonly dt { color: var(--text-muted); }
+  .cp-readonly dd { margin: 0; overflow-wrap: anywhere; }
+  .cp-settings-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--navy-100); }
+  .cp-settings-row--authors { grid-template-columns: 70px 1fr auto auto; }
+  .cp-settings-row--cat { grid-template-columns: auto 1fr 70px auto; }
+  .cp-settings-row .cp-in, .cp-settings-row select { width: 100%; }
+
+  /* List view */
+  .cp-list-range { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .cp-bulk { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 12px; margin-bottom: 10px; background: var(--navy-50); border: 1px solid var(--navy-100); border-radius: var(--radius); font-size: var(--text-sm); }
+  th.cp-sort button { background: none; border: none; padding: 0; cursor: pointer; color: inherit;
+    font-family: inherit; font-size: inherit; font-variation-settings: inherit; letter-spacing: inherit; text-transform: inherit; }
+  th.cp-sort button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  th.cp-sort { cursor: pointer; white-space: nowrap; }
+  th.cp-sort[aria-sort="ascending"]::after { content: ' ▲'; }
+  th.cp-sort[aria-sort="descending"]::after { content: ' ▼'; }
+  .cp-list-title { min-width: 220px; }
+  .cp-list-title button { background: none; border: none; padding: 0; text-align: left; font-family: var(--font); font-size: var(--text-sm); color: var(--navy); cursor: pointer; }
+  .cp-list-title button:hover { text-decoration: underline; }
+  .cp-listwrap select { padding-top: .25rem; padding-bottom: .25rem; }
+  /* Ideas */
+  .cp-ideas { display: grid; gap: 12px; }
+  .cp-idea-list { display: grid; gap: 6px; }
+  .cp-idea {
+    display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: start; padding: 10px 12px;
+    background: var(--g-bg); border: 1px solid var(--navy-100); border-left: 3px solid var(--g); border-radius: var(--radius-sm); min-width: 0; }
+  .cp-idea.is-archived { opacity: .55; }
+  .cp-idea__main { display: grid; gap: 4px; min-width: 0; }
+  .cp-idea__title { display: flex; gap: 6px; align-items: center; font-size: var(--text-sm); font-variation-settings: 'wght' 700; color: var(--g-fg); min-width: 0; overflow-wrap: anywhere; }
+  .cp-idea__notes { font-size: var(--text-sm); color: var(--g-muted); white-space: pre-line; overflow-wrap: anywhere; }
+  .cp-idea__meta { font-size: var(--text-xs); color: var(--g-muted); }
+  .cp-idea__actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+  .cp-span { grid-column: 1 / -1; }
+  .cp-authors { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+  .cp-authors__row { display: flex; gap: 4px; align-items: center; min-width: 0; }
+  .cp-author-combo { width: 14rem; max-width: 100%; }
+  .cp-flush { margin-bottom: 6px; }
+  .cp-nowrap { white-space: nowrap; }
+  .cp-ties { display: grid; gap: 2px; margin-top: 8px; font-size: var(--text-sm); }
+  .cp-tie { padding: 3px 0; border-top: 1px solid var(--navy-100); overflow-wrap: anywhere; }
+  .cp-cup__paste { width: 100%; white-space: pre; overflow-wrap: normal; overflow-x: auto; }
+  #cpCupPaste { font-family: var(--font-mono); }   /* id beats .form-group textarea */
+  .cp-cup__preview { display: grid; gap: 6px; margin-top: 10px; }
+  .cp-cup__saved { margin-top: 24px; }
+  .cp-loading { padding: 20px; color: var(--text-muted); display: flex; gap: 8px; align-items: center; }
+
+  @media (max-width: 640px) {
+    .cp-day { grid-template-columns: 1fr; gap: 6px; }
+    .cp-idea { grid-template-columns: 1fr; }
+    .cp-idea__actions { justify-content: flex-start; }
+    .cp-dh { grid-template-columns: 1fr; }
+    .cp-split { grid-template-columns: 1fr; }
+    .cp-slot { grid-template-columns: 52px 1fr; }
+    .cp-settings-row, .cp-settings-row--authors { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Topbar — auto-rendered by /system/nl-topbar.js from window.NL_TOOL -->
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="page">
+
+    <div class="tabs" role="tablist" id="cpTabs">
+      <button class="tab active" type="button" role="tab" data-view="calendar" aria-selected="true">Calendar</button>
+      <button class="tab" type="button" role="tab" data-view="list" aria-selected="false">List</button>
+      <button class="tab" type="button" role="tab" data-view="ideas" aria-selected="false">Ideas</button>
+    </div>
+
+    <div class="toolbar" id="cpBar"></div>
+    <div class="filter-bar" id="cpFilters"></div>
+    <div class="cp-summary" id="cpSummary"></div>
+    <div id="cpBulk"></div>
+    <div id="cpMain"><div class="cp-loading">Loading the plan…</div></div>
+
+  </div>
+</div>
+
+<!-- Main app -->
+<script>
+(function () {
+  'use strict';
+
+  var TOOL_KEY = 'media-content-plan';
+  var ROOT = 'app-data/' + TOOL_KEY;
+
+  /* ── Fixed vocab (code, not config) ───────────────────────────────────
+     Kinds, platforms and statuses are fixed here. Categories are config. */
+  /* Starting categories. token = a brand colour used until someone picks one. */
+  var DEFAULT_CATEGORIES = {
+    football:   { label: 'Football',   token: '--blue',     order: 1 },
+    awards:     { label: 'Awards',     token: '--purple',   order: 2 },
+    league:     { label: 'League',     token: '--navy-400', order: 3 },
+    statements: { label: 'Statements', token: '--navy',     order: 4 },
+    trust:      { label: 'Trust',      token: '--yellow',   order: 5 },
+    u19:        { label: 'U19',        token: '--primary',  order: 6 },
+    '3up':      { label: '3UP',        token: '--navy-900', order: 7 }
+  };
+  /* What older values mean now: the sheet's CMS categories fold into Football. */
+  var LEGACY_CATEGORY = { national: 'football', north: 'football', south: 'football', 'nl cup': 'football', nlcup: 'football' };
+  /* Kind = what the item is. One label, shown as the chip's badge. */
+  var KINDS = [
+    { key: 'web',     label: 'Article',        glyph: 'article' },
+    { key: 'video',   label: 'Video',          glyph: 'play' },
+    { key: 'graphic', label: 'Graphic',        glyph: 'image' },
+    { key: 'club',    label: 'Club',           glyph: 'shield' },
+    { key: 'crm',     label: 'CRM',            glyph: 'email' }
+  ];
+  /* A few sheet items were social with no video/graphic marker. */
+  var KIND_UNSET = { key: 'social', label: 'Social (video or graphic?)', glyph: 'chat' };  // a few sheet items
+  /* Where an item is posted. Icons are the sprite's brand marks. */
+  var PLATFORMS = [
+    { key: 'website',   label: 'Website' },
+    { key: 'x',         label: 'X' },
+    { key: 'facebook',  label: 'Facebook' },
+    { key: 'instagram', label: 'Instagram' },
+    { key: 'tiktok',    label: 'TikTok' },
+    { key: 'linkedin',  label: 'LinkedIn' },
+    { key: 'youtube',   label: 'YouTube' }
+  ];
+  /* Starting set for a new item, by kind, until the user's own last set for that kind exists. */
+  function defaultPlatforms(kind, last) {
+    var mine = last && last.platformsByKind && last.platformsByKind[kind];
+    if (mine) return mine;
+    if (kind === 'web') return { website: true };
+    if (kind === 'video' || kind === 'graphic') return { x: true, facebook: true };
+    return {};
+  }
+  function platformsOn(it) { return PLATFORMS.filter(function (p) { return it.platforms && it.platforms[p.key]; }); }
+  function platformsObj(on) { var o = {}; PLATFORMS.forEach(function (p) { o[p.key] = !!(on && on[p.key]); }); return o; }
+  /* A row of logo toggles. Returns the node; node.value() gives {key: bool}. */
+  function platformToggles(initial, onChange) {
+    var state = platformsObj(initial);
+    var box = el('div', 'cp-plat-toggles');
+    box.setAttribute('role', 'group'); box.setAttribute('aria-label', 'Posted on');
+    PLATFORMS.forEach(function (p) {
+      var b = el('button', 'btn btn--icon btn--ghost cp-plat'); b.type = 'button'; b.title = p.label;
+      b.setAttribute('aria-label', p.label);
+      b.setAttribute('aria-pressed', state[p.key] ? 'true' : 'false');
+      b.appendChild(NL.icon(p.key, 'sm'));
+      b.addEventListener('click', function () {
+        state[p.key] = !state[p.key];
+        b.setAttribute('aria-pressed', state[p.key] ? 'true' : 'false');
+        if (onChange) onChange(p.key, state[p.key]);
+      });
+      box.appendChild(b);
+    });
+    box.value = function () { return platformsObj(state); };
+    box.set = function (on) {
+      state = platformsObj(on);
+      Array.prototype.forEach.call(box.children, function (b, i) { b.setAttribute('aria-pressed', state[PLATFORMS[i].key] ? 'true' : 'false'); });
+    };
+    return box;
+  }
+  var TYPES = [
+    { key: 'routine',  label: 'Routine' },
+    { key: 'reactive', label: 'Reactive' },
+    { key: 'original', label: 'Original' }
+  ];
+  var STATUSES = [
+    { key: 'planned', label: 'Planned' },
+    { key: 'published', label: 'Published' },
+    { key: 'dropped', label: 'Dropped' }
+  ];
+  /* Week-view rows: "No time", then one per hour. Dropping on an hour sets
+     HH:00; a time outside 06–23 still shows, in the row for its hour. */
+  var SLOTS = [{ key: 'none', label: 'No time', from: null }];
+  for (var h = 0; h < 24; h++) {
+    SLOTS.push({ key: 'h' + h, label: pad2(h) + ':00', from: pad2(h) + ':00', to: h === 23 ? '24:00' : pad2(h + 1) + ':00', offHours: h < 6 });
+  }
+  /* NLS competitions counted in day headers. FA Cup / Trophy aren't in the feed. */
+  var NLS_BASE = 'https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2';
+  var NLS_COMPS = [
+    { id: 89,   key: 'nl',  label: 'NAT' },
+    { id: 373,  key: 'n',   label: 'NOR' },
+    { id: 372,  key: 's',   label: 'SOU' },
+    { id: 1275, key: 'cup', label: 'NLC' }
+  ];
+
+  /* ── State ─────────────────────────────────────────────────────────── */
+  var S = {
+    session: null,
+    canEdit: false,
+    isSuper: false,
+    view: 'calendar',         // calendar | list | ideas
+    cup: {}, cupRef: null,
+    ideas: {}, ideasRef: null, showArchived: false, ideaForm: null,
+    mode: 'month',            // month | week
+    split: false,
+    cursor: null,             // Date inside the visible period
+    listFrom: '', listTo: '',
+    sort: { key: 'date', dir: 1 },
+    selected: {},             // list view bulk selection
+    items: {},                // id → item for the visible range
+    days: {},                 // date → day record
+    config: { categories: {}, authors: {} },
+    filters: { kind: '', category: '', author: '', platform: '', status: '' },
+    itemsRef: null, daysRef: null,
+    addingOn: null,           // date with the inline add form open
+    addForm: null,            // that form's node, reused across live re-renders so typing survives
+    matches: {},              // date → {nl, n, s, cup}
+    seasonsLoading: {}
+  };
+
+  /* ── Small helpers ─────────────────────────────────────────────────── */
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  function ymd(d) { return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
+  function fromYmd(s) { return NL.parseDate(s); }   // canon: ISO date → local midnight
+  function addDays(d, n) { var x = new Date(d.getFullYear(), d.getMonth(), d.getDate() + n); return x; }
+  function todayYmd() { return ymd(new Date()); }
+  var WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  var MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  function dayLabel(s) { var d = fromYmd(s); return WD[d.getDay()] + ' ' + d.getDate() + ' ' + MON[d.getMonth()].slice(0, 3); }
+  function uk(s) { if (!s) return ''; var p = s.split('-'); return p[2] + '/' + p[1] + '/' + p[0]; }   // CSV only
+  function shortDate(s) { return s ? NL.formatDateShort(s) : ''; }
+  function lookup(list, key) { for (var i = 0; i < list.length; i++) if (list[i].key === key) return list[i]; return null; }
+  function sel(options, value, placeholder, cls) {
+    var s = el('select', cls || 'nl-select');
+    if (placeholder != null) { var o0 = el('option', null, placeholder); o0.value = ''; s.appendChild(o0); }
+    options.forEach(function (o) {
+      var op = el('option', null, o.label); op.value = o.key;
+      if (o.disabled) op.disabled = true;
+      s.appendChild(op);
+    });
+    s.value = value == null ? '' : value;
+    return s;
+  }
+  function icon(name) { return NL.icon(name, 'sm'); }
+  function lsGet(k) { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  function stamp() { return { updatedBy: S.session.uid, updatedAt: firebase.database.ServerValue.TIMESTAMP }; }
+  function fail(err) { NL.toast((err && err.message) || 'Something went wrong', 'error'); }
+
+  /* ── Config lookups ────────────────────────────────────────────────── */
+  function cssVar(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+  function toHex(c) {
+    c = String(c || '').trim();
+    if (/^#[0-9a-f]{6}$/i.test(c)) return c.toLowerCase();
+    if (/^#[0-9a-f]{3}$/i.test(c)) return ('#' + c[1] + c[1] + c[2] + c[2] + c[3] + c[3]).toLowerCase();
+    var m = /rgba?\((\d+)\D+(\d+)\D+(\d+)/.exec(c);
+    if (m) return '#' + [m[1], m[2], m[3]].map(function (v) { return ('0' + (+v).toString(16)).slice(-2); }).join('');
+    return toHex(cssVar('--navy-300') || '#000');
+  }
+  function categoryColour(c) { return toHex(c.colour || (c.token ? cssVar(c.token) : '')); }
+  /* Light fill → dark ink: pick whichever of --text / --white contrasts more (WCAG). */
+  function luminance(hex) {
+    var v = [1, 3, 5].map(function (i) {
+      var x = parseInt(hex.substr(i, 2), 16) / 255;
+      return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+  }
+  function contrast(a, b) { var x = luminance(a), y = luminance(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
+  function isLight(hex) { return contrast(hex, toHex(cssVar('--text'))) > contrast(hex, toHex(cssVar('--white'))); }
+  function categoryList() {
+    var c = S.config.categories || {};
+    return Object.keys(c).map(function (k) { return { key: k, label: c[k].label, colour: categoryColour(c[k]), order: c[k].order || 99 }; })
+      .sort(function (a, b) { return a.order - b.order || a.label.localeCompare(b.label); });
+  }
+  /* A stored category may be a key (now), a label (older) or a CMS name (the sheet). */
+  function categoryOf(value) {
+    if (!value) return null;
+    var list = categoryList(), v = String(value), low = v.toLowerCase(), i;
+    for (i = 0; i < list.length; i++) if (list[i].key === v) return list[i];
+    for (i = 0; i < list.length; i++) if (list[i].label.toLowerCase() === low) return list[i];
+    var legacy = LEGACY_CATEGORY[low];
+    if (legacy) for (i = 0; i < list.length; i++) if (list[i].key === legacy) return list[i];
+    return null;
+  }
+  function categoryLabel(value) { var c = categoryOf(value); return c ? c.label : (value || ''); }
+  function categoryOptions(current) {
+    var opts = categoryList().map(function (c) { return { key: c.key, label: c.label }; });
+    if (current && !categoryOf(current)) opts.push({ key: current, label: current + ' (removed)' });
+    return opts;
+  }
+  /* Paint a chip or card in its category's colour. */
+  function paint(node, value) {
+    var c = categoryOf(value);
+    if (!c) return;
+    node.classList.add('cp-cat', isLight(c.colour) ? 'cp-on-light' : 'cp-on-dark');
+    node.style.setProperty('--g', c.colour);
+  }
+  function authorList(includeRetired) {
+    var a = S.config.authors || {};
+    return Object.keys(a).filter(function (k) { return includeRetired || a[k].active !== false; })
+      .sort().map(function (k) { return { key: k, label: a[k].name || k, name: a[k].name || '', uid: a[k].uid || null, active: a[k].active !== false }; });
+  }
+  function myInitials() {
+    var a = S.config.authors || {};
+    for (var k in a) if (a[k] && a[k].uid === S.session.uid) return k;
+    return null;
+  }
+  function kindOf(it) {
+    if (it.lane === 'social') return it.format === 'vid' ? 'video' : (it.format ? 'graphic' : 'social');
+    return it.lane || 'web';
+  }
+  function kindInfo(k) { return lookup(KINDS, k) || KIND_UNSET; }
+  /* Kind → stored lane + format. Choosing "graphic" keeps an AD / OTD format. */
+  function kindPatch(k, it) {
+    if (k === 'video') return { lane: 'social', format: 'vid' };
+    if (k === 'graphic') return { lane: 'social', format: it && it.format && it.format !== 'vid' ? it.format : 'gfx' };
+    if (k === 'social') return { lane: 'social', format: null };
+    return { lane: k || 'web', format: null };
+  }
+  function kindOptions(current) {
+    return current === 'social' ? KINDS.concat([KIND_UNSET]) : KINDS;
+  }
+  /* Initials → full name from config/authors; falls back to the initials. */
+  function authorName(ini) {
+    var a = (S.config.authors || {})[ini];
+    return (a && a.name) || ini;
+  }
+  function authorText(it) {
+    if (it.author) return it.author + (it.coAuthors && it.coAuthors.length ? '/' + it.coAuthors.join('/') : '');
+    if (it.authorOther) return it.authorOther;
+    return '';
+  }
+  function authorFull(it) {
+    if (it.author) return [it.author].concat(asArray(it.coAuthors)).map(authorName).join(' / ');
+    return it.authorOther || '';
+  }
+  function asArray(v) { if (!v) return []; if (Array.isArray(v)) return v.filter(Boolean); return Object.keys(v).map(function (k) { return v[k]; }); }
+
+  /* ── Filtering ─────────────────────────────────────────────────────── */
+  function passes(it) {
+    var f = S.filters;
+    if (f.kind && kindOf(it) !== f.kind) return false;
+    if (f.category && (categoryOf(it.category) || {}).key !== f.category) return false;
+    if (f.author === '_me') { var me = myInitials(); if (!me || (it.author !== me && asArray(it.coAuthors).indexOf(me) < 0)) return false; }
+    else if (f.author === '_none') { if (it.author || it.authorOther) return false; }
+    else if (f.author === '_guest') { if (!it.authorOther) return false; }
+    else if (f.author && it.author !== f.author && asArray(it.coAuthors).indexOf(f.author) < 0) return false;
+    if (f.platform && !(it.platforms && it.platforms[f.platform])) return false;
+    if (f.status && it.status !== f.status) return false;
+    return true;
+  }
+  function sortItems(a, b) {
+    var ta = a.time || '99:99', tb = b.time || '99:99';
+    if (ta !== tb) return ta < tb ? -1 : 1;
+    var la = kindOrder(kindOf(a)), lb = kindOrder(kindOf(b));
+    if (la !== lb) return la - lb;
+    return (a.createdAt || 0) - (b.createdAt || 0);
+  }
+  function kindOrder(k) { for (var i = 0; i < KINDS.length; i++) if (KINDS[i].key === k) return i; return 9; }
+  /* ── Range + listeners ─────────────────────────────────────────────── */
+  function currentRange() {
+    if (S.view === 'list') return { from: S.listFrom, to: S.listTo };
+    var c = S.cursor;
+    if (S.mode === 'week') {
+      var dow = (c.getDay() + 6) % 7;              // Monday start
+      var start = addDays(c, -dow);
+      return { from: ymd(start), to: ymd(addDays(start, 6)) };
+    }
+    return { from: ymd(new Date(c.getFullYear(), c.getMonth(), 1)), to: ymd(new Date(c.getFullYear(), c.getMonth() + 1, 0)) };
+  }
+  var _renderQueued = false;
+  function queueRender() {
+    if (_renderQueued) return;
+    _renderQueued = true;
+    requestAnimationFrame(function () { _renderQueued = false; render(); });
+  }
+  function listen() {
+    var r = currentRange();
+    if (S.itemsRef) S.itemsRef.off();
+    if (S.daysRef) S.daysRef.off();
+    if (S.cupRef) { S.cupRef.off(); S.cupRef = null; }
+    if (S.ideasRef) { S.ideasRef.off(); S.ideasRef = null; }
+    if (S.view === 'ideas') {
+      S.itemsRef = null; S.daysRef = null;
+      S.ideasRef = db.ref(ROOT + '/ideas');
+      S.ideasRef.on('value', function (snap) {
+        var out = {};
+        snap.forEach(function (ch) { var v = ch.val(); if (v && v.title) { v.id = ch.key; out[ch.key] = v; } });
+        S.ideas = out; queueRender();
+      }, fail);
+      return;
+    }
+    S.items = {}; S.days = {};
+    var loaded = { items: false, days: false };
+    S.itemsRef = db.ref(ROOT + '/items').orderByChild('date').startAt(r.from).endAt(r.to);
+    S.itemsRef.on('value', function (snap) {
+      var out = {};
+      snap.forEach(function (ch) { var v = ch.val(); if (v && v.date) { v.id = ch.key; out[ch.key] = v; } });
+      S.items = out; loaded.items = true;
+      if (loaded.days) queueRender();
+    }, fail);
+    S.daysRef = db.ref(ROOT + '/days').orderByKey().startAt(r.from).endAt(r.to);
+    S.daysRef.on('value', function (snap) {
+      S.days = snap.val() || {}; loaded.days = true;
+      if (loaded.items) queueRender();
+    }, fail);
+    if (S.view === 'calendar') {
+      loadMatches(r.from, r.to);
+      S.cup = {};
+      S.cupRef = db.ref(ROOT + '/cupFixtures').orderByChild('date').startAt(r.from).endAt(r.to);
+      S.cupRef.on('value', function (snap) { S.cup = snap.val() || {}; queueRender(); }, fail);
+    }
+  }
+
+  /* ── Match counts from NLS (memory cache per season) ───────────────── */
+  function seasonOf(s) { return NL.season.fromDate(fromYmd(s)); }
+  function londonDay(iso) {
+    if (!iso) return '';
+    var d = new Date(iso.indexOf('T') >= 0 ? iso : iso.replace(' ', 'T') + 'Z');
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+  }
+  function fetchComp(comp, season) {
+    var all = [];
+    function page(n) {
+      var url = NLS_BASE + '/matches/?competitionID=' + comp.id + '&seasonID=' + season +
+        '&sort=kickOffDateUTC&page.number=' + n + '&page.size=100';
+      return fetch(url).then(function (r) { if (!r.ok) throw new Error('NLS ' + r.status); return r.json(); })
+        .then(function (j) {
+          var rows = (j && j.data) || [];
+          all = all.concat(rows);
+          var total = j && j.meta && j.meta.totalCount;
+          if (rows.length < 100 || (total != null && all.length >= total) || n >= 20) return all;
+          return page(n + 1);
+        });
+    }
+    return page(1).then(function (rows) {
+      rows.forEach(function (m) {
+        var a = (m && m.attributes) || {};
+        var day = londonDay(a.kickOffDateUTC || a.kickoffDateUTC || a.kickOffDate || a.kickoffDate || a.date || '');
+        if (!day) return;
+        var bucket = S.matches[day] = S.matches[day] || {};
+        bucket[comp.key] = (bucket[comp.key] || 0) + 1;
+      });
+    });
+  }
+  function loadMatches(from, to) {
+    [seasonOf(from), seasonOf(to)].forEach(function (season) {
+      if (S.seasonsLoading[season]) return;
+      S.seasonsLoading[season] = true;
+      Promise.all(NLS_COMPS.map(function (c) {
+        return fetchComp(c, season).catch(function (e) { console.warn('[content-plan] match counts', c.label, e && e.message); });
+      })).then(queueRender);
+    });
+  }
+  function matchPills(date) {
+    var m = S.matches[date] || {}, d = S.days[date] || {}, mm = d.manualMatches || {};
+    var box = el('div', 'cp-mpills'), n = 0;
+    function pill(cls, label, count, title) {
+      var p = el('span', 'cp-mpill ' + cls, label + ' ' + count); p.title = title; box.appendChild(p); n++;
+    }
+    var titles = { nl: 'National League', n: 'National League North', s: 'National League South', cup: 'National League Cup' };
+    NLS_COMPS.forEach(function (c) { if (m[c.key]) pill('cp-mpill--' + c.key, c.label, m[c.key], titles[c.key] + ' matches'); });
+    var cc = cupCounts(date);
+    var fac = cc.facup || mm.faCup, fat = cc.fatrophy || mm.faTrophy;
+    if (fac) pill('cp-mpill--fac', 'FAC', fac, 'FA Cup matches');
+    if (fat) pill('cp-mpill--fat', 'FAT', fat, 'FA Trophy matches');
+    return n ? box : null;
+  }
+  function matchText(date) {
+    var m = S.matches[date] || {}, d = S.days[date] || {}, mm = d.manualMatches || {};
+    var parts = [];
+    NLS_COMPS.forEach(function (c) { if (m[c.key]) parts.push(c.label + ' ' + m[c.key]); });
+    var cc = cupCounts(date);
+    if (cc.facup || mm.faCup) parts.push('FAC ' + (cc.facup || mm.faCup));
+    if (cc.fatrophy || mm.faTrophy) parts.push('FAT ' + (cc.fatrophy || mm.faTrophy));
+    return parts.join(' · ');
+  }
+
+  /* ── Writes ────────────────────────────────────────────────────────── */
+  function writeItem(id, patch, auditAction, auditDetail) {
+    return NL.ensureAuth().then(function () {
+      if (auditAction) NL.writeAudit(auditAction, auditDetail);
+      var p = {}; for (var k in patch) p[k] = patch[k];
+      var st = stamp(); p.updatedBy = st.updatedBy; p.updatedAt = st.updatedAt;
+      return db.ref(ROOT + '/items/' + id).update(p);
+    });
+  }
+  function createItem(data) {
+    return NL.ensureAuth().then(function () {
+      var ref = db.ref(ROOT + '/items').push();
+      var now = firebase.database.ServerValue.TIMESTAMP;
+      data.createdBy = S.session.uid; data.createdAt = now;
+      data.updatedBy = S.session.uid; data.updatedAt = now;
+      NL.writeAudit('content_plan_create', { id: ref.key, date: data.date, title: data.title });
+      return ref.set(data).then(function () { return ref.key; });
+    });
+  }
+  function deleteItem(it) {
+    return NL.confirm('Delete "' + it.title + '"?', { title: 'Delete item', confirmText: 'Delete', variant: 'danger' })
+      .then(function (ok) {
+        if (!ok) return false;
+        return NL.ensureAuth().then(function () {
+          NL.writeAudit('content_plan_delete', { id: it.id, date: it.date, title: it.title });
+          return db.ref(ROOT + '/items/' + it.id).remove();
+        }).then(function () { NL.toast('Deleted'); return true; });
+      });
+  }
+  function markPublished(it) {
+    var pub = it.status !== 'published';
+    var patch = pub
+      ? { status: 'published', publishedBy: S.session.uid, publishedAt: firebase.database.ServerValue.TIMESTAMP }
+      : { status: 'planned', publishedBy: null, publishedAt: null };
+    return writeItem(it.id, patch).then(function () { NL.toast(pub ? 'Marked published' : 'Back to planned'); }).catch(fail);
+  }
+  function moveItem(id, date, time) {
+    var it = S.items[id];
+    if (!it) return;
+    var patch = { date: date };
+    if (time !== undefined) patch.time = time;
+    if (it.date === date && (time === undefined || it.time === time)) return;
+    writeItem(id, patch).catch(fail);
+  }
+
+  /* ── Top bar (period nav / list range / actions) ───────────────────── */
+  function renderBar() {
+    var bar = document.getElementById('cpBar');
+    bar.innerHTML = '';
+    var left = el('div', 'toolbar__left'), right = el('div', 'toolbar__right');
+    if (S.view === 'calendar') {
+      var prev = el('button', 'btn btn--ghost btn--sm'); prev.type = 'button'; prev.appendChild(icon('back')); prev.setAttribute('aria-label', 'Previous');
+      var next = el('button', 'btn btn--ghost btn--sm'); next.type = 'button'; next.appendChild(icon('forward')); next.setAttribute('aria-label', 'Next');
+      var today = el('button', 'btn btn--ghost btn--sm', 'Today'); today.type = 'button';
+      prev.addEventListener('click', function () { step(-1); });
+      next.addEventListener('click', function () { step(1); });
+      today.addEventListener('click', function () { S.cursor = new Date(); listen(); renderBar(); });
+      var r = currentRange();
+      var label = S.mode === 'month'
+        ? MON[S.cursor.getMonth()] + ' ' + S.cursor.getFullYear()
+        : 'Week of ' + dayLabel(r.from);
+      left.appendChild(prev); left.appendChild(today); left.appendChild(next);
+      left.appendChild(el('span', 'cp-period', label));
+
+      var modes = el('div', 'chip-group');
+      [['month', 'Month'], ['week', 'Week']].forEach(function (m) {
+        var b = el('button', 'chip' + (S.mode === m[0] ? ' active' : ''), m[1]); b.type = 'button';
+        b.setAttribute('aria-pressed', S.mode === m[0] ? 'true' : 'false');
+        b.addEventListener('click', function () { if (S.mode === m[0]) return; S.mode = m[0]; savePrefs(); listen(); renderBar(); });
+        modes.appendChild(b);
+      });
+      right.appendChild(modes);
+      /* Combined / split only means something in month view; week view is a timeline. */
+      if (S.mode === 'month') {
+        var split = el('div', 'chip-group');
+        [[false, 'Combined'], [true, 'Split web / social']].forEach(function (m) {
+          var b = el('button', 'chip' + (S.split === m[0] ? ' active' : ''), m[1]); b.type = 'button';
+          b.setAttribute('aria-pressed', S.split === m[0] ? 'true' : 'false');
+          b.addEventListener('click', function () { if (S.split === m[0]) return; S.split = m[0]; savePrefs(); renderBar(); render(); });
+          split.appendChild(b);
+        });
+        right.appendChild(split);
+      }
+    } else if (S.view === 'ideas') {
+      var arch = el('div', 'chip-group');
+      [[false, 'Open'], [true, 'Archived']].forEach(function (m) {
+        var b = el('button', 'chip' + (S.showArchived === m[0] ? ' active' : ''), m[1]); b.type = 'button';
+        b.setAttribute('aria-pressed', S.showArchived === m[0] ? 'true' : 'false');
+        b.addEventListener('click', function () { if (S.showArchived === m[0]) return; S.showArchived = m[0]; renderBar(); render(); });
+        arch.appendChild(b);
+      });
+      left.appendChild(arch);
+    } else {
+      var range = el('div', 'cp-list-range');
+      var f = el('input', 'cp-in'); f.type = 'date'; f.value = S.listFrom; f.id = 'cpFrom'; f.setAttribute('aria-label', 'From');
+      var t = el('input', 'cp-in'); t.type = 'date'; t.value = S.listTo; t.id = 'cpTo'; t.setAttribute('aria-label', 'To');
+      function apply() {
+        if (!f.value || !t.value) return;
+        if (f.value > t.value) { NL.toast('The start date is after the end date', 'error'); return; }
+        S.listFrom = f.value; S.listTo = t.value; S.selected = {}; listen();
+      }
+      f.addEventListener('change', apply); t.addEventListener('change', apply);
+      range.appendChild(f); range.appendChild(el('span', 'form-hint', 'to')); range.appendChild(t);
+      left.appendChild(range);
+      var csv = el('button', 'btn btn--ghost btn--sm'); csv.type = 'button'; csv.appendChild(icon('download')); csv.appendChild(document.createTextNode(' CSV'));
+      csv.addEventListener('click', exportCsv);
+      right.appendChild(csv);
+    }
+    if (S.canEdit) {
+      var settings = el('button', 'btn btn--ghost btn--sm'); settings.type = 'button';
+      settings.appendChild(icon('settings')); settings.appendChild(document.createTextNode(' Settings'));
+      settings.addEventListener('click', openSettings);
+      right.appendChild(settings);
+      if (S.view !== 'ideas') {
+        var add = el('button', 'btn btn--primary btn--sm'); add.type = 'button';
+        add.appendChild(icon('add')); add.appendChild(document.createTextNode(' Add item'));
+        add.addEventListener('click', function () { openEditor(null, defaultAddDate()); });
+        right.appendChild(add);
+      }
+    }
+    bar.appendChild(left); bar.appendChild(right);
+  }
+  function defaultAddDate() {
+    var r = currentRange(), t = todayYmd();
+    return (t >= r.from && t <= r.to) ? t : r.from;
+  }
+  function step(n) {
+    var c = S.cursor;
+    S.cursor = S.mode === 'month' ? new Date(c.getFullYear(), c.getMonth() + n, 1) : addDays(c, 7 * n);
+    S.addingOn = null; S.addForm = null;
+    listen(); renderBar();
+  }
+
+  /* ── Filter bar ────────────────────────────────────────────────────── */
+  function renderFilters() {
+    var box = document.getElementById('cpFilters');
+    box.innerHTML = '';
+    var f = S.filters;
+    function add(control, key, label) {
+      control.setAttribute('aria-label', label);
+      control.addEventListener('change', function () { f[key] = control.value; S.selected = {}; savePrefs(); render(); });
+      box.appendChild(control);
+    }
+    add(sel(KINDS, f.kind, 'All kinds'), 'kind', 'Kind');
+    add(sel(categoryOptions(), f.category, 'All categories'), 'category', 'Category');
+    var authorOpts = [{ key: '_me', label: 'My items' }, { key: '_none', label: 'Unassigned' }, { key: '_guest', label: 'Guest writers' }]
+      .concat(authorList(true).map(function (a) { return { key: a.key, label: a.label + (a.active ? '' : ' (retired)') }; }));
+    add(sel(authorOpts, f.author, 'All authors'), 'author', 'Author');
+    add(sel(PLATFORMS, f.platform, 'All platforms'), 'platform', 'Platform');
+    add(sel(STATUSES, f.status, 'Any status'), 'status', 'Status');
+    var any = Object.keys(f).some(function (k) { return !!f[k]; });
+    if (any) {
+      var clr = el('button', 'btn btn--ghost btn--sm', 'Clear filters'); clr.type = 'button';
+      clr.addEventListener('click', function () {
+        Object.keys(f).forEach(function (k) { f[k] = ''; });
+        savePrefs(); renderFilters(); render();
+      });
+      box.appendChild(clr);
+    }
+  }
+
+  /* ── Summary line ──────────────────────────────────────────────────── */
+  function renderSummary(all) {
+    var box = document.getElementById('cpSummary');
+    box.innerHTML = '';
+    /* Only counts that ask for action. Who-wrote-what belongs in Reports. */
+    var unassigned = 0;
+    all.forEach(function (it) {
+      if (!it.author && !it.authorOther && it.lane === 'web' && it.status === 'planned') unassigned++;
+    });
+    function part(label, n) { var s = el('span'); s.appendChild(el('b', null, String(n))); s.appendChild(document.createTextNode(' ' + label)); box.appendChild(s); }
+    part(all.length === 1 ? 'item' : 'items', all.length);
+    if (unassigned) part('unassigned', unassigned);
+  }
+
+  /* ── Item chip ─────────────────────────────────────────────────────── */
+  function glyph(kind) {
+    var g = NL.icon(kind.glyph, 'sm');
+    g.setAttribute('class', 'icon icon--sm cp-glyph');
+    return g;
+  }
+  function chip(it) {
+    /* A plain container (it is what gets dragged). The inner button opens the
+       item; the tick is a sibling button, never nested inside another control. */
+    var c = el('div', 'cp-item');
+    paint(c, it.category);
+    if (it.status === 'published') c.classList.add('is-published');
+    if (it.status === 'dropped') c.classList.add('is-dropped');
+    var open = el('button', 'cp-item__open'); open.type = 'button';
+    var kind = kindInfo(kindOf(it));
+    open.appendChild(glyph(kind));
+    if (it.time) open.appendChild(el('span', 'cp-item__time', it.time));
+    open.appendChild(el('span', 'cp-item__t', it.title || '(untitled)'));
+    if (it.linkedItemId) open.appendChild(icon('link'));
+    var pl = platformsOn(it);
+    if (pl.length) {
+      var ps = el('span', 'cp-plats');
+      pl.forEach(function (p) { ps.appendChild(NL.icon(p.key, 'sm')); });
+      open.appendChild(ps);
+    }
+    var at = authorText(it), af = authorFull(it);
+    open.appendChild(el('span', 'cp-item__ini', at));   // always present, so logos line up down the day
+    var tip = [kind.label, it.title, categoryLabel(it.category), pl.map(function (p) { return p.label; }).join(', '), af, lookup(STATUSES, it.status) ? lookup(STATUSES, it.status).label : ''].filter(Boolean).join(' · ');
+    open.title = tip; open.setAttribute('aria-label', tip);
+    open.addEventListener('click', function () { openEditor(it); });
+    c.appendChild(open);
+    if (S.canEdit) {
+      c.draggable = true;
+      c.addEventListener('dragstart', function (e) {
+        e.dataTransfer.setData('text/plain', it.id);
+        e.dataTransfer.effectAllowed = 'move';
+        c.classList.add('is-dragging');
+        var cal = c.closest('.cp-cal'); if (cal) cal.classList.add('is-dragging');
+      });
+      c.addEventListener('dragend', function () {
+        c.classList.remove('is-dragging');
+        var cal = document.querySelector('.cp-cal.is-dragging'); if (cal) cal.classList.remove('is-dragging');
+      });
+      if (it.status !== 'dropped') {
+        var pub = it.status === 'published';
+        var tick = el('button', 'cp-tick'); tick.type = 'button';
+        var tl = pub ? 'Published – click to put back to planned' : 'Mark published';
+        tick.setAttribute('aria-label', tl); tick.title = tl;
+        tick.appendChild(icon('tick'));
+        tick.addEventListener('click', function (e) { e.stopPropagation(); markPublished(it); });
+        c.appendChild(tick);
+      }
+    } else if (it.status === 'published') {
+      var done = el('span', 'cp-done'); done.title = 'Published'; done.appendChild(icon('tick'));
+      c.appendChild(done);
+    }
+    return c;
+  }
+  function dropTarget(node, date, slot) {
+    if (!S.canEdit) return;
+    node.addEventListener('dragover', function (e) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; node.classList.add('is-drop'); });
+    node.addEventListener('dragleave', function (e) { if (!node.contains(e.relatedTarget)) node.classList.remove('is-drop'); });
+    node.addEventListener('drop', function (e) {
+      e.preventDefault(); e.stopPropagation(); node.classList.remove('is-drop');
+      var id = e.dataTransfer.getData('text/plain');
+      if (!id || !S.items[id]) return;
+      var time;
+      if (slot) {
+        var cur = S.items[id].time || null;
+        if (!slot.from) time = null;
+        else if (!(cur && cur >= slot.from && cur < slot.to)) time = slot.from;
+      }
+      moveItem(id, date, time);
+    });
+  }
+
+  /* ── Calendar ──────────────────────────────────────────────────────── */
+  function renderCalendar(byDate) {
+    var main = document.getElementById('cpMain');
+    var r = currentRange();
+    var cal = el('div', 'cp-cal');
+    var today = todayYmd();
+    for (var d = fromYmd(r.from); ymd(d) <= r.to; d = addDays(d, 1)) {
+      (function (date, dow) {
+        var row = el('div', 'cp-day');
+        if (dow === 0 || dow === 6) row.classList.add('is-weekend');
+        if (date === today) row.classList.add('is-today');
+        row.id = 'day-' + date;
+
+        var dh = el('div', 'cp-dh');
+        var top = el('div', 'cp-dh__top');
+        top.appendChild(el('span', 'cp-dh__date', dayLabel(date)));
+        if (S.canEdit) {
+          var plus = el('button', 'cp-dh__btn'); plus.type = 'button'; plus.appendChild(icon('add'));
+          plus.setAttribute('aria-label', 'Add an item on ' + dayLabel(date)); plus.title = 'Add item';
+          plus.addEventListener('click', function () { S.addingOn = date; S.addForm = null; render(); });
+          top.appendChild(plus);
+        }
+        var info = el('button', 'cp-dh__btn'); info.type = 'button'; info.appendChild(icon(S.canEdit ? 'edit' : 'info'));
+        info.setAttribute('aria-label', 'Day notes for ' + dayLabel(date)); info.title = 'Day notes and match counts';
+        info.addEventListener('click', function () { openDay(date); });
+        top.appendChild(info);
+        dh.appendChild(top);
+        var mp = matchPills(date);
+        if (mp) dh.appendChild(mp);
+        var notes = S.days[date] && S.days[date].notes;
+        if (notes) dh.appendChild(el('span', 'cp-dh__notes', notes));
+        row.appendChild(dh);
+
+        var items = byDate[date] || [];
+        var body;
+        if (S.mode === 'week') {
+          body = el('div', 'cp-slots');
+          SLOTS.forEach(function (slot) {
+            var sr = el('div', 'cp-slot');
+            sr.appendChild(el('span', 'cp-slot__label', slot.label));
+            var st = el('div', 'cp-stack');
+            var inSlot = items.filter(function (it) {
+              if (!slot.from) return !it.time;
+              return it.time && it.time >= slot.from && it.time < slot.to;
+            });
+            inSlot.forEach(function (it) { st.appendChild(chip(it)); });
+            if (!inSlot.length) {
+              if (slot.offHours) return;            // 00–05 only when something is there
+              sr.classList.add('is-empty');
+            }
+            sr.appendChild(st);
+            dropTarget(sr, date, slot);
+            body.appendChild(sr);
+          });
+        } else if (S.split) {
+          body = el('div', 'cp-split');
+          var web = el('div', 'cp-split__col'), soc = el('div', 'cp-split__col');
+          web.appendChild(el('span', 'cp-split__head', 'Web-first'));
+          soc.appendChild(el('span', 'cp-split__head', 'Social-first & other'));
+          items.forEach(function (it) { (kindOf(it) === 'web' ? web : soc).appendChild(chip(it)); });
+          body.appendChild(web); body.appendChild(soc);
+        } else {
+          body = el('div', 'cp-stack');
+          items.forEach(function (it) { body.appendChild(chip(it)); });
+          if (!items.length && S.addingOn !== date) body.appendChild(el('span', 'cp-empty-day', '—'));
+        }
+        if (S.addingOn === date) {
+          var wrap = el('div', 'cp-stack');
+          wrap.appendChild(body);
+          wrap.appendChild(addForm(date));
+          body = wrap;
+        }
+        row.appendChild(body);
+        dropTarget(row, date, null);
+        cal.appendChild(row);
+      })(ymd(d), d.getDay());
+    }
+    main.innerHTML = '';
+    main.appendChild(cal);
+    if (S.addingOn && S._focusAdd) {
+      S._focusAdd = false;
+      var t = document.getElementById('cpAddTitle');
+      if (t) t.focus();
+    }
+  }
+
+  /* ── Inline add form ───────────────────────────────────────────────── */
+  function prefsKey() { return 'cp:last:' + S.session.uid; }
+  function closeAdd() { S.addingOn = null; S.addForm = null; render(); }
+  function addForm(date) {
+    if (S.addForm && S.addForm.date === date) return S.addForm.node;
+    S._focusAdd = true;
+    var last = lsGet(prefsKey()) || {};
+    var form = el('form', 'cp-add');
+    form.setAttribute('aria-label', 'Add an item on ' + dayLabel(date));
+    var title = el('input', 'cp-add__title'); title.type = 'text'; title.id = 'cpAddTitle'; title.placeholder = 'Title'; title.maxLength = 300; title.setAttribute('aria-label', 'Title');
+    form.appendChild(title);
+
+    var row = el('div', 'cp-add__row');
+    var kind = sel(KINDS, last.kind || 'web'); kind.setAttribute('aria-label', 'Kind');
+    /* Any category for any kind; the last one used is remembered. */
+    var plats = null;
+    var cat = sel(categoryOptions(), categoryOf(last.category) ? categoryOf(last.category).key : '', 'Category'); cat.setAttribute('aria-label', 'Category');
+    kind.addEventListener('change', function () {
+      if (plats) plats.set(defaultPlatforms(kind.value, last));
+    });
+    var auth = authorPicker({ author: (S.config.authors || {})[last.author] ? last.author : '' });
+    var time = el('input'); time.type = 'time'; time.step = 300; time.setAttribute('aria-label', 'Time (optional)');
+    var type = sel(TYPES, '', 'Type'); type.setAttribute('aria-label', 'Type');
+    [kind, cat, auth, time, type].forEach(function (x) { row.appendChild(x); });
+    form.appendChild(row);
+
+    plats = platformToggles(defaultPlatforms(kind.value, last));
+    var actions = el('div', 'cp-add__row');
+    actions.appendChild(plats);
+    var save = el('button', 'btn btn--primary btn--sm', 'Add'); save.type = 'submit';
+    var cancel = el('button', 'btn btn--ghost btn--sm', 'Cancel'); cancel.type = 'button';
+    cancel.addEventListener('click', closeAdd);
+    actions.appendChild(save); actions.appendChild(cancel);
+    form.appendChild(actions);
+
+    form.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeAdd(); });
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var t = title.value.trim();
+      if (!t) { title.focus(); NL.toast('Add a title', 'error'); return; }
+      var data = blankItem(date);
+      data.title = t;
+      var kp = kindPatch(kind.value || 'web'); data.lane = kp.lane; data.format = kp.format;
+      data.category = cat.value || null;
+      var av = auth.value(); data.author = av.author; data.authorOther = av.authorOther; data.coAuthors = av.coAuthors;
+      data.time = time.value || null;
+      data.type = type.value || null;
+      data.platforms = plats.value();
+      save.disabled = true;
+      createItem(data).then(function () {
+        var byKind = last.platformsByKind || {}; byKind[kind.value] = data.platforms;
+        lsSet(prefsKey(), { platformsByKind: byKind, kind: kind.value, category: cat.value, author: auth.value().author || '' });
+        NL.toast('Added');
+        S.addingOn = date;          // keep the form open for the next one, fresh
+        S.addForm = null;
+        render();
+      }).catch(function (err) { save.disabled = false; fail(err); });
+    });
+    S.addForm = { date: date, node: form };
+    return form;
+  }
+  function blankItem(date) {
+    return {
+      date: date, time: null, lane: 'web', title: '', category: null, type: null,
+      author: null, authorOther: null, coAuthors: null,
+      platforms: platformsObj(null), format: null, linkedItemId: null,
+      status: 'planned', notes: '', needsReview: false
+    };
+  }
+
+
+  /* Author typeahead, on the canon .club-picker look: type to filter the
+     authors (name or initials), pick one, or keep what was typed for a guest
+     writer ("Use … as entered"). value is an author key (initials) when one
+     was picked, otherwise the typed name.
+     Canon candidate (16/10/2026): NL.clubPicker is club-specific; a generic
+     NL.combobox would serve this and any other "pick or type" field. */
+  function authorCombo(value, exclude, onChange, label) {
+    var authors = S.config.authors || {};
+    var root = el('div', 'club-picker cp-author-combo');
+    var wrap = el('div', 'club-picker__wrap');
+    var input = el('input', 'club-picker__input'); input.type = 'text'; input.autocomplete = 'off';
+    input.placeholder = 'Author'; input.setAttribute('aria-label', label || 'Author');
+    input.setAttribute('role', 'combobox'); input.setAttribute('aria-autocomplete', 'list'); input.setAttribute('aria-expanded', 'false');
+    var listId = 'cpac-' + Math.random().toString(36).slice(2, 8);
+    input.setAttribute('aria-controls', listId);
+    var dd = el('div', 'club-picker__dropdown'); dd.id = listId; dd.setAttribute('role', 'listbox');
+    wrap.appendChild(input); root.appendChild(wrap); root.appendChild(dd);
+    var current = value || '', rows = [], active = -1;
+    function show(v) { return authors[v] ? (authors[v].name || v) : (v || ''); }
+    input.value = show(current);
+    function matches(q) {
+      q = q.toLowerCase().trim();
+      return authorList(false).filter(function (a) {
+        if (exclude.indexOf(a.key) >= 0 && a.key !== current) return false;
+        return !q || a.key.toLowerCase().indexOf(q) === 0 || (a.name || '').toLowerCase().indexOf(q) >= 0;
+      });
+    }
+    function exact(q) {
+      q = q.toLowerCase().trim();
+      var hit = null;
+      authorList(true).forEach(function (a) { if (a.key.toLowerCase() === q || (a.name || '').toLowerCase() === q) hit = a.key; });
+      return hit;
+    }
+    function render() {
+      var q = input.value;
+      rows = matches(q).map(function (a) { return { key: a.key, label: a.name || a.key, sub: a.key }; });
+      var typed = q.trim();
+      if (typed && !exact(typed)) rows.push({ free: typed });
+      dd.innerHTML = '';
+      rows.forEach(function (r, i) {
+        var o = el('div', 'club-picker__option' + (r.free ? ' club-picker__option--freetext' : ''));
+        o.id = listId + '-' + i; o.setAttribute('role', 'option');
+        o.appendChild(el('span', 'club-picker__option-name', r.free ? 'Use “' + r.free + '” as entered' : r.label));
+        if (!r.free) o.appendChild(el('span', 'club-picker__option-div', r.sub));
+        o.addEventListener('mousedown', function (e) { e.preventDefault(); pick(i); });
+        dd.appendChild(o);
+      });
+      active = rows.length ? 0 : -1; paint();
+      dd.classList.toggle('open', rows.length > 0); input.setAttribute('aria-expanded', rows.length ? 'true' : 'false');
+    }
+    function paint() {
+      Array.prototype.forEach.call(dd.children, function (o, i) {
+        var on = i === active;
+        o.classList.toggle('club-picker__option--active', on); o.setAttribute('aria-selected', on ? 'true' : 'false');
+        if (on) input.setAttribute('aria-activedescendant', o.id);
+      });
+    }
+    function close() { dd.classList.remove('open'); input.setAttribute('aria-expanded', 'false'); }
+    function set(v) { current = v; input.value = show(v); close(); if (onChange) onChange(v); }
+    function pick(i) { var r = rows[i]; if (r) set(r.free || r.key); }
+    input.addEventListener('focus', render);
+    input.addEventListener('input', render);
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); if (!dd.classList.contains('open')) render(); else if (rows.length) { active = (active + 1) % rows.length; paint(); } }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); if (rows.length) { active = (active - 1 + rows.length) % rows.length; paint(); } }
+      else if (e.key === 'Enter') { if (dd.classList.contains('open') && active >= 0) { e.preventDefault(); pick(active); } }
+      else if (e.key === 'Escape') { if (dd.classList.contains('open')) { e.preventDefault(); e.stopPropagation(); close(); } }
+    });
+    /* Leaving the box lands whatever is there: a name or initials that match
+       an author pick that author; anything else is kept as typed. */
+    input.addEventListener('blur', function () {
+      var typed = input.value.trim();
+      if (typed === show(current)) { close(); return; }
+      set(typed ? (exact(typed) || typed) : '');
+    });
+    root.focusInput = function () { input.focus(); };
+    return root;
+  }
+
+  /* Authors: one typeahead, a + to add another (each new one leaves out the
+     authors already picked), × to remove an extra one.
+     value() → { author, authorOther, coAuthors } in the stored item shape:
+     a picked author is stored by key; a typed name is kept as written. */
+  function authorPicker(init) {
+    var state = { lead: init.authorOther || init.author || '', co: asArray(init.coAuthors).slice() };
+    var box = el('div', 'cp-authors');
+    box.setAttribute('role', 'group'); box.setAttribute('aria-label', 'Authors');
+    function isKey(v) { return !!(S.config.authors || {})[v]; }
+    function taken(except) {
+      var t = [];
+      if (isKey(state.lead) && except !== -1) t.push(state.lead);
+      state.co.forEach(function (k, i) { if (isKey(k) && i !== except) t.push(k); });
+      return t;
+    }
+    function draw(focusIdx) {
+      box.innerHTML = '';
+      var combos = [];
+      var lead = authorCombo(state.lead, taken(-1), function (v) { state.lead = v; draw(null); }, 'Author');
+      box.appendChild(lead); combos.push(lead);
+      state.co.forEach(function (k, i) {
+        var r = el('div', 'cp-authors__row');
+        var c = authorCombo(k, taken(i), function (v) { state.co[i] = v; draw(null); }, 'Author ' + (i + 2));
+        var x = el('button', 'btn btn--icon btn--ghost'); x.type = 'button';
+        x.setAttribute('aria-label', 'Remove this author'); x.title = 'Remove';
+        x.appendChild(NL.icon('close', 'sm'));
+        x.addEventListener('click', function () { state.co.splice(i, 1); draw(null); });
+        r.appendChild(c); r.appendChild(x); box.appendChild(r); combos.push(c);
+      });
+      /* + sits after the last author, once the first is filled in. */
+      if (state.lead) {
+        var plus = el('button', 'btn btn--icon btn--ghost'); plus.type = 'button';
+        plus.setAttribute('aria-label', 'Add another author'); plus.title = 'Add another author';
+        plus.appendChild(NL.icon('add', 'sm'));
+        plus.addEventListener('click', function () { state.co.push(''); draw(state.co.length); });
+        box.appendChild(plus);
+      }
+      if (focusIdx != null && combos[focusIdx]) setTimeout(function () { combos[focusIdx].focusInput(); }, 0);
+    }
+    draw(null);
+    box.value = function () {
+      var lead = state.lead.trim();
+      var co = state.co.map(function (v) { return v.trim(); })
+        .filter(function (v, i, a) { return v && v !== lead && a.indexOf(v) === i; });
+      return {
+        author: isKey(lead) ? lead : null,
+        authorOther: lead && !isKey(lead) ? lead.slice(0, 80) : null,
+        coAuthors: co.length ? co.map(function (v) { return isKey(v) ? v : v.slice(0, 80); }) : null
+      };
+    };
+    return box;
+  }
+
+  /* ── Full editor modal ─────────────────────────────────────────────── */
+  function field(label, control, span2, hint) {
+    var g = el('div', 'form-group' + (span2 ? ' span2' : ''));
+    /* Inside .form-group the canon form select rules apply; .nl-select is for bare selects. */
+    if (control.classList) control.classList.remove('nl-select');
+    var id = control.id || ('cpf-' + Math.random().toString(36).slice(2, 8));
+    control.id = id;
+    var l = el('label', null, label); l.htmlFor = id;
+    g.appendChild(l); g.appendChild(control);
+    if (hint) g.appendChild(el('div', 'form-hint', hint));
+    return g;
+  }
+
+  function openEditor(it, date) {
+    if (!S.canEdit) { if (it) openReadOnly(it); return; }
+    var isNew = !it;
+    var d = it ? JSON.parse(JSON.stringify(it)) : blankItem(date);
+    var form = el('div', 'form-grid');
+
+    var title = el('input'); title.type = 'text'; title.value = d.title || ''; title.maxLength = 300;
+    form.appendChild(field('Title', title, true));
+    var dateIn = el('input'); dateIn.type = 'date'; dateIn.value = d.date;
+    form.appendChild(field('Date', dateIn));
+    var timeIn = el('input'); timeIn.type = 'time'; timeIn.step = 300; timeIn.value = d.time || '';
+    form.appendChild(field('Time', timeIn, false, 'Optional'));
+    var curKind = kindOf(d);
+    var kind = sel(kindOptions(curKind), curKind);
+    form.appendChild(field('Kind', kind));
+    var status = sel(STATUSES, d.status || 'planned');
+    form.appendChild(field('Status', status));
+
+    var curCat = categoryOf(d.category);
+    var cat = sel(categoryOptions(curCat ? null : d.category), curCat ? curCat.key : (d.category || ''), 'None');
+    form.appendChild(field('Category', cat));
+    var type = sel(TYPES, d.type || '', 'Not classified');
+    form.appendChild(field('Type', type, false, 'Did the world prompt it (routine / reactive), or did the team decide to make it (original)?'));
+
+    var auth = authorPicker(d);
+    /* Not wrapped by field(): .form-group's input rules would paint a second
+       focus ring inside the .club-picker box. Label row only. */
+    var authG = el('div', 'cp-span'), authL = el('div', 'form-group cp-flush');
+    var authLab = el('label', null, 'Authors'); authLab.addEventListener('click', function () { var i = auth.querySelector('input'); if (i) i.focus(); });
+    authL.appendChild(authLab); authG.appendChild(authL); authG.appendChild(auth);
+    form.appendChild(authG);
+
+    var platBox = platformToggles(isNew ? defaultPlatforms(curKind, lsGet(prefsKey())) : d.platforms);
+    form.appendChild(field('Posted on', platBox, true));
+
+
+    /* Linked item: search loaded items by title */
+    var linkId = d.linkedItemId || null;
+    var linkCur = el('div', 'form-hint');
+    function showLink() {
+      linkCur.innerHTML = '';
+      if (!linkId) { linkCur.textContent = 'Not linked'; return; }
+      var li = S.items[linkId];
+      linkCur.appendChild(document.createTextNode('Linked to: ' + (li ? li.title + ' (' + shortDate(li.date) + ')' : 'an item outside this period') + ' '));
+      var un = el('button', 'btn btn--ghost btn--sm', 'Unlink'); un.type = 'button';
+      un.addEventListener('click', function () { linkId = null; showLink(); });
+      linkCur.appendChild(un);
+    }
+    showLink();
+    var linkSearch = el('input'); linkSearch.type = 'search'; linkSearch.placeholder = 'Search items in view by title';
+    var results = el('div', 'cp-link-results');
+    linkSearch.addEventListener('input', function () {
+      results.innerHTML = '';
+      var q = linkSearch.value.trim().toLowerCase();
+      if (q.length < 2) return;
+      Object.keys(S.items).map(function (k) { return S.items[k]; })
+        .filter(function (x) { return x.id !== d.id && (x.title || '').toLowerCase().indexOf(q) >= 0; })
+        .slice(0, 12).forEach(function (x) {
+          var b = el('button', null, shortDate(x.date) + ' · ' + x.title); b.type = 'button';
+          b.addEventListener('click', function () { linkId = x.id; linkSearch.value = ''; results.innerHTML = ''; showLink(); });
+          results.appendChild(b);
+        });
+    });
+    var linkGroup = field('Linked item', linkSearch, true);
+    linkGroup.insertBefore(linkCur, linkSearch);
+    linkGroup.appendChild(results);
+    form.appendChild(linkGroup);
+
+    var notes = el('textarea'); notes.value = d.notes || ''; notes.rows = 3; notes.maxLength = 2000;
+    form.appendChild(field('Notes', notes, true));
+    var reviewG = el('div', 'form-group span2');
+    if (d.source && d.source.raw) reviewG.appendChild(el('div', 'form-hint', 'Imported from ' + d.source.tab + ' ' + d.source.cell + ': “' + d.source.raw + '”'));
+    if (!isNew) reviewG.appendChild(el('div', 'form-hint', 'Last changed ' + NL.formatDateTime(d.updatedAt) + (d.status === 'published' && d.publishedAt ? ' · published ' + NL.formatDateTime(d.publishedAt) : '')));
+    form.appendChild(reviewG);
+
+    function collect() {
+      var t = title.value.trim();
+      if (!t) { title.focus(); NL.toast('Add a title', 'error'); return null; }
+      if (!dateIn.value) { dateIn.focus(); NL.toast('Pick a date', 'error'); return null; }
+      var av = auth.value();
+      var kp = kindPatch(kind.value, d);
+      var out = {
+        title: t, date: dateIn.value, time: timeIn.value || null, lane: kp.lane, format: kp.format,
+        status: status.value || 'planned', category: cat.value || null, type: type.value || null,
+        author: av.author, authorOther: av.authorOther, coAuthors: av.coAuthors, linkedItemId: linkId, platforms: platBox.value(),
+        notes: notes.value.trim(), needsReview: false
+      };
+      if (out.status === 'published' && d.status !== 'published') {
+        out.publishedBy = S.session.uid; out.publishedAt = firebase.database.ServerValue.TIMESTAMP;
+      }
+      return out;
+    }
+
+    var buttons = [];
+    if (!isNew) buttons.push({ label: 'Delete', className: 'btn--danger', onClick: function (c) {
+      deleteItem(it).then(function (gone) { if (gone) c.close(); }).catch(fail);
+    } });
+    buttons.push({ label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } });
+    buttons.push({ label: isNew ? 'Add item' : 'Save', className: 'btn--primary', onClick: function (c) {
+      var data = collect(); if (!data) return;
+      var p = isNew
+        ? createItem((function () { var b = blankItem(data.date); for (var k in data) b[k] = data[k]; return b; })())
+        : writeItem(it.id, data);
+      p.then(function () { NL.toast(isNew ? 'Added' : 'Saved'); c.close(); }).catch(fail);
+    } });
+    NL.modal({ title: isNew ? 'Add item' : 'Edit item', body: form, width: 'wide', buttons: buttons, footerSplit: !isNew });
+  }
+  function openReadOnly(it) {
+    var box = el('div', 'cp-readonly');
+    var dl = el('dl');
+    function row(k, v) { if (v == null || v === '') return; dl.appendChild(el('dt', null, k)); dl.appendChild(el('dd', null, v)); }
+    row('Date', shortDate(it.date) + (it.time ? ' ' + it.time : ''));
+    row('Kind', kindInfo(kindOf(it)).label);
+    row('Category', categoryLabel(it.category));
+    row('Type', (lookup(TYPES, it.type) || {}).label || 'Not classified');
+    row('Author', authorFull(it) || 'Unassigned');
+    row('Posted on', platformsOn(it).map(function (p) { return p.label; }).join(', '));
+    row('Status', (lookup(STATUSES, it.status) || {}).label);
+    if (it.linkedItemId && S.items[it.linkedItemId]) row('Linked to', S.items[it.linkedItemId].title);
+    row('Notes', it.notes);
+    box.appendChild(dl);
+    NL.modal({ title: it.title, body: box, buttons: [{ label: 'Close', className: 'btn--primary', onClick: function (c) { c.close(); } }] });
+  }
+
+  /* ── Day modal: notes + FA Cup / Trophy counts ─────────────────────── */
+  function openDay(date) {
+    var day = S.days[date] || {};
+    var mm = day.manualMatches || {};
+    var ties = cupOnDate(date);
+    function tiesBox() {
+      var box = el('div', 'cp-ties');
+      ties.forEach(function (f) { box.appendChild(el('div', 'cp-tie', cupLine(f))); });
+      return box;
+    }
+    if (!S.canEdit) {
+      var b = el('div', 'cp-readonly'); var dl = el('dl');
+      [['Matches', matchText(date) || 'None'], ['Notes', day.notes || '—']].forEach(function (r) { dl.appendChild(el('dt', null, r[0])); dl.appendChild(el('dd', null, r[1])); });
+      b.appendChild(dl);
+      if (ties.length) b.appendChild(tiesBox());
+      NL.modal({ title: dayLabel(date), body: b, size: 'sm', buttons: [{ label: 'Close', className: 'btn--primary', onClick: function (c) { c.close(); } }] });
+      return;
+    }
+    var form = el('div', 'form-grid');
+    var notes = el('textarea'); notes.rows = 3; notes.value = day.notes || ''; notes.maxLength = 1000;
+    notes.placeholder = 'Matchday, draws, bank holidays, on this day…';
+    form.appendChild(field('Day notes', notes, true));
+    var auto = matchText(date);
+    form.appendChild(el('div', 'form-hint cp-span', 'Matches: ' + (auto || 'none')));
+    if (ties.length) { var tg = el('div', 'cp-span'); tg.appendChild(tiesBox()); form.appendChild(tg); }
+    NL.modal({ title: dayLabel(date), body: form, buttons: [
+      { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+      { label: 'Save', className: 'btn--primary', onClick: function (c) {
+        var n = notes.value.trim();
+        var rec = {};
+        if (n) rec.notes = n;
+        if (mm.faCup || mm.faTrophy) rec.manualMatches = mm;   // counts from the sheet import stay as they were
+        NL.ensureAuth().then(function () {
+          var ref = db.ref(ROOT + '/days/' + date);
+          return Object.keys(rec).length ? ref.set(rec) : ref.remove();
+        }).then(function () { NL.toast('Saved'); c.close(); }).catch(fail);
+      } }
+    ] });
+  }
+
+  /* ── List view ─────────────────────────────────────────────────────── */
+  var LIST_COLS = [
+    { key: 'date', label: 'Date' }, { key: 'kind', label: 'Kind' }, { key: 'title', label: 'Title' },
+    { key: 'category', label: 'Category' }, { key: 'type', label: 'Type' }, { key: 'author', label: 'Author' },
+    { key: 'platforms', label: 'Posted on', nosort: true }, { key: 'status', label: 'Status' }
+  ];
+  function sortVal(it, key) {
+    if (key === 'date') return it.date + ' ' + (it.time || '99:99');
+    if (key === 'author') return authorFull(it).toLowerCase();
+    if (key === 'kind') return kindOrder(kindOf(it));
+    if (key === 'category') return categoryLabel(it.category).toLowerCase();
+    return String(it[key] || '').toLowerCase();
+  }
+  function renderList(all) {
+    var main = document.getElementById('cpMain');
+    var k = S.sort.key, dir = S.sort.dir;
+    all.sort(function (a, b) { var x = sortVal(a, k), y = sortVal(b, k); return x < y ? -dir : x > y ? dir : 0; });
+    renderBulk(all);
+    var wrap = el('div', 'table-wrap cp-listwrap');
+    var table = el('table', 'table table--compact');
+    var thead = el('thead'), hr = el('tr');
+    if (S.canEdit) {
+      var th0 = el('th'); var all0 = el('input'); all0.type = 'checkbox'; all0.setAttribute('aria-label', 'Select all');
+      all0.checked = all.length > 0 && all.every(function (it) { return S.selected[it.id]; });
+      all0.addEventListener('change', function () { S.selected = {}; if (all0.checked) all.forEach(function (it) { S.selected[it.id] = true; }); render(); });
+      th0.appendChild(all0); hr.appendChild(th0);
+    }
+    LIST_COLS.forEach(function (c) {
+      var th = el('th', c.nosort ? null : 'cp-sort', c.nosort ? c.label : null);
+      if (!c.nosort) {
+        if (k === c.key) th.setAttribute('aria-sort', dir > 0 ? 'ascending' : 'descending');
+        var sb = el('button', null, c.label); sb.type = 'button';
+        sb.addEventListener('click', function () { if (S.sort.key === c.key) S.sort.dir = -S.sort.dir; else S.sort = { key: c.key, dir: 1 }; render(); });
+        th.appendChild(sb);
+      }
+      hr.appendChild(th);
+    });
+    thead.appendChild(hr); table.appendChild(thead);
+    var tb = el('tbody');
+    if (!all.length) {
+      var er = el('tr', 'empty-row'); var td = el('td', null, 'Nothing matches these filters in this date range.');
+      td.colSpan = LIST_COLS.length + (S.canEdit ? 1 : 0); er.appendChild(td); tb.appendChild(er);
+    }
+    all.forEach(function (it) {
+      var tr = el('tr');
+      if (S.canEdit) {
+        var tdc = el('td'); var cb = el('input'); cb.type = 'checkbox'; cb.checked = !!S.selected[it.id]; cb.setAttribute('aria-label', 'Select ' + it.title);
+        cb.addEventListener('change', function () { if (cb.checked) S.selected[it.id] = true; else delete S.selected[it.id]; renderBulk(all); });
+        tdc.appendChild(cb); tr.appendChild(tdc);
+      }
+      tr.appendChild(el('td', 'cp-nowrap', shortDate(it.date) + (it.time ? ' ' + it.time : '')));
+      if (S.canEdit) {
+        var tdk = el('td'); var ck = kindOf(it); var ks = sel(kindOptions(ck), ck); ks.setAttribute('aria-label', 'Kind');
+        ks.addEventListener('change', function () { writeItem(it.id, kindPatch(ks.value, it)).catch(fail); });
+        tdk.appendChild(ks); tr.appendChild(tdk);
+      } else tr.appendChild(el('td', null, kindInfo(kindOf(it)).label));
+      var tdt = el('td', 'cp-list-title'); var tbtn = el('button', null, it.title || '(untitled)'); tbtn.type = 'button';
+      tbtn.addEventListener('click', function () { openEditor(it); });
+      tdt.appendChild(tbtn);
+      tr.appendChild(tdt);
+      tr.appendChild(el('td', null, categoryLabel(it.category)));
+      if (S.canEdit) {
+        var tdty = el('td'); var ts = sel(TYPES, it.type || '', '—'); ts.setAttribute('aria-label', 'Type');
+        ts.addEventListener('change', function () { writeItem(it.id, { type: ts.value || null }).catch(fail); });
+        tdty.appendChild(ts); tr.appendChild(tdty);
+      } else tr.appendChild(el('td', null, (lookup(TYPES, it.type) || {}).label || ''));
+      tr.appendChild(el('td', null, authorFull(it)));
+      var tdp = el('td');
+      if (S.canEdit) {
+        tdp.appendChild(platformToggles(it.platforms, function (key, on) { var u = {}; u['platforms/' + key] = on; writeItem(it.id, u).catch(fail); }));
+      } else {
+        var ps = el('span', 'cp-plats');
+        platformsOn(it).forEach(function (p) { var ic = NL.icon(p.key, 'sm'); ps.appendChild(ic); });
+        tdp.appendChild(ps);
+      }
+      tr.appendChild(tdp);
+      if (S.canEdit) {
+        var tds = el('td'); var ss = sel(STATUSES, it.status || 'planned'); ss.setAttribute('aria-label', 'Status');
+        ss.addEventListener('change', function () {
+          var u = { status: ss.value };
+          if (ss.value === 'published') { u.publishedBy = S.session.uid; u.publishedAt = firebase.database.ServerValue.TIMESTAMP; }
+          writeItem(it.id, u).catch(fail);
+        });
+        tds.appendChild(ss); tr.appendChild(tds);
+      } else tr.appendChild(el('td', null, (lookup(STATUSES, it.status) || {}).label || ''));
+      tb.appendChild(tr);
+    });
+    table.appendChild(tb); wrap.appendChild(table);
+    main.innerHTML = ''; main.appendChild(wrap);
+  }
+  function renderBulk(all) {
+    var box = document.getElementById('cpBulk');
+    box.innerHTML = '';
+    if (!S.canEdit || S.view !== 'list') return;
+    var ids = all.map(function (it) { return it.id; }).filter(function (id) { return S.selected[id]; });
+    if (!ids.length) return;
+    var bar = el('div', 'cp-bulk');
+    bar.appendChild(el('b', null, ids.length + ' selected'));
+    var t = sel(TYPES, '', 'Set type…'); t.setAttribute('aria-label', 'Set type for selected');
+    var s = sel(STATUSES, '', 'Set status…'); s.setAttribute('aria-label', 'Set status for selected');
+    var a = sel(authorList(false).map(function (x) { return { key: x.key, label: x.label }; }), '', 'Set author…'); a.setAttribute('aria-label', 'Set author for selected');
+    function bulk(field, value, label) {
+      var u = {}, st = stamp();
+      ids.forEach(function (id) {
+        u[id + '/' + field] = value;
+        if (field === 'author') u[id + '/authorOther'] = null;
+        if (field === 'status' && value === 'published') { u[id + '/publishedBy'] = S.session.uid; u[id + '/publishedAt'] = firebase.database.ServerValue.TIMESTAMP; }
+        u[id + '/updatedBy'] = st.updatedBy; u[id + '/updatedAt'] = st.updatedAt;
+      });
+      NL.ensureAuth().then(function () {
+        NL.writeAudit('content_plan_bulk', { field: field, value: value, count: ids.length });
+        return db.ref(ROOT + '/items').update(u);
+      }).then(function () { NL.toast(label + ' on ' + ids.length + ' item' + (ids.length === 1 ? '' : 's')); S.selected = {}; render(); }).catch(fail);
+    }
+    t.addEventListener('change', function () { if (t.value) bulk('type', t.value, 'Type set'); });
+    s.addEventListener('change', function () { if (s.value) bulk('status', s.value, 'Status set'); });
+    a.addEventListener('change', function () { if (a.value) bulk('author', a.value, 'Author set'); });
+    var clr = el('button', 'btn btn--ghost btn--sm', 'Clear selection'); clr.type = 'button';
+    clr.addEventListener('click', function () { S.selected = {}; render(); });
+    [t, s, a, clr].forEach(function (x) { bar.appendChild(x); });
+    box.appendChild(bar);
+  }
+  function exportCsv() {
+    var all = Object.keys(S.items).map(function (k) { return S.items[k]; }).filter(passes)
+      .sort(function (a, b) { return sortVal(a, 'date') < sortVal(b, 'date') ? -1 : 1; });
+    var rows = [['Date', 'Time', 'Kind', 'Title', 'Category', 'Type', 'Author', 'Guest writer', 'Co-authors', 'Posted on', 'Status', 'Notes']];
+    all.forEach(function (it) {
+      rows.push([uk(it.date), it.time || '', kindInfo(kindOf(it)).label, it.title, categoryLabel(it.category),
+        (lookup(TYPES, it.type) || {}).label || '',
+        it.author || '', it.authorOther || '', asArray(it.coAuthors).join('/'),
+        platformsOn(it).map(function (p) { return p.label; }).join('; '),
+        (lookup(STATUSES, it.status) || {}).label || '', it.notes || '']);
+    });
+    NL.download('content-plan-' + S.listFrom + '-to-' + S.listTo + '.csv', NL.csv(rows, { bom: true }), 'text/csv;charset=utf-8');
+  }
+
+  /* ── Settings: categories, authors, import ────────────────────────── */
+  function openSettings() {
+    var wrap = el('div');
+    var tabs = el('div', 'tabs'); tabs.setAttribute('role', 'tablist');
+    var panes = {};
+    var names = [['categories', 'Categories'], ['authors', 'Authors'], ['cup', 'Cup fixtures']];
+    if (S.isSuper) names.push(['import', 'Import']);
+    var ctrl = null;   // the modal, so the footer Save can hide on tabs it doesn't apply to
+    names.forEach(function (n, i) {
+      var b = el('button', 'tab' + (i === 0 ? ' active' : ''), n[1]); b.type = 'button';
+      b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', i === 0 ? 'true' : 'false');
+      b.addEventListener('click', function () {
+        tabs.querySelectorAll('.tab').forEach(function (x) { x.classList.remove('active'); x.setAttribute('aria-selected', 'false'); });
+        b.classList.add('active'); b.setAttribute('aria-selected', 'true');
+        Object.keys(panes).forEach(function (k) { panes[k].hidden = k !== n[0]; });
+        var footSave = ctrl && ctrl.el.querySelector('.modal__footer .btn--primary');
+        if (footSave) footSave.hidden = n[0] === 'cup' || n[0] === 'import';
+      });
+      tabs.appendChild(b);
+      panes[n[0]] = el('div'); panes[n[0]].hidden = i !== 0; panes[n[0]].setAttribute('role', 'tabpanel');
+    });
+    wrap.appendChild(tabs);
+
+    /* Categories */
+    var catRows = [];
+    var cp = panes.categories;
+    cp.appendChild(el('p', 'form-hint', 'Removing a category leaves its items uncoloured until they are given another.'));
+    function catRow(key, c) {
+      var r = el('div', 'cp-settings-row cp-settings-row--cat');
+      var g = el('input', 'cp-swatch'); g.type = 'color'; g.value = c.colour || toHex(cssVar('--blue')); g.setAttribute('aria-label', 'Colour for ' + (c.label || 'new category'));
+      var l = el('input', 'cp-in'); l.type = 'text'; l.value = c.label || ''; l.maxLength = 40; l.setAttribute('aria-label', 'Name of ' + (c.label || 'new category'));
+      var o = el('input', 'cp-in'); o.type = 'number'; o.value = c.order || ''; o.min = '1'; o.max = '99'; o.setAttribute('aria-label', 'Order');
+      var x = el('button', 'btn btn--ghost btn--sm', 'Remove'); x.type = 'button';
+      var row = { key: key, l: l, g: g, o: o, orig: c.colour, removed: false };
+      x.addEventListener('click', function () { row.removed = true; r.remove(); });
+      [g, l, o, x].forEach(function (n) { r.appendChild(n); });
+      catRows.push(row);
+      return r;
+    }
+    var catList = el('div');
+    categoryList().forEach(function (c) { catList.appendChild(catRow(c.key, c)); });
+    cp.appendChild(catList);
+    var addCat = el('button', 'btn btn--ghost btn--sm', 'Add category'); addCat.type = 'button';
+    addCat.addEventListener('click', function () { var r = catRow(null, { order: catRows.length + 1 }); catList.appendChild(r); r.querySelector('input').focus(); });
+    cp.appendChild(addCat);
+
+    /* Authors */
+    var authRows = [];
+    var ap = panes.authors;
+    ap.appendChild(el('p', 'form-hint', 'Retired authors stay on their old items but leave the pickers. "This is me" powers the My items filter.'));
+    var authList = el('div');
+    function authRow(key, a) {
+      var r = el('div', 'cp-settings-row cp-settings-row--authors');
+      var ini = el('input', 'cp-in'); ini.type = 'text'; ini.value = key || ''; ini.maxLength = 4; ini.readOnly = !!key; ini.setAttribute('aria-label', 'Initials');
+      var nm = el('input', 'cp-in'); nm.type = 'text'; nm.value = a.name || ''; nm.maxLength = 80; nm.placeholder = 'Full name'; nm.setAttribute('aria-label', 'Full name');
+      var act = el('label', 'cp-check'); var ac = el('input'); ac.type = 'checkbox'; ac.checked = a.active !== false;
+      act.appendChild(ac); act.appendChild(document.createTextNode('Active'));
+      var me = el('label', 'cp-check'); var mc = el('input'); mc.type = 'checkbox'; mc.checked = !!a.uid && a.uid === S.session.uid;
+      mc.addEventListener('change', function () { if (mc.checked) authRows.forEach(function (x) { if (x.mc !== mc) x.mc.checked = false; }); });
+      me.appendChild(mc); me.appendChild(document.createTextNode('This is me'));
+      [ini, nm, act, me].forEach(function (x) { r.appendChild(x); });
+      authRows.push({ key: key, ini: ini, nm: nm, ac: ac, mc: mc, uid: a.uid || null });
+      return r;
+    }
+    authorList(true).forEach(function (a) { authList.appendChild(authRow(a.key, a)); });
+    ap.appendChild(authList);
+    var addAuth = el('button', 'btn btn--ghost btn--sm', 'Add author'); addAuth.type = 'button';
+    addAuth.addEventListener('click', function () { var r = authRow(null, {}); authList.appendChild(r); r.querySelector('input').focus(); });
+    ap.appendChild(addAuth);
+
+    /* Import (superadmin) */
+    buildCupPane(panes.cup);
+    if (panes['import']) buildImportPane(panes['import']);
+
+    Object.keys(panes).forEach(function (k) { wrap.appendChild(panes[k]); });
+
+    var slug = slugKey;
+    function save(c) {
+      var cats = {}, auths = {}, problem = null;
+      catRows.forEach(function (r) {
+        if (r.removed) return;
+        var label = r.l.value.trim(); if (!label) return;
+        var key = r.key || slug(label).replace(/-/g, '');
+        if (!key) return;
+        var old = (S.config.categories || {})[key] || {};
+        var rec = { label: label, order: parseInt(r.o.value, 10) || 99 };
+        /* Keep the brand token until someone actually picks a different colour. */
+        if (old.token && r.g.value.toLowerCase() === r.orig) rec.token = old.token;
+        else rec.colour = r.g.value.toLowerCase();
+        cats[key] = rec;
+      });
+      authRows.forEach(function (r) {
+        var ini = r.ini.value.trim().toUpperCase();
+        if (!ini) return;
+        if (!/^[A-Z]{2,4}$/.test(ini)) { problem = 'Initials must be 2–4 letters: ' + ini; return; }
+        if (!r.key && (S.config.authors || {})[ini]) { problem = ini + ' already exists'; return; }
+        var uid = r.mc.checked ? S.session.uid : (r.uid === S.session.uid ? null : r.uid);
+        auths[ini] = { name: r.nm.value.trim(), active: r.ac.checked, uid: uid || null };
+      });
+      if (problem) { NL.toast(problem, 'error'); return; }
+      NL.ensureAuth().then(function () {
+        NL.writeAudit('content_plan_config', 'Settings saved');
+        return db.ref(ROOT + '/config').update({ categories: cats, authors: auths });
+      }).then(function () { NL.toast('Settings saved'); c.close(); }).catch(fail);
+    }
+    ctrl = NL.modal({ title: 'Settings', body: wrap, width: 'wide', buttons: [
+      { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+      { label: 'Save settings', className: 'btn--primary', onClick: save }
+    ] });
+  }
+
+  /* One-off load of the sheet export (scripts/content-plan-import.py).
+     Takes upload-items.json or upload-days.json; merges, never replaces. */
+  function buildImportPane(pane) {
+    pane.appendChild(el('p', 'form-hint', 'Load upload-items.json, then upload-days.json, from the import script. Records merge by id.'));
+    var file = el('input'); file.type = 'file'; file.accept = '.json,application/json'; file.id = 'cpImportFile';
+    pane.appendChild(field('Import file', file, true));
+    var status = el('div', 'form-hint'); pane.appendChild(status);
+    file.addEventListener('change', function () {
+      var f = file.files && file.files[0]; if (!f) return;
+      var reader = new FileReader();
+      reader.onload = function () {
+        var data;
+        try { data = JSON.parse(reader.result); } catch (e) { NL.toast('That file isn’t valid JSON', 'error'); return; }
+        var keys = Object.keys(data || {});
+        if (!keys.length) { NL.toast('The file is empty', 'error'); return; }
+        var kind = keys.every(function (k) { return /^\d{4}-\d{2}-\d{2}$/.test(k); }) ? 'days'
+          : keys.every(function (k) { return data[k] && data[k].date && data[k].lane; }) ? 'items' : null;
+        if (!kind) { NL.toast('That isn’t an items or days file from the import script', 'error'); return; }
+        NL.confirm('Load ' + keys.length + ' ' + kind + ' into the plan?', { title: 'Import', confirmText: 'Import' }).then(function (ok) {
+          if (!ok) return;
+          var chunks = [];
+          for (var i = 0; i < keys.length; i += 200) chunks.push(keys.slice(i, i + 200));
+          var done = 0;
+          return NL.ensureAuth().then(function () {
+            NL.writeAudit('content_plan_import', { kind: kind, count: keys.length });
+            return chunks.reduce(function (p, ch) {
+              return p.then(function () {
+                var u = {};
+                ch.forEach(function (k) { u[k] = data[k]; });
+                return db.ref(ROOT + '/' + kind).update(u).then(function () {
+                  done += ch.length; status.textContent = 'Loaded ' + done + ' of ' + keys.length + '…';
+                });
+              });
+            }, Promise.resolve());
+          }).then(function () { status.textContent = 'Loaded ' + keys.length + ' ' + kind + '.'; NL.toast('Import complete'); listen(); });
+        }).catch(fail);
+      };
+      reader.readAsText(f);
+    });
+  }
+
+
+  /* ── FA Cup / FA Trophy fixtures: pasted from a spreadsheet ───────────
+     There is no feed for these (NLS carries 89/372/373/1275 only). Six
+     pasted columns: date & time, round, competition, home, (score, blank),
+     away. A fixture's key is competition + round + home + away, so pasting
+     a moved tie again updates its date instead of adding a second copy. */
+  var CUP_COMPS = [
+    { key: 'facup',    label: 'FA Cup',    short: 'FAC' },
+    { key: 'fatrophy', label: 'FA Trophy', short: 'FAT' }
+  ];
+  var MONTHS3 = MON.map(function (m) { return m.slice(0, 3).toLowerCase(); });
+  function slugKey(s) { return String(s || '').toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40); }
+  function cupKey(f) { return [f.comp, slugKey(f.round) || 'r', slugKey(f.home), 'v', slugKey(f.away)].join('_'); }
+  /* "17/10/2026 15:00", "Sat 17/10/26 12:30", "2026-10-17 15:00", "17 Oct 2026 3:00" */
+  function parseWhen(s) {
+    s = String(s || '').trim();
+    var time = null, tm = /(\d{1,2}):(\d{2})\s*(am|pm)?/i.exec(s);
+    if (tm && +tm[1] < 24 && +tm[2] < 60) {
+      var hh = +tm[1], ap = (tm[3] || '').toLowerCase();
+      /* No football kicks off between 1am and 10am: "3:00" means 15:00. */
+      if (ap === 'pm' && hh < 12) hh += 12;
+      else if (ap !== 'am' && hh >= 1 && hh <= 9) hh += 12;
+      time = pad2(hh) + ':' + tm[2]; s = s.replace(tm[0], ' ');
+    }
+    var y, m, d, x;
+    if ((x = /(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s))) { y = +x[1]; m = +x[2]; d = +x[3]; }
+    else if ((x = /(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/.exec(s))) { d = +x[1]; m = +x[2]; y = +x[3]; }
+    else if ((x = /(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]{3,})\.?\s+(\d{2,4})/i.exec(s))) {
+      d = +x[1]; m = MONTHS3.indexOf(x[2].slice(0, 3).toLowerCase()) + 1; y = +x[3];
+    }
+    if (!y || !m || !d) return null;
+    if (y < 100) y += 2000;
+    var dt = new Date(y, m - 1, d);
+    if (dt.getMonth() !== m - 1 || dt.getDate() !== d) return null;
+    return { date: ymd(dt), time: time };
+  }
+  function parseComp(s) {
+    var t = String(s || '').toLowerCase().trim();
+    if (t === 'fat') return 'fatrophy';
+    if (t === 'fac') return 'facup';
+    if (t.indexOf('trophy') >= 0) return 'fatrophy';
+    if (t.indexOf('cup') >= 0) return 'facup';
+    return null;
+  }
+  /* Returns [{ok, row, fixture|reason}] */
+  function parseCupPaste(text) {
+    var lines = String(text || '').replace(/\r/g, '').split('\n');
+    var out = [];
+    lines.forEach(function (line, i) {
+      if (!line.trim()) return;
+      var c = line.indexOf('\t') >= 0 ? line.split('\t') : (NL.csvParse(line)[0] || []);
+      c = c.map(function (v) { return String(v == null ? '' : v).trim(); });
+      var when = parseWhen(c[0]);
+      if (!when) { out.push({ ok: false, row: i + 1, raw: line, reason: i === 0 ? 'Header row, skipped' : 'Can’t read the date' }); return; }
+      var comp = parseComp(c[2]);
+      if (!comp) { out.push({ ok: false, row: i + 1, raw: line, reason: 'Competition isn’t FA Cup or FA Trophy' }); return; }
+      var home = c[3] || '', away = c.length >= 6 ? c[5] : (c[4] || '');
+      if (!home || !away) { out.push({ ok: false, row: i + 1, raw: line, reason: 'Missing a team' }); return; }
+      if (home.length > 80 || away.length > 80) { out.push({ ok: false, row: i + 1, raw: line, reason: 'A team name is over 80 characters' }); return; }
+      out.push({ ok: true, row: i + 1, fixture: { date: when.date, time: when.time, round: c[1] || '', comp: comp, home: home, away: away } });
+    });
+    return out;
+  }
+  function cupCounts(date) {
+    var out = {};
+    Object.keys(S.cup || {}).forEach(function (k) {
+      var f = S.cup[k];
+      if (f && f.date === date) out[f.comp] = (out[f.comp] || 0) + 1;
+    });
+    return out;
+  }
+  function cupOnDate(date) {
+    return Object.keys(S.cup || {}).map(function (k) { var f = Object.assign({}, S.cup[k]); f.id = k; return f; })
+      .filter(function (f) { return f.date === date; })
+      .sort(function (a, b) { return (a.comp + (a.time || '') + a.home).localeCompare(b.comp + (b.time || '') + b.home); });
+  }
+  function cupLine(f) {
+    var c = lookup(CUP_COMPS, f.comp) || { short: '?' };
+    return (f.time ? f.time + ' ' : '') + c.short + (f.round ? ' ' + f.round : '') + ' – ' + f.home + ' v ' + f.away;
+  }
+
+  /* Settings → Cup fixtures: paste at the top, saved fixtures below. */
+  function buildCupPane(pane) {
+    var paneAdd = el('div'), paneList = el('div');
+    var head = el('div', 'section-head cp-cup__saved'); head.appendChild(el('h2', null, 'Saved fixtures'));
+    pane.appendChild(paneAdd); pane.appendChild(head); pane.appendChild(paneList);
+
+    /* Paste */
+    var ta = el('textarea', 'cp-in cp-cup__paste'); ta.rows = 8; ta.id = 'cpCupPaste';
+    ta.placeholder = '17/10/2026 15:00\t4QR\tFA Cup\tBury\t\tHarrogate Town AFC';
+    paneAdd.appendChild(field('Fixtures', ta, true,
+      'Columns: date & time, round, competition, home, score (blank), away.'));
+    var preview = el('div', 'cp-cup__preview');
+    paneAdd.appendChild(preview);
+    var parsed = [];
+    var existing = null;
+    function ensureExisting() {
+      if (existing) return Promise.resolve(existing);
+      return NL.ensureAuth().then(function () { return db.ref(ROOT + '/cupFixtures').once('value'); })
+        .then(function (snap) { existing = snap.val() || {}; return existing; });
+    }
+    function showPreview() {
+      parsed = parseCupPaste(ta.value);
+      preview.innerHTML = '';
+      if (!parsed.length) return;
+      ensureExisting().then(function (ex) {
+        var good = parsed.filter(function (p) { return p.ok; });
+        var tw = el('div', 'table-wrap cp-listwrap');
+        var t = el('table', 'table table--compact');
+        var hr = el('tr');
+        ['Date', 'Time', 'Comp', 'Round', 'Home', 'Away', ''].forEach(function (h) { hr.appendChild(el('th', null, h)); });
+        var th = el('thead'); th.appendChild(hr); t.appendChild(th);
+        var tb = el('tbody'), adds = 0, ups = 0, same = 0;
+        parsed.forEach(function (p) {
+          var tr = el('tr');
+          if (!p.ok) {
+            var td = el('td', 'form-hint', 'Row ' + p.row + ': ' + p.reason + ' – “' + p.raw.replace(/\t/g, ' | ').slice(0, 80) + '”');
+            td.colSpan = 7; tr.appendChild(td); tb.appendChild(tr); return;
+          }
+          var f = p.fixture, k = cupKey(f), old = ex[k], state;
+          if (!old) { state = 'New'; adds++; }
+          else if (old.date !== f.date || (old.time || null) !== (f.time || null)) { state = 'Moves from ' + shortDate(old.date) + (old.time ? ' ' + old.time : ''); ups++; }
+          else { state = 'Already saved'; same++; }
+          [shortDate(f.date), f.time || '', (lookup(CUP_COMPS, f.comp) || {}).short, f.round, f.home, f.away, state].forEach(function (v) { tr.appendChild(el('td', null, v)); });
+          tb.appendChild(tr);
+        });
+        t.appendChild(tb); tw.appendChild(t);
+        var sum = el('p', 'form-hint', good.length + ' fixture' + (good.length === 1 ? '' : 's') + ' read: ' + adds + ' new, ' + ups + ' moved, ' + same + ' unchanged' +
+          (parsed.length > good.length ? '. ' + (parsed.length - good.length) + ' row' + (parsed.length - good.length === 1 ? '' : 's') + ' skipped (shown below).' : '.'));
+        preview.appendChild(sum);
+        preview.appendChild(tw);
+      }).catch(fail);
+    }
+    ta.addEventListener('input', function () { clearTimeout(ta._t); ta._t = setTimeout(showPreview, 250); });
+
+    /* Saved list: per-fixture edit / delete */
+    var listBox = el('div');
+    var filterRow = el('div', 'cp-add__row');
+    var compSel = sel(CUP_COMPS, '', 'Both competitions'); compSel.setAttribute('aria-label', 'Competition');
+    var q = el('input', 'cp-in'); q.type = 'search'; q.placeholder = 'Search a team'; q.setAttribute('aria-label', 'Search a team');
+    var showPast = el('label', 'cp-check'); var pastCb = el('input'); pastCb.type = 'checkbox';
+    showPast.appendChild(pastCb); showPast.appendChild(document.createTextNode('Include past'));
+    [compSel, q, showPast].forEach(function (x) { filterRow.appendChild(x); });
+    paneList.appendChild(filterRow); paneList.appendChild(listBox);
+    var all = {};
+    function loadList() {
+      listBox.innerHTML = '';
+      listBox.appendChild(el('div', 'cp-loading', 'Loading…'));
+      NL.ensureAuth().then(function () { return db.ref(ROOT + '/cupFixtures').once('value'); }).then(function (snap) {
+        all = snap.val() || {}; existing = all; drawList();
+      }).catch(fail);
+    }
+    function drawList() {
+      listBox.innerHTML = '';
+      var today = todayYmd(), term = q.value.trim().toLowerCase();
+      var rows = Object.keys(all).map(function (k) { var f = Object.assign({}, all[k]); f.id = k; return f; }).filter(function (f) {
+        if (compSel.value && f.comp !== compSel.value) return false;
+        if (!pastCb.checked && f.date < today) return false;
+        if (term && (f.home + ' ' + f.away).toLowerCase().indexOf(term) < 0) return false;
+        return true;
+      }).sort(function (a, b) { return (a.date + (a.time || '') + a.home).localeCompare(b.date + (b.time || '') + b.home); });
+      if (!rows.length) { listBox.appendChild(el('p', 'form-hint', 'No fixtures match.')); return; }
+      var tw = el('div', 'table-wrap cp-listwrap'), t = el('table', 'table table--compact'), tb = el('tbody');
+      rows.slice(0, 400).forEach(function (f) {
+        var tr = el('tr');
+        [shortDate(f.date) + (f.time ? ' ' + f.time : ''), (lookup(CUP_COMPS, f.comp) || {}).short, f.round || '', f.home + ' v ' + f.away].forEach(function (v) { tr.appendChild(el('td', null, v)); });
+        var td = el('td', 'ta-right cp-nowrap');
+        var e = el('button', 'btn btn--ghost btn--sm', 'Edit'); e.type = 'button';
+        e.addEventListener('click', function () { editCupFixture(f, function () { loadList(); }); });
+        var d = el('button', 'btn btn--danger btn--sm', 'Delete'); d.type = 'button';
+        d.addEventListener('click', function () {
+          NL.confirm('Delete ' + f.home + ' v ' + f.away + '?', { title: 'Delete fixture', confirmText: 'Delete', variant: 'danger' }).then(function (ok) {
+            if (!ok) return;
+            return NL.ensureAuth().then(function () {
+              NL.writeAudit('content_plan_cup_delete', { id: f.id });
+              return db.ref(ROOT + '/cupFixtures/' + f.id).remove();
+            }).then(function () { delete all[f.id]; drawList(); NL.toast('Deleted'); });
+          }).catch(fail);
+        });
+        td.appendChild(e); td.appendChild(document.createTextNode(' ')); td.appendChild(d);
+        tr.appendChild(td); tb.appendChild(tr);
+      });
+      t.appendChild(tb); tw.appendChild(t); listBox.appendChild(tw);
+      if (rows.length > 400) listBox.appendChild(el('p', 'form-hint', 'Showing the first 400. Search or pick a competition to narrow it down.'));
+    }
+    compSel.addEventListener('change', drawList);
+    q.addEventListener('input', drawList);
+    pastCb.addEventListener('change', drawList);
+
+    var saveBtn = el('button', 'btn btn--primary btn--sm', 'Save pasted fixtures'); saveBtn.type = 'button';
+    var saveRow = el('div', 'cp-add__row'); saveRow.appendChild(saveBtn);
+    paneAdd.appendChild(saveRow);
+    saveBtn.addEventListener('click', function () {
+      var good = parsed.filter(function (p) { return p.ok; });
+      if (!good.length) { NL.toast('Paste some fixtures first', 'error'); return; }
+      var u = {};
+      good.forEach(function (p) {
+        var f = p.fixture;
+        u[cupKey(f)] = { date: f.date, time: f.time || null, round: f.round, comp: f.comp, home: f.home, away: f.away,
+          updatedBy: S.session.uid, updatedAt: firebase.database.ServerValue.TIMESTAMP };
+      });
+      saveBtn.disabled = true;
+      NL.ensureAuth().then(function () {
+        NL.writeAudit('content_plan_cup_paste', { count: good.length });
+        return db.ref(ROOT + '/cupFixtures').update(u);
+      }).then(function () {
+        NL.toast(good.length + ' fixture' + (good.length === 1 ? '' : 's') + ' saved');
+        ta.value = ''; preview.innerHTML = ''; parsed = []; existing = null; saveBtn.disabled = false;
+        loadList(); listen();
+      }).catch(function (err) { saveBtn.disabled = false; fail(err); });
+    });
+    loadList();
+  }
+  function editCupFixture(f, done) {
+    var form = el('div', 'form-grid');
+    var d = el('input'); d.type = 'date'; d.value = f.date; form.appendChild(field('Date', d));
+    var t = el('input'); t.type = 'time'; t.step = 300; t.value = f.time || ''; form.appendChild(field('Kick-off', t));
+    var comp = sel(CUP_COMPS.map(function (c) { return { key: c.key, label: c.label }; }), f.comp); form.appendChild(field('Competition', comp));
+    var r = el('input'); r.type = 'text'; r.value = f.round || ''; r.maxLength = 40; form.appendChild(field('Round', r));
+    var h = el('input'); h.type = 'text'; h.value = f.home; h.maxLength = 80; form.appendChild(field('Home', h));
+    var a = el('input'); a.type = 'text'; a.value = f.away; a.maxLength = 80; form.appendChild(field('Away', a));
+    NL.modal({ title: 'Edit fixture', body: form, size: 'sm', buttons: [
+      { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+      { label: 'Save', className: 'btn--primary', onClick: function (c) {
+        if (!d.value || !h.value.trim() || !a.value.trim()) { NL.toast('Date and both teams are needed', 'error'); return; }
+        var nf = { date: d.value, time: t.value || null, round: r.value.trim(), comp: comp.value, home: h.value.trim(), away: a.value.trim(),
+          updatedBy: S.session.uid, updatedAt: firebase.database.ServerValue.TIMESTAMP };
+        var nk = cupKey(nf), u = {};
+        u[nk] = nf;
+        if (nk !== f.id) u[f.id] = null;   // teams or round changed: the key moves with them
+        NL.ensureAuth().then(function () { return db.ref(ROOT + '/cupFixtures').update(u); })
+          .then(function () { NL.toast('Saved'); c.close(); listen(); if (done) done(); }).catch(fail);
+      } }
+    ] });
+  }
+
+  /* ── Ideas: undated, scheduled onto the calendar when ready ─────────── */
+  function ideaForm() {
+    if (S.ideaForm) return S.ideaForm;
+    var form = el('form', 'cp-add');
+    form.setAttribute('aria-label', 'Add an idea');
+    var title = el('input', 'cp-add__title'); title.type = 'text'; title.id = 'cpIdeaTitle'; title.placeholder = 'An idea for content'; title.maxLength = 300; title.setAttribute('aria-label', 'Idea');
+    form.appendChild(title);
+    var row = el('div', 'cp-add__row');
+    var notes = el('input'); notes.type = 'text'; notes.placeholder = 'Notes (optional)'; notes.maxLength = 1000; notes.classList.add('cp-grow'); notes.setAttribute('aria-label', 'Notes');
+    var kind = sel(KINDS, '', 'Any kind'); kind.setAttribute('aria-label', 'Kind');
+    var cat = sel(categoryOptions(), '', 'Category'); cat.setAttribute('aria-label', 'Category');
+    var save = el('button', 'btn btn--primary btn--sm', 'Add idea'); save.type = 'submit';
+    [notes, kind, cat, save].forEach(function (x) { row.appendChild(x); });
+    form.appendChild(row);
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var t = title.value.trim();
+      if (!t) { title.focus(); NL.toast('Add a title', 'error'); return; }
+      save.disabled = true;
+      NL.ensureAuth().then(function () {
+        var ref = db.ref(ROOT + '/ideas').push();
+        NL.writeAudit('content_plan_idea_add', { id: ref.key, title: t });
+        return ref.set({
+          title: t, notes: notes.value.trim(), kind: kind.value || null, category: cat.value || null,
+          addedBy: S.session.uid, addedByName: S.session.name || '', archived: false,
+          createdAt: firebase.database.ServerValue.TIMESTAMP
+        });
+      }).then(function () {
+        title.value = ''; notes.value = ''; kind.value = ''; cat.value = ''; save.disabled = false; title.focus();
+        NL.toast('Idea added');
+      }).catch(function (err) { save.disabled = false; fail(err); });
+    });
+    S.ideaForm = form;
+    return form;
+  }
+  function renderIdeas() {
+    var main = document.getElementById('cpMain');
+    var wrap = el('div', 'cp-ideas');
+    if (S.canEdit && !S.showArchived) wrap.appendChild(ideaForm());
+    var list = Object.keys(S.ideas).map(function (k) { return S.ideas[k]; })
+      .filter(function (i) { return !!i.archived === S.showArchived; })
+      .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+    if (!list.length) {
+      var es = el('div', 'empty-state');
+      es.appendChild(el('div', 'empty-state__title', S.showArchived ? 'Nothing archived' : 'No ideas yet'));
+      wrap.appendChild(es);
+    }
+    var box = el('div', 'cp-idea-list');
+    list.forEach(function (idea) {
+      var card = el('div', 'cp-idea' + (idea.archived ? ' is-archived' : ''));
+      paint(card, idea.category);
+      var m = el('div', 'cp-idea__main');
+      var t = el('div', 'cp-idea__title');
+      if (idea.kind) t.appendChild(glyph(kindInfo(idea.kind)));
+      t.appendChild(el('span', null, idea.title));
+      m.appendChild(t);
+      if (idea.notes) m.appendChild(el('div', 'cp-idea__notes', idea.notes));
+      m.appendChild(el('div', 'cp-idea__meta', [categoryLabel(idea.category), idea.addedByName ? 'Added by ' + idea.addedByName : '', idea.createdAt ? NL.timeAgo(idea.createdAt) : ''].filter(Boolean).join(' · ')));
+      card.appendChild(m);
+      if (S.canEdit) {
+        var acts = el('div', 'cp-idea__actions');
+        var btn = function (label, cls, fn) { var b = el('button', 'btn btn--sm ' + cls, label); b.type = 'button'; b.addEventListener('click', fn); acts.appendChild(b); };
+        if (!idea.archived) {
+          btn('Schedule', 'btn--primary', function () { scheduleIdea(idea); });
+          btn('Edit', 'btn--ghost', function () { editIdea(idea); });
+          btn('Archive', 'btn--ghost', function () { setIdeaArchived(idea, true); });
+        } else {
+          btn('Restore', 'btn--restore', function () { setIdeaArchived(idea, false); });
+          btn('Delete', 'btn--danger', function () { deleteIdea(idea); });
+        }
+        card.appendChild(acts);
+      }
+      box.appendChild(card);
+    });
+    wrap.appendChild(box);
+    main.innerHTML = '';
+    main.appendChild(wrap);
+  }
+  function setIdeaArchived(idea, on) {
+    NL.ensureAuth().then(function () { return db.ref(ROOT + '/ideas/' + idea.id).update({ archived: on }); })
+      .then(function () { NL.toast(on ? 'Archived' : 'Restored'); }).catch(fail);
+  }
+  function deleteIdea(idea) {
+    NL.confirm('Delete "' + idea.title + '" for good?', { title: 'Delete idea', confirmText: 'Delete', variant: 'danger' }).then(function (ok) {
+      if (!ok) return;
+      return NL.ensureAuth().then(function () {
+        NL.writeAudit('content_plan_idea_delete', { id: idea.id, title: idea.title });
+        return db.ref(ROOT + '/ideas/' + idea.id).remove();
+      }).then(function () { NL.toast('Deleted'); });
+    }).catch(fail);
+  }
+  function editIdea(idea) {
+    var form = el('div', 'form-grid');
+    var title = el('input'); title.type = 'text'; title.value = idea.title; title.maxLength = 300;
+    form.appendChild(field('Title', title, true));
+    var kind = sel(KINDS, idea.kind || '', 'Any kind');
+    form.appendChild(field('Kind', kind));
+    var cat = sel(categoryOptions(idea.category), (categoryOf(idea.category) || {}).key || idea.category || '', 'None');
+    form.appendChild(field('Category', cat));
+    var notes = el('textarea'); notes.rows = 4; notes.maxLength = 1000; notes.value = idea.notes || '';
+    form.appendChild(field('Notes', notes, true));
+    NL.modal({ title: 'Edit idea', body: form, buttons: [
+      { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+      { label: 'Save', className: 'btn--primary', onClick: function (c) {
+        var t = title.value.trim();
+        if (!t) { title.focus(); NL.toast('Add a title', 'error'); return; }
+        NL.ensureAuth().then(function () {
+          return db.ref(ROOT + '/ideas/' + idea.id).update({ title: t, kind: kind.value || null, category: cat.value || null, notes: notes.value.trim() });
+        }).then(function () { NL.toast('Saved'); c.close(); }).catch(fail);
+      } }
+    ] });
+  }
+  /* Scheduling writes the item and removes the idea in one update, so the
+     idea never exists in both places. */
+  function scheduleIdea(idea) {
+    var form = el('div', 'form-grid');
+    var dateIn = el('input'); dateIn.type = 'date'; dateIn.value = todayYmd();
+    form.appendChild(field('Date', dateIn));
+    var timeIn = el('input'); timeIn.type = 'time'; timeIn.step = 300;
+    form.appendChild(field('Time', timeIn, false, 'Optional'));
+    var kind = sel(KINDS, idea.kind || 'web');
+    form.appendChild(field('Kind', kind));
+    var auth = sel(authorList(false).map(function (a) { return { key: a.key, label: a.label }; }), '', 'Unassigned');
+    form.appendChild(field('Author', auth));
+    NL.modal({ title: 'Schedule: ' + idea.title, body: form, buttons: [
+      { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+      { label: 'Schedule', className: 'btn--primary', onClick: function (c) {
+        if (!dateIn.value) { dateIn.focus(); NL.toast('Pick a date', 'error'); return; }
+        var item = blankItem(dateIn.value);
+        var kp = kindPatch(kind.value || 'web');
+        item.title = idea.title; item.notes = idea.notes || ''; item.category = idea.category || null;
+        item.lane = kp.lane; item.format = kp.format; item.time = timeIn.value || null;
+        item.author = auth.value || null; item.type = 'original';
+        item.platforms = platformsObj(defaultPlatforms(kind.value || 'web', lsGet(prefsKey())));
+        item.createdBy = S.session.uid; item.createdAt = firebase.database.ServerValue.TIMESTAMP;
+        item.updatedBy = S.session.uid; item.updatedAt = firebase.database.ServerValue.TIMESTAMP;
+        NL.ensureAuth().then(function () {
+          var key = db.ref(ROOT + '/items').push().key;
+          var u = {};
+          u['items/' + key] = item;
+          u['ideas/' + idea.id] = null;
+          NL.writeAudit('content_plan_idea_scheduled', { idea: idea.id, item: key, date: item.date, title: item.title });
+          return db.ref(ROOT).update(u);
+        }).then(function () { NL.toast('Scheduled for ' + dayLabel(dateIn.value)); c.close(); }).catch(fail);
+      } }
+    ] });
+  }
+
+  /* ── Render ────────────────────────────────────────────────────────── */
+  function render() {
+    var ideas = S.view === 'ideas';
+    document.getElementById('cpFilters').hidden = ideas;
+    document.getElementById('cpSummary').hidden = ideas;
+    if (ideas) { document.getElementById('cpBulk').innerHTML = ''; renderIdeas(); return; }
+    var all = Object.keys(S.items).map(function (k) { return S.items[k]; }).filter(passes);
+    renderSummary(all);
+    if (S.view === 'calendar') {
+      document.getElementById('cpBulk').innerHTML = '';
+      var by = {};
+      all.forEach(function (it) { (by[it.date] = by[it.date] || []).push(it); });
+      Object.keys(by).forEach(function (d) { by[d].sort(sortItems); });
+      renderCalendar(by);
+    } else {
+      renderList(all);
+    }
+  }
+  function setView(v) {
+    S.view = v;
+    document.querySelectorAll('#cpTabs .tab').forEach(function (t) {
+      var on = t.getAttribute('data-view') === v;
+      t.classList.toggle('active', on); t.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    if (v === 'list' && !S.listFrom) {
+      var r = currentRangeFor('calendar');
+      S.listFrom = r.from; S.listTo = r.to;
+    }
+    S.addingOn = null; S.addForm = null; S.ideaForm = null; S.selected = {};
+    savePrefs(); renderBar(); listen();
+  }
+  function currentRangeFor(view) { var v = S.view; S.view = view; var r = currentRange(); S.view = v; return r; }
+
+  function prefsStoreKey() { return 'cp:prefs:' + S.session.uid; }
+  function savePrefs() { lsSet(prefsStoreKey(), { view: S.view, mode: S.mode, split: S.split, filters: S.filters }); }
+  function loadPrefs() {
+    var p = lsGet(prefsStoreKey());
+    if (!p) return;
+    if (p.mode === 'week' || p.mode === 'month') S.mode = p.mode;
+    S.split = !!p.split;
+    if (p.view === 'list' || p.view === 'ideas') S.view = p.view;
+    if (p.filters) Object.keys(S.filters).forEach(function (k) { if (p.filters[k] != null) S.filters[k] = p.filters[k]; });
+  }
+
+  /* ── Boot ──────────────────────────────────────────────────────────── */
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function (session) {
+    S.session = session;
+    S.isSuper = session.role === 'superadmin';
+    S.canEdit = S.isSuper || session.toolLevel === 'admin';
+    S.cursor = new Date();
+    loadPrefs();
+
+    document.querySelectorAll('#cpTabs .tab').forEach(function (t) {
+      t.addEventListener('click', function () { setView(t.getAttribute('data-view')); });
+    });
+
+    NL.ensureAuth().then(function () {
+      db.ref(ROOT + '/config').on('value', function (snap) {
+        var c = snap.val() || {};
+        var firstLoad = !S._configLoaded;
+        S._configLoaded = true;
+        S.config = { categories: c.categories || {}, authors: c.authors || {} };
+        /* First run: no categories yet. Use the starting set on screen, and
+           write them once if this user can edit, so Settings starts populated. */
+        if (!c.categories) {
+          S.config.categories = DEFAULT_CATEGORIES;
+          if (S.canEdit && firstLoad) {
+            NL.writeAudit('content_plan_config', 'Default categories seeded');
+            db.ref(ROOT + '/config/categories').set(DEFAULT_CATEGORIES).catch(fail);
+          }
+        }
+        renderFilters();
+        if (firstLoad) {
+          if (S.view === 'list') { var r = currentRangeFor('calendar'); S.listFrom = r.from; S.listTo = r.to; setView('list'); }
+          else setView(S.view === 'ideas' ? 'ideas' : 'calendar');
+        } else queueRender();
+      }, fail);
+    }).catch(fail);
+  };
+
+  /* If auth-guard fired before this script loaded, replay the session. */
+  if (window._toolDeferredSession) {
+    window.TOOL.boot(window._toolDeferredSession);
+    delete window._toolDeferredSession;
+  }
+})();
+</script>
+
+</body>
+</html>

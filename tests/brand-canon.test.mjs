@@ -1101,3 +1101,17 @@ test('the file-wide reduced-motion escape hatch is still universal', () => {
   assert.match(block, /scroll-behavior:\s*auto\s*!important/,
     'smooth scrolling must also be cancelled for anyone who asked for less motion');
 });
+
+/* ── icon-article / icon-image (16/10/2026) ───────────────────────────────
+   Content Plan marks each item's kind with a glyph: article (website story),
+   image (social graphic), alongside the existing play and shield. They sit
+   side by side on a calendar chip, so all four must be stroked like the UI
+   set; a filled one among them reads as a different kind of mark. */
+test('the sprite carries article and image, stroked like play and shield', () => {
+  const sprite = readFileSync(join(REPO, 'assets/icons/sprites.svg'), 'utf8');
+  for (const n of ['article', 'image', 'play', 'shield']) {
+    const m = new RegExp(`<symbol id="icon-${n}"[\\s\\S]*?</symbol>`).exec(sprite);
+    assert.ok(m, `#icon-${n} is in the sprite`);
+    assert.ok(m[0].includes('fill="none"') && m[0].includes('stroke="currentColor"'), `#icon-${n} is stroked`);
+  }
+});
