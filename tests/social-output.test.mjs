@@ -233,3 +233,47 @@ test('gaps list empty days and days with reshares but no own post', () => {
   const onlyRs = S.planImport(parse([row({ 'Tweet ID': '5', 'Posted At': '2026-08-20T09:00:00Z', 'Type': 'repost' })]).posts, {}, { month: '2026-08', rules: RULES });
   assert.deepEqual(plain(onlyRs.gaps.noOwn), ['2026-08-20']);
 });
+
+test('gaps count what is already stored, so a month can be loaded in parts', () => {
+  const first = parse([row({ 'Tweet ID': '1', 'Posted At': '2026-08-01T09:00:00Z' })]).posts;
+  const stored = JSON.parse(JSON.stringify(S.planImport(first, {}, { month: '2026-08', rules: RULES }).updates));
+  const second = parse([row({ 'Tweet ID': '2', 'Posted At': '2026-08-02T09:00:00Z' })]).posts;
+  const plan = S.planImport(second, stored, { month: '2026-08', rules: RULES });
+  assert.ok(!plan.gaps.empty.includes('2026-08-01'));
+  assert.ok(!plan.gaps.empty.includes('2026-08-02'));
+  assert.equal(plan.gaps.empty.length, 29);
+});
+
+test('known scraper columns the tool does not use are ignored, not reported as Not read', () => {
+  const p = parse([Object.assign(row({ 'Tweet ID': '1', 'Posted At': '2026-08-08T13:05:00Z' }),
+    { repostedBy: '', hashtags: '', scrapedAt: '2026-10-16T15:12:21.862Z', mode: 'own', Mystery: 'x' })]);
+  assert.deepEqual(plain(p.columns.ignored), ['repostedBy', 'mode']);
+  assert.deepEqual(plain(p.columns.unrecognised), ['Mystery']);
+});
+
+test('rule lists split on commas or semicolons', () => {
+  assert.deepEqual(plain(S.listOf('half-time; ht, half time')), ['half-time', 'ht', 'half time']);
+});
+
+test('mentions, hashtags, reply and quote targets are kept; scrapedAt becomes metricsAt', () => {
+  const r = Object.assign(row({ 'Tweet ID': '1', 'Posted At': '2026-08-01T07:48:00.000Z', 'Views': '8530' }),
+    { mentions: "'@altrinchamfc @DAZN_NationalLg", hashtags: '#TOTW', replyTo: "'@NL_Enterprise", quotedAuthor: '',
+      scrapedAt: '2026-10-16T15:12:21.862Z' });
+  const p = parse([r]).posts[0];
+  assert.deepEqual(plain(p.mentions), ['altrinchamfc', 'DAZN_NationalLg']);
+  assert.deepEqual(plain(p.hashtags), ['TOTW']);
+  assert.equal(p.replyTo, 'NL_Enterprise');
+  assert.equal(p.quotedAuthor, undefined);
+  const plan = S.planImport([p], {}, { month: '2026-08', rules: RULES, now: 'IMPORT' });
+  assert.equal(plan.updates['1'].metricsAt, '2026-10-16T15:12:21.862Z');
+});
+
+test('a re-import fills mentions into posts stored without them, and never overwrites', () => {
+  const r = Object.assign(row({ 'Tweet ID': '1', 'Posted At': '2026-08-01T07:48:00.000Z' }), { mentions: "'@a" });
+  const stored = { '1': { id: '1', postedAtLocal: '2026-08-01 08:48', isOwn: true, kind: 'original', category: 'Reactive', plannerType: 'reactive' } };
+  const plan = S.planImport(parse([r]).posts, stored, { month: '2026-08', rules: RULES });
+  assert.deepEqual(plain(plan.updates['1/mentions']), ['a']);
+  stored['1'].mentions = ['b'];
+  const again = S.planImport(parse([r]).posts, stored, { month: '2026-08', rules: RULES });
+  assert.ok(!('1/mentions' in again.updates));
+});

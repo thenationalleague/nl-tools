@@ -1,7 +1,7 @@
 /* =========================================================================
    Social Output — data logic
    File: /social-output/_data.js
-   Version: v1.1 (16/10/2026)
+   Version: v1.2 (16/10/2026)
 
    Everything the page does to the numbers, with no DOM and no Firebase, so it
    can be tested in Node (tests/social-output.test.mjs). index.html loads this
@@ -25,6 +25,14 @@
      monthsFrom(start, end), prevMonth(m), monthLabel(m)
 
    Changelog
+     v1.2 (16/10/2026) — Also reads mentions, hashtags, replyTo and
+                         quotedAuthor (stored, filled in on older posts but
+                         never overwritten), and scrapedAt as metricsAt.
+                         Gaps are judged on the stored month plus the file,
+                         so a month imported in parts only flags days still
+                         missing. Scraper columns the tool does not use
+                         (repostedBy, hashtags, scrapedAt…) are listed as
+                         ignored instead of tripping the Not read warning.
      v1.1 (16/10/2026) — Import flags without blocking: overspill (rows from
                          other months, rejected and counted per month),
                          reshares of older posts carried into the month,
@@ -172,6 +180,7 @@
     Object.keys(obj).forEach(function (k) {
       var v = obj[k];
       if (v === undefined || v === null || v === '') return;
+      if (Array.isArray(v) && !v.length) return;
       if (typeof v === 'object' && !Array.isArray(v)) {
         v = clean(v);
         if (!Object.keys(v).length) return;
@@ -204,6 +213,11 @@
     media:        ['media', 'mediatype'],
     mediaCount:   ['mediacount', 'nummedia', 'mediaitems'],
     thumbUrl:     ['thumburl', 'thumbnail', 'thumb', 'imageurl', 'poster', 'posterurl'],
+    mentions:     ['mentions'],
+    hashtags:     ['hashtags'],
+    replyTo:      ['replyto', 'inreplyto'],
+    quotedAuthor: ['quotedauthor'],
+    scrapedAt:    ['scrapedat', 'readat'],
     timeIsOriginal: ['timeisoriginal'],
     category:     ['category'],
     views:        ['views', 'viewcount', 'impressions'],
@@ -216,18 +230,33 @@
     saves:        ['saves', 'savecount']
   };
 
-  function mapColumns(headers, aliases) {
+  /* Columns the scraper writes that this tool has no use for. Named so the
+     preview can tell "known, not needed" apart from "renamed or new", which
+     is the case the Not read warning exists for. */
+  var X_IGNORED = ['repostedby', 'dayqueried', 'mode'];
+
+  /* "'@a @b", "#x #y" -> ['a', 'b'] / ['x', 'y']. The leading apostrophe is
+     the scraper guarding the cell against spreadsheet formulas. */
+  function handles(v, sigil) {
+    return str(v).replace(/^'/, '').split(/[\s,;]+/).map(function (h) {
+      return h.replace(/^'/, '').replace(sigil, '');
+    }).filter(Boolean);
+  }
+
+  function mapColumns(headers, aliases, ignore) {
+    ignore = ignore || [];
     var lookup = {};
     Object.keys(aliases).forEach(function (field) {
       aliases[field].forEach(function (a) { if (!(a in lookup)) lookup[a] = field; });
     });
-    var map = {}, recognised = [], unrecognised = [];
+    var map = {}, recognised = [], unrecognised = [], ignored = [];
     headers.forEach(function (h) {
       var f = lookup[normHead(h)];
       if (f && !map[f]) { map[f] = h; recognised.push(h + ' → ' + f); }
+      else if (ignore.indexOf(normHead(h)) >= 0) ignored.push(h);
       else unrecognised.push(h);
     });
-    return { map: map, recognised: recognised, unrecognised: unrecognised };
+    return { map: map, recognised: recognised, unrecognised: unrecognised, ignored: ignored };
   }
 
   function normKind(raw, isRepost) {
@@ -255,7 +284,7 @@
   function normaliseX(rows) {
     rows = rows || [];
     var headers = rows.length ? Object.keys(rows[0]) : [];
-    var cols = mapColumns(headers, X_ALIASES);
+    var cols = mapColumns(headers, X_ALIASES, X_IGNORED);
     var M = cols.map;
     var missing = [];
     if (!M.id && !M.key && !M.url) missing.push('a post ID or URL');
@@ -309,6 +338,13 @@
         media: normMedia(g('media'), mediaCount),
         mediaCount: mediaCount,
         thumbUrl: str(g('thumbUrl')),
+        mentions: handles(g('mentions'), /^@/),
+        hashtags: handles(g('hashtags'), /^#/),
+        replyTo: handles(g('replyTo'), /^@/)[0] || '',
+        quotedAuthor: handles(g('quotedAuthor'), /^@/)[0] || '',
+        /* When the numbers were read off the page — the scraper's own
+           timestamp beats the import time, which can be days later. */
+        metricsAt: parseWhen(g('scrapedAt')),
         metrics: metrics,
         /* X shows the original post's time on a repost, not when the league
            reposted it — the scraper cannot see the reshare time. */
@@ -324,7 +360,7 @@
 
   function listOf(v) {
     if (Array.isArray(v)) return v.map(str).filter(Boolean);
-    return str(v).split(',').map(str).filter(Boolean);
+    return str(v).split(/[,;]/).map(str).filter(Boolean);
   }
   function escRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
   /* Whole-word, case-insensitive. A boundary is only added where the keyword
@@ -445,7 +481,7 @@
         rec.category = cat.category;
         rec.plannerType = cat.plannerType;
         rec.categoryManual = false;
-        rec.metricsAt = now;
+        rec.metricsAt = p.metricsAt || now;
         /* clean() drops blanks, never false, so isOwn and categoryManual
            survive it. */
         updates[key] = clean(rec);
@@ -455,9 +491,16 @@
       var changed = false;
       if (p.metrics && Object.keys(p.metrics).length && !sameMetrics(p.metrics, old.metrics)) {
         updates[key + '/metrics'] = p.metrics;
-        updates[key + '/metricsAt'] = now;
+        updates[key + '/metricsAt'] = p.metricsAt || now;
         changed = true;
       }
+      /* Fields an older import may not have carried are filled in, never
+         overwritten, so a stored post only gains detail. */
+      ['mentions', 'hashtags', 'replyTo', 'quotedAuthor'].forEach(function (f) {
+        var v = p[f];
+        var has = Array.isArray(v) ? v.length : v;
+        if (has && !old[f]) { updates[key + '/' + f] = v; changed = true; }
+      });
       if (p.thumbUrl && p.thumbUrl !== old.thumbUrl) {
         updates[key + '/thumbUrl'] = p.thumbUrl;
         changed = true;
@@ -470,8 +513,14 @@
       if (changed) stats.updated++; else stats.unchanged++;
     });
 
-    var kept = Object.keys(seen).map(function (k) { return seen[k]; });
-    return { stats: stats, updates: updates, skipped: skipped, overspill: overspill, gaps: gaps(kept, month) };
+    /* Gaps are judged on the month as it will stand after this import —
+       what is already stored plus this file — so a month loaded in parts
+       (1st–20th, then 21st–31st) only flags days that are still missing. */
+    var after = {};
+    Object.keys(existing).forEach(function (k) { after[k] = existing[k]; });
+    Object.keys(seen).forEach(function (k) { if (!after[k]) after[k] = seen[k]; });
+    var all = Object.keys(after).map(function (k) { return after[k]; });
+    return { stats: stats, updates: updates, skipped: skipped, overspill: overspill, gaps: gaps(all, month) };
   }
 
   /* Days of the month the file has nothing for, and days with reshares but
