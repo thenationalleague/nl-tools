@@ -4,8 +4,11 @@ Content Plan importer – turns the legacy "Content plan" Google Sheet (.xlsx ex
 into JSON for /app-data/media-content-plan/ in RTDB. Load the output through
 the tool's Settings → Import (superadmin), not the Firebase console.
 
-Version: v1.1 – 16/10/2026
+Version: v1.2 – 16/10/2026
 Changelog
+  v1.2 (16/10/2026) – Website is a platform: every web item imports with
+                      platforms {website: true}. Social platforms stay unset
+                      (the sheet never recorded them).
   v1.1 (16/10/2026) – Kind model: social items carry format only (vid / gfx / ad / otd).
                       No platforms, originPlatform or campaigns. "YouTube …" cells
                       import as video; "Instagram …" cells have no video/graphic
@@ -158,6 +161,7 @@ def main():
                     "date": date, "time": None, "lane": lane, "title": title,
                     "category": None, "type": None, "author": None, "authorOther": None,
                     "coAuthors": None, "format": None, "linkedItemId": None,
+                    "platforms": {"website": lane == "web"},
                     "status": status, "notes": "",
                     "source": {"tab": tab, "cell": cell.coordinate, "raw": str(cell.value)},
                     "needsReview": bool(reasons),
