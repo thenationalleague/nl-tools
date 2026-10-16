@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Content Plan
-  Version: v1.5 (16/10/2026)
+  Version: v1.6 (16/10/2026)
   File: /content-plan/index.html
 
   Plans and records everything the media team publishes: website stories,
@@ -12,6 +12,10 @@
     app-data/media-content-plan/items/{id}      one record per planned/published item
                                                  (indexed on date; queried by visible range)
     app-data/media-content-plan/days/{date}     notes + manualMatches {faCup, faTrophy}
+    app-data/media-content-plan/cupFixtures/{key}  FA Cup / FA Trophy fixtures pasted from a
+                                                 spreadsheet: date, time, round, comp
+                                                 (facup | fatrophy), home, away. Key =
+                                                 comp_round_home_v_away, so a re-paste updates.
     app-data/media-content-plan/ideas/{id}      undated ideas: title, notes, kind, category,
                                                  addedBy/addedByName, archived. Scheduling one
                                                  creates an item and deletes the idea.
@@ -75,6 +79,13 @@
                         remembered per kind. Match counts are pills in the
                         division colours (--div-*); FA Cup / Trophy pills are
                         outlined because they are typed in, not fed.
+    v1.6 (16/10/2026) – Cup fixtures: paste FA Cup / FA Trophy rows from a spreadsheet
+                        (date & time, round, competition, home, blank, away), with a
+                        preview that says new / moved / unchanged / skipped and why.
+                        Saved fixtures can be edited or deleted one by one. FAC / FAT
+                        pills count them per day; the day window lists the ties.
+                        Typed-in counts from the sheet import still show where a
+                        day has no pasted fixtures. Day window loses its count boxes.
 -->
 <html lang="en">
 <head>
@@ -124,7 +135,7 @@
     window.NL_CHANGELOG = [
       {
         date: '16 October 2026',
-        version: 'v1.5',
+        version: 'v1.6',
         items: [
           'The content plan now lives here instead of the Google Sheet.',
           'Month and week calendars: drag an item to another day, or onto an hour in week view.',
@@ -136,6 +147,7 @@
           'Tick an item when it\u2019s published.',
           'Show where each item goes: the website, X, Facebook, Instagram, TikTok, LinkedIn or YouTube.',
           'Match counts for each day, as pills.',
+          'Paste FA Cup and FA Trophy fixtures from a spreadsheet, and edit them one by one.',
           'Filter by kind, colour, type, author and status, including "My items" and "Unassigned".',
           'Day headers show how many National League matches are on.'
         ]
@@ -205,8 +217,8 @@
   .cp-dh__top { display: flex; align-items: center; gap: 6px; }
   .cp-dh__date { font-size: var(--text-sm); color: var(--text); font-variation-settings: 'wght' 800; font-variant-numeric: tabular-nums; }
   .cp-day.is-today .cp-dh__date { color: var(--primary); }
-  /* Match pills: division colours from canon (--div-*); cup pills in the cup tint;
-     FA Cup / Trophy outlined because they are typed in, not fed. */
+  /* Match pills: division colours from canon (--div-*); NL Cup in primary;
+     FA Cup / Trophy outlined because they come from a pasted list, not a feed. */
   .cp-mpills { display: flex; flex-wrap: wrap; gap: 3px; }
   .cp-mpill { display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px; border-radius: var(--radius-pill);
     font-size: 11px; font-variation-settings: 'wght' 700; font-variant-numeric: tabular-nums; line-height: 1.5; white-space: nowrap;
@@ -324,6 +336,10 @@
   .cp-idea__notes { font-size: var(--text-sm); color: var(--text-muted); white-space: pre-line; overflow-wrap: anywhere; }
   .cp-idea__meta { font-size: var(--text-xs); color: var(--text-muted); }
   .cp-idea__actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+  .cp-ties { display: grid; gap: 2px; margin-top: 8px; font-size: var(--text-sm); }
+  .cp-tie { padding: 3px 0; border-top: 1px solid var(--navy-100); overflow-wrap: anywhere; }
+  .cp-cup__paste { width: 100%; font-family: var(--font-mono) !important; white-space: pre; overflow-wrap: normal; overflow-x: auto; }
+  .cp-cup__preview { display: grid; gap: 6px; margin-top: 10px; }
   .cp-loading { padding: 20px; color: var(--text-muted); display: flex; gap: 8px; align-items: center; }
 
   @media (max-width: 640px) {
@@ -476,6 +492,7 @@
     canEdit: false,
     isSuper: false,
     view: 'calendar',         // calendar | list | ideas
+    cup: {}, cupRef: null,
     ideas: {}, ideasRef: null, showArchived: false, ideaForm: null,
     mode: 'month',            // month | week
     split: false,
@@ -630,6 +647,7 @@
     var r = currentRange();
     if (S.itemsRef) S.itemsRef.off();
     if (S.daysRef) S.daysRef.off();
+    if (S.cupRef) { S.cupRef.off(); S.cupRef = null; }
     if (S.ideasRef) { S.ideasRef.off(); S.ideasRef = null; }
     if (S.view === 'ideas') {
       S.itemsRef = null; S.daysRef = null;
@@ -655,7 +673,12 @@
       S.days = snap.val() || {}; loaded.days = true;
       if (loaded.items) queueRender();
     }, fail);
-    if (S.view === 'calendar') loadMatches(r.from, r.to);
+    if (S.view === 'calendar') {
+      loadMatches(r.from, r.to);
+      S.cup = {};
+      S.cupRef = db.ref(ROOT + '/cupFixtures').orderByChild('date').startAt(r.from).endAt(r.to);
+      S.cupRef.on('value', function (snap) { S.cup = snap.val() || {}; queueRender(); }, fail);
+    }
   }
 
   /* ── Match counts from NLS (memory cache per season) ───────────────── */
@@ -707,16 +730,19 @@
     }
     var titles = { nl: 'National League', n: 'National League North', s: 'National League South', cup: 'National League Cup' };
     NLS_COMPS.forEach(function (c) { if (m[c.key]) pill('cp-mpill--' + c.key, c.label, m[c.key], titles[c.key] + ' matches'); });
-    if (mm.faCup) pill('cp-mpill--manual', 'FAC', mm.faCup, 'FA Cup matches (typed in)');
-    if (mm.faTrophy) pill('cp-mpill--manual', 'FAT', mm.faTrophy, 'FA Trophy matches (typed in)');
+    var cc = cupCounts(date);
+    var fac = cc.facup || mm.faCup, fat = cc.fatrophy || mm.faTrophy;
+    if (fac) pill('cp-mpill--manual', 'FAC', fac, 'FA Cup matches');
+    if (fat) pill('cp-mpill--manual', 'FAT', fat, 'FA Trophy matches');
     return n ? box : null;
   }
   function matchText(date) {
     var m = S.matches[date] || {}, d = S.days[date] || {}, mm = d.manualMatches || {};
     var parts = [];
     NLS_COMPS.forEach(function (c) { if (m[c.key]) parts.push(c.label + ' ' + m[c.key]); });
-    if (mm.faCup) parts.push('FAC ' + mm.faCup);
-    if (mm.faTrophy) parts.push('FAT ' + mm.faTrophy);
+    var cc = cupCounts(date);
+    if (cc.facup || mm.faCup) parts.push('FAC ' + (cc.facup || mm.faCup));
+    if (cc.fatrophy || mm.faTrophy) parts.push('FAT ' + (cc.fatrophy || mm.faTrophy));
     return parts.join(' · ');
   }
 
@@ -832,6 +858,12 @@
       var settings = el('button', 'btn btn--ghost btn--sm'); settings.type = 'button';
       settings.appendChild(icon('settings')); settings.appendChild(document.createTextNode(' Settings'));
       settings.addEventListener('click', openSettings);
+      if (S.view === 'calendar') {
+        var cupBtn = el('button', 'btn btn--ghost btn--sm'); cupBtn.type = 'button';
+        cupBtn.appendChild(icon('calendar')); cupBtn.appendChild(document.createTextNode(' Cup fixtures'));
+        cupBtn.addEventListener('click', openCupFixtures);
+        right.appendChild(cupBtn);
+      }
       right.appendChild(settings);
       if (S.view !== 'ideas') {
         var add = el('button', 'btn btn--primary btn--sm'); add.type = 'button';
@@ -1293,10 +1325,17 @@
   function openDay(date) {
     var day = S.days[date] || {};
     var mm = day.manualMatches || {};
+    var ties = cupOnDate(date);
+    function tiesBox() {
+      var box = el('div', 'cp-ties');
+      ties.forEach(function (f) { box.appendChild(el('div', 'cp-tie', cupLine(f))); });
+      return box;
+    }
     if (!S.canEdit) {
       var b = el('div', 'cp-readonly'); var dl = el('dl');
       [['Matches', matchText(date) || 'None'], ['Notes', day.notes || '—']].forEach(function (r) { dl.appendChild(el('dt', null, r[0])); dl.appendChild(el('dd', null, r[1])); });
       b.appendChild(dl);
+      if (ties.length) b.appendChild(tiesBox());
       NL.modal({ title: dayLabel(date), body: b, size: 'sm', buttons: [{ label: 'Close', className: 'btn--primary', onClick: function (c) { c.close(); } }] });
       return;
     }
@@ -1304,20 +1343,16 @@
     var notes = el('textarea'); notes.rows = 3; notes.value = day.notes || ''; notes.maxLength = 1000;
     notes.placeholder = 'Matchday, draws, bank holidays, on this day…';
     form.appendChild(field('Day notes', notes, true));
-    var fac = el('input'); fac.type = 'number'; fac.min = '0'; fac.max = '200'; fac.value = mm.faCup || '';
-    form.appendChild(field('FA Cup matches', fac));
-    var fat = el('input'); fat.type = 'number'; fat.min = '0'; fat.max = '200'; fat.value = mm.faTrophy || '';
-    form.appendChild(field('FA Trophy matches', fat));
     var auto = matchText(date);
-    form.appendChild(el('div', 'form-hint span2', 'From the NL feed: ' + (auto || 'no National League matches')));
+    form.appendChild(el('div', 'form-hint span2', 'Matches: ' + (auto || 'none')));
+    if (ties.length) { var tg = el('div', 'span2'); tg.appendChild(tiesBox()); form.appendChild(tg); }
     NL.modal({ title: dayLabel(date), body: form, buttons: [
       { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
       { label: 'Save', className: 'btn--primary', onClick: function (c) {
-        var n = notes.value.trim(), a = parseInt(fac.value, 10), t = parseInt(fat.value, 10);
+        var n = notes.value.trim();
         var rec = {};
         if (n) rec.notes = n;
-        var m = {}; if (a > 0) m.faCup = a; if (t > 0) m.faTrophy = t;
-        if (m.faCup || m.faTrophy) rec.manualMatches = m;
+        if (mm.faCup || mm.faTrophy) rec.manualMatches = mm;   // counts from the sheet import stay as they were
         NL.ensureAuth().then(function () {
           var ref = db.ref(ROOT + '/days/' + date);
           return Object.keys(rec).length ? ref.set(rec) : ref.remove();
@@ -1598,6 +1633,248 @@
       };
       reader.readAsText(f);
     });
+  }
+
+
+  /* ── FA Cup / FA Trophy fixtures: pasted from a spreadsheet ───────────
+     There is no feed for these (NLS carries 89/372/373/1275 only). Six
+     pasted columns: date & time, round, competition, home, (score, blank),
+     away. A fixture's key is competition + round + home + away, so pasting
+     a moved tie again updates its date instead of adding a second copy. */
+  var CUP_COMPS = [
+    { key: 'facup',    label: 'FA Cup',    short: 'FAC' },
+    { key: 'fatrophy', label: 'FA Trophy', short: 'FAT' }
+  ];
+  var MONTHS3 = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  function slugKey(s) { return String(s || '').toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40); }
+  function cupKey(f) { return [f.comp, slugKey(f.round) || 'r', slugKey(f.home), 'v', slugKey(f.away)].join('_'); }
+  /* "17/10/2026 15:00", "Sat 17/10/26 12:30", "2026-10-17 15:00", "17 Oct 2026 3:00" */
+  function parseWhen(s) {
+    s = String(s || '').trim();
+    var time = null, tm = /(\d{1,2}):(\d{2})\s*(am|pm)?/i.exec(s);
+    if (tm && +tm[1] < 24 && +tm[2] < 60) {
+      var hh = +tm[1], ap = (tm[3] || '').toLowerCase();
+      /* No football kicks off between 1am and 10am: "3:00" means 15:00. */
+      if (ap === 'pm' && hh < 12) hh += 12;
+      else if (ap !== 'am' && hh >= 1 && hh <= 9) hh += 12;
+      time = pad2(hh) + ':' + tm[2]; s = s.replace(tm[0], ' ');
+    }
+    var y, m, d, x;
+    if ((x = /(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s))) { y = +x[1]; m = +x[2]; d = +x[3]; }
+    else if ((x = /(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/.exec(s))) { d = +x[1]; m = +x[2]; y = +x[3]; }
+    else if ((x = /(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]{3,})\.?\s+(\d{2,4})/i.exec(s))) {
+      d = +x[1]; m = MONTHS3.indexOf(x[2].slice(0, 3).toLowerCase()) + 1; y = +x[3];
+    }
+    if (!y || !m || !d) return null;
+    if (y < 100) y += 2000;
+    var dt = new Date(y, m - 1, d);
+    if (dt.getMonth() !== m - 1 || dt.getDate() !== d) return null;
+    return { date: ymd(dt), time: time };
+  }
+  function parseComp(s) {
+    var t = String(s || '').toLowerCase();
+    if (t.indexOf('trophy') >= 0) return 'fatrophy';
+    if (t.indexOf('cup') >= 0) return 'facup';
+    return null;
+  }
+  /* Returns [{ok, row, fixture|reason}] */
+  function parseCupPaste(text) {
+    var lines = String(text || '').replace(/\r/g, '').split('\n');
+    var out = [];
+    lines.forEach(function (line, i) {
+      if (!line.trim()) return;
+      var c = line.indexOf('\t') >= 0 ? line.split('\t') : (NL.csvParse(line)[0] || []);
+      c = c.map(function (v) { return String(v == null ? '' : v).trim(); });
+      var when = parseWhen(c[0]);
+      if (!when) { out.push({ ok: false, row: i + 1, raw: line, reason: i === 0 ? 'Header row, skipped' : 'Can’t read the date' }); return; }
+      var comp = parseComp(c[2]);
+      if (!comp) { out.push({ ok: false, row: i + 1, raw: line, reason: 'Competition isn’t FA Cup or FA Trophy' }); return; }
+      var home = c[3] || '', away = c.length >= 6 ? c[5] : (c[4] || '');
+      if (!home || !away) { out.push({ ok: false, row: i + 1, raw: line, reason: 'Missing a team' }); return; }
+      out.push({ ok: true, row: i + 1, fixture: { date: when.date, time: when.time, round: c[1] || '', comp: comp, home: home, away: away } });
+    });
+    return out;
+  }
+  function cupCounts(date) {
+    var out = {};
+    Object.keys(S.cup || {}).forEach(function (k) {
+      var f = S.cup[k];
+      if (f && f.date === date) out[f.comp] = (out[f.comp] || 0) + 1;
+    });
+    return out;
+  }
+  function cupOnDate(date) {
+    return Object.keys(S.cup || {}).map(function (k) { var f = S.cup[k]; f.id = k; return f; })
+      .filter(function (f) { return f.date === date; })
+      .sort(function (a, b) { return (a.comp + (a.time || '') + a.home).localeCompare(b.comp + (b.time || '') + b.home); });
+  }
+  function cupLine(f) {
+    var c = lookup(CUP_COMPS, f.comp) || { short: '?' };
+    return (f.time ? f.time + ' ' : '') + c.short + (f.round ? ' ' + f.round : '') + ' – ' + f.home + ' v ' + f.away;
+  }
+
+  function openCupFixtures() {
+    var wrap = el('div', 'cp-cup');
+    var tabs = el('div', 'tabs');
+    var paneAdd = el('div'), paneList = el('div');
+    [['Paste fixtures', paneAdd], ['Saved fixtures', paneList]].forEach(function (t, i) {
+      var b = el('button', 'tab' + (i === 0 ? ' active' : ''), t[0]); b.type = 'button';
+      b.addEventListener('click', function () {
+        tabs.querySelectorAll('.tab').forEach(function (x) { x.classList.remove('active'); });
+        b.classList.add('active');
+        paneAdd.hidden = t[1] !== paneAdd; paneList.hidden = t[1] !== paneList;
+        if (t[1] === paneList) loadList();
+      });
+      tabs.appendChild(b);
+    });
+    paneList.hidden = true;
+    wrap.appendChild(tabs); wrap.appendChild(paneAdd); wrap.appendChild(paneList);
+
+    /* Paste */
+    var ta = el('textarea', 'cp-in cp-cup__paste'); ta.rows = 8; ta.id = 'cpCupPaste';
+    ta.placeholder = '17/10/2026 15:00\t4QR\tFA Cup\tBury\t\tHarrogate Town AFC';
+    paneAdd.appendChild(field('Copy the rows from your spreadsheet and paste them here', ta, true,
+      'Columns: date & time, round, competition, home, score (blank), away.'));
+    var preview = el('div', 'cp-cup__preview');
+    paneAdd.appendChild(preview);
+    var parsed = [];
+    var existing = null;
+    function ensureExisting() {
+      if (existing) return Promise.resolve(existing);
+      return NL.ensureAuth().then(function () { return db.ref(ROOT + '/cupFixtures').once('value'); })
+        .then(function (snap) { existing = snap.val() || {}; return existing; });
+    }
+    function showPreview() {
+      parsed = parseCupPaste(ta.value);
+      preview.innerHTML = '';
+      if (!parsed.length) return;
+      ensureExisting().then(function (ex) {
+        var good = parsed.filter(function (p) { return p.ok; });
+        var tw = el('div', 'table-wrap cp-listwrap');
+        var t = el('table', 'table table--compact');
+        var hr = el('tr');
+        ['Date', 'Time', 'Comp', 'Round', 'Home', 'Away', ''].forEach(function (h) { hr.appendChild(el('th', null, h)); });
+        var th = el('thead'); th.appendChild(hr); t.appendChild(th);
+        var tb = el('tbody'), adds = 0, ups = 0, same = 0;
+        parsed.forEach(function (p) {
+          var tr = el('tr');
+          if (!p.ok) {
+            var td = el('td', 'cp-meta', 'Row ' + p.row + ': ' + p.reason + ' – “' + p.raw.replace(/\t/g, ' | ').slice(0, 80) + '”');
+            td.colSpan = 7; tr.appendChild(td); tb.appendChild(tr); return;
+          }
+          var f = p.fixture, k = cupKey(f), old = ex[k], state;
+          if (!old) { state = 'New'; adds++; }
+          else if (old.date !== f.date || (old.time || null) !== (f.time || null)) { state = 'Moves from ' + uk(old.date) + (old.time ? ' ' + old.time : ''); ups++; }
+          else { state = 'Already saved'; same++; }
+          [uk(f.date), f.time || '', (lookup(CUP_COMPS, f.comp) || {}).short, f.round, f.home, f.away, state].forEach(function (v) { tr.appendChild(el('td', null, v)); });
+          tb.appendChild(tr);
+        });
+        t.appendChild(tb); tw.appendChild(t);
+        var sum = el('p', 'form-hint', good.length + ' fixture' + (good.length === 1 ? '' : 's') + ' read: ' + adds + ' new, ' + ups + ' moved, ' + same + ' unchanged' +
+          (parsed.length > good.length ? '. ' + (parsed.length - good.length) + ' row' + (parsed.length - good.length === 1 ? '' : 's') + ' skipped (shown below).' : '.'));
+        preview.appendChild(sum);
+        preview.appendChild(tw);
+      }).catch(fail);
+    }
+    ta.addEventListener('input', function () { clearTimeout(ta._t); ta._t = setTimeout(showPreview, 250); });
+
+    /* Saved list: per-fixture edit / delete */
+    var listBox = el('div');
+    var filterRow = el('div', 'cp-add__row');
+    var compSel = sel(CUP_COMPS, '', 'Both competitions'); compSel.setAttribute('aria-label', 'Competition');
+    var q = el('input', 'cp-in'); q.type = 'search'; q.placeholder = 'Search a team'; q.setAttribute('aria-label', 'Search a team');
+    var showPast = el('label', 'cp-check'); var pastCb = el('input'); pastCb.type = 'checkbox';
+    showPast.appendChild(pastCb); showPast.appendChild(document.createTextNode('Include past'));
+    [compSel, q, showPast].forEach(function (x) { filterRow.appendChild(x); });
+    paneList.appendChild(filterRow); paneList.appendChild(listBox);
+    var all = {};
+    function loadList() {
+      listBox.innerHTML = '';
+      listBox.appendChild(el('div', 'cp-loading', 'Loading…'));
+      NL.ensureAuth().then(function () { return db.ref(ROOT + '/cupFixtures').once('value'); }).then(function (snap) {
+        all = snap.val() || {}; existing = all; drawList();
+      }).catch(fail);
+    }
+    function drawList() {
+      listBox.innerHTML = '';
+      var today = todayYmd(), term = q.value.trim().toLowerCase();
+      var rows = Object.keys(all).map(function (k) { var f = all[k]; f.id = k; return f; }).filter(function (f) {
+        if (compSel.value && f.comp !== compSel.value) return false;
+        if (!pastCb.checked && f.date < today) return false;
+        if (term && (f.home + ' ' + f.away).toLowerCase().indexOf(term) < 0) return false;
+        return true;
+      }).sort(function (a, b) { return (a.date + (a.time || '') + a.home).localeCompare(b.date + (b.time || '') + b.home); });
+      if (!rows.length) { listBox.appendChild(el('p', 'form-hint', 'No fixtures match.')); return; }
+      var tw = el('div', 'table-wrap cp-listwrap'), t = el('table', 'table table--compact'), tb = el('tbody');
+      rows.slice(0, 400).forEach(function (f) {
+        var tr = el('tr');
+        [uk(f.date) + (f.time ? ' ' + f.time : ''), (lookup(CUP_COMPS, f.comp) || {}).short, f.round || '', f.home + ' v ' + f.away].forEach(function (v) { tr.appendChild(el('td', null, v)); });
+        var td = el('td', 'ta-right');
+        var e = el('button', 'btn btn--ghost btn--sm', 'Edit'); e.type = 'button';
+        e.addEventListener('click', function () { editCupFixture(f, function () { loadList(); }); });
+        var d = el('button', 'btn btn--danger btn--sm', 'Delete'); d.type = 'button';
+        d.addEventListener('click', function () {
+          NL.confirm('Delete ' + f.home + ' v ' + f.away + '?', { title: 'Delete fixture', confirmText: 'Delete', variant: 'danger' }).then(function (ok) {
+            if (!ok) return;
+            return NL.ensureAuth().then(function () {
+              NL.writeAudit('content_plan_cup_delete', { id: f.id });
+              return db.ref(ROOT + '/cupFixtures/' + f.id).remove();
+            }).then(function () { delete all[f.id]; drawList(); NL.toast('Deleted'); });
+          }).catch(fail);
+        });
+        td.appendChild(e); td.appendChild(document.createTextNode(' ')); td.appendChild(d);
+        tr.appendChild(td); tb.appendChild(tr);
+      });
+      t.appendChild(tb); tw.appendChild(t); listBox.appendChild(tw);
+      if (rows.length > 400) listBox.appendChild(el('p', 'form-hint', 'Showing the first 400. Search or pick a competition to narrow it down.'));
+    }
+    compSel.addEventListener('change', drawList);
+    q.addEventListener('input', drawList);
+    pastCb.addEventListener('change', drawList);
+
+    NL.modal({ title: 'Cup fixtures', body: wrap, width: 'wide', buttons: [
+      { label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+      { label: 'Save pasted fixtures', className: 'btn--primary', onClick: function (c) {
+        var good = parsed.filter(function (p) { return p.ok; });
+        if (!good.length) { NL.toast('Paste some fixtures first', 'error'); return; }
+        var u = {};
+        good.forEach(function (p) {
+          var f = p.fixture;
+          u[cupKey(f)] = { date: f.date, time: f.time || null, round: f.round, comp: f.comp, home: f.home, away: f.away,
+            updatedBy: S.session.uid, updatedAt: firebase.database.ServerValue.TIMESTAMP };
+        });
+        NL.ensureAuth().then(function () {
+          NL.writeAudit('content_plan_cup_paste', { count: good.length });
+          return db.ref(ROOT + '/cupFixtures').update(u);
+        }).then(function () {
+          NL.toast(good.length + ' fixture' + (good.length === 1 ? '' : 's') + ' saved');
+          ta.value = ''; preview.innerHTML = ''; parsed = []; existing = null;
+          listen();
+        }).catch(fail);
+      } }
+    ] });
+  }
+  function editCupFixture(f, done) {
+    var form = el('div', 'form-grid');
+    var d = el('input'); d.type = 'date'; d.value = f.date; form.appendChild(field('Date', d));
+    var t = el('input'); t.type = 'time'; t.step = 300; t.value = f.time || ''; form.appendChild(field('Kick-off', t));
+    var comp = sel(CUP_COMPS.map(function (c) { return { key: c.key, label: c.label }; }), f.comp); form.appendChild(field('Competition', comp));
+    var r = el('input'); r.type = 'text'; r.value = f.round || ''; r.maxLength = 40; form.appendChild(field('Round', r));
+    var h = el('input'); h.type = 'text'; h.value = f.home; h.maxLength = 80; form.appendChild(field('Home', h));
+    var a = el('input'); a.type = 'text'; a.value = f.away; a.maxLength = 80; form.appendChild(field('Away', a));
+    NL.modal({ title: 'Edit fixture', body: form, size: 'sm', buttons: [
+      { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+      { label: 'Save', className: 'btn--primary', onClick: function (c) {
+        if (!d.value || !h.value.trim() || !a.value.trim()) { NL.toast('Date and both teams are needed', 'error'); return; }
+        var nf = { date: d.value, time: t.value || null, round: r.value.trim(), comp: comp.value, home: h.value.trim(), away: a.value.trim(),
+          updatedBy: S.session.uid, updatedAt: firebase.database.ServerValue.TIMESTAMP };
+        var nk = cupKey(nf), u = {};
+        u[nk] = nf;
+        if (nk !== f.id) u[f.id] = null;   // teams or round changed: the key moves with them
+        NL.ensureAuth().then(function () { return db.ref(ROOT + '/cupFixtures').update(u); })
+          .then(function () { NL.toast('Saved'); c.close(); listen(); if (done) done(); }).catch(fail);
+      } }
+    ] });
   }
 
   /* ── Ideas: undated, scheduled onto the calendar when ready ─────────── */
