@@ -10,7 +10,7 @@
        would collide with gives way. UK share card dropped (four cards).
        Games table: date with kick-off time, an H / A / N pill before the
        opponent instead of a Venue column, a tick or cross for Shown in UK,
-       and the UK / INT breakdown lighter than the total.
+       and the UK figure faded on games not shown in the UK.
      v37.0 (16/10/2026) — The y-axis stays level with the columns when By
        game scrolls: the scrollbar's height is measured and the axis lifted
        by it (alignAxis).
@@ -442,8 +442,10 @@
             '</span></td>' +
           '<td class="dz-sm-hide ta-center dz-avail dz-avail--' + (intl ? 'no' : 'yes') + '" title="' + esc(t || 'Shown in the UK') + '">' +
             availIcon(intl) + '</td>' +
-          '<td class="ta-right dz-sm-hide dz-muted"' + (intl ? ' title="' + esc(AVAIL_TITLE.intl) + '"' : '') + '>' + n0(g.ukViews) + '</td>' +
-          '<td class="ta-right dz-sm-hide dz-muted">' + n0(g.intlViews) + '</td>' +
+          /* Not shown in the UK: the UK figure is faded, so a handful of
+             views reads as expected rather than as a failure. */
+          '<td class="ta-right dz-sm-hide' + (intl ? ' dz-faint' : '') + '"' + (intl ? ' title="' + esc(AVAIL_TITLE.intl) + '"' : '') + '>' + n0(g.ukViews) + '</td>' +
+          '<td class="ta-right dz-sm-hide">' + n0(g.intlViews) + '</td>' +
           '<td class="ta-right dz-strong">' + n0(r.total) + '</td>' +
           '<td class="dz-grid__barcol">' + bar(g.ukViews, g.intlViews, max) + '</td>' +
           '<td class="ta-right dz-sm-hide">' + n1(r.avg) + '</td>' +
