@@ -1,9 +1,16 @@
 /* =============================================================================
    NL Tools — DAZN Viewership: one club's season, as a dashboard
    File: /dazn/_view.js
-   Version: v37.0 (16/10/2026)
+   Version: v38.0 (16/10/2026)
 
    CHANGELOG
+     v38.0 (16/10/2026) — Month totals above the columns are no longer cut off
+       at the top (the scale leaves room for them). The average reads "AVG"
+       on the y-axis instead of a label inside the plot; a scale number it
+       would collide with gives way. UK share card dropped (four cards).
+       Games table: date with kick-off time, an H / A / N pill before the
+       opponent instead of a Venue column, a tick or cross for Shown in UK,
+       and the UK figure faded on games not shown in the UK.
      v37.0 (16/10/2026) — The y-axis stays level with the columns when By
        game scrolls: the scrollbar's height is measured and the axis lifted
        by it (alignAxis).
@@ -106,6 +113,14 @@
   function venueOf(r) { return r.g.neutral ? 'Neutral' : r.home ? 'Home' : 'Away'; }
   function venueAbbr(r) { return r.g.neutral ? 'N' : r.home ? 'H' : 'A'; }
 
+  /* Tick or cross for Shown in UK, named for a screen reader. */
+  function availIcon(intl) {
+    var ic = window.NL.icon(intl ? 'close' : 'tick', 'sm');
+    ic.setAttribute('role', 'img');
+    ic.setAttribute('aria-label', intl ? 'Not shown in the UK' : 'Shown in the UK');
+    return ic.outerHTML;
+  }
+
   var AVAIL_TITLE = {
     round: 'Saturday: the whole round was available in the UK',
     moved: 'Saturday: moved kick-off',
@@ -148,6 +163,8 @@
       grid(host, cfg);
     };
     window.NL.clubs.wireCrestImgs(host);
+    var g = host.querySelector('.dz-grid'), th = g && g.querySelector('thead');
+    if (th) g.style.setProperty('--dz-head', th.offsetHeight + 'px');
   }
 
   /* UK / INT data bar against a shared max. Red then navy, the brand pair. */
@@ -230,11 +247,12 @@
       sign + Math.abs(pct) + '% vs division</div>';
   }
 
-  /* Five cards, each answering one question: how many watched, how a
-     game does against the division, where the audience is, how long they
-     stay, and the game that drew most. One comparison only (views per
-     game): it is the figure a club compares, and a UK share or minutes
-     "vs division" percentage reads as a different thing from a views one.
+  /* Four cards, each answering one question: how many watched, how a game
+     does against the division, how long they stay, and the game that drew
+     most. (A UK share card went in v38.0: the UK / INT split under Total
+     views already says it.) One comparison only (views per game): it is the
+     figure a club compares, and a minutes "vs division" percentage reads as
+     a different thing from a views one.
      `who` names the club so Best game can say who it was against; the
      League tab passes none and gets "HOME v AWAY". */
   function kpis(s, bench, showBench, who) {
@@ -244,7 +262,6 @@
         '<div class="stat__num">' + num + '</div><div class="stat__label">' + esc(label) + '</div>' + (extra || '') + '</div>';
     };
     var sub = function (t) { return t ? '<div class="dz-sub">' + esc(t) + '</div>' : ''; };
-    var share = s.views ? Math.round(s.ukViews / s.views * 100) : null;
     var t = s.top, code = who && who.code, nameOf = (who && who.nameOf) || function () { return ''; };
     var best = '', bestTitle = '';
     if (t) {
@@ -264,8 +281,6 @@
         sub('UK ' + compact(s.ukViews) + ' · INT ' + compact(s.intlViews)), n0(s.views) + ' views') +
       card(compact(s.avgViewsPerGame), 'Views per game',
         delta(s.avgViewsPerGame, b('avgViewsPerGame')) + sub(n0(s.games) + (s.games === 1 ? ' game' : ' games'))) +
-      card(share == null ? '—' : share + '%', 'UK share',
-        sub(s.intlOnly ? s.intlOnly + ' not shown in UK' : ''), n0(s.ukViews) + ' UK of ' + n0(s.views) + ' views') +
       card(compact(s.mins / 60), 'Hours watched',
         sub(n1(s.avgMins) + ' mins per view'), n0(s.mins) + ' minutes watched') +
       card(t ? compact(t.ukViews + t.intlViews) : '—', 'Best game', sub(best), bestTitle) +
@@ -295,10 +310,21 @@
   /* cols: [{ uk, intl, label (html), title, value (text above, optional),
               attrs (extra attributes), cls, tag ('button'|'div') }] */
   function chart(cols, scaleMax, extraCls, minInner, avg) {
-    var tk = ticks(scaleMax), top = tk[tk.length - 1] || 1;
+    /* Totals printed above the columns need room under the top of the plot,
+       or the busiest month's figure is cut off: 15% headroom when there are
+       any. */
+    var labelled = cols.some(function (c) { return c.value; });
+    var tk = ticks(labelled ? scaleMax * 1.15 : scaleMax), top = tk[tk.length - 1] || 1;
     var pct = function (v) { return (v / top * 100).toFixed(2) + '%'; };
     var grid = tk.map(function (t) { return '<span class="dz-chart__grid" style="bottom:' + pct(t) + '"></span>'; }).join('');
-    var yl = tk.map(function (t) { return '<span class="dz-chart__tick" style="bottom:' + pct(t) + '">' + compact(t) + '</span>'; }).join('');
+    /* The average is named on the axis, where a reader looks for a value,
+       not inside the plot over the columns. A scale number within 7% of it
+       gives way rather than overprint. */
+    var near = function (t) { return avg > 0 && Math.abs(t - avg) / top < 0.07; };
+    var yl = tk.map(function (t) {
+      return near(t) ? '' : '<span class="dz-chart__tick" style="bottom:' + pct(t) + '">' + compact(t) + '</span>';
+    }).join('') +
+      (avg > 0 ? '<span class="dz-chart__tick dz-chart__tick--avg" style="bottom:' + pct(avg) + '" title="Average ' + n0(avg) + ' views per game">AVG</span>' : '');
     var body = cols.map(function (c) {
       var t = c.uk + c.intl, tag = c.tag || 'div';
       return '<' + tag + (tag === 'button' ? ' type="button"' : '') + ' class="dz-col ' + (c.cls || '') + '"' + (c.attrs || '') +
@@ -311,10 +337,10 @@
     }).join('');
     var xl = cols.map(function (c) { return '<span class="dz-chart__x ' + (c.cls || '') + '">' + c.label + '</span>'; }).join('');
     return '<div class="dz-chart ' + (extraCls || '') + '">' +
-      '<div class="dz-chart__y" aria-hidden="true">' + yl + '</div>' +
+      '<div class="dz-chart__y">' + yl + '</div>' +
       '<div class="dz-chart__scroll"><div class="dz-chart__inner"' + (minInner ? ' style="min-width:' + minInner + 'px"' : '') + '>' +
         '<div class="dz-chart__plot">' + grid + '<div class="dz-chart__cols">' + body + '</div>' +
-          (avg > 0 ? '<span class="dz-chart__avg" style="bottom:' + pct(avg) + '"><span class="dz-chart__avg-l">Avg ' + compact(avg) + '</span></span>' : '') +
+          (avg > 0 ? '<span class="dz-chart__avg" style="bottom:' + pct(avg) + '"></span>' : '') +
         '</div>' +
         '<div class="dz-chart__xrow">' + xl + '</div>' +
       '</div></div></div>';
@@ -393,10 +419,9 @@
       height: 440,
       sort: { key: 'date', dir: 1 },
       cols: [
-        { key: 'date', label: 'Date', get: function (r) { return r.g.date; } },
+        { key: 'date', label: 'Date', get: function (r) { return r.g.date + ' ' + (r.g.ko || ''); } },
         { key: 'opp', label: 'Opponent', get: function (r) { return r.oppName; } },
-        { key: 'venue', label: 'Venue', cls: 'dz-sm-hide', get: venueOf },
-        { key: 'avail', label: 'Shown in UK', cls: 'dz-sm-hide', get: function (r) { return r.g.avail === 'intl' ? 'No' : 'Yes'; } },
+        { key: 'avail', label: 'Shown in UK', cls: 'dz-sm-hide ta-center', get: function (r) { return r.g.avail === 'intl' ? 'No' : 'Yes'; } },
         { key: 'uk', label: 'UK', num: true, cls: 'dz-sm-hide', get: function (r) { return r.g.ukViews; } },
         { key: 'intl', label: 'INT', num: true, cls: 'dz-sm-hide', get: function (r) { return r.g.intlViews; } },
         { key: 'total', label: 'Views', num: true, get: function (r) { return r.total; } },
@@ -407,14 +432,19 @@
       row: function (r) {
         var g = r.g, intl = g.avail === 'intl', t = AVAIL_TITLE[g.avail];
         return '<tr>' +
-          '<td class="dz-nowrap">' + esc(window.NL.formatDateShort(g.date)) + '</td>' +
-          '<td><span class="dz-opp">' + window.NL.clubs.crestImgHtml(r.oppName, 'thumb', { className: 'nl-crest' }) +
+          '<td class="dz-nowrap">' + esc(window.NL.formatDateShort(g.date)) +
+            (g.ko ? ' <span class="dz-muted">' + esc(g.ko) + '</span>' : '') + '</td>' +
+          '<td><span class="dz-opp">' +
+            '<span class="pill dz-venue dz-venue--' + venueAbbr(r).toLowerCase() + '" title="' + venueOf(r) + '">' + venueAbbr(r) + '</span>' +
+            window.NL.clubs.crestImgHtml(r.oppName, 'thumb', { className: 'nl-crest' }) +
             '<span>' + esc(r.oppName) + '</span>' +
             (g.abandoned ? ' <span class="pill pill--postponed" title="Abandoned. Counted: it was played and watched.">Abandoned</span>' : '') +
             '</span></td>' +
-          '<td class="dz-sm-hide">' + venueOf(r) + '</td>' +
-          '<td class="dz-sm-hide' + (intl ? ' dz-muted' : '') + '"' + (t ? ' title="' + esc(t) + '"' : '') + '>' + (intl ? 'No' : 'Yes') + '</td>' +
-          '<td class="ta-right dz-sm-hide' + (intl ? ' dz-muted' : '') + '"' + (intl ? ' title="' + esc(AVAIL_TITLE.intl) + '"' : '') + '>' + n0(g.ukViews) + '</td>' +
+          '<td class="dz-sm-hide ta-center dz-avail dz-avail--' + (intl ? 'no' : 'yes') + '" title="' + esc(t || 'Shown in the UK') + '">' +
+            availIcon(intl) + '</td>' +
+          /* Not shown in the UK: the UK figure is faded, so a handful of
+             views reads as expected rather than as a failure. */
+          '<td class="ta-right dz-sm-hide' + (intl ? ' dz-faint' : '') + '"' + (intl ? ' title="' + esc(AVAIL_TITLE.intl) + '"' : '') + '>' + n0(g.ukViews) + '</td>' +
           '<td class="ta-right dz-sm-hide">' + n0(g.intlViews) + '</td>' +
           '<td class="ta-right dz-strong">' + n0(r.total) + '</td>' +
           '<td class="dz-grid__barcol">' + bar(g.ukViews, g.intlViews, max) + '</td>' +
@@ -422,7 +452,7 @@
         '</tr>';
       },
       total: '<tr>' +
-        '<td>Total</td><td>' + n0(s.games) + ' games</td><td class="dz-sm-hide"></td><td class="dz-sm-hide"></td>' +
+        '<td>Total</td><td>' + n0(s.games) + ' games</td><td class="dz-sm-hide"></td>' +
         '<td class="ta-right dz-sm-hide">' + n0(s.ukViews) + '</td>' +
         '<td class="ta-right dz-sm-hide">' + n0(s.intlViews) + '</td>' +
         '<td class="ta-right">' + n0(s.views) + '</td>' +
