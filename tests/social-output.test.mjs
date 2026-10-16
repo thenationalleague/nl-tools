@@ -186,3 +186,50 @@ test('months run newest first and wrap the year', () => {
   assert.deepEqual(plain(S.monthsFrom('2025-11', '2026-02')), ['2026-02', '2026-01', '2025-12', '2025-11']);
   assert.equal(S.monthLabel('2026-08'), 'August 2026');
 });
+
+test('rows from other months are rejected and counted per month as overspill', () => {
+  const rows = [
+    row({ 'Tweet ID': '1', 'Posted At': '2026-08-10T09:00:00Z' }),
+    row({ 'Tweet ID': '2', 'Posted At': '2026-09-01T09:00:00Z' }),
+    row({ 'Tweet ID': '3', 'Posted At': '2026-09-02T09:00:00Z' }),
+    row({ 'Tweet ID': '4', 'Posted At': '2026-07-31T09:00:00Z' })
+  ];
+  const plan = S.planImport(parse(rows).posts, {}, { month: '2026-08', rules: RULES });
+  assert.deepEqual(plain(plan.overspill), { '2026-09': 2, '2026-07': 1 });
+  assert.deepEqual(plain(Object.keys(plan.updates)), ['1']);
+});
+
+test('a multi-month file cannot carry one month\'s reshares into another', () => {
+  /* Own posts in August and September, and an August-dated reshare. Imported
+     as September, the reshare is August's and must not be carried. */
+  const rows = [
+    row({ 'Tweet ID': '1', 'Posted At': '2026-08-10T09:00:00Z' }),
+    row({ 'Tweet ID': '2', 'Posted At': '2026-09-10T09:00:00Z' }),
+    row({ 'Tweet ID': '3', 'Posted At': '2026-08-15T14:47:00Z', 'Type': 'repost' })
+  ];
+  const sep = S.planImport(parse(rows).posts, {}, { month: '2026-09', rules: RULES });
+  assert.ok(!sep.updates['rt_3']);
+  assert.equal(sep.stats.carried, 0);
+  const aug = S.planImport(parse(rows).posts, {}, { month: '2026-08', rules: RULES });
+  assert.ok(aug.updates['rt_3']);
+});
+
+test('a single-month file still carries a reshare of an older post', () => {
+  const rows = [
+    row({ 'Tweet ID': '1', 'Posted At': '2026-08-10T09:00:00Z' }),
+    row({ 'Tweet ID': '9', 'Posted At': '2026-07-20T09:00:00Z', 'Type': 'repost' })
+  ];
+  const plan = S.planImport(parse(rows).posts, {}, { month: '2026-08', rules: RULES });
+  assert.ok(plan.updates['rt_9']);
+  assert.equal(plan.stats.carried, 1);
+});
+
+test('gaps list empty days and days with reshares but no own post', () => {
+  const plan = S.planImport(parse(SAMPLE).posts, {}, { month: '2026-08', rules: RULES });
+  /* SAMPLE has posts on 08, 09 and 11 August, all with an own post. */
+  assert.equal(plan.gaps.empty.length, 28);
+  assert.ok(plan.gaps.empty.includes('2026-08-10'));
+  assert.equal(plan.gaps.noOwn.length, 0);
+  const onlyRs = S.planImport(parse([row({ 'Tweet ID': '5', 'Posted At': '2026-08-20T09:00:00Z', 'Type': 'repost' })]).posts, {}, { month: '2026-08', rules: RULES });
+  assert.deepEqual(plain(onlyRs.gaps.noOwn), ['2026-08-20']);
+});

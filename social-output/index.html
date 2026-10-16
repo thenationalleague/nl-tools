@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Social Output
-  Version: v1.0 (16/10/2026)
+  Version: v1.1 (16/10/2026)
   File: /social-output/index.html
 
   Month-by-month record of what the league's social channels put out — own
@@ -26,6 +26,11 @@
   Logic with no DOM lives in _data.js (tested: tests/social-output.test.mjs).
 
   Changelog
+    v1.1 (16/10/2026) — Import preview flags, never blocks: rows from other
+                        months (left out, counted per month), reshares of
+                        older posts kept in the month, days with no posts at
+                        all, and days with reshares but no own post. Needs
+                        _data.js v1.1.
     v1.0 (16/10/2026) — Phase 1: X. Import tab reads the X Output Scraper CSV
                         by column alias and previews new/updated/unchanged/
                         skipped before writing. Overview (print-friendly),
@@ -84,6 +89,13 @@
     window.NL_CHANGELOG = [
       {
         date: '16/10/2026',
+        version: 'v1.1',
+        items: [
+          'Before you import, the preview now flags rows from other months (left out), days with no posts, and days with reshares but no own post.'
+        ]
+      },
+      {
+        date: '16/10/2026',
         version: 'v1.0',
         items: [
           'First release, covering X.',
@@ -117,7 +129,7 @@
   <script src="/system/nl-topbar.js?v=10"></script>
   <script src="/system/auth-guard.js?v=16"></script>
 
-  <script src="/social-output/_data.js?v=1"></script>
+  <script src="/social-output/_data.js?v=2"></script>
 
 <style>
   /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
@@ -966,7 +978,7 @@
       view.appendChild(el('details', { className: 'disclosure', style: 'margin-bottom:24px' }, [
         el('summary', { className: 'so-summary', text: 'Monthly routine' }),
         el('ol', { className: 'so-steps' }, [
-          el('li', { text: '1st–4th: run the X Output Scraper in Everything mode for last month. Your own account, never the league\'s.' }),
+          el('li', { text: '1st–4th: run the X Output Scraper in Everything mode for last month, 1st to last day. Your own account, never the league\'s.' }),
           el('li', { text: '5th, 06:00: Apps Script pulls Instagram, Facebook and YouTube (from phase 2).' }),
           el('li', { text: '5th onwards: upload the X file here, then TikTok and LinkedIn exports (from phase 4).' }),
           el('li', { text: 'Share the Overview once nothing above says Missing.' })
@@ -1030,16 +1042,44 @@
     }
     var plan = SD.planImport(parsed.posts, existing, { month: month, rules: rulesFor(channel), now: new Date().toISOString() });
     var st = plan.stats;
-    var skippedTotal = st.skipped + parsed.skipped.length;
+    var skippedTotal = st.skipped - st.outside + parsed.skipped.length;
     var changes = st.created + st.updated;
+    var mName = SD.monthLabel(month).split(' ')[0];
 
     preview.appendChild(el('div', { className: 'stats' }, [
       stat(rows(parsed), 'Rows read'),
       stat(st.created, 'New'),
       stat(st.updated, 'Updated'),
       stat(st.unchanged, 'Unchanged'),
+      stat(st.outside, 'Other months'),
       stat(skippedTotal, 'Skipped')
     ]));
+
+    /* Flags. None of these blocks the write: rows from other months are
+       already left out, and a gap may be a genuinely quiet day. */
+    var spill = Object.keys(plan.overspill).sort();
+    if (spill.length) {
+      preview.appendChild(el('div', { className: 'banner banner--amber' }, [
+        el('strong', { text: 'Not imported, outside ' + mName + ': ' }),
+        spill.map(function (m) { return fmt(plan.overspill[m]) + ' from ' + (m === '?' ? 'an unknown month' : SD.monthLabel(m)); }).join(', ') + '.'
+      ]));
+    }
+    if (st.carried) {
+      preview.appendChild(el('div', { className: 'banner banner--info' }, [
+        el('strong', { text: fmt(st.carried) + ' reshare' + (st.carried === 1 ? '' : 's') + ' of older posts' }),
+        ' kept in ' + mName + '. X shows the original post\'s date, not the reshare\'s.'
+      ]));
+    }
+    function dayList(dates) {
+      return dates.map(function (d) { return ukLocal(d + ' 12:00', { short: true, dateOnly: true }); }).join(', ');
+    }
+    if (plan.gaps.empty.length || plan.gaps.noOwn.length) {
+      preview.appendChild(el('div', { className: 'banner banner--amber' }, [
+        plan.gaps.empty.length ? el('div', null, [el('strong', { text: 'No posts at all on ' + plan.gaps.empty.length + ' day' + (plan.gaps.empty.length === 1 ? '' : 's') + ': ' }), dayList(plan.gaps.empty) + '.']) : null,
+        plan.gaps.noOwn.length ? el('div', null, [el('strong', { text: 'Reshares but no own post on: ' }), dayList(plan.gaps.noOwn) + '.']) : null,
+        el('div', { text: 'A run of empty days at the start or end usually means the scrape did not cover the whole month.' })
+      ]));
+    }
     if (parsed.columns.unrecognised.length) {
       preview.appendChild(el('div', { className: 'banner banner--amber' }, [
         el('strong', { text: 'Not read: ' }), parsed.columns.unrecognised.join(', ') + '. ',
