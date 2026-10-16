@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Content Plan
-  Version: v2.2 (16/10/2026)
+  Version: v2.3 (16/10/2026)
   File: /content-plan/index.html
 
   Plans and records everything the media team publishes: website stories,
@@ -121,6 +121,10 @@
                         --white; sortable headers hold a button; Settings tabs carry
                         tablist / tab / aria-selected; icons on the 16px ladder; no
                         invisible spinner; waffle trimmed; changelog corrected.
+    v2.3 (16/10/2026) – Author picker: one dropdown plus a + that adds another (the new
+                        one leaves out anyone already picked), × to remove; "Other…"
+                        for a guest writer stays on the first. Used in the add form and
+                        the editor; replaces the co-author tick boxes.
 -->
 <html lang="en">
 <head>
@@ -170,14 +174,14 @@
     window.NL_CHANGELOG = [
       {
         date: '16 October 2026',
-        version: 'v2.2',
+        version: 'v2.3',
         items: [
           'The content plan now lives here instead of the Google Sheet.',
           'Month and week calendars: drag an item to another day, or onto an hour in week view.',
           'Give items a time, like 09:00, so everyone knows roughly when they go out.',
           'A list view for checking and tagging lots of items at once.',
           'An Ideas tab for things without a date yet. Schedule one and it lands on the calendar.',
-          'Pick a category (each has its own colour) and an author, with "Other…" for guest writers.',
+          'Pick a category (each has its own colour) and an author; press + to add more authors, or "Other…" for a guest writer.',
           'Every item shows what it is with a symbol: article, video, graphic or club.',
           'Tick an item when it\u2019s published.',
           'Show where each item goes: the website, X, Facebook, Instagram, TikTok, LinkedIn or YouTube.',
@@ -333,7 +337,6 @@
   @media (max-width: 700px) { .cp-in, .cp-add input { font-size: 16px; } }
 
   /* Modals */
-  .cp-checks { display: flex; flex-wrap: wrap; gap: 6px 14px; }
   .cp-link-results { display: grid; gap: 2px; max-height: 180px; overflow-y: auto; margin-top: 6px; }
   .cp-link-results button { text-align: left; background: var(--off-white); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 8px; font-family: var(--font); font-size: var(--text-sm); cursor: pointer; }
   .cp-link-results button:hover { border-color: var(--navy-300); }
@@ -371,6 +374,9 @@
   .cp-idea__meta { font-size: var(--text-xs); color: var(--g-muted); }
   .cp-idea__actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
   .cp-span { grid-column: 1 / -1; }
+  .cp-authors { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+  .cp-authors__row { display: flex; gap: 4px; align-items: center; min-width: 0; }
+  .cp-authors .cp-author-sel { width: auto; min-width: 12rem; }
   .cp-nowrap { white-space: nowrap; }
   .cp-ties { display: grid; gap: 2px; margin-top: 8px; font-size: var(--text-sm); }
   .cp-tie { padding: 3px 0; border-top: 1px solid var(--navy-100); overflow-wrap: anywhere; }
@@ -1165,13 +1171,10 @@
     kind.addEventListener('change', function () {
       if (plats) plats.set(defaultPlatforms(kind.value, last));
     });
-    var authorOpts = authorList(false).map(function (a) { return { key: a.key, label: a.name || a.key }; }).concat([{ key: '_other', label: 'Other…' }]);
-    var auth = sel(authorOpts, last.author || '', 'Author'); auth.setAttribute('aria-label', 'Author');
-    var other = el('input'); other.type = 'text'; other.placeholder = 'Guest writer name'; other.hidden = true; other.maxLength = 80; other.setAttribute('aria-label', 'Guest writer name');
-    auth.addEventListener('change', function () { other.hidden = auth.value !== '_other'; if (!other.hidden) other.focus(); });
+    var auth = authorPicker({ author: (S.config.authors || {})[last.author] ? last.author : '' });
     var time = el('input'); time.type = 'time'; time.step = 300; time.setAttribute('aria-label', 'Time (optional)');
     var type = sel(TYPES, '', 'Type'); type.setAttribute('aria-label', 'Type');
-    [kind, cat, auth, other, time, type].forEach(function (x) { row.appendChild(x); });
+    [kind, cat, auth, time, type].forEach(function (x) { row.appendChild(x); });
     form.appendChild(row);
 
     plats = platformToggles(defaultPlatforms(kind.value, last));
@@ -1188,20 +1191,19 @@
       e.preventDefault();
       var t = title.value.trim();
       if (!t) { title.focus(); NL.toast('Add a title', 'error'); return; }
-      if (auth.value === '_other' && !other.value.trim()) { other.focus(); NL.toast('Add the guest writer’s name', 'error'); return; }
+      if (auth.needsGuest()) { NL.toast('Add the guest writer’s name', 'error'); return; }
       var data = blankItem(date);
       data.title = t;
       var kp = kindPatch(kind.value || 'web'); data.lane = kp.lane; data.format = kp.format;
       data.category = cat.value || null;
-      if (auth.value === '_other') data.authorOther = other.value.trim();
-      else data.author = auth.value || null;
+      var av = auth.value(); data.author = av.author; data.authorOther = av.authorOther; data.coAuthors = av.coAuthors;
       data.time = time.value || null;
       data.type = type.value || null;
       data.platforms = plats.value();
       save.disabled = true;
       createItem(data).then(function () {
         var byKind = last.platformsByKind || {}; byKind[kind.value] = data.platforms;
-        lsSet(prefsKey(), { platformsByKind: byKind, kind: kind.value, category: cat.value, author: auth.value === '_other' ? '' : auth.value });
+        lsSet(prefsKey(), { platformsByKind: byKind, kind: kind.value, category: cat.value, author: auth.value().author || '' });
         NL.toast('Added');
         S.addingOn = date;          // keep the form open for the next one, fresh
         S.addForm = null;
@@ -1220,6 +1222,79 @@
     };
   }
 
+
+  /* Author picker: one dropdown, a + to add another author (the new dropdown
+     leaves out anyone already picked), × to remove an extra one. The first
+     dropdown also offers "Other…" for a guest writer.
+     value() → { author, authorOther, coAuthors } in the stored item shape. */
+  function authorPicker(init, inForm) {
+    /* Inside a .form-group the canon form select style applies, so no .nl-select there. */
+    var selCls = inForm ? 'cp-author-sel' : null;
+    var state = { lead: init.authorOther ? '_other' : (init.author || ''), guest: init.authorOther || '', co: asArray(init.coAuthors).slice() };
+    var box = el('div', 'cp-authors');
+    box.setAttribute('role', 'group'); box.setAttribute('aria-label', 'Authors');
+    function opts(exclude, current) {
+      var list = authorList(true).filter(function (a) {
+        if (a.key === current) return true;
+        return a.active && exclude.indexOf(a.key) < 0;
+      }).map(function (a) { return { key: a.key, label: a.label + (a.active ? '' : ' (retired)') }; });
+      if (current && current !== '_other' && !lookup(list, current)) list.push({ key: current, label: current + ' (not in list)' });
+      return list;
+    }
+    function taken(exceptIndex) {
+      var t = [];
+      if (state.lead && state.lead !== '_other') t.push(state.lead);
+      state.co.forEach(function (k, i) { if (k && i !== exceptIndex) t.push(k); });
+      return t;
+    }
+    function draw(focusIdx) {
+      box.innerHTML = '';
+      var first = el('div', 'cp-authors__row');
+      var leadOpts = opts(taken(-1).filter(function (k) { return k !== state.lead; }), state.lead).concat([{ key: '_other', label: 'Other…' }]);
+      var lead = sel(leadOpts, state.lead, 'Author', selCls); lead.setAttribute('aria-label', 'Author');
+      lead.addEventListener('change', function () { state.lead = lead.value; draw(0); });
+      first.appendChild(lead);
+      if (state.lead === '_other') {
+        var g = el('input', 'cp-in'); g.type = 'text'; g.placeholder = 'Guest writer name'; g.maxLength = 80; g.value = state.guest;
+        g.setAttribute('aria-label', 'Guest writer name');
+        g.addEventListener('input', function () { state.guest = g.value; });
+        first.appendChild(g);
+        if (focusIdx === 0) setTimeout(function () { g.focus(); }, 0);
+      }
+      box.appendChild(first);
+      state.co.forEach(function (k, i) {
+        var r = el('div', 'cp-authors__row');
+        var s2 = sel(opts(taken(i), k), k, 'Author', selCls); s2.setAttribute('aria-label', 'Author ' + (i + 2));
+        s2.addEventListener('change', function () { state.co[i] = s2.value; draw(i + 1); });
+        var x = el('button', 'btn btn--icon btn--ghost'); x.type = 'button';
+        x.setAttribute('aria-label', 'Remove this author'); x.title = 'Remove';
+        x.appendChild(NL.icon('close', 'sm'));
+        x.addEventListener('click', function () { state.co.splice(i, 1); draw(0); });
+        r.appendChild(s2); r.appendChild(x);
+        box.appendChild(r);
+        if (focusIdx === i + 1 && !k) setTimeout(function () { s2.focus(); }, 0);
+      });
+      /* + sits after the last author; it goes once nobody is left to add. */
+      var spare = opts(taken(-1), null).length > 0;
+      if (state.lead && spare) {
+        var plus = el('button', 'btn btn--icon btn--ghost'); plus.type = 'button';
+        plus.setAttribute('aria-label', 'Add another author'); plus.title = 'Add another author';
+        plus.appendChild(NL.icon('add', 'sm'));
+        plus.addEventListener('click', function () { state.co.push(''); draw(state.co.length); });
+        box.appendChild(plus);
+      }
+    }
+    draw(-1);
+    box.value = function () {
+      var lead = state.lead === '_other' ? null : (state.lead || null);
+      var co = state.co.filter(function (k, i, a) { return k && k !== lead && a.indexOf(k) === i; });
+      return { author: lead, authorOther: state.lead === '_other' ? state.guest.trim() : null, coAuthors: co.length ? co : null };
+    };
+    box.needsGuest = function () { return state.lead === '_other' && !state.guest.trim(); };
+    box.lead = function () { return state.lead; };
+    return box;
+  }
+
   /* ── Full editor modal ─────────────────────────────────────────────── */
   function field(label, control, span2, hint) {
     var g = el('div', 'form-group' + (span2 ? ' span2' : ''));
@@ -1232,16 +1307,7 @@
     if (hint) g.appendChild(el('div', 'form-hint', hint));
     return g;
   }
-  function checkGroup(options, onKeys) {
-    var box = el('div', 'cp-checks');
-    var inputs = {};
-    options.forEach(function (o) {
-      var l = el('label', 'cp-check'); var c = el('input'); c.type = 'checkbox'; c.checked = onKeys.indexOf(o.key) >= 0;
-      inputs[o.key] = c; l.appendChild(c); l.appendChild(document.createTextNode(o.label)); box.appendChild(l);
-    });
-    box.values = function () { return Object.keys(inputs).filter(function (k) { return inputs[k].checked; }); };
-    return box;
-  }
+
   function openEditor(it, date) {
     if (!S.canEdit) { if (it) openReadOnly(it); return; }
     var isNew = !it;
@@ -1266,23 +1332,11 @@
     var type = sel(TYPES, d.type || '', 'Not classified');
     form.appendChild(field('Type', type, false, 'Did the world prompt it (routine / reactive), or did the team decide to make it (original)?'));
 
-    var authors = authorList(true);
-    var aOpts = authors.filter(function (a) { return a.active || a.key === d.author; })
-      .map(function (a) { return { key: a.key, label: a.label + (a.active ? '' : ' (retired)') }; });
-    if (d.author && !lookup(aOpts, d.author)) aOpts.push({ key: d.author, label: d.author + ' (not in list)' });
-    aOpts.push({ key: '_other', label: 'Other…' });
-    var auth = sel(aOpts, d.authorOther ? '_other' : (d.author || ''), 'Unassigned');
-    form.appendChild(field('Author', auth));
-    var other = el('input'); other.type = 'text'; other.value = d.authorOther || ''; other.maxLength = 80; other.placeholder = 'Guest writer name';
-    var otherGroup = field('Guest writer', other);
-    otherGroup.hidden = auth.value !== '_other';
-    auth.addEventListener('change', function () { otherGroup.hidden = auth.value !== '_other'; });
-    form.appendChild(otherGroup);
+    var auth = authorPicker(d, true);
+    form.appendChild(field('Authors', auth, true));
 
     var platBox = platformToggles(isNew ? defaultPlatforms(curKind, lsGet(prefsKey())) : d.platforms);
     form.appendChild(field('Posted on', platBox, true));
-    var coBox = checkGroup(authors.filter(function (a) { return a.active; }).map(function (a) { return { key: a.key, label: a.label }; }), asArray(d.coAuthors));
-    form.appendChild(field('Co-authors', coBox, true));
 
 
     /* Linked item: search loaded items by title */
@@ -1328,15 +1382,13 @@
       var t = title.value.trim();
       if (!t) { title.focus(); NL.toast('Add a title', 'error'); return null; }
       if (!dateIn.value) { dateIn.focus(); NL.toast('Pick a date', 'error'); return null; }
-      if (auth.value === '_other' && !other.value.trim()) { other.focus(); NL.toast('Add the guest writer’s name', 'error'); return null; }
-      var co = coBox.values().filter(function (k) { return k !== auth.value; });
+      if (auth.needsGuest()) { NL.toast('Add the guest writer’s name', 'error'); return null; }
+      var av = auth.value();
       var kp = kindPatch(kind.value, d);
       var out = {
         title: t, date: dateIn.value, time: timeIn.value || null, lane: kp.lane, format: kp.format,
         status: status.value || 'planned', category: cat.value || null, type: type.value || null,
-        author: auth.value && auth.value !== '_other' ? auth.value : null,
-        authorOther: auth.value === '_other' ? other.value.trim() : null,
-        coAuthors: co.length ? co : null, linkedItemId: linkId, platforms: platBox.value(),
+        author: av.author, authorOther: av.authorOther, coAuthors: av.coAuthors, linkedItemId: linkId, platforms: platBox.value(),
         notes: notes.value.trim(), needsReview: false
       };
       if (out.status === 'published' && d.status !== 'published') {
