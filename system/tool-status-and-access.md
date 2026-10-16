@@ -68,9 +68,9 @@ so nothing is lost.
 
 ---
 
-## Live — 17 records
+## Live — 18 records
 
-### League audience — NL staff only, clubs never (7)
+### League audience — NL staff only, clubs never (8)
 
 | Tool | Key | League Admin | League Staff | Notes |
 |---|---|---|---|---|
@@ -80,6 +80,7 @@ so nothing is lost.
 | **Website Archive** | `staff-website-archive` | Manage | Use | **Reads the admin level.** Granting Manage was a no-op until v2.7 — it read `toolPerms.admin` on a string |
 | **Programme Packs (admin)** | `media-programme` | Manage | Off | Console for `/programme/`; the club-facing side is the Storage-backed page, not this |
 | **Fan Widgets** | `ops-fan-widgets` | Off | Off | Superadmin only today |
+| **Content Plan** | `media-content-plan` | Use | Use | **Reads the admin level.** Media team plan and record what is published; editing needs a per-user Manage grant (the default is view-only for everyone else). Superadmin also gets Settings → Import for the one-off load of the old sheet |
 | **Brand Exposure** | `ops-brand-exposure` | Manage | Off | Commercial team only — grants are per-user, like Commercial Compliance. Holds match measurements produced by `scripts/board-exposure-match.py` on a laptop; the tool never sees video |
 
 Two tools carry a registry record but no row above: `ops-club-codes` and

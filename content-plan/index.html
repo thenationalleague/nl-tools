@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Content Plan
-  Version: v2.0 (16/10/2026)
+  Version: v2.1 (16/10/2026)
   File: /content-plan/index.html
 
   Plans and records everything the media team publishes: website stories,
@@ -108,6 +108,8 @@
                         category KEY; older values (labels, and the sheet's National /
                         North / South / NL Cup) resolve to Football. Colour groups and
                         the colour filter are gone: the category is the colour.
+    v2.1 (16/10/2026) – Cup fixtures move into Settings as a tab (paste at the top,
+                        saved fixtures below) and off the calendar toolbar.
 -->
 <html lang="en">
 <head>
@@ -157,7 +159,7 @@
     window.NL_CHANGELOG = [
       {
         date: '16 October 2026',
-        version: 'v2.0',
+        version: 'v2.1',
         items: [
           'The content plan now lives here instead of the Google Sheet.',
           'Month and week calendars: drag an item to another day, or onto an hour in week view.',
@@ -356,10 +358,12 @@
   .cp-idea__meta { font-size: var(--text-xs); color: var(--g-muted); }
   .cp-idea__actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
   .cp-span { grid-column: 1 / -1; }
+  .cp-nowrap { white-space: nowrap; }
   .cp-ties { display: grid; gap: 2px; margin-top: 8px; font-size: var(--text-sm); }
   .cp-tie { padding: 3px 0; border-top: 1px solid var(--navy-100); overflow-wrap: anywhere; }
   .cp-cup__paste { width: 100%; font-family: var(--font-mono) !important; white-space: pre; overflow-wrap: normal; overflow-x: auto; }
   .cp-cup__preview { display: grid; gap: 6px; margin-top: 10px; }
+  .cp-cup__saved { margin-top: 24px; }
   .cp-loading { padding: 20px; color: var(--text-muted); display: flex; gap: 8px; align-items: center; }
 
   @media (max-width: 640px) {
@@ -900,12 +904,6 @@
       var settings = el('button', 'btn btn--ghost btn--sm'); settings.type = 'button';
       settings.appendChild(icon('settings')); settings.appendChild(document.createTextNode(' Settings'));
       settings.addEventListener('click', openSettings);
-      if (S.view === 'calendar') {
-        var cupBtn = el('button', 'btn btn--ghost btn--sm'); cupBtn.type = 'button';
-        cupBtn.appendChild(icon('calendar')); cupBtn.appendChild(document.createTextNode(' Cup fixtures'));
-        cupBtn.addEventListener('click', openCupFixtures);
-        right.appendChild(cupBtn);
-      }
       right.appendChild(settings);
       if (S.view !== 'ideas') {
         var add = el('button', 'btn btn--primary btn--sm'); add.type = 'button';
@@ -1541,14 +1539,17 @@
     var wrap = el('div');
     var tabs = el('div', 'tabs');
     var panes = {};
-    var names = [['categories', 'Categories'], ['authors', 'Authors']];
+    var names = [['categories', 'Categories'], ['authors', 'Authors'], ['cup', 'Cup fixtures']];
     if (S.isSuper) names.push(['import', 'Import']);
+    var ctrl = null;   // the modal, so the footer Save can hide on tabs it doesn't apply to
     names.forEach(function (n, i) {
       var b = el('button', 'tab' + (i === 0 ? ' active' : ''), n[1]); b.type = 'button';
       b.addEventListener('click', function () {
         tabs.querySelectorAll('.tab').forEach(function (x) { x.classList.remove('active'); });
         b.classList.add('active');
         Object.keys(panes).forEach(function (k) { panes[k].hidden = k !== n[0]; });
+        var footSave = ctrl && ctrl.el.querySelector('.modal__footer .btn--primary');
+        if (footSave) footSave.hidden = n[0] === 'cup' || n[0] === 'import';
       });
       tabs.appendChild(b);
       panes[n[0]] = el('div'); panes[n[0]].hidden = i !== 0;
@@ -1603,6 +1604,7 @@
     ap.appendChild(addAuth);
 
     /* Import (superadmin) */
+    buildCupPane(panes.cup);
     if (panes['import']) buildImportPane(panes['import']);
 
     Object.keys(panes).forEach(function (k) { wrap.appendChild(panes[k]); });
@@ -1636,7 +1638,7 @@
         return db.ref(ROOT + '/config').update({ categories: cats, authors: auths });
       }).then(function () { NL.toast('Settings saved'); c.close(); }).catch(fail);
     }
-    NL.modal({ title: 'Settings', body: wrap, width: 'wide', buttons: [
+    ctrl = NL.modal({ title: 'Settings', body: wrap, width: 'wide', buttons: [
       { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
       { label: 'Save settings', className: 'btn--primary', onClick: save }
     ] });
@@ -1741,6 +1743,7 @@
       if (!comp) { out.push({ ok: false, row: i + 1, raw: line, reason: 'Competition isn’t FA Cup or FA Trophy' }); return; }
       var home = c[3] || '', away = c.length >= 6 ? c[5] : (c[4] || '');
       if (!home || !away) { out.push({ ok: false, row: i + 1, raw: line, reason: 'Missing a team' }); return; }
+      if (home.length > 80 || away.length > 80) { out.push({ ok: false, row: i + 1, raw: line, reason: 'A team name is over 80 characters' }); return; }
       out.push({ ok: true, row: i + 1, fixture: { date: when.date, time: when.time, round: c[1] || '', comp: comp, home: home, away: away } });
     });
     return out;
@@ -1763,22 +1766,11 @@
     return (f.time ? f.time + ' ' : '') + c.short + (f.round ? ' ' + f.round : '') + ' – ' + f.home + ' v ' + f.away;
   }
 
-  function openCupFixtures() {
-    var wrap = el('div', 'cp-cup');
-    var tabs = el('div', 'tabs');
+  /* Settings → Cup fixtures: paste at the top, saved fixtures below. */
+  function buildCupPane(pane) {
     var paneAdd = el('div'), paneList = el('div');
-    [['Paste fixtures', paneAdd], ['Saved fixtures', paneList]].forEach(function (t, i) {
-      var b = el('button', 'tab' + (i === 0 ? ' active' : ''), t[0]); b.type = 'button';
-      b.addEventListener('click', function () {
-        tabs.querySelectorAll('.tab').forEach(function (x) { x.classList.remove('active'); });
-        b.classList.add('active');
-        paneAdd.hidden = t[1] !== paneAdd; paneList.hidden = t[1] !== paneList;
-        if (t[1] === paneList) loadList();
-      });
-      tabs.appendChild(b);
-    });
-    paneList.hidden = true;
-    wrap.appendChild(tabs); wrap.appendChild(paneAdd); wrap.appendChild(paneList);
+    var head = el('div', 'section-head cp-cup__saved'); head.appendChild(el('h2', null, 'Saved fixtures'));
+    pane.appendChild(paneAdd); pane.appendChild(head); pane.appendChild(paneList);
 
     /* Paste */
     var ta = el('textarea', 'cp-in cp-cup__paste'); ta.rows = 8; ta.id = 'cpCupPaste';
@@ -1859,7 +1851,7 @@
       rows.slice(0, 400).forEach(function (f) {
         var tr = el('tr');
         [uk(f.date) + (f.time ? ' ' + f.time : ''), (lookup(CUP_COMPS, f.comp) || {}).short, f.round || '', f.home + ' v ' + f.away].forEach(function (v) { tr.appendChild(el('td', null, v)); });
-        var td = el('td', 'ta-right');
+        var td = el('td', 'ta-right cp-nowrap');
         var e = el('button', 'btn btn--ghost btn--sm', 'Edit'); e.type = 'button';
         e.addEventListener('click', function () { editCupFixture(f, function () { loadList(); }); });
         var d = el('button', 'btn btn--danger btn--sm', 'Delete'); d.type = 'button';
@@ -1882,27 +1874,29 @@
     q.addEventListener('input', drawList);
     pastCb.addEventListener('change', drawList);
 
-    NL.modal({ title: 'Cup fixtures', body: wrap, width: 'wide', buttons: [
-      { label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } },
-      { label: 'Save pasted fixtures', className: 'btn--primary', onClick: function (c) {
-        var good = parsed.filter(function (p) { return p.ok; });
-        if (!good.length) { NL.toast('Paste some fixtures first', 'error'); return; }
-        var u = {};
-        good.forEach(function (p) {
-          var f = p.fixture;
-          u[cupKey(f)] = { date: f.date, time: f.time || null, round: f.round, comp: f.comp, home: f.home, away: f.away,
-            updatedBy: S.session.uid, updatedAt: firebase.database.ServerValue.TIMESTAMP };
-        });
-        NL.ensureAuth().then(function () {
-          NL.writeAudit('content_plan_cup_paste', { count: good.length });
-          return db.ref(ROOT + '/cupFixtures').update(u);
-        }).then(function () {
-          NL.toast(good.length + ' fixture' + (good.length === 1 ? '' : 's') + ' saved');
-          ta.value = ''; preview.innerHTML = ''; parsed = []; existing = null;
-          listen();
-        }).catch(fail);
-      } }
-    ] });
+    var saveBtn = el('button', 'btn btn--primary btn--sm', 'Save pasted fixtures'); saveBtn.type = 'button';
+    var saveRow = el('div', 'cp-add__row'); saveRow.appendChild(saveBtn);
+    paneAdd.appendChild(saveRow);
+    saveBtn.addEventListener('click', function () {
+      var good = parsed.filter(function (p) { return p.ok; });
+      if (!good.length) { NL.toast('Paste some fixtures first', 'error'); return; }
+      var u = {};
+      good.forEach(function (p) {
+        var f = p.fixture;
+        u[cupKey(f)] = { date: f.date, time: f.time || null, round: f.round, comp: f.comp, home: f.home, away: f.away,
+          updatedBy: S.session.uid, updatedAt: firebase.database.ServerValue.TIMESTAMP };
+      });
+      saveBtn.disabled = true;
+      NL.ensureAuth().then(function () {
+        NL.writeAudit('content_plan_cup_paste', { count: good.length });
+        return db.ref(ROOT + '/cupFixtures').update(u);
+      }).then(function () {
+        NL.toast(good.length + ' fixture' + (good.length === 1 ? '' : 's') + ' saved');
+        ta.value = ''; preview.innerHTML = ''; parsed = []; existing = null; saveBtn.disabled = false;
+        loadList(); listen();
+      }).catch(function (err) { saveBtn.disabled = false; fail(err); });
+    });
+    loadList();
   }
   function editCupFixture(f, done) {
     var form = el('div', 'form-grid');

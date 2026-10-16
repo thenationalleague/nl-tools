@@ -4,8 +4,13 @@ Content Plan importer – turns the legacy "Content plan" Google Sheet (.xlsx ex
 into JSON for /app-data/media-content-plan/ in RTDB. Load the output through
 the tool's Settings → Import (superadmin), not the Firebase console.
 
-Version: v1.3 – 16/10/2026
+Version: v1.4 – 16/10/2026
 Changelog
+  v1.4 (16/10/2026) – Public-repo hygiene: no built-in initials (--authors is required),
+                      --out is required and must sit outside the repo. Titles are cut
+                      to 300 and day notes to 1000 characters (the RTDB rule limits),
+                      with a review reason, so one long cell can't reject a whole
+                      import batch.
   v1.3 (16/10/2026) – Categories are the Content Plan's own list now, stored by key.
                       The sheet's National / North / South / NL Cup become
                       'football'; Awards, League, Statements, Trust, U19, 3UP map
@@ -26,14 +31,14 @@ Changelog
                       and import-review.csv.
 
 Run once, locally, against the export. NEVER commit the outputs: they hold staff
-initials and day notes, and this repo is public. Write them somewhere outside the
-repo (the default --out is the current directory, so run it from elsewhere).
+initials and day notes, and this repo is public. --out must be outside the repo
+(the script refuses otherwise).
 
-  python3 scripts/content-plan-import.py "Content plan.xlsx" --out ~/content-plan-import
+  python3 scripts/content-plan-import.py "Content plan.xlsx" --out ~/content-plan-import --authors AB,CD
 
 Optional:
   --today 2026-10-16   Import day. Unstruck items before it are flagged for review.
-  --authors SE,TS,RD   Initials treated as known authors (default below).
+  --authors AB,CD      Required. Initials of the known authors.
 
 Needs openpyxl (pip install openpyxl).
 """
@@ -65,7 +70,6 @@ TOOL_CATEGORY = {"national": "football", "north": "football", "south": "football
 def tool_category(label):
     return TOOL_CATEGORY.get(label.lower()) if label else None
 
-DEFAULT_AUTHORS = ["SE", "TS", "RD", "NM", "MW", "GLR", "BH", "JW"]
 
 SOCIAL_FORMATS = {"gfx": "gfx", "vid": "vid", "ad": "ad", "otd": "otd"}
 # Platform-prefixed cells: YouTube is always video; Instagram could be either.
@@ -134,11 +138,14 @@ def as_count(v):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("xlsx")
-    ap.add_argument("--out", default=".")
+    ap.add_argument("--out", required=True, help="folder OUTSIDE the repo for the outputs")
     ap.add_argument("--today", default=dt.date.today().isoformat())
-    ap.add_argument("--authors", default=",".join(DEFAULT_AUTHORS))
+    ap.add_argument("--authors", required=True, help="comma-separated initials, e.g. AB,CD")
     args = ap.parse_args()
 
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if os.path.abspath(args.out).startswith(repo + os.sep) or os.path.abspath(args.out) == repo:
+        sys.exit("--out is inside the repo. The outputs hold staff initials and must never be committed.")
     today = dt.date.fromisoformat(args.today)
     known = set(a.strip().upper() for a in args.authors.split(",") if a.strip())
     now_ms = int(dt.datetime.now().timestamp() * 1000)
@@ -168,6 +175,9 @@ def main():
             def add_item(cell, lane, title, extra, uncertain_reasons):
                 status = "published" if is_struck(cell) else "planned"
                 reasons = list(uncertain_reasons)
+                if len(title) > 300:            # RTDB rule limit
+                    title = title[:300]
+                    reasons.append("title cut to 300 characters")
                 if status == "planned" and in_past:
                     reasons.append("not struck through but dated in the past")
                 item = {
@@ -284,7 +294,7 @@ def main():
             if notes or manual:
                 d = days.setdefault(date, {})
                 if notes:
-                    d["notes"] = " / ".join(notes)
+                    d["notes"] = " / ".join(notes)[:1000]
                     counts["dayNotes"] += 1
                 if manual:
                     d["manualMatches"] = manual
