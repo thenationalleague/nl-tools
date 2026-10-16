@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Content Plan
-  Version: v2.3 (16/10/2026)
+  Version: v2.4 (16/10/2026)
   File: /content-plan/index.html
 
   Plans and records everything the media team publishes: website stories,
@@ -125,6 +125,10 @@
                         one leaves out anyone already picked), × to remove; "Other…"
                         for a guest writer stays on the first. Used in the add form and
                         the editor; replaces the co-author tick boxes.
+    v2.4 (16/10/2026) – Each author box is a typeahead on the canon .club-picker look:
+                        type to filter by name or initials, pick, or "Use … as
+                        entered" for a guest (replaces "Other…"). Picked authors are
+                        stored by key; typed names as written (co-authors too).
 -->
 <html lang="en">
 <head>
@@ -174,14 +178,14 @@
     window.NL_CHANGELOG = [
       {
         date: '16 October 2026',
-        version: 'v2.3',
+        version: 'v2.4',
         items: [
           'The content plan now lives here instead of the Google Sheet.',
           'Month and week calendars: drag an item to another day, or onto an hour in week view.',
           'Give items a time, like 09:00, so everyone knows roughly when they go out.',
           'A list view for checking and tagging lots of items at once.',
           'An Ideas tab for things without a date yet. Schedule one and it lands on the calendar.',
-          'Pick a category (each has its own colour) and an author; press + to add more authors, or "Other…" for a guest writer.',
+          'Pick a category (each has its own colour). Type an author\u2019s name to pick them, or keep what you typed for a guest writer; press + to add more authors.',
           'Every item shows what it is with a symbol: article, video, graphic or club.',
           'Tick an item when it\u2019s published.',
           'Show where each item goes: the website, X, Facebook, Instagram, TikTok, LinkedIn or YouTube.',
@@ -376,7 +380,8 @@
   .cp-span { grid-column: 1 / -1; }
   .cp-authors { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
   .cp-authors__row { display: flex; gap: 4px; align-items: center; min-width: 0; }
-  .cp-authors .cp-author-sel { width: auto; min-width: 12rem; }
+  .cp-author-combo { width: 14rem; max-width: 100%; }
+  .cp-flush { margin-bottom: 6px; }
   .cp-nowrap { white-space: nowrap; }
   .cp-ties { display: grid; gap: 2px; margin-top: 8px; font-size: var(--text-sm); }
   .cp-tie { padding: 3px 0; border-top: 1px solid var(--navy-100); overflow-wrap: anywhere; }
@@ -1191,7 +1196,6 @@
       e.preventDefault();
       var t = title.value.trim();
       if (!t) { title.focus(); NL.toast('Add a title', 'error'); return; }
-      if (auth.needsGuest()) { NL.toast('Add the guest writer’s name', 'error'); return; }
       var data = blankItem(date);
       data.title = t;
       var kp = kindPatch(kind.value || 'web'); data.lane = kp.lane; data.format = kp.format;
@@ -1223,75 +1227,135 @@
   }
 
 
-  /* Author picker: one dropdown, a + to add another author (the new dropdown
-     leaves out anyone already picked), × to remove an extra one. The first
-     dropdown also offers "Other…" for a guest writer.
-     value() → { author, authorOther, coAuthors } in the stored item shape. */
-  function authorPicker(init, inForm) {
-    /* Inside a .form-group the canon form select style applies, so no .nl-select there. */
-    var selCls = inForm ? 'cp-author-sel' : null;
-    var state = { lead: init.authorOther ? '_other' : (init.author || ''), guest: init.authorOther || '', co: asArray(init.coAuthors).slice() };
+  /* Author typeahead, on the canon .club-picker look: type to filter the
+     authors (name or initials), pick one, or keep what was typed for a guest
+     writer ("Use … as entered"). value is an author key (initials) when one
+     was picked, otherwise the typed name.
+     Canon candidate (16/10/2026): NL.clubPicker is club-specific; a generic
+     NL.combobox would serve this and any other "pick or type" field. */
+  function authorCombo(value, exclude, onChange, label) {
+    var authors = S.config.authors || {};
+    var root = el('div', 'club-picker cp-author-combo');
+    var wrap = el('div', 'club-picker__wrap');
+    var input = el('input', 'club-picker__input'); input.type = 'text'; input.autocomplete = 'off';
+    input.placeholder = 'Author'; input.setAttribute('aria-label', label || 'Author');
+    input.setAttribute('role', 'combobox'); input.setAttribute('aria-autocomplete', 'list'); input.setAttribute('aria-expanded', 'false');
+    var listId = 'cpac-' + Math.random().toString(36).slice(2, 8);
+    input.setAttribute('aria-controls', listId);
+    var dd = el('div', 'club-picker__dropdown'); dd.id = listId; dd.setAttribute('role', 'listbox');
+    wrap.appendChild(input); root.appendChild(wrap); root.appendChild(dd);
+    var current = value || '', rows = [], active = -1;
+    function show(v) { return authors[v] ? (authors[v].name || v) : (v || ''); }
+    input.value = show(current);
+    function matches(q) {
+      q = q.toLowerCase().trim();
+      return authorList(false).filter(function (a) {
+        if (exclude.indexOf(a.key) >= 0 && a.key !== current) return false;
+        return !q || a.key.toLowerCase().indexOf(q) === 0 || (a.name || '').toLowerCase().indexOf(q) >= 0;
+      });
+    }
+    function exact(q) {
+      q = q.toLowerCase().trim();
+      var hit = null;
+      authorList(true).forEach(function (a) { if (a.key.toLowerCase() === q || (a.name || '').toLowerCase() === q) hit = a.key; });
+      return hit;
+    }
+    function render() {
+      var q = input.value;
+      rows = matches(q).map(function (a) { return { key: a.key, label: a.name || a.key, sub: a.key }; });
+      var typed = q.trim();
+      if (typed && !exact(typed)) rows.push({ free: typed });
+      dd.innerHTML = '';
+      rows.forEach(function (r, i) {
+        var o = el('div', 'club-picker__option' + (r.free ? ' club-picker__option--freetext' : ''));
+        o.id = listId + '-' + i; o.setAttribute('role', 'option');
+        o.appendChild(el('span', 'club-picker__option-name', r.free ? 'Use “' + r.free + '” as entered' : r.label));
+        if (!r.free) o.appendChild(el('span', 'club-picker__option-div', r.sub));
+        o.addEventListener('mousedown', function (e) { e.preventDefault(); pick(i); });
+        dd.appendChild(o);
+      });
+      active = rows.length ? 0 : -1; paint();
+      dd.classList.toggle('open', rows.length > 0); input.setAttribute('aria-expanded', rows.length ? 'true' : 'false');
+    }
+    function paint() {
+      Array.prototype.forEach.call(dd.children, function (o, i) {
+        var on = i === active;
+        o.classList.toggle('club-picker__option--active', on); o.setAttribute('aria-selected', on ? 'true' : 'false');
+        if (on) input.setAttribute('aria-activedescendant', o.id);
+      });
+    }
+    function close() { dd.classList.remove('open'); input.setAttribute('aria-expanded', 'false'); }
+    function set(v) { current = v; input.value = show(v); close(); if (onChange) onChange(v); }
+    function pick(i) { var r = rows[i]; if (r) set(r.free || r.key); }
+    input.addEventListener('focus', render);
+    input.addEventListener('input', render);
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); if (!dd.classList.contains('open')) render(); else if (rows.length) { active = (active + 1) % rows.length; paint(); } }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); if (rows.length) { active = (active - 1 + rows.length) % rows.length; paint(); } }
+      else if (e.key === 'Enter') { if (dd.classList.contains('open') && active >= 0) { e.preventDefault(); pick(active); } }
+      else if (e.key === 'Escape') { if (dd.classList.contains('open')) { e.preventDefault(); e.stopPropagation(); close(); } }
+    });
+    /* Leaving the box lands whatever is there: a name or initials that match
+       an author pick that author; anything else is kept as typed. */
+    input.addEventListener('blur', function () {
+      var typed = input.value.trim();
+      if (typed === show(current)) { close(); return; }
+      set(typed ? (exact(typed) || typed) : '');
+    });
+    root.focusInput = function () { input.focus(); };
+    return root;
+  }
+
+  /* Authors: one typeahead, a + to add another (each new one leaves out the
+     authors already picked), × to remove an extra one.
+     value() → { author, authorOther, coAuthors } in the stored item shape:
+     a picked author is stored by key; a typed name is kept as written. */
+  function authorPicker(init) {
+    var state = { lead: init.authorOther || init.author || '', co: asArray(init.coAuthors).slice() };
     var box = el('div', 'cp-authors');
     box.setAttribute('role', 'group'); box.setAttribute('aria-label', 'Authors');
-    function opts(exclude, current) {
-      var list = authorList(true).filter(function (a) {
-        if (a.key === current) return true;
-        return a.active && exclude.indexOf(a.key) < 0;
-      }).map(function (a) { return { key: a.key, label: a.label + (a.active ? '' : ' (retired)') }; });
-      if (current && current !== '_other' && !lookup(list, current)) list.push({ key: current, label: current + ' (not in list)' });
-      return list;
-    }
-    function taken(exceptIndex) {
+    function isKey(v) { return !!(S.config.authors || {})[v]; }
+    function taken(except) {
       var t = [];
-      if (state.lead && state.lead !== '_other') t.push(state.lead);
-      state.co.forEach(function (k, i) { if (k && i !== exceptIndex) t.push(k); });
+      if (isKey(state.lead) && except !== -1) t.push(state.lead);
+      state.co.forEach(function (k, i) { if (isKey(k) && i !== except) t.push(k); });
       return t;
     }
     function draw(focusIdx) {
       box.innerHTML = '';
-      var first = el('div', 'cp-authors__row');
-      var leadOpts = opts(taken(-1).filter(function (k) { return k !== state.lead; }), state.lead).concat([{ key: '_other', label: 'Other…' }]);
-      var lead = sel(leadOpts, state.lead, 'Author', selCls); lead.setAttribute('aria-label', 'Author');
-      lead.addEventListener('change', function () { state.lead = lead.value; draw(0); });
-      first.appendChild(lead);
-      if (state.lead === '_other') {
-        var g = el('input', 'cp-in'); g.type = 'text'; g.placeholder = 'Guest writer name'; g.maxLength = 80; g.value = state.guest;
-        g.setAttribute('aria-label', 'Guest writer name');
-        g.addEventListener('input', function () { state.guest = g.value; });
-        first.appendChild(g);
-        if (focusIdx === 0) setTimeout(function () { g.focus(); }, 0);
-      }
-      box.appendChild(first);
+      var combos = [];
+      var lead = authorCombo(state.lead, taken(-1), function (v) { state.lead = v; draw(null); }, 'Author');
+      box.appendChild(lead); combos.push(lead);
       state.co.forEach(function (k, i) {
         var r = el('div', 'cp-authors__row');
-        var s2 = sel(opts(taken(i), k), k, 'Author', selCls); s2.setAttribute('aria-label', 'Author ' + (i + 2));
-        s2.addEventListener('change', function () { state.co[i] = s2.value; draw(i + 1); });
+        var c = authorCombo(k, taken(i), function (v) { state.co[i] = v; draw(null); }, 'Author ' + (i + 2));
         var x = el('button', 'btn btn--icon btn--ghost'); x.type = 'button';
         x.setAttribute('aria-label', 'Remove this author'); x.title = 'Remove';
         x.appendChild(NL.icon('close', 'sm'));
-        x.addEventListener('click', function () { state.co.splice(i, 1); draw(0); });
-        r.appendChild(s2); r.appendChild(x);
-        box.appendChild(r);
-        if (focusIdx === i + 1 && !k) setTimeout(function () { s2.focus(); }, 0);
+        x.addEventListener('click', function () { state.co.splice(i, 1); draw(null); });
+        r.appendChild(c); r.appendChild(x); box.appendChild(r); combos.push(c);
       });
-      /* + sits after the last author; it goes once nobody is left to add. */
-      var spare = opts(taken(-1), null).length > 0;
-      if (state.lead && spare) {
+      /* + sits after the last author, once the first is filled in. */
+      if (state.lead) {
         var plus = el('button', 'btn btn--icon btn--ghost'); plus.type = 'button';
         plus.setAttribute('aria-label', 'Add another author'); plus.title = 'Add another author';
         plus.appendChild(NL.icon('add', 'sm'));
         plus.addEventListener('click', function () { state.co.push(''); draw(state.co.length); });
         box.appendChild(plus);
       }
+      if (focusIdx != null && combos[focusIdx]) setTimeout(function () { combos[focusIdx].focusInput(); }, 0);
     }
-    draw(-1);
+    draw(null);
     box.value = function () {
-      var lead = state.lead === '_other' ? null : (state.lead || null);
-      var co = state.co.filter(function (k, i, a) { return k && k !== lead && a.indexOf(k) === i; });
-      return { author: lead, authorOther: state.lead === '_other' ? state.guest.trim() : null, coAuthors: co.length ? co : null };
+      var lead = state.lead.trim();
+      var co = state.co.map(function (v) { return v.trim(); })
+        .filter(function (v, i, a) { return v && v !== lead && a.indexOf(v) === i; });
+      return {
+        author: isKey(lead) ? lead : null,
+        authorOther: lead && !isKey(lead) ? lead.slice(0, 80) : null,
+        coAuthors: co.length ? co.map(function (v) { return isKey(v) ? v : v.slice(0, 80); }) : null
+      };
     };
-    box.needsGuest = function () { return state.lead === '_other' && !state.guest.trim(); };
-    box.lead = function () { return state.lead; };
     return box;
   }
 
@@ -1332,8 +1396,13 @@
     var type = sel(TYPES, d.type || '', 'Not classified');
     form.appendChild(field('Type', type, false, 'Did the world prompt it (routine / reactive), or did the team decide to make it (original)?'));
 
-    var auth = authorPicker(d, true);
-    form.appendChild(field('Authors', auth, true));
+    var auth = authorPicker(d);
+    /* Not wrapped by field(): .form-group's input rules would paint a second
+       focus ring inside the .club-picker box. Label row only. */
+    var authG = el('div', 'cp-span'), authL = el('div', 'form-group cp-flush');
+    var authLab = el('label', null, 'Authors'); authLab.addEventListener('click', function () { var i = auth.querySelector('input'); if (i) i.focus(); });
+    authL.appendChild(authLab); authG.appendChild(authL); authG.appendChild(auth);
+    form.appendChild(authG);
 
     var platBox = platformToggles(isNew ? defaultPlatforms(curKind, lsGet(prefsKey())) : d.platforms);
     form.appendChild(field('Posted on', platBox, true));
@@ -1382,7 +1451,6 @@
       var t = title.value.trim();
       if (!t) { title.focus(); NL.toast('Add a title', 'error'); return null; }
       if (!dateIn.value) { dateIn.focus(); NL.toast('Pick a date', 'error'); return null; }
-      if (auth.needsGuest()) { NL.toast('Add the guest writer’s name', 'error'); return null; }
       var av = auth.value();
       var kp = kindPatch(kind.value, d);
       var out = {
