@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Content Plan
-  Version: v2.4 (16/10/2026)
+  Version: v2.5 (16/10/2026)
   File: /content-plan/index.html
 
   Plans and records everything the media team publishes: website stories,
@@ -129,6 +129,15 @@
                         type to filter by name or initials, pick, or "Use … as
                         entered" for a guest (replaces "Other…"). Picked authors are
                         stored by key; typed names as written (co-authors too).
+    v2.5 (16/10/2026) – Days and Agenda scroll endlessly, like Google Calendar: open on
+                        today, load four more weeks as you near either end, and keep
+                        your place when earlier weeks load above. Each month has a
+                        heading that sticks under the topbar. Agenda shows only days
+                        with items or notes (and today); six empty loads in a row
+                        stop that end. The calendar scrolls in its own panel so tabs,
+                        toolbar and filters stay put. Data loads per four-week chunk,
+                        never refetching what is on screen. Arrows jump a month; a
+                        day's date opens its week. Week view is unchanged.
 -->
 <html lang="en">
 <head>
@@ -178,10 +187,11 @@
     window.NL_CHANGELOG = [
       {
         date: '16 October 2026',
-        version: 'v2.4',
+        version: 'v2.5',
         items: [
           'The content plan now lives here instead of the Google Sheet.',
-          'Month and week calendars: drag an item to another day, or onto an hour in week view.',
+          'The calendar opens on today and keeps loading as you scroll up or down. Agenda shows only the days with something on.',
+          'Drag an item to another day, or onto an hour in week view. Click a day\u2019s date to open its week.',
           'Give items a time, like 09:00, so everyone knows roughly when they go out.',
           'A list view for checking and tagging lots of items at once.',
           'An Ideas tab for things without a date yet. Schedule one and it lands on the calendar.',
@@ -245,6 +255,19 @@
   .cp-day:first-child { border-top: none; }
   .cp-day.is-weekend { background: var(--navy-50); }
   .cp-day.is-today { box-shadow: inset 3px 0 0 var(--primary); }
+  /* Endless views: each month opens with a heading that pins under the topbar. */
+  .cp-month { position: sticky; top: 0; z-index: 2; margin: 0; padding: 8px 12px; background: var(--navy-50); border-top: 1px solid var(--navy-100); border-bottom: 1px solid var(--navy-100); font-size: var(--text-md); font-variation-settings: 'wght' 800; color: var(--navy); }
+  .cp-cal > .cp-mblock:nth-child(2) .cp-month { border-top: none; }
+  .cp-month + .cp-day { border-top: none; }
+  .cp-edge { height: 1px; }
+  .cp-end { margin: 0; padding: 12px; text-align: center; font-size: var(--text-sm); color: var(--text-muted); }
+  /* Endless views scroll inside their own panel, as Google Calendar does, so
+     the tabs, toolbar and filters above stay where they are. */
+  #cpMain.cp-scroller { overflow-y: auto; overscroll-behavior: contain; border: 1px solid var(--border); border-radius: var(--radius); background: var(--white); }
+  #cpMain.cp-scroller .cp-cal { border: none; border-radius: 0; }
+  .cp-dh__link { background: none; border: 0; padding: 0; font: inherit; text-align: left; cursor: pointer; }
+  .cp-dh__link:hover { text-decoration: underline; }
+  .cp-dh__link:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; border-radius: 2px; }
   .cp-day.is-drop, .cp-slot.is-drop { outline: 2px dashed var(--navy-300); outline-offset: -2px; }
   .cp-dh { display: grid; gap: 2px; align-content: start; font-size: var(--text-xs); color: var(--text-muted); min-width: 0; }
   .cp-dh__top { display: flex; align-items: center; gap: 6px; }
@@ -534,7 +557,12 @@
     view: 'calendar',         // calendar | list | ideas
     cup: {}, cupRef: null,
     ideas: {}, ideasRef: null, showArchived: false, ideaForm: null,
-    mode: 'month',            // month | week
+    mode: 'month',            // month (every day, endless) | agenda (days with something, endless) | week
+    from: '', to: '',         // loaded span in the endless modes; grows as you scroll
+    scrollTo: null,           // date to bring to the top after the next calendar render
+    chunks: [], cov: null,    // live listeners per date span, and the span they cover
+    extending: false,
+    emptyRun: { top: 0, bottom: 0 }, extDir: null, rowsBefore: 0,
     split: false,
     cursor: null,             // Date inside the visible period
     listFrom: '', listTo: '',
@@ -703,12 +731,97 @@
   function currentRange() {
     if (S.view === 'list') return { from: S.listFrom, to: S.listTo };
     var c = S.cursor;
+    if (endless()) {
+      if (!S.from) startAround(todayYmd());
+      return { from: S.from, to: S.to };
+    }
     if (S.mode === 'week') {
       var dow = (c.getDay() + 6) % 7;              // Monday start
       var start = addDays(c, -dow);
       return { from: ymd(start), to: ymd(addDays(start, 6)) };
     }
+    return monthOf(c);
+  }
+  function monthOf(c) {
     return { from: ymd(new Date(c.getFullYear(), c.getMonth(), 1)), to: ymd(new Date(c.getFullYear(), c.getMonth() + 1, 0)) };
+  }
+
+  /* ── Endless scroll (Days / Agenda) ─────────────────────────────────
+     Opens on today with a few weeks either side; nearing either end loads
+     another four weeks there. Prepending keeps the day you were looking at
+     still, so the page never jumps. */
+  var LOAD_BEFORE = 14, LOAD_AFTER = 42, LOAD_STEP = 28;
+  function endless() { return S.view === 'calendar' && S.mode !== 'week'; }
+  function startAround(date) {
+    var d = fromYmd(date);
+    S.from = ymd(addDays(d, -LOAD_BEFORE)); S.to = ymd(addDays(d, LOAD_AFTER));
+  }
+  function scroller() { return document.getElementById('cpMain'); }
+  /* The top edge of the scrolling panel, in viewport terms. */
+  function topOffset() { var m = scroller(); return m.getBoundingClientRect().top + m.clientTop; }
+  /* The panel runs from where it starts down to the foot of the window, with
+     a floor so a short window still shows a useful stretch. */
+  function sizeScroller() {
+    var m = scroller();
+    if (!endless()) { m.classList.remove('cp-scroller'); m.style.height = ''; return; }
+    m.classList.add('cp-scroller');
+    var docTop = m.getBoundingClientRect().top + window.pageYOffset;
+    m.style.height = Math.max(window.innerHeight - docTop - 16, Math.round(window.innerHeight * 0.6)) + 'px';
+  }
+  window.addEventListener('resize', function () { if (endless()) sizeScroller(); });
+  /* The first day row not hidden under the pinned bars, and where it sits. */
+  function topVisible() {
+    var rows = document.querySelectorAll('#cpMain .cp-day');
+    var head = document.querySelector('#cpMain .cp-month');
+    var top = topOffset() + (head ? head.offsetHeight : 0);
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i].getBoundingClientRect();
+      if (r.bottom > top + 4) return { id: rows[i].id, top: r.top };   // more than a sliver showing
+    }
+    return null;
+  }
+  function topVisibleDate() { var a = topVisible(); return a ? a.id.slice(4) : todayYmd(); }
+  /* Limits, so Agenda over an empty stretch stops asking rather than
+     loading empty weeks for ever: three years back, eighteen months ahead. */
+  function extend(dir) {
+    if (S.extending || !endless()) return;
+    /* Agenda: six empty loads in a row (about six months of nothing) and
+       that end stops, with a line saying so. */
+    var end = dir < 0 ? 'top' : 'bottom';
+    if (S.mode === 'agenda' && S.emptyRun[end] >= 6) return;
+    S.extDir = end; S.rowsBefore = document.querySelectorAll('#cpMain .cp-day').length;
+    var t = new Date();
+    if (dir < 0) {
+      var floor = ymd(addDays(t, -1095));
+      if (S.from <= floor) return;
+      S.from = ymd(addDays(fromYmd(S.from), -LOAD_STEP));
+      if (S.from < floor) S.from = floor;
+    } else {
+      var ceil = ymd(addDays(t, 548));
+      if (S.to >= ceil) return;
+      S.to = ymd(addDays(fromYmd(S.to), LOAD_STEP));
+      if (S.to > ceil) S.to = ceil;
+    }
+    S.extending = true;
+    listen(true);
+  }
+  /* Bring a date to the top, loading its stretch first if it is not loaded. */
+  function goTo(date) {
+    S.addingOn = null; S.addForm = null;
+    S.scrollTo = date;
+    if (date >= S.from && date <= S.to && document.getElementById('day-' + date)) { render(); return; }
+    if (date < S.from && ymd(addDays(fromYmd(date), LOAD_STEP * 3)) >= S.from) { S.from = ymd(addDays(fromYmd(date), -7)); listen(true); }
+    else if (date > S.to && ymd(addDays(fromYmd(date), -LOAD_STEP * 3)) <= S.to) { S.to = ymd(addDays(fromYmd(date), LOAD_AFTER)); listen(true); }
+    else { startAround(date); listen(); }
+  }
+  var _io = null;
+  function watchEdges(cal) {
+    if (_io) _io.disconnect();
+    if (!('IntersectionObserver' in window)) return;
+    _io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { if (e.isIntersecting) extend(e.target.getAttribute('data-edge') === 'top' ? -1 : 1); });
+    }, { root: scroller(), rootMargin: '600px 0px' });
+    cal.querySelectorAll('[data-edge]').forEach(function (n) { _io.observe(n); });
   }
   var _renderQueued = false;
   function queueRender() {
@@ -716,14 +829,59 @@
     _renderQueued = true;
     requestAnimationFrame(function () { _renderQueued = false; render(); });
   }
-  function listen() {
+  /* Data arrives in chunks, one per date span, each with its own live
+     listeners. Scrolling adds a chunk for the new four weeks only; what is
+     already on screen is never fetched again. Any other change of range
+     drops every chunk and starts one afresh. */
+  function dropChunks() {
+    S.chunks.forEach(function (c) { c.refs.forEach(function (ref) { ref.off(); }); });
+    S.chunks = []; S.cov = null;
+  }
+  function mergeChunks() {
+    var items = {}, days = {}, cup = {}, loading = false;
+    S.chunks.forEach(function (c) {
+      var k;
+      for (k in c.items) items[k] = c.items[k];
+      for (k in c.days) days[k] = c.days[k];
+      for (k in c.cup) cup[k] = c.cup[k];
+      if (!c.ready) loading = true;
+    });
+    S.items = items; S.days = days; S.cup = cup; S.loading = loading;
+  }
+  function addChunk(from, to) {
+    var c = { from: from, to: to, items: {}, days: {}, cup: {}, refs: [], got: {}, ready: false };
+    S.chunks.push(c);
+    function landed(part) {
+      c.got[part] = true;
+      if (c.got.items && c.got.days) c.ready = true;
+      mergeChunks();
+      if (c.ready) queueRender();
+    }
+    var items = db.ref(ROOT + '/items').orderByChild('date').startAt(from).endAt(to);
+    items.on('value', function (snap) {
+      var out = {};
+      snap.forEach(function (ch) { var v = ch.val(); if (v && v.date) { v.id = ch.key; out[ch.key] = v; } });
+      c.items = out; landed('items');
+    }, fail);
+    var days = db.ref(ROOT + '/days').orderByKey().startAt(from).endAt(to);
+    days.on('value', function (snap) { c.days = snap.val() || {}; landed('days'); }, fail);
+    c.refs.push(items, days);
+    if (S.view === 'calendar') {
+      loadMatches(from, to);
+      var cup = db.ref(ROOT + '/cupFixtures').orderByChild('date').startAt(from).endAt(to);
+      cup.on('value', function (snap) { c.cup = snap.val() || {}; mergeChunks(); if (c.ready) queueRender(); }, fail);
+      c.refs.push(cup);
+    }
+    S.cov = S.cov ? { from: from < S.cov.from ? from : S.cov.from, to: to > S.cov.to ? to : S.cov.to } : { from: from, to: to };
+  }
+  function dayBefore(d) { return ymd(addDays(fromYmd(d), -1)); }
+  function dayAfter(d) { return ymd(addDays(fromYmd(d), 1)); }
+  function listen(keep) {
     var r = currentRange();
-    if (S.itemsRef) S.itemsRef.off();
-    if (S.daysRef) S.daysRef.off();
-    if (S.cupRef) { S.cupRef.off(); S.cupRef = null; }
+    if (!endless() && _io) { _io.disconnect(); _io = null; }
     if (S.ideasRef) { S.ideasRef.off(); S.ideasRef = null; }
     if (S.view === 'ideas') {
-      S.itemsRef = null; S.daysRef = null;
+      dropChunks();
       S.ideasRef = db.ref(ROOT + '/ideas');
       S.ideasRef.on('value', function (snap) {
         var out = {};
@@ -732,26 +890,19 @@
       }, fail);
       return;
     }
-    S.items = {}; S.days = {};
-    var loaded = { items: false, days: false };
-    S.itemsRef = db.ref(ROOT + '/items').orderByChild('date').startAt(r.from).endAt(r.to);
-    S.itemsRef.on('value', function (snap) {
-      var out = {};
-      snap.forEach(function (ch) { var v = ch.val(); if (v && v.date) { v.id = ch.key; out[ch.key] = v; } });
-      S.items = out; loaded.items = true;
-      if (loaded.days) queueRender();
-    }, fail);
-    S.daysRef = db.ref(ROOT + '/days').orderByKey().startAt(r.from).endAt(r.to);
-    S.daysRef.on('value', function (snap) {
-      S.days = snap.val() || {}; loaded.days = true;
-      if (loaded.items) queueRender();
-    }, fail);
-    if (S.view === 'calendar') {
-      loadMatches(r.from, r.to);
-      S.cup = {};
-      S.cupRef = db.ref(ROOT + '/cupFixtures').orderByChild('date').startAt(r.from).endAt(r.to);
-      S.cupRef.on('value', function (snap) { S.cup = snap.val() || {}; queueRender(); }, fail);
+    /* Widening only: add the missing ends, keep everything already loaded. */
+    if (keep && S.cov && r.from <= S.cov.from && r.to >= S.cov.to) {
+      var cov = S.cov;
+      if (r.from < cov.from) addChunk(r.from, dayBefore(cov.from));
+      if (r.to > cov.to) addChunk(dayAfter(cov.to), r.to);
+      mergeChunks();
+      return;
     }
+    dropChunks();
+    S.emptyRun = { top: 0, bottom: 0 }; S.extDir = null;
+    if (!keep) { S.items = {}; S.days = {}; S.cup = {}; }
+    addChunk(r.from, r.to);
+    mergeChunks();
   }
 
   /* ── Match counts from NLS (memory cache per season) ───────────────── */
@@ -875,25 +1026,27 @@
       var today = el('button', 'btn btn--ghost btn--sm', 'Today'); today.type = 'button';
       prev.addEventListener('click', function () { step(-1); });
       next.addEventListener('click', function () { step(1); });
-      today.addEventListener('click', function () { S.cursor = new Date(); listen(); renderBar(); });
-      var r = currentRange();
-      var label = S.mode === 'month'
-        ? MON[S.cursor.getMonth()] + ' ' + S.cursor.getFullYear()
-        : 'Week of ' + dayLabel(r.from);
+      today.addEventListener('click', function () {
+        S.cursor = new Date();
+        if (endless()) goTo(todayYmd()); else { listen(); renderBar(); }
+      });
+      prev.setAttribute('aria-label', endless() ? 'Previous month' : 'Previous week');
+      next.setAttribute('aria-label', endless() ? 'Next month' : 'Next week');
       left.appendChild(prev); left.appendChild(today); left.appendChild(next);
-      left.appendChild(el('span', 'cp-period', label));
+      /* The endless views name the month in a heading that sticks as you scroll. */
+      if (!endless()) left.appendChild(el('span', 'cp-period', 'Week of ' + dayLabel(currentRange().from)));
 
       var modes = el('div', 'chip-group');
-      [['month', 'Month'], ['week', 'Week']].forEach(function (m) {
+      [['month', 'Days'], ['agenda', 'Agenda'], ['week', 'Week']].forEach(function (m) {
         var b = el('button', 'chip' + (S.mode === m[0] ? ' active' : ''), m[1]); b.type = 'button';
         b.setAttribute('aria-pressed', S.mode === m[0] ? 'true' : 'false');
-        b.addEventListener('click', function () { if (S.mode === m[0]) return; S.mode = m[0]; savePrefs(); listen(); renderBar(); });
+        b.addEventListener('click', function () { setMode(m[0]); });
         modes.appendChild(b);
       });
       right.appendChild(modes);
-      /* Combined / split only means something in month view; week view is a timeline. */
-      if (S.mode === 'month') {
-        var split = el('div', 'chip-group');
+      /* Combined / split only means something in the day rows; week view is a timeline. */
+      if (S.mode !== 'week') {
+        var split = el('div', 'chip-group cp-split-chips');
         [[false, 'Combined'], [true, 'Split web / social']].forEach(function (m) {
           var b = el('button', 'chip' + (S.split === m[0] ? ' active' : ''), m[1]); b.type = 'button';
           b.setAttribute('aria-pressed', S.split === m[0] ? 'true' : 'false');
@@ -929,12 +1082,14 @@
     }
     if (S.canEdit) {
       var settings = el('button', 'btn btn--ghost btn--sm'); settings.type = 'button';
-      settings.appendChild(icon('settings')); settings.appendChild(document.createTextNode(' Settings'));
+      settings.appendChild(icon('settings')); settings.appendChild(el('span', 'cp-btn-text', ' Settings'));
+      settings.setAttribute('aria-label', 'Settings');
       settings.addEventListener('click', openSettings);
       right.appendChild(settings);
       if (S.view !== 'ideas') {
         var add = el('button', 'btn btn--primary btn--sm'); add.type = 'button';
-        add.appendChild(icon('add')); add.appendChild(document.createTextNode(' Add item'));
+        add.appendChild(icon('add')); add.appendChild(el('span', 'cp-btn-text', ' Add item'));
+        add.setAttribute('aria-label', 'Add item');
         add.addEventListener('click', function () { openEditor(null, defaultAddDate()); });
         right.appendChild(add);
       }
@@ -946,10 +1101,34 @@
     return (t >= r.from && t <= r.to) ? t : r.from;
   }
   function step(n) {
-    var c = S.cursor;
-    S.cursor = S.mode === 'month' ? new Date(c.getFullYear(), c.getMonth() + n, 1) : addDays(c, 7 * n);
+    if (endless()) {
+      var t = fromYmd(topVisibleDate());
+      /* Back from mid-month goes to the 1st of this month first, as a calendar would. */
+      var target = n < 0 && t.getDate() > 1 ? new Date(t.getFullYear(), t.getMonth(), 1) : new Date(t.getFullYear(), t.getMonth() + n, 1);
+      goTo(ymd(target));
+      return;
+    }
+    S.cursor = addDays(S.cursor, 7 * n);
     S.addingOn = null; S.addForm = null;
     listen(); renderBar();
+  }
+  /* Switching mode keeps your place: the week you open is the one at the top
+     of the day rows, and leaving the week lands on its Monday. */
+  function setMode(mode, date) {
+    if (S.mode === mode && !date) return;
+    var wasEndless = endless();
+    var at = date || (wasEndless ? topVisibleDate() : ymd(S.cursor));
+    S.mode = mode; S.addingOn = null; S.addForm = null;
+    S.emptyRun = { top: 0, bottom: 0 };
+    savePrefs(); renderBar();
+    if (endless()) {
+      if (wasEndless) { S.scrollTo = at; render(); return; }
+      if (at < S.from || at > S.to || !S.from) { startAround(at); S.scrollTo = at; listen(); }
+      else { S.scrollTo = at; listen(true); }
+    } else {
+      S.cursor = fromYmd(at);
+      listen(); renderBar();
+    }
   }
 
   /* ── Filter bar ────────────────────────────────────────────────────── */
@@ -985,13 +1164,17 @@
     var box = document.getElementById('cpSummary');
     box.innerHTML = '';
     /* Only counts that ask for action. Who-wrote-what belongs in Reports. */
+    /* The endless views load more as you scroll, so a total there would just
+       grow; they count only the unassigned stories from today on. */
+    var scrolling = endless(), today = todayYmd();
     var unassigned = 0;
     all.forEach(function (it) {
+      if (scrolling && it.date < today) return;
       if (!it.author && !it.authorOther && it.lane === 'web' && it.status === 'planned') unassigned++;
     });
     function part(label, n) { var s = el('span'); s.appendChild(el('b', null, String(n))); s.appendChild(document.createTextNode(' ' + label)); box.appendChild(s); }
-    part(all.length === 1 ? 'item' : 'items', all.length);
-    if (unassigned) part('unassigned', unassigned);
+    if (!scrolling) part(all.length === 1 ? 'item' : 'items', all.length);
+    if (unassigned) part(scrolling ? 'unassigned from today' : 'unassigned', unassigned);
   }
 
   /* ── Item chip ─────────────────────────────────────────────────────── */
@@ -1076,8 +1259,29 @@
     var r = currentRange();
     var cal = el('div', 'cp-cal');
     var today = todayYmd();
+    var scrolling = endless();
+    var anchor = scrolling && !(S.scrollTo && !S.loading) ? topVisible() : null;
+    var shownMonth = '', block = null;
+    if (scrolling && S.mode === 'agenda' && S.emptyRun.top >= 6) cal.appendChild(el('p', 'cp-end', 'Nothing earlier in the plan.'));
+    if (scrolling) cal.appendChild(edge('top'));
     for (var d = fromYmd(r.from); ymd(d) <= r.to; d = addDays(d, 1)) {
-      (function (date, dow) {
+      (function (date, dow, dt) {
+        var items = byDate[date] || [];
+        /* Agenda: only days with items or notes, plus today so you land somewhere. */
+        if (S.mode === 'agenda' && !items.length && !(S.days[date] && S.days[date].notes) &&
+            date !== today && S.addingOn !== date) return;
+        var mk = date.slice(0, 7);
+        if (scrolling && mk !== shownMonth) {
+          /* Each month is its own block, so its heading sticks only while
+             that month is on screen and the next one pushes it away. */
+          shownMonth = mk;
+          block = el('section', 'cp-mblock');
+          var mh = el('h2', 'cp-month', MON[dt.getMonth()] + ' ' + dt.getFullYear());
+          mh.id = 'month-' + mk;
+          block.setAttribute('aria-labelledby', mh.id);
+          block.appendChild(mh);
+          cal.appendChild(block);
+        }
         var row = el('div', 'cp-day');
         if (dow === 0 || dow === 6) row.classList.add('is-weekend');
         if (date === today) row.classList.add('is-today');
@@ -1085,7 +1289,12 @@
 
         var dh = el('div', 'cp-dh');
         var top = el('div', 'cp-dh__top');
-        top.appendChild(el('span', 'cp-dh__date', dayLabel(date)));
+        if (scrolling) {
+          var dl = el('button', 'cp-dh__date cp-dh__link', dayLabel(date)); dl.type = 'button';
+          dl.title = 'Open this week'; dl.setAttribute('aria-label', 'Open the week of ' + dayLabel(date));
+          dl.addEventListener('click', function () { setMode('week', date); });
+          top.appendChild(dl);
+        } else top.appendChild(el('span', 'cp-dh__date', dayLabel(date)));
         if (S.canEdit) {
           var plus = el('button', 'cp-dh__btn'); plus.type = 'button'; plus.appendChild(icon('add'));
           plus.setAttribute('aria-label', 'Add an item on ' + dayLabel(date)); plus.title = 'Add item';
@@ -1103,7 +1312,6 @@
         if (notes) dh.appendChild(el('span', 'cp-dh__notes', notes));
         row.appendChild(dh);
 
-        var items = byDate[date] || [];
         var body;
         if (S.mode === 'week') {
           body = el('div', 'cp-slots');
@@ -1144,17 +1352,50 @@
         }
         row.appendChild(body);
         dropTarget(row, date, null);
-        cal.appendChild(row);
-      })(ymd(d), d.getDay());
+        (block || cal).appendChild(row);
+      })(ymd(d), d.getDay(), d);
     }
+    if (scrolling) cal.appendChild(edge('bottom'));
+    if (scrolling && S.mode === 'agenda' && S.emptyRun.bottom >= 6) cal.appendChild(el('p', 'cp-end', 'Nothing further ahead in the plan.'));
     main.innerHTML = '';
     main.appendChild(cal);
+    if (scrolling) {
+      if (S.scrollTo && !S.loading) {
+        /* The date itself, or (Agenda, empty day) the next day shown after it. */
+        var want = S.scrollTo, target = null, rows = cal.querySelectorAll('.cp-day');
+        S.scrollTo = null;
+        for (var i = 0; i < rows.length; i++) if (rows[i].id.slice(4) >= want) { target = rows[i]; break; }
+        if (target) {
+          /* The 1st of a month scrolls to its heading, so the month name shows. */
+          var blk = want.slice(8) === '01' && target.parentNode.classList.contains('cp-mblock') && target.parentNode;
+          main.scrollTop += (blk || target).getBoundingClientRect().top - topOffset() - (blk ? 0 : monthHeadHeight(cal));
+        }
+      } else if (anchor) {
+        var same = document.getElementById(anchor.id);
+        if (same) main.scrollTop += same.getBoundingClientRect().top - anchor.top;
+      }
+      /* Only once the wider range has arrived, or the edge that asked for it
+         is still in view and would ask again. */
+      if (!S.loading) {
+        if (S.extDir) {
+          var grew = cal.querySelectorAll('.cp-day').length > S.rowsBefore;
+          S.emptyRun[S.extDir] = grew ? 0 : S.emptyRun[S.extDir] + 1;
+          S.extDir = null;
+        }
+        S.extending = false;
+      }
+      watchEdges(cal);
+    }
     if (S.addingOn && S._focusAdd) {
       S._focusAdd = false;
       var t = document.getElementById('cpAddTitle');
       if (t) t.focus();
     }
   }
+
+  function edge(which) { var n = el('div', 'cp-edge'); n.setAttribute('data-edge', which); n.setAttribute('aria-hidden', 'true'); return n; }
+  /* The sticky month heading covers the top of the page; leave room for it. */
+  function monthHeadHeight(cal) { var h = cal.querySelector('.cp-month'); return h ? h.offsetHeight : 0; }
 
   /* ── Inline add form ───────────────────────────────────────────────── */
   function prefsKey() { return 'cp:last:' + S.session.uid; }
@@ -2210,6 +2451,7 @@
 
   /* ── Render ────────────────────────────────────────────────────────── */
   function render() {
+    sizeScroller();
     var ideas = S.view === 'ideas';
     document.getElementById('cpFilters').hidden = ideas;
     document.getElementById('cpSummary').hidden = ideas;
@@ -2227,15 +2469,17 @@
     }
   }
   function setView(v) {
+    var calendarWas = endless() ? topVisibleDate() : null;   // the List opens on the month you were looking at
     S.view = v;
     document.querySelectorAll('#cpTabs .tab').forEach(function (t) {
       var on = t.getAttribute('data-view') === v;
       t.classList.toggle('active', on); t.setAttribute('aria-selected', on ? 'true' : 'false');
     });
     if (v === 'list' && !S.listFrom) {
-      var r = currentRangeFor('calendar');
+      var r = calendarWas ? monthOf(fromYmd(calendarWas)) : currentRangeFor('calendar');
       S.listFrom = r.from; S.listTo = r.to;
     }
+    if (v === 'calendar' && S.mode !== 'week') { S.from = ''; S.scrollTo = todayYmd(); }
     S.addingOn = null; S.addForm = null; S.ideaForm = null; S.selected = {};
     savePrefs(); renderBar(); listen();
   }
@@ -2246,7 +2490,7 @@
   function loadPrefs() {
     var p = lsGet(prefsStoreKey());
     if (!p) return;
-    if (p.mode === 'week' || p.mode === 'month') S.mode = p.mode;
+    if (p.mode === 'week' || p.mode === 'month' || p.mode === 'agenda') S.mode = p.mode;
     S.split = !!p.split;
     if (p.view === 'list' || p.view === 'ideas') S.view = p.view;
     if (p.filters) Object.keys(S.filters).forEach(function (k) { if (p.filters[k] != null) S.filters[k] = p.filters[k]; });
@@ -2282,7 +2526,7 @@
         }
         renderFilters();
         if (firstLoad) {
-          if (S.view === 'list') { var r = currentRangeFor('calendar'); S.listFrom = r.from; S.listTo = r.to; setView('list'); }
+          if (S.view === 'list') { var r = monthOf(S.cursor); S.listFrom = r.from; S.listTo = r.to; setView('list'); }
           else setView(S.view === 'ideas' ? 'ideas' : 'calendar');
         } else queueRender();
       }, fail);
