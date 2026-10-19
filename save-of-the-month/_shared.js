@@ -78,6 +78,98 @@
     return (bytes / 1048576).toFixed(bytes < 10485760 ? 1 : 0) + 'MB';
   };
 
+  /* ── the NLS feed ─────────────────────────────────────────────────────
+     Shapes verified against live responses on 19/10/2026 (matches list and
+     match detail, ~270 league matches of 2026/27) — not written from memory.
+     Worked example: g2660201, Worthing 5-0 Solihull Moors, a half-time
+     keeper change logged as eventTime 45, eventPeriod "2". */
+
+  /* National League, North, South. Not the NL Cup or any other cup: the
+     list endpoint filtered by teamID returns every competition, so this is
+     the filter. */
+  SOTM.LEAGUE_COMPS = [89, 373, 372];
+
+  /* The UTC window the list endpoint takes for a month. */
+  SOTM.monthRange = function (k) {
+    var y = +k.slice(0, 4), m = +k.slice(5, 7);
+    var last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    return { from: k + '-01 00:00:00Z', to: k + '-' + pad(last) + ' 23:59:59Z' };
+  };
+
+  /* matches-list `data[]` → the club's played league matches, oldest first:
+     { id, date: 'YYYY-MM-DD', label: 'Worthing 5–0 Solihull Moors' }. */
+  SOTM.leagueMatches = function (data) {
+    return (data || []).filter(function (m) {
+      var a = m && m.attributes;
+      if (!a || SOTM.LEAGUE_COMPS.indexOf(+a.competitionID) < 0) return false;
+      var p = String(a.matchPeriod || '').toLowerCase();
+      return p === 'fulltime' || p === 'postmatch';
+    }).map(function (m) {
+      var a = m.attributes, h = a.homeTeam || {}, w = a.awayTeam || {};
+      return {
+        id: String(m.id),
+        date: String(a.kickOffDateUTC || '').slice(0, 10),
+        label: h.name + ' ' + h.score + '–' + w.score + ' ' + w.name
+      };
+    }).sort(function (x, y) { return x.date < y.date ? -1 : x.date > y.date ? 1 : 0; });
+  };
+
+  SOTM.playerName = function (p) {
+    var n = (p && p.playerName) || {};
+    return n.customKnownName || n.knownName || [n.firstName, n.lastName].filter(Boolean).join(' ');
+  };
+
+  /* The club's keeper on the pitch at `minute`, from a match detail's
+     matchTeams[] entry: { id, name }, or null when the lineup cannot say —
+     the club then types the name.
+
+     · The starting keeper is the one Start[] entry whose playerPosition is
+       Goalkeeper. None, or two (both happen in this season's data), is
+       null: guessing a name into a club's nomination is worse than asking.
+     · A substitution takes effect for minutes AFTER its eventTime. That one
+       rule covers the half-time change (eventTime 45, period "2": a save in
+       the 45th minute was the first keeper's) and an in-play change.
+     · Players are looked up by subOffID / subOnID in THIS match's own lists.
+       The subOffPlayer / subOnPlayer objects inside a substitution are stale
+       copies from other matches — wrong position, wrong team. */
+  SOTM.keeperAt = function (team, minute) {
+    var pl = (team && team.players) || {};
+    var start = pl.Start || [], bench = pl.Sub || [], byId = {};
+    start.concat(bench).forEach(function (p) { if (p && p.playerID) byId[p.playerID] = p; });
+    var gks = start.filter(function (p) { return p && p.playerPosition === 'Goalkeeper'; });
+    if (gks.length !== 1) return null;
+    var cur = gks[0].playerID;
+    var subs = (((team.events || {}).subs) || []).slice().sort(function (a, b) {
+      return (+a.eventTime || 0) - (+b.eventTime || 0);
+    });
+    subs.forEach(function (s) {
+      var e = s && s.substitutionEvents;
+      if (e && e.subOffID === cur && +s.eventTime < minute && byId[e.subOnID]) cur = e.subOnID;
+    });
+    return { id: cur, name: SOTM.playerName(byId[cur]) };
+  };
+
+  /* Every name in the club's squad for the match, for the override box. */
+  SOTM.squadNames = function (team) {
+    var pl = (team && team.players) || {}, seen = {}, out = [];
+    (pl.Start || []).concat(pl.Sub || []).forEach(function (p) {
+      var n = SOTM.playerName(p);
+      if (n && !seen[n]) { seen[n] = 1; out.push(n); }
+    });
+    return out.sort();
+  };
+
+  /* The content type to upload a clip as, or null if it is not a video.
+     Not file.type alone: some browsers send an empty type for .mov, and the
+     Storage rule refuses anything that is not video/*. */
+  var VIDEO_EXT = { mp4: 'video/mp4', m4v: 'video/x-m4v', mov: 'video/quicktime',
+    webm: 'video/webm', avi: 'video/x-msvideo', mkv: 'video/x-matroska' };
+  SOTM.clipType = function (name, type) {
+    if (/^video\//.test(String(type || ''))) return type;
+    var ext = (String(name || '').match(/\.([A-Za-z0-9]+)$/) || [])[1];
+    return (ext && VIDEO_EXT[ext.toLowerCase()]) || null;
+  };
+
   /* A file name safe for a Storage path. */
   SOTM.safeName = function (name) {
     return String(name || 'clip').replace(/[^A-Za-z0-9._-]+/g, '-').slice(-80);
