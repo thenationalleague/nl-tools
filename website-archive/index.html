@@ -3,10 +3,14 @@
 <head>
 <!--
   NL Tools — Website Archive
-  Version: 3.1
-  Date: 15/10/2026
+  Version: 3.2
+  Date: 19/10/2026
 
   CHANGELOG
+  v3.2 (19/10/2026)
+    - Performance month is the canon month picker (NL.monthPicker) in
+      step mode: ‹ › still walk a month, and the label opens a year grid
+      to jump straight to one. Replaces the local .perf-month stepper.
   v3.1 (15/10/2026)
     - Window is now 14 days (was 7), so articles that pick up in their
       second week are counted. Articles are coloured from 48 hours old:
@@ -282,7 +286,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Website Archive — NL Tools</title>
 
-<link rel="stylesheet" href="/system/nl-brand.css?v=67">
+<link rel="stylesheet" href="/system/nl-brand.css?v=68">
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
@@ -306,6 +310,13 @@
   var NL_TOOL_KEY = 'staff-website-archive';
 
   window.NL_CHANGELOG = [
+    {
+      date: '19 October 2026',
+      version: 'v3.2',
+      items: [
+        'Performance tab: click the month to jump straight to any month; ‹ › still step one at a time.'
+      ]
+    },
     {
       date: '15 October 2026',
       version: 'v3.1',
@@ -424,7 +435,7 @@
     }
   ];
 </script>
-<script src="/system/nl-utils.js?v=48"></script>
+<script src="/system/nl-utils.js?v=49"></script>
 <!-- GA4 for nl.tools — cookieless, no banner, no identity. See system/nl-analytics.js -->
 <script src="/system/nl-analytics.js?v=1"></script>
 <script src="/system/nl-topbar.js?v=10"></script>
@@ -513,17 +524,6 @@
   box-shadow: var(--shadow); padding: 14px 18px; margin-bottom: 16px;
   display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px 24px;
 }
-.perf-month { display: flex; align-items: center; gap: 6px; }
-.perf-month h2 {
-  margin: 0; min-width: 11ch; text-align: center;
-  font-size: var(--text-lg); font-weight: 900; font-variation-settings: 'wght' 900;
-}
-.perf-month button {
-  width: 40px; height: 40px; border-radius: var(--radius); border: 1px solid var(--border);
-  background: var(--white); color: var(--navy); font-size: var(--text-lg); line-height: 1; cursor: pointer;
-}
-.perf-month button:disabled { opacity: .35; cursor: default; }
-.perf-month button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 #perfAuthor { min-width: 200px; min-height: 40px; }
 .perf-note { margin-left: auto; align-self: center; max-width: 42ch; text-align: right; font-size: var(--text-xs); color: var(--text-muted); }
 
@@ -1528,11 +1528,7 @@
     <div class="perf-bar">
       <div class="field">
         <span class="field__label">Month</span>
-        <div class="perf-month">
-          <button type="button" id="perfPrev" aria-label="Previous month">‹</button>
-          <h2 id="perfMonth">–</h2>
-          <button type="button" id="perfNext" aria-label="Next month">›</button>
-        </div>
+        <div id="perfMonth"></div>
       </div>
       <div class="field">
         <label class="field__label" for="perfAuthor">Author</label>
@@ -2941,8 +2937,6 @@ function perfFoldNames(rows) {
 function perfOpen() {
   if (PERF.started) { perfRender(); return; }
   PERF.started = true;
-  $('perfPrev').addEventListener('click', function() { perfGo(PERF.k - 1); });
-  $('perfNext').addEventListener('click', function() { perfGo(PERF.k + 1); });
   $('perfAuthor').addEventListener('change', function() { PERF.who = this.value; PERF.sel = null; perfRender(); });
   $('perfBody').addEventListener('click', function(e) {
     var pick = e.target.closest('[data-pick]');
@@ -3113,9 +3107,13 @@ function perfRender() {
   var rows = perfMonthRows(m);
   PERF.monthList = rows;
 
-  $('perfMonth').textContent = perfMonthName(m);
-  $('perfPrev').disabled = PERF.k <= 0;
-  $('perfNext').disabled = PERF.k >= PERF.months.length - 1;
+  /* Made on first render: the month range only exists once the feed is in. */
+  if (!PERF.pick) PERF.pick = NL.monthPicker($('perfMonth'), {
+    ariaLabel: 'Month', step: true,
+    onChange: function(mk) { perfGo(PERF.months.indexOf(mk)); }
+  });
+  PERF.pick.setRange({ min: PERF.months[0], max: PERF.months[PERF.months.length - 1] });
+  PERF.pick.set(m);
   $('perfNote').textContent = PERF.k === 0
     ? 'Earliest month: data starts ' + perfDdmm(PERF.feed.dataFrom) + '.'
     : m < PERF_NEW_SITE

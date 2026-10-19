@@ -310,6 +310,28 @@ test('csv: RFC-4180 escaping, CRLF rows, optional BOM', () => {
   assert.equal(NL.csv([]), '', 'no rows → empty string');
 });
 
+/* v1.45: CSV injection. Free text a club or the public typed must not run as
+   a formula when staff open the export in Excel. */
+test('csv: formula-leading cells are neutralised; numbers are not', () => {
+  assert.equal(NL.csv([['=HYPERLINK("x")']]), '"\'=HYPERLINK(""x"")"');
+  assert.equal(NL.csv([['+1+1', '-2+3', '@SUM(A1)', '\tcmd']]), "'+1+1,'-2+3,'@SUM(A1)," + "'\tcmd");
+  assert.equal(NL.csv([[-5, '-5', '+44', '-1.5']]), '-5,-5,+44,-1.5', 'numbers and plain-number strings untouched');
+  assert.equal(NL.csv([['a=b', 'mid-field']]), 'a=b,mid-field', 'only a LEADING trigger counts');
+  assert.equal(NL.csv([['=1+1']], { raw: true }), '=1+1', 'raw opts out');
+});
+
+test('month: key, label, prev, isKey', () => {
+  assert.equal(NL.month.key(new Date(2026, 9, 19)), '2026-10');
+  assert.equal(NL.month.key(new Date(2027, 0, 1)), '2027-01');
+  assert.equal(NL.month.label('2026-09'), 'September 2026');
+  assert.equal(NL.month.label('nope'), 'nope', 'not a key → returned as-is');
+  assert.equal(NL.month.prev('2026-10'), '2026-09');
+  assert.equal(NL.month.prev('2027-01'), '2026-12', 'January → previous December');
+  assert.equal(NL.month.isKey('2026-12'), true);
+  assert.equal(NL.month.isKey('2026-13'), false);
+  assert.equal(NL.month.isKey(''), false);
+});
+
 test('copy / download are exposed (behaviour covered by smoke test)', () => {
   assert.equal(typeof NL.copy, 'function');
   assert.equal(typeof NL.download, 'function');

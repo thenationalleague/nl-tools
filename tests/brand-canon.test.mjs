@@ -1115,3 +1115,43 @@ test('the sprite carries article and image, stroked like play and shield', () =>
     assert.ok(m[0].includes('fill="none"') && m[0].includes('stroke="currentColor"'), `#icon-${n} is stroked`);
   }
 });
+
+/* ── .month-picker (brand v2.71, 19/10/2026) ──────────────────────────────
+   One way to pick a month. Before it there were four: a native
+   <input type="month"> (Save of the Month), two <select>s of hand-labelled
+   month names (Social Output, DAZN) and a ‹ month › stepper (Website
+   Archive). The native control is the one this exists to replace — it is a
+   different widget in every browser and a bare text box in some. */
+test('no page picks a month any other way than NL.monthPicker', () => {
+  const files = execSync("git ls-files '*.html' '*.js'", { cwd: REPO, encoding: 'utf8' })
+    /* Not embeds/: fan-facing CMS widgets cannot load NL.* at all (CLAUDE.md,
+       "Two families of frontend"), so the canon cannot be their answer. */
+    .split('\n').filter((f) => f && !f.startsWith('tests/') && !f.startsWith('embeds/') && !f.startsWith('node_modules/') &&
+      f !== 'system/nl-utils.js' && f !== 'style-guide/index.html');
+  const offenders = [];
+  for (const f of files) {
+    const src = stripComments(readFileSync(join(REPO, f), 'utf8'));
+    if (/type=["']month["']/i.test(src)) offenders.push(f + ': <input type="month">');
+    if (/<select[^>]*aria-label=["']Month["']/i.test(src)) offenders.push(f + ': a <select> of months');
+  }
+  assert.deepEqual(offenders, [], 'use NL.monthPicker:\n  ' + offenders.join('\n  '));
+});
+
+test('.month-picker popover sits on the open-dropdown rung, and above a modal inside one', () => {
+  const pop = ruleBody('.month-picker__pop');
+  assert.match(pop, /position:\s*fixed/, 'fixed, so an overflow:hidden panel cannot clip it');
+  assert.match(pop, /z-index:\s*150/);
+  assert.match(rules, /\n\.modal-backdrop \.month-picker__pop \{ z-index: 2\d\d; \}/);
+});
+
+test('.month-picker is tokened — no raw hex, no rgba', () => {
+  const i = rules.indexOf('\n.month-picker {');
+  const block = rules.slice(i, rules.indexOf('.month-picker__foot', i));
+  assert.doesNotMatch(block, /#[0-9a-fA-F]{3,8}\b|rgba?\(/);
+});
+
+test('the Style Guide shows the month picker live', () => {
+  const sg = readFileSync(join(REPO, 'style-guide/index.html'), 'utf8');
+  assert.match(sg, /NL\.monthPicker\('#sgMonth\d'/);
+  assert.equal(typeof NL.monthPicker, 'function');
+});

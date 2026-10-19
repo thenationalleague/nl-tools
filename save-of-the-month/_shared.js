@@ -1,6 +1,9 @@
 /* Save of the Month — pure logic shared by both pages and tests/save-of-the-month.test.mjs.
-   Version: v4.0 (19/10/2026)
+   Version: v8.0 (19/10/2026)
    File: /save-of-the-month/_shared.js
+   v8.0 (19/10/2026): month labels and the previous month moved to canon
+     (NL.month, nl-utils v1.45); isMonthKey stays for isOpen, which the
+     node tests run without NL.
    v4.0 (19/10/2026): first build.
 
    No DOM, no Firebase, no NL.* — everything here is a pure function of its
@@ -11,8 +14,6 @@
   'use strict';
 
   var SOTM = {};
-  var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
-    'August', 'September', 'October', 'November', 'December'];
 
   SOTM.MAX_PER_CLUB = 5;
   SOTM.SLOTS = ['s1', 's2', 's3', 's4', 's5'];
@@ -22,21 +23,7 @@
 
   SOTM.isMonthKey = function (k) { return /^\d{4}-(0[1-9]|1[0-2])$/.test(String(k || '')); };
 
-  /* '2026-09' → 'September 2026'. */
-  SOTM.monthLabel = function (k) {
-    if (!SOTM.isMonthKey(k)) return String(k || '');
-    return MONTHS[+k.slice(5, 7) - 1] + ' ' + k.slice(0, 4);
-  };
-
   SOTM.ymd = function (d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); };
-
-  /* The month before `d`, as a key — what you normally open: October's
-     nominations are collected in November. */
-  SOTM.previousMonth = function (d) {
-    var y = d.getFullYear(), m = d.getMonth();   /* 0-based, so m is already "last month" + 1 */
-    if (m === 0) { y--; m = 12; }
-    return y + '-' + pad(m);
-  };
 
   /* A closing date is the whole of that day, in the browser's local time
      (UK for everyone who sets one). */
