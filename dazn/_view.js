@@ -1,9 +1,15 @@
 /* =============================================================================
    NL Tools — DAZN Viewership: one club's season, as a dashboard
    File: /dazn/_view.js
-   Version: v40.0 (16/10/2026)
+   Version: v41.0 (19/10/2026)
 
    CHANGELOG
+     v41.0 (19/10/2026) — Fourth card is Avg viewing time (total minutes ÷
+       total views, weighted by audience, not an average of per-game
+       averages); Best game goes. No division comparison on Views per game.
+       The season picker joins the slicer row (o.seasons / o.onSeason), so
+       the page loses a row. By game is the chart's default view. The
+       footnote on how views are counted is gone.
      v40.0 (16/10/2026) — Games table: kick-off in its own column, written
        7.45pm / 3pm; no hover text on Shown in UK or the faded UK figure.
      v38.0 (16/10/2026) — Month totals above the columns are no longer cut off
@@ -81,7 +87,7 @@
                  solved it the same way (border on the scroll box, the
                  table itself unclipped). A canon gap, recorded, not filled.
      .dz-cols  — the month column chart. .dz-bar — the UK / INT data bar.
-     .dz-delta / .dz-sub — the lines under a KPI (canon .stat has no slot).
+     .dz-sub — the line under a KPI (canon .stat has no slot).
 
      DAZNView.render(el, {
        code:   'ROC',                  clubs-meta code
@@ -207,15 +213,15 @@
      club whose games were all shown in the UK gets no UK availability
      slicer, and a club with one game gets no venue slicer. The same rule
      the month list already followed (no month with no games). */
-  function slicers(months, F, has) {
+  function slicers(months, F, has, seasonHtml) {
     var venues = [['all', 'All']];
     if (has.home) venues.push(['home', 'Home']);
     if (has.away) venues.push(['away', 'Away']);
     var ukSplits = has.uk && has.intl;
     var venueSplits = (has.home ? 1 : 0) + (has.away ? 1 : 0) + (has.neutral ? 1 : 0) > 1 && venues.length > 2;
     /* Nothing to split by (a one-game club): no strip at all. */
-    if (!ukSplits && !venueSplits && months.length < 2 && !filtered(F)) return '';
-    return '<div class="filter-bar dz-slicers">' +
+    if (!seasonHtml && !ukSplits && !venueSplits && months.length < 2 && !filtered(F)) return '';
+    return '<div class="filter-bar dz-slicers">' + (seasonHtml || '') +
       (ukSplits ? slicer('UK availability', chips('uk', [['all', 'All'], ['uk', 'Shown in UK'], ['intl', 'Not shown in UK']], F.uk)) : '') +
       (venueSplits ? slicer('Venue', chips('venue', venues, F.venue)) : '') +
       (months.length < 2 ? '' : slicer('Month', '<select class="nl-select" data-f="month" aria-label="Month"><option value="all">All</option>' +
@@ -239,56 +245,26 @@
     });
   }
 
-  /* ---- KPI cards -------------------------------------------------------
-     The division comparison sits under the KPIs it applies to. It is a
-     season figure, so it shows only while no slicer is on: a home-only or
-     single-month figure against a season average would read as a
-     comparison and not be one. */
-  function delta(mine, avg) {
-    if (mine == null || !avg) return '';
-    var pct = Math.round((mine - avg) / avg * 100);
-    var sign = pct > 0 ? '+' : pct < 0 ? '−' : '';
-    return '<div class="dz-delta ' + (pct >= 0 ? 'dz-delta--up' : 'dz-delta--down') + '">' +
-      sign + Math.abs(pct) + '% vs division</div>';
-  }
+  /* ---- KPI cards ------------------------------------------------------- */
 
-  /* Four cards, each answering one question: how many watched, how a game
-     does against the division, how long they stay, and the game that drew
-     most. (A UK share card went in v38.0: the UK / INT split under Total
-     views already says it.) One comparison only (views per game): it is the
-     figure a club compares, and a minutes "vs division" percentage reads as
-     a different thing from a views one.
-     `who` names the club so Best game can say who it was against; the
-     League tab passes none and gets "HOME v AWAY". */
-  function kpis(s, bench, showBench, who) {
-    var b = function (k) { return showBench ? D.benchFigure(bench, k) : null; };
+  /* Four cards: how many watched, how many per game, how long in total,
+     and how long each viewer stayed. Avg viewing time is total minutes over
+     total views, so a 1,500-view game counts for more than a 30-view one;
+     an average of each game's own average would let the small games pull
+     it about. No division comparison (dropped 19/10/2026). bench, showBench
+     and who are kept in the signature for callers; nothing reads them. */
+  function kpis(s) {
     var card = function (num, label, extra, title) {
       return '<div class="stat"' + (title ? ' title="' + esc(title) + '"' : '') + '>' +
         '<div class="stat__num">' + num + '</div><div class="stat__label">' + esc(label) + '</div>' + (extra || '') + '</div>';
     };
     var sub = function (t) { return t ? '<div class="dz-sub">' + esc(t) + '</div>' : ''; };
-    var t = s.top, code = who && who.code, nameOf = (who && who.nameOf) || function () { return ''; };
-    var best = '', bestTitle = '';
-    if (t) {
-      var when = window.NL.formatDateShort(t.date);
-      if (code) {
-        var opp = t.home === code ? t.away : t.home, v = t.neutral ? 'N' : t.home === code ? 'H' : 'A';
-        best = 'v ' + opp + ' (' + v + ') · ' + when;
-        bestTitle = 'v ' + (nameOf(opp) || opp) + ' (' + v + '), ' + when;
-      } else {
-        best = t.home + ' v ' + t.away + ' · ' + when;
-        bestTitle = (nameOf(t.home) || t.home) + ' v ' + (nameOf(t.away) || t.away) + ', ' + when;
-      }
-      bestTitle += ': ' + n0(t.ukViews + t.intlViews) + ' views';
-    }
     return '<div class="stats dz-kpis">' +
       card(compact(s.views), 'Total views',
-        sub('UK ' + compact(s.ukViews) + ' · INT ' + compact(s.intlViews)), n0(s.views) + ' views') +
-      card(compact(s.avgViewsPerGame), 'Views per game',
-        delta(s.avgViewsPerGame, b('avgViewsPerGame')) + sub(n0(s.games) + (s.games === 1 ? ' game' : ' games'))) +
-      card(compact(s.mins / 60), 'Hours watched',
-        sub(n1(s.avgMins) + ' mins per view'), n0(s.mins) + ' minutes watched') +
-      card(t ? compact(t.ukViews + t.intlViews) : '—', 'Best game', sub(best), bestTitle) +
+        sub('UK ' + compact(s.ukViews) + ' \u00b7 INT ' + compact(s.intlViews)), n0(s.views) + ' views') +
+      card(compact(s.avgViewsPerGame), 'Views per game', sub(n0(s.games) + (s.games === 1 ? ' game' : ' games'))) +
+      card(compact(s.mins / 60), 'Hours watched', '', n0(s.mins) + ' minutes watched') +
+      card(s.avgMins == null ? '\u2014' : n1(s.avgMins), 'Avg viewing time', sub('minutes per viewer')) +
     '</div>';
   }
 
@@ -514,7 +490,15 @@
       has[g.neutral ? 'neutral' : g.home === o.code ? 'home' : 'away'] = true;
     });
     var F = { uk: 'all', venue: 'all', month: 'all' };
-    var view = 'month';
+    var view = 'game';
+    /* The season picker sits first in the slicer row when the page passes
+       its seasons: one row fewer than a toolbar of its own. */
+    var seasonHtml = (o.seasons && o.seasons.length && o.onSeason)
+      ? slicer('Season', '<select class="nl-select" data-f="season" aria-label="Season">' +
+          o.seasons.map(function (sv) {
+            return '<option value="' + esc(sv[0]) + '"' + (sv[0] === o.season ? ' selected' : '') + '>' + esc(sv[1]) + '</option>';
+          }).join('') + '</select>')
+      : '';
     /* Fixed scales: the club's whole season, never the sliced subset. */
     var allByMonth = byMonth(all, months);
     var scale = {
@@ -535,14 +519,13 @@
       '<div data-slicers></div>' +
       '<div data-kpis></div>' +
       '<div class="dz-row">' +
-        panel('Views by month', '<div data-chart></div>',
-          '<span class="dz-panel__tools">' + chips('chart', [['month', 'By month'], ['game', 'By game']], 'month') + legend() + '</span>',
+        panel('Views by game', '<div data-chart></div>',
+          '<span class="dz-panel__tools">' + chips('chart', [['game', 'By game'], ['month', 'By month']], 'game') + legend() + '</span>',
           '', 'data-chart-title') +
         panel('Top games', '<div data-top></div>', '<span class="dz-panel__ctx" data-top-ctx></span>') +
       '</div>' +
       panel('Games', '<div data-games></div>', legend(), 'dz-panel--flush') +
       notPlayedNote(o.notPlayed, nameOf, o.code) +
-      '<p class="form-hint">A view is counted per game, so someone who watched three games counts three times.</p>' +
     '</div>';
 
     var q = function (sel) { return el.querySelector(sel); };
@@ -563,7 +546,7 @@
     });
 
     function draw() {
-      q('[data-slicers]').innerHTML = slicers(months, F, has);
+      q('[data-slicers]').innerHTML = slicers(months, F, has, seasonHtml);
       var shown = applyFilters(all, o.code, F);
       q('[data-chart-title]').textContent = view === 'game' ? 'Views by game' : 'Views by month';
       var ctx = context();
@@ -589,7 +572,7 @@
                  avg: total ? (g.ukMins + g.intlMins) / total : null };
       });
       if (view === 'game') q('[data-chart]').innerHTML = gameChart(rows, scale.game);
-      q('[data-kpis]').innerHTML = kpis(s, o.bench, !filtered(F), { code: o.code, nameOf: nameOf });
+      q('[data-kpis]').innerHTML = kpis(s);
       q('[data-top]').innerHTML = topGames(rows);
       window.NL.clubs.wireCrestImgs(q('[data-top]'));
       gamesGrid(q('[data-games]'), rows, s);
@@ -612,6 +595,7 @@
       if (e.target.closest('[data-reset]')) { F = { uk: 'all', venue: 'all', month: 'all' }; draw(); }
     };
     el.onchange = function (e) {
+      if (e.target.matches('select[data-f="season"]')) { o.onSeason(e.target.value); return; }
       if (e.target.matches('select[data-f="month"]')) { F.month = e.target.value; draw(); }
     };
     draw();

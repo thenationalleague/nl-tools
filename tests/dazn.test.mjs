@@ -296,24 +296,22 @@ test('a club view with a neutral game: Venue Home and Away both leave it out, Al
   assert.equal(n('away'), 2);
 });
 
-test('headline cards: views per game against the division, best game named, no UK share', () => {
+test('headline cards: total, per game, hours, and avg viewing time weighted by audience', () => {
   const win = { DAZNData: D, NL: { formatDateShort: (d) => d, escHtml: (t) => String(t) } };
   vm.runInNewContext(readFileSync(join(REPO, 'dazn/_view.js'), 'utf8'), { window: win, Intl });
+  /* 1,000 views watching 90 minutes and 10 views watching 10 minutes.
+     Weighted: 90,100 / 1,010 = 89.2. An average of the two games' own
+     averages would say 50.0, which no viewer experienced. */
   const games = [
-    { date: '2025-08-09', home: 'ALP', away: 'BET', ukViews: 300, intlViews: 100, ukMins: 0, intlMins: 6000, avail: 'uk' },
-    { date: '2025-08-16', home: 'GAM', away: 'ALP', ukViews: 0, intlViews: 200, ukMins: 0, intlMins: 0, avail: 'intl' }
+    { date: '2025-08-09', home: 'ALP', away: 'BET', ukViews: 1000, intlViews: 0, ukMins: 90000, intlMins: 0, avail: 'uk' },
+    { date: '2025-08-16', home: 'GAM', away: 'ALP', ukViews: 0, intlViews: 10, ukMins: 0, intlMins: 100, avail: 'intl' }
   ];
-  const s = D.summarise(games, 'ALP');
-  const bench = { games: 10, ukShownGames: 10, avgViewsPerGame: 200 };
-  const html = win.DAZNView.kpis(s, bench, true, { code: 'ALP', nameOf: () => '' });
+  const html = win.DAZNView.kpis(D.summarise(games, 'ALP'));
   const labels = [...html.matchAll(/stat__label">([^<]*)</g)].map((m) => m[1]);
-  assert.deepEqual(JSON.parse(JSON.stringify(labels)), ['Total views', 'Views per game', 'Hours watched', 'Best game']);
-  assert.match(html, /\+50% vs division/, '300 per game against 200');
-  assert.match(html, /v BET \(H\)/);
-  assert.match(html, />100</, '6,000 minutes is 100 hours');
-  /* A slicer is on: no comparison, but the card still counts the games. */
-  assert.doesNotMatch(win.DAZNView.kpis(s, bench, false, { code: 'ALP' }), /vs division/);
-  assert.match(win.DAZNView.kpis(D.summarise(games), null, false), /ALP v BET/, 'League: home v away');
+  assert.deepEqual(JSON.parse(JSON.stringify(labels)), ['Total views', 'Views per game', 'Hours watched', 'Avg viewing time']);
+  assert.match(html, />89\.2</, 'total minutes over total views');
+  assert.doesNotMatch(html, />50\.0</);
+  assert.doesNotMatch(html, /vs division/, 'no division comparison');
 });
 
 test('the chart has a fixed height, so nothing beside it can stretch it', () => {
@@ -335,7 +333,7 @@ test('By month always runs August to May; slicers appear only when they split th
   const view = readFileSync(join(REPO, 'dazn/_view.js'), 'utf8');
   assert.match(view, /for \(var k = 0; k < 10; k\+\+\)/, 'ten-month season axis');
   assert.match(view, /var ukSplits = has\.uk && has\.intl/);
-  assert.match(view, /if \(!ukSplits && !venueSplits && months\.length < 2 && !filtered\(F\)\) return ''/);
+  assert.match(view, /if \(!seasonHtml && !ukSplits && !venueSplits && months\.length < 2 && !filtered\(F\)\) return ''/);
 });
 
 test('a month total printed above its column is never cut off by the top of the scale', () => {

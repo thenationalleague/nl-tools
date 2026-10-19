@@ -1,10 +1,13 @@
 <!DOCTYPE html>
 <!--
   NL Tools — DAZN Viewership (club page)
-  Version: v40.0 (16/10/2026)
+  Version: v41.0 (19/10/2026)
   File: /dazn/index.html
 
   CHANGELOG
+    v41.0 (19/10/2026) — Cards: Avg viewing time replaces Best game; no division
+      comparison. Season picker moves into the club view's slicer row; By game
+      opens first; the views footnote is gone (_view v41.0).
     v40.0 (16/10/2026) — Games table: kick-off in its own column (7.45pm);
       no hover text on Shown in UK (_view v40.0).
     v38.0 (16/10/2026) — Dashboard tidy (_view v38.0): month totals no longer
@@ -99,9 +102,9 @@
   <script src="/system/nl-utils.js?v=48"></script>
   <!-- GA4 for nl.tools — cookieless, no banner, no identity. See system/nl-analytics.js -->
   <script src="/system/nl-analytics.js?v=1"></script>
-  <link rel="stylesheet" href="/dazn/_view.css?v=12">
+  <link rel="stylesheet" href="/dazn/_view.css?v=13">
   <script src="/dazn/_data.js?v=6"></script>
-  <script src="/dazn/_view.js?v=17"></script>
+  <script src="/dazn/_view.js?v=18"></script>
 </head>
 <body>
   <!-- White bar: no NL account is behind this page (nl-brand v2.51). -->
@@ -120,12 +123,6 @@
   <div class="gate" id="dzGate"></div>
 
   <main class="page" id="dzShell" hidden>
-    <div class="toolbar" id="dzSeasonBar" hidden>
-      <div class="toolbar__left">
-        <span class="filter-label">Season</span>
-        <select class="nl-select" id="dzSeason" aria-label="Season"></select>
-      </div>
-    </div>
     <div id="dzBody"></div>
   </main>
 
@@ -148,18 +145,41 @@
     return c ? c.name : '';
   }
 
-  function showSeason(key) {
-    message('Loading…');
+  function labelOf(k) { return (S.idx && S.idx[k] && S.idx[k].label) || NL.season.label(null, k); }
+
+  function readClub(key) {
     return db.ref(BASE + '/seasons/' + key + '/clubs/' + S.code).once('value').then(function (snap) {
       var club = snap.val();
-      if (!club || !club.matches) { message('No DAZN games this season'); return; }
-      return db.ref(BASE + '/seasons/' + key + '/bench/' + club.div).once('value').then(function (b) {
-        DAZNView.render($('dzBody'), {
-          code: S.code, name: nameOf(S.code), games: club.matches, notPlayed: club.notPlayed,
-          bench: b.val(), div: club.div,
-          seasonLabel: (S.idx && S.idx[key] && S.idx[key].label) || NL.season.label(null, key),
-          nameOf: nameOf
-        });
+      return club && club.matches ? club : null;
+    });
+  }
+
+  /* Open on the newest season this club has games in, not simply the newest
+     season: a club that left the League (or has just joined) would
+     otherwise land on an empty season with no picker to leave it by. */
+  function firstSeasonWithGames(i) {
+    if (i >= S.seasons.length) return Promise.resolve(S.seasons[0]);
+    return readClub(S.seasons[i]).then(function (club) { return club ? S.seasons[i] : firstSeasonWithGames(i + 1); });
+  }
+
+  function showSeason(key) {
+    message('Loading…');
+    return readClub(key).then(function (club) {
+      if (!club) {
+        var others = S.seasons.filter(function (k) { return k !== key; });
+        message('No DAZN games in ' + labelOf(key), others.map(function (k) {
+          return '<button type="button" class="btn btn--primary btn--sm" data-season="' + NL.escHtml(k) + '">Show ' + NL.escHtml(labelOf(k)) + '</button>';
+        }).join(' '));
+        return;
+      }
+      DAZNView.render($('dzBody'), {
+        code: S.code, name: nameOf(S.code), games: club.matches, notPlayed: club.notPlayed, div: club.div,
+        seasonLabel: labelOf(key),
+        nameOf: nameOf,
+        /* The season picker rides in the view's slicer row. */
+        seasons: S.seasons.map(function (k) { return [k, labelOf(k)]; }),
+        season: key,
+        onSeason: showSeason
       });
     }).catch(function (e) {
       console.error('[dazn]', e);
@@ -191,19 +211,17 @@
       var idx = S.idx = (snap && snap.val()) || {};
       S.seasons = Object.keys(idx).sort().reverse();
       if (!S.seasons.length) { message('No figures yet'); return; }
-      var sel = $('dzSeason');
-      sel.innerHTML = S.seasons.map(function (k) {
-        return '<option value="' + NL.escHtml(k) + '">' + NL.escHtml(idx[k].label || NL.season.label(null, k)) + '</option>';
-      }).join('');
-      /* Shown even with one season: the figures always say which season. */
-      $('dzSeasonBar').hidden = false;
-      sel.onchange = function () { showSeason(sel.value); };
-      return showSeason(S.seasons[0]);
+      return firstSeasonWithGames(0).then(showSeason);
     }).catch(function (e) {
       console.error('[dazn]', e);
       message('Figures could not be loaded', 'Reload the page to try again.');
     });
   }
+
+  $('dzBody').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-season]');
+    if (b) showSeason(b.getAttribute('data-season'));
+  });
 
   $('dzOut').addEventListener('click', function () {
     NL.codeGate.signOut().then(function () { location.reload(); });
