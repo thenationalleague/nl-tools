@@ -1,9 +1,12 @@
 /* =============================================================================
    NL Tools — DAZN Viewership: one club's season, as a dashboard
    File: /dazn/_view.js
-   Version: v41.0 (19/10/2026)
+   Version: v42.0 (19/10/2026)
 
    CHANGELOG
+     v42.0 (19/10/2026) — The Month slicer is the canon month picker
+       (NL.monthPicker): only months with games are pickable, "All" clears
+       it. Was a <select> of hand-formatted month names.
      v41.0 (19/10/2026) — Fourth card is Avg viewing time (total minutes ÷
        total views, weighted by audience, not an average of per-game
        averages); Best game goes. No division comparison on Views per game.
@@ -224,11 +227,7 @@
     return '<div class="filter-bar dz-slicers">' + (seasonHtml || '') +
       (ukSplits ? slicer('UK availability', chips('uk', [['all', 'All'], ['uk', 'Shown in UK'], ['intl', 'Not shown in UK']], F.uk)) : '') +
       (venueSplits ? slicer('Venue', chips('venue', venues, F.venue)) : '') +
-      (months.length < 2 ? '' : slicer('Month', '<select class="nl-select" data-f="month" aria-label="Month"><option value="all">All</option>' +
-        months.map(function (m) {
-          return '<option value="' + m + '"' + (F.month === m ? ' selected' : '') + '>' +
-            esc(MONTH_LONG.format(new Date(m + '-01T00:00:00Z'))) + '</option>';
-        }).join('') + '</select>')) +
+      (months.length < 2 ? '' : slicer('Month', '<div data-month-pick></div>')) +
       (filtered(F) ? '<button type="button" class="btn btn--ghost btn--sm dz-slicers__clear" data-reset>Clear</button>' : '') +
     '</div>';
   }
@@ -509,7 +508,7 @@
     /* What Top games is ranked over, so the list is never ambiguous:
        "2025-26", "April 2026", "2025-26 · Home · Not shown in UK". */
     function context() {
-      var bits = [F.month !== 'all' ? MONTH_LONG.format(new Date(F.month + '-01T00:00:00Z')) : (o.seasonLabel || 'Season')];
+      var bits = [F.month !== 'all' ? window.NL.month.label(F.month) : (o.seasonLabel || 'Season')];
       if (F.venue !== 'all') bits.push(F.venue === 'home' ? 'Home' : 'Away');
       if (F.uk !== 'all') bits.push(F.uk === 'uk' ? 'Shown in UK' : 'Not shown in UK');
       return bits.join(' \u00b7 ');
@@ -547,6 +546,11 @@
 
     function draw() {
       q('[data-slicers]').innerHTML = slicers(months, F, has, seasonHtml);
+      var mp = q('[data-month-pick]');
+      if (mp) window.NL.monthPicker(mp, {
+        ariaLabel: 'Month', months: months, emptyLabel: 'All', value: F.month === 'all' ? null : F.month,
+        onChange: function (k) { F.month = k || 'all'; draw(); }
+      });
       var shown = applyFilters(all, o.code, F);
       q('[data-chart-title]').textContent = view === 'game' ? 'Views by game' : 'Views by month';
       var ctx = context();
@@ -596,7 +600,6 @@
     };
     el.onchange = function (e) {
       if (e.target.matches('select[data-f="season"]')) { o.onSeason(e.target.value); return; }
-      if (e.target.matches('select[data-f="month"]')) { F.month = e.target.value; draw(); }
     };
     draw();
   }

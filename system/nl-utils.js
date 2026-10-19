@@ -1,7 +1,27 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.44 (15/10/2026)
+   Version: v1.45 (19/10/2026)
+
+   v1.45 — Two things, one cache-bust (?v=48 -> ?v=49, nl-brand unchanged):
+   · NL.month — month keys ('YYYY-MM'): key(date), label(key) → 'September
+     2026', prev(key), isKey(key). Promoted on the third copy: social-output
+     (SocialData.monthLabel/prevMonth), dazn/_view.js (Intl) and Save of the
+     Month had each written their own, and two had already drifted (one took
+     a Date, one a key). The month picker convention it serves: a
+     <select class="nl-select"> of labelled month keys.
+   · NL.monthPicker(mount, opts) — the brand month picker (.month-picker,
+     nl-brand v2.71, ?v=67 -> ?v=68). The concept of <input type="month">,
+     drawn in the brand: a .nl-select trigger opening a year with its
+     twelve months. Every month choice in the estate goes through it —
+     Save of the Month, Social Output, DAZN and Website Archive moved in
+     the same change.
+   · NL.csv neutralises spreadsheet formulas. A cell that opens with = + - @
+     tab or CR is prefixed with an apostrophe, so text a club or the public
+     typed cannot run as a formula when staff open the export in Excel
+     (CSV injection). Numbers, and strings that are plain numbers ("-5",
+     "+44"), pass through unchanged. {raw:true} turns it off for an export
+     that deliberately carries formulas.
 
    v1.44 — NL.clubs.byCode(code): sync, case-insensitive, memoised lookup by
    the clubs-meta `code`, the key a club-code token carries. uw-promo/club
@@ -592,6 +612,199 @@
     return d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + d.getFullYear();
   };
 
+  /* Month keys — 'YYYY-MM', the shape RTDB paths and <option> values use.
+     Label is the long form ('September 2026'); a picker is a
+     <select class="nl-select"> of these, newest first. */
+  window.NL.month = {
+    isKey: function(k) { return /^\d{4}-(0[1-9]|1[0-2])$/.test(String(k || '')); },
+    /* The month a Date falls in, local time. Default: now. */
+    key: function(d) {
+      d = d || new Date();
+      var m = d.getMonth() + 1;
+      return d.getFullYear() + '-' + (m < 10 ? '0' : '') + m;
+    },
+    label: function(k) {
+      if (!window.NL.month.isKey(k)) return String(k || '');
+      return MONTHS[+k.slice(5, 7) - 1] + ' ' + k.slice(0, 4);
+    },
+    prev: function(k) {
+      var y = +k.slice(0, 4), m = +k.slice(5, 7) - 1;
+      if (m === 0) { y--; m = 12; }
+      return y + '-' + (m < 10 ? '0' : '') + m;
+    }
+  };
+
+  /* ---- NL.monthPicker -------------------------------------------------
+     The brand month picker. Renders .month-picker (nl-brand.css) into
+     `mount` and returns a controller.
+
+       NL.monthPicker(mount, {
+         value:     'YYYY-MM' | null,  the starting month
+         min, max:  'YYYY-MM',         bounds, inclusive (either optional)
+         months:    ['YYYY-MM', …],    ONLY these are pickable (a filter
+                                       over months that have data)
+         emptyLabel: 'All months',     allows no month: shown when value is
+                                       null, and as a button in the popover
+         placeholder: 'Choose a month' trigger text with no value and no
+                                       emptyLabel
+         step:      true,              ‹ › beside the trigger, one month at
+                                       a time through the pickable months
+         id, ariaLabel                 for a <label for> / screen readers
+         onChange(key|null)            fired on a user's choice only
+       })
+       → { el, get(), set(key|null), setRange({min,max,months}), open(), close() }
+
+     set() never fires onChange: the caller already knows what it set. */
+  window.NL.monthPicker = function(mount, opts) {
+    opts = opts || {};
+    var host = (typeof mount === 'string') ? document.querySelector(mount) : mount;
+    if (!host) throw new Error('NL.monthPicker: mount not found');
+    var M = window.NL.month, esc = window.NL.escHtml;
+    var S = { value: M.isKey(opts.value) ? opts.value : null, min: opts.min || null, max: opts.max || null,
+              months: opts.months ? opts.months.slice() : null, year: 0 };
+
+    var root = document.createElement('div');
+    root.className = 'month-picker';
+    root.innerHTML =
+      (opts.step ? '<button type="button" class="month-picker__step" data-step="-1" aria-label="Previous month">‹</button>' : '') +
+      '<button type="button" class="nl-select month-picker__trigger" aria-haspopup="dialog" aria-expanded="false"' +
+        (opts.id ? ' id="' + esc(opts.id) + '"' : '') + (opts.ariaLabel ? ' aria-label="' + esc(opts.ariaLabel) + '"' : '') + '></button>' +
+      (opts.step ? '<button type="button" class="month-picker__step" data-step="1" aria-label="Next month">›</button>' : '') +
+      '<div class="month-picker__pop" role="dialog" aria-label="' + esc(opts.ariaLabel || 'Choose a month') + '">' +
+        '<div class="month-picker__head">' +
+          '<button type="button" class="month-picker__nav" data-year="-1" aria-label="Previous year">‹</button>' +
+          '<span class="month-picker__year"></span>' +
+          '<button type="button" class="month-picker__nav" data-year="1" aria-label="Next year">›</button>' +
+        '</div>' +
+        '<div class="month-picker__grid"></div>' +
+        (opts.emptyLabel ? '<div class="month-picker__foot"><button type="button" class="btn btn--ghost btn--sm" data-empty>' + esc(opts.emptyLabel) + '</button></div>' : '') +
+      '</div>';
+    host.innerHTML = '';
+    host.appendChild(root);
+    var trig = root.querySelector('.month-picker__trigger'), pop = root.querySelector('.month-picker__pop');
+
+    function allowed(k) {
+      if (S.min && k < S.min) return false;
+      if (S.max && k > S.max) return false;
+      return !S.months || S.months.indexOf(k) >= 0;
+    }
+    /* The pickable months in order — what the step buttons walk. With no
+       `months` list it is the open range, so step by arithmetic instead. */
+    function stepFrom(k, dir) {
+      if (S.months) {
+        var list = S.months.filter(allowed).sort(), i = list.indexOf(k);
+        if (i < 0) return dir > 0 ? (list.filter(function (m) { return m > k; })[0] || null) : (list.filter(function (m) { return m < k; }).pop() || null);
+        return list[i + dir] || null;
+      }
+      var n = dir > 0 ? next(k) : M.prev(k);
+      return allowed(n) ? n : null;
+    }
+    function next(k) { var y = +k.slice(0, 4), m = +k.slice(5, 7) + 1; if (m === 13) { y++; m = 1; } return y + '-' + (m < 10 ? '0' : '') + m; }
+    function yearHas(y) {
+      for (var m = 1; m <= 12; m++) if (allowed(y + '-' + (m < 10 ? '0' : '') + m)) return true;
+      return false;
+    }
+
+    function drawTrigger() {
+      trig.textContent = S.value ? M.label(S.value) : (opts.emptyLabel || opts.placeholder || 'Choose a month');
+      trig.classList.toggle('is-empty', !S.value && !opts.emptyLabel);
+      if (opts.step) {
+        var steps = root.querySelectorAll('.month-picker__step');
+        steps[0].disabled = !S.value || !stepFrom(S.value, -1);
+        steps[1].disabled = !S.value || !stepFrom(S.value, 1);
+      }
+    }
+    function drawGrid() {
+      var now = M.key(), y = S.year, html = '';
+      for (var m = 1; m <= 12; m++) {
+        var k = y + '-' + (m < 10 ? '0' : '') + m;
+        html += '<button type="button" class="month-picker__m' + (k === S.value ? ' is-sel' : '') + (k === now ? ' is-now' : '') + '"' +
+          ' data-m="' + k + '"' + (allowed(k) ? '' : ' disabled') + (k === S.value ? ' aria-pressed="true"' : '') + '>' +
+          M.label(k).slice(0, 3) + '</button>';
+      }
+      root.querySelector('.month-picker__grid').innerHTML = html;
+      root.querySelector('.month-picker__year').textContent = y;
+      root.querySelector('[data-year="-1"]').disabled = !yearHas(y - 1) && !!(S.min || S.months);
+      root.querySelector('[data-year="1"]').disabled = !yearHas(y + 1) && !!(S.max || S.months);
+    }
+
+    function choose(k) {
+      S.value = k;
+      drawTrigger();
+      ctrl.close();
+      if (opts.onChange) opts.onChange(k);
+    }
+    function onDoc(e) { if (!root.contains(e.target)) ctrl.close(); }
+    /* Below the trigger, or above it when the viewport has no room below;
+       never off either side. Re-run on scroll and resize while open. */
+    function place() {
+      var r = trig.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
+      var vw = document.documentElement.clientWidth, vh = window.innerHeight;
+      var top = (r.bottom + 4 + h > vh && r.top - 4 - h >= 0) ? r.top - 4 - h : r.bottom + 4;
+      pop.style.top = Math.round(top) + 'px';
+      pop.style.left = Math.round(Math.max(8, Math.min(r.left, vw - w - 8))) + 'px';
+    }
+    function onKey(e) {
+      if (e.key === 'Escape') { e.preventDefault(); ctrl.close(); trig.focus(); return; }
+      var b = document.activeElement;
+      if (!b || !b.classList.contains('month-picker__m')) return;
+      var d = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -3, ArrowDown: 3 }[e.key];
+      if (!d) return;
+      e.preventDefault();
+      var all = Array.prototype.slice.call(root.querySelectorAll('.month-picker__m'));
+      var i = all.indexOf(b) + d;
+      while (all[i] && all[i].disabled) i += d > 0 ? 1 : -1;
+      if (all[i]) all[i].focus();
+    }
+
+    root.addEventListener('click', function (e) {
+      var t = e.target.closest('button');
+      if (!t || t.disabled) return;
+      if (t === trig) { pop.classList.contains('open') ? ctrl.close() : ctrl.open(); }
+      else if (t.hasAttribute('data-m')) choose(t.getAttribute('data-m'));
+      else if (t.hasAttribute('data-year')) { S.year += +t.getAttribute('data-year'); drawGrid(); }
+      else if (t.hasAttribute('data-step')) { var n = stepFrom(S.value, +t.getAttribute('data-step')); if (n) choose(n); }
+      else if (t.hasAttribute('data-empty')) choose(null);
+    });
+
+    var ctrl = {
+      el: root,
+      get: function () { return S.value; },
+      set: function (k) { S.value = M.isKey(k) ? k : null; drawTrigger(); if (pop.classList.contains('open')) drawGrid(); },
+      setRange: function (r) {
+        r = r || {};
+        if ('min' in r) S.min = r.min || null;
+        if ('max' in r) S.max = r.max || null;
+        if ('months' in r) S.months = r.months ? r.months.slice() : null;
+        drawTrigger();
+        if (pop.classList.contains('open')) drawGrid();
+      },
+      open: function () {
+        S.year = +((S.value || S.max || (S.months && S.months.slice().sort().pop()) || M.key()).slice(0, 4));
+        drawGrid();
+        pop.classList.add('open');
+        place();
+        trig.setAttribute('aria-expanded', 'true');
+        document.addEventListener('mousedown', onDoc);
+        window.addEventListener('scroll', place, true);
+        window.addEventListener('resize', place);
+        root.addEventListener('keydown', onKey);
+        var f = root.querySelector('.month-picker__m.is-sel') || root.querySelector('.month-picker__m:not(:disabled)');
+        if (f) f.focus();
+      },
+      close: function () {
+        pop.classList.remove('open');
+        trig.setAttribute('aria-expanded', 'false');
+        document.removeEventListener('mousedown', onDoc);
+        window.removeEventListener('scroll', place, true);
+        window.removeEventListener('resize', place);
+        root.removeEventListener('keydown', onKey);
+      }
+    };
+    drawTrigger();
+    return ctrl;
+  };
+
   /* Short format, e.g. '17 Apr 2026' */
   window.NL.formatDateShort = function(str) {
     var d = window.NL.parseDate(str);
@@ -766,11 +979,16 @@
   /* Build a CSV string from an array of rows (each an array of cells). Escapes
      per RFC 4180: a cell containing a comma, quote or newline is wrapped in
      double-quotes with internal quotes doubled. {bom:true} prefixes a UTF-8
-     BOM so Excel reads accented text correctly. */
+     BOM so Excel reads accented text correctly. A cell opening with = + - @
+     tab or CR is apostrophe-prefixed so it cannot run as a formula (CSV
+     injection); numbers and plain-number strings are left alone, and
+     {raw:true} turns it off. */
   window.NL.csv = function(rows, opts) {
     opts = opts || {};
     function cell(v) {
+      var isNum = typeof v === 'number';
       v = v == null ? '' : String(v);
+      if (!opts.raw && !isNum && /^[=+\-@\t\r]/.test(v) && !/^[+-]?\d+(\.\d+)?$/.test(v)) v = "'" + v;
       return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
     }
     var body = (rows || []).map(function (r) {

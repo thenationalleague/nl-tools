@@ -1,10 +1,14 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Save of the Month (League console)
-  Version: v4.0 (19/10/2026)
+  Version: v8.0 (19/10/2026)
   File: /save-of-the-month/admin/index.html
 
   CHANGELOG
+    v8.0 (19/10/2026) — Canon pass: crests through NL.clubs.crestImgHtml +
+      wireCrestImgs and .nl-crest, plain btn--danger, the shortlist highlight
+      survives row hover, one restated line cut. Both month choices are the
+      canon month picker (NL.monthPicker); the list's has ‹ › to step.
     v4.0 (19/10/2026) — First build. Opens one month at a time for
       nominations, with an optional closing date, and closes it by hand.
       Lists what clubs have nominated for any month, plays the clips, marks
@@ -45,7 +49,7 @@
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
 
   <!-- Brand stylesheet (lint canonical: ?v=67) -->
-  <link rel="stylesheet" href="/system/nl-brand.css?v=67">
+  <link rel="stylesheet" href="/system/nl-brand.css?v=68">
 
   <!-- Firebase 10.12.0 SDK (compat) -->
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -79,6 +83,11 @@
     window.NL_CHANGELOG = [
       {
         date: '19/10/2026',
+        version: 'v8.0',
+        items: ['Months are chosen with the brand month picker; the list has ‹ › to step between months with nominations.', 'Shortlisted rows stay highlighted under the pointer.']
+      },
+      {
+        date: '19/10/2026',
         version: 'v4.0',
         items: [
           'First build. Open a month for nominations with an optional closing date, and close it by hand.',
@@ -103,14 +112,14 @@
   </script>
 
   <!-- NL system scripts (lint canonical: ?v=48 / ?v=1 / ?v=10 / ?v=16) -->
-  <script src="/system/nl-utils.js?v=48"></script>
+  <script src="/system/nl-utils.js?v=49"></script>
   <!-- GA4, one property for all of nl.tools. Cookieless, so no consent
        banner on any page; page views by path, no identity. Tool events go
        through NL.track(). See system/nl-analytics.js. -->
   <script src="/system/nl-analytics.js?v=1"></script>
   <script src="/system/nl-topbar.js?v=10"></script>
   <script src="/system/auth-guard.js?v=16"></script>
-  <script src="/save-of-the-month/_shared.js?v=1"></script>
+  <script src="/save-of-the-month/_shared.js?v=2"></script>
 
 <style>
   /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
@@ -121,11 +130,11 @@
   .sm-open > div { margin: 0; }
   .sm-state { margin-bottom: 12px; font-size: var(--text-sm); }
   .sm-club { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
-  .sm-club img { width: 24px; height: 24px; object-fit: contain; }
   .sm-sub { display: block; font-size: var(--text-xs); color: var(--text-muted); }
   .sm-context { max-width: 320px; font-size: var(--text-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
   .sm-section { margin-top: 24px; }
-  tr.is-short td { background: var(--amber-light); }
+  /* !important + the extra :hover to outrank .table tr:hover td. */
+  tr.is-short td, tr.is-short:hover td { background: var(--amber-light) !important; }
 </style>
 </head>
 <body>
@@ -142,15 +151,15 @@
         <div class="sm-state" id="smState">Loading…</div>
         <div class="sm-open">
           <div class="form-group">
-            <label for="smMonth">Month</label>
-            <input id="smMonth" type="month">
+            <label for="smMonthBtn">Month</label>
+            <div id="smMonth"></div>
           </div>
           <div class="form-group">
             <label for="smCloses">Closes</label>
             <input id="smCloses" type="date">
           </div>
           <button type="button" class="btn btn--primary" id="smOpenBtn">Open month</button>
-          <button type="button" class="btn btn--ghost btn--danger" id="smCloseBtn" hidden>Close now</button>
+          <button type="button" class="btn btn--danger" id="smCloseBtn" hidden>Close now</button>
         </div>
       </div>
     </section>
@@ -159,7 +168,7 @@
       <div class="section-head"><h2>Nominations</h2></div>
       <div class="toolbar">
         <div class="toolbar__left">
-          <select class="toolbar__filter" id="smView" aria-label="Month"></select>
+          <div id="smView"></div>
           <div class="chip-group" id="smFilter">
             <button type="button" class="chip active" data-f="all">All</button>
             <button type="button" class="chip" data-f="short">Shortlisted</button>
@@ -167,7 +176,7 @@
         </div>
         <div class="toolbar__right">
           <button type="button" class="btn btn--ghost btn--sm" id="smCsv">Export CSV</button>
-          <button type="button" class="btn btn--ghost btn--sm btn--danger" id="smWipe">Delete clips</button>
+          <button type="button" class="btn btn--danger btn--sm" id="smWipe">Delete clips</button>
         </div>
       </div>
       <div class="stats" id="smStats"></div>
@@ -185,7 +194,20 @@
   var BASE = 'app-data/media-save-of-the-month/';
   var $ = function (id) { return document.getElementById(id); };
   var esc = function (s) { return NL.escHtml(s); };
-  var S = { config: null, noms: {}, short: {}, view: null, filter: 'all', loaded: 0 };
+  var S = { config: null, noms: {}, short: {}, view: null, filter: 'all', loaded: 0, touched: false };
+
+  /* Which month to open: up to this one. Usually last month — October's
+     saves are collected in November. */
+  var openPick = NL.monthPicker($('smMonth'), {
+    id: 'smMonthBtn', max: NL.month.key(), value: NL.month.prev(NL.month.key()),
+    onChange: function () { S.touched = true; }
+  });
+  /* Which month's nominations to list: only months that have any, plus the
+     open one. */
+  var viewPick = NL.monthPicker($('smView'), {
+    ariaLabel: 'Month', step: true, months: [], placeholder: 'No months yet',
+    onChange: function (k) { S.view = k; render(); }
+  });
 
   function clubName(code) {
     var c = NL.clubs.byCode(code);
@@ -197,31 +219,27 @@
   function renderState() {
     var c = S.config, open = SOTM.isOpen(c, Date.now());
     if (!c) {
-      $('smState').innerHTML = '<span class="pill pill--pending">Closed</span> Nothing is open to clubs.';
+      $('smState').innerHTML = '<span class="pill">Closed</span>';
     } else {
       $('smState').innerHTML = (open
         ? '<span class="pill pill--live">Open</span> '
         : '<span class="pill pill--expired">Past closing date</span> ') +
-        '<strong>' + esc(SOTM.monthLabel(c.month)) + '</strong>' +
+        '<strong>' + esc(NL.month.label(c.month)) + '</strong>' +
         (c.closesAt ? ' · closes ' + esc(NL.formatDate(c.closesAt)) : ' · no closing date');
     }
     $('smCloseBtn').hidden = !c;
     $('smOpenBtn').textContent = c ? 'Update' : 'Open month';
-    if (c && !$('smMonth').dataset.touched) {
-      $('smMonth').value = c.month;
+    if (c && !S.touched) {
+      openPick.set(c.month);
       $('smCloses').value = c.closesAt ? SOTM.ymd(new Date(c.closesAt)) : '';
-    } else if (!c && !$('smMonth').value) {
-      $('smMonth').value = SOTM.previousMonth(new Date());
     }
   }
 
-  ['smMonth', 'smCloses'].forEach(function (id) {
-    $(id).addEventListener('input', function () { $('smMonth').dataset.touched = '1'; });
-  });
+  $('smCloses').addEventListener('input', function () { S.touched = true; });
 
   $('smOpenBtn').addEventListener('click', function () {
-    var month = $('smMonth').value, closes = $('smCloses').value;
-    if (!SOTM.isMonthKey(month)) { NL.toast('Pick a month', 'error'); return; }
+    var month = openPick.get(), closes = $('smCloses').value;
+    if (!month) { NL.toast('Pick a month', 'error'); return; }
     var rec = { month: month };
     if (closes) {
       rec.closesAt = SOTM.endOfDay(closes);
@@ -229,14 +247,14 @@
     }
     var cur = S.config;
     var ask = (cur && cur.month !== month)
-      ? NL.confirm('This closes ' + SOTM.monthLabel(cur.month) + ' and opens ' + SOTM.monthLabel(month) + '.',
+      ? NL.confirm('This closes ' + NL.month.label(cur.month) + ' and opens ' + NL.month.label(month) + '.',
           { title: 'Switch month', confirmText: 'Switch' })
       : Promise.resolve(true);
     ask.then(function (ok) {
       if (!ok) return;
       return db.ref(BASE + 'config').set(rec).then(function () {
-        delete $('smMonth').dataset.touched;
-        NL.toast(SOTM.monthLabel(month) + ' is open', 'success');
+        S.touched = false;
+        NL.toast(NL.month.label(month) + ' is open', 'success');
       });
     }).catch(function (e) { NL.toast('Could not save: ' + (e && e.message), 'error'); });
   });
@@ -244,7 +262,7 @@
   $('smCloseBtn').addEventListener('click', function () {
     var cur = S.config;
     if (!cur) return;
-    NL.confirm('Clubs can no longer add or change nominations for ' + SOTM.monthLabel(cur.month) + '.',
+    NL.confirm('Clubs can no longer add or change nominations for ' + NL.month.label(cur.month) + '.',
       { title: 'Close nominations', confirmText: 'Close', variant: 'danger' })
       .then(function (ok) {
         if (!ok) return;
@@ -255,17 +273,14 @@
   /* ── the list ────────────────────────────────────────────────────────── */
 
   /* Months to offer: every month anything was nominated for, plus the open
-     one. Newest first; a dropdown because the list only ever grows. */
+     one. Defaults to the open month, else the newest. */
   function renderMonths() {
     var keys = Object.keys(S.noms);
     if (S.config && keys.indexOf(S.config.month) < 0) keys.push(S.config.month);
     keys.sort().reverse();
     if (!S.view || keys.indexOf(S.view) < 0) S.view = (S.config && S.config.month) || keys[0] || null;
-    $('smView').innerHTML = keys.length
-      ? keys.map(function (k) {
-          return '<option value="' + esc(k) + '"' + (k === S.view ? ' selected' : '') + '>' + esc(SOTM.monthLabel(k)) + '</option>';
-        }).join('')
-      : '<option value="">No months yet</option>';
+    viewPick.setRange({ months: keys });
+    viewPick.set(S.view);
   }
 
   function rowsFor(month) {
@@ -303,7 +318,7 @@
       rows.map(function (r) {
         var n = r.rec;
         return '<tr' + (r.short ? ' class="is-short"' : '') + '>' +
-          '<td><span class="sm-club"><img src="' + esc(NL.clubs.crestUrl(r.clubName, 'thumb')) + '" alt="">' + esc(r.clubName) + '</span></td>' +
+          '<td><span class="sm-club">' + NL.clubs.crestImgHtml(r.clubName, 'thumb', { className: 'nl-crest' }) + esc(r.clubName) + '</span></td>' +
           '<td>' + esc(n.match) + '<span class="sm-sub">' + esc(n.date ? NL.formatDateShort(n.date) : '') + '</span></td>' +
           '<td class="ta-right">' + esc(n.minute) + '′</td>' +
           '<td>' + esc(n.keeper) + (n.keeperEdited ? '<span class="sm-sub">Typed by the club</span>' : '') + '</td>' +
@@ -315,9 +330,7 @@
             esc(r.club) + '" data-slot="' + esc(r.slot) + '">' + (r.short ? 'Shortlisted' : 'Shortlist') + '</button></td>' +
         '</tr>';
       }).join('') + '</tbody></table></div>';
-    Array.prototype.forEach.call($('smList').querySelectorAll('.sm-club img'), function (img) {
-      NL.clubs.wireCrestImg(img, img.parentNode.textContent);
-    });
+    NL.clubs.wireCrestImgs($('smList'));
   }
 
   $('smList').addEventListener('click', function (e) {
@@ -331,7 +344,6 @@
     });
   });
 
-  $('smView').addEventListener('change', function () { S.view = this.value || null; render(); });
 
   $('smFilter').addEventListener('click', function (e) {
     var b = e.target.closest('[data-f]');
@@ -360,7 +372,7 @@
     var withClip = rowsFor(month).filter(function (r) { return r.rec.clip; });
     if (!withClip.length) return;
     NL.confirm('Deletes ' + withClip.length + ' clip' + (withClip.length === 1 ? '' : 's') + ' for ' +
-      SOTM.monthLabel(month) + '. The nominations stay. This cannot be undone.',
+      NL.month.label(month) + '. The nominations stay. This cannot be undone.',
       { title: 'Delete clips', confirmText: 'Delete', variant: 'danger' })
       .then(function (ok) {
         if (!ok) return;

@@ -198,15 +198,6 @@ test('endOfDay: the closing date includes the whole day', () => {
   assert.equal(SOTM.ymd(new Date(t + 1)), '2026-11-08');
 });
 
-test('previousMonth: October → September, January → last December', () => {
-  assert.equal(SOTM.previousMonth(new Date(2026, 9, 19)), '2026-09');
-  assert.equal(SOTM.previousMonth(new Date(2027, 0, 5)), '2026-12');
-});
-
-test('monthLabel', () => {
-  assert.equal(SOTM.monthLabel('2026-09'), 'September 2026');
-});
-
 test('freeSlot: first gap, null at five', () => {
   assert.equal(SOTM.freeSlot({}), 's1');
   assert.equal(SOTM.freeSlot({ s1: {}, s3: {} }), 's2');
