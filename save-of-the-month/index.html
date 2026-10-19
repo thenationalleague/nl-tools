@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Save of the Month (club page)
+  Version: v4.0 (19/10/2026)
+  File: /save-of-the-month/index.html
+
+  CHANGELOG
+    v4.0 (19/10/2026) — First build. A club enters its access code and, while
+      the League has a month open, nominates up to five saves by its own
+      goalkeeper: a league match from that month (National League, North or
+      South, never a cup), the minute, the keeper (filled from the lineup,
+      changeable), optional context and an optional video clip up to 100MB.
+      Nominations can be edited or removed until the month closes. Version
+      is the session's turn number.
+
+  THE GATE. The one club access code (system/club-code-plan.md), checked
+  server-side by NL.codeGate.viaFunction, which mints a token carrying
+  `club: '<CODE>'`. The RTDB rules on app-data/media-save-of-the-month open,
+  to that claim:
+    · config                               read (which month is open)
+    · nominations/<YYYY-MM>/<CODE>         read; write s1..s5 only while
+                                           that month is open and before
+                                           its closing date (server clock)
+  Storage: save-of-the-month/<CODE>/<YYYY-MM>/..., video under 100MB.
+  The League's shortlist is not readable here, by rule.
+
+  MATCHES AND KEEPERS come from NLS, browser-direct (CORS is open). One list
+  call for the club's month, one detail call when a match is picked. The
+  parsing lives in _shared.js (SOTM.leagueMatches, SOTM.keeperAt), tested.
+
+  No auth-guard: that gates NL accounts, and this page is entered by code.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Save of the Month — The National League</title>
+  <!-- Favicons. Static, not injected: nl-topbar.js adds these too, but a
+       standalone page never loads it, and an icon that arrives with the JS
+       leaves the tab blank until it does. /favicon.ico at the root is the
+       backstop every browser asks for without being told. -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="/system/nl-brand.css?v=67">
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+  </script>
+  <script src="/system/nl-utils.js?v=48"></script>
+  <!-- GA4 for nl.tools — cookieless, no banner, no identity. See system/nl-analytics.js -->
+  <script src="/system/nl-analytics.js?v=1"></script>
+  <script src="/save-of-the-month/_shared.js?v=1"></script>
+  <style>
+    .sm-nom {
+      display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center;
+      padding: 12px 0; border-top: 1px solid var(--border);
+    }
+    .sm-nom:first-child { border-top: none; }
+    .sm-nom strong { display: block; font-size: var(--text-sm); }
+    .sm-nom__meta { font-size: var(--text-xs); color: var(--text-muted); }
+    .sm-nom__acts { display: flex; gap: 6px; }
+    .sm-add { margin-top: 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .sm-keeper { display: flex; gap: 8px; align-items: center; }
+    .sm-keeper input { flex: 1; }
+    .sm-keeper input[readonly] { background: var(--off-white); }
+    .sm-clip { font-size: var(--text-sm); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+    @media (max-width: 560px) {
+      .sm-nom { grid-template-columns: minmax(0, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <!-- White bar: no NL account is behind this page (nl-brand v2.51). -->
+  <header class="nl-idbar">
+    <img class="nl-idbar__crest" id="smCrest" src="/assets/crests/National%20League%20rose.png"
+         alt="" width="42" height="42">
+    <div class="nl-idbar__id">
+      <div class="nl-idbar__title">Save of the Month</div>
+      <div class="nl-idbar__sub" id="smClub">The National League</div>
+    </div>
+    <div class="nl-idbar__actions">
+      <button class="nl-idbar__btn" id="smOut" type="button" hidden>Sign out</button>
+    </div>
+  </header>
+
+  <div class="gate" id="smGate"></div>
+
+  <main class="page" id="smShell" hidden>
+    <div id="smBody"></div>
+  </main>
+
+<script>
+(function () {
+  'use strict';
+
+  var BASE = 'app-data/media-save-of-the-month/';
+  /* CANON CANDIDATE (19/10/2026): the NLS base URL is hand-written in ~19
+     pages; NL.endpoints.nls is the obvious home. */
+  var NLS = 'https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2';
+  var db = firebase.database();
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return NL.escHtml(s); };
+  var S = { code: null, teamID: null, config: null, mine: {}, matches: null, matchesFor: null, details: {} };
+
+  function message(title, html) {
+    $('smBody').innerHTML = '<div class="empty-state"><div class="empty-state__title">' + esc(title) + '</div>' +
+      (html ? '<div class="empty-state__text">' + html + '</div>' : '') + '</div>';
+  }
+
+  /* ── NLS ─────────────────────────────────────────────────────────────── */
+
+  /* The club's played league matches in the month. An empty window is a
+     404 from NLS, not an empty list. */
+  function loadMatches(month) {
+    if (S.matchesFor === month && S.matches) return Promise.resolve(S.matches);
+    var r = SOTM.monthRange(month);
+    var url = NLS + '/matches/?teamID=' + encodeURIComponent(S.teamID) +
+      '&from=' + encodeURIComponent(r.from) + '&to=' + encodeURIComponent(r.to) + '&page.size=100';
+    return fetch(url).then(function (res) {
+      if (res.status === 404) return { data: [] };
+      if (!res.ok) throw new Error('NLS ' + res.status);
+      return res.json();
+    }).then(function (j) {
+      S.matches = SOTM.leagueMatches(j.data);
+      S.matchesFor = month;
+      return S.matches;
+    });
+  }
+
+  /* This club's matchTeams[] entry from the match detail, or null. */
+  function loadTeam(matchId) {
+    if (S.details[matchId] !== undefined) return Promise.resolve(S.details[matchId]);
+    return fetch(NLS + '/matches/' + encodeURIComponent(matchId)).then(function (res) {
+      if (!res.ok) return null;
+      return res.json().then(function (j) {
+        var teams = (j && j.data && j.data.attributes && j.data.attributes.matchTeams) || [];
+        return teams.filter(function (t) { return t.teamID === S.teamID; })[0] || null;
+      });
+    }).catch(function () { return null; }).then(function (t) { S.details[matchId] = t; return t; });
+  }
+
+  /* ── the page ────────────────────────────────────────────────────────── */
+
+  function render() {
+    var c = S.config;
+    if (!SOTM.isOpen(c, Date.now())) {
+      message('Nominations are closed', 'The League will open the next month here.');
+      return;
+    }
+    var slots = SOTM.SLOTS.filter(function (s) { return S.mine[s]; });
+    var free = SOTM.freeSlot(S.mine);
+    var list = slots.map(function (s) {
+      var n = S.mine[s];
+      return '<div class="sm-nom">' +
+        '<div><strong>' + esc(n.match) + '</strong>' +
+          '<span class="sm-nom__meta">' + esc(n.minute) + '′ · ' + esc(n.keeper) +
+          (n.clip ? ' · Clip attached' : '') + '</span></div>' +
+        '<div class="sm-nom__acts">' +
+          '<button type="button" class="btn btn--ghost btn--sm" data-edit="' + s + '">Edit</button>' +
+          '<button type="button" class="btn btn--ghost btn--sm btn--danger" data-drop="' + s + '">Remove</button>' +
+        '</div></div>';
+    }).join('');
+    $('smBody').innerHTML =
+      '<div class="section-head"><h2>' + esc(SOTM.monthLabel(c.month)) + '</h2></div>' +
+      (c.closesAt ? '<div class="banner banner--info">Nominations close ' + esc(NL.formatDate(c.closesAt)) + '.</div>' : '') +
+      (slots.length ? '<section class="form-panel"><div class="form-panel__body">' + list + '</div></section>' : '') +
+      '<div class="sm-add">' +
+        (free ? '<button type="button" class="btn btn--primary" id="smNew">Nominate a save</button>' : '') +
+        '<span class="form-hint">' + slots.length + ' of ' + SOTM.MAX_PER_CLUB + ' used</span>' +
+      '</div>';
+  }
+
+  $('smBody').addEventListener('click', function (e) {
+    var b = e.target.closest('button');
+    if (!b) return;
+    if (b.id === 'smNew') openForm(SOTM.freeSlot(S.mine));
+    else if (b.hasAttribute('data-edit')) openForm(b.getAttribute('data-edit'));
+    else if (b.hasAttribute('data-drop')) drop(b.getAttribute('data-drop'));
+  });
+
+  function drop(slot) {
+    var n = S.mine[slot];
+    if (!n) return;
+    NL.confirm('Remove the nomination for ' + n.match + ', ' + n.minute + '′?',
+      { title: 'Remove nomination', confirmText: 'Remove', variant: 'danger' })
+      .then(function (ok) {
+        if (!ok) return;
+        return db.ref(nomPath(slot)).remove().then(function () {
+          if (n.clip) deleteClip(n.clip.path);
+          NL.toast('Removed', 'success');
+        });
+      }).catch(function (err) { NL.toast('Could not remove: ' + (err && err.message), 'error'); });
+  }
+
+  function nomPath(slot) { return BASE + 'nominations/' + S.config.month + '/' + S.code + '/' + slot; }
+
+  function deleteClip(path) {
+    return firebase.storage().ref(path).delete().catch(function (err) { console.warn('[save-of-the-month]', err); });
+  }
+
+  /* ── the form ────────────────────────────────────────────────────────── */
+
+  function openForm(slot) {
+    var month = S.config.month;
+    var prev = S.mine[slot] || null;
+    var keptClip = prev && prev.clip ? prev.clip : null;
+    var auto = null;   /* the keeper the lineup gave, if any */
+
+    var body = document.createElement('div');
+    body.innerHTML =
+      '<div class="form-group"><label for="smMatch">Match<span class="req">*</span></label>' +
+        '<select id="smMatch" disabled><option value="">Loading matches…</option></select></div>' +
+      '<div class="form-group"><label for="smMin">Minute<span class="req">*</span></label>' +
+        '<input id="smMin" type="number" inputmode="numeric" min="1" max="130" value="' + esc(prev ? prev.minute : '') + '"></div>' +
+      '<div class="form-group"><label for="smKeeper">Goalkeeper<span class="req">*</span></label>' +
+        '<div class="sm-keeper"><input id="smKeeper" maxlength="80" list="smSquad" autocomplete="off" value="' + esc(prev ? prev.keeper : '') + '">' +
+        '<button type="button" class="btn btn--ghost btn--sm" id="smKeeperEdit" hidden>Not right?</button></div>' +
+        '<datalist id="smSquad"></datalist>' +
+        '<div class="form-hint" id="smKeeperHint"></div></div>' +
+      '<div class="form-group"><label for="smCtx">Context</label>' +
+        '<textarea id="smCtx" maxlength="1000">' + esc(prev && prev.context || '') + '</textarea></div>' +
+      '<div class="form-group"><label for="smFile">Clip</label>' +
+        '<div class="sm-clip" id="smKept"></div>' +
+        '<input id="smFile" type="file" accept="video/*">' +
+        '<div class="form-hint">Video, up to 100MB.</div></div>';
+
+    var sel = body.querySelector('#smMatch'), min = body.querySelector('#smMin');
+    var kin = body.querySelector('#smKeeper'), kedit = body.querySelector('#smKeeperEdit');
+    var khint = body.querySelector('#smKeeperHint');
+
+    function drawKept() {
+      body.querySelector('#smKept').innerHTML = keptClip
+        ? '<a href="' + esc(keptClip.url) + '" target="_blank" rel="noopener">' + esc(keptClip.name) + '</a>' +
+          '<button type="button" class="btn btn--ghost btn--sm" id="smKeptDrop">Remove clip</button>'
+        : '';
+    }
+    drawKept();
+    body.addEventListener('click', function (e) {
+      if (e.target.id === 'smKeptDrop') { keptClip = null; drawKept(); }
+    });
+
+    /* The keeper box: filled from the lineup and locked, with "Not right?"
+       to unlock it. When the lineup cannot say, it is simply open. A name
+       the club has already typed is never overwritten. */
+    var userTyped = !!(prev && prev.keeperEdited);
+    function setKeeperUnlocked(on) {
+      kin.readOnly = !on;
+      kedit.hidden = on || !auto;
+      if (on) kin.focus();
+    }
+    kedit.addEventListener('click', function () { userTyped = true; setKeeperUnlocked(true); khint.textContent = ''; });
+    kin.addEventListener('input', function () { userTyped = true; });
+
+    function resolveKeeper() {
+      var id = sel.value, m = parseInt(min.value, 10);
+      if (!id) return;
+      loadTeam(id).then(function (team) {
+        if (sel.value !== id) return;
+        body.querySelector('#smSquad').innerHTML = SOTM.squadNames(team).map(function (n) {
+          return '<option value="' + esc(n) + '">';
+        }).join('');
+        if (!(m >= 1)) { auto = null; khint.textContent = ''; setKeeperUnlocked(true); return; }
+        var k = SOTM.keeperAt(team, m);
+        auto = k && k.name ? k.name : null;
+        if (userTyped) { kedit.hidden = true; return; }
+        if (auto) {
+          kin.value = auto;
+          khint.textContent = 'From the lineup.';
+          setKeeperUnlocked(false);
+        } else {
+          kin.value = '';
+          khint.textContent = 'Not in the lineup. Type the name.';
+          setKeeperUnlocked(true);
+        }
+      });
+    }
+    sel.addEventListener('change', resolveKeeper);
+    min.addEventListener('change', resolveKeeper);
+    if (!prev) setKeeperUnlocked(true);
+
+    loadMatches(month).then(function (ms) {
+      if (!ms.length) {
+        sel.innerHTML = '<option value="">No league matches played in ' + esc(SOTM.monthLabel(month)) + '</option>';
+        return;
+      }
+      sel.innerHTML = '<option value="">Choose a match</option>' + ms.map(function (m) {
+        return '<option value="' + esc(m.id) + '"' + (prev && prev.matchId === m.id ? ' selected' : '') + '>' +
+          esc(NL.formatDateShort(m.date) + ' · ' + m.label) + '</option>';
+      }).join('');
+      sel.disabled = false;
+      if (prev) { kin.readOnly = !userTyped; resolveKeeper(); }
+    }).catch(function (err) {
+      console.error('[save-of-the-month]', err);
+      sel.innerHTML = '<option value="">Could not load matches. Close and try again.</option>';
+    });
+
+    NL.modal({
+      title: prev ? 'Edit nomination' : 'Nominate a save',
+      body: body,
+      dismissable: false,
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: prev ? 'Save' : 'Nominate', className: 'btn--primary', onClick: function (c) { send(c); } }
+      ]
+    });
+
+    function send(c) {
+      var match = S.matches && S.matches.filter(function (m) { return m.id === sel.value; })[0];
+      var minute = parseInt(min.value, 10);
+      var keeper = kin.value.trim();
+      var context = body.querySelector('#smCtx').value.trim();
+      var file = (body.querySelector('#smFile').files || [])[0];
+      if (!match) { NL.toast('Choose a match', 'error'); return; }
+      if (!(minute >= 1 && minute <= 130)) { NL.toast('Enter the minute, 1 to 130', 'error'); return; }
+      if (!keeper) { NL.toast('Enter the goalkeeper', 'error'); kin.focus(); return; }
+      var type = file ? SOTM.clipType(file.name, file.type) : null;
+      if (file && !type) { NL.toast(file.name + ' is not a video', 'error'); return; }
+      if (file && file.size >= SOTM.MAX_CLIP_BYTES) { NL.toast(file.name + ' is over 100MB', 'error'); return; }
+
+      var btns = c.el.querySelectorAll('.modal__footer button');
+      Array.prototype.forEach.call(btns, function (b) { b.disabled = true; });
+      var go = btns[btns.length - 1], go0 = go.textContent;
+
+      /* CANON CANDIDATE (19/10/2026): a club page uploading into its own
+         Storage folder with progress and a named refusal. This is the third
+         (Programme Packs, Commercial Compliance), which is the count the
+         Compliance flag set for promotion. */
+      function upload() {
+        if (!file) return Promise.resolve(null);
+        var path = 'save-of-the-month/' + S.code + '/' + month + '/' + Date.now().toString(36) + '-' + SOTM.safeName(file.name);
+        var ref = firebase.storage().ref(path);
+        return new Promise(function (resolve, reject) {
+          var task = ref.put(file, { contentType: type });
+          task.on('state_changed', function (snap) {
+            var pct = snap.totalBytes ? Math.floor(100 * snap.bytesTransferred / snap.totalBytes) : 0;
+            go.textContent = 'Uploading ' + pct + '%';
+          }, function (err) {
+            reject(new Error(err && err.code === 'storage/unauthorized'
+              ? file.name + ' was refused (video only, under 100MB)'
+              : 'Upload failed: ' + ((err && err.message) || err)));
+          }, function () {
+            ref.getDownloadURL().then(function (url) {
+              resolve({ path: path, url: url, name: file.name.slice(0, 160), size: file.size, type: type.slice(0, 100) });
+            }, reject);
+          });
+        });
+      }
+
+      var uploaded = null;
+      upload().then(function (clip) {
+        uploaded = clip;
+        go.textContent = 'Saving…';
+        var rec = {
+          matchId: match.id, match: match.label, date: match.date, minute: minute, keeper: keeper,
+          at: firebase.database.ServerValue.TIMESTAMP
+        };
+        if (!auto || keeper !== auto) rec.keeperEdited = true;
+        if (context) rec.context = context;
+        var clipRec = clip || keptClip;
+        if (clipRec) rec.clip = clipRec;
+        return db.ref(nomPath(slot)).set(rec);
+      }).then(function () {
+        /* The old file goes once the record no longer points at it. */
+        var old = prev && prev.clip;
+        if (old && (!keptClip || uploaded)) deleteClip(old.path);
+        c.close();
+        NL.toast(prev ? 'Saved' : 'Nominated', 'success');
+      }).catch(function (err) {
+        if (uploaded) deleteClip(uploaded.path);   /* nothing points at it */
+        Array.prototype.forEach.call(btns, function (b) { b.disabled = false; });
+        go.textContent = go0;
+        var closed = err && /permission/i.test(err.code || err.message || '');
+        NL.toast(closed ? 'Nominations for ' + SOTM.monthLabel(month) + ' have closed' : ((err && err.message) || 'Could not save'), 'error');
+      });
+    }
+  }
+
+  /* ── sign-in ─────────────────────────────────────────────────────────── */
+
+  var mineRef = null;
+  function watchMine() {
+    if (mineRef) mineRef.off();
+    S.mine = {};
+    if (!S.config) { render(); return; }
+    mineRef = db.ref(BASE + 'nominations/' + S.config.month + '/' + S.code);
+    mineRef.on('value', function (snap) { S.mine = snap.val() || {}; render(); }, function (e) {
+      console.error('[save-of-the-month]', e);
+      message('Could not load your nominations', 'Reload the page to try again.');
+    });
+  }
+
+  function start(session) {
+    $('smGate').hidden = true;
+    $('smShell').hidden = false;
+    $('smOut').hidden = false;
+
+    var code = session && session.role;
+    if (!code || code === '*' || code === 'NL') {
+      message('This page is for clubs',
+        'League staff: nominations are on <a href="/save-of-the-month/admin/">the console</a>.');
+      return;
+    }
+    S.code = code;
+    message('Loading…');
+
+    NL.clubs.load().then(function () {
+      var me = NL.clubs.byCode(code);
+      var name = (me && me.name) || (session && session.name) || code;
+      S.teamID = me && me.optaID;
+      $('smClub').textContent = name;
+      var crest = $('smCrest');
+      crest.src = NL.clubs.crestUrl(name, 'thumb');
+      NL.clubs.wireCrestImg(crest, name);
+      if (!S.teamID) { message('Your club is not set up for this yet', 'Contact the League.'); return; }
+      /* Live: the League opening or closing a month shows without a reload. */
+      db.ref(BASE + 'config').on('value', function (snap) {
+        var next = snap.val();
+        var changed = !S.config || !next || next.month !== S.config.month;
+        S.config = next;
+        if (changed) watchMine(); else render();
+      }, function (e) {
+        console.error('[save-of-the-month]', e);
+        message('Could not load', 'Reload the page to try again.');
+      });
+    }).catch(function (e) {
+      console.error('[save-of-the-month]', e);
+      message('Could not load', 'Reload the page to try again.');
+    });
+  }
+
+  $('smOut').addEventListener('click', function () {
+    NL.codeGate.signOut().then(function () { location.reload(); });
+  });
+
+  NL.codeGate.ensure({
+    mount: $('smGate'),
+    title: 'Save of the Month',
+    sub: 'Enter your access code.',
+    numeric: false,
+    verify: NL.codeGate.viaFunction('app-data/club-codes', { tool: 'save-of-the-month' }),
+    claim: 'club'
+  }).then(start);
+})();
+</script>
+</body>
+</html>
