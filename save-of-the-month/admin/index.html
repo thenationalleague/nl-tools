@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Save of the Month (League console)
+  Version: v4.0 (19/10/2026)
+  File: /save-of-the-month/admin/index.html
+
+  CHANGELOG
+    v4.0 (19/10/2026) — First build. Opens one month at a time for
+      nominations, with an optional closing date, and closes it by hand.
+      Lists what clubs have nominated for any month, plays the clips, marks
+      a shortlist (never shown to clubs), exports the view as CSV, and
+      deletes a finished month's clips from Storage. Version is the
+      session's turn number.
+
+  Clubs nominate at /save-of-the-month/ with their access code: a league
+  match from the open month, the minute, their goalkeeper, optional context
+  and an optional clip. Up to five per club per month (slots s1..s5).
+
+  Storage (RTDB):
+    app-data/media-save-of-the-month/config
+        { month: 'YYYY-MM', closesAt?: ms }      absent = nothing open
+    app-data/media-save-of-the-month/nominations/<YYYY-MM>/<CODE>/<s1..s5>
+        { matchId, match, date, minute, keeper, keeperEdited?, context?, clip?, at }
+    app-data/media-save-of-the-month/shortlist/<YYYY-MM>/<CODE>/<slot>: true
+        League-only: clubs have no read on this node.
+    tools/media-save-of-the-month                tool registration
+  Storage (bucket):
+    save-of-the-month/<CODE>/<YYYY-MM>/*         club clips, video, <100MB
+
+  Access (auth-guard registry): league roles, levels off/access. Access is
+  the whole console; nothing reads an admin level.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Save of the Month — NL Tools</title>
+  <!-- Favicons. Static, not injected: nl-topbar.js adds these too, but a
+       standalone page never loads it, and an icon that arrives with the JS
+       leaves the tab blank until it does. /favicon.ico at the root is the
+       backstop every browser asks for without being told. -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+
+  <!-- Brand stylesheet (lint canonical: ?v=67) -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=67">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'Save of the Month',
+      toolKey: 'media-save-of-the-month'
+    };
+    var NL_TOOL_KEY = 'media-save-of-the-month';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '19/10/2026',
+        version: 'v4.0',
+        items: [
+          'First build. Open a month for nominations with an optional closing date, and close it by hand.',
+          'See every club’s nominations for a month, play the clips, and mark a shortlist that clubs never see.',
+          'Export the list as CSV, and delete a finished month’s clips.'
+        ]
+      }
+    ];
+
+    /* auth-guard fires this once the session is verified + pageWrap is
+       revealed. Boot the main app from here so RTDB reads happen with a
+       live auth token. Do NOT read RTDB before this fires. */
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts (lint canonical: ?v=48 / ?v=1 / ?v=10 / ?v=16) -->
+  <script src="/system/nl-utils.js?v=48"></script>
+  <!-- GA4, one property for all of nl.tools. Cookieless, so no consent
+       banner on any page; page views by path, no identity. Tool events go
+       through NL.track(). See system/nl-analytics.js. -->
+  <script src="/system/nl-analytics.js?v=1"></script>
+  <script src="/system/nl-topbar.js?v=10"></script>
+  <script src="/system/auth-guard.js?v=16"></script>
+  <script src="/save-of-the-month/_shared.js?v=1"></script>
+
+<style>
+  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
+     style.display = 'block'. Don't clear with '' — would re-trigger the
+     brand rule and re-hide the page. */
+
+  .sm-open { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+  .sm-open .form-group { margin: 0; }
+  .sm-state { margin-bottom: 12px; font-size: var(--text-sm); }
+  .sm-club { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .sm-club img { width: 24px; height: 24px; object-fit: contain; }
+  .sm-sub { display: block; font-size: var(--text-xs); color: var(--text-muted); }
+  .sm-context { max-width: 320px; font-size: var(--text-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .sm-section { margin-top: 24px; }
+  tr.is-short td { background: var(--amber-light); }
+</style>
+</head>
+<body>
+
+<!-- Topbar — auto-rendered by /system/nl-topbar.js from window.NL_TOOL -->
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="page">
+
+    <section class="form-panel">
+      <div class="form-panel__head">Collecting</div>
+      <div class="form-panel__body">
+        <div class="sm-state" id="smState">Loading…</div>
+        <div class="sm-open">
+          <div class="form-group">
+            <label for="smMonth">Month</label>
+            <input id="smMonth" type="month">
+          </div>
+          <div class="form-group">
+            <label for="smCloses">Closes</label>
+            <input id="smCloses" type="date">
+          </div>
+          <button type="button" class="btn btn--primary" id="smOpenBtn">Open month</button>
+          <button type="button" class="btn btn--ghost btn--danger" id="smCloseBtn" hidden>Close now</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="sm-section">
+      <div class="section-head"><h2>Nominations</h2></div>
+      <div class="toolbar">
+        <div class="toolbar__left">
+          <select class="toolbar__filter" id="smView" aria-label="Month"></select>
+          <div class="chip-group" id="smFilter">
+            <button type="button" class="chip active" data-f="all">All</button>
+            <button type="button" class="chip" data-f="short">Shortlisted</button>
+          </div>
+        </div>
+        <div class="toolbar__right">
+          <button type="button" class="btn btn--ghost btn--sm" id="smCsv">Export CSV</button>
+          <button type="button" class="btn btn--ghost btn--sm btn--danger" id="smWipe">Delete clips</button>
+        </div>
+      </div>
+      <div class="stats" id="smStats"></div>
+      <div id="smList"></div>
+    </section>
+
+  </div>
+</div>
+
+<!-- Main app -->
+<script>
+(function () {
+  'use strict';
+
+  var BASE = 'app-data/media-save-of-the-month/';
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return NL.escHtml(s); };
+  var S = { config: null, noms: {}, short: {}, view: null, filter: 'all', loaded: 0 };
+
+  function clubName(code) {
+    var c = NL.clubs.byCode(code);
+    return (c && c.name) || code;
+  }
+
+  /* ── the open month ─────────────────────────────────────────────────── */
+
+  function renderState() {
+    var c = S.config, open = SOTM.isOpen(c, Date.now());
+    if (!c) {
+      $('smState').innerHTML = '<span class="pill pill--pending">Closed</span> Nothing is open to clubs.';
+    } else {
+      $('smState').innerHTML = (open
+        ? '<span class="pill pill--live">Open</span> '
+        : '<span class="pill pill--expired">Past closing date</span> ') +
+        '<strong>' + esc(SOTM.monthLabel(c.month)) + '</strong>' +
+        (c.closesAt ? ' · closes ' + esc(NL.formatDate(c.closesAt)) : ' · no closing date');
+    }
+    $('smCloseBtn').hidden = !c;
+    $('smOpenBtn').textContent = c ? 'Update' : 'Open month';
+    if (c && !$('smMonth').dataset.touched) {
+      $('smMonth').value = c.month;
+      $('smCloses').value = c.closesAt ? SOTM.ymd(new Date(c.closesAt)) : '';
+    } else if (!c && !$('smMonth').value) {
+      $('smMonth').value = SOTM.previousMonth(new Date());
+    }
+  }
+
+  ['smMonth', 'smCloses'].forEach(function (id) {
+    $(id).addEventListener('input', function () { $('smMonth').dataset.touched = '1'; });
+  });
+
+  $('smOpenBtn').addEventListener('click', function () {
+    var month = $('smMonth').value, closes = $('smCloses').value;
+    if (!SOTM.isMonthKey(month)) { NL.toast('Pick a month', 'error'); return; }
+    var rec = { month: month };
+    if (closes) {
+      rec.closesAt = SOTM.endOfDay(closes);
+      if (rec.closesAt < Date.now()) { NL.toast('That closing date has passed', 'error'); return; }
+    }
+    var cur = S.config;
+    var ask = (cur && cur.month !== month)
+      ? NL.confirm('This closes ' + SOTM.monthLabel(cur.month) + ' and opens ' + SOTM.monthLabel(month) + '.',
+          { title: 'Switch month', confirmText: 'Switch' })
+      : Promise.resolve(true);
+    ask.then(function (ok) {
+      if (!ok) return;
+      return db.ref(BASE + 'config').set(rec).then(function () {
+        delete $('smMonth').dataset.touched;
+        NL.toast(SOTM.monthLabel(month) + ' is open', 'success');
+      });
+    }).catch(function (e) { NL.toast('Could not save: ' + (e && e.message), 'error'); });
+  });
+
+  $('smCloseBtn').addEventListener('click', function () {
+    var cur = S.config;
+    if (!cur) return;
+    NL.confirm('Clubs can no longer add or change nominations for ' + SOTM.monthLabel(cur.month) + '.',
+      { title: 'Close nominations', confirmText: 'Close', variant: 'danger' })
+      .then(function (ok) {
+        if (!ok) return;
+        return db.ref(BASE + 'config').remove().then(function () { NL.toast('Closed', 'success'); });
+      }).catch(function (e) { NL.toast('Could not close: ' + (e && e.message), 'error'); });
+  });
+
+  /* ── the list ────────────────────────────────────────────────────────── */
+
+  /* Months to offer: every month anything was nominated for, plus the open
+     one. Newest first; a dropdown because the list only ever grows. */
+  function renderMonths() {
+    var keys = Object.keys(S.noms);
+    if (S.config && keys.indexOf(S.config.month) < 0) keys.push(S.config.month);
+    keys.sort().reverse();
+    if (!S.view || keys.indexOf(S.view) < 0) S.view = (S.config && S.config.month) || keys[0] || null;
+    $('smView').innerHTML = keys.length
+      ? keys.map(function (k) {
+          return '<option value="' + esc(k) + '"' + (k === S.view ? ' selected' : '') + '>' + esc(SOTM.monthLabel(k)) + '</option>';
+        }).join('')
+      : '<option value="">No months yet</option>';
+  }
+
+  function rowsFor(month) {
+    var rows = SOTM.flatten(S.noms[month] || {}, S.short[month] || {});
+    rows.forEach(function (r) { r.clubName = clubName(r.club); });
+    rows.sort(function (a, b) { return a.clubName.localeCompare(b.clubName) || a.slot.localeCompare(b.slot); });
+    return rows;
+  }
+
+  function render() {
+    if (S.loaded < 3) return;
+    renderState();
+    renderMonths();
+    var all = S.view ? rowsFor(S.view) : [];
+    var rows = S.filter === 'short' ? all.filter(function (r) { return r.short; }) : all;
+    var clubs = {};
+    all.forEach(function (r) { clubs[r.club] = 1; });
+    $('smStats').innerHTML =
+      '<div class="stat"><div class="stat__num">' + all.length + '</div><div class="stat__label">Nominations</div></div>' +
+      '<div class="stat"><div class="stat__num">' + Object.keys(clubs).length + '</div><div class="stat__label">Clubs</div></div>' +
+      '<div class="stat"><div class="stat__num">' + all.filter(function (r) { return r.short; }).length + '</div><div class="stat__label">Shortlisted</div></div>';
+
+    var isOpenMonth = S.config && S.config.month === S.view;
+    $('smWipe').disabled = isOpenMonth || !all.some(function (r) { return r.clip; });
+    $('smWipe').title = isOpenMonth ? 'Close the month first' : '';
+    $('smCsv').disabled = !rows.length;
+
+    if (!rows.length) {
+      $('smList').innerHTML = '<div class="empty-state"><div class="empty-state__title">' +
+        (S.filter === 'short' && all.length ? 'Nothing shortlisted yet' : 'No nominations') + '</div></div>';
+      return;
+    }
+    $('smList').innerHTML = '<div class="table-wrap"><table class="table">' +
+      '<thead><tr><th>Club</th><th>Match</th><th class="ta-right">Min</th><th>Goalkeeper</th><th>Context</th><th>Clip</th><th></th></tr></thead><tbody>' +
+      rows.map(function (r) {
+        var n = r.rec;
+        return '<tr' + (r.short ? ' class="is-short"' : '') + '>' +
+          '<td><span class="sm-club"><img src="' + esc(NL.clubs.crestUrl(r.clubName, 'thumb')) + '" alt="">' + esc(r.clubName) + '</span></td>' +
+          '<td>' + esc(n.match) + '<span class="sm-sub">' + esc(n.date ? NL.formatDateShort(n.date) : '') + '</span></td>' +
+          '<td class="ta-right">' + esc(n.minute) + '′</td>' +
+          '<td>' + esc(n.keeper) + (n.keeperEdited ? '<span class="sm-sub">Typed by the club</span>' : '') + '</td>' +
+          '<td><div class="sm-context">' + esc(n.context || '') + '</div></td>' +
+          '<td>' + (n.clip
+            ? '<a href="' + esc(n.clip.url) + '" target="_blank" rel="noopener">Play</a><span class="sm-sub">' + esc(SOTM.mb(n.clip.size)) + '</span>'
+            : '<span class="sm-sub">None</span>') + '</td>' +
+          '<td><button type="button" class="btn btn--sm ' + (r.short ? 'btn--primary' : 'btn--ghost') + '" data-club="' +
+            esc(r.club) + '" data-slot="' + esc(r.slot) + '">' + (r.short ? 'Shortlisted' : 'Shortlist') + '</button></td>' +
+        '</tr>';
+      }).join('') + '</tbody></table></div>';
+    Array.prototype.forEach.call($('smList').querySelectorAll('.sm-club img'), function (img) {
+      NL.clubs.wireCrestImg(img, img.parentNode.textContent);
+    });
+  }
+
+  $('smList').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-slot]');
+    if (!b || !S.view) return;
+    var club = b.getAttribute('data-club'), slot = b.getAttribute('data-slot');
+    var on = !(S.short[S.view] && S.short[S.view][club] && S.short[S.view][club][slot]);
+    var ref = db.ref(BASE + 'shortlist/' + S.view + '/' + club + '/' + slot);
+    (on ? ref.set(true) : ref.remove()).catch(function (err) {
+      NL.toast('Could not save: ' + (err && err.message), 'error');
+    });
+  });
+
+  $('smView').addEventListener('change', function () { S.view = this.value || null; render(); });
+
+  $('smFilter').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-f]');
+    if (!b) return;
+    S.filter = b.getAttribute('data-f');
+    Array.prototype.forEach.call(this.querySelectorAll('.chip'), function (c) { c.classList.toggle('active', c === b); });
+    render();
+  });
+
+  $('smCsv').addEventListener('click', function () {
+    var rows = rowsFor(S.view).filter(function (r) { return S.filter !== 'short' || r.short; });
+    var out = [['Club', 'Match', 'Date', 'Minute', 'Goalkeeper', 'Goalkeeper typed by club', 'Context', 'Clip', 'Shortlisted']];
+    rows.forEach(function (r) {
+      var n = r.rec;
+      out.push([r.clubName, n.match, n.date ? NL.formatDate(n.date) : '', n.minute, n.keeper,
+        n.keeperEdited ? 'Yes' : '', n.context || '', n.clip ? n.clip.url : '', r.short ? 'Yes' : '']);
+    });
+    NL.download('save-of-the-month-' + S.view + (S.filter === 'short' ? '-shortlist' : '') + '.csv',
+      NL.csv(out, { bom: true }), 'text/csv;charset=utf-8');
+  });
+
+  /* Clips are the only thing here that costs money to keep. The records
+     stay (the list still shows what was nominated); the files go. */
+  $('smWipe').addEventListener('click', function () {
+    var month = S.view;
+    var withClip = rowsFor(month).filter(function (r) { return r.rec.clip; });
+    if (!withClip.length) return;
+    NL.confirm('Deletes ' + withClip.length + ' clip' + (withClip.length === 1 ? '' : 's') + ' for ' +
+      SOTM.monthLabel(month) + '. The nominations stay. This cannot be undone.',
+      { title: 'Delete clips', confirmText: 'Delete', variant: 'danger' })
+      .then(function (ok) {
+        if (!ok) return;
+        var failed = 0;
+        return Promise.all(withClip.map(function (r) {
+          return firebase.storage().ref(r.rec.clip.path).delete()
+            .catch(function (err) { if (!err || err.code !== 'storage/object-not-found') throw err; })
+            .then(function () {
+              return db.ref(BASE + 'nominations/' + month + '/' + r.club + '/' + r.slot + '/clip').remove();
+            })
+            .catch(function (err) { failed++; console.error('[save-of-the-month]', err); });
+        })).then(function () {
+          if (failed) NL.toast(failed + ' clip' + (failed === 1 ? '' : 's') + ' could not be deleted', 'error');
+          else NL.toast('Clips deleted', 'success');
+        });
+      });
+  });
+
+  /* ── boot ────────────────────────────────────────────────────────────── */
+
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function () {
+    NL.ensureAuth().then(function () { return NL.clubs.load(); }).then(function () {
+      function listen(path, key) {
+        db.ref(BASE + path).on('value', function (snap) {
+          S[key] = snap.val() || (key === 'config' ? null : {});
+          if (!S['_' + key]) { S['_' + key] = 1; S.loaded++; }
+          render();
+        }, function (err) {
+          console.error('[save-of-the-month]', path, err);
+          $('smList').innerHTML = '<div class="banner banner--error">Could not load ' + esc(path) + '. Reload to try again.</div>';
+        });
+      }
+      listen('config', 'config');
+      listen('nominations', 'noms');
+      listen('shortlist', 'short');
+    }).catch(function (e) {
+      console.error('[save-of-the-month]', e);
+      $('smList').innerHTML = '<div class="banner banner--error">Could not load. Reload to try again.</div>';
+    });
+  };
+
+  if (window._toolDeferredSession) {
+    window.TOOL.boot(window._toolDeferredSession);
+    delete window._toolDeferredSession;
+  }
+})();
+</script>
+
+</body>
+</html>
