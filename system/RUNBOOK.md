@@ -54,6 +54,13 @@ Three categories, and knowing which one you are in tells you what a merge does.
   it is live.
 - **Cloud Functions** — `deploy-functions.yml` runs automatically on any push
   to `main` touching `functions/**` or `firebase.json`.
+- **The `tools/` registry** (since 20/10/2026) — **Deploy tools registry** runs
+  automatically on any push to `main` that changes
+  `system/rtdb/tools-registry.snapshot.json`. It writes only the records that
+  push changed, plus any missing from live; it never deletes. It then re-reads
+  live and **fails** if any tool is not there, so a red run in Actions (and the
+  email GitHub sends) means someone cannot open a tool. Deleting a record, or
+  replacing the whole node, is still the manual button below.
 
   ⚠️ It runs `firebase deploy --only functions`, which deploys **every**
   function in the directory, not just the one you changed. There are around a
@@ -73,7 +80,7 @@ effect of a merge.
 |---|---|---|
 | RTDB rules (both databases) | **Deploy RTDB rules** | choose target (`both` / `nl-tools` / `nl-widgets`), type `publish` |
 | Storage rules | **Deploy Storage rules** | `publish` |
-| `tools/` registry | **Deploy tools registry** | `report` writes nothing; `publish` + type `publish` replaces the node |
+| `tools/` registry (by hand) | **Deploy tools registry** | `report` writes nothing; `publish` + type `publish` replaces the whole node. Changes ship on merge without this — see above |
 | Apps Script | **Deploy Apps Script** | `publish` |
 | Brand Exposure scan container | **Deploy scan job** | `publish` |
 
@@ -160,7 +167,11 @@ and both are files in this repo:
    auth-guard's access fallback; there is no separate registry in code. Without
    it the page is superadmin-only and invisible on the portal.
    Check `system/rtdb/tools-registry.snapshot.json` first — the record may
-   already exist. Add it there, then run **Deploy tools registry**.
+   already exist. Add it there; it publishes when the PR merges. Give an
+   unfinished tool `"status": "wip"` so its card sits on In Progress, and
+   delete the field to promote it. Before telling anyone it is ready, open it
+   signed in as a Staff test account in a private window — your own account
+   skips every access check.
 
 2. **RTDB rules for `app-data/<toolKey>/...`** — edit
    `system/rtdb/rules.snapshot.json`, then run **Deploy RTDB rules**.
@@ -175,7 +186,11 @@ The same key indexes the registry record, the tool's data under
 
 Ordered by how often each one turns out to be the answer.
 
-**A tool denies everyone, or silently redirects to the portal.**
+**A tool says "This tool isn't available" to everyone but you.**
+The audit log has a `page_unavailable` entry for each one, with a reason.
+"not in the registry" means the tool's `tools/` record never reached live:
+since 20/10/2026 that publishes on merge, so check the **Deploy tools
+registry** run for that merge. "no access" means the defaults or grant:
 Look at `tools/<toolKey>/defaults` in RTDB and the user's own
 `tools/<toolKey>` entry. Per-user entries are strings: `"off"`, `"access"`,
 `"admin"`. With no per-user entry it falls back to the role default; a role

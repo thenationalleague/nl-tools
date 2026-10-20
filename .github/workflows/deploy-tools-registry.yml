@@ -16,8 +16,26 @@ name: Deploy tools registry
 # that exists only in live is therefore a DELETION on publish, so publish
 # refuses if any exist unless allow_deletions is ticked — the same
 # refuse-rather-than-pick-a-winner stance as the Apps Script deploy.
+#
+# AUTO MODE (20/10/2026). A merge that changes the snapshot now publishes by
+# itself. A new tool used to sit unpublished until someone remembered to run
+# this by hand — and until then auth-guard turned away everyone except the
+# superadmin, who skips the check, so the person launching it never saw the
+# fault. Auto mode is deliberately narrower than publish:
+#   - it writes only the records this push changed, plus any record missing
+#     from live, one record at a time. It never replaces the whole node, so a
+#     setting changed live in the portal on some other tool is left alone;
+#   - it never deletes. A record removed from the snapshot is reported, and
+#     deleting it stays a manual publish with allow_deletions ticked.
+# After any publish, a check re-reads live and FAILS the run if a snapshot
+# record is missing or did not land as written — GitHub emails the person who
+# merged. "Published" has to mean "people can open it".
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - system/rtdb/tools-registry.snapshot.json
   workflow_dispatch:
     inputs:
       mode:
@@ -48,9 +66,12 @@ jobs:
   registry:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      MODE: ${{ github.event_name == 'push' && 'auto' || inputs.mode }}
+      DB: https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app
     steps:
       - name: Check the confirmation
-        if: inputs.mode == 'publish'
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'publish'
         run: |
           if [ "${{ inputs.confirm }}" != "publish" ]; then
             echo "::error::Publish mode needs the confirm box to say exactly: publish"
@@ -132,15 +153,77 @@ jobs:
           fs.writeFileSync('deletions.txt', String(onlyLive.length));
           EOF
           {
-            echo "## Tools registry — \`${{ inputs.mode }}\`"
+            echo "## Tools registry — \`$MODE\`"
             echo
             echo '```'
             cat diff-report.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Work out what this push changed
+        if: env.MODE == 'auto'
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          # The snapshot as it was before this push. Missing (first push of a
+          # branch, or history unavailable) means "nothing known to have
+          # changed" — only records absent from live get written then.
+          if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
+             && git fetch --quiet --depth=1 origin "$BEFORE" \
+             && git show "$BEFORE:system/rtdb/tools-registry.snapshot.json" > before.json 2>/dev/null; then
+            echo "Compared against $BEFORE."
+          else
+            echo '{}' > before.json
+            echo "::warning::No previous snapshot to compare against — writing only records missing from live."
+          fi
+          node - <<'EOF'
+          const fs = require('fs');
+          const live   = JSON.parse(fs.readFileSync('live.json', 'utf8')) || {};
+          const before = JSON.parse(fs.readFileSync('before.json', 'utf8')) || {};
+          const snap   = JSON.parse(fs.readFileSync('system/rtdb/tools-registry.snapshot.json', 'utf8'));
+          const same = (a, b) => JSON.stringify(sort(a)) === JSON.stringify(sort(b));
+          function sort(v) {
+            if (Array.isArray(v)) return v.map(sort);
+            if (v && typeof v === 'object') return Object.keys(v).sort().reduce((o, k) => (o[k] = sort(v[k]), o), {});
+            return v;
+          }
+          const changed = Object.keys(snap).filter(k => k in before && !same(before[k], snap[k]));
+          const added   = Object.keys(snap).filter(k => !(k in before) && Object.keys(before).length);
+          const missing = Object.keys(snap).filter(k => !(k in live));
+          const write   = [...new Set([...changed, ...added, ...missing])].sort();
+          const removed = Object.keys(before).filter(k => !(k in snap));
+          fs.writeFileSync('to-write.txt', write.join('\n'));
+          const out = ['', `Auto publish will write ${write.length} record(s):`];
+          write.forEach(k => out.push(`  ${k}${missing.includes(k) ? '  (missing from live)' : ''}`));
+          if (removed.length) {
+            out.push('', 'Removed from the snapshot but NOT deleted from live (run publish with allow_deletions to delete):');
+            removed.forEach(k => out.push(`  - ${k}`));
+          }
+          console.log(out.join('\n'));
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, '\n```' + out.join('\n') + '\n```\n');
+          EOF
+
+      - name: Publish the changed records
+        if: env.MODE == 'auto'
+        run: |
+          set -euo pipefail
+          if [ ! -s to-write.txt ]; then echo "Nothing to write."; exit 0; fi
+          TOKEN=$(gcloud auth print-access-token)
+          while read -r key; do
+            [ -n "$key" ] || continue
+            node -e 'const s=require("./system/rtdb/tools-registry.snapshot.json");process.stdout.write(JSON.stringify(s[process.argv[1]]))' "$key" > record.json
+            code=$(curl -sS -o put-result.json -w '%{http_code}' -X PUT \
+              -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+              --data @record.json "$DB/tools/$key.json")
+            if [ "$code" != "200" ]; then
+              echo "::error::Writing tools/$key failed with HTTP $code"; cat put-result.json; exit 1
+            fi
+            echo "Wrote tools/$key"
+          done < to-write.txt
+
       - name: Publish the snapshot
-        if: inputs.mode == 'publish'
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'publish'
         run: |
           set -euo pipefail
           if [ "$(cat deletions.txt)" != "0" ] && [ "${{ inputs.allow_deletions }}" != "true" ]; then
@@ -159,3 +242,47 @@ jobs:
           fi
           echo "Published. tools/ now matches the snapshot exactly."
           echo "The portal reflects it on next load — no cache in the way, auth-guard re-reads per page."
+
+      - name: Check every tool is live
+        if: env.MODE != 'report'
+        run: |
+          set -euo pipefail
+          TOKEN=$(gcloud auth print-access-token)
+          code=$(curl -sS -o after.json -w '%{http_code}' \
+            -H "Authorization: Bearer $TOKEN" "$DB/tools.json")
+          if [ "$code" != "200" ]; then
+            echo "::error::Could not re-read the live registry to check it (HTTP $code)."; exit 1
+          fi
+          node - <<'EOF'
+          const fs = require('fs');
+          const live = JSON.parse(fs.readFileSync('after.json', 'utf8')) || {};
+          const snap = JSON.parse(fs.readFileSync('system/rtdb/tools-registry.snapshot.json', 'utf8'));
+          const wrote = fs.existsSync('to-write.txt')
+            ? fs.readFileSync('to-write.txt', 'utf8').split('\n').filter(Boolean)
+            : Object.keys(snap); // a full publish wrote everything
+          const sort = v => Array.isArray(v) ? v.map(sort)
+            : (v && typeof v === 'object') ? Object.keys(v).sort().reduce((o, k) => (o[k] = sort(v[k]), o), {}) : v;
+          const same = (a, b) => JSON.stringify(sort(a)) === JSON.stringify(sort(b));
+          const errors = [], warnings = [];
+          for (const [k, rec] of Object.entries(snap)) {
+            if (!(k in live)) { errors.push(`${k} (${rec.label}) is not live — nobody but the superadmin can open it.`); continue; }
+            if (!same(live[k], rec)) {
+              (wrote.includes(k) ? errors : warnings).push(
+                wrote.includes(k) ? `${k} (${rec.label}) did not land as written.`
+                                  : `${k} (${rec.label}) differs in live from the snapshot (changed in the portal?). Left alone.`);
+            }
+            // A finished tool that no role gets by default can only be reached by
+            // per-person grants. Usually a mistake; sometimes deliberate.
+            const roles = Object.entries(rec.defaults || {}).filter(([r, l]) => r !== 'superadmin' && l !== 'off');
+            if (wrote.includes(k) && !rec.status && !roles.length && rec.audience !== 'meta') {
+              warnings.push(`${k} (${rec.label}) is finished but no role gets it by default — only people granted it by name.`);
+            }
+          }
+          const lines = ['', 'Check after publishing:'];
+          if (!errors.length) lines.push(`  All ${Object.keys(snap).length} tools are live.`);
+          errors.forEach(e => { lines.push('  ✗ ' + e); console.log('::error::' + e); });
+          warnings.forEach(w => { lines.push('  ! ' + w); console.log('::warning::' + w); });
+          console.log(lines.join('\n'));
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, '\n```' + lines.join('\n') + '\n```\n');
+          if (errors.length) process.exit(1);
+          EOF

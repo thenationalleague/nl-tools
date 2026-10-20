@@ -1,11 +1,23 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.124 (15/10/2026)
+  Version: v15.0 (20/10/2026)
   Date: 09/04/2026
   File: /portal/index.html
 
   Changelog:
+  v15.0 (20/10/2026) — Two new shelves and one access answer. Version jumps
+    to the session's turn number, per house rule.
+    · Registry `status: 'wip'` puts a card on an In Progress shelf, and
+      `shelf: 'website'` on a Website shelf (the staff layer over the
+      fan-facing widgets). Shelving only: access is untouched.
+    · getAccessLevel() now calls NL.resolveToolLevel — the resolver
+      auth-guard uses — instead of its own copy. The copy read a legacy
+      {access,admin} object and a stored `false` as "no entry" and fell back
+      to the role default, so either could show a card whose tool then
+      turned the user away.
+    · A club role no longer gets a card for a league or meta tool on a stray
+      grant, matching auth-guard's audience gate.
   v5.124 (15/10/2026) — Registry `shelf: 'club'` puts a card on the Club
     Tools shelf without changing who can be granted it. audience does two
     jobs (the shelf and the club-role gate), so flipping it to 'club' to
@@ -908,6 +920,15 @@
   /* Public-facing "What's new" — shown when users click the version badge. */
   window.NL_CHANGELOG = [
     {
+      date: '20/10/2026',
+      version: 'v15.0',
+      items: [
+        'Shorter, clearer descriptions on every card.',
+        'Tools still being built now sit together under In Progress.',
+        'Fan Widgets moves to a new Website shelf.'
+      ]
+    },
+    {
       date: '15/10/2026',
       version: 'v5.124',
       items: [
@@ -1122,7 +1143,7 @@
 <!-- GA4 for nl.tools — cookieless, no banner, no identity. See system/nl-analytics.js -->
 <script src="/system/nl-analytics.js?v=1"></script>
 <script src="/system/nl-topbar.js?v=10"></script>
-<script src="/system/auth-guard.js?v=16"></script>
+<script src="/system/auth-guard.js?v=17"></script>
 
 <link rel="stylesheet" href="/system/nl-brand.css?v=68">
 
@@ -2605,6 +2626,22 @@
       <div class="tool-grid" id="clubToolGrid"><!-- Populated by JS --></div>
     </div>
 
+    <!-- Website — the staff layer over the fan-facing widgets on the public
+         site (registry shelf: 'website'). Renders only when a visible tool
+         carries it. -->
+    <div id="webToolsSection" style="display:none;">
+      <div class="tools-section__head" style="margin-top:36px;">Website</div>
+      <div class="tool-grid" id="webToolGrid"><!-- Populated by JS --></div>
+    </div>
+
+    <!-- In Progress — registry status: 'wip'. Shelving only: who can open a
+         tool here is decided by its defaults and grants exactly as anywhere
+         else. Promote a tool by deleting its status. -->
+    <div id="wipToolsSection" style="display:none;">
+      <div class="tools-section__head" style="margin-top:36px;">In Progress</div>
+      <div class="tool-grid" id="wipToolGrid"><!-- Populated by JS --></div>
+    </div>
+
     <!-- Meta — tools ABOUT the estate rather than of it (estate map, style
          guide). Third `audience` value: for access it behaves exactly as
          'staff' (toolAudience maps it, auth-guard hard-gates it to league
@@ -2959,12 +2996,13 @@ function getAccessLevel(uid, toolKey) {
   var ud = (uid === STATE.uid) ? STATE.userData : (STATE.allUsers[uid] || {});
   if (!ud) return 'off';
   if (ud.role === 'superadmin') return 'admin';
-  var entry = ud.tools && ud.tools[toolKey];
-  if (typeof entry === 'string') return entry;
-  if (entry === true) return 'access';
-  var tool = STATE.tools[toolKey];
-  if (!tool || !tool.defaults) return 'off';
-  return tool.defaults[getGroupKey(ud)] || 'off';
+  /* The same resolver auth-guard uses (v5.125). This used to be its own copy,
+     and it disagreed with the guard on two inputs: a legacy {access,admin}
+     object and a stored `false` both fell through to the role default here,
+     while the guard read them as written. Either one showed a card whose
+     tool then turned the user away. One answer, from one place. */
+  var entry = ud.tools ? ud.tools[toolKey] : undefined;
+  return NL.resolveToolLevel(entry, STATE.tools[toolKey], ud.role);
 }
 
 function getGroupKey(ud) {
@@ -3444,9 +3482,27 @@ function renderToolGrid() {
      top. Shelf only — audience still decides who can be granted the tool. */
   function isClubTool(t) { return t.tool.shelf === 'club' || toolAudience(t.tool) === 'club'; }
   function isMetaTool(t) { return t.tool.audience === 'meta'; }
+  /* v5.125: two more shelves, both read straight off the registry and neither
+     touching access. `status: 'wip'` gathers unfinished tools on In Progress,
+     whoever can open them; `shelf: 'website'` is the staff layer over the
+     fan-facing widgets on the public site. Precedence: meta, then in
+     progress, then website, then club/staff — a card sits on one shelf only. */
+  function isWipTool(t) { return t.tool.status === 'wip'; }
+  function isWebTool(t) { return t.tool.shelf === 'website'; }
+  /* Same structural boundary as auth-guard's audience gate: a club role never
+     gets a card for a league or meta tool, whatever a stray grant says, so
+     the portal cannot offer a door the guard will refuse. */
+  if (isClub) {
+    myTools = myTools.filter(function(t) { return toolAudience(t.tool) !== 'staff'; });
+  }
   var metaTools  = myTools.filter(isMetaTool);
-  var staffTools = myTools.filter(function(t) { return !isClubTool(t) && !isMetaTool(t); });
-  var clubTools  = myTools.filter(function(t) { return  isClubTool(t) && !isMetaTool(t); });
+  var rest       = myTools.filter(function(t) { return !isMetaTool(t); });
+  var wipTools   = rest.filter(isWipTool);
+  rest           = rest.filter(function(t) { return !isWipTool(t); });
+  var webTools   = rest.filter(isWebTool);
+  rest           = rest.filter(function(t) { return !isWebTool(t); });
+  var staffTools = rest.filter(function(t) { return !isClubTool(t); });
+  var clubTools  = rest.filter(isClubTool);
 
   function populateGrid(gridId, items) {
     var grid = document.getElementById(gridId);
@@ -3476,8 +3532,11 @@ function renderToolGrid() {
     document.getElementById('staffToolsSection').style.display = 'none';
     document.getElementById('clubToolsSection').style.display = 'none';
     document.getElementById('metaToolsSection').style.display = 'none';
+    document.getElementById('webToolsSection').style.display = 'none';
+    document.getElementById('wipToolsSection').style.display = 'none';
     document.getElementById('clubFlatSection').style.display = '';
-    populateGrid('clubFlatGrid', clubTools);
+    /* Clubs see one flat list; the in-progress split is a staff view. */
+    populateGrid('clubFlatGrid', clubTools.concat(wipTools.filter(isClubTool)));
   } else {
     /* Staff users — two sections */
     document.getElementById('clubFlatSection').style.display = 'none';
@@ -3485,8 +3544,12 @@ function renderToolGrid() {
     document.getElementById('clubToolsSection').style.display = clubTools.length ? '' : 'none';
     /* Meta shelf: hidden entirely unless this user can see something on it. */
     document.getElementById('metaToolsSection').style.display = metaTools.length ? '' : 'none';
+    document.getElementById('webToolsSection').style.display  = webTools.length  ? '' : 'none';
+    document.getElementById('wipToolsSection').style.display  = wipTools.length  ? '' : 'none';
     populateGrid('staffToolGrid', staffTools);
     populateGrid('clubToolGrid', clubTools);
+    populateGrid('webToolGrid', webTools);
+    populateGrid('wipToolGrid', wipTools);
     populateGrid('metaToolGrid', metaTools);
   }
 }

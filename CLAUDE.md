@@ -277,7 +277,7 @@ var NL_TOOL_KEY = 'ops-vacancies';
 2. RTDB `app-data/<toolKey>/...` — that tool's owned data.
 3. RTDB security rules — the full deployed document is snapshotted at `system/rtdb/rules.snapshot.json`.
 
-`auth-guard.js` runs on every page load (v6.0+ treats `sessionStorage` as cache only and always re-verifies Firebase Auth + re-reads `users/<uid>` and `tools/<toolKey>`). Per-user tool entries are strings (`"off"` | `"access"` | `"admin"`); legacy `{access:true, admin:true}` objects and the retired `"hidden"` value are still accepted and read as `"off"`. As of auth-guard v6.1 the level model is **three states** — `off` (no access, invisible, silent redirect), `access`, `admin`; the old `hidden`/`off` split and the per-tool request-access flow are gone (admins grant access directly in the portal). `superadmin` is always granted. With no per-user entry, it falls back to `tools/<toolKey>/defaults[<role>]` (bare role key preferred, compound `nl-<role>` accepted); a role absent from `defaults` (e.g. `third-party`) resolves to `off`.
+`auth-guard.js` runs on every page load (v6.0+ treats `sessionStorage` as cache only and always re-verifies Firebase Auth + re-reads `users/<uid>` and `tools/<toolKey>`). Per-user tool entries are strings (`"off"` | `"access"` | `"admin"`); legacy `{access:true, admin:true}` objects and the retired `"hidden"` value are still accepted and read as `"off"`. As of auth-guard v6.1 the level model is **three states** — `off` (no access, invisible; since v15.0 the page shows "This tool isn't available. Please contact media@thenationalleague.org.uk." and logs `page_unavailable` to the audit, instead of a silent redirect), `access`, `admin`; the old `hidden`/`off` split and the per-tool request-access flow are gone (admins grant access directly in the portal). `superadmin` is always granted. With no per-user entry, it falls back to `tools/<toolKey>/defaults[<role>]` (bare role key preferred, compound `nl-<role>` accepted); a role absent from `defaults` (e.g. `third-party`) resolves to `off`.
 
 `nlAuthReady(session)` fires **after** the live auth token is confirmed. Do not read RTDB before this fires. The template wires a `window.TOOL.boot(session)` pattern that handles the case where `auth-guard` fired before the app script loaded (`_toolDeferredSession`).
 
@@ -324,7 +324,7 @@ which he can run from a browser:
 | **RTDB rules** — BOTH databases, nl-tools and nl-widgets | `deploy-rtdb-rules.yml` | **manual only.** Actions → Run workflow → choose target → type `publish`. Nothing is ever pasted into a Firebase console — `functions/README.md` said otherwise for nl-widgets until 19/08/2026 and misdirected a session. |
 | **Storage rules** | `deploy-storage-rules.yml` | **manual only.** Actions → Run workflow → type `publish` |
 | **Apps Script** (`gas/`) | `deploy-gas.yml` | **manual only.** Actions → Run workflow → type `publish` |
-| **`tools/` registry** | `deploy-tools-registry.yml` | **manual only.** `report` mode diffs live vs snapshot and writes nothing; `publish` + type `publish` replaces the node. Never paste this by hand. |
+| **`tools/` registry** | `deploy-tools-registry.yml` | **automatic** on any push to `main` changing the snapshot (since 20/10/2026): writes only the records that push changed plus any missing from live, never deletes, then fails the run if a tool is not live. Manually: `report` diffs and writes nothing; `publish` + type `publish` replaces the whole node. Never paste this by hand. |
 
 Two things worth knowing, because both have already caught someone out:
 
@@ -348,7 +348,13 @@ overwrite someone's editor change — if it stops you, run the sync first.
 
 The **`tools/` registry deploys from the repo too** (`deploy-tools-registry.yml`,
 added 16/08/2026) — `system/rtdb/tools-registry.snapshot.json` **is** the
-registry, exactly as the rules files are the rules. Run it in **report** mode
+registry, exactly as the rules files are the rules. Since 20/10/2026 a merge
+that changes the snapshot publishes by itself — record by record, never
+deleting, and never touching a record the merge did not change — and then
+re-reads live and fails the run if any tool is missing. That closed the
+"launched a tool and nobody but Richard could open it" gap: superadmin skips
+the access check, so an unpublished record was invisible to the one person
+launching it. By hand, run it in **report** mode
 (the default) to diff live against the snapshot without writing anything; that
 is the right first move whenever drift is suspected, and it beats exporting the
 node and comparing by hand. **publish** replaces the whole node, so a record
@@ -401,7 +407,7 @@ and `scripts/backfill-ga-hourly-archive.js` went too, having run once in May
 
 ## Files to look at first when something is mysterious
 
-- A tool denies for everyone or silently redirects to the portal → `system/auth-guard.js` (`checkAccess`) + the user's `tools/<toolKey>` entry + `tools/<toolKey>/defaults` in RTDB.
+- A tool says "This tool isn't available" (or, before auth-guard v15.0, silently redirected to the portal) → check the audit log for `page_unavailable`: "not in the registry" means the `tools/` record never published; "no access" means the grant or default. Then `system/auth-guard.js` (`checkAccess`) + the user's `tools/<toolKey>` entry + `tools/<toolKey>/defaults` in RTDB.
 - `PERMISSION_DENIED` on RTDB read despite being signed in → wrap the read in `NL.ensureAuth().then(...)` (the v6.0 guard fix handles the common case, but async boot flows can still race).
 - "It works locally but not on the deployed site" → `_headers` should be sending no-cache for `/system/*`; if a stale `?v=` is loading, `lint-tools.sh` will say which tool drifted.
 - Audit feed missing entries → `NL.installAuditHook` skip list, or a manual `NL.writeAudit` is suppressing the auto-hook for 500ms.
