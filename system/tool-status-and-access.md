@@ -74,11 +74,11 @@ so nothing is lost.
 
 | Tool | Key | League Admin | League Staff | Notes |
 |---|---|---|---|---|
-| **Graphics & Media** | `staff-graphics` | Use | Use | Flat — nothing to administer |
+| **Graphics** | `staff-graphics` | Use | Use | Flat — nothing to administer |
 | **Newsletter** | `staff-newsletter` | Use | Use | Flat. Monthly staff newsletter builder |
 | **Travel Planner** | `staff-travel-planner` | Use | Use | Flat |
 | **Website Archive** | `staff-website-archive` | Manage | Use | **Reads the admin level.** Granting Manage was a no-op until v2.7 — it read `toolPerms.admin` on a string |
-| **Programme Packs (admin)** | `media-programme` | Manage | Off | Console for `/programme/`; the club-facing side is the Storage-backed page, not this |
+| **Programme Packs** | `media-programme` | Manage | Off | Console for `/programme/`; the club-facing side is the Storage-backed page, not this |
 | **Fan Widgets** | `ops-fan-widgets` | Off | Off | Superadmin only today |
 | **Content Plan** | `media-content-plan` | Use | Use | **Reads the admin level.** Media team plan and record what is published; editing needs a per-user Manage grant (the default is view-only for everyone else). Superadmin also gets Settings → Import for the one-off load of the old sheet |
 | **Brand Exposure** | `ops-brand-exposure` | Manage | Off | Commercial team only — grants are per-user, like Commercial Compliance. Holds match measurements produced by `scripts/board-exposure-match.py` on a laptop; the tool never sees video |
@@ -115,7 +115,7 @@ links this repo cannot see.
 | **Club Directory** | `ops-club-directory` | edit all club data | view all | edit own club's data | view all |
 | **Commercial Benchmarking** | `ops-commercial-benchmarking` | edit data | view benchmarks (club dropdown) | view output only | view output only |
 | **DAZN Viewership** | `media-dazn` | view all; import seasons | view all | own club only, at `/dazn/` by club access code (rules: `clubs/$club` = claim) | same as Club Admin |
-| **Handbook 2026-27** | `ops-handbook` | edit content | view | view | view |
+| **Handbook** | `ops-handbook` | edit content | view | view | view |
 | **Judgements & Decisions** | `ops-judgements` | **Manage** — add / amend / remove all | view | view | view |
 | **Vacancies** | `ops-vacancies` | **Manage** — full CRUD + approve/reject | view all | add/edit own club's; every submission needs NL approval | view all |
 

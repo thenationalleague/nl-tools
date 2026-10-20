@@ -1,7 +1,17 @@
 /*
  * auth-guard.js — NL Tools v2
  * File: /system/auth-guard.js
- * Version: v6.7 (17/08/2026)
+ * Version: v15.0 (20/10/2026)
+ *
+ * v15.0: No more silent bounce. A user the guard turns away — no access, a
+ *       club role on a league tool, or a tool whose registry record has not
+ *       been published — now sees "This tool isn't available. Please contact
+ *       media@thenationalleague.org.uk." with a link back to the portal,
+ *       instead of landing on the portal with no idea why. The reason is
+ *       written to the audit log as `page_unavailable`. Pending accounts
+ *       still redirect: that path has its own message on the portal.
+ *       Version jumps to the session's turn number, per house rule.
+ *       Cache-bust ?v=16 -> ?v=17, template and every tool in lockstep.
  *
  * v6.7: The loading overlay joins the brand. It is built with cssText, so it
  *       was invisible to every stylesheet sweep: 13px and 11px text, four
@@ -316,6 +326,42 @@
     if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
   }
 
+  /* v15.0: the overlay becomes the answer when the answer is no. This used to
+     be a silent redirect to the portal, and a tool whose registry record had
+     not been published yet looked exactly like a broken link to everyone but
+     the superadmin, who skips the check. The words are fixed by Richard: say
+     it is unavailable and who to contact, nothing about why. The address is
+     plain selectable text — mailto: is not reliable on every device.
+     `reason` goes to the audit log only, so a missed publish shows up the
+     first time someone hits it. */
+  var CONTACT_EMAIL = 'media@thenationalleague.org.uk';
+  function showUnavailable(session, reason) {
+    clearTimeout(_slowTimer);
+    clearTimeout(_verySlowTimer);
+    spinner.style.display = 'none';
+    setStatus('This tool isn’t available.', '');
+    subText.textContent = 'Please contact ' + CONTACT_EMAIL + '.';
+    subText.style.userSelect = 'text';
+    subText.style.marginTop = '-8px';
+
+    var back = document.createElement('a');
+    back.href = PORTAL_URL;
+    back.textContent = 'Back to NL Tools';
+    back.style.cssText = [
+      'color:var(--white, #fff)', 'font-size:var(--text-sm, 14px)', 'font-weight:700',
+      'text-decoration:underline', 'text-underline-offset:3px'
+    ].join(';');
+    card.appendChild(back);
+
+    try {
+      window.NL = window.NL || {};
+      if (!window.NL.session) window.NL.session = session;
+      if (window.NL.writeAudit) {
+        window.NL.writeAudit('page_unavailable', '[' + NL_TOOL_KEY + '] ' + reason + ' ' + location.pathname);
+      }
+    } catch (e) {}
+  }
+
   /* ── Access check ──────────────────────────────────────────────────────── */
   function checkAccess(session, toolData) {
     if (session.pending) {
@@ -346,7 +392,7 @@
          audiences differently; this file does not care about shelves. */
       var LEAGUE = { superadmin: true, admin: true, staff: true };
       if (!LEAGUE[session.role]) {
-        window.location.replace(PORTAL_URL);
+        showUnavailable(session, 'league-only tool');
         return;
       }
     }
@@ -376,8 +422,10 @@
     if (level === 'access' || level === 'admin') {
       grantAccess(session);
     } else {
-      /* off (or legacy hidden) -- no access, silent redirect */
-      window.location.replace(PORTAL_URL);
+      /* off (or legacy hidden). The reason separates the two cases that look
+         identical to the user: a tool not published to the registry yet, and
+         a person without a grant. */
+      showUnavailable(session, toolData ? 'no access' : 'not in the registry');
     }
   }
 
