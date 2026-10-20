@@ -193,7 +193,9 @@ jobs:
           const missing = Object.keys(snap).filter(k => !(k in live));
           const write   = [...new Set([...changed, ...added, ...missing])].sort();
           const removed = Object.keys(before).filter(k => !(k in snap));
-          fs.writeFileSync('to-write.txt', write.join('\n'));
+          // Trailing newline: `while read` drops a final line without one, which is
+          // how the first auto run skipped the last record (20/10/2026).
+          fs.writeFileSync('to-write.txt', write.length ? write.join('\n') + '\n' : '');
           const out = ['', `Auto publish will write ${write.length} record(s):`];
           write.forEach(k => out.push(`  ${k}${missing.includes(k) ? '  (missing from live)' : ''}`));
           if (removed.length) {
@@ -210,7 +212,7 @@ jobs:
           set -euo pipefail
           if [ ! -s to-write.txt ]; then echo "Nothing to write."; exit 0; fi
           TOKEN=$(gcloud auth print-access-token)
-          while read -r key; do
+          while read -r key || [ -n "$key" ]; do
             [ -n "$key" ] || continue
             node -e 'const s=require("./system/rtdb/tools-registry.snapshot.json");process.stdout.write(JSON.stringify(s[process.argv[1]]))' "$key" > record.json
             code=$(curl -sS -o put-result.json -w '%{http_code}' -X PUT \
