@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   National League Trust Cup — photo frame
-  Version: v1.0 (21/10/2026)
+  Version: v1.1 (21/10/2026)
   File: /public/trust-cup/index.html
 
   An open page for clubs taking part in the Enterprise-sponsored National
@@ -30,6 +30,12 @@
   When the list lands, swap the picker's roster for it (see TEAMS below).
 
   CHANGELOG
+  v1.1 (21/10/2026) — Cup lockup: Enterprise logo, NATIONAL LEAGUE, TRUST CUP
+                      justified to one width, in black and Enterprise green
+                      (no red). Panel re-laid out per size: club | cup in one
+                      row for Square and Portrait (same panel, same on-screen
+                      size in feeds); club above cup for Story. Logos trimmed
+                      to their visible edges; long names wrap to two lines.
   v1.0 (21/10/2026) — First build. Square / Portrait / Story sizes; drag,
                       pinch, wheel and slider zoom; two-finger and slider
                       rotate; recentre/reset; club crest and colour from
@@ -184,6 +190,11 @@
 
 <script>
 var NL_CHANGELOG = [
+  { version: 'v1.1', date: '21/10/2026', changes: [
+    'Cup lockup: Enterprise logo, NATIONAL LEAGUE, TRUST CUP justified to one width; black and Enterprise green, no red',
+    'Panel re-laid out per size: one row for Square and Portrait, club above cup for Story',
+    'Long team names wrap to two lines; logos trimmed to their visible edges'
+  ]},
   { version: 'v1.0', date: '21/10/2026', changes: [
     'First build: Square, Portrait and Story frames for the National League Trust Cup',
     'Drag, pinch, wheel and slider zoom; two-finger and slider rotate; recentre and reset',
@@ -197,13 +208,18 @@ var NL_CHANGELOG = [
 
   /* ── Output sizes ─────────────────────────────────────────────────────────
      A closed set of three, hence chips. `band` is the white brand panel;
-     `foot` lifts it off the bottom edge. Story keeps its panel clear of the
-     bottom ~250px Instagram and Facebook cover with the reply bar, and the
-     photo runs on underneath it rather than leaving a dead white strip. */
+     `foot` lifts it off the bottom edge; `rows` is 1 (club and cup side by
+     side) or 2 (club above cup). Every format is 1080 wide, so a taller
+     panel cannot simply be scaled up — it runs out of width — which is why
+     Story stacks instead. Square and Portrait share one panel on purpose:
+     feeds show both at the same width, so the same pixels are the same
+     size on screen, and Portrait's extra height all goes to the photo.
+     Story keeps its panel clear of the bottom ~250px Instagram and Facebook
+     cover with the reply bar, and the photo runs on underneath it. */
   var FORMATS = [
-    { key: 'square',   label: 'Square',   w: 1080, h: 1080, band: 300, foot: 0   },
-    { key: 'portrait', label: 'Portrait', w: 1080, h: 1350, band: 300, foot: 0   },
-    { key: 'story',    label: 'Story',    w: 1080, h: 1920, band: 300, foot: 260 }
+    { key: 'square',   label: 'Square',   w: 1080, h: 1080, band: 290, foot: 0,   rows: 1 },
+    { key: 'portrait', label: 'Portrait', w: 1080, h: 1350, band: 290, foot: 0,   rows: 1 },
+    { key: 'story',    label: 'Story',    w: 1080, h: 1920, band: 540, foot: 250, rows: 2 }
   ];
 
   /* ── Teams ────────────────────────────────────────────────────────────────
@@ -211,7 +227,7 @@ var NL_CHANGELOG = [
      the entrants, pass them to NL.clubPicker as a fixed roster instead. */
   var TEAMS = null;
 
-  var TITLE  = 'NATIONAL LEAGUE TRUST CUP';
+  var LOCKUP = ['NATIONAL LEAGUE', 'TRUST CUP'];
   var SUB    = 'UNDER-11s · ' + NL.season.label(null, String(NL.season.fromDate()));
   var LOGO_TRUST      = '/assets/crests/The%20National%20League%20Trust.png';
   var LOGO_ENTERPRISE = '/assets/partners/Enterprise.png';
@@ -224,12 +240,17 @@ var NL_CHANGELOG = [
   var css = getComputedStyle(document.documentElement);
   function tok(name) { return css.getPropertyValue(name).trim(); }
   var C = {
-    red:   tok('--primary'),
     ink:   tok('--navy-900'),
+    rule:  tok('--border'),
     muted: tok('--text-muted'),
     white: tok('--white'),
     empty: tok('--navy-100'),
-    emptyInk: tok('--navy-400')
+    emptyInk: tok('--navy-400'),
+    /* Enterprise green, sampled from assets/partners/Enterprise.png. A
+       sponsor's identity colour, so tool-local per the nl-brand.css policy
+       — but the MOTM embed carries its own, slightly different, copy
+       (#34ab56): a canon candidate if a third consumer appears. */
+    ent:   '#34b56a'
   };
 
   var canvas = document.getElementById('tcCanvas');
@@ -255,7 +276,7 @@ var NL_CHANGELOG = [
     photo: null,                // working-copy canvas of the user's photo
     club: null,                 // clubs-meta record
     crest: null,                // loaded crest image
-    accent: C.red,
+    accent: C.ent,
     name: '',
     // Framing, in units that survive a format change: zoom relative to
     // cover-fit, rotation in degrees, offset as a fraction of area width.
@@ -280,6 +301,31 @@ var NL_CHANGELOG = [
       var ff = new FontFace(f[0], 'url(' + FONT_DIR + f[1] + ')');
       return ff.load().then(function (l) { document.fonts.add(l); }, function () {});
     }));
+  }
+
+  /* Crop a logo to its visible pixels. The Enterprise file carries a white
+     margin and the Trust file a transparent one; either throws off any
+     alignment measured from the image edge. Same-origin, so readable. */
+  function trimmed(img) {
+    var c = document.createElement('canvas');
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    var g = c.getContext('2d'); g.drawImage(img, 0, 0);
+    var d = g.getImageData(0, 0, c.width, c.height).data;
+    var x0 = c.width, y0 = c.height, x1 = -1, y1 = -1;
+    for (var y = 0; y < c.height; y++) {
+      for (var x = 0; x < c.width; x++) {
+        var i = (y * c.width + x) * 4;
+        if (d[i + 3] > 16 && (d[i] < 240 || d[i + 1] < 240 || d[i + 2] < 240)) {
+          if (x < x0) x0 = x; if (x > x1) x1 = x;
+          if (y < y0) y0 = y; if (y > y1) y1 = y;
+        }
+      }
+    }
+    if (x1 < 0) return c;
+    var out = document.createElement('canvas');
+    out.width = x1 - x0 + 1; out.height = y1 - y0 + 1;
+    out.getContext('2d').drawImage(c, x0, y0, out.width, out.height, 0, 0, out.width, out.height);
+    return out;
   }
 
   /* Copy the photo into a canvas capped at MAX_SRC on its long edge. Phones
@@ -325,17 +371,44 @@ var NL_CHANGELOG = [
     ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
   }
 
-  // Largest size (≤ max) at which text fits maxW; truncates at min if needed.
-  function fitText(text, family, max, min, maxW) {
-    var size = max;
-    for (; size > min; size -= 1) {
-      ctx.font = size + 'px "' + family + '"';
-      if (ctx.measureText(text).width <= maxW) return { text: text, size: size };
-    }
-    ctx.font = min + 'px "' + family + '"';
+  function setFont(size, family) { ctx.font = size + 'px "' + family + '"'; }
+
+  // Ink extent of a string at `size` — tighter than measureText().width,
+  // which includes side bearings and would misalign a justified lockup.
+  function ink(text, size, family) {
+    setFont(size, family);
+    var m = ctx.measureText(text);
+    return { left: m.actualBoundingBoxLeft, w: m.actualBoundingBoxLeft + m.actualBoundingBoxRight,
+             asc: m.actualBoundingBoxAscent };
+  }
+
+  function truncate(text, maxW) {
     var t = text;
     while (t.length > 1 && ctx.measureText(t + '…').width > maxW) t = t.slice(0, -1);
-    return { text: t === text ? t : t.trim() + '…', size: min };
+    return t === text ? t : t.trim() + '…';
+  }
+
+  /* Team name: one line if it fits at a decent size, else the most even
+     two-line split, else truncated at the minimum size. */
+  function nameLines(name, max, min, maxW) {
+    var words = name.split(/\s+/), best = null;
+    for (var size = max; size >= min; size -= 1) {
+      setFont(size, 'Carbona-Black');
+      if (ctx.measureText(name).width <= maxW && size >= max * 0.72) return { lines: [name], size: size };
+      if (!best && words.length > 1) {
+        for (var i = 1; i < words.length; i++) {
+          var a = words.slice(0, i).join(' '), b = words.slice(i).join(' ');
+          var wa = ctx.measureText(a).width, wb = ctx.measureText(b).width;
+          if (wa <= maxW && wb <= maxW) {
+            var score = Math.max(wa, wb);
+            if (!best || score < best.score) best = { lines: [a, b], size: size, score: score };
+          }
+        }
+        if (best) return best;
+      }
+    }
+    if (ctx.measureText(name).width <= maxW * 1.0001) return { lines: [name], size: min };
+    return { lines: [truncate(name, maxW)], size: min };
   }
 
   function drawPhoto(f) {
@@ -360,42 +433,97 @@ var NL_CHANGELOG = [
     ctx.restore();
   }
 
-  /* The brand panel. Layout, left to right: club crest · text block ·
-     Trust lockup. Enterprise, as title sponsor, heads the text block —
-     the same position it holds in "Enterprise National League". */
+  /* ── The cup lockup ──────────────────────────────────────────────────────
+     Enterprise logo, NATIONAL LEAGUE, TRUST CUP — three rows justified to
+     one width L, so the sponsor and the name read as a single mark rather
+     than a title with a logo near it. Height scales linearly with L, so
+     measure once at L = 1 and size it to whatever box it has. */
+  function lockupMetrics(L) {
+    var gap = L * 0.05, ent = logos.ent, entH = ent ? L * ent.height / ent.width : 0;
+    var rows = LOCKUP.map(function (t) {
+      var at100 = ink(t, 100, 'Carbona-Black');
+      var size = 100 * L / at100.w;
+      return { text: t, size: size, asc: at100.asc * size / 100 };
+    });
+    var h = entH + rows.reduce(function (n, r) { return n + gap + r.asc; }, 0);
+    return { L: L, gap: gap, entH: entH, rows: rows, h: h };
+  }
+  function fitLockup(maxW, maxH) {
+    var unit = lockupMetrics(100);
+    return lockupMetrics(Math.min(maxW, 100 * maxH / unit.h));
+  }
+  function drawLockup(m, x, y) {
+    if (logos.ent) ctx.drawImage(logos.ent, x, y, m.L, m.entH);
+    y += m.entH;
+    m.rows.forEach(function (r, i) {
+      y += m.gap + r.asc;
+      var e = ink(r.text, r.size, 'Carbona-Black');
+      ctx.fillStyle = i === 0 ? C.ink : C.ent;
+      ctx.fillText(r.text, x + e.left, y);
+    });
+  }
+
+  /* ── The club block: crest, team name, age group and season ──────────── */
+  function drawClub(x, y, w, H) {
+    var crest = Math.round(H * 0.84), gap = Math.round(H * 0.12);
+    if (S.crest) containIn(S.crest, x, y + (H - crest) / 2, crest, crest);
+    var tx = x + crest + gap, tw = w - crest - gap;
+    var nm = (S.name || '').trim().toUpperCase();
+    var subSize = Math.round(H * 0.11);
+    for (; subSize > 12; subSize--) {
+      setFont(subSize, 'Carbona-Bold');
+      if (ctx.measureText(SUB).width <= tw) break;
+    }
+    var n = nm ? nameLines(nm, Math.round(H * 0.25), Math.round(H * 0.13), tw) : { lines: [], size: 0 };
+    var cap = n.size * 0.74, lead = n.size * 0.18, subCap = subSize * 0.74, subGap = H * 0.08;
+    var blockH = n.lines.length * cap + Math.max(0, n.lines.length - 1) * lead + (n.lines.length ? subGap : 0) + subCap;
+    var by = y + (H - blockH) / 2;
+    ctx.fillStyle = C.ink;
+    setFont(n.size, 'Carbona-Black');
+    n.lines.forEach(function (line, i) {
+      ctx.fillText(line, tx, by + cap + i * (cap + lead));
+    });
+    setFont(subSize, 'Carbona-Bold'); ctx.fillStyle = C.muted;
+    ctx.fillText(truncate(SUB, tw), tx, by + blockH);
+  }
+
+  /* ── The cup block: lockup beside the Trust logo. Returns its width. ─── */
+  function cupBlock(maxW, H, lockMax) {
+    var trustH = H * 0.8, t = logos.trust;
+    var trustW = t ? trustH * t.width / t.height : 0, gap = Math.round(H * 0.16);
+    var m = fitLockup(Math.min(lockMax, maxW - trustW - gap), H * 0.86);
+    return { m: m, trustW: trustW, trustH: trustH, gap: gap, w: m.L + gap + trustW };
+  }
+  function drawCup(b, x, y, H) {
+    drawLockup(b.m, x, y + (H - b.m.h) / 2);
+    if (logos.trust) ctx.drawImage(logos.trust, x + b.m.L + b.gap, y + (H - b.trustH) / 2, b.trustW, b.trustH);
+  }
+
+  /* The brand panel. One row: club on the left, a hairline, the cup on the
+     right. Two rows (Story): club above, cup centred below. */
   function drawBand(f) {
     var top = f.h - f.band - f.foot;
-    var stripe = 14, pad = 44, gap = 32;
+    var stripe = 12, padX = 44, padY = f.rows === 1 ? Math.round(f.band * 0.12) : 40, gap = 36;
     ctx.fillStyle = C.white; ctx.fillRect(0, top, f.w, f.band);
     ctx.fillStyle = S.accent; ctx.fillRect(0, top, f.w, stripe);
-
-    var y0 = top + stripe + pad, h = f.band - stripe - pad * 2;
-    var crestBox = h, trustW = Math.round(h * 1.09);
-
-    if (S.crest) containIn(S.crest, pad, y0, crestBox, crestBox);
-    if (logos.trust) containIn(logos.trust, f.w - pad - trustW, y0, trustW, h);
-
-    var tx = pad + crestBox + gap;
-    var tw = f.w - tx - gap - trustW - pad;
-
-    // Enterprise logo, then title, then team name, then the sub-line.
-    var entH = 46, entW = entH * (2560 / 541);
-    if (logos.ent) ctx.drawImage(logos.ent, tx - 6, y0 - 4, entW, entH);
     ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = C.rule;
 
-    var title = fitText(TITLE, 'Carbona-Black', 40, 22, tw);
-    ctx.font = title.size + 'px "Carbona-Black"'; ctx.fillStyle = C.red;
-    ctx.fillText(title.text, tx, y0 + entH + 4 + title.size);
-
-    var nm = (S.name || '').toUpperCase();
-    if (nm) {
-      var n = fitText(nm, 'Carbona-Black', 48, 26, tw);
-      ctx.font = n.size + 'px "Carbona-Black"'; ctx.fillStyle = C.ink;
-      ctx.fillText(n.text, tx, y0 + h - 34);
+    if (f.rows === 1) {
+      var H = f.band - stripe - padY * 2, y = top + stripe + padY;
+      var cup = cupBlock(f.w * 0.45, H, H * 1.1);
+      var cx = f.w - padX - cup.w, rx = cx - gap;
+      ctx.fillRect(rx, y + H * 0.08, 2, H * 0.84);
+      drawCup(cup, cx, y, H);
+      drawClub(padX, y, rx - gap - padX, H);
+    } else {
+      var rowH = (f.band - stripe - padY * 3) / 2;
+      var y1 = top + stripe + padY, y2 = y1 + rowH + padY;
+      drawClub(padX, y1, f.w - padX * 2, rowH);
+      ctx.fillStyle = C.rule; ctx.fillRect(padX, y2 - padY / 2 - 1, f.w - padX * 2, 2);
+      var c2 = cupBlock(f.w - padX * 2, rowH, rowH * 1.6);
+      drawCup(c2, (f.w - c2.w) / 2, y2, rowH);
     }
-
-    ctx.font = '24px "Carbona-Bold"'; ctx.fillStyle = C.muted;
-    ctx.fillText(SUB, tx, y0 + h);
   }
 
   var raf = 0;
@@ -551,7 +679,7 @@ var NL_CHANGELOG = [
 
   /* Accent: the club's first listed colour that reads against white. Many
      clubs list white as primary (it is their home shirt), and a white stripe
-     on a white panel is invisible. Falls back to Trust red. */
+     on a white panel is invisible. Falls back to Enterprise green. */
   function luminance(hex) {
     var m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
     if (!m) return null;
@@ -568,7 +696,7 @@ var NL_CHANGELOG = [
       var L = luminance(picks[i]);
       if (L !== null && L < 0.6) return picks[i];
     }
-    return C.red;
+    return C.ent;
   }
 
   NL.clubPicker('#tcClub', {
@@ -622,8 +750,8 @@ var NL_CHANGELOG = [
   update();
   Promise.all([
     loadFonts(),
-    loadImg(LOGO_TRUST).then(function (i) { logos.trust = i; }, function () {}),
-    loadImg(LOGO_ENTERPRISE).then(function (i) { logos.ent = i; }, function () {})
+    loadImg(LOGO_TRUST).then(function (i) { logos.trust = trimmed(i); }, function () {}),
+    loadImg(LOGO_ENTERPRISE).then(function (i) { logos.ent = trimmed(i); }, function () {})
   ]).then(update);
 })();
 </script>
