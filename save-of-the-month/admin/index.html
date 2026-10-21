@@ -1,10 +1,15 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Save of the Month (League console)
-  Version: v16.0 (21/10/2026)
+  Version: v18.0 (21/10/2026)
   File: /save-of-the-month/admin/index.html
 
   CHANGELOG
+    v18.0 (21/10/2026) — Clips play in the page: Play opens a player with
+      the nomination's details and context, ‹ › between its clips, a
+      Shortlist toggle and a download link, instead of opening the Storage
+      URL in a new tab. A format the browser cannot play says so and
+      offers the download.
     v16.0 (21/10/2026) — "Changed by the club" (was "Typed by the club":
       the flag is also set when a club picks a different keeper from the
       dropdown); Clips, plural, in the table and CSV.
@@ -92,6 +97,11 @@
     window.NL_CHANGELOG = [
       {
         date: '19/10/2026',
+        version: 'v18.0',
+        items: ['Clips play right here, with the nomination details, Shortlist and Download beside them.']
+      },
+      {
+        date: '21/10/2026',
         version: 'v16.0',
         items: ['A keeper the club changed from the team sheet is marked "Changed by the club".']
       },
@@ -150,6 +160,12 @@
   .sm-state { margin-bottom: 12px; font-size: var(--text-sm); }
   .sm-club { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
   .sm-sub { display: block; font-size: var(--text-xs); color: var(--text-muted); }
+  .sm-player video { display: block; width: 100%; max-height: 62vh; background: var(--navy-900); border-radius: var(--radius); }
+  .sm-player .banner { margin-top: 10px; }
+  .sm-player__meta { margin-top: 12px; font-size: var(--text-sm); }
+  .sm-player__ctx { margin-top: 6px; font-size: var(--text-sm); color: var(--text-muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .sm-player__bar { margin-top: 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .sm-player__bar [data-dl] { margin-left: auto; }
   .sm-context { max-width: 320px; font-size: var(--text-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
   .sm-section { margin-top: 24px; }
   /* !important + the extra :hover to outrank .table tr:hover td. */
@@ -344,7 +360,7 @@
           '<td><div class="sm-context">' + esc(n.context || '') + '</div></td>' +
           '<td>' + (SOTM.clipsOf(n).length
             ? SOTM.clipsOf(n).map(function (cl, i, all) {
-                return '<a href="' + esc(cl.url) + '" target="_blank" rel="noopener">Play' + (all.length > 1 ? ' ' + (i + 1) : '') + '</a>' +
+                return '<button type="button" class="btn btn--ghost btn--sm" data-play="' + i + '" data-club="' + esc(r.club) + '" data-nid="' + esc(r.slot) + '">Play' + (all.length > 1 ? ' ' + (i + 1) : '') + '</button>' +
                   '<span class="sm-sub">' + esc(SOTM.mb(cl.size)) + '</span>';
               }).join('')
             : '<span class="sm-sub">None</span>') + '</td>' +
@@ -356,6 +372,8 @@
   }
 
   $('smList').addEventListener('click', function (e) {
+    var p = e.target.closest('button[data-play]');
+    if (p) { openPlayer(S.view, p.getAttribute('data-club'), p.getAttribute('data-nid'), +p.getAttribute('data-play')); return; }
     var b = e.target.closest('button[data-slot]');
     if (!b || !S.view) return;
     var club = b.getAttribute('data-club'), slot = b.getAttribute('data-slot');
@@ -386,6 +404,94 @@
     NL.download('save-of-the-month-' + S.view + (S.filter === 'short' ? '-shortlist' : '') + '.csv',
       NL.csv(out, { bom: true }), 'text/csv;charset=utf-8');
   });
+
+  /* ── the player ─────────────────────────────────────────────────────
+     Plays a clip in the page rather than opening the Storage URL in a new
+     tab, with what is needed to judge it alongside: who, which match, the
+     minute and keeper, the club's context, and the Shortlist toggle. */
+  function isShort(month, club, nid) {
+    return !!(S.short[month] && S.short[month][club] && S.short[month][club][nid]);
+  }
+
+  function openPlayer(month, club, nid, start) {
+    var n = S.noms[month] && S.noms[month][club] && S.noms[month][club][nid];
+    var clips = SOTM.clipsOf(n);
+    if (!clips.length) return;
+    var i = Math.max(0, Math.min(start, clips.length - 1));
+
+    var body = document.createElement('div');
+    body.className = 'sm-player';
+    body.innerHTML =
+      '<video controls autoplay playsinline preload="metadata"></video>' +
+      '<div class="banner banner--amber" data-err hidden>This clip will not play in this browser. Download it to watch.</div>' +
+      '<div class="sm-player__meta">' +
+        '<strong>' + esc(clubName(club)) + '</strong> · ' + esc(n.match) + ' · ' + esc(n.minute) + '′ · ' + esc(n.keeper) +
+        (n.keeperEdited ? ' <span class="sm-sub">Changed by the club</span>' : '') +
+      '</div>' +
+      (n.context ? '<div class="sm-player__ctx">' + esc(n.context) + '</div>' : '') +
+      '<div class="sm-player__bar">' +
+        (clips.length > 1 ? '<button type="button" class="btn btn--ghost btn--sm" data-step="-1" aria-label="Previous clip">‹</button>' +
+          '<span class="sm-sub" data-count></span>' +
+          '<button type="button" class="btn btn--ghost btn--sm" data-step="1" aria-label="Next clip">›</button>' : '') +
+        '<button type="button" class="btn btn--ghost btn--sm" data-dl>Download</button>' +
+      '</div>';
+    var video = body.querySelector('video'), err = body.querySelector('[data-err]');
+
+    function show() {
+      var cl = clips[i];
+      err.hidden = true;
+      video.src = cl.url;
+      var count = body.querySelector('[data-count]');
+      if (count) count.textContent = 'Clip ' + (i + 1) + ' of ' + clips.length;
+      Array.prototype.forEach.call(body.querySelectorAll('[data-step]'), function (b) {
+        var to = i + +b.getAttribute('data-step');
+        b.disabled = to < 0 || to >= clips.length;
+      });
+    }
+    /* A .mov in HEVC, say, which Chrome will not decode. */
+    video.addEventListener('error', function () { err.hidden = false; });
+    body.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-step]');
+      if (b && !b.disabled) { i += +b.getAttribute('data-step'); show(); return; }
+      /* Fetched, then saved through NL.download: a download attribute is
+         ignored on a cross-origin Storage URL, which would just open it.
+         The bucket's CORS (system/storage/cors.json) allows GET from nl.tools,
+         and a clip already watched comes from the browser cache. */
+      var d = e.target.closest('[data-dl]');
+      if (!d) return;
+      var cl = clips[i];
+      d.disabled = true;
+      fetch(cl.url).then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        return res.blob();
+      }).then(function (blob) {
+        NL.download(cl.name || 'clip', blob);
+      }).catch(function (e2) {
+        NL.toast('Could not download: ' + (e2 && e2.message), 'error');
+      }).then(function () { d.disabled = false; });
+    });
+
+    function shortLabel() { return isShort(month, club, nid) ? 'Shortlisted' : 'Shortlist'; }
+    var ctrl = NL.modal({
+      title: clubName(club) + ' · ' + n.minute + '′',
+      width: 'wide',
+      body: body,
+      buttons: [
+        { label: shortLabel(), className: isShort(month, club, nid) ? 'btn--primary' : 'btn--ghost', onClick: function (c) {
+          var on = !isShort(month, club, nid);
+          var ref = db.ref(BASE + 'shortlist/' + month + '/' + club + '/' + nid);
+          (on ? ref.set(true) : ref.remove()).then(function () {
+            var btn = c.el.querySelector('.modal__footer button');
+            btn.textContent = on ? 'Shortlisted' : 'Shortlist';
+            btn.className = 'btn ' + (on ? 'btn--primary' : 'btn--ghost');
+          }, function (e2) { NL.toast('Could not save: ' + (e2 && e2.message), 'error'); });
+        } },
+        { label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } }
+      ]
+    });
+    show();
+    return ctrl;
+  }
 
   /* Clips are the only thing here that costs money to keep. The records
      stay (the list still shows what was nominated); the files go. */
