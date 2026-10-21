@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   National League Trust Cup — photo frame
-  Version: v1.4 (21/10/2026)
+  Version: v1.5 (21/10/2026)
   File: /public/trust-cup/index.html
 
   An open page for clubs taking part in the Enterprise-sponsored National
@@ -30,6 +30,10 @@
   When the list lands, swap the picker's roster for it (see TEAMS below).
 
   CHANGELOG
+  v1.5 (21/10/2026) — No blank space: zoom, pan and rotate are constrained so
+                      the photo always covers the frame. Tilting zooms in
+                      just enough to fill the corners; dragging stops at the
+                      photo's edge. Rotation kept.
   v1.4 (21/10/2026) — Rose drawn 4% over the text height (optical overshoot)
                       so it reads as the same height as the two text rows.
   v1.3 (21/10/2026) — The red NL rose returns, inside the cup lockup: beside
@@ -201,6 +205,9 @@
 
 <script>
 var NL_CHANGELOG = [
+  { version: 'v1.5', date: '21/10/2026', changes: [
+    'Photo always covers the frame: tilting zooms in to fill the corners, dragging stops at the edge'
+  ]},
   { version: 'v1.4', date: '21/10/2026', changes: [
     'Rose given 4% optical overshoot so it reads as the same height as the text'
   ]},
@@ -256,7 +263,8 @@ var NL_CHANGELOG = [
   var ROSE_OVERSHOOT  = 0.04;   // see drawLockup
   var FONT_DIR = '/graphics/_shared/fonts/';
   var MAX_SRC = 3000;           // long-edge cap for the working copy of the photo
-  var Z_MIN = 1, Z_MAX = 6;     // zoom is relative to "just covers the photo area"
+  var Z_MIN = 1, Z_MAX = 6;     // zoom is relative to "just covers the photo area";
+                                // rotation can raise the floor (see constrain)
 
   /* Brand colours come from the token sheet — canvas cannot read var(), so
      resolve once. Club colours come from clubs-meta at selection time. */
@@ -588,6 +596,7 @@ var NL_CHANGELOG = [
     drawBand(f);
   }
   function update() {
+    constrain();
     syncControls();
     if (!raf) raf = requestAnimationFrame(draw);
   }
@@ -596,6 +605,39 @@ var NL_CHANGELOG = [
   function clampZ(z) { return Math.min(Z_MAX, Math.max(Z_MIN, z)); }
   function normRot(r) { r = ((r + 180) % 360 + 360) % 360 - 180; return Math.round(r * 10) / 10; }
   function resetFraming() { S.z = 1; S.rot = 0; S.ox = 0; S.oy = 0; }
+
+  /* ── No blank space, ever ─────────────────────────────────────────────────
+     Runs before every redraw, so no gesture, slider or size change can
+     expose the backing colour. Worked in the photo's own (rotated)
+     coordinates, where the question is simple: does the frame's area fit
+     inside the image rectangle? The area rotated by -θ has a bounding box
+     of half-size ex × ey, and because a rectangle is centrally symmetric,
+     its four corners fit exactly when that box does. So:
+       1. the scale must be at least big enough for the box to fit at all
+          (a tilted photo has to zoom in to fill the corners), and
+       2. the area's centre may only wander as far as leaves the box inside
+          the image — clamp it there, then rotate back to canvas offsets. */
+  function constrain() {
+    if (!S.photo) return;
+    var a = photoArea(S.fmt), iw = S.photo.width, ih = S.photo.height;
+    var cover = coverScale(a), th = S.rot * Math.PI / 180;
+    var cs = Math.cos(th), sn = Math.sin(th), ac = Math.abs(cs), as = Math.abs(sn);
+    var ex = (a.w * ac + a.h * as) / 2, ey = (a.w * as + a.h * ac) / 2;
+
+    var zMin = Math.max(2 * ex / iw, 2 * ey / ih) / cover;
+    S.z = Math.max(zMin, Math.min(Math.max(Z_MAX, zMin), S.z));
+    var s = cover * S.z;
+
+    // Area centre relative to the image centre, in canvas pixels, then in
+    // the image's unrotated, unscaled frame.
+    var dx = -S.ox * a.w, dy = -S.oy * a.w;
+    var ux = ( cs * dx + sn * dy) / s, uy = (-sn * dx + cs * dy) / s;
+    var mx = Math.max(0, iw / 2 - ex / s), my = Math.max(0, ih / 2 - ey / s);
+    ux = Math.max(-mx, Math.min(mx, ux));
+    uy = Math.max(-my, Math.min(my, uy));
+    dx = (cs * ux - sn * uy) * s; dy = (sn * ux + cs * uy) * s;
+    S.ox = -dx / a.w; S.oy = -dy / a.w;
+  }
 
   // Slider runs 0–1000 on a log scale so the first doublings get the travel.
   function zToSlider(z) { return Math.round(1000 * Math.log(z / Z_MIN) / Math.log(Z_MAX / Z_MIN)); }
