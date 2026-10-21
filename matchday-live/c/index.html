@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Matchday Live: contributor capture page
-  Version: v1.3 (15/10/2026)
+  Version: v1.4 (15/10/2026)
   File: /matchday-live/c/index.html
 
   Public, no login. A contributor opens their personal link
@@ -57,6 +57,12 @@
                       The camera is asked for its native wide 1080p, which
                       ends the cropped "zoomed" look. 30-second cap.
                       ?debug prints camera and file dimensions.
+    v1.4  15/10/2026  "What's it about?" moves onto the match screen, chosen
+                      before recording; the review screen has it as a
+                      dropdown. Pick follows the match until touched.
+                      "Find my match" picks the open match at the ground the
+                      phone is standing in — distance worked out on the
+                      phone, coordinates never sent.
 -->
 <html lang="en">
 <head>
@@ -112,6 +118,8 @@
   .cap-big {
     width: 100%; padding: 22px; font-size: var(--text-lg); border-radius: var(--radius-lg);
   }
+  /* Always reachable: on a busy afternoon the event list above it grows. */
+  .cap-record { position: sticky; bottom: calc(12px + env(safe-area-inset-bottom)); box-shadow: var(--shadow-lg); }
   .cap-note { color: var(--text-muted); font-size: var(--text-sm); text-align: center; margin-top: 12px; }
   .cap-list { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
   .cap-opt {
@@ -193,7 +201,11 @@
   <section class="cap-screen" id="s-home" hidden>
     <div class="banner banner--info" id="testNote" hidden>Test link. Your clips are marked TEST and can't be published.</div>
     <div id="matchBox"></div>
-    <button class="btn btn--primary cap-big" type="button" id="btnRecord">Record update</button>
+    <div id="tagBox" hidden>
+      <div class="cap-sub">What's it about?</div>
+      <div class="cap-list" id="tagList"></div>
+    </div>
+    <button class="btn btn--primary cap-big cap-record" type="button" id="btnRecord">Record update</button>
     <div class="cap-note" id="sentToday"></div>
     <div class="banner banner--amber cap-queue" id="queueNote" hidden></div>
     <button class="btn btn--ghost btn--sm" type="button" id="btnChangeMatch" hidden style="margin-top:16px;">Change match</button>
@@ -211,8 +223,8 @@
     <div class="banner banner--error" id="sidewaysNote" hidden style="margin-top:12px;">This came out sideways. Retake it holding the phone upright.</div>
     <div class="cap-note" id="reviewDebug" hidden></div>
 
-    <div class="cap-sub">What's it about?</div>
-    <div class="cap-list" id="tagList"></div>
+    <label class="cap-sub" for="tagSelect">About</label>
+    <select class="nl-select cap-caption" id="tagSelect"></select>
 
     <input class="cap-caption" id="caption" maxlength="80" placeholder="Caption (optional)" aria-label="Caption">
 
@@ -435,7 +447,7 @@
       var hit = list.filter(function (c) { return c.ymd + '|' + c.id === saved; })[0];
       if (hit) { $('btnChangeMatch').hidden = false; setMatch(hit); return; }
       if (!list.length) { setMatch(null); return; }
-      renderPick(list);
+      renderPick(list, true);
     })['catch'](function (e) { stop('Could not load matches: ' + e.message); });
   }
 
@@ -445,7 +457,9 @@
     return NL.formatDate(d);
   }
 
-  function renderPick(list) {
+  /* auto: try location without a tap. Never after "Change match", or the
+     page would pick the same ground straight back. */
+  function renderPick(list, auto) {
     var box = $('pickList');
     box.textContent = '';
     list.sort(function (x, y) {
@@ -453,6 +467,18 @@
       if (x.m.live !== y.m.live) return x.m.live ? -1 : 1;
       return String(x.m.ko).localeCompare(String(y.m.ko)) || String(x.m.home.name).localeCompare(String(y.m.home.name));
     });
+    if (navigator.geolocation) {
+      var find = el('button', 'btn btn--navy cap-big', '📍 Find my match');
+      find.type = 'button';
+      find.id = 'btnFindMe';
+      find.addEventListener('click', function () { findMyMatch(list, false); });
+      box.appendChild(find);
+      if (auto && navigator.permissions && navigator.permissions.query) {
+        navigator.permissions.query({ name: 'geolocation' }).then(function (st) {
+          if (st.state === 'granted') findMyMatch(list, true);
+        })['catch'](function () {});
+      }
+    }
     var lastDay = null;
     list.forEach(function (c) {
       var m = c.m;
@@ -473,12 +499,72 @@
     show('s-pick');
   }
 
+  /* ── Find my match, by location ──────────────────────────────────── */
+  /* The ground you are standing in is the match you are at. Distance to each
+     open match's home ground (clubs-meta lat/lng) is worked out HERE, on the
+     phone; the coordinates are never sent or stored — only the match it
+     picks, which is what a tap on the list would have sent anyway. Asked only
+     when someone taps the button, or automatically if the phone has already
+     granted location to this page, so nobody gets a surprise prompt. */
+  var GROUND_RADIUS_M = 1000;
+
+  function metresBetween(a, b) {
+    var R = 6371000, toRad = Math.PI / 180;
+    var dLat = (b.lat - a.lat) * toRad, dLng = (b.lng - a.lng) * toRad;
+    var h = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(a.lat * toRad) * Math.cos(b.lat * toRad) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }
+
+  function groundOf(m) {
+    var c = m && m.home && m.home.id ? NL.clubs.byOpta(m.home.id) : null;
+    return c && typeof c.lat === 'number' && typeof c.lng === 'number' ? { lat: c.lat, lng: c.lng } : null;
+  }
+
+  /* The open match whose ground is nearest, within the radius — today's
+     first, then the most recent day. Null when nowhere is close enough. */
+  function matchAt(pos, list) {
+    var here = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    var best = null;
+    list.forEach(function (c) {
+      var g = groundOf(c.m);
+      if (!g) return;
+      var d = metresBetween(here, g);
+      if (d > GROUND_RADIUS_M) return;
+      if (!best || c.ymd > best.c.ymd || (c.ymd === best.c.ymd && d < best.d)) best = { c: c, d: d };
+    });
+    return best ? best.c : null;
+  }
+
+  function findMyMatch(list, quiet) {
+    if (!navigator.geolocation) return;
+    var btn = $('btnFindMe');
+    if (btn) { btn.disabled = true; btn.textContent = '📍 Finding you…'; }
+    navigator.geolocation.getCurrentPosition(function (pos) {
+      var c = matchAt(pos, list);
+      if (btn) { btn.disabled = false; btn.textContent = '📍 Find my match'; }
+      if (!c) {
+        if (!quiet) NL.toast('No open match at a ground near you. Pick from the list.', 'error');
+        return;
+      }
+      try { sessionStorage.setItem('mdl.match', c.ymd + '|' + c.id); } catch (e) {}
+      $('btnChangeMatch').hidden = false;
+      setMatch(c);
+    }, function () {
+      if (btn) { btn.disabled = false; btn.textContent = '📍 Find my match'; }
+      if (!quiet) NL.toast('Location is off for this page. Pick from the list.', 'error');
+    /* A tap means "where am I now": no cached fix. The silent first look
+       may use one up to a minute old. */
+    }, { enableHighAccuracy: true, timeout: 10000, maximumAge: quiet ? 60000 : 0 });
+  }
+
   function setMatch(c) {
     if (matchRef) matchRef.off();
     matchRef = null;
     match = null;
     matchId = c ? c.id : null;
     matchYmd = c ? c.ymd : null;
+    if (typeof Tags !== 'undefined') Tags.reset();
     if (!c) { renderHome(); show('s-home'); waitForToday(); return; }
     matchRef = db.ref(ROOT + '/matchdays/' + matchYmd + '/' + matchId);
     matchRef.on('value', function (s) { match = s.val(); renderHome(); });
@@ -541,6 +627,7 @@
   function renderHome() {
     var box = $('matchBox');
     box.textContent = '';
+    if (typeof Tags !== 'undefined') Tags.render();
     if (!match) {
       var e = el('div', 'empty-state');
       e.appendChild(el('div', 'empty-state__icon', '📅'));
@@ -578,6 +665,112 @@
     var drift = m.updatedAt ? Math.floor((Date.now() - m.updatedAt) / 60000) : 0;
     return m.minute + Math.max(0, Math.min(drift, 3));
   }
+
+  /* ── What's it about? ─────────────────────────────────────────────── */
+  /* Chosen on the match screen BEFORE recording, so the moment after a goal
+     is one tap on Record rather than a hunt through a list with the phone
+     still up. The review screen repeats it as a dropdown for a change of
+     mind. Until the contributor touches it, the choice follows the match:
+     the most recent goal or red card from the last five minutes is picked
+     for them, and a new one arriving moves the pick. */
+  var Tags = (function () {
+    var touched = false;
+
+    function evText(e) {
+      var side = e.side === 'home' ? match.home.name : e.side === 'away' ? match.away.name : '';
+      return (KIND[e.kind] || e.kind) + (e.player ? ' – ' + e.player : '') + (e.pen ? ' (pen)' : '') +
+        (e.og ? ' (og)' : '') + (side ? ' · ' + side : '');
+    }
+
+    /* Every choice, in screen order: the last five goals and red cards,
+       "just happened" while live, General update and its kinds, then the
+       last three yellows. value: 'e:<eventKey>' | 'pending' | 'g:' | 'g:<kind>'. */
+    function options() {
+      var events = (match && match.events) || {};
+      var keys = Object.keys(events).sort(function (a, b) {
+        return (events[b].minute || 0) - (events[a].minute || 0) || (events[b].at || 0) - (events[a].at || 0);
+      });
+      var out = [];
+      keys.filter(function (k) { return events[k].kind !== 'yellow'; }).slice(0, 5).forEach(function (k) {
+        out.push({ value: 'e:' + k, min: minLabel(events[k].minute, events[k].fm), text: evText(events[k]), e: events[k] });
+      });
+      if (match && match.live) out.push({ value: 'pending', min: '', text: 'Just happened – not on the scores yet' });
+      out.push({ value: 'g:', min: '', text: 'General update' });
+      GENERAL.forEach(function (g) { out.push({ value: 'g:' + g[0], text: g[1], chip: true }); });
+      keys.filter(function (k) { return events[k].kind === 'yellow'; }).slice(0, 3).forEach(function (k) {
+        out.push({ value: 'e:' + k, min: minLabel(events[k].minute, events[k].fm), text: evText(events[k]), e: events[k], minor: true });
+      });
+      return out;
+    }
+
+    function autoPick(opts) {
+      var at = minuteNow(match);
+      var recent = opts.filter(function (o) {
+        return o.e && typeof at === 'number' && typeof o.e.minute === 'number' &&
+          at - o.e.minute <= 5 && at - o.e.minute >= -1;
+      });
+      var major = recent.filter(function (o) { return !o.minor; })[0];
+      return (major || recent[0] || { value: 'g:' }).value;
+    }
+
+    function current(opts) {
+      if (touched && opts.some(function (o) { return o.value === tagValue; })) return tagValue;
+      touched = false;
+      return autoPick(opts);
+    }
+
+    var tagValue = 'g:';
+    function set(v, byHand) {
+      tagValue = v;
+      if (byHand) touched = true;
+      tag = v.indexOf('e:') === 0 ? { eventId: v.slice(2) }
+        : v === 'pending' ? { pending: true }
+        : { general: v.slice(2) || null };
+    }
+
+    function render() {
+      var list = $('tagList');
+      list.textContent = '';
+      $('tagBox').hidden = !match;
+      if (!match) return;
+      var opts = options();
+      set(current(opts), false);
+      var chips = null;
+      opts.forEach(function (o) {
+        if (o.chip) {
+          if (!chips) { chips = el('div', 'chip-group'); chips.style.flexWrap = 'wrap'; list.appendChild(chips); }
+          var c = el('button', 'chip' + (o.value === tagValue ? ' active' : ''), o.text);
+          c.type = 'button';
+          c.addEventListener('click', function () { set(o.value, true); render(); });
+          chips.appendChild(c);
+          return;
+        }
+        var b = el('button', 'cap-opt' + (o.minor ? ' cap-opt--minor' : ''));
+        b.type = 'button';
+        var on = o.value === tagValue || (o.value === 'g:' && tagValue.indexOf('g:') === 0);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        b.appendChild(el('span', 'cap-opt__min', o.min || ''));
+        b.appendChild(el('span', null, o.text));
+        b.addEventListener('click', function () { set(o.value, true); render(); });
+        list.appendChild(b);
+      });
+    }
+
+    function renderSelect() {
+      var sel = $('tagSelect');
+      sel.textContent = '';
+      options().forEach(function (o) {
+        var op = el('option', null, (o.min ? o.min + ' ' : '') + (o.chip ? 'General update · ' : '') + o.text);
+        op.value = o.value;
+        sel.appendChild(op);
+      });
+      sel.value = tagValue;
+    }
+
+    $('tagSelect').addEventListener('change', function () { set($('tagSelect').value, true); render(); });
+
+    return { render: render, renderSelect: renderSelect, reset: function () { touched = false; render(); } };
+  })();
 
   /* ── Screen 2: recording ──────────────────────────────────────────── */
   var Cam = (function () {
@@ -799,76 +992,9 @@
         $('btnSend').disabled = !!sideways;
       };
       $('caption').value = '';
-      renderTags();
+      Tags.renderSelect();
       renderConsent();
       show('s-review');
-    }
-
-    function opt(minText, text, cls, sel, onPick) {
-      var b = el('button', 'cap-opt' + (cls ? ' ' + cls : ''));
-      b.type = 'button';
-      b.setAttribute('aria-pressed', sel ? 'true' : 'false');
-      if (minText != null) b.appendChild(el('span', 'cap-opt__min', minText));
-      b.appendChild(el('span', null, text));
-      b.addEventListener('click', function () {
-        Array.prototype.forEach.call($('tagList').querySelectorAll('.cap-opt'), function (x) {
-          x.setAttribute('aria-pressed', x === b ? 'true' : 'false');
-        });
-        onPick();
-      });
-      return b;
-    }
-
-    function evText(e) {
-      var side = e.side === 'home' ? match.home.name : e.side === 'away' ? match.away.name : '';
-      return (KIND[e.kind] || e.kind) + (e.player ? ' – ' + e.player : '') + (e.pen ? ' (pen)' : '') +
-        (e.og ? ' (og)' : '') + (side ? ' · ' + side : '');
-    }
-
-    /* The last five goals and red cards, yellows below them. The most recent
-       event from the five minutes before recording started is pre-selected,
-       because it is almost always the reason someone pressed record. */
-    function renderTags() {
-      var list = $('tagList');
-      list.textContent = '';
-      var events = (match && match.events) || {};
-      var keys = Object.keys(events).sort(function (a, b) {
-        return (events[b].minute || 0) - (events[a].minute || 0) || (events[b].at || 0) - (events[a].at || 0);
-      });
-      var major = keys.filter(function (k) { return events[k].kind !== 'yellow'; }).slice(0, 5);
-      var minor = keys.filter(function (k) { return events[k].kind === 'yellow'; }).slice(0, 3);
-      var at = take.minute;
-      var recent = function (k) { return typeof at === 'number' && typeof events[k].minute === 'number' && at - events[k].minute <= 5 && at - events[k].minute >= -1; };
-      var pre = major.filter(recent)[0] || minor.filter(recent)[0] || null;
-      tag = pre ? { eventId: pre } : { general: null };
-
-      major.forEach(function (k) {
-        list.appendChild(opt(minLabel(events[k].minute, events[k].fm), evText(events[k]), '', k === pre,
-          function () { tag = { eventId: k }; }));
-      });
-      if (match && match.live) {
-        list.appendChild(opt('', 'Just happened – not on the scores yet', '', false, function () { tag = { pending: true }; }));
-      }
-      list.appendChild(opt('', 'General update', '', !pre, function () { tag = { general: null }; }));
-      var chips = el('div', 'chip-group');
-      chips.style.flexWrap = 'wrap';
-      GENERAL.forEach(function (g) {
-        var c = el('button', 'chip', g[1]);
-        c.type = 'button';
-        c.addEventListener('click', function () {
-          Array.prototype.forEach.call(chips.children, function (x) { x.classList.toggle('active', x === c); });
-          Array.prototype.forEach.call(list.querySelectorAll('.cap-opt'), function (x) {
-            x.setAttribute('aria-pressed', x.textContent === 'General update' ? 'true' : 'false');
-          });
-          tag = { general: g[0] };
-        });
-        chips.appendChild(c);
-      });
-      list.appendChild(chips);
-      minor.forEach(function (k) {
-        list.appendChild(opt(minLabel(events[k].minute, events[k].fm), evText(events[k]), 'cap-opt--minor', k === pre,
-          function () { tag = { eventId: k }; }));
-      });
     }
 
     function needsConsent() {
@@ -917,6 +1043,7 @@
       take = null;
       if (url) { URL.revokeObjectURL(url); url = null; }
       $('preview').removeAttribute('src');
+      Tags.reset();
       show('s-home');
       Queue.add(item);
     }
@@ -1120,7 +1247,7 @@
     $('btnSend').addEventListener('click', Review.send);
     $('btnChangeMatch').addEventListener('click', function () {
       try { sessionStorage.removeItem('mdl.match'); } catch (e) {}
-      loadDays().then(function (days) { renderPick(candidates(days)); });
+      loadDays().then(function (days) { renderPick(candidates(days), false); });
     });
   }
 
