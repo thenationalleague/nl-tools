@@ -1,6 +1,7 @@
 /* Save of the Month — pure logic shared by both pages and tests/save-of-the-month.test.mjs.
-   Version: v14.0 (21/10/2026)
+   Version: v16.0 (21/10/2026)
    File: /save-of-the-month/_shared.js
+   v16.0 (21/10/2026): clip cap 100MB -> 250MB, with the Storage rule.
    v14.0 (21/10/2026): no cap on nominations (slots s1..s5 go; records are
      push keys). keepersInMatch lists every goalkeeper who played, for the
      keeper dropdown. clipsOf reads several clips per nomination (and the
@@ -20,7 +21,7 @@
 
   var SOTM = {};
 
-  SOTM.MAX_CLIP_BYTES = 100 * 1024 * 1024;   /* the Storage rule's cap */
+  SOTM.MAX_CLIP_BYTES = 250 * 1024 * 1024;   /* the Storage rule's cap */
 
   function pad(n) { return (n < 10 ? '0' : '') + n; }
 
