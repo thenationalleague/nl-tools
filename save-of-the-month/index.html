@@ -18,7 +18,10 @@
       The form sits on .form-grid, which owns the spacing between fields
       (labels were jammed under the field above); Minute and Goalkeeper
       share a row on wider screens. Context is marked optional, with
-      examples as its placeholder. Clips may be up to 250MB (was 100MB):
+      examples as its placeholder. Canon pass: hero title is the page's
+      <h1> on .text-display, labels on .text-label, tokened transition,
+      paired font-weight, NL.formatTime, fuller card aria-label, labelled
+      keeper text box. Clips may be up to 250MB (was 100MB):
       a phone's 1080p runs ~100–130MB a minute.
     v14.0 (21/10/2026) — A bold "Nominations are open until 23:59 on …"
       header; the club's played league matches that month as cards (crests,
@@ -50,7 +53,7 @@
   `club: '<CODE>'`. The RTDB rules on app-data/media-save-of-the-month open,
   to that claim:
     · config                               read (which month is open)
-    · nominations/<YYYY-MM>/<CODE>         read; write s1..s5 only while
+    · nominations/<YYYY-MM>/<CODE>         read; write any push key while
                                            that month is open and before
                                            its closing date (server clock)
   Storage: save-of-the-month/<CODE>/<YYYY-MM>/..., video under 250MB.
@@ -112,12 +115,11 @@
       border-radius: var(--radius); border-bottom: 4px solid var(--primary);
       padding: 22px 22px 20px; margin-bottom: 28px;
     }
-    .sm-hero__kicker { font-size: var(--text-xs); letter-spacing: .08em; text-transform: uppercase; color: var(--navy-100); }
-    .sm-hero__title {
-      font-size: var(--text-xl); line-height: 1.1; text-transform: uppercase;
-      font-weight: 900; font-variation-settings: 'wght' 900; margin: 6px 0 4px;
-    }
-    .sm-hero__until { font-size: var(--text-lg); font-variation-settings: 'wght' 700; }
+    /* Type comes from canon .text-label / .text-display; only colour,
+       case and spacing are local. */
+    .sm-hero__kicker { color: var(--navy-100); }
+    .sm-hero__title { color: var(--white); text-transform: uppercase; margin: 6px 0 4px; }
+    .sm-hero__until { font-size: var(--text-lg); font-weight: 700; font-variation-settings: 'wght' 700; }
     /* One card per played league match: crest over name, score between.
        At most three abreast, so a long club name wraps instead of being
        cut off. The card is a button: it opens the form for that match. */
@@ -129,19 +131,18 @@
       font-family: var(--font); color: var(--text); cursor: pointer;
       background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
       box-shadow: var(--shadow); padding: 12px 14px;
-      transition: border-color .15s, box-shadow .15s;
+      transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
     }
     .sm-match:hover { border-color: var(--navy-300); box-shadow: var(--shadow-lg); }
-    .sm-match:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-    .sm-match__date { font-size: var(--text-xs); color: var(--text-muted); text-transform: uppercase; letter-spacing: .06em; }
+    .sm-match:focus-visible { outline: none; border-color: var(--primary); box-shadow: var(--focus-ring); }
     .sm-match__teams { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: start; gap: 8px; }
     .sm-match__team {
       --crest-size: 40px;
       display: flex; flex-direction: column; align-items: center; gap: 6px;
-      font-size: var(--text-sm); font-variation-settings: 'wght' 700; line-height: 1.25;
+      font-size: var(--text-sm); font-weight: 700; font-variation-settings: 'wght' 700; line-height: 1.25;
     }
-    .sm-match__score { font-size: var(--text-lg); font-variation-settings: 'wght' 900; color: var(--navy); white-space: nowrap; padding-top: 6px; }
-    .sm-match__foot { font-size: var(--text-xs); color: var(--navy); font-variation-settings: 'wght' 700; text-transform: uppercase; letter-spacing: .06em; }
+    .sm-match__score { font-size: var(--text-lg); font-weight: 900; font-variation-settings: 'wght' 900; color: var(--navy); white-space: nowrap; padding-top: 6px; }
+    .sm-match__foot { color: var(--navy); }
     #smKeeper:not([hidden]) { margin-top: 8px; }
     #smKeeperSel[hidden] + #smKeeper { margin-top: 0; }
     .sm-clip { font-size: var(--text-sm); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
@@ -231,8 +232,11 @@
   /* "until 23:59 on Monday 10 November 2026" — the closing moment as the
      rules see it (endOfDay), in the words a press officer reads. */
   function untilText(ms) {
-    var d = new Date(ms), hm = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
-    return 'until ' + hm + ' on ' + d.toLocaleDateString('en-GB', { weekday: 'long' }) + ' ' + NL.formatDate(ms);
+    /* CANON CANDIDATE (21/10/2026): a long weekday ("Monday 10 November
+       2026") is hand-built here and in content-plan; NL.formatDate(x,
+       {weekday:true}) is its home. */
+    return 'until ' + NL.formatTime(ms) + ' on ' +
+      new Date(ms).toLocaleDateString('en-GB', { weekday: 'long' }) + ' ' + NL.formatDate(ms);
   }
 
   function clubNameFor(team) {
@@ -244,14 +248,16 @@
      "Nominate a save" per page, not one per card. */
   function matchCard(m, count) {
     var h = clubNameFor(m.home), w = clubNameFor(m.away);
-    return '<button type="button" class="sm-match" data-new="' + esc(m.id) + '" aria-label="Nominate a save from ' + esc(m.label) + '">' +
-      '<span class="sm-match__date">' + esc(NL.formatDateShort(m.date)) + '</span>' +
+    var name = 'Nominate a save from ' + h + ' ' + m.home.score + '–' + m.away.score + ' ' + w + ', ' +
+      NL.formatDateShort(m.date) + (count ? ', ' + count + ' nominated' : '');
+    return '<button type="button" class="sm-match" data-new="' + esc(m.id) + '" aria-label="' + esc(name) + '">' +
+      '<span class="text-label">' + esc(NL.formatDateShort(m.date)) + '</span>' +
       '<span class="sm-match__teams">' +
         '<span class="sm-match__team">' + NL.clubs.crestImgHtml(h, 'thumb', { className: 'nl-crest' }) + '<span>' + esc(h) + '</span></span>' +
         '<span class="sm-match__score">' + esc(m.home.score) + '–' + esc(m.away.score) + '</span>' +
         '<span class="sm-match__team">' + NL.clubs.crestImgHtml(w, 'thumb', { className: 'nl-crest' }) + '<span>' + esc(w) + '</span></span>' +
       '</span>' +
-      (count ? '<span class="sm-match__foot">' + count + ' nominated</span>' : '') +
+      (count ? '<span class="sm-match__foot text-label">' + count + ' nominated</span>' : '') +
     '</button>';
   }
 
@@ -286,8 +292,8 @@
 
     $('smBody').innerHTML =
       '<section class="sm-hero">' +
-        '<div class="sm-hero__kicker">' + esc(month) + '</div>' +
-        '<div class="sm-hero__title">Nominations are open</div>' +
+        '<div class="sm-hero__kicker text-label">' + esc(month) + '</div>' +
+        '<h1 class="sm-hero__title text-display">Nominations are open</h1>' +
         (c.closesAt ? '<div class="sm-hero__until">' + esc(untilText(c.closesAt)) + '</div>' : '') +
       '</section>' +
       howItWorks() +
@@ -375,7 +381,7 @@
         '<input id="smMin" type="number" inputmode="numeric" min="1" max="130" value="' + esc(prev ? prev.minute : '') + '"></div>' +
       '<div class="form-group"><label for="smKeeperSel">Goalkeeper<span class="req">*</span></label>' +
         '<select id="smKeeperSel" hidden></select>' +
-        '<input id="smKeeper" maxlength="80" autocomplete="off" placeholder="Goalkeeper’s name" value="' + esc(prev ? prev.keeper : '') + '">' +
+        '<input id="smKeeper" maxlength="80" autocomplete="off" placeholder="Goalkeeper’s name" aria-label="Goalkeeper’s name" value="' + esc(prev ? prev.keeper : '') + '">' +
         '<div class="form-hint" id="smKeeperHint"></div></div>' +
       '<div class="form-group span2"><label for="smCtx">Context (optional)</label>' +
         '<textarea id="smCtx" maxlength="1000" placeholder="e.g. 93rd-minute stop to rescue a point; the save that won the derby">' + esc(prev && prev.context || '') + '</textarea></div>' +
