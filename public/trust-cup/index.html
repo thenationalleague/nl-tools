@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<!--
+  National League Trust Cup — photo frame
+  Version: v1.0 (21/10/2026)
+  File: /public/trust-cup/index.html
+
+  An open page for clubs taking part in the Enterprise-sponsored National
+  League Trust Cup (under-11s) to drop a team photo into a branded frame and
+  download it for social media. Built at the National League Trust's request.
+
+  THE PHOTO NEVER LEAVES THE DEVICE. It is read with an object URL, drawn
+  onto a <canvas> and exported with canvas.toBlob — there is no upload, no
+  Firebase and no storage. These are photos of children, and keeping them
+  off our infrastructure is what removes the safeguarding and retention
+  questions entirely (decided with Richard, 21/10/2026). Anyone changing this
+  page to send the image anywhere is reopening that decision; do not.
+
+  Open page, so it carries only what an open page may:
+    - no Firebase SDKs, no auth-guard.js, no nl-topbar.js, no #pageWrap
+    - the white .nl-idbar instead of the red topbar (nl-brand.css v2.37)
+  Everything it reads is already public: clubs-meta, crests, the Trust and
+  Enterprise logos. Not linked from anywhere and not indexed.
+
+  Why canvas, not DOM + html-to-image: the output is exactly the pixels on
+  screen, so what the coach frames is what downloads — no export-time font
+  or image-decoding races, which html-to-image has on iOS Safari.
+
+  The participating teams are a CLOSED list the Trust has not confirmed yet;
+  until it does, the picker offers the current season's member clubs.
+  When the list lands, swap the picker's roster for it (see TEAMS below).
+
+  CHANGELOG
+  v1.0 (21/10/2026) — First build. Square / Portrait / Story sizes; drag,
+                      pinch, wheel and slider zoom; two-finger and slider
+                      rotate; recentre/reset; club crest and colour from
+                      clubs-meta; download PNG, plus share sheet on phones.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>National League Trust Cup — Photo Frame</title>
+  <meta name="robots" content="noindex,nofollow">
+
+  <!-- Favicons. Static, not injected: nl-topbar.js adds these on gated pages
+       and this page never loads it. -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+
+  <!-- No Firebase, no auth-guard, no nl-topbar: this page is open. -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=68">
+  <script src="/system/nl-utils.js?v=49"></script>
+  <!-- GA4 for nl.tools — cookieless, no banner, no identity. See system/nl-analytics.js -->
+  <script src="/system/nl-analytics.js?v=1"></script>
+
+  <style>
+    .tc-wrap {
+      max-width: 1100px; margin: 0 auto; padding: 20px 16px 48px;
+      display: grid; gap: 20px;
+      grid-template-columns: minmax(0, 1fr) 340px;
+      align-items: start;
+    }
+    @media (max-width: 820px) {
+      .tc-wrap { grid-template-columns: minmax(0, 1fr); }
+    }
+
+    .tc-stage {
+      background: var(--off-white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      display: flex; flex-direction: column; align-items: center; gap: 10px;
+    }
+    #tcCanvas {
+      display: block;
+      max-width: 100%;
+      max-height: 72vh;
+      width: auto; height: auto;
+      box-shadow: var(--shadow);
+      touch-action: none;          /* we own every gesture on the canvas */
+      cursor: grab;
+      background: var(--white);
+    }
+    #tcCanvas.is-empty { cursor: pointer; }
+    #tcCanvas.is-dragging { cursor: grabbing; }
+    #tcCanvas:focus-visible { outline: 3px solid var(--navy); outline-offset: 3px; }
+    .tc-hint { font-size: var(--text-xs); color: var(--text-muted); text-align: center; }
+
+    .tc-field { margin-bottom: 16px; }
+    .tc-field:last-child { margin-bottom: 0; }
+    .tc-formats { width: 100%; }
+    .tc-format { flex: 1; }
+    .tc-file { display: none; }
+    .tc-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .tc-grow { flex: 1; }
+    .tc-range { display: flex; align-items: center; gap: 10px; }
+    .tc-range input[type="range"] { flex: 1; accent-color: var(--navy); }
+    .tc-range output {
+      min-width: 48px; text-align: right;
+      font-size: var(--text-sm); color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .tc-actions { display: grid; gap: 8px; }
+    .tc-wide { width: 100%; }
+    .tc-note { font-size: var(--text-xs); color: var(--text-muted); margin-top: 10px; }
+  </style>
+</head>
+<body>
+
+  <div class="nl-idbar">
+    <img class="nl-idbar__crest" src="/assets/crests/National%20League%20rose.png"
+         alt="" width="42" height="42">
+    <div class="nl-idbar__id">
+      <div class="nl-idbar__title">National League Trust Cup</div>
+      <div class="nl-idbar__sub">Photo frame</div>
+    </div>
+  </div>
+
+  <main class="tc-wrap">
+    <section class="tc-stage" aria-label="Preview">
+      <canvas id="tcCanvas" class="is-empty" tabindex="0"
+              aria-label="Framed photo preview. Arrow keys move the photo, plus and minus zoom."></canvas>
+      <div class="tc-hint">Drag to move · pinch or scroll to zoom · two fingers to rotate</div>
+    </section>
+
+    <aside class="form-panel tc-controls">
+      <div class="form-panel__body">
+        <div class="form-group tc-field">
+          <label for="tcClub">Club</label>
+          <div id="tcClub"></div>
+        </div>
+
+        <div class="form-group tc-field">
+          <label for="tcName">Name on the frame</label>
+          <input id="tcName" type="text" maxlength="40" autocomplete="off">
+        </div>
+
+        <div class="form-group tc-field">
+          <label>Photo</label>
+          <input id="tcFile" class="tc-file" type="file" accept="image/*">
+          <button id="tcPick" type="button" class="btn btn--navy tc-wide">Choose photo</button>
+        </div>
+
+        <div class="form-group tc-field">
+          <label>Size</label>
+          <div class="chip-group tc-formats" role="radiogroup" id="tcFormats"></div>
+        </div>
+
+        <div class="form-group tc-field">
+          <label for="tcZoom">Zoom</label>
+          <div class="tc-range">
+            <input id="tcZoom" type="range" min="0" max="1000" value="0">
+            <output id="tcZoomOut" for="tcZoom">100%</output>
+          </div>
+        </div>
+
+        <div class="form-group tc-field">
+          <label for="tcRot">Rotate</label>
+          <div class="tc-range">
+            <input id="tcRot" type="range" min="-180" max="180" step="1" value="0">
+            <output id="tcRotOut" for="tcRot">0°</output>
+          </div>
+        </div>
+
+        <div class="form-group tc-field">
+          <div class="tc-row">
+            <button id="tcRot90" type="button" class="btn btn--ghost btn--sm tc-grow">Rotate 90°</button>
+            <button id="tcCentre" type="button" class="btn btn--ghost btn--sm tc-grow">Recentre</button>
+            <button id="tcReset" type="button" class="btn btn--ghost btn--sm tc-grow">Reset</button>
+          </div>
+        </div>
+      </div>
+      <div class="form-panel__foot" style="display:block">
+        <div class="tc-actions">
+          <button id="tcDownload" type="button" class="btn btn--primary tc-wide" disabled>Download PNG</button>
+          <button id="tcShare" type="button" class="btn btn--ghost tc-wide" hidden disabled>Share or save to Photos</button>
+        </div>
+        <div class="tc-note">Your photo stays on this device. Nothing is uploaded.</div>
+      </div>
+    </aside>
+  </main>
+
+<script>
+var NL_CHANGELOG = [
+  { version: 'v1.0', date: '21/10/2026', changes: [
+    'First build: Square, Portrait and Story frames for the National League Trust Cup',
+    'Drag, pinch, wheel and slider zoom; two-finger and slider rotate; recentre and reset',
+    'Club crest and accent colour from clubs-meta; PNG download, share sheet on phones',
+    'Photo is processed entirely in the browser — never uploaded'
+  ]}
+];
+
+(function () {
+  'use strict';
+
+  /* ── Output sizes ─────────────────────────────────────────────────────────
+     A closed set of three, hence chips. `band` is the white brand panel;
+     `foot` lifts it off the bottom edge. Story keeps its panel clear of the
+     bottom ~250px Instagram and Facebook cover with the reply bar, and the
+     photo runs on underneath it rather than leaving a dead white strip. */
+  var FORMATS = [
+    { key: 'square',   label: 'Square',   w: 1080, h: 1080, band: 300, foot: 0   },
+    { key: 'portrait', label: 'Portrait', w: 1080, h: 1350, band: 300, foot: 0   },
+    { key: 'story',    label: 'Story',    w: 1080, h: 1920, band: 300, foot: 260 }
+  ];
+
+  /* ── Teams ────────────────────────────────────────────────────────────────
+     Placeholder: the current season's member clubs. When the Trust confirms
+     the entrants, pass them to NL.clubPicker as a fixed roster instead. */
+  var TEAMS = null;
+
+  var TITLE  = 'NATIONAL LEAGUE TRUST CUP';
+  var SUB    = 'UNDER-11s · ' + NL.season.label(null, String(NL.season.fromDate()));
+  var LOGO_TRUST      = '/assets/crests/The%20National%20League%20Trust.png';
+  var LOGO_ENTERPRISE = '/assets/partners/Enterprise.png';
+  var FONT_DIR = '/graphics/_shared/fonts/';
+  var MAX_SRC = 3000;           // long-edge cap for the working copy of the photo
+  var Z_MIN = 1, Z_MAX = 6;     // zoom is relative to "just covers the photo area"
+
+  /* Brand colours come from the token sheet — canvas cannot read var(), so
+     resolve once. Club colours come from clubs-meta at selection time. */
+  var css = getComputedStyle(document.documentElement);
+  function tok(name) { return css.getPropertyValue(name).trim(); }
+  var C = {
+    red:   tok('--primary'),
+    ink:   tok('--navy-900'),
+    muted: tok('--text-muted'),
+    white: tok('--white'),
+    empty: tok('--navy-100'),
+    emptyInk: tok('--navy-400')
+  };
+
+  var canvas = document.getElementById('tcCanvas');
+  var ctx = canvas.getContext('2d');
+  var els = {
+    name: document.getElementById('tcName'),
+    file: document.getElementById('tcFile'),
+    pick: document.getElementById('tcPick'),
+    formats: document.getElementById('tcFormats'),
+    zoom: document.getElementById('tcZoom'),
+    zoomOut: document.getElementById('tcZoomOut'),
+    rot: document.getElementById('tcRot'),
+    rotOut: document.getElementById('tcRotOut'),
+    rot90: document.getElementById('tcRot90'),
+    centre: document.getElementById('tcCentre'),
+    reset: document.getElementById('tcReset'),
+    download: document.getElementById('tcDownload'),
+    share: document.getElementById('tcShare')
+  };
+
+  var S = {
+    fmt: FORMATS[0],
+    photo: null,                // working-copy canvas of the user's photo
+    club: null,                 // clubs-meta record
+    crest: null,                // loaded crest image
+    accent: C.red,
+    name: '',
+    // Framing, in units that survive a format change: zoom relative to
+    // cover-fit, rotation in degrees, offset as a fraction of area width.
+    z: 1, rot: 0, ox: 0, oy: 0
+  };
+  var logos = { trust: null, ent: null };
+
+  /* ── Loading ─────────────────────────────────────────────────────────── */
+  function loadImg(src) {
+    return new Promise(function (res, rej) {
+      var i = new Image();
+      i.onload = function () { res(i); };
+      i.onerror = rej;
+      i.src = src;
+    });
+  }
+
+  function loadFonts() {
+    if (!window.FontFace) return Promise.resolve();
+    var faces = [['Carbona-Black', 'Carbona-Black.otf'], ['Carbona-Bold', 'Carbona-Bold.otf']];
+    return Promise.all(faces.map(function (f) {
+      var ff = new FontFace(f[0], 'url(' + FONT_DIR + f[1] + ')');
+      return ff.load().then(function (l) { document.fonts.add(l); }, function () {});
+    }));
+  }
+
+  /* Copy the photo into a canvas capped at MAX_SRC on its long edge. Phones
+     shoot 12–48MP; redrawing that on every pointer move stutters, and the
+     output is only 1080 wide, so 3000px leaves headroom for close zooms.
+     EXIF orientation is applied by the browser when the <img> decodes. */
+  function workingCopy(img) {
+    var iw = img.naturalWidth, ih = img.naturalHeight;
+    var k = Math.min(1, MAX_SRC / Math.max(iw, ih));
+    var c = document.createElement('canvas');
+    c.width = Math.round(iw * k); c.height = Math.round(ih * k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    return c;
+  }
+
+  function usePhoto(file) {
+    if (!file || !/^image\//.test(file.type)) { NL.toast('That file is not an image', 'error'); return; }
+    var url = URL.createObjectURL(file);
+    loadImg(url).then(function (img) {
+      S.photo = workingCopy(img);
+      URL.revokeObjectURL(url);
+      resetFraming();
+      canvas.classList.remove('is-empty');
+      els.pick.textContent = 'Change photo';
+      update();
+    }, function () {
+      URL.revokeObjectURL(url);
+      NL.toast('Could not open that photo — try a JPEG or PNG', 'error');
+    });
+  }
+
+  /* ── Geometry ────────────────────────────────────────────────────────── */
+  function photoArea(f) { return { x: 0, y: 0, w: f.w, h: f.foot ? f.h : f.h - f.band }; }
+  function coverScale(area) {
+    return Math.max(area.w / S.photo.width, area.h / S.photo.height);
+  }
+
+  /* ── Drawing ─────────────────────────────────────────────────────────── */
+  function containIn(img, x, y, w, h) {
+    var iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+    var k = Math.min(w / iw, h / ih);
+    var dw = iw * k, dh = ih * k;
+    ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+  }
+
+  // Largest size (≤ max) at which text fits maxW; truncates at min if needed.
+  function fitText(text, family, max, min, maxW) {
+    var size = max;
+    for (; size > min; size -= 1) {
+      ctx.font = size + 'px "' + family + '"';
+      if (ctx.measureText(text).width <= maxW) return { text: text, size: size };
+    }
+    ctx.font = min + 'px "' + family + '"';
+    var t = text;
+    while (t.length > 1 && ctx.measureText(t + '…').width > maxW) t = t.slice(0, -1);
+    return { text: t === text ? t : t.trim() + '…', size: min };
+  }
+
+  function drawPhoto(f) {
+    var a = photoArea(f);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(a.x, a.y, a.w, a.h); ctx.clip();
+    if (!S.photo) {
+      ctx.fillStyle = C.empty; ctx.fillRect(a.x, a.y, a.w, a.h);
+      ctx.fillStyle = C.emptyInk; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = '44px "Carbona-Black", sans-serif';
+      ctx.fillText('ADD YOUR TEAM PHOTO', a.w / 2, a.h / 2 - 22);
+      ctx.font = '28px "Carbona-Bold", sans-serif';
+      ctx.fillText('Tap or click here, or drop a photo', a.w / 2, a.h / 2 + 30);
+    } else {
+      ctx.fillStyle = C.ink; ctx.fillRect(a.x, a.y, a.w, a.h);
+      var s = coverScale(a) * S.z;
+      ctx.translate(a.x + a.w / 2 + S.ox * a.w, a.y + a.h / 2 + S.oy * a.w);
+      ctx.rotate(S.rot * Math.PI / 180);
+      ctx.drawImage(S.photo, -S.photo.width * s / 2, -S.photo.height * s / 2,
+                    S.photo.width * s, S.photo.height * s);
+    }
+    ctx.restore();
+  }
+
+  /* The brand panel. Layout, left to right: club crest · text block ·
+     Trust lockup. Enterprise, as title sponsor, heads the text block —
+     the same position it holds in "Enterprise National League". */
+  function drawBand(f) {
+    var top = f.h - f.band - f.foot;
+    var stripe = 14, pad = 44, gap = 32;
+    ctx.fillStyle = C.white; ctx.fillRect(0, top, f.w, f.band);
+    ctx.fillStyle = S.accent; ctx.fillRect(0, top, f.w, stripe);
+
+    var y0 = top + stripe + pad, h = f.band - stripe - pad * 2;
+    var crestBox = h, trustW = Math.round(h * 1.09);
+
+    if (S.crest) containIn(S.crest, pad, y0, crestBox, crestBox);
+    if (logos.trust) containIn(logos.trust, f.w - pad - trustW, y0, trustW, h);
+
+    var tx = pad + crestBox + gap;
+    var tw = f.w - tx - gap - trustW - pad;
+
+    // Enterprise logo, then title, then team name, then the sub-line.
+    var entH = 46, entW = entH * (2560 / 541);
+    if (logos.ent) ctx.drawImage(logos.ent, tx - 6, y0 - 4, entW, entH);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+
+    var title = fitText(TITLE, 'Carbona-Black', 40, 22, tw);
+    ctx.font = title.size + 'px "Carbona-Black"'; ctx.fillStyle = C.red;
+    ctx.fillText(title.text, tx, y0 + entH + 4 + title.size);
+
+    var nm = (S.name || '').toUpperCase();
+    if (nm) {
+      var n = fitText(nm, 'Carbona-Black', 48, 26, tw);
+      ctx.font = n.size + 'px "Carbona-Black"'; ctx.fillStyle = C.ink;
+      ctx.fillText(n.text, tx, y0 + h - 34);
+    }
+
+    ctx.font = '24px "Carbona-Bold"'; ctx.fillStyle = C.muted;
+    ctx.fillText(SUB, tx, y0 + h);
+  }
+
+  var raf = 0;
+  function draw() {
+    raf = 0;
+    var f = S.fmt;
+    if (canvas.width !== f.w || canvas.height !== f.h) { canvas.width = f.w; canvas.height = f.h; }
+    ctx.clearRect(0, 0, f.w, f.h);
+    drawPhoto(f);
+    drawBand(f);
+  }
+  function update() {
+    syncControls();
+    if (!raf) raf = requestAnimationFrame(draw);
+  }
+
+  /* ── Framing state ───────────────────────────────────────────────────── */
+  function clampZ(z) { return Math.min(Z_MAX, Math.max(Z_MIN, z)); }
+  function normRot(r) { r = ((r + 180) % 360 + 360) % 360 - 180; return Math.round(r * 10) / 10; }
+  function resetFraming() { S.z = 1; S.rot = 0; S.ox = 0; S.oy = 0; }
+
+  // Slider runs 0–1000 on a log scale so the first doublings get the travel.
+  function zToSlider(z) { return Math.round(1000 * Math.log(z / Z_MIN) / Math.log(Z_MAX / Z_MIN)); }
+  function sliderToZ(v) { return Z_MIN * Math.pow(Z_MAX / Z_MIN, v / 1000); }
+
+  function syncControls() {
+    els.zoom.value = zToSlider(S.z);
+    els.zoomOut.textContent = Math.round(S.z * 100) + '%';
+    els.rot.value = Math.round(S.rot);
+    els.rotOut.textContent = Math.round(S.rot) + '°';
+    var ready = !!(S.photo && S.club);
+    var noPhoto = !S.photo;
+    [els.zoom, els.rot, els.rot90, els.centre, els.reset].forEach(function (b) { b.disabled = noPhoto; });
+    els.download.disabled = !ready;
+    els.share.disabled = !ready;
+    els.download.title = ready ? '' : (S.club ? 'Add a photo first' : 'Choose a club first');
+  }
+
+  /* ── Gestures ────────────────────────────────────────────────────────────
+     Pointer Events cover mouse, pen and touch with one code path. One
+     pointer pans; two pinch-zoom and twist-rotate around their midpoint.
+     Deltas are measured in CSS pixels, so convert to canvas pixels. */
+  var pointers = new Map();
+  var pinch = null;
+
+  function toCanvasScale() { return canvas.width / canvas.getBoundingClientRect().width; }
+  function pairInfo() {
+    var p = Array.from(pointers.values());
+    var dx = p[1].x - p[0].x, dy = p[1].y - p[0].y;
+    return { d: Math.hypot(dx, dy), a: Math.atan2(dy, dx), mx: (p[0].x + p[1].x) / 2, my: (p[0].y + p[1].y) / 2 };
+  }
+
+  canvas.addEventListener('pointerdown', function (e) {
+    if (!S.photo) return;
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    canvas.classList.add('is-dragging');
+    if (pointers.size === 2) pinch = pairInfo();
+  });
+
+  canvas.addEventListener('pointermove', function (e) {
+    var p = pointers.get(e.pointerId);
+    if (!p) return;
+    var k = toCanvasScale(), aw = photoArea(S.fmt).w;
+    if (pointers.size === 1) {
+      S.ox += (e.clientX - p.x) * k / aw;
+      S.oy += (e.clientY - p.y) * k / aw;
+      p.x = e.clientX; p.y = e.clientY;
+    } else if (pointers.size === 2 && pinch) {
+      p.x = e.clientX; p.y = e.clientY;
+      var now = pairInfo();
+      if (pinch.d > 0) S.z = clampZ(S.z * now.d / pinch.d);
+      S.rot = normRot(S.rot + (now.a - pinch.a) * 180 / Math.PI);
+      S.ox += (now.mx - pinch.mx) * k / aw;
+      S.oy += (now.my - pinch.my) * k / aw;
+      pinch = now;
+    }
+    update();
+  });
+
+  function endPointer(e) {
+    pointers.delete(e.pointerId);
+    pinch = pointers.size === 2 ? pairInfo() : null;
+    if (!pointers.size) canvas.classList.remove('is-dragging');
+  }
+  canvas.addEventListener('pointerup', endPointer);
+  canvas.addEventListener('pointercancel', endPointer);
+
+  // Wheel and trackpad pinch (which arrives as ctrl+wheel) both zoom.
+  canvas.addEventListener('wheel', function (e) {
+    if (!S.photo) return;
+    e.preventDefault();
+    S.z = clampZ(S.z * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)));
+    update();
+  }, { passive: false });
+
+  canvas.addEventListener('keydown', function (e) {
+    if (!S.photo) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); els.file.click(); }
+      return;
+    }
+    var step = e.shiftKey ? 0.05 : 0.01, handled = true;
+    switch (e.key) {
+      case 'ArrowLeft':  S.ox -= step; break;
+      case 'ArrowRight': S.ox += step; break;
+      case 'ArrowUp':    S.oy -= step; break;
+      case 'ArrowDown':  S.oy += step; break;
+      case '+': case '=': S.z = clampZ(S.z * 1.05); break;
+      case '-': case '_': S.z = clampZ(S.z / 1.05); break;
+      default: handled = false;
+    }
+    if (handled) { e.preventDefault(); update(); }
+  });
+
+  canvas.addEventListener('click', function () { if (!S.photo) els.file.click(); });
+
+  // Drag-and-drop a file anywhere on the page.
+  document.addEventListener('dragover', function (e) { e.preventDefault(); });
+  document.addEventListener('drop', function (e) {
+    e.preventDefault();
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) usePhoto(f);
+  });
+
+  /* ── Controls ────────────────────────────────────────────────────────── */
+  els.pick.addEventListener('click', function () { els.file.click(); });
+  els.file.addEventListener('change', function () {
+    usePhoto(els.file.files[0]);
+    els.file.value = '';        // so picking the same file again still fires
+  });
+  els.zoom.addEventListener('input', function () { S.z = clampZ(sliderToZ(+els.zoom.value)); update(); });
+  els.rot.addEventListener('input', function () { S.rot = +els.rot.value; update(); });
+  els.rot90.addEventListener('click', function () { S.rot = normRot(Math.round(S.rot / 90) * 90 + 90); update(); });
+  els.centre.addEventListener('click', function () { S.ox = 0; S.oy = 0; update(); });
+  els.reset.addEventListener('click', function () { resetFraming(); update(); });
+  els.name.addEventListener('input', function () { S.name = els.name.value; update(); });
+
+  FORMATS.forEach(function (f) {
+    var b = document.createElement('button');
+    b.type = 'button'; b.className = 'chip tc-format' + (f === S.fmt ? ' active' : '');
+    b.setAttribute('role', 'radio'); b.setAttribute('aria-checked', String(f === S.fmt));
+    b.textContent = f.label;
+    b.addEventListener('click', function () {
+      S.fmt = f;
+      Array.prototype.forEach.call(els.formats.children, function (c) {
+        var on = c === b;
+        c.classList.toggle('active', on); c.setAttribute('aria-checked', String(on));
+      });
+      update();
+    });
+    els.formats.appendChild(b);
+  });
+
+  /* Accent: the club's first listed colour that reads against white. Many
+     clubs list white as primary (it is their home shirt), and a white stripe
+     on a white panel is invisible. Falls back to Trust red. */
+  function luminance(hex) {
+    var m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
+    if (!m) return null;
+    var n = parseInt(m[1], 16);
+    var ch = [n >> 16, (n >> 8) & 255, n & 255].map(function (v) {
+      v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+  }
+  function accentFor(club) {
+    var c = (club && club.colors) || {};
+    var picks = [c.primary, c.secondary, c.tertiary];
+    for (var i = 0; i < picks.length; i++) {
+      var L = luminance(picks[i]);
+      if (L !== null && L < 0.6) return picks[i];
+    }
+    return C.red;
+  }
+
+  NL.clubPicker('#tcClub', {
+    mode: 'search',
+    season: 'current',
+    placeholder: 'Search your club…',
+    extraClubs: TEAMS || [],
+    onSelect: function (sel) {
+      S.club = sel && sel.club ? sel.club : null;
+      S.accent = accentFor(S.club);
+      S.crest = null;
+      if (S.club) {
+        S.name = S.club.name;
+        els.name.value = S.name;
+        loadImg(sel.crestUrl).then(function (img) { S.crest = img; update(); },
+          function () { NL.toast('Crest not found for ' + S.club.name, 'info'); });
+      }
+      update();
+    }
+  });
+
+  /* ── Export ──────────────────────────────────────────────────────────── */
+  function slug(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); }
+  function fileName() { return 'nl-trust-cup-' + slug(S.club && S.club.name) + '-' + S.fmt.key + '.png'; }
+  function toBlob() {
+    if (raf) { cancelAnimationFrame(raf); draw(); }
+    return new Promise(function (res) { canvas.toBlob(res, 'image/png'); });
+  }
+
+  els.download.addEventListener('click', function () {
+    toBlob().then(function (blob) {
+      if (!blob) { NL.toast('Could not create the image', 'error'); return; }
+      NL.download(fileName(), blob);
+    });
+  });
+
+  // Phones: the share sheet is how a photo reaches the camera roll.
+  if (navigator.canShare && navigator.canShare({ files: [new File([''], 'x.png', { type: 'image/png' })] })) {
+    els.share.hidden = false;
+    els.share.addEventListener('click', function () {
+      toBlob().then(function (blob) {
+        var file = new File([blob], fileName(), { type: 'image/png' });
+        return navigator.share({ files: [file] });
+      }).catch(function (err) {
+        if (err && err.name !== 'AbortError') NL.toast('Sharing failed — use Download instead', 'error');
+      });
+    });
+  }
+
+  /* ── Boot ────────────────────────────────────────────────────────────── */
+  update();
+  Promise.all([
+    loadFonts(),
+    loadImg(LOGO_TRUST).then(function (i) { logos.trust = i; }, function () {}),
+    loadImg(LOGO_ENTERPRISE).then(function (i) { logos.ent = i; }, function () {})
+  ]).then(update);
+})();
+</script>
+</body>
+</html>
