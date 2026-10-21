@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   National League Trust Cup — photo frame
-  Version: v1.2 (21/10/2026)
+  Version: v1.3 (21/10/2026)
   File: /public/trust-cup/index.html
 
   An open page for clubs taking part in the Enterprise-sponsored National
@@ -18,8 +18,8 @@
   Open page, so it carries only what an open page may:
     - no Firebase SDKs, no auth-guard.js, no nl-topbar.js, no #pageWrap
     - the white .nl-idbar instead of the red topbar (nl-brand.css v2.37)
-  Everything it reads is already public: clubs-meta, crests and the
-  Enterprise logo. Not linked from anywhere and not indexed.
+  Everything it reads is already public: clubs-meta, crests, the NL rose
+  and the Enterprise logo. Not linked from anywhere and not indexed.
 
   Why canvas, not DOM + html-to-image: the output is exactly the pixels on
   screen, so what the coach frames is what downloads — no export-time font
@@ -30,6 +30,10 @@
   When the list lands, swap the picker's roster for it (see TEAMS below).
 
   CHANGELOG
+  v1.3 (21/10/2026) — The red NL rose returns, inside the cup lockup: beside
+                      NATIONAL LEAGUE / TRUST CUP, as tall as the two rows.
+                      Name wrapping prefers two lines and never strands a
+                      short word ("&", "FC") on a line of its own.
   v1.2 (21/10/2026) — Trust logo removed (its PFA and Premier League marks
                       beside Enterprise implied a link that does not exist);
                       the panel is now club | cup lockup. Nothing is ever
@@ -194,6 +198,10 @@
 
 <script>
 var NL_CHANGELOG = [
+  { version: 'v1.3', date: '21/10/2026', changes: [
+    'Red NL rose added to the cup lockup, beside NATIONAL LEAGUE / TRUST CUP',
+    'Name wrapping prefers two lines and never strands a short word on its own line'
+  ]},
   { version: 'v1.2', date: '21/10/2026', changes: [
     'Trust logo removed from the panel; club and cup lockup only',
     'No truncation anywhere: team name and season line shrink or wrap to fit'
@@ -238,6 +246,7 @@ var NL_CHANGELOG = [
   var LOCKUP = ['NATIONAL LEAGUE', 'TRUST CUP'];
   var SUB    = 'UNDER-11s · ' + NL.season.label(null, String(NL.season.fromDate()));
   var LOGO_ENTERPRISE = '/assets/partners/Enterprise.png';
+  var LOGO_ROSE       = '/assets/crests/National%20League%20rose.png';
   var FONT_DIR = '/graphics/_shared/fonts/';
   var MAX_SRC = 3000;           // long-edge cap for the working copy of the photo
   var Z_MIN = 1, Z_MAX = 6;     // zoom is relative to "just covers the photo area"
@@ -289,7 +298,7 @@ var NL_CHANGELOG = [
     // cover-fit, rotation in degrees, offset as a fraction of area width.
     z: 1, rot: 0, ox: 0, oy: 0
   };
-  var logos = { ent: null };
+  var logos = { ent: null, rose: null };
 
   /* ── Loading ─────────────────────────────────────────────────────────── */
   function loadImg(src) {
@@ -402,19 +411,29 @@ var NL_CHANGELOG = [
     }
     return out;
   }
+  // A split that strands "&" or "FC" on a line of its own reads badly.
+  function goodSplit(ls) { return ls.every(function (l) { return l.length > 2; }); }
+  function bestSplit(words, n, maxW, size) {
+    var best = null;
+    splits(words, n).filter(goodSplit).forEach(function (ls) {
+      var w = Math.max.apply(null, ls.map(function (l) { return ctx.measureText(l).width; }));
+      if (w <= maxW && (!best || w < best.w)) best = { lines: ls, size: size, w: w };
+    });
+    return best;
+  }
+  /* Fewer lines win: two lines are tried down to just over half size before
+     three are allowed, and one line shrinks without limit as the floor. */
   function nameLines(name, max, maxW) {
-    var words = name.split(/\s+/);
-    for (var size = max; size > 1; size -= 1) {
+    var words = name.split(/\s+/), size, hit;
+    for (size = max; size >= Math.round(max * 0.55); size -= 1) {
       setFont(size, 'Carbona-Black');
       if (ctx.measureText(name).width <= maxW && size >= max * 0.72) return { lines: [name], size: size };
-      for (var n = 2; n <= Math.min(3, words.length); n++) {
-        var best = null;
-        splits(words, n).forEach(function (ls) {
-          var w = Math.max.apply(null, ls.map(function (l) { return ctx.measureText(l).width; }));
-          if (w <= maxW && (!best || w < best.w)) best = { lines: ls, size: size, w: w };
-        });
-        if (best) return best;
-      }
+      if (words.length > 1 && (hit = bestSplit(words, 2, maxW, size))) return hit;
+    }
+    for (size = max; size > 1; size -= 1) {
+      setFont(size, 'Carbona-Black');
+      if (words.length > 2 && (hit = bestSplit(words, 3, maxW, size))) return hit;
+      if (words.length > 1 && (hit = bestSplit(words, 2, maxW, size))) return hit;
       if (ctx.measureText(name).width <= maxW) return { lines: [name], size: size };
     }
     return { lines: [name], size: 1 };
@@ -443,19 +462,26 @@ var NL_CHANGELOG = [
   }
 
   /* ── The cup lockup ──────────────────────────────────────────────────────
-     Enterprise logo, NATIONAL LEAGUE, TRUST CUP — three rows justified to
-     one width L, so the sponsor and the name read as a single mark rather
-     than a title with a logo near it. Height scales linearly with L, so
-     measure once at L = 1 and size it to whatever box it has. */
+     Enterprise logo across the full width L; beneath it the NL rose beside
+     NATIONAL LEAGUE / TRUST CUP, the rose as tall as the two text rows and
+     the text rows justified to the space left. One mark, not a title with
+     logos near it. The rose is the League's own symbol and the heart of the
+     Trust's logo — it carries their identity without the partner marks
+     that got the full Trust logo dropped (v1.2). Every dimension is
+     proportional to L, so measure once and size to whatever box it has. */
   function lockupMetrics(L) {
     var gap = L * 0.05, ent = logos.ent, entH = ent ? L * ent.height / ent.width : 0;
-    var rows = LOCKUP.map(function (t) {
+    var unit = LOCKUP.map(function (t) {
       var at100 = ink(t, 100, 'Carbona-Black');
-      var size = 100 * L / at100.w;
-      return { text: t, size: size, asc: at100.asc * size / 100 };
+      return { text: t, w: at100.w, k: at100.asc / at100.w };
     });
-    var h = entH + rows.reduce(function (n, r) { return n + gap + r.asc; }, 0);
-    return { L: L, gap: gap, entH: entH, rows: rows, h: h };
+    // L = rose + gap + T, and rose = text height = T·(k1 + k2) + gap.
+    var T = (L - 2 * gap) / (1 + unit[0].k + unit[1].k);
+    var rows = unit.map(function (u) {
+      return { text: u.text, size: 100 * T / u.w, asc: u.k * T };
+    });
+    var rose = rows[0].asc + gap + rows[1].asc;
+    return { L: L, gap: gap, entH: entH, rows: rows, rose: rose, h: entH + gap + rose };
   }
   function fitLockup(maxW, maxH) {
     var unit = lockupMetrics(100);
@@ -463,12 +489,14 @@ var NL_CHANGELOG = [
   }
   function drawLockup(m, x, y) {
     if (logos.ent) ctx.drawImage(logos.ent, x, y, m.L, m.entH);
-    y += m.entH;
+    y += m.entH + m.gap;
+    if (logos.rose) containIn(logos.rose, x, y, m.rose, m.rose);
+    var tx = x + m.rose + m.gap;
     m.rows.forEach(function (r, i) {
-      y += m.gap + r.asc;
+      y += (i ? m.gap : 0) + r.asc;
       var e = ink(r.text, r.size, 'Carbona-Black');
       ctx.fillStyle = i === 0 ? C.ink : C.ent;
-      ctx.fillText(r.text, x + e.left, y);
+      ctx.fillText(r.text, tx + e.left, y);
     });
   }
 
@@ -758,7 +786,8 @@ var NL_CHANGELOG = [
   update();
   Promise.all([
     loadFonts(),
-    loadImg(LOGO_ENTERPRISE).then(function (i) { logos.ent = trimmed(i); }, function () {})
+    loadImg(LOGO_ENTERPRISE).then(function (i) { logos.ent = trimmed(i); }, function () {}),
+    loadImg(LOGO_ROSE).then(function (i) { logos.rose = trimmed(i); }, function () {})
   ]).then(update);
 })();
 </script>
