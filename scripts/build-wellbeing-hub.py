@@ -101,7 +101,11 @@ EDITIONS = [
         'logo_w': 190,
         'lead_first': 'Watson',
         'kicker': False,
-        'accent': {'bg': '#73f2f2', 'fg': '#14293b', 'muted': '#2d4a63'},
+        # Sampled from the Trident site, not eyeballed: it is a four-colour
+        # brand — navy, teal, green, white — and the teal already in use here
+        # is an exact match for theirs.
+        'accent': {'bg': '#73f2f2', 'fg': '#14293b', 'muted': '#2d4a63',
+                   'green': '#87fc9c'},
         'noindex': True,
         'leagues': [
             ('Isthmian League', '/assets/wellbeing/trident-isthmian.png'),
@@ -246,6 +250,63 @@ def league_row(ed):
     names += ' and ' + esc(ed['leagues'][-1][0])
     return ('  <div class="hub-leagues">\n'
             '    <span>Covering the %s</span>\n%s\n  </div>\n' % (names, marks))
+
+
+def _type_css(ed):
+    """The edition's own navy for type, and its green as the accent.
+
+    THE NAVY. The page sets headings and emphasis in --navy, the National
+    League's #223b7c. The Trident masthead and footer already use theirs,
+    #14293b, so the two sat side by side on one page. Redefining the token
+    moves every heading at once.
+
+    The --navy-50…900 ladder is NOT redefined with it. Those stops are
+    committed literal hex, so they would not follow a change to --navy, and
+    they are only used for tints and borders — surfaces, hairlines, an idle
+    icon — where a few degrees of hue read as the same neutral blue-grey
+    either way. Redefining eleven tokens to chase that would be a lot of
+    surface area for something nobody can see.
+
+    THE GREEN GOES ON REASSURANCE, NOT ON URGENCY. The obvious home for it
+    was the "Who to call" band, which would have echoed the green OUR NUMBERS
+    block on their own site — but that band is a light red tint because it
+    holds 999 and the Samaritans line, and recolouring an emergency section to
+    the colour that conventionally means "go" is the same mistake the nav
+    nearly made. It goes on the privacy panel and the route-to-support flow
+    instead: both are reassurance, and green says that without arguing with
+    anything.
+
+    IT ALSO MUST NOT GO ON .hub-flow__t.is-last, which the first draft of
+    this function did. That pill is the last step of the route to support and
+    is solid red BECAUSE it is the emergency one — turning it green both
+    deleted the signal and left its white text at 1.28:1 on a light ground.
+    Caught by reading the rule it was overriding. The flow keeps its red end.
+
+    GREEN AND TEAL MUST NEVER TOUCH. They are 1.05:1 apart — the same
+    lightness, differing only in hue, so to a red-green colour-blind reader
+    they are one colour. Their own site never abuts them either; the band
+    order is navy, green, white, teal. Everything below is a contained block
+    on a white page, so nothing here lands against the teal chrome.
+
+    White on green is 1.28:1, so nothing on green is white. Navy on it is
+    11.65:1 and even the brand red is 6.70:1.
+    """
+    a = ed['accent']
+    if not a:
+        return ''
+    g = a['green']
+    return (
+        '\n  /* ' + ed['org'] + ' type and accent. Green sits on reassurance,\n'
+        '     never on urgency, and never against the teal — see _type_css(). */\n'
+        '  :root { --navy: ' + a['fg'] + '; }\n'
+        '  .hub-privacy {\n'
+        '    background: ' + g + '; border-color: ' + a['fg'] + ';\n'
+        '    border-left-color: ' + a['fg'] + ';\n'
+        '  }\n'
+        '  .hub-privacy strong { color: ' + a['fg'] + '; }\n'
+        '  .hub-privacy p { color: ' + a['muted'] + '; }\n'
+        '  .hub-flow__t { border-color: ' + a['fg'] + '; }\n'
+    )
 
 
 def _nav_css(ed):
@@ -403,6 +464,7 @@ def accent_css(ed):
         '  }\n'
         '  .hub-leagues img { height: 58px; width: auto; }\n'
         + _nav_css(ed)
+        + _type_css(ed)
         + _footer_css(ed)
     )
 
