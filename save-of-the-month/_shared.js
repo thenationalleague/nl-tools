@@ -1,6 +1,11 @@
 /* Save of the Month — pure logic shared by both pages and tests/save-of-the-month.test.mjs.
-   Version: v8.0 (19/10/2026)
+   Version: v14.0 (21/10/2026)
    File: /save-of-the-month/_shared.js
+   v14.0 (21/10/2026): no cap on nominations (slots s1..s5 go; records are
+     push keys). keepersInMatch lists every goalkeeper who played, for the
+     keeper dropdown. clipsOf reads several clips per nomination (and the
+     old single `clip`). leagueMatches carries team ids and scores for the
+     match cards.
    v8.0 (19/10/2026): month labels and the previous month moved to canon
      (NL.month, nl-utils v1.45); isMonthKey stays for isOpen, which the
      node tests run without NL.
@@ -15,8 +20,6 @@
 
   var SOTM = {};
 
-  SOTM.MAX_PER_CLUB = 5;
-  SOTM.SLOTS = ['s1', 's2', 's3', 's4', 's5'];
   SOTM.MAX_CLIP_BYTES = 100 * 1024 * 1024;   /* the Storage rule's cap */
 
   function pad(n) { return (n < 10 ? '0' : '') + n; }
@@ -37,13 +40,6 @@
   SOTM.isOpen = function (config, nowMs) {
     if (!config || !SOTM.isMonthKey(config.month)) return false;
     return !(typeof config.closesAt === 'number' && nowMs > config.closesAt);
-  };
-
-  /* First slot not yet used, or null at the limit. */
-  SOTM.freeSlot = function (mine) {
-    mine = mine || {};
-    for (var i = 0; i < SOTM.SLOTS.length; i++) if (!mine[SOTM.SLOTS[i]]) return SOTM.SLOTS[i];
-    return null;
   };
 
   /* nominations/<month> + shortlist/<month> → one row per nomination. */
@@ -96,7 +92,9 @@
       return {
         id: String(m.id),
         date: String(a.kickOffDateUTC || '').slice(0, 10),
-        label: h.name + ' ' + h.score + '–' + w.score + ' ' + w.name
+        label: h.name + ' ' + h.score + '–' + w.score + ' ' + w.name,
+        home: { id: h.teamID, name: h.name, score: h.score },
+        away: { id: w.teamID, name: w.name, score: w.score }
       };
     }).sort(function (x, y) { return x.date < y.date ? -1 : x.date > y.date ? 1 : 0; });
   };
@@ -134,6 +132,44 @@
       if (e && e.subOffID === cur && +s.eventTime < minute && byId[e.subOnID]) cur = e.subOnID;
     });
     return { id: cur, name: SOTM.playerName(byId[cur]) };
+  };
+
+  /* Every goalkeeper who played for the club in the match, in the order
+     they came on: { id, name }. Starters listed as Goalkeeper, then anyone
+     who came on as one — by their bench position, or because they replaced
+     a keeper (a sub's own playerPosition is always "Substitute"). This is
+     the keeper dropdown; keeperAt picks its default. */
+  SOTM.keepersInMatch = function (team) {
+    var pl = (team && team.players) || {}, byId = {}, out = [], seen = {};
+    var start = pl.Start || [], bench = pl.Sub || [];
+    start.concat(bench).forEach(function (p) { if (p && p.playerID) byId[p.playerID] = p; });
+    function add(id) {
+      if (!id || seen[id] || !byId[id]) return;
+      seen[id] = 1;
+      out.push({ id: id, name: SOTM.playerName(byId[id]) });
+    }
+    start.forEach(function (p) { if (p && p.playerPosition === 'Goalkeeper') add(p.playerID); });
+    var subs = (((team && team.events) || {}).subs || []).slice().sort(function (a, b) {
+      return (+a.eventTime || 0) - (+b.eventTime || 0);
+    });
+    subs.forEach(function (s) {
+      var e = s && s.substitutionEvents, on = e && byId[e.subOnID];
+      if (!on) return;
+      if (on.playerSubPosition === 'Goalkeeper' || seen[e.subOffID]) add(e.subOnID);
+    });
+    return out;
+  };
+
+  /* A nomination's clips as a list, oldest first. Records from before
+     v14.0 carry one `clip`; later ones a `clips` map. */
+  SOTM.clipsOf = function (rec) {
+    if (!rec) return [];
+    var out = [];
+    if (rec.clip) out.push(Object.assign({ key: 'clip' }, rec.clip));
+    Object.keys(rec.clips || {}).sort().forEach(function (k) {
+      out.push(Object.assign({ key: k }, rec.clips[k]));
+    });
+    return out;
   };
 
   /* Every name in the club's squad for the match, for the override box. */

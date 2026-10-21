@@ -1,10 +1,14 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Save of the Month (League console)
-  Version: v8.0 (19/10/2026)
+  Version: v14.0 (21/10/2026)
   File: /save-of-the-month/admin/index.html
 
   CHANGELOG
+    v14.0 (21/10/2026) — Several clips per nomination (Play 1, Play 2…;
+      CSV lists every clip; Delete clips clears them all). No cap per club,
+      so rows sort by when they were sent, not by slot. Fixed Delete clips
+      never enabling (it checked the row, not its record).
     v8.0 (19/10/2026) — Canon pass: crests through NL.clubs.crestImgHtml +
       wireCrestImgs and .nl-crest, plain btn--danger, the shortlist highlight
       survives row hover, one restated line cut. Both month choices are the
@@ -18,14 +22,16 @@
 
   Clubs nominate at /save-of-the-month/ with their access code: a league
   match from the open month, the minute, their goalkeeper, optional context
-  and an optional clip. Up to five per club per month (slots s1..s5).
+  and optional clips. No cap per club; each nomination is a push key.
 
   Storage (RTDB):
     app-data/media-save-of-the-month/config
         { month: 'YYYY-MM', closesAt?: ms }      absent = nothing open
     app-data/media-save-of-the-month/nominations/<YYYY-MM>/<CODE>/<s1..s5>
-        { matchId, match, date, minute, keeper, keeperEdited?, context?, clip?, at }
-    app-data/media-save-of-the-month/shortlist/<YYYY-MM>/<CODE>/<slot>: true
+        { matchId, match, date, minute, keeper, keeperEdited?, context?, clips?, at }
+        (clips: { c00: {path,url,name,size,type}, … }; records before v14.0
+        carry a single `clip` — SOTM.clipsOf reads both)
+    app-data/media-save-of-the-month/shortlist/<YYYY-MM>/<CODE>/<nid>: true
         League-only: clubs have no read on this node.
     tools/media-save-of-the-month                tool registration
   Storage (bucket):
@@ -83,6 +89,11 @@
     window.NL_CHANGELOG = [
       {
         date: '19/10/2026',
+        version: 'v14.0',
+        items: ['A nomination can carry several clips; each gets its own Play link.', 'Delete clips now works (it stayed greyed out).']
+      },
+      {
+        date: '19/10/2026',
         version: 'v8.0',
         items: ['Months are chosen with the brand month picker; the list has ‹ › to step between months with nominations.', 'Shortlisted rows stay highlighted under the pointer.']
       },
@@ -119,7 +130,7 @@
   <script src="/system/nl-analytics.js?v=1"></script>
   <script src="/system/nl-topbar.js?v=10"></script>
   <script src="/system/auth-guard.js?v=17"></script>
-  <script src="/save-of-the-month/_shared.js?v=2"></script>
+  <script src="/save-of-the-month/_shared.js?v=3"></script>
 
 <style>
   /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
@@ -286,7 +297,7 @@
   function rowsFor(month) {
     var rows = SOTM.flatten(S.noms[month] || {}, S.short[month] || {});
     rows.forEach(function (r) { r.clubName = clubName(r.club); });
-    rows.sort(function (a, b) { return a.clubName.localeCompare(b.clubName) || a.slot.localeCompare(b.slot); });
+    rows.sort(function (a, b) { return a.clubName.localeCompare(b.clubName) || (a.rec.at || 0) - (b.rec.at || 0); });
     return rows;
   }
 
@@ -304,7 +315,7 @@
       '<div class="stat"><div class="stat__num">' + all.filter(function (r) { return r.short; }).length + '</div><div class="stat__label">Shortlisted</div></div>';
 
     var isOpenMonth = S.config && S.config.month === S.view;
-    $('smWipe').disabled = isOpenMonth || !all.some(function (r) { return r.clip; });
+    $('smWipe').disabled = isOpenMonth || !all.some(function (r) { return SOTM.clipsOf(r.rec).length; });
     $('smWipe').title = isOpenMonth ? 'Close the month first' : '';
     $('smCsv').disabled = !rows.length;
 
@@ -323,8 +334,11 @@
           '<td class="ta-right">' + esc(n.minute) + '′</td>' +
           '<td>' + esc(n.keeper) + (n.keeperEdited ? '<span class="sm-sub">Typed by the club</span>' : '') + '</td>' +
           '<td><div class="sm-context">' + esc(n.context || '') + '</div></td>' +
-          '<td>' + (n.clip
-            ? '<a href="' + esc(n.clip.url) + '" target="_blank" rel="noopener">Play</a><span class="sm-sub">' + esc(SOTM.mb(n.clip.size)) + '</span>'
+          '<td>' + (SOTM.clipsOf(n).length
+            ? SOTM.clipsOf(n).map(function (cl, i, all) {
+                return '<a href="' + esc(cl.url) + '" target="_blank" rel="noopener">Play' + (all.length > 1 ? ' ' + (i + 1) : '') + '</a>' +
+                  '<span class="sm-sub">' + esc(SOTM.mb(cl.size)) + '</span>';
+              }).join('')
             : '<span class="sm-sub">None</span>') + '</td>' +
           '<td><button type="button" class="btn btn--sm ' + (r.short ? 'btn--primary' : 'btn--ghost') + '" data-club="' +
             esc(r.club) + '" data-slot="' + esc(r.slot) + '">' + (r.short ? 'Shortlisted' : 'Shortlist') + '</button></td>' +
@@ -359,7 +373,7 @@
     rows.forEach(function (r) {
       var n = r.rec;
       out.push([r.clubName, n.match, n.date ? NL.formatDate(n.date) : '', n.minute, n.keeper,
-        n.keeperEdited ? 'Yes' : '', n.context || '', n.clip ? n.clip.url : '', r.short ? 'Yes' : '']);
+        n.keeperEdited ? 'Yes' : '', n.context || '', SOTM.clipsOf(n).map(function (cl) { return cl.url; }).join(' '), r.short ? 'Yes' : '']);
     });
     NL.download('save-of-the-month-' + S.view + (S.filter === 'short' ? '-shortlist' : '') + '.csv',
       NL.csv(out, { bom: true }), 'text/csv;charset=utf-8');
@@ -369,7 +383,13 @@
      stay (the list still shows what was nominated); the files go. */
   $('smWipe').addEventListener('click', function () {
     var month = S.view;
-    var withClip = rowsFor(month).filter(function (r) { return r.rec.clip; });
+    /* One entry per clip, carrying where its record lives. */
+    var withClip = [];
+    rowsFor(month).forEach(function (r) {
+      SOTM.clipsOf(r.rec).forEach(function (cl) {
+        withClip.push({ path: cl.path, ref: BASE + 'nominations/' + month + '/' + r.club + '/' + r.slot + '/' + (cl.key === 'clip' ? 'clip' : 'clips/' + cl.key) });
+      });
+    });
     if (!withClip.length) return;
     NL.confirm('Deletes ' + withClip.length + ' clip' + (withClip.length === 1 ? '' : 's') + ' for ' +
       NL.month.label(month) + '. The nominations stay. This cannot be undone.',
@@ -378,11 +398,9 @@
         if (!ok) return;
         var failed = 0;
         return Promise.all(withClip.map(function (r) {
-          return firebase.storage().ref(r.rec.clip.path).delete()
+          return firebase.storage().ref(r.path).delete()
             .catch(function (err) { if (!err || err.code !== 'storage/object-not-found') throw err; })
-            .then(function () {
-              return db.ref(BASE + 'nominations/' + month + '/' + r.club + '/' + r.slot + '/clip').remove();
-            })
+            .then(function () { return db.ref(r.ref).remove(); })
             .catch(function (err) { failed++; console.error('[save-of-the-month]', err); });
         })).then(function () {
           if (failed) NL.toast(failed + ' clip' + (failed === 1 ? '' : 's') + ' could not be deleted', 'error');

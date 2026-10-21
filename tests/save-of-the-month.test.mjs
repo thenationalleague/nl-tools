@@ -140,6 +140,48 @@ test('squadNames: everyone in the match squad, once each, sorted', () => {
   assert.deepEqual(Array.from(names), ['Alex Starter', 'Bench Mid', 'Out Field', 'Sam Bench']);
 });
 
+/* ── keepersInMatch — the keeper dropdown (v14.0) ─────────────────────── */
+
+test('keepersInMatch: the starter, then the keeper who came on', () => {
+  const ks = SOTM.keepersInMatch(solihull());
+  assert.deepEqual(Array.from(ks.map((k) => k.name)), ['Alex Starter', 'Sam Bench']);
+});
+
+test('keepersInMatch: an outfield sub is not a keeper', () => {
+  const t = solihull();
+  t.events.subs = [t.events.subs[1]];
+  assert.deepEqual(Array.from(SOTM.keepersInMatch(t).map((k) => k.name)), ['Alex Starter']);
+});
+
+test('keepersInMatch: whoever replaces a keeper counts, even with no bench position', () => {
+  /* A keeper sent off and replaced, or a bench keeper whose playerSubPosition
+     came back null: replacing the keeper is what makes them one. */
+  const t = solihull();
+  t.players.Sub[0].playerSubPosition = null;
+  assert.deepEqual(Array.from(SOTM.keepersInMatch(t).map((k) => k.name)), ['Alex Starter', 'Sam Bench']);
+});
+
+test('keepersInMatch: two keepers in the XI are both offered; none is an empty list', () => {
+  const t = solihull();
+  t.events.subs = [];
+  t.players.Start.push(p('p100003', 'Second', 'Keeper', 'Goalkeeper'));
+  assert.equal(SOTM.keepersInMatch(t).length, 2);
+  t.players.Start.forEach((x) => { x.playerPosition = 'Defender'; });
+  assert.equal(SOTM.keepersInMatch(t).length, 0);
+  assert.equal(SOTM.keepersInMatch(null).length, 0);
+});
+
+/* ── clipsOf — several clips per nomination (v14.0) ───────────────────── */
+
+test('clipsOf: reads the old single clip and the new map, in order', () => {
+  const c = (n) => ({ path: 'p' + n, url: 'u' + n, name: 'n' + n });
+  assert.equal(SOTM.clipsOf({}).length, 0);
+  assert.equal(SOTM.clipsOf(null).length, 0);
+  assert.deepEqual(Array.from(SOTM.clipsOf({ clip: c(0) }).map((x) => x.key)), ['clip']);
+  const many = SOTM.clipsOf({ clips: { c01: c(2), c00: c(1) } });
+  assert.deepEqual(Array.from(many.map((x) => x.name)), ['n1', 'n2']);
+});
+
 /* ── leagueMatches ────────────────────────────────────────────────────── */
 
 const row = (id, comp, period, date, hs, as) => ({
@@ -169,10 +211,13 @@ test('leagueMatches: unplayed and postponed matches stay out', () => {
   assert.deepEqual(Array.from(out.map((m) => m.id)), ['g3']);
 });
 
-test('leagueMatches: label and date', () => {
+test('leagueMatches: label, date, and both teams for the match card', () => {
   const [m] = SOTM.leagueMatches([row('g2660201', 89, 'FullTime', '2026-10-10', 5, 0)]);
   assert.equal(m.label, 'Worthing 5–0 Solihull Moors');
   assert.equal(m.date, '2026-10-10');
+  assert.equal(m.home.id, 't523');
+  assert.equal(m.away.name, 'Solihull Moors');
+  assert.equal(m.away.score, 0);
 });
 
 test('monthRange: whole UTC month, including a short February', () => {
@@ -196,12 +241,6 @@ test('endOfDay: the closing date includes the whole day', () => {
   const d = new Date(t);
   assert.equal(SOTM.ymd(d), '2026-11-07');
   assert.equal(SOTM.ymd(new Date(t + 1)), '2026-11-08');
-});
-
-test('freeSlot: first gap, null at five', () => {
-  assert.equal(SOTM.freeSlot({}), 's1');
-  assert.equal(SOTM.freeSlot({ s1: {}, s3: {} }), 's2');
-  assert.equal(SOTM.freeSlot({ s1: {}, s2: {}, s3: {}, s4: {}, s5: {} }), null);
 });
 
 test('clipType: trusts a video type, falls back to the extension, refuses the rest', () => {
