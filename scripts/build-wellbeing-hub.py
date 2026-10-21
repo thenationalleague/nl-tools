@@ -168,7 +168,11 @@ def poster_accent_css(ed):
     a = ed['accent']
     if not a:
         return ''
-    return (
+    # The poster has its own stylesheet, so it needs the palette and the fonts
+    # in its own right. Without this it kept pulling National League values
+    # through the canon tokens — no NL hex appears in the file, which is
+    # exactly why a search for literal hex said it was already clean.
+    return _palette_css(ed) + _font_css(ed) + (
         '\n  /* ' + ed['org'] + ' masthead. Teal ground, navy type — the page\n'
         '     stylesheet does the same, and the supplied lockup carries its\n'
         '     own teal background with no alpha, so any other ground shows a\n'
@@ -250,6 +254,187 @@ def league_row(ed):
     names += ' and ' + esc(ed['leagues'][-1][0])
     return ('  <div class="hub-leagues">\n'
             '    <span>Covering the %s</span>\n%s\n  </div>\n' % (names, marks))
+
+
+def _font_css(ed):
+    """The edition's own typefaces: Faculty Glyphic for headings, Lato for text.
+
+    Both are open licence (OFL) on Google Fonts, so they are SELF-HOSTED from
+    /assets/fonts/ rather than linked. That is not a preference: the poster
+    has to render correctly from a machine that cannot reach the internet,
+    which is the same reason Carbona is self-hosted here. A <link> to Google
+    would also hand a third party the visitor's IP and a referrer of
+    /trident-wellbeing/#crisis.
+
+    Only the `latin` subsets are shipped. The copy is English with curly
+    quotes and em dashes, all of which are in latin; latin-ext doubles the
+    bytes for characters this page does not contain.
+
+    FACULTY GLYPHIC HAS ONE WEIGHT, 400. The hub sets headings at 900, which
+    a browser would answer by synthesising a fake bold — smeared outlines,
+    and nothing like the face. Their own site runs these headings light, so
+    the heading weights drop to 400 to match rather than to work around a
+    missing file. Lato supplies 400/700/900 for everything else.
+    """
+    if ed['key'] == 'nl':
+        return ''
+    return """
+  /* Faculty Glyphic + Lato, self-hosted — see _font_css(). */
+  @font-face {
+    font-family: 'tri-head';
+    src: url('/assets/fonts/faculty-glyphic-400.woff2') format('woff2');
+    font-weight: 400; font-style: normal; font-display: swap;
+  }
+  @font-face {
+    font-family: 'tri-body';
+    src: url('/assets/fonts/lato-400.woff2') format('woff2');
+    font-weight: 400; font-style: normal; font-display: swap;
+  }
+  @font-face {
+    font-family: 'tri-body';
+    src: url('/assets/fonts/lato-700.woff2') format('woff2');
+    font-weight: 500 700; font-style: normal; font-display: swap;
+  }
+  @font-face {
+    font-family: 'tri-body';
+    src: url('/assets/fonts/lato-900.woff2') format('woff2');
+    font-weight: 701 900; font-style: normal; font-display: swap;
+  }
+  :root { --font: 'tri-body', ui-sans-serif, system-ui, -apple-system, sans-serif; }
+
+  /* Faculty Glyphic has a single weight. Set at 900 the browser fakes a bold
+     and the face stops looking like itself, so headings run light — which is
+     how their own site sets them.
+
+     The canon type classes have to be named, not just the elements: every
+     heading here also carries .text-display or .text-heading from
+     nl-brand.css, and a bare `h1` is one element selector where those are a
+     class — so the 900 kept winning and the first pass shipped a synthesised
+     bold. Same specificity trap as the poster lockup.
+
+     Big headings only. Card titles and labels stay Lato, because that is how
+     their own site is set and a glyphic face at 15px is just harder to
+     read. */
+  h1, h2, .text-display, .text-heading, .hub-brand b, .hd b {
+    font-family: 'tri-head', Georgia, serif;
+    font-weight: 400;
+  }
+"""
+
+
+def _palette_css(ed):
+    """EVERY National League colour token, redefined in Trident's palette.
+
+    Asked for directly: "i want all NL colours removed and only use trident
+    colours". Their brand is four colours — navy #14293b, green #87fc9c,
+    teal #73f2f2, white — so everything below is those, a shade of one of
+    them, or white.
+
+    THE BRAND HAS NO RED, AND THAT IS THE ONE REAL COST. The National League
+    edition carries urgency in --primary: the URGENT HELP banner, the crisis
+    card, the 999 and Samaritans numbers, the Hide page tab, the last pill of
+    the route to support, the Urgent help item in both navs. Red is doing
+    real work there — it is the one colour a reader does not have to learn.
+
+    There is nothing in the Trident palette to put in its place, so urgency
+    moves from HUE to WEIGHT: --primary becomes the brand navy, and the
+    urgent things become SOLID FILLED NAVY on a page that is otherwise white,
+    pale tint and teal. They stay the heaviest objects on the page and all
+    clear 14:1, but a reader now has to notice weight rather than recognise a
+    colour, and that is a genuine reduction in signal on a page about
+    suicide. Flagged, then built as asked.
+
+    The ladders are OKLab, generated rather than picked, and they borrow the
+    National League ladder's LIGHTNESS RHYTHM so surfaces, hairlines and idle
+    icons sit exactly where they did — same steps, different hue. The dark
+    half is scaled down from the base instead of copied, because Trident's
+    navy is darker than the League's and copying absolute values put stop 600
+    LIGHTER than 500.
+
+    The five decorative hues (green, amber, blue, purple, red) carried no
+    information — they spread the topic glyphs across the palette so the grid
+    reads as eight things. Eight topics do not fit three brand hues, so they
+    collapse onto navy, teal and green with some repetition. Nothing depends
+    on a topic being the amber one.
+
+    NOT REDEFINED: --calm-ink and --calm-acid. Those are CALM's own brand
+    inside the CALM block, not the League's, and repainting another charity's
+    identity in Trident colours would be wrong in a way the rest of this is
+    not.
+    """
+    a = ed['accent']
+    if not a:
+        return ''
+    return '''
+  /* ── Trident palette ───────────────────────────────────────────────────
+     Every League colour token, redefined. Navy, teal, green, white, and
+     shades generated from them in OKLab. See _palette_css() for why the
+     brand's lack of a red moved urgency from hue to weight. */
+  :root {
+    --navy:        #14293b;
+    --navy-50:     #f4f5f6;
+    --navy-100:    #e3e6e9;
+    --navy-200:    #c4cbd1;
+    --navy-300:    #a1abb5;
+    --navy-400:    #6a7a89;
+    --navy-500:    #14293b;
+    --navy-600:    #0e1f2e;
+    --navy-700:    #081521;
+    --navy-800:    #040c15;
+    --navy-900:    #010408;
+
+    /* Urgency, carried by weight rather than hue — the brand has no red. */
+    --primary:     #14293b;
+    --primary-50:  #f4f5f6;
+    --primary-100: #e3e6e9;
+    --primary-200: #c4cbd1;
+    --primary-300: #a1abb5;
+    --primary-400: #6a7a89;
+    --primary-500: #14293b;
+    --primary-600: #0e1f2e;
+    --primary-700: #081521;
+    --primary-800: #040c15;
+    --primary-900: #010408;
+
+    /* The decorative hues, collapsed onto the three brand ones. */
+    --green:        #36653e;
+    --green-light:  #dbfee1;
+    --amber:        #306666;
+    --amber-deep:   #306666;
+    --amber-light:  #d5fbfb;
+    --blue:         #0e1f2e;
+    --blue-light:   #e3e6e9;
+    --purple:       #306666;
+    --purple-light: #e6fdfd;
+    --red:          #14293b;
+    --red-deep:     #081521;
+    --red-light:    #e3e6e9;
+
+    --text:        #14293b;
+    --text-muted:  #3f5365;
+    --border:      #c4cbd1;
+    --off-white:   #f4f5f6;
+  }
+
+  /* THE CRISIS CARD HAS TO STAY FINDABLE WITHOUT RED, and this is where that
+     is actually done. In the League edition it is the red-titled card with
+     the red-tinted border, and a reader spots it before reading a word.
+     Remove red and all eight titles are the same navy — which is exactly
+     what the first pass of this shipped.
+
+     So it is the only INVERTED chip in the grid: solid navy, white glyph,
+     where the other seven are a pale tint with a dark glyph. Plus a solid
+     navy border against the others' hairline. Weight and inversion instead
+     of hue.
+
+     --hmark is the heading glyph inside a topic page; --chip is the card in
+     the grid. The first pass styled only the first and left the grid
+     untouched, which is the half that matters on the way in. */
+  .hub-chip--urgent,
+  .hub-hmark--urgent { background: var(--navy); color: var(--white); }
+  .hub-topic--urgent { border-color: var(--navy); border-width: 2px; }
+  .hub-topic--urgent:hover { border-color: var(--navy); background: var(--navy-50); }
+'''
 
 
 def _type_css(ed):
@@ -463,6 +648,8 @@ def accent_css(ed):
         '    flex: 1 1 100%; margin: 0;\n'
         '  }\n'
         '  .hub-leagues img { height: 58px; width: auto; }\n'
+        + _palette_css(ed)
+        + _font_css(ed)
         + _nav_css(ed)
         + _type_css(ed)
         + _footer_css(ed)
@@ -1202,7 +1389,7 @@ def _page(ed):
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Wellbeing Hub — {ed['org']}</title>
   <meta name="description" content="Information, practical advice and confidential support for players, staff and volunteers across {ed['org_short']} football.">{noindex_meta(ed)}
-  <meta name="theme-color" content="#223b7c">
+  <meta name="theme-color" content="{ed['accent']['fg'] if ed['accent'] else '#223b7c'}">
   <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
 
   <link rel="stylesheet" href="/system/nl-brand.css?v=68">
