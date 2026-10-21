@@ -960,9 +960,31 @@ topic_cards = '\n'.join(
         hue, icon(glyph, 'md'), esc(label), esc(desc), icon('forward', 'sm'))
     for tid, label, desc, glyph, hue in TOPICS)
 
+# ── Helplines: ONE list, two surfaces ────────────────────────────────────
+# The poster used to carry its own hardcoded copy of these numbers, and the
+# two had already drifted: Mind was on the website and not on the sheet, and
+# a number changing would have had to be edited in two places. Now each entry
+# says which surfaces it appears on, so a difference between page and poster
+# is a visible decision rather than two lists that happen to disagree.
+#
+# `note` is the page's wording and `poster` is the sheet's. They differ
+# because the page leads with the NAME and the poster leads with the NUMBER,
+# so the sheet's line has to carry the name itself. The VALUE — the part that
+# matters and the part that changes — exists once.
+#
+# 999 is poster-only by ruling: the page already says it seven times, in the
+# urgent banner and across the crisis pages, and a fifth tile repeating it
+# above those would be noise. A printed sheet has no banner, so it leads.
+def helplines(surface):
+    out = [q for q in d['quick'] if surface in q['on']]
+    assert out, 'no helplines for surface %r' % surface
+    return out
+
+
 quick = '\n'.join(
     '      <div class="hub-num"><strong>%s</strong><span>%s</span><small>%s</small></div>'
-    % (esc(q['value']), esc(q['name']), esc(q['note'])) for q in d['quick'])
+    % (esc(q['value']), esc(q['name']), esc(q['note']))
+    for q in helplines('page'))
 
 # Headshots, supplied 05/10/2026. Keyed by surname rather than by position so
 # that re-ordering the two leads cannot silently swap their faces.
@@ -2471,12 +2493,6 @@ assert not _missing, 'TOPICS without a view in content.json: %s' % _missing
 # 999 leads. It is not in the hub's own "Need to talk now?" block — that block
 # is about talking — but a sheet on a dressing-room wall has to carry the
 # emergency number first. All four appear somewhere on the hub.
-POSTER_NUMS = [
-    ('999',     'If someone is in immediate danger'),
-    ('116 123', 'Samaritans, free, day or night'),
-    ('111',     'NHS urgent mental health help'),
-    ('85258',   'Shout — text SHOUT, free, 24/7'),
-]
 
 SPRITE_SRC = open(os.path.join(REPO, 'assets', 'icons', 'sprites.svg'), encoding='utf-8').read()
 
@@ -2499,8 +2515,9 @@ poster_topics = '\n'.join(
     for tid, label, _, glyph, hue in TOPICS)
 
 poster_nums = '\n'.join(
-    '      <div class="num"><b>%s</b><span>%s</span></div>' % (esc(v), esc(note))
-    for v, note in POSTER_NUMS)
+    '      <div class="num"><b>%s</b><span>%s</span></div>'
+    % (esc(q['value']), esc(q['poster']))
+    for q in helplines('poster'))
 
 # NAMES OFF, at Martyn Cannon's request (08/10/2026) — and right for the
 # medium. A web page is corrected in a minute; an A4 on a dressing-room wall
@@ -2722,10 +2739,18 @@ def _poster(ed):
   .qr span {{ display: block; font-size: 10pt; color: var(--text-muted); margin-top: 3px; }}
 
   .nums {{ margin-top: 18px; padding-top: 15px; border-top: 2px solid var(--primary); }}
-  .nums__g {{ display: flex; gap: 10px; }}
-  .num {{ flex: 1 1 0; }}
+  /* Five helplines, not four — Mind joined the sheet on 21/10/2026. Its
+     number is 13 characters, and in five equal columns at 24pt it broke
+     across three lines and shoved the rest of the sheet down. The row wraps
+     instead of forcing equal columns, and the number itself never breaks:
+     a phone number split over two lines is one somebody can misread. */
+  .nums__g {{
+    display: grid; gap: 12px 16px;
+    grid-template-columns: repeat(3, 1fr);
+  }}
+  .num {{ min-width: 0; }}
   .num b {{ display: block; font-size: 24pt; font-weight: 900; color: var(--primary);
-            line-height: 1; }}
+            line-height: 1; white-space: nowrap; }}
   .num span {{ display: block; font-size: 10pt; color: var(--text-muted);
                margin-top: 4px; line-height: 1.3; }}
 
