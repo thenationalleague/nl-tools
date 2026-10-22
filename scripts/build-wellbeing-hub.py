@@ -104,8 +104,20 @@ EDITIONS = [
         # Sampled from the Trident site, not eyeballed: it is a four-colour
         # brand — navy, teal, green, white — and the teal already in use here
         # is an exact match for theirs.
+        # Sampled from their own UK map graphic, where the petrol landmass
+        # sits on exactly this navy — so it is a real fourth brand tone, not
+        # a shade invented here.
+        # `petrol` is the landmass of their UK map graphic and `mint` is
+        # its dots; both sit on exactly this navy there, so they are real
+        # brand tones rather than shades invented here.
+        #
+        # MINT IS A DARK-GROUND COLOUR ONLY. 8.97:1 on the navy and 5.85:1
+        # on the petrol, but 1.66:1 on white and 1.24:1 on the teal — so it
+        # can go on the nav and nowhere else on this page. Noted because the
+        # obvious next use for it is a heading or a chip on white, and that
+        # would be unreadable.
         'accent': {'bg': '#73f2f2', 'fg': '#14293b', 'muted': '#2d4a63',
-                   'green': '#87fc9c'},
+                   'green': '#87fc9c', 'petrol': '#1b495e', 'mint': '#4adfc5'},
         'noindex': True,
         'leagues': [
             ('Isthmian League', '/assets/wellbeing/trident-isthmian.png'),
@@ -432,7 +444,6 @@ def _palette_css(ed):
      untouched, which is the half that matters on the way in. */
   .hub-chip--urgent,
   .hub-hmark--urgent { background: var(--navy); color: var(--white); }
-  .hub-topic--urgent { border-color: var(--navy); border-width: 2px; }
   .hub-topic--urgent:hover { border-color: var(--navy); background: var(--navy-50); }
 '''
 
@@ -491,6 +502,74 @@ def _type_css(ed):
         '  .hub-privacy strong { color: ' + a['fg'] + '; }\n'
         '  .hub-privacy p { color: ' + a['muted'] + '; }\n'
         '  .hub-flow__t { border-color: ' + a['fg'] + '; }\n'
+    )
+
+
+def _tweaks_css(ed):
+    """The 22/10 pass: nav in the map's petrol, and green as the alarm colour.
+
+    GREEN BECOMES URGENCY, NAVY BECOMES PRIVACY — they swap. Asked for, and
+    it is better than what it replaces. With the palette having no red, the
+    previous version carried urgency in WEIGHT alone: solid navy on a page of
+    navy type. Green is the only hue here that is not navy or teal, so making
+    it the one alarm colour gives urgency a HUE again, which is what it lost
+    when the red went. Privacy takes the quiet navy panel, which suits it.
+
+    GREEN AND TEAL STILL CANNOT TOUCH — 1.05:1, the same lightness in a
+    different hue. That is exactly where the Hide page tab sits: a fixed
+    strip on the teal masthead. A plain green tab there would be invisible,
+    so it carries a solid navy outline; the outline is 11.14:1 on teal and
+    draws the shape, and the green fills it.
+
+    The nav is the map's petrol at #1b495e, which is deep enough to take
+    white type at 9.72:1 and to hold the green urgent block at 7.60:1.
+    """
+    a = ed['accent']
+    if not a:
+        return ''
+    g, p, fg = a['green'], a['petrol'], a['fg']
+    return (
+        '\n  /* Nav in the map petrol; green is the alarm colour. See'
+        ' _tweaks_css(). */\n'
+        '  .hub-nav { background: ' + p + '; border-top-color: ' + p + '; }\n'
+        '  .hub-nav a { color: var(--white); }\n'
+        # Mint on petrol, 5.85:1 — the one place on the page it is legible.
+        '  .hub-nav a:hover {\n'
+        '    color: ' + a['mint'] + '; border-bottom-color: ' + a['mint'] + ';\n'
+        '  }\n'
+        '  .hub-bottom a:hover { color: ' + a['mint'] + '; }\n'
+        '  .hub-bottom { background: ' + p + '; border-top-color: ' + p + '; }\n'
+        '  .hub-bottom a { color: var(--white); }\n'
+
+        '  .hub-nav a.is-urgent,\n'
+        '  .hub-bottom a.is-urgent {\n'
+        '    background: ' + g + '; color: ' + fg + ';\n'
+        '  }\n'
+        '  .hub-nav a.is-urgent:hover {\n'
+        '    background: ' + g + '; color: ' + fg + ';\n'
+        '    border-bottom-color: ' + g + ';\n'
+        '  }\n'
+        '  .hub-bottom a.is-urgent .hub-i { color: ' + fg + '; }\n'
+
+        '  .hub-urgent { background: ' + g + '; color: ' + fg + '; }\n'
+        '  .hub-urgent:hover { background: ' + g + '; }\n'
+        '  .hub-urgent__go { background: ' + fg + '; color: ' + g + '; }\n'
+
+        # The one place green meets teal. The outline carries the shape.
+        '  .hub-exit {\n'
+        '    background: ' + g + '; color: ' + fg + ';\n'
+        '    border: 3px solid ' + fg + ';\n'
+        '  }\n'
+        '  .hub-exit:hover { background: ' + g + '; color: ' + fg + '; }\n'
+
+        # Privacy is quiet, not loud: the navy tint panel, as the National
+        # League edition has it.
+        '  .hub-privacy {\n'
+        '    background: var(--navy-50); border-color: var(--navy-200);\n'
+        '    border-left-color: ' + fg + ';\n'
+        '  }\n'
+        '  .hub-privacy strong { color: ' + fg + '; }\n'
+        '  .hub-privacy p { color: var(--text-muted); }\n'
     )
 
 
@@ -652,6 +731,7 @@ def accent_css(ed):
         + _font_css(ed)
         + _nav_css(ed)
         + _type_css(ed)
+        + _tweaks_css(ed)
         + _footer_css(ed)
     )
 
@@ -1822,7 +1902,11 @@ def _page(ed):
      chip — same specificity, later in source — so every chip's colour was
      quietly repainted navy-400 and the whole palette came out washed. */
   .hub-topic > .hub-i {{ margin-top: auto; align-self: flex-end; color: var(--navy-400); }}
-  .hub-topic--urgent {{ border-color: var(--primary-200); }}
+  /* The crisis card sits in the grid on the same border as the other seven.
+     It carried a tinted border until 22/10/2026; asked for its removal on
+     both editions, and the card is still marked out — by its red title on
+     the National League edition, and by being the only inverted glyph chip
+     on Trident's. The border was a third signal on top of two. */
   .hub-topic--urgent strong {{ color: var(--primary); }}
   .hub-topic--urgent:hover {{ border-color: var(--primary); background: var(--primary-50); }}
 
