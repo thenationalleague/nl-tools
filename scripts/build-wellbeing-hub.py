@@ -716,6 +716,21 @@ def accent_css(ed):
         '  @media (max-width: 560px) {\n'
         '    .hub-brand img { width: 140px; }\n'
         '  }\n'
+        # At 300px the 140px lockup and the 137px tab meet. No mainstream
+        # phone is that narrow — the Galaxy Fold's outer screen is 280px,
+        # which is why it is handled rather than ignored.
+        '  @media (max-width: 379px) {\n'
+        '    .hub-brand img { width: 118px; }\n'
+        '  }\n'
+        # TWO LINES, lockup above title. The National League masthead is
+        # already two lines — a wordless rose beside THE NATIONAL LEAGUE over
+        # WELLBEING HUB — and this is the same shape for a logo that carries
+        # its own name: the lockup takes the first line, the title the second.
+        # It also frees the right of the first line for the Hide page tab,
+        # which is what lets the masthead drop its reserved strip.
+        '  .hub-brand {\n'
+        '    flex-direction: column; align-items: flex-start; gap: 10px;\n'
+        '  }\n'
         '  .hub-leagues {\n'
         '    display: flex; flex-wrap: wrap; align-items: center; gap: 14px 22px;\n'
         '    margin: 18px 0 0; padding-top: 16px;\n'
@@ -1579,6 +1594,16 @@ def _page(ed):
      WELLBEING HUB large below, tagline under that — and all three in white,
      with size and weight doing the hierarchy rather than a washed-out tint. */
   .hub-brand {{ display: flex; align-items: center; gap: 16px; min-width: 0; }}
+  /* Under 380px the rose drops above the text instead of sitting beside it.
+     The National League lockup is a badge NEXT TO two lines of type, so its
+     title shares a row with the Hide page tab — and on a 320 or 360px phone
+     the two met. Stacking gives the tab the whole right of the first row,
+     which is what lets the masthead carry no reserved strip at the top.
+     Measured: clear at 390px and up without this, so the rule stops there
+     rather than restyling phones that do not need it. */
+  @media (max-width: 379px) {{
+    .hub-brand {{ flex-direction: column; align-items: flex-start; gap: 9px; }}
+  }}
   .hub-brand img {{ width: 58px; height: 58px; object-fit: contain; flex: none; }}
   .hub-brand__t {{ min-width: 0; }}
   .hub-brand b {{
@@ -1632,20 +1657,17 @@ def _page(ed):
     }}
     .hub-exit .hub-i {{ transform: none; }}
     .hub-exit:hover {{ padding-left: 13px; padding-bottom: 13px; }}
-    /* THE TAB GETS ITS OWN ROW, it does not share one with the brand.
-       This read `padding-right: 92px`, a reserve for a tab that is actually
-       137px wide — so it was 45px short from the day it was written, and the
-       masthead title sat under the tab. Reported as "label hiding the
-       header"; measured at 360-600px on both editions before changing
-       anything.
-       A bigger horizontal reserve cannot fix it. At 360px a 137px tab plus a
-       24px offset plus the Trident edition's 140px wordmark plus the words
-       WELLBEING HUB do not fit on one row, whatever the number is. So the
-       masthead reserves VERTICAL space instead: the tab occupies a strip at
-       the top right and the brand starts below it, full width.
-       One number, and it is the tab's HEIGHT — which does not change with the
-       label, the logo or the viewport, unlike its width. */
-    .hub-top__in {{ padding-top: 52px; }}
+    /* NO RESERVED BAND ABOVE THE BRAND. This used to add 52px of padding so
+       the horizontal tab had a strip to itself, which left an empty gap at
+       the top of the masthead — "both need to have no gap at top when top
+       scrolled... as is should just slot in".
+       The tab now sits BESIDE the brand's first line. That is only possible
+       because the brand is two lines on both editions: a narrow first line
+       (the rose, or the Trident lockup) leaves the right-hand side free for
+       the tab, and the wide line — WELLBEING HUB — sits below it, clear.
+       The earlier 92px horizontal reserve is gone too; it was 45px short of
+       the tab's real 137px and is what put the tab across the title in the
+       first place. Nothing is reserved now, because nothing needs to be. */
   }}
   .hub-exit:hover {{ background: var(--primary-600); padding-left: 15px; }}
   .hub-exit:focus-visible {{ outline: none; box-shadow: var(--focus-ring); }}
@@ -1669,7 +1691,20 @@ def _page(ed):
     border-bottom: 3px solid transparent;
   }}
   .hub-nav a:hover {{ color: var(--white); border-bottom-color: var(--navy-300); }}
-  .hub-nav a.is-urgent {{ color: var(--white); }}
+  /* A FILLED BLOCK, not just white type. It was white on a navy bar beside
+     navy-100 on the same bar — a shade apart, when it is the one item on the
+     nav somebody might need in a hurry. Red on navy-600 is 3.5:1 as a block
+     against its own bar and unmistakable as a shape, which is what matters
+     here; the label on it is white at 9:1. Trident's edition does the same
+     thing in green, that palette having no red. */
+  .hub-nav a.is-urgent {{
+    background: var(--primary); color: var(--white);
+    border-radius: 6px 6px 0 0;
+  }}
+  .hub-nav a.is-urgent:hover {{
+    background: var(--primary-600); color: var(--white);
+    border-bottom-color: var(--primary-600);
+  }}
 
   .hub-main {{
     max-width: 1100px; margin: 0 auto;
@@ -2100,8 +2135,8 @@ def _page(ed):
     white-space: nowrap;
   }}
   .hub-bottom a:hover {{ color: var(--white); }}
-  .hub-bottom a.is-urgent {{ color: var(--white); }}
-  .hub-bottom a.is-urgent .hub-i {{ color: var(--primary-200); }}
+  .hub-bottom a.is-urgent {{ background: var(--primary); color: var(--white); }}
+  .hub-bottom a.is-urgent .hub-i {{ color: var(--white); }}
 
   .hub-box--res .hub-res {{ max-width: none; border-color: var(--navy-200); }}
 
