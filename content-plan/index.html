@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Content Plan
-  Version: v2.8 (23/10/2026)
+  Version: v2.9 (23/10/2026)
   File: /content-plan/index.html
 
   Plans and records everything the media team publishes: website stories,
@@ -160,6 +160,10 @@
                         out of sight, so "Added" looked like nothing happened), and says
                         so if the filters hide it. Search box: titles, notes, authors and
                         categories across the whole plan, newest first; a date opens it.
+    v2.9 (23/10/2026) – Settings → Authors lists every set of initials used on items,
+                        not only saved authors (the import brought initials but no
+                        author records, so the list was empty). The view switch stays
+                        put: Agenda's Select and CSV sit on the left of the toolbar.
 -->
 <html lang="en">
 <head>
@@ -209,7 +213,7 @@
     window.NL_CHANGELOG = [
       {
         date: '23 October 2026',
-        version: 'v2.8',
+        version: 'v2.9',
         items: [
           'The content plan now lives here instead of the Google Sheet.',
           'Three views. Day: today\u2019s items as big cards on an hourly timeline. Week: seven days side by side. Agenda: everything as a list that keeps loading as you scroll.',
@@ -1144,17 +1148,19 @@
         modes.appendChild(b);
       });
       right.appendChild(modes);
+      /* The view switch, Settings and Add never move: the right-hand group is
+         the same in every view. Anything one view adds goes on the left. */
       if (S.mode === 'agenda') {
         if (S.canEdit) {
           var selb = el('button', 'btn btn--ghost btn--sm', S.selecting ? 'Done' : 'Select'); selb.type = 'button';
           selb.setAttribute('aria-pressed', S.selecting ? 'true' : 'false');
           selb.addEventListener('click', function () { S.selecting = !S.selecting; S.selected = {}; renderBar(); render(); });
-          right.appendChild(selb);
+          left.appendChild(selb);
         }
         var csv = el('button', 'btn btn--ghost btn--sm'); csv.type = 'button'; csv.appendChild(icon('download')); csv.appendChild(document.createTextNode(' CSV'));
         csv.title = 'Everything loaded that matches the filters';
         csv.addEventListener('click', exportCsv);
-        right.appendChild(csv);
+        left.appendChild(csv);
       }
     } else if (S.view === 'ideas') {
       var arch = el('div', 'chip-group');
@@ -2156,6 +2162,22 @@
     }
     authorList(true).forEach(function (a) { authList.appendChild(authRow(a.key, a)); });
     ap.appendChild(authList);
+    /* Initials on items (the import, or typed before Settings had them) that
+       have no author record yet: list them so they only need a name. */
+    loadAll(function (all) {
+      var have = {}, found = {};
+      authRows.forEach(function (r) { if (r.key) have[r.key] = true; });
+      all.forEach(function (it) {
+        [it.author].concat(asArray(it.coAuthors)).forEach(function (k) {
+          if (k && /^[A-Z]{2,4}$/.test(k) && !have[k]) found[k] = (found[k] || 0) + 1;
+        });
+      });
+      Object.keys(found).sort().forEach(function (k) {
+        var r = authRow(k, {});
+        r.querySelector('input[aria-label="Full name"]').placeholder = 'Full name (on ' + found[k] + ' item' + (found[k] === 1 ? '' : 's') + ')';
+        authList.appendChild(r);
+      });
+    });
     var addAuth = el('button', 'btn btn--ghost btn--sm', 'Add author'); addAuth.type = 'button';
     addAuth.addEventListener('click', function () { var r = authRow(null, {}); authList.appendChild(r); r.querySelector('input').focus(); });
     ap.appendChild(addAuth);
@@ -2627,19 +2649,25 @@
   }
 
   /* ── Search: every item, not just the dates loaded on screen ─────── */
+  /* Every item, not just the loaded dates. Fetched once, stale after a
+     minute so a long session still sees new items. */
+  function loadAll(done) {
+    if (S.allItems) { if (done) done(S.allItems); return; }
+    S.allWaiters = (S.allWaiters || []).concat(done ? [done] : []);
+    if (S.allLoading) return;
+    S.allLoading = true;
+    NL.ensureAuth().then(function () { return db.ref(ROOT + '/items').once('value'); }).then(function (snap) {
+      var out = [];
+      snap.forEach(function (ch) { var x = ch.val(); if (x && x.date) { x.id = ch.key; out.push(x); } });
+      S.allItems = out; S.allLoading = false;
+      setTimeout(function () { S.allItems = null; }, 60000);
+      var w = S.allWaiters; S.allWaiters = [];
+      w.forEach(function (f) { f(out); });
+    }).catch(function (e) { S.allLoading = false; S.allWaiters = []; fail(e); });
+  }
   function setSearch(v) {
     S.q = (v || '').trim();
-    if (S.q && !S.allItems && !S.allLoading) {
-      S.allLoading = true;
-      NL.ensureAuth().then(function () { return db.ref(ROOT + '/items').once('value'); }).then(function (snap) {
-        var out = [];
-        snap.forEach(function (ch) { var x = ch.val(); if (x && x.date) { x.id = ch.key; out.push(x); } });
-        S.allItems = out; S.allLoading = false;
-        /* Stale after a minute, so a long session still finds new items. */
-        setTimeout(function () { S.allItems = null; }, 60000);
-        render();
-      }).catch(function (e) { S.allLoading = false; fail(e); });
-    }
+    if (S.q) loadAll(function () { if (S.q) render(); });
     render();
   }
   function matchesSearch(it) {
