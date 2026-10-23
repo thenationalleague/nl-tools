@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Content Plan
-  Version: v2.7 (17/10/2026)
+  Version: v2.8 (23/10/2026)
   File: /content-plan/index.html
 
   Plans and records everything the media team publishes: website stories,
@@ -155,6 +155,11 @@
                         the kind and type labels, notes and full names leave the row
                         (all still in the item). Only the platforms an item is posted
                         on show, not all seven.
+    v2.8 (23/10/2026) – Adding an item now jumps to its date and highlights it (an item
+                        added for a date outside the day / week on screen used to save
+                        out of sight, so "Added" looked like nothing happened), and says
+                        so if the filters hide it. Search box: titles, notes, authors and
+                        categories across the whole plan, newest first; a date opens it.
 -->
 <html lang="en">
 <head>
@@ -203,13 +208,14 @@
 
     window.NL_CHANGELOG = [
       {
-        date: '17 October 2026',
-        version: 'v2.7',
+        date: '23 October 2026',
+        version: 'v2.8',
         items: [
           'The content plan now lives here instead of the Google Sheet.',
           'Three views. Day: today\u2019s items as big cards on an hourly timeline. Week: seven days side by side. Agenda: everything as a list that keeps loading as you scroll.',
           'Times are optional. Items without one sit under "Any time"; drag one onto an hour once you know.',
           'Drag an item to another day or hour. Click a date to open that day.',
+          'Search the whole plan from the box above the calendar.',
           'In Agenda, press Select to change the author, status, category or type of many items at once, or export to CSV.',
           'An Ideas tab for things without a date yet. Schedule one and it lands on the calendar.',
           'Pick a category (each has its own colour). Type an author\u2019s name to pick them, or keep what you typed for a guest writer; press + to add more authors.',
@@ -274,6 +280,9 @@
   .cp-cal > .cp-mblock:nth-child(2) .cp-month { border-top: none; }
   .cp-month + .cp-day { border-top: none; }
   .cp-edge { height: 1px; }
+  .cp-search { min-width: 14rem; flex: 1 1 14rem; max-width: 22rem; }
+  .cp-flash { box-shadow: 0 0 0 3px var(--amber); transition: box-shadow .3s; }
+  @media (prefers-reduced-motion: reduce) { .cp-flash { transition: none; } }
   .cp-end { margin: 0; padding: 12px; text-align: center; font-size: var(--text-sm); color: var(--text-muted); }
   /* Agenda scrolls inside its own panel, as Google Calendar does, so the
      tabs, toolbar and filters above stay where they are. */
@@ -841,7 +850,7 @@
      another four weeks there. Prepending keeps the day you were looking at
      still, so the page never jumps. */
   var LOAD_BEFORE = 14, LOAD_AFTER = 42, LOAD_STEP = 28;
-  function endless() { return S.view === 'calendar' && S.mode === 'agenda'; }
+  function endless() { return S.view === 'calendar' && S.mode === 'agenda' && !S.q; }
   function startAround(date) {
     var d = fromYmd(date);
     S.from = ymd(addDays(d, -LOAD_BEFORE)); S.to = ymd(addDays(d, LOAD_AFTER));
@@ -1215,6 +1224,14 @@
     var box = document.getElementById('cpFilters');
     box.innerHTML = '';
     var f = S.filters;
+    var q = el('input', 'cp-in cp-search'); q.type = 'search'; q.id = 'cpSearch';
+    q.placeholder = 'Search the whole plan'; q.setAttribute('aria-label', 'Search the whole plan'); q.value = S.q || '';
+    var qt = null;
+    q.addEventListener('input', function () {
+      clearTimeout(qt);
+      qt = setTimeout(function () { setSearch(q.value); }, 200);
+    });
+    box.appendChild(q);
     function add(control, key, label) {
       control.setAttribute('aria-label', label);
       control.addEventListener('change', function () { f[key] = control.value; S.selected = {}; savePrefs(); render(); });
@@ -1266,6 +1283,7 @@
     /* A plain container (it is what gets dragged). The inner button opens the
        item; the tick is a sibling button, never nested inside another control. */
     var c = el('div', 'cp-item');
+    c.setAttribute('data-id', it.id);
     paint(c, it.category);
     if (it.status === 'published') c.classList.add('is-published');
     if (it.status === 'dropped') c.classList.add('is-dropped');
@@ -1387,6 +1405,7 @@
      has every column, filled or empty, so everything lines up. */
   function itemRow(it, big) {
     var r = el('div', big ? 'cp-row cp-row--big' : 'cp-row');
+    r.setAttribute('data-id', it.id);
     if (big) paint(r, it.category);
     if (it.status === 'published') r.classList.add('is-published');
     if (it.status === 'dropped') r.classList.add('is-dropped');
@@ -1657,12 +1676,14 @@
       data.type = type.value || null;
       data.platforms = plats.value();
       save.disabled = true;
-      createItem(data).then(function () {
+      createItem(data).then(function (key) {
         var byKind = last.platformsByKind || {}; byKind[kind.value] = data.platforms;
         lsSet(prefsKey(), { platformsByKind: byKind, kind: kind.value, category: cat.value, author: auth.value().author || '' });
         NL.toast('Added');
         S.addingOn = date;          // keep the form open for the next one, fresh
         S.addForm = null;
+        if (!passes(data)) NL.toast('Saved, but your filters hide it. Clear filters to see it.');
+        S.flash = key;
         render();
       }).catch(function (err) { save.disabled = false; fail(err); });
     });
@@ -1824,6 +1845,27 @@
     return g;
   }
 
+  /* After an add or a save, bring the item into view: move to its date if
+     the view is elsewhere, then highlight it. If the filters hide it, say so,
+     because otherwise "Added" looks like nothing happened. */
+  function reveal(id, data) {
+    if (!passes(data)) { NL.toast('Saved, but your filters hide it. Clear filters to see it.'); return; }
+    S.flash = id;
+    var r = currentRange();
+    if (S.view !== 'calendar') return;
+    if (S.mode === 'agenda') { if (data.date < S.from || data.date > S.to) goTo(data.date); else { S.scrollTo = data.date; render(); } return; }
+    if (data.date < r.from || data.date > r.to) { S.cursor = fromYmd(data.date); S.addingOn = null; S.addForm = null; listen(); renderBar(); }
+    else queueRender();
+  }
+  function flashItem() {
+    if (!S.flash) return;
+    var n = document.querySelector('#cpMain [data-id="' + S.flash + '"]');
+    if (!n) return;
+    S.flash = null;
+    n.classList.add('cp-flash');
+    if (n.scrollIntoView) n.scrollIntoView({ block: 'nearest' });
+    setTimeout(function () { n.classList.remove('cp-flash'); }, 2000);
+  }
   function openEditor(it, date) {
     if (!S.canEdit) { if (it) openReadOnly(it); return; }
     var isNew = !it;
@@ -1927,7 +1969,10 @@
       var p = isNew
         ? createItem((function () { var b = blankItem(data.date); for (var k in data) b[k] = data[k]; return b; })())
         : writeItem(it.id, data);
-      p.then(function () { NL.toast(isNew ? 'Added' : 'Saved'); c.close(); }).catch(fail);
+      p.then(function (key) {
+        NL.toast(isNew ? 'Added for ' + dayLabel(data.date) : 'Saved'); c.close();
+        reveal(isNew ? key : it.id, data);
+      }).catch(fail);
     } });
     NL.modal({ title: isNew ? 'Add item' : 'Edit item', body: form, width: 'wide', buttons: buttons, footerSplit: !isNew });
   }
@@ -2581,6 +2626,65 @@
     ] });
   }
 
+  /* ── Search: every item, not just the dates loaded on screen ─────── */
+  function setSearch(v) {
+    S.q = (v || '').trim();
+    if (S.q && !S.allItems && !S.allLoading) {
+      S.allLoading = true;
+      NL.ensureAuth().then(function () { return db.ref(ROOT + '/items').once('value'); }).then(function (snap) {
+        var out = [];
+        snap.forEach(function (ch) { var x = ch.val(); if (x && x.date) { x.id = ch.key; out.push(x); } });
+        S.allItems = out; S.allLoading = false;
+        /* Stale after a minute, so a long session still finds new items. */
+        setTimeout(function () { S.allItems = null; }, 60000);
+        render();
+      }).catch(function (e) { S.allLoading = false; fail(e); });
+    }
+    render();
+  }
+  function matchesSearch(it) {
+    var words = S.q.toLowerCase().split(/\s+/).filter(Boolean);
+    var hay = [it.title, it.notes, it.authorOther, authorFull(it), authorText(it), categoryLabel(it.category), kindInfo(kindOf(it)).label]
+      .join(' ').toLowerCase();
+    return words.every(function (w) { return hay.indexOf(w) >= 0; });
+  }
+  function renderSearch() {
+    var main = document.getElementById('cpMain');
+    var box = el('div', 'cp-cal cp-agenda');
+    main.innerHTML = '';
+    if (!S.allItems) { box.appendChild(el('p', 'cp-end', 'Searching…')); main.appendChild(box); return; }
+    /* Live edits to loaded items win over the snapshot taken for the search. */
+    var seen = {};
+    var res = S.allItems.map(function (x) { seen[x.id] = true; return S.items[x.id] || x; })
+      .concat(Object.keys(S.items).filter(function (k) { return !seen[k]; }).map(function (k) { return S.items[k]; }))
+      .filter(function (x) { return passes(x) && matchesSearch(x); })
+      .sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : sortItems(a, b); });
+    document.getElementById('cpSummary').innerHTML = '';
+    var sum = el('span'); sum.appendChild(el('b', null, String(res.length))); sum.appendChild(document.createTextNode(res.length === 1 ? ' match' : ' matches'));
+    document.getElementById('cpSummary').appendChild(sum);
+    if (!res.length) { box.appendChild(el('p', 'cp-end', 'Nothing matches “' + S.q + '”.')); main.appendChild(box); return; }
+    var byDate = {}, order = [];
+    res.slice(0, 300).forEach(function (it) { if (!byDate[it.date]) { byDate[it.date] = []; order.push(it.date); } byDate[it.date].push(it); });
+    order.forEach(function (date) {
+      var dt = fromYmd(date);
+      var row = el('div', 'cp-day');
+      var gut = el('div', 'cp-ag-gutter');
+      var dl = el('button', 'cp-ag-date'); dl.type = 'button';
+      dl.setAttribute('aria-label', 'Open ' + longDay(date));
+      dl.appendChild(el('span', 'cp-ag-num', String(dt.getDate())));
+      dl.appendChild(el('span', 'cp-ag-dow', MON[dt.getMonth()].slice(0, 3) + ' ' + String(dt.getFullYear()).slice(2)));
+      dl.addEventListener('click', function () { S.q = ''; var qi = document.getElementById('cpSearch'); if (qi) qi.value = ''; setMode('day', date); render(); });
+      gut.appendChild(dl);
+      row.appendChild(gut);
+      var body = el('div', 'cp-ag-body');
+      byDate[date].forEach(function (it) { body.appendChild(itemRow(it, false)); });
+      row.appendChild(body);
+      box.appendChild(row);
+    });
+    if (res.length > 300) box.appendChild(el('p', 'cp-end', 'Showing the 300 most recent. Add a word to narrow it.'));
+    main.appendChild(box);
+  }
+
   /* ── Render ────────────────────────────────────────────────────────── */
   function render() {
     sizeScroller();
@@ -2588,6 +2692,7 @@
     document.getElementById('cpFilters').hidden = ideas;
     document.getElementById('cpSummary').hidden = ideas;
     if (ideas) { document.getElementById('cpBulk').innerHTML = ''; renderIdeas(); return; }
+    if (S.q) { document.getElementById('cpBulk').innerHTML = ''; renderSearch(); return; }
     var all = Object.keys(S.items).map(function (k) { return S.items[k]; }).filter(passes);
     renderSummary(all);
     var by = {};
@@ -2599,6 +2704,7 @@
     if (S.mode === 'day') renderDay(by);
     else if (S.mode === 'week') renderWeek(by);
     else renderAgenda(by);
+    flashItem();
   }
   function setView(v) {
     S.view = v;
