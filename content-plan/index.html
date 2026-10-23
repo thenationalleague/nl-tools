@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Content Plan
-  Version: v3.0 (23/10/2026)
+  Version: v3.1 (23/10/2026)
   File: /content-plan/index.html
 
   Plans and records everything the media team publishes: website stories,
@@ -175,6 +175,12 @@
                         type) recolours every view with a key and counts; it always
                         starts on category. Authors get a palette colour, changeable in
                         Settings → Authors.
+    v3.1 (23/10/2026) – Month: a + on every day (on hover; always on touch). Settings →
+                        Authors: Remove, and how many items each author is on. A name
+                        typed as free text that matches an author counts as that author
+                        (initials, colour, counts, filters). List with a filter on shows
+                        only days with a matching item, not every day with matches or
+                        notes.
 -->
 <html lang="en">
 <head>
@@ -224,7 +230,7 @@
     window.NL_CHANGELOG = [
       {
         date: '23 October 2026',
-        version: 'v3.0',
+        version: 'v3.1',
         items: [
           'The content plan now lives here instead of the Google Sheet.',
           'Three views: Week (seven days side by side), Month (a calendar) and List (everything, loading as you scroll). Click a date to open that day.',
@@ -386,6 +392,11 @@
   .cp-mo-pills .cp-mpill { font-size: 11px; padding: 0 4px; }
   .cp-mo-list { display: grid; gap: 2px; align-content: start; min-width: 0; }
   .cp-mo-more { justify-self: start; background: none; border: 0; padding: 0 2px; font-family: var(--font); font-size: var(--text-xs); font-variation-settings: 'wght' 700; color: var(--navy); cursor: pointer; }
+  .cp-mo-top { display: flex; justify-content: space-between; align-items: center; gap: 4px; min-width: 0; }
+  /* The + shows on hover or keyboard focus; on touch screens it always shows. */
+  .cp-mo-add { opacity: 0; }
+  .cp-mo-cell:hover .cp-mo-add, .cp-mo-add:focus-visible { opacity: 1; }
+  @media (hover: none) { .cp-mo-add { opacity: 1; } }
   .cp-mo-dots, .cp-mo-day { display: none; }
   .cp-mo-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--navy-300); }
   .cp-mo-dots i.is-none { background: var(--white); box-shadow: inset 0 0 0 1px var(--navy-300); }
@@ -495,7 +506,8 @@
   .cp-readonly dt { color: var(--text-muted); }
   .cp-readonly dd { margin: 0; overflow-wrap: anywhere; }
   .cp-settings-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--navy-100); }
-  .cp-settings-row--authors { grid-template-columns: auto 70px 1fr auto auto; }
+  .cp-settings-row--authors { grid-template-columns: auto 70px 1fr auto auto 5.5rem auto; }
+  .cp-auth-n { font-size: var(--text-xs); color: var(--text-muted); white-space: nowrap; }
   .cp-settings-row--cat { grid-template-columns: auto 1fr 70px auto; }
   .cp-settings-row .cp-in, .cp-settings-row select { width: 100%; }
 
@@ -540,7 +552,8 @@
     /* Month on a phone: a compact grid with a dot per item; the chosen day below. */
     .cp-mo-cell { min-height: 52px; padding: 4px 2px; grid-template-rows: auto auto; justify-items: center; cursor: pointer; }
     .cp-mo-num { justify-self: center; }
-    .cp-mo-list, .cp-mo-pills, .cp-mo-more { display: none; }
+    .cp-mo-list, .cp-mo-pills, .cp-mo-more, .cp-mo-add { display: none; }
+    .cp-mo-top { justify-content: center; }
     .cp-mo-cell.is-sel { background: var(--navy-100); }
     .cp-mo-dots { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; max-width: 40px; }
     .cp-mo-day { display: grid; gap: 4px; padding: 10px 12px; border-top: 1px solid var(--navy-100); }
@@ -832,6 +845,20 @@
     node.style.setProperty('--g', c.hex);
     return c;
   }
+  /* An item saved with an author's name typed as free text (before Settings
+     had the name, say) counts as that author everywhere. In memory only; the
+     next save of the item stores the initials. */
+  function authorKeyFor(text) {
+    var t = String(text || '').trim().toLowerCase(), a = S.config.authors || {};
+    if (!t) return null;
+    for (var k in a) if (k.toLowerCase() === t || (a[k] && a[k].name && a[k].name.trim().toLowerCase() === t)) return k;
+    return null;
+  }
+  function normAuthors(it) {
+    if (!it.author && it.authorOther) { var k = authorKeyFor(it.authorOther); if (k) { it.author = k; it.authorOther = null; } }
+    if (it.coAuthors) it.coAuthors = asArray(it.coAuthors).map(function (c) { return authorKeyFor(c) || c; });
+    return it;
+  }
   function authorList(includeRetired) {
     var a = S.config.authors || {};
     return Object.keys(a).filter(function (k) { return includeRetired || a[k].active !== false; })
@@ -1031,7 +1058,7 @@
     var items = db.ref(ROOT + '/items').orderByChild('date').startAt(from).endAt(to);
     items.on('value', function (snap) {
       var out = {};
-      snap.forEach(function (ch) { var v = ch.val(); if (v && v.date) { v.id = ch.key; out[ch.key] = v; } });
+      snap.forEach(function (ch) { var v = ch.val(); if (v && v.date) { v.id = ch.key; out[ch.key] = normAuthors(v); } });
       c.items = out; landed('items');
     }, fail);
     var days = db.ref(ROOT + '/days').orderByKey().startAt(from).endAt(to);
@@ -1649,7 +1676,14 @@
         var num = el('button', 'cp-mo-num', String(fromYmd(date).getDate())); num.type = 'button';
         num.setAttribute('aria-label', 'Open ' + longDay(date));
         num.addEventListener('click', function (e) { e.stopPropagation(); if (PHONE.matches) { S.monthSel = date; render(); } else openDayPanel(date); });
-        cell.appendChild(num);
+        var top = el('div', 'cp-mo-top'); top.appendChild(num);
+        if (S.canEdit) {
+          var add = el('button', 'cp-dh__btn cp-mo-add'); add.type = 'button'; add.appendChild(icon('add'));
+          add.setAttribute('aria-label', 'Add an item on ' + dayLabel(date)); add.title = 'Add item';
+          add.addEventListener('click', function (e) { e.stopPropagation(); openEditor(null, date); });
+          top.appendChild(add);
+        }
+        cell.appendChild(top);
         var dots = el('span', 'cp-mo-dots');
         items.slice(0, 6).forEach(function (it) {
           var c = colourOf(it), dot = el('i');
@@ -1695,6 +1729,7 @@
     var r = currentRange();
     var cal = el('div', 'cp-cal cp-agenda' + (S.selecting ? ' is-selecting' : ''));
     var today = todayYmd();
+    var filtering = Object.keys(S.filters).some(function (k) { return !!S.filters[k]; });
     var anchor = !(S.scrollTo && !S.loading) ? topVisible() : null;
     var shownMonth = '', block = null;
     if (S.emptyRun.top >= 6) cal.appendChild(el('p', 'cp-end', 'Nothing earlier in the plan.'));
@@ -1702,8 +1737,9 @@
     for (var d = fromYmd(r.from); ymd(d) <= r.to; d = addDays(d, 1)) {
       (function (date, dow, dt) {
         var items = byDate[date] || [];
-        /* Only days with items or notes, plus today so you land somewhere. */
-        if (!items.length && !(S.days[date] && S.days[date].notes) && date !== today && S.addingOn !== date) return;
+        /* Days with items or notes, plus today so you land somewhere. With a
+           filter on, only days with a matching item: the rest is noise. */
+        if (!items.length && S.addingOn !== date && (filtering || (!(S.days[date] && S.days[date].notes) && date !== today))) return;
         var mk = date.slice(0, 7);
         if (mk !== shownMonth) {
           /* Each month is its own block, so its heading sticks only while
@@ -2307,8 +2343,13 @@
       var me = el('label', 'cp-check'); var mc = el('input'); mc.type = 'checkbox'; mc.checked = !!a.uid && a.uid === S.session.uid;
       mc.addEventListener('change', function () { if (mc.checked) authRows.forEach(function (x) { if (x.mc !== mc) x.mc.checked = false; }); });
       me.appendChild(mc); me.appendChild(document.createTextNode('This is me'));
-      [col, ini, nm, act, me].forEach(function (x) { r.appendChild(x); });
-      authRows.push({ key: key, ini: ini, nm: nm, ac: ac, mc: mc, uid: a.uid || null, col: col, colour: a.colour || null, auto: col.value });
+      var n = el('span', 'cp-auth-n');
+      var x = el('button', 'btn btn--ghost btn--sm', 'Remove'); x.type = 'button';
+      var row = { key: key, ini: ini, nm: nm, ac: ac, mc: mc, uid: a.uid || null, col: col, colour: a.colour || null, auto: col.value, n: n, removed: false };
+      /* Items keep their initials; only the author record goes. */
+      x.addEventListener('click', function () { row.removed = true; r.remove(); });
+      [col, ini, nm, act, me, n, x].forEach(function (y) { r.appendChild(y); });
+      authRows.push(row);
       return r;
     }
     authorList(true).forEach(function (a) { authList.appendChild(authRow(a.key, a)); });
@@ -2318,6 +2359,9 @@
     loadAll(function (all) {
       var have = {}, found = {};
       authRows.forEach(function (r) { if (r.key) have[r.key] = true; });
+      var used = {};
+      all.forEach(function (it) { [it.author].concat(asArray(it.coAuthors)).forEach(function (k) { if (k) used[k] = (used[k] || 0) + 1; }); });
+      authRows.forEach(function (r) { if (r.key) r.n.textContent = (used[r.key] || 0) + ' item' + (used[r.key] === 1 ? '' : 's'); });
       all.forEach(function (it) {
         [it.author].concat(asArray(it.coAuthors)).forEach(function (k) {
           if (k && /^[A-Z]{2,4}$/.test(k) && !have[k]) found[k] = (found[k] || 0) + 1;
@@ -2325,7 +2369,7 @@
       });
       Object.keys(found).sort().forEach(function (k) {
         var r = authRow(k, {});
-        r.querySelector('input[aria-label="Full name"]').placeholder = 'Full name (on ' + found[k] + ' item' + (found[k] === 1 ? '' : 's') + ')';
+        r.querySelector('.cp-auth-n').textContent = found[k] + ' item' + (found[k] === 1 ? '' : 's');
         authList.appendChild(r);
       });
     });
@@ -2355,6 +2399,7 @@
         cats[key] = rec;
       });
       authRows.forEach(function (r) {
+        if (r.removed) return;
         var ini = r.ini.value.trim().toUpperCase();
         if (!ini) return;
         if (!/^[A-Z]{2,4}$/.test(ini)) { problem = 'Initials must be 2–4 letters: ' + ini; return; }
@@ -2811,7 +2856,7 @@
     S.allLoading = true;
     NL.ensureAuth().then(function () { return db.ref(ROOT + '/items').once('value'); }).then(function (snap) {
       var out = [];
-      snap.forEach(function (ch) { var x = ch.val(); if (x && x.date) { x.id = ch.key; out.push(x); } });
+      snap.forEach(function (ch) { var x = ch.val(); if (x && x.date) { x.id = ch.key; out.push(normAuthors(x)); } });
       S.allItems = out; S.allLoading = false;
       setTimeout(function () { S.allItems = null; }, 60000);
       var w = S.allWaiters; S.allWaiters = [];
