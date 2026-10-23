@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Round Up Graphic (Graphics sub-tool)
+  Version: v1.0 (23/10/2026)
+  File: /graphics/round-up/index.html
+
+  The Round Up header card, powered by Dyno-Rod: 1200×630, navy panel on the
+  left with the title, sponsor lockup and Enterprise National League badge,
+  photo on the right. The only input is the photo — drop or choose it, drag
+  it to position, zoom to crop, download the PNG. Drawn on a canvas, so the
+  export is the preview pixel for pixel.
+
+  Storage: none. The photo never leaves the browser.
+  Assets:
+    /assets/crests/National League rose white.png   (watermark)
+    /assets/partners/Dyno-Rod lockup white.png      (sponsor lockup)
+    /assets/divisions/National.png                  (Enterprise NL badge)
+    /graphics/_shared/fonts/Carbona-*.otf           (local, so the canvas has them)
+  Access (auth-guard):
+    toolKey 'staff-graphics' — same gate as the other graphics sub-tools.
+
+  Changelog:
+    v1.0 (23/10/2026) — first build.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Round Up Graphic — NL Tools</title>
+  <meta name="robots" content="noindex,nofollow">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+
+  <!-- Brand stylesheet (lint canonical: ?v=68) -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=68">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'Round Up Graphic',
+      toolKey: 'staff-graphics'
+    };
+    var NL_TOOL_KEY = 'staff-graphics';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '23/10/2026',
+        version: 'v1.0',
+        items: [
+          'The Round Up card, powered by Dyno-Rod, at 1200 × 630. Add a photo, drag it into place, zoom to crop, download the PNG.'
+        ]
+      }
+    ];
+
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts (lint canonical: ?v=49 / ?v=1 / ?v=10 / ?v=17) -->
+  <script src="/system/nl-utils.js?v=49"></script>
+  <!-- GA4, one property for all of nl.tools. Cookieless, so no consent
+       banner on any page; page views by path, no identity. Tool events go
+       through NL.track(). See system/nl-analytics.js. -->
+  <script src="/system/nl-analytics.js?v=1"></script>
+  <script src="/system/nl-topbar.js?v=10"></script>
+  <script src="/system/auth-guard.js?v=17"></script>
+
+<style>
+  /* The canvas needs the LOCAL Carbona cuts, not the portal's variable font:
+     a canvas drawn before a font resolves falls back to sans-serif without
+     saying so. Registered under names nothing else uses. */
+  @font-face {
+    font-family: 'RUCarbonaExtraBold';
+    src: url('/graphics/_shared/fonts/Carbona-ExtraBold.otf') format('opentype');
+  }
+  @font-face {
+    font-family: 'RUCarbonaBold';
+    src: url('/graphics/_shared/fonts/Carbona-Bold.otf') format('opentype');
+  }
+
+  .ru-stage { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; align-items: start; }
+  @media (max-width: 860px) { .ru-stage { grid-template-columns: 1fr; } }
+
+  .ru-canvasbox {
+    background: var(--navy-100);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    display: grid; place-items: center;
+    position: relative;
+  }
+  .ru-canvasbox.is-over { outline: 3px dashed var(--navy); outline-offset: -8px; }
+  #ruCanvas {
+    max-width: 100%; height: auto; display: block;
+    box-shadow: var(--shadow);
+    touch-action: none;
+  }
+  #ruCanvas.has-photo { cursor: grab; }
+  #ruCanvas.is-dragging { cursor: grabbing; }
+
+  .ru-controls {
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 18px;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  .ru-controls label { display: block; font-size: var(--text-sm); font-weight: 700; margin-bottom: 6px; }
+  .ru-controls input[type="file"] {
+    width: 100%; padding: 8px 10px;
+    border: 1px dashed var(--border); border-radius: var(--radius);
+    font-family: var(--font); font-size: var(--text-sm);
+  }
+  .ru-controls input[type="range"] { width: 100%; accent-color: var(--primary); }
+  .ru-action { justify-content: center; }
+  .ru-hint { font-size: var(--text-xs); color: var(--text-muted); margin: 6px 0 0; }
+</style>
+</head>
+<body>
+
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="page">
+    <div class="ru-stage">
+      <div class="ru-canvasbox" id="ruDrop">
+        <canvas id="ruCanvas" width="1200" height="630"></canvas>
+      </div>
+
+      <div class="ru-controls">
+        <div>
+          <label for="ruFile">Photo</label>
+          <input id="ruFile" type="file" accept="image/*">
+          <p class="ru-hint">Or drop it on the preview. Drag the photo to position it.</p>
+        </div>
+        <div>
+          <label for="ruZoom">Zoom</label>
+          <input id="ruZoom" type="range" min="1" max="3" step="0.01" value="1" disabled>
+        </div>
+        <button class="btn btn--ghost btn--sm ru-action" id="ruReset" type="button" disabled>Reset position</button>
+        <button class="btn btn--primary ru-action" id="ruDownload" type="button" disabled>Download PNG</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var W = 1200, H = 630;
+  var PANEL = 600;          /* left navy panel; the photo takes the rest */
+  var BAND = 72;            /* red band across the top of the panel */
+
+  var ASSETS = {
+    rose:  '/assets/crests/National%20League%20rose%20white.png',
+    dyno:  '/assets/partners/Dyno-Rod%20lockup%20white.png',
+    badge: '/assets/divisions/National.png'
+  };
+
+  var state = { photo: null, zoom: 1, dx: 0, dy: 0 };
+  var art = {};             /* loaded brand images, by ASSETS key */
+  var canvas, ctx;
+
+  function el(id) { return document.getElementById(id); }
+
+  /* Canvas can't read CSS variables, so take the brand tokens' resolved
+     values once rather than writing the hex out again here. */
+  function token(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  function loadImage(src) {
+    return new Promise(function (res) {
+      var i = new Image();
+      i.onload = function () { res(i); };
+      i.onerror = function () { res(null); };
+      i.src = src;
+    });
+  }
+
+  /* Cover-fit the photo into the right-hand panel, then apply zoom and the
+     drag offset. The offset is clamped so the panel is never left bare. */
+  function photoRect() {
+    var p = state.photo, pw = W - PANEL;
+    var s = Math.max(pw / p.naturalWidth, H / p.naturalHeight) * state.zoom;
+    var dw = p.naturalWidth * s, dh = p.naturalHeight * s;
+    var mx = (dw - pw) / 2, my = (dh - H) / 2;
+    state.dx = Math.max(-mx, Math.min(mx, state.dx));
+    state.dy = Math.max(-my, Math.min(my, state.dy));
+    return { x: PANEL - mx + state.dx, y: -my + state.dy, w: dw, h: dh };
+  }
+
+  function draw() {
+    var navy = token('--navy'), red = token('--primary'), white = token('--white');
+
+    /* Photo panel */
+    ctx.fillStyle = token('--navy-100');
+    ctx.fillRect(PANEL, 0, W - PANEL, H);
+    if (state.photo) {
+      var r = photoRect();
+      ctx.save();
+      ctx.beginPath(); ctx.rect(PANEL, 0, W - PANEL, H); ctx.clip();
+      ctx.drawImage(state.photo, r.x, r.y, r.w, r.h);
+      ctx.restore();
+    } else {
+      ctx.fillStyle = token('--text-muted');
+      ctx.font = '30px RUCarbonaBold, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('Add a photo', PANEL + (W - PANEL) / 2, H / 2);
+    }
+
+    /* Navy panel with the rose watermark, clipped below the red band */
+    ctx.fillStyle = navy;
+    ctx.fillRect(0, BAND, PANEL, H - BAND);
+    if (art.rose) {
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, BAND, PANEL, H - BAND); ctx.clip();
+      ctx.globalAlpha = 0.06;
+      var rh = 660, rw = rh * art.rose.naturalWidth / art.rose.naturalHeight;
+      ctx.drawImage(art.rose, PANEL / 2 - rw / 2 - 20, 360 - rh / 2, rw, rh);
+      ctx.restore();
+    }
+    ctx.fillStyle = red;
+    ctx.fillRect(0, 0, PANEL, BAND);
+
+    /* Type */
+    ctx.fillStyle = white;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.font = '68px RUCarbonaExtraBold, sans-serif';
+    ctx.fillText('The Round Up', PANEL / 2, 205);
+    ctx.font = '32px RUCarbonaBold, sans-serif';
+    ctx.fillText('Powered by', PANEL / 2, 284);
+
+    /* Sponsor lockup at its native size, then the league badge */
+    if (art.dyno) {
+      ctx.drawImage(art.dyno, Math.round(PANEL / 2 - art.dyno.naturalWidth / 2), 300);
+    }
+    if (art.badge) {
+      var bw = 110, bh = bw * art.badge.naturalHeight / art.badge.naturalWidth;
+      ctx.drawImage(art.badge, PANEL / 2 - bw / 2, 505, bw, bh);
+    }
+  }
+
+  function setPhoto(file) {
+    if (!file || !/^image\//.test(file.type)) {
+      NL.toast('That file isn’t an image.', 'error');
+      return;
+    }
+    var url = URL.createObjectURL(file);
+    loadImage(url).then(function (img) {
+      URL.revokeObjectURL(url);
+      if (!img) { NL.toast('That image couldn’t be opened.', 'error'); return; }
+      state.photo = img; state.zoom = 1; state.dx = 0; state.dy = 0;
+      el('ruZoom').value = 1;
+      ['ruZoom', 'ruReset', 'ruDownload'].forEach(function (id) { el(id).disabled = false; });
+      canvas.classList.add('has-photo');
+      draw();
+    });
+  }
+
+  function wireDrag() {
+    var start = null;
+    canvas.addEventListener('pointerdown', function (e) {
+      if (!state.photo) return;
+      start = { x: e.clientX, y: e.clientY, dx: state.dx, dy: state.dy };
+      canvas.setPointerCapture(e.pointerId);
+      canvas.classList.add('is-dragging');
+    });
+    canvas.addEventListener('pointermove', function (e) {
+      if (!start) return;
+      /* Screen pixels to canvas pixels: the preview is scaled down to fit. */
+      var k = W / canvas.getBoundingClientRect().width;
+      state.dx = start.dx + (e.clientX - start.x) * k;
+      state.dy = start.dy + (e.clientY - start.y) * k;
+      draw();
+    });
+    function end() { start = null; canvas.classList.remove('is-dragging'); }
+    canvas.addEventListener('pointerup', end);
+    canvas.addEventListener('pointercancel', end);
+  }
+
+  function wireDrop() {
+    var box = el('ruDrop');
+    ['dragenter', 'dragover'].forEach(function (t) {
+      box.addEventListener(t, function (e) { e.preventDefault(); box.classList.add('is-over'); });
+    });
+    ['dragleave', 'drop'].forEach(function (t) {
+      box.addEventListener(t, function (e) { e.preventDefault(); box.classList.remove('is-over'); });
+    });
+    box.addEventListener('drop', function (e) {
+      var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f) setPhoto(f);
+    });
+  }
+
+  function fileDate() {
+    var d = new Date();
+    function p(n) { return (n < 10 ? '0' : '') + n; }
+    return p(d.getDate()) + '-' + p(d.getMonth() + 1) + '-' + d.getFullYear();
+  }
+
+  function download() {
+    try {
+      canvas.toBlob(function (blob) {
+        if (!blob) { NL.toast('The PNG couldn’t be made. Try again.', 'error'); return; }
+        NL.download('Round Up - ' + fileDate() + '.png', blob, 'image/png');
+      }, 'image/png');
+    } catch (err) {
+      NL.toast('The PNG couldn’t be made: ' + err.message, 'error');
+    }
+  }
+
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function () {
+    canvas = el('ruCanvas');
+    ctx = canvas.getContext('2d');
+
+    el('ruFile').addEventListener('change', function () { setPhoto(this.files[0]); this.value = ''; });
+    el('ruZoom').addEventListener('input', function () { state.zoom = +this.value; draw(); });
+    el('ruReset').addEventListener('click', function () {
+      state.zoom = 1; state.dx = 0; state.dy = 0; el('ruZoom').value = 1; draw();
+    });
+    el('ruDownload').addEventListener('click', download);
+    wireDrag();
+    wireDrop();
+
+    /* No glyph or logo is drawn until the fonts and art have arrived, so the
+       first frame is already the finished card. */
+    var fonts = document.fonts ? Promise.all([
+      document.fonts.load('68px "RUCarbonaExtraBold"'),
+      document.fonts.load('32px "RUCarbonaBold"')
+    ]).catch(function () {}) : Promise.resolve();
+    var images = Object.keys(ASSETS).map(function (k) {
+      return loadImage(ASSETS[k]).then(function (img) { art[k] = img; });
+    });
+    Promise.all([fonts].concat(images)).then(draw);
+  };
+
+  if (window._toolDeferredSession) {
+    window.TOOL.boot(window._toolDeferredSession);
+    delete window._toolDeferredSession;
+  }
+})();
+</script>
+
+</body>
+</html>
