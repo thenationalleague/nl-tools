@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Round Up Graphic (Graphics sub-tool)
-  Version: v1.2 (23/10/2026)
+  Version: v1.3 (24/10/2026)
   File: /graphics/round-up/index.html
 
   The Round Up card, powered by Dyno-Rod, in four sizes: the 1200×630 link
@@ -9,8 +9,8 @@
   navy panel below). The panel carries the title, the sponsor lockup and
   strapline, and the Enterprise National League badge. The only input is the
   photo: drop or choose it, then drag, pinch or slide to crop. Each size keeps
-  its own crop. Drawn on a canvas, so the export is the preview pixel for
-  pixel.
+  its own crop. Drawn on a canvas at twice the size's pixel dimensions, so
+  the preview is sharp on a retina screen and the export holds up on a phone.
 
   Storage: none. The photo never leaves the browser.
   Assets:
@@ -22,6 +22,10 @@
     toolKey 'staff-graphics' — same gate as the other graphics sub-tools.
 
   Changelog:
+    v1.3 (24/10/2026) — Drawn and exported at 2x, with high-quality image
+      scaling; the old 1x canvas was being stretched by retina screens and
+      the badge was shrunk 22-fold in one rough step. Warns when the photo
+      has fewer pixels than its crop needs.
     v1.2 (23/10/2026) — 9:16 centres its content in the panel again, with no
       gap held back at the bottom, and the photo takes more of the height.
     v1.1 (23/10/2026) — 1:1, 4:5 and 9:16 alongside the link card, each with
@@ -73,6 +77,14 @@
     var NL_TOOL_KEY = 'staff-graphics';
 
     window.NL_CHANGELOG = [
+      {
+        date: '24/10/2026',
+        version: 'v1.3',
+        items: [
+          'Sharper everywhere: the preview and every download are now twice the resolution, and the logos are scaled down properly.',
+          'If the photo is too small for the crop, a note under Zoom says so. A small photo will look soft however it is exported.'
+        ]
+      },
       {
         date: '23/10/2026',
         version: 'v1.2',
@@ -214,6 +226,7 @@
         <div>
           <label for="ruZoom">Zoom</label>
           <input id="ruZoom" type="range" min="1" max="3" step="0.01" value="1" disabled>
+          <p class="ru-hint" id="ruSoft" hidden>This photo is smaller than the crop, so it will look soft. Zoom out or use a bigger photo.</p>
         </div>
         <button class="btn btn--ghost btn--sm ru-action" id="ruReset" type="button" disabled>Reset position</button>
         <button class="btn btn--primary ru-action" id="ruDownload" type="button" disabled>Download this size</button>
@@ -239,6 +252,11 @@
   };
   var ORDER = ['link', '1x1', '4x5', '9x16'];
   var ZOOM_MAX = 3;
+
+  /* Everything is laid out in the size's own units above and drawn at twice
+     that. At 1x the preview was stretched by every retina screen and the
+     exports by every phone, which is what made the card look soft. */
+  var SCALE = 2;
 
   /* The panel's content, as one stack measured at s = 1 from its top edge.
      Taken off the original artwork, so the link card matches it. */
@@ -282,6 +300,14 @@
     });
   }
 
+  /* True when the crop stretches the photo past its own pixels at 1x. Up
+     to 2x it is only being drawn finer than it was taken, which is fine. */
+  function isSoft(f) {
+    if (!state.photo) return false;
+    var r = photoRect(f, regions(f).photo);
+    return state.photo.naturalWidth < r.w;
+  }
+
   function resetCrops() {
     ORDER.forEach(function (f) { state.crops[f] = { zoom: 1, dx: 0, dy: 0 }; });
   }
@@ -312,6 +338,11 @@
   function render(g, f) {
     var F = FORMATS[f], R = regions(f), s = F.s, P = R.panel;
     var white = token('--white');
+    g.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+    /* The badge file is 2,400px drawn at 110: the default ("low") scaling
+       does that in one rough step. */
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = 'high';
 
     /* Photo */
     g.fillStyle = token('--navy-100');
@@ -385,9 +416,10 @@
 
   function draw() {
     var F = FORMATS[state.fmt];
-    if (canvas.width !== F.w) canvas.width = F.w;
-    if (canvas.height !== F.h) canvas.height = F.h;
+    if (canvas.width !== F.w * SCALE) canvas.width = F.w * SCALE;
+    if (canvas.height !== F.h * SCALE) canvas.height = F.h * SCALE;
     render(ctx, state.fmt);
+    el('ruSoft').hidden = !isSoft(state.fmt);
     el('ruZoom').value = state.crops[state.fmt].zoom;
     [].forEach.call(el('ruFormats').children, function (b) {
       b.setAttribute('aria-pressed', String(b.dataset.fmt === state.fmt));
@@ -421,7 +453,8 @@
   function wireGestures() {
     var pts = {}, drag = null, pinch = null;
 
-    function scale() { return canvas.width / canvas.getBoundingClientRect().width; }
+    /* Screen pixels to the size's own units, which the crop offsets are in. */
+    function scale() { return FORMATS[state.fmt].w / canvas.getBoundingClientRect().width; }
     function two() {
       var ids = Object.keys(pts);
       return ids.length === 2 ? [pts[ids[0]], pts[ids[1]]] : null;
@@ -489,7 +522,7 @@
       b.type = 'button';
       b.className = 'ru-fmt';
       b.dataset.fmt = f;
-      b.innerHTML = '<b>' + FORMATS[f].label + '</b><span>' + FORMATS[f].w + ' × ' + FORMATS[f].h + '</span>';
+      b.innerHTML = '<b>' + FORMATS[f].label + '</b><span>' + FORMATS[f].w * SCALE + ' × ' + FORMATS[f].h * SCALE + '</span>';
       b.addEventListener('click', function () { state.fmt = f; draw(); });
       el('ruFormats').appendChild(b);
     });
@@ -507,7 +540,7 @@
   function save(f) {
     return new Promise(function (resolve) {
       var c = document.createElement('canvas');
-      c.width = FORMATS[f].w; c.height = FORMATS[f].h;
+      c.width = FORMATS[f].w * SCALE; c.height = FORMATS[f].h * SCALE;
       render(c.getContext('2d'), f);
       try {
         c.toBlob(function (blob) {
