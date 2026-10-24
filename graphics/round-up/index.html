@@ -1,16 +1,16 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Round Up Graphic (Graphics sub-tool)
-  Version: v1.2 (23/10/2026)
+  Version: v1.5 (24/10/2026)
   File: /graphics/round-up/index.html
 
-  The Round Up card, powered by Dyno-Rod, in four sizes: the 1200×630 link
-  card (navy panel left, photo right) and 1:1, 4:5 and 9:16 (photo on top,
+  The Round Up card, powered by Dyno-Rod, in four sizes: 16:9 at 1920×1080
+  (navy panel left, photo right) and 1:1, 4:5 and 9:16 (photo on top,
   navy panel below). The panel carries the title, the sponsor lockup and
   strapline, and the Enterprise National League badge. The only input is the
   photo: drop or choose it, then drag, pinch or slide to crop. Each size keeps
-  its own crop. Drawn on a canvas, so the export is the preview pixel for
-  pixel.
+  its own crop. Drawn on a canvas: exports at each size's standard pixels,
+  the preview at twice that so a retina screen doesn't stretch it.
 
   Storage: none. The photo never leaves the browser.
   Assets:
@@ -22,6 +22,14 @@
     toolKey 'staff-graphics' — same gate as the other graphics sub-tools.
 
   Changelog:
+    v1.5 (24/10/2026) — 16:9 at 1920×1080 replaces the 1200×630 link card:
+      the same layout scaled by 1080/630, so it matches the original.
+    v1.4 (24/10/2026) — Sharp at the standard sizes. Large images (badge,
+      logo, watermark, photo) are shrunk in halving steps to the exact pixel
+      size they're drawn at, then placed on whole pixels; one 22-fold step
+      at low quality was what made the badge rough. The preview draws at 2x
+      so a retina screen no longer stretches it. Warns when the photo has
+      fewer pixels than its crop needs. (v1.3, a 2x export, never shipped.)
     v1.2 (23/10/2026) — 9:16 centres its content in the panel again, with no
       gap held back at the bottom, and the photo takes more of the height.
     v1.1 (23/10/2026) — 1:1, 4:5 and 9:16 alongside the link card, each with
@@ -73,6 +81,21 @@
     var NL_TOOL_KEY = 'staff-graphics';
 
     window.NL_CHANGELOG = [
+      {
+        date: '24/10/2026',
+        version: 'v1.5',
+        items: [
+          'The 1200 × 630 link card is now 16:9 at 1920 × 1080, same layout.'
+        ]
+      },
+      {
+        date: '24/10/2026',
+        version: 'v1.4',
+        items: [
+          'Sharper at the usual sizes: the badge, logo and photo are now scaled down properly, and the preview is sharp on a retina screen.',
+          'If the photo is too small for the crop, a note under Zoom says so. A small photo will look soft however it is exported.'
+        ]
+      },
       {
         date: '23/10/2026',
         version: 'v1.2',
@@ -197,7 +220,7 @@
   <div class="page">
     <div class="ru-stage">
       <div class="ru-canvasbox" id="ruDrop">
-        <canvas id="ruCanvas" width="1200" height="630"></canvas>
+        <canvas id="ruCanvas" width="1920" height="1080"></canvas>
       </div>
 
       <div class="ru-controls">
@@ -214,6 +237,7 @@
         <div>
           <label for="ruZoom">Zoom</label>
           <input id="ruZoom" type="range" min="1" max="3" step="0.01" value="1" disabled>
+          <p class="ru-hint" id="ruSoft" hidden>This photo is smaller than the crop, so it will look soft. Zoom out or use a bigger photo.</p>
         </div>
         <button class="btn btn--ghost btn--sm ru-action" id="ruReset" type="button" disabled>Reset position</button>
         <button class="btn btn--primary ru-action" id="ruDownload" type="button" disabled>Download this size</button>
@@ -228,20 +252,27 @@
   'use strict';
 
   /* Each size is a split: 'x' puts the panel on the left and the photo on the
-     right (the link card); 'y' puts the photo on top and the panel below.
+     right (16:9); 'y' puts the photo on top and the panel below.
      `cut` is where the split falls, `band` the red band at the top of the
-     panel, `s` the scale of the panel's content against the link card. */
+     panel, `s` the scale of the panel's content against the original
+     1200×630 artwork it was measured from. 16:9 is that artwork scaled by
+     1080/630, so it matches the original exactly. */
   var FORMATS = {
-    link: { label: 'Link card', w: 1200, h: 630,  split: 'x', cut: 600,  band: 72, s: 1 },
+    '16x9':{ label: '16:9',     w: 1920, h: 1080, split: 'x', cut: 960,  band: 123, s: 1.714 },
     '1x1': { label: '1:1',      w: 1080, h: 1080, split: 'y', cut: 520,  band: 56, s: 1.05 },
     '4x5': { label: '4:5',      w: 1080, h: 1350, split: 'y', cut: 700,  band: 60, s: 1.25 },
     '9x16':{ label: '9:16',     w: 1080, h: 1920, split: 'y', cut: 1060, band: 70, s: 1.6 }
   };
-  var ORDER = ['link', '1x1', '4x5', '9x16'];
+  var ORDER = ['16x9', '1x1', '4x5', '9x16'];
   var ZOOM_MAX = 3;
 
+  /* Layout is in each size's own pixels and exports at exactly that. The
+     on-screen preview alone draws at twice, or a retina screen stretches it
+     and it looks softer than the file you download. */
+  var PREVIEW_SCALE = 2;
+
   /* The panel's content, as one stack measured at s = 1 from its top edge.
-     Taken off the original artwork, so the link card matches it. */
+     Taken off the original 1200×630 artwork. */
   var STACK = {
     titleSize: 68, titleBase: 49,
     poweredSize: 32, poweredBase: 128,
@@ -261,7 +292,7 @@
     badge: '/assets/divisions/National.png'
   };
 
-  var state = { photo: null, fmt: 'link', crops: {} };
+  var state = { photo: null, fmt: '16x9', crops: {} };
   var art = {};
   var canvas, ctx;
 
@@ -280,6 +311,14 @@
       i.onerror = function () { res(null); };
       i.src = src;
     });
+  }
+
+  /* True when the crop stretches the photo past its own pixels at 1x. Up
+     to 2x it is only being drawn finer than it was taken, which is fine. */
+  function isSoft(f) {
+    if (!state.photo) return false;
+    var r = photoRect(f, regions(f).photo);
+    return state.photo.naturalWidth < r.w;
   }
 
   function resetCrops() {
@@ -309,9 +348,43 @@
     return { x: box.x - mx + c.dx, y: box.y - my + c.dy, w: dw, h: dh };
   }
 
-  function render(g, f) {
+  /* Draw a large image small without losing it. One big drawImage step at
+     the default ("low") quality is what crunched the badge: 2,400px straight
+     to 110. Halve it until it's within 2x of the size it lands at, finish
+     with one high-quality step, and place it on whole pixels so the canvas
+     doesn't resample it again. Each size is kept, so dragging is cheap. */
+  function drawArt(g, img, x, y, w, h, k) {
+    var tw = Math.max(1, Math.round(w * k)), th = Math.max(1, Math.round(h * k));
+    var cache = img._ruSized || (img._ruSized = {});
+    var key = tw + 'x' + th;
+    if (!cache[key]) {
+      var keys = Object.keys(cache);
+      if (keys.length > 12) delete cache[keys[0]];
+      var src = img, sw = img.naturalWidth, sh = img.naturalHeight;
+      while (sw / 2 >= tw && sh / 2 >= th) {
+        var half = document.createElement('canvas');
+        half.width = Math.round(sw / 2); half.height = Math.round(sh / 2);
+        var hg = half.getContext('2d');
+        hg.imageSmoothingQuality = 'high';
+        hg.drawImage(src, 0, 0, half.width, half.height);
+        src = half; sw = half.width; sh = half.height;
+      }
+      var out = document.createElement('canvas');
+      out.width = tw; out.height = th;
+      var og = out.getContext('2d');
+      og.imageSmoothingQuality = 'high';
+      og.drawImage(src, 0, 0, tw, th);
+      cache[key] = out;
+    }
+    g.drawImage(cache[key], Math.round(x * k) / k, Math.round(y * k) / k, tw / k, th / k);
+  }
+
+  function render(g, f, k) {
     var F = FORMATS[f], R = regions(f), s = F.s, P = R.panel;
     var white = token('--white');
+    g.setTransform(k, 0, 0, k, 0, 0);
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = 'high';
 
     /* Photo */
     g.fillStyle = token('--navy-100');
@@ -320,7 +393,7 @@
       var r = photoRect(f, R.photo);
       g.save();
       g.beginPath(); g.rect(R.photo.x, R.photo.y, R.photo.w, R.photo.h); g.clip();
-      g.drawImage(state.photo, r.x, r.y, r.w, r.h);
+      drawArt(g, state.photo, r.x, r.y, r.w, r.h, k);
       g.restore();
     } else {
       g.fillStyle = token('--text-muted');
@@ -339,7 +412,7 @@
       g.globalAlpha = 0.06;
       var rh = Math.max(body.h * 1.18, 660 * s);
       var rw = rh * art.rose.naturalWidth / art.rose.naturalHeight;
-      g.drawImage(art.rose, body.x + body.w / 2 - rw / 2 - 20 * s, body.y + body.h / 2 - rh / 2 + 15 * s, rw, rh);
+      drawArt(g, art.rose, body.x + body.w / 2 - rw / 2 - 20 * s, body.y + body.h / 2 - rh / 2 + 15 * s, rw, rh, k);
       g.restore();
     }
     g.fillStyle = token('--primary');
@@ -357,13 +430,13 @@
 
     if (art.dyno) {
       var lw = STACK.logoW * s, lh = lw * art.dyno.naturalHeight / art.dyno.naturalWidth;
-      g.drawImage(art.dyno, cx - lw / 2, top + STACK.logoTop * s, lw, lh);
+      drawArt(g, art.dyno, cx - lw / 2, top + STACK.logoTop * s, lw, lh, k);
     }
     drawStrap(g, cx, top + STACK.strapBase * s, STACK.strapW * s);
 
     if (art.badge) {
       var bw = STACK.badgeW * s, bh = bw * art.badge.naturalHeight / art.badge.naturalWidth;
-      g.drawImage(art.badge, cx - bw / 2, top + STACK.badgeTop * s, bw, bh);
+      drawArt(g, art.badge, cx - bw / 2, top + STACK.badgeTop * s, bw, bh, k);
     }
   }
 
@@ -385,9 +458,10 @@
 
   function draw() {
     var F = FORMATS[state.fmt];
-    if (canvas.width !== F.w) canvas.width = F.w;
-    if (canvas.height !== F.h) canvas.height = F.h;
-    render(ctx, state.fmt);
+    if (canvas.width !== F.w * PREVIEW_SCALE) canvas.width = F.w * PREVIEW_SCALE;
+    if (canvas.height !== F.h * PREVIEW_SCALE) canvas.height = F.h * PREVIEW_SCALE;
+    render(ctx, state.fmt, PREVIEW_SCALE);
+    el('ruSoft').hidden = !isSoft(state.fmt);
     el('ruZoom').value = state.crops[state.fmt].zoom;
     [].forEach.call(el('ruFormats').children, function (b) {
       b.setAttribute('aria-pressed', String(b.dataset.fmt === state.fmt));
@@ -421,7 +495,8 @@
   function wireGestures() {
     var pts = {}, drag = null, pinch = null;
 
-    function scale() { return canvas.width / canvas.getBoundingClientRect().width; }
+    /* Screen pixels to the size's own units, which the crop offsets are in. */
+    function scale() { return FORMATS[state.fmt].w / canvas.getBoundingClientRect().width; }
     function two() {
       var ids = Object.keys(pts);
       return ids.length === 2 ? [pts[ids[0]], pts[ids[1]]] : null;
@@ -508,7 +583,7 @@
     return new Promise(function (resolve) {
       var c = document.createElement('canvas');
       c.width = FORMATS[f].w; c.height = FORMATS[f].h;
-      render(c.getContext('2d'), f);
+      render(c.getContext('2d'), f, 1);
       try {
         c.toBlob(function (blob) {
           if (blob) NL.download(fileName(f), blob, 'image/png');
