@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* ============================================================
    build-fixtures-graphics.js
-   Version: v1.10 (13/10/2026)
+   Version: v1.11 (24/10/2026)
 
    Makes the fixtures and results cards that are due, without anyone
    pressing anything. Run by .github/workflows/fixtures-graphics.yml on a
@@ -29,11 +29,13 @@
                card shows the round so far: Friday's result scored,
                Saturday's games as v, subtitled FIXTURES & RESULTS. Card id
                "<date> <Division> Round so far".
-     early     A day with a late kick-off (two hours or more after the day's
-               usual time — the 17:30 on a 3pm Saturday) gets a card as soon
-               as the usual-time games are done, with the late game printed
-               "v / 17:30"; the full card follows when it finishes. Card id
-               "<date> <Division> Results early", tables likewise.
+     waves     A day whose kick-offs come in waves two hours or more apart
+               (12:30, 15:00, 17:30) gets a results card, and a table, as
+               each wave finishes, with the games still to come printed v
+               (and their time, when it is not the assumed one). Extended
+               only, stamped with the wave's kick-off. The full card follows
+               when the last game finishes. Card id
+               "<date> <Division> Results 12.30", tables likewise.
                --before-late replays a past day as it stood at that point.
      corrected A results card or table already sent whose content has since
                changed (a score corrected after full time) goes again as
@@ -97,6 +99,10 @@
      render offline.
 
    CHANGELOG
+     v1.11 24/10/2026 A results card and table after every kick-off wave, not
+                      only before a late one: on a 12:30 / 15:00 / 17:30
+                      Saturday the 12:30s now get theirs too. Ids end in the
+                      wave's time ("Results 15.00") instead of "early".
      v1.10 13/10/2026 Passes the division to buildRows, so a Cup card prints
                       every kick-off time.
      v1.9 10/10/2026  --mode backfill --today A --until B: every card the
@@ -309,6 +315,35 @@ function splitLate(data) {
   const late = data.filter(m => koMinutes(m) != null && koMinutes(m) >= usual + LATE_GAP_MIN);
   return { early: data.filter(m => !late.includes(m)), late, usual };
 }
+/* Kick-off waves. Kick-offs less than two hours apart are one wave (15:00
+   and 15:30); a gap of two hours or more starts the next (12:30, 15:00,
+   17:30 on a busy Saturday). Each wave but the last gets its own results
+   card once it and every wave before it is done, while a later one is
+   still to finish — decided with Richard 24/10/2026: a graphic after each
+   kick-off. Returns [{ start, games }] in kick-off order. */
+function koWaves(data) {
+  const timed = data.filter(m => koMinutes(m) != null).sort((a, b) => koMinutes(a) - koMinutes(b));
+  const out = [];
+  let last = null;
+  for (const m of timed) {
+    const k = koMinutes(m);
+    if (last == null || k - last >= LATE_GAP_MIN) out.push({ start: k, games: [] });
+    out[out.length - 1].games.push(m);
+    last = k;
+  }
+  return out;
+}
+/* The latest wave that is finished, with every earlier wave finished too,
+   while some later game is not: the wave the next card is for. null when
+   there is none (nothing finished yet, or the whole day is done). A run that
+   comes late — 12:30s and 15:00s both done — gets only the 15:00 card. */
+function finishedWave(data) {
+  const w = koWaves(data);
+  let i = -1;
+  while (i + 1 < w.length && w[i + 1].games.every(isDone)) i++;
+  if (i < 0 || i === w.length - 1) return null;
+  return w[i];
+}
 /* The early card prints only what is decided. A late game the run catches
    already under way must show "v", not its live score as a result. */
 function withoutLiveScores(data) {
@@ -452,16 +487,16 @@ async function dueCards(args, rounds, season, done) {
         if (!args.noTables) cards.push(...await tableCards(division, season, today, rounds, done, skipped, args.tablesAnyway, ''));
         continue;
       }
-      const { early, late, usual } = splitLate(data);
-      if (late.length && early.every(isDone) && late.some(m => !isDone(m))) {
-        const id = `${today} ${division} Results early`;
+      const wave = finishedWave(data);
+      if (wave) {
+        const stamp = stampOf(wave.start);
+        const id = `${today} ${division} Results ${stamp}`;
         if (!done.has(id)) {
-          cards.push({ ...card, data: withoutLiveScores(data), id, early: true, main: false,
-                       stamp: stampOf(usual) });
-        } else skipped.push({ division, reason: `${id} already delivered; waiting for ${live.length} late game(s)` });
+          cards.push({ ...card, data: withoutLiveScores(data), id, early: true, main: false, stamp });
+        } else skipped.push({ division, reason: `${id} already delivered; waiting for ${live.length} later game(s)` });
         if (!args.noTables) {
-          const t = await tableCards(division, season, today, rounds, done, skipped, args.tablesAnyway, 'early');
-          t.forEach(c => { c.main = false; c.stamp = stampOf(usual); });
+          const t = await tableCards(division, season, today, rounds, done, skipped, args.tablesAnyway, stamp);
+          t.forEach(c => { c.main = false; c.stamp = stamp; });
           cards.push(...t);
         }
         continue;
@@ -805,4 +840,4 @@ if (require.main === module) {
   main().catch(e => { console.error(`\n  ${e.message}`); process.exit(1); });
 }
 module.exports = { dueCards, KIND, dayName, folderName, folderTag, stampOf, cardDests, addDays, seasonStart, seasonLabel, roundFor, cardTitle, shortDate,
-  splitLate, withoutLiveScores, resultsSig, tableSig, parseDone, versionedId, isDone };
+  splitLate, koWaves, finishedWave, withoutLiveScores, resultsSig, tableSig, parseDone, versionedId, isDone };
