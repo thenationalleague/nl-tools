@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Content Plan
-  Version: v3.3 (24/10/2026)
+  Version: v3.4 (24/10/2026)
   File: /content-plan/index.html
 
   Plans and records everything the media team publishes: website stories,
@@ -198,6 +198,11 @@
                         becomes a tick on any item, with a shield badge and a
                         filter. Status is Due or Published (Dropped retired).
                         Settings → Import gains "Clear the plan" for a re-import.
+    v3.4 (24/10/2026) – Match pills open a fixture card (hover, or tap on a phone):
+                        kick-off, home v away and the score once played. League
+                        games come from the NLS feed (now kept per game, not just
+                        counted); cup ties from the pasted fixtures, whose score
+                        column is now kept.
 -->
 <html lang="en">
 <head>
@@ -245,6 +250,14 @@
     var NL_TOOL_KEY = 'media-content-plan';
 
     window.NL_CHANGELOG = [
+      {
+        date: '24 October 2026',
+        version: 'v3.4',
+        items: [
+          'Hover over a match pill (or tap it on a phone) to see that day\u2019s fixtures, with kick-off times and scores once played.',
+          'Pasted FA Cup and FA Trophy fixtures now keep their scores.'
+        ]
+      },
       {
         date: '24 October 2026',
         version: 'v3.3',
@@ -466,6 +479,22 @@
   /* Match pills: one pastel per competition (NAT orange, NOR yellow, SOU blue,
      NLC purple, FAC pink-red, FAT grey), matching the team's spreadsheet. */
   .cp-mpills { display: flex; flex-wrap: wrap; gap: 3px; }
+  .cp-mpill { font-family: var(--font); cursor: pointer; }
+  .cp-mpill:hover { border-color: var(--mp-fg); }
+  .cp-mpill:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  /* Fixture card: fixed, on the open-popover rung (150) of the brand stacking scale. */
+  .cp-gcard { position: fixed; z-index: 150; max-width: min(460px, calc(100vw - 16px)); max-height: 60vh; overflow: auto;
+    background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 8px 10px; font-size: var(--text-sm); }
+  .cp-gcard[hidden] { display: none; }
+  .cp-gcard__head { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: var(--tracking-wide); color: var(--text-muted); font-variation-settings: 'wght' 700; padding-bottom: 6px; border-bottom: 1px solid var(--navy-50); margin-bottom: 4px; }
+  .cp-gcard__list { border-collapse: collapse; width: 100%; }
+  .cp-gcard__list td { padding: 3px 4px; vertical-align: baseline; }
+  .cp-gcard__tm, .cp-gcard__sc { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .cp-gcard__tm, .cp-gcard__rd { color: var(--text-muted); font-size: var(--text-xs); }
+  .cp-gcard__h { text-align: right; }
+  .cp-gcard__sc { text-align: center; font-variation-settings: 'wght' 700; color: var(--navy); }
+  .cp-gcard__none { margin: 4px 0; color: var(--text-muted); }
+  @media (min-width: 761px) { .cp-gcard { max-width: min(640px, calc(100vw - 16px)); } .cp-gcard__list td { white-space: nowrap; } }
   .cp-mpill { display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px; border-radius: var(--radius-pill);
     font-size: var(--text-xs); font-variation-settings: 'wght' 700; font-variant-numeric: tabular-nums; line-height: 1.5; white-space: nowrap;
     background: var(--mp-bg); color: var(--mp-fg); border: 1px solid var(--mp-edge); }
@@ -781,6 +810,7 @@
     addingOn: null,           // date with the inline add form open
     addForm: null,            // that form's node, reused across live re-renders so typing survives
     matches: {},              // date → {nl, n, s, cup}
+    games: {},                // date → {nl: [{time, home, away, hs, as, note}], …} for the pill cards
     seasonsLoading: {}
   };
 
@@ -1172,6 +1202,11 @@
     if (isNaN(d.getTime())) return '';
     return d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
   }
+  function londonTime(iso) {
+    if (!iso) return '';
+    var d = new Date(iso.indexOf('T') >= 0 ? iso : iso.replace(' ', 'T') + 'Z');
+    return isNaN(d.getTime()) ? '' : d.toLocaleTimeString('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit' });
+  }
   function fetchComp(comp, season) {
     var all = [];
     function page(n) {
@@ -1193,6 +1228,15 @@
         if (!day) return;
         var bucket = S.matches[day] = S.matches[day] || {};
         bucket[comp.key] = (bucket[comp.key] || 0) + 1;
+        /* Field names checked against the live feed, 24/10/2026:
+           kickOffDateUTC "YYYY-MM-DD HH:MM:SS" (UTC), TBC, postponementReason,
+           homeTeam/awayTeam {name, score}. */
+        var h = a.homeTeam || {}, w = a.awayTeam || {};
+        var g = S.games[day] = S.games[day] || {};
+        (g[comp.key] = g[comp.key] || []).push({
+          time: a.TBC ? 'TBC' : londonTime(a.kickOffDateUTC), home: h.name || h.shortName || '?', away: w.name || w.shortName || '?',
+          score: h.score != null && w.score != null ? h.score + '–' + w.score : '', note: a.postponementReason ? 'Postponed' : ''
+        });
       });
     });
   }
@@ -1208,17 +1252,91 @@
   function matchPills(date) {
     var m = S.matches[date] || {}, d = S.days[date] || {}, mm = d.manualMatches || {};
     var box = el('div', 'cp-mpills'), n = 0;
-    function pill(cls, label, count, title) {
-      var p = el('span', 'cp-mpill ' + cls, label + ' ' + count); p.title = title; box.appendChild(p); n++;
+    /* Each pill opens a card listing that competition's games on the day. */
+    function pill(cls, label, count, name, games) {
+      var p = el('button', 'cp-mpill ' + cls, label + ' ' + count); p.type = 'button';
+      p.setAttribute('aria-label', name + ': ' + count + ' match' + (count === 1 ? '' : 'es') + '. Show fixtures');
+      gameCard(p, name, date, games);
+      box.appendChild(p); n++;
     }
     var titles = { nl: 'National League', n: 'National League North', s: 'National League South', cup: 'National League Cup' };
-    NLS_COMPS.forEach(function (c) { if (m[c.key]) pill('cp-mpill--' + c.key, c.label, m[c.key], titles[c.key] + ' matches'); });
-    var cc = cupCounts(date);
+    var g = S.games[date] || {};
+    NLS_COMPS.forEach(function (c) { if (m[c.key]) pill('cp-mpill--' + c.key, c.label, m[c.key], titles[c.key], g[c.key] || []); });
+    var cc = cupCounts(date), ties = cupOnDate(date);
+    function cupGames(comp) {
+      return ties.filter(function (f) { return f.comp === comp; })
+        .map(function (f) { return { time: f.time || '', round: f.round || '', home: f.home, away: f.away, score: f.score || '' }; });
+    }
     var fac = cc.facup || mm.faCup, fat = cc.fatrophy || mm.faTrophy;
-    if (fac) pill('cp-mpill--fac', 'FAC', fac, 'FA Cup matches');
-    if (fat) pill('cp-mpill--fat', 'FAT', fat, 'FA Trophy matches');
+    if (fac) pill('cp-mpill--fac', 'FAC', fac, 'FA Cup', cupGames('facup'));
+    if (fat) pill('cp-mpill--fat', 'FAT', fat, 'FA Trophy', cupGames('fatrophy'));
     return n ? box : null;
   }
+
+  /* ── Fixture card on a match pill. Hover (mouse) or tap/Enter opens it;
+     Escape, a tap elsewhere or scrolling closes it. One card on the page at
+     a time, fixed-position so no overflow clips it.
+     Canon candidate (24/10/2026): social-output hand-rolls a tooltip too
+     (.so-tip); a shared NL popover would serve both. */
+  var CARD = { node: null, owner: null, timer: null };
+  function closeCard() {
+    clearTimeout(CARD.timer);
+    if (CARD.owner) CARD.owner.setAttribute('aria-expanded', 'false');
+    if (CARD.node) CARD.node.hidden = true;
+    CARD.owner = null;
+  }
+  function gameCard(pill, name, date, games) {
+    pill.setAttribute('aria-expanded', 'false');
+    function open() {
+      clearTimeout(CARD.timer);
+      if (CARD.owner === pill) return;
+      closeCard();
+      if (!CARD.node) {
+        CARD.node = el('div', 'cp-gcard'); CARD.node.id = 'cpGameCard'; CARD.node.setAttribute('role', 'dialog');
+        CARD.node.hidden = true;
+        CARD.node.addEventListener('mouseenter', function () { clearTimeout(CARD.timer); });
+        CARD.node.addEventListener('mouseleave', function () { CARD.timer = setTimeout(closeCard, 150); });
+        document.body.appendChild(CARD.node);
+      }
+      var c = CARD.node; c.innerHTML = '';
+      c.setAttribute('aria-label', name + ' fixtures');
+      c.appendChild(el('div', 'cp-gcard__head', name + ' · ' + longDay(date)));
+      if (games.length) {
+        var t = el('table', 'cp-gcard__list'), tb = el('tbody');
+        games.slice().sort(function (a, b) { return (a.time || '99').localeCompare(b.time || '99') || a.home.localeCompare(b.home); })
+          .forEach(function (x) {
+            var tr = el('tr');
+            tr.appendChild(el('td', 'cp-gcard__tm', x.time || ''));
+            tr.appendChild(el('td', 'cp-gcard__h', x.home));
+            tr.appendChild(el('td', 'cp-gcard__sc', x.note || x.score || 'v'));
+            tr.appendChild(el('td', null, x.away));
+            if (x.round) tr.appendChild(el('td', 'cp-gcard__rd', x.round));
+            tb.appendChild(tr);
+          });
+        t.appendChild(tb); c.appendChild(t);
+      } else c.appendChild(el('p', 'cp-gcard__none', name === 'FA Cup' || name === 'FA Trophy'
+        ? 'No fixture list for this day. Paste fixtures in Settings → Cup fixtures.' : 'Fixtures are still loading.'));
+      c.hidden = false;
+      var r = pill.getBoundingClientRect(), cw = c.offsetWidth, ch = c.offsetHeight;
+      var left = Math.max(8, Math.min(r.left, window.innerWidth - cw - 8));
+      var top = r.bottom + 6 + ch > window.innerHeight - 8 && r.top - 6 - ch > 8 ? r.top - 6 - ch : r.bottom + 6;
+      c.style.left = left + 'px'; c.style.top = top + 'px';
+      CARD.owner = pill; pill.setAttribute('aria-expanded', 'true');
+    }
+    var hover = window.matchMedia && window.matchMedia('(hover: hover)').matches;
+    if (hover) {
+      pill.addEventListener('mouseenter', function () { clearTimeout(CARD.timer); CARD.timer = setTimeout(open, 120); });
+      pill.addEventListener('mouseleave', function () { clearTimeout(CARD.timer); if (CARD.owner === pill) CARD.timer = setTimeout(closeCard, 150); });
+    }
+    pill.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (CARD.owner === pill) closeCard(); else open();
+    });
+  }
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && CARD.owner) { var o = CARD.owner; closeCard(); o.focus(); } });
+  document.addEventListener('click', function (e) { if (CARD.owner && !(CARD.node && CARD.node.contains(e.target))) closeCard(); });
+  window.addEventListener('scroll', function () { if (CARD.owner) closeCard(); }, true);
+  window.addEventListener('resize', function () { if (CARD.owner) closeCard(); });
   function matchText(date) {
     var m = S.matches[date] || {}, d = S.days[date] || {}, mm = d.manualMatches || {};
     var parts = [];
@@ -2630,7 +2748,8 @@
       var home = c[3] || '', away = c.length >= 6 ? c[5] : (c[4] || '');
       if (!home || !away) { out.push({ ok: false, row: i + 1, raw: line, reason: 'Missing a team' }); return; }
       if (home.length > 80 || away.length > 80) { out.push({ ok: false, row: i + 1, raw: line, reason: 'A team name is over 80 characters' }); return; }
-      out.push({ ok: true, row: i + 1, fixture: { date: when.date, time: when.time, round: c[1] || '', comp: comp, home: home, away: away } });
+      var score = c.length >= 6 ? c[4].replace(/\s+/g, ' ').slice(0, 30) : '';
+      out.push({ ok: true, row: i + 1, fixture: { date: when.date, time: when.time, round: c[1] || '', comp: comp, home: home, away: away, score: score } });
     });
     return out;
   }
@@ -2769,7 +2888,7 @@
       var u = {};
       good.forEach(function (p) {
         var f = p.fixture;
-        u[cupKey(f)] = { date: f.date, time: f.time || null, round: f.round, comp: f.comp, home: f.home, away: f.away,
+        u[cupKey(f)] = { date: f.date, time: f.time || null, round: f.round, comp: f.comp, home: f.home, away: f.away, score: f.score || null,
           updatedBy: S.session.uid, updatedAt: firebase.database.ServerValue.TIMESTAMP };
       });
       saveBtn.disabled = true;
@@ -2796,7 +2915,7 @@
       { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
       { label: 'Save', className: 'btn--primary', onClick: function (c) {
         if (!d.value || !h.value.trim() || !a.value.trim()) { NL.toast('Date and both teams are needed', 'error'); return; }
-        var nf = { date: d.value, time: t.value || null, round: r.value.trim(), comp: comp.value, home: h.value.trim(), away: a.value.trim(),
+        var nf = { date: d.value, time: t.value || null, round: r.value.trim(), comp: comp.value, home: h.value.trim(), away: a.value.trim(), score: f.score || null,
           updatedBy: S.session.uid, updatedAt: firebase.database.ServerValue.TIMESTAMP };
         var nk = cupKey(nf), u = {};
         u[nk] = nf;
@@ -3022,6 +3141,7 @@
 
   /* ── Render ────────────────────────────────────────────────────────── */
   function render() {
+    closeCard();
     sizeScroller();
     var ideas = S.view === 'ideas';
     document.getElementById('cpFilters').hidden = ideas;
