@@ -4,8 +4,15 @@ Content Plan importer – turns the legacy "Content plan" Google Sheet (.xlsx ex
 into JSON for /app-data/media-content-plan/ in RTDB. Load the output through
 the tool's Settings → Import (superadmin), not the Firebase console.
 
-Version: v1.4 – 16/10/2026
+Version: v1.5 – 24/10/2026
 Changelog
+  v1.5 (24/10/2026) – Football splits by competition again: the sheet's National /
+                      North / South / NL Cup keep their own keys, a title naming the
+                      FA Cup or FA Trophy takes that competition, a joint North-South
+                      item is general Football. Social items take a competition from
+                      the title when it names one, otherwise Football. Club
+                      obligations are no longer a lane: they import as web items
+                      with clubObligation: true and no platform ticked.
   v1.4 (16/10/2026) – Public-repo hygiene: no built-in initials (--authors is required),
                       --out is required and must sit outside the repo. Titles are cut
                       to 300 and day notes to 1000 characters (the RTDB rule limits),
@@ -62,13 +69,41 @@ CATEGORIES = ["Statements", "National", "Awards", "League", "NL Cup", "North", "
               "Trust", "U19", "3UP"]
 CATEGORY_KEYS = {c.lower(): re.sub(r"[^a-z0-9]", "", c.lower()) for c in CATEGORIES}
 # CMS name in the sheet -> Content Plan category key
-TOOL_CATEGORY = {"national": "football", "north": "football", "south": "football", "nl cup": "football",
+TOOL_CATEGORY = {"national": "national", "north": "north", "south": "south", "nl cup": "nlcup",
                  "awards": "awards", "league": "league", "statements": "statements",
                  "trust": "trust", "u19": "u19", "3up": "3up"}
 
 
 def tool_category(label):
     return TOOL_CATEGORY.get(label.lower()) if label else None
+
+
+COMPETITIONS = {"national", "north", "south", "nlcup", "football"}
+FA_CUP_RE = re.compile(r"\bfa cup\b", re.I)
+FA_TROPHY_RE = re.compile(r"\b(fa )?trophy\b", re.I)
+
+
+def competition(category, title):
+    """A football item about the FA Cup or FA Trophy takes that competition.
+    (The FA Youth Cup is not the FA Cup.)"""
+    if category is not None and category not in COMPETITIONS:
+        return category
+    if FA_CUP_RE.search(title) and "youth" not in title.lower():
+        return "facup"
+    if FA_TROPHY_RE.search(title):
+        return "fatrophy"
+    return category
+
+
+SOCIAL_COMP = [("nlcup", re.compile(r"\b(nl cup|league cup)\b", re.I)), ("north", re.compile(r"^north\b(?!\s*[-/]\s*south)", re.I)),
+               ("south", re.compile(r"^south\b", re.I)), ("national", re.compile(r"^national\b", re.I))]
+
+
+def social_competition(title):
+    for key, rx in SOCIAL_COMP:
+        if rx.search(title):
+            return key
+    return competition("football", title)
 
 
 SOCIAL_FORMATS = {"gfx": "gfx", "vid": "vid", "ad": "ad", "otd": "otd"}
@@ -234,13 +269,14 @@ def main():
                 raw = " ".join(str(cell.value).split())
                 reasons = []
                 category, rest = match_category(raw)
-                if category is None:
-                    reasons.append("joint North-South item: pick a category" if JOINT_RE.match(raw)
-                                   else "no category prefix")
+                joint = category is None and JOINT_RE.match(raw)
+                if category is None and not joint:
+                    reasons.append("no category prefix")
                 title, initials = split_author(rest)
                 extra, a_reasons = resolve_authors(initials)
                 reasons += a_reasons
-                extra.update({"category": tool_category(category), "title": title or raw})
+                cat = "football" if joint else tool_category(category)
+                extra.update({"category": competition(cat, title or raw), "title": title or raw})
                 add_item(cell, "web", title or raw, extra, reasons)
 
             # Social items
@@ -265,9 +301,9 @@ def main():
                     reasons.append("no format or platform prefix")
                 category, body2 = match_category(body)
                 if category:
-                    extra["category"] = tool_category(category)
+                    extra["category"] = competition(tool_category(category), body2 or body)
                     body = body2 or body
-                extra.setdefault("category", "football")
+                extra.setdefault("category", social_competition(body))
                 add_item(cell, "social", body or raw, extra, reasons)
 
             # K / L – meaning read from each tab's header
@@ -279,7 +315,9 @@ def main():
                 text = str(cell.value).strip()
                 if head.lower().startswith("club"):
                     title = text.split(":", 1)[1].strip() if ":" in text else text
-                    add_item(cell, "club", title, {}, [])
+                    add_item(cell, "web", title, {"clubObligation": True, "platforms": {}}, [])
+                    counts["club"] += 1
+                    tab_counts["club"] += 1
                 else:
                     notes.append(" / ".join(line.strip() for line in text.splitlines() if line.strip()))
 
