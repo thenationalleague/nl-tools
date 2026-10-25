@@ -489,3 +489,57 @@ test('the batch tells buildRows the competition, so a Cup card prints every kick
   const src = readFileSync(new URL('../scripts/build-fixtures-graphics.js', import.meta.url), 'utf8');
   assert.match(src, /C\.buildRows\(j\.data, NL\.clubs, \{ division: j\.division \}\)/);
 });
+
+/* A card after every kick-off wave (decided 24/10/2026): that Saturday had
+   12:30, 15:00 and 17:30 kick-offs and only got a card when the 15:00s
+   finished. 11:30Z = 12:30 BST, 14:00Z = 15:00, 14:30Z = 15:30, 16:30Z = 17:30. */
+test('kick-offs two hours apart are separate waves; closer ones are one', () => {
+  const day = [g('a', '2026-10-24 11:30:00', 'FullTime', 4, 2), g('b', '2026-10-24 14:00:00', 'SecondHalf', 1, 0),
+               g('c', '2026-10-24 14:30:00', 'FirstHalf', 0, 0), g('d', '2026-10-24 16:30:00', 'PreMatch')];
+  assert.deepEqual(m.koWaves(day).map(w => [w.start, w.games.map(x => x.id)]),
+    [[750, ['a']], [900, ['b', 'c']], [1050, ['d']]]);
+  assert.equal(m.finishedWave(day).start, 750, '12:30s done, the rest to come: the 12:30 card');
+  const later = day.map(x => x.id === 'b' || x.id === 'c' ? { ...x, attributes: { ...x.attributes, matchPeriod: 'FullTime' } } : x);
+  assert.equal(m.finishedWave(later).start, 900, 'a run that comes late gets only the latest wave');
+  assert.equal(m.finishedWave(day.slice(1)), null, 'nothing finished, no card');
+  assert.equal(m.finishedWave(later.slice(0, 3)), null, 'all done: the full card, not a wave card');
+  const midweek = [g('x', '2026-10-13 18:00:00', 'FullTime', 1, 0), g('y', '2026-10-13 18:45:00', 'SecondHalf', 0, 0)];
+  assert.equal(m.koWaves(midweek).length, 1, 'a 19:00 and a 19:45 are one night, not two cards');
+});
+
+/* NLS stand-in on port 0, shapes as in 'every card due' above. */
+test('the 12:30s finishing make an Extended results card stamped 12.30', async () => {
+  const http = await import('node:http');
+  const { execFile } = await import('node:child_process');
+  const match = (id, ko, period, hs, as) => ({ id, attributes: { kickOffDateUTC: ko, matchPeriod: period,
+    homeTeam: { name: 'Woking', score: hs }, awayTeam: { name: 'Sutton United', score: as } } });
+  const games = [match('a', '2026-10-24 11:30:00', 'FullTime', 4, 2), match('b', '2026-10-24 14:00:00', 'SecondHalf', 1, 0),
+                 match('c', '2026-10-24 16:30:00', 'PreMatch')];
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://x');
+    if (u.pathname.startsWith('/league-tables')) { res.writeHead(404); return res.end('{}'); }
+    const body = u.searchParams.get('includePopulatedDates')
+      ? { data: [], meta: { populatedDates: { '2026-10-24': {} } }, links: {} }
+      : { data: games, meta: { totalCount: games.length }, links: {} };
+    res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body));
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const script = `
+    const m = require(${JSON.stringify(join(REPO, 'scripts/build-fixtures-graphics.js'))});
+    (async () => {
+      const r = await m.dueCards({ mode: 'results', division: 'National', today: '2026-10-24', formats: ['4x5'], noTables: true }, {}, 2026, new Map());
+      console.log(JSON.stringify(r.cards.map(c => ({ id: c.id, main: c.main,
+        dests: c.dests.map(d => d.path[0] + ' :: ' + d.files[0].name),
+        scores: c.data.map(x => x.attributes.homeTeam.score) }))));
+    })().catch(e => { console.error(e.stack); process.exit(1); });`;
+  const stdout = await new Promise((resolve, reject) => execFile(process.execPath, ['-e', script],
+    { env: { ...process.env, NLS_BASE: `http://127.0.0.1:${server.address().port}` } },
+    (err, out, errOut) => err ? reject(new Error(errOut || err.message)) : resolve(out)));
+  server.close();
+  const cards = JSON.parse(stdout);
+  assert.equal(cards.length, 1);
+  assert.equal(cards[0].id, '2026-10-24 National Results 12.30');
+  assert.equal(cards[0].main, false);
+  assert.deepEqual(cards[0].dests, ['Extended :: National Results 24Oct26 12.30 - 4x5.png']);
+  assert.deepEqual(cards[0].scores, [4, null, null], 'the 15:00 in play shows v, not its live score');
+});
