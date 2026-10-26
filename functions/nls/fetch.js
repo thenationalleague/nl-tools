@@ -188,7 +188,10 @@ async function fetchCurrentSeason() {
 }
 
 module.exports = {
-  NLS_BASE, MAX_PAGES, PAGE_SIZE,
+  NLS_BASE, MAX_PAGES, PAGE_SIZE, HEADERS,
+  /* Exported for efl/fetch.js, which reads another deployment of the same
+     upstream with the same error reporting. */
+  getJson,
   upstreamFor, dayWindow,
   fetchDayList, fetchSeasonList, fetchDetail, fetchTable, fetchCurrentSeason,
 };
