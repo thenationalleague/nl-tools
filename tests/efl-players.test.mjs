@@ -203,6 +203,7 @@ test('a run builds rows, closes complete days and records pending', async () => 
   const t = store.tree.players[2026];
   assert.equal(t.apps.hg20_1.g20.source, 'efl');
   assert.equal(t.squads.t1.hg20_1, 'Synthetic hg20_1');
+  assert.deepEqual(t.teams, { t1: 'Synthetic Town', t2: 'Example Rovers' });
   assert.equal(t.matches.g20.complete, true);
   assert.equal(store.tree.meta['player-backfill'].league_two.days['2026-10-24'], true);
   assert.equal(store.tree.meta['player-backfill'].league_two.pending, 0);

@@ -237,6 +237,7 @@ at most every six hours.
 |---|---|
 | `players/<season>/apps/<playerID>/<matchID>` | The row — the NLS row's shape exactly (`nls/players.js`), with `source: 'efl'` and the EFL MCP's competition keys (`championship`, `league_one`, `league_two`, `carabao`, `trophy`). |
 | `players/<season>/squads/<teamID>/<playerID>` | Name. |
+| `players/<season>/teams/<teamID>` | Club name. The EFL has no clubs-meta and its list rows carry no teamID, so this is how a reader resolves a club. |
 | `players/<season>/matches/<matchID>` | The ledger, as for NLS. |
 | `meta/player-backfill/<compKey>/{days,pending}` | Progress. |
 | `meta/players` | Last run: `lastRun`, `lastSuccess`, `matchesWritten`, `errorCount`, `pending`, `caughtUp`, `version`. |

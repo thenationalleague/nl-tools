@@ -16,6 +16,7 @@
  * Layout under efl/:
  *   players/<season>/apps/<playerID>/<matchID>   the row
  *   players/<season>/squads/<teamID>/<playerID>  name
+ *   players/<season>/teams/<teamID>              club name (no clubs-meta here)
  *   players/<season>/matches/<matchID>           the ledger (complete, pids)
  *   meta/player-backfill/<compKey>/days/<ymd>    a matchday finished
  *   meta/player-backfill/<compKey>/pending       matchdays still to build
@@ -138,6 +139,12 @@ async function writeMatch(store, seasonID, detail, prevLedger, now) {
   Object.values(built.rows).forEach((r) => {
     updates[base + 'apps/' + r.playerID + '/' + detail.id] = r;
     if (r.teamID) updates[base + 'squads/' + r.teamID + '/' + r.playerID] = r.name || r.playerID;
+  });
+  /* Club names by teamID. The EFL has no clubs-meta and its list rows carry
+     no teamID, so this is the only place a reader can turn "Wrexham" into a
+     teamID without fetching match detail. A hundred-odd entries a season. */
+  [detail.home, detail.away].forEach((side) => {
+    if (side && side.id && side.name) updates[base + 'teams/' + side.id] = side.name;
   });
   /* A corrected team sheet can remove a player; without this his phantom
      appearance would stay in his season. */
