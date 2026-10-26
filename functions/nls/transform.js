@@ -58,6 +58,14 @@ function competitionOf(compId) {
   return COMPETITIONS[Number(compId)] || null;
 }
 
+/* Another deployment of the same upstream codebase (the EFL's, read by
+   efl/players.js) passes its own map in the same shape. Omitted, the NLS map
+   above applies, so every NLS caller is unaffected. An entry may carry
+   `source`; the shaped node's `source` falls back to 'nls'. */
+function competitionIn(comps, compId) {
+  return comps ? (comps[Number(compId)] || null) : competitionOf(compId);
+}
+
 function compKeyOf(compId) {
   const c = competitionOf(compId);
   return c ? c.key : null;
@@ -183,11 +191,11 @@ function listSide(t) {
    `live/index/{compKey}/{ymd}` and never downloads a lineup it will not draw.
    RTDB egress is metered and NLS is not, which is why scoping is not
    optional here (spec §4). */
-function shapeIndexRow(m, now) {
+function shapeIndexRow(m, now, comps) {
   const a = (m && m.attributes) || {};
   const ko = normaliseUtc(a.kickOffDateUTC || a.kickoffDateUTC || a.kickOffUTC ||
                           a.kickOffDate || a.date || '');
-  const comp = competitionOf(a.competitionID);
+  const comp = competitionIn(comps, a.competitionID);
   if (!m || !m.id || !ko || !comp || !a.homeTeam || !a.awayTeam) return null;
 
   const period = periodOf(a);
@@ -211,7 +219,7 @@ function shapeIndexRow(m, now) {
     away: listSide(a.awayTeam),
     detailAvailability: comp.detailAvailability,
     updatedAt: now,
-    source: 'nls',
+    source: comp.source || 'nls',
   };
 }
 
@@ -371,9 +379,9 @@ function lineupComplete(shaped) {
   return Boolean(ok(shaped && shaped.home) && ok(shaped && shaped.away));
 }
 
-function shapeDetail(m, now) {
+function shapeDetail(m, now, comps) {
   const a = (m && m.attributes) || {};
-  const comp = competitionOf(a.competitionID);
+  const comp = competitionIn(comps, a.competitionID);
   const ko = normaliseUtc(a.kickOffUTC || a.kickOffDateUTC || a.kickoffDateUTC || '');
   if (!m || !a.matchID || !comp) return null;
 
@@ -420,7 +428,7 @@ function shapeDetail(m, now) {
     shootout: shapeShootout(homeMT, awayMT),
     detailAvailability: comp.detailAvailability,
     updatedAt: now,
-    source: 'nls',
+    source: comp.source || 'nls',
   };
   shaped.lineupComplete = lineupComplete(shaped);
   return shaped;
@@ -450,7 +458,7 @@ function stableStringify(v) {
 
 module.exports = {
   COMPETITIONS, COMP_IDS,
-  competitionOf, compKeyOf,
+  competitionOf, competitionIn, compKeyOf,
   normaliseUtc, ymdOf, periodOf, isLive, isFinished, minuteOf,
   playerNameOf, normaliseFormation, shapePlayer, shapePlayers,
   shapeIndexRow, signatureOf,

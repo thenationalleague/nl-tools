@@ -27,6 +27,11 @@ The functions in this directory:
   **reads** nl-widgets, with the grant the ingester already needs — nothing new
   to set up. See `matchday-live/README.md`.
 
+- **`eflPlayersHourly`** (`efl-players.js`) — one row per player per finished
+  EFL match (Championship, League One, League Two, Carabao Cup, EFL Trophy),
+  written to `efl/` in **this** project's database. EFL data is licensed and
+  **internal-only** — see the section below.
+
 See the headers of `index.js` / `account.js` for details.
 
 This is the **only server-side code** in the repo; everything else is a static
@@ -207,6 +212,42 @@ on that metric. The code cannot create that policy; someone has to.
 Cloud Run: pennies. The minute job is a no-op outside match windows, and real
 work runs perhaps six hours a week. RTDB: low single figures monthly, provided
 write-on-change and scoped slices hold — both exist to protect that number.
+
+## EFL player rows (`efl-players.js`)
+
+**EFL data is the EFL's, licensed, and internal-only.** It is written to the
+nl-tools (staff) database under `efl/`, never to nl-widgets, and `efl/` has no
+rules entry: the closed root denies every client, so the only reader is a
+server-side identity with an IAM role on this project — today the EFL MCP's
+Cloud Run service account (Firebase Realtime Database Viewer). Never add a
+client read rule for `efl/` and never feed these rows to an embed or widget.
+
+`eflPlayersHourly` runs every hour (europe-west2, the shared runtime service
+account, which already holds Firebase Admin here — no new grant to write). It
+reads each competition's season list (one request each; the EFL host 404s the
+`includePopulatedDates` query the NLS backfill uses), groups finished matches
+by UTC day, and builds past matchdays oldest first across all five
+competitions — up to 150 detail fetches inside a 200-second budget per run, so
+a season's ~1,900 matches rebuild in about fourteen runs. Days close when every
+team sheet is complete and no result is still outstanding, or once a week old;
+a day is never closed while a fetch is failing. Incomplete sheets are retried
+at most every six hours.
+
+| Path under `efl/` | Holds |
+|---|---|
+| `players/<season>/apps/<playerID>/<matchID>` | The row — the NLS row's shape exactly (`nls/players.js`), with `source: 'efl'` and the EFL MCP's competition keys (`championship`, `league_one`, `league_two`, `carabao`, `trophy`). |
+| `players/<season>/squads/<teamID>/<playerID>` | Name. |
+| `players/<season>/matches/<matchID>` | The ledger, as for NLS. |
+| `meta/player-backfill/<compKey>/{days,pending}` | Progress. |
+| `meta/players` | Last run: `lastRun`, `lastSuccess`, `matchesWritten`, `errorCount`, `pending`, `caughtUp`, `version`. |
+
+Player IDs are shared with the NLS feed — the same person has the same
+`playerID` in both (probed 26/10/2026: 95 of 97 shared names matched; the two
+that did not were different people), so `efl/` and `nls/` rows for one ID are
+one career. Cup ties settled by a shootout straight after 90 minutes are
+counted as 90-minute matches, not 120 (`efl/backfill.js`). Shaping goes through
+`nls/transform.js` with the EFL competition map passed in; NLS shaping is
+unchanged. Covered by `tests/efl-players.test.mjs`.
 
 ## What the footage proxy does once live
 

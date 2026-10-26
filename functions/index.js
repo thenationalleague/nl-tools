@@ -99,6 +99,12 @@ Object.assign(exports, require("./brand-exposure-scan"));
 // terminal and no gcloud, which was the deciding constraint on its shape.
 Object.assign(exports, require("./nls-ingester"));
 
+// EFL player rows (eflPlayersHourly) — one row per player per finished EFL
+// match, into efl/ in THIS project's database. Internal-only: EFL data is
+// licensed, so it is kept out of nl-widgets and has no client read rule. See
+// functions/efl-players.js.
+Object.assign(exports, require("./efl-players"));
+
 
 // Publish the handbook, get the PDF (handbookPdfOnPublish). Watches
 // publishedEditionId and asks GitHub Actions to run render-handbook-pdf.yml,
