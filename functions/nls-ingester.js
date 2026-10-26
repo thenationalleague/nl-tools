@@ -50,6 +50,13 @@
  * This file orchestrates them and owns every RTDB write.
  *
  * CHANGELOG
+ *   26/10/2026  v0.5.0  Scorer table from player rows: players/<season>/
+ *                       scorers/<compKey>/<playerID>, recomputed from each
+ *                       affected player's season rows whenever a match's
+ *                       rows are written. The incremental derived/scorers
+ *                       tally misses goals entered after the whistle (60%
+ *                       of North's were absent on 26/10/2026); rows are
+ *                       rebuilt whole the day after, so this cannot.
  *   26/10/2026  v0.4.0  Player rows: nls/players/<season>/apps/<playerID>/
  *                       <matchID>, one per player per finished match —
  *                       role (start/sub/unused/unlisted), minutes, goals,
@@ -99,7 +106,7 @@ const A = require('./nls/anchors');
 const D = require('./nls/derive');
 const P = require('./nls/players');
 
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 
 /* nls/ lives in nl-widgets, alongside the feed/ fixture cache and the fan
    widgets that will read it in step 2. Writing it into nl-tools would put the
@@ -787,7 +794,77 @@ async function writePlayerMatch(seasonID, detail, prevLedger, now) {
   updates[base + 'matches/' + detail.id] =
     P.ledgerEntry(detail, built, now, ((prevLedger && prevLedger.attempts) || 0) + 1);
   await updateMulti(updates);
+  await refreshScorers(seasonID, detail.compKey, built, prevLedger, now);
   return built;
+}
+
+/**
+ * players/<season>/scorers/<compKey>/<playerID> — the scorer table, rebuilt
+ * from rows. Only the players this match can have changed are recomputed:
+ * its scorers and own-goal scorers, plus — when the match is being rewritten —
+ * everyone it previously had a row for, since a corrected sheet can take a
+ * goal away. Each recompute is one read of that player's season.
+ */
+async function refreshScorers(seasonID, compKey, built, prevLedger, now) {
+  if (!compKey) return 0;
+  const affected = new Set();
+  Object.values(built.rows).forEach((r) => {
+    if ((r.goals || 0) > 0 || (r.ownGoals || 0) > 0) affected.add(r.playerID);
+  });
+  if (prevLedger) Object.keys(prevLedger.pids || {}).forEach((pid) => affected.add(pid));
+  if (!affected.size) return 0;
+  const base = 'players/' + seasonID + '/';
+  const updates = {};
+  await mapPool([...affected], 6, async (pid) => {
+    const season = (await read(base + 'apps/' + pid)) || {};
+    updates[base + 'scorers/' + compKey + '/' + pid] =
+      P.scorerEntry(Object.values(season), compKey, now);
+  });
+  await updateMulti(updates);
+  return affected.size;
+}
+
+/**
+ * One-off catch-up for the scorer table: rows written before v0.5.0 have no
+ * scorer entries, and their matches are complete, so nothing would revisit
+ * them. Walks every player in squads/, a bounded slice per hourly run with a
+ * cursor, recomputing his entry in each competition he has rows in. Marks the
+ * season seeded when the walk finishes; from then on writePlayerMatch keeps
+ * the table current by itself.
+ */
+const SCORER_SEED_PER_RUN = 300;
+
+async function seedScorers(seasonID, now, runStarted) {
+  const metaPath = 'meta/player-scorers/' + seasonID;
+  const state = (await read(metaPath)) || {};
+  if (state.seeded) return null;
+  const squads = (await read('players/' + seasonID + '/squads')) || {};
+  const pids = [...new Set([].concat(...Object.values(squads).map((m) => Object.keys(m || {}))))].sort();
+  const start = state.cursor || 0;
+  const slice = pids.slice(start, start + SCORER_SEED_PER_RUN);
+  let done = 0;
+  for (let i = 0; i < slice.length; i += 25) {
+    if (Date.now() - runStarted > PLAYER_TIME_BUDGET_MS + 60 * 1000) break;
+    const batch = slice.slice(i, i + 25);
+    const updates = {};
+    await mapPool(batch, 6, async (pid) => {
+      const rows = Object.values((await read('players/' + seasonID + '/apps/' + pid)) || {});
+      [...new Set(rows.map((r) => r.compKey).filter(Boolean))].forEach((ck) => {
+        updates['players/' + seasonID + '/scorers/' + ck + '/' + pid] = P.scorerEntry(rows, ck, now);
+      });
+    });
+    await updateMulti(updates);
+    done += batch.length;
+  }
+  const cursor = start + done;
+  /* The cursor is an index into a sorted list that only grows (squads are
+     never deleted from), so a player added between runs shifts later ones
+     along by one — at worst a player is visited twice, never skipped. Players
+     first seen after v0.5.0 are covered by writePlayerMatch anyway. */
+  const finished = cursor >= pids.length && pids.length > 0;
+  await db().ref(ROOT + '/' + metaPath).set({ cursor: finished ? pids.length : cursor,
+    players: pids.length, seeded: finished, updatedAt: now });
+  return { cursor, players: pids.length, seeded: finished };
 }
 
 async function backfillPlayers(seasonID, now, todayYmd, runStarted) {
@@ -1046,6 +1123,13 @@ async function runIngest(now, opts) {
     await backfillScorers(seasonID, now, todayYmd);
     await backfillAnchors(seasonID, now, todayYmd);
     playerSummary = await backfillPlayers(seasonID, now, todayYmd, started);
+    try {
+      const seeded = await seedScorers(seasonID, now, started);
+      if (seeded) playerSummary.push('scorer-seed:' + seeded.cursor + '/' + seeded.players);
+    } catch (err) {
+      const why = (err && err.message) || String(err);
+      logger.error('scorer seed failed: ' + why, { reason: why });
+    }
     await writeCoverage(seasonID, now);
   }
 
