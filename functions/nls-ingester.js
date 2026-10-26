@@ -822,33 +822,35 @@ async function backfillPlayers(seasonID, now, todayYmd, runStarted) {
           ledgers[r.id] = await read('players/' + seasonID + '/matches/' + r.id);
         }));
 
-        const due = finished.filter((r) => {
-          const l = ledgers[r.id];
-          if (!l) return true;
-          if (l.complete) return false;
-          return now - (l.writtenAt || 0) >= PLAYER_RETRY_MS;
-        });
+        const due = finished.filter((r) => P.isDue(ledgers[r.id], now, PLAYER_RETRY_MS));
 
         let errors = 0;
         let written = 0;
         await mapPool(due, 4, async (r) => {
+          const prev = ledgers[r.id];
           try {
             const d = T.shapeDetail(await F.fetchDetail(r.id, r.comp), now);
-            if (!d) { errors += 1; return; }
-            const built = await writePlayerMatch(seasonID, d, ledgers[r.id], now);
-            ledgers[r.id] = { complete: built.complete };
+            if (!d) throw new Error('detail could not be shaped');
+            const built = await writePlayerMatch(seasonID, d, prev, now);
+            ledgers[r.id] = { complete: built.complete, attempts: ((prev && prev.attempts) || 0) + 1 };
             written += 1;
           } catch (err) {
             errors += 1;
+            /* Recorded, so the retry interval applies — without this a broken
+               match is refetched every hour and its day never closes. */
+            const entry = P.failureLedger(prev, r.id, key, now, err && err.message);
+            ledgers[r.id] = entry;
+            try {
+              await db().ref(ROOT + '/players/' + seasonID + '/matches/' + r.id).set(entry);
+            } catch (e) { /* the next run simply tries again */ }
           }
         });
         if (due.length) worked += 1;
 
-        const allComplete = finished.every((r) => ledgers[r.id] && ledgers[r.id].complete);
-        /* Done when every team sheet is in, or when the day is too old for one
-           to arrive — but never while a fetch is failing, or the day would be
-           closed on matches it never managed to read. */
-        if (!errors && (allComplete || ymd < giveUpBefore)) {
+        /* Done when every team sheet is in; or, once the day is past the
+           retry window, when every match has had its look — a missing sheet
+           once, a failing fetch MAX_FAILED_ATTEMPTS times (nls/players.js). */
+        if (P.dayClosed(ledgers, finished.map((r) => r.id), ymd, giveUpBefore)) {
           await db().ref(ROOT + '/meta/player-backfill/' + key + '/days/' + ymd).set(true);
           finishedDays += 1;
         }

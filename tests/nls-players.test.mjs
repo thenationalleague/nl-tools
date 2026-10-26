@@ -171,6 +171,36 @@ test('rows carry the match context a preview needs without a second read', () =>
   assert.equal(r.home, false);
 });
 
+test('a failed fetch is recorded, and is not due again inside the retry window', () => {
+  const six = 6 * 3600 * 1000;
+  const f = P.failureLedger(null, 'g1', 'north', NOW, 'upstream HTTP 503');
+  assert.equal(f.complete, false);
+  assert.equal(f.attempts, 1);
+  assert.equal(f.lastError, 'upstream HTTP 503');
+  assert.equal(P.isDue(f, NOW + six - 1, six), false, 'no hourly refetch of a broken match');
+  assert.equal(P.isDue(f, NOW + six, six), true);
+  assert.equal(P.isDue(null, NOW, six), true);
+  assert.equal(P.isDue({ complete: true }, NOW, six), false);
+  // A second failure keeps the rows already written for this match.
+  const g = P.failureLedger({ pids: { p1: true }, attempts: 1 }, 'g1', 'north', NOW, 'x');
+  assert.equal(g.attempts, 2);
+  assert.deepEqual(g.pids, { p1: true });
+});
+
+test('an old day closes on a missing sheet at once, on a failing fetch only after three tries', () => {
+  const old = '2026-09-01', cut = '2026-10-17', recent = '2026-10-20';
+  const done = { complete: true };
+  const noSheet = { complete: false, attempts: 1 };
+  const failed1 = { complete: false, attempts: 1, lastError: 'x' };
+  const failed3 = { complete: false, attempts: 3, lastError: 'x' };
+  assert.equal(P.dayClosed({ a: done, b: done }, ['a', 'b'], recent, cut), true, 'all complete closes any day');
+  assert.equal(P.dayClosed({ a: done, b: noSheet }, ['a', 'b'], recent, cut), false, 'a recent day waits for its sheets');
+  assert.equal(P.dayClosed({ a: done, b: noSheet }, ['a', 'b'], old, cut), true, 'an old day stops waiting');
+  assert.equal(P.dayClosed({ a: done, b: failed1 }, ['a', 'b'], old, cut), false, 'one transient failure must not close a backfill day');
+  assert.equal(P.dayClosed({ a: done, b: failed3 }, ['a', 'b'], old, cut), true);
+  assert.equal(P.dayClosed({ a: done }, ['a', 'b'], old, cut), false, 'a match never attempted keeps the day open');
+});
+
 test('ymdMinusDays crosses a month boundary', () => {
   assert.equal(typeof ymdMinusDays, 'function');
   assert.equal(ymdMinusDays('2026-11-03', 7), '2026-10-27');

@@ -222,6 +222,45 @@ function ledgerEntry(detail, built, now, attempts) {
   };
 }
 
+/* ---- Retry bookkeeping (pure, so the closing rules are testable) ----------
+
+   Two different reasons a match is not complete, and they get different
+   treatment on an OLD day (past the retry window):
+     - fetched, but a team sheet is missing → one look is enough; a sheet that
+       has not appeared in a week is not coming;
+     - the fetch itself failed (lastError set) → try MAX_FAILED_ATTEMPTS times,
+       spaced by the retry interval, so a transient outage during the season
+       backfill cannot close a day on matches it never read.
+   A failure writes a ledger entry too, which is what stops a broken match
+   being refetched every hour for ever: the retry interval applies to it. */
+const MAX_FAILED_ATTEMPTS = 3;
+
+function isDue(ledger, now, retryMs) {
+  if (!ledger) return true;
+  if (ledger.complete) return false;
+  return now - (ledger.writtenAt || 0) >= retryMs;
+}
+
+function failureLedger(prev, matchID, compKey, now, message) {
+  return Object.assign({}, prev || {}, {
+    matchID: matchID,
+    compKey: compKey,
+    complete: false,
+    attempts: ((prev && prev.attempts) || 0) + 1,
+    writtenAt: now,
+    lastError: String(message || 'unknown').slice(0, 200),
+  });
+}
+
+/* ledgers: { matchID: entry|null } for every FINISHED match of the day. */
+function dayClosed(ledgers, matchIDs, ymd, giveUpBefore) {
+  const all = matchIDs.map((id) => ledgers[id] || null);
+  if (all.every((l) => l && l.complete)) return true;
+  if (!(ymd < giveUpBefore)) return false;
+  return all.every((l) => l && (l.complete || !l.lastError ||
+    (l.attempts || 0) >= MAX_FAILED_ATTEMPTS));
+}
+
 /* The retry cut-off is a UTC calendar date, matching the {ymd} the calendar
    and the day lists use. */
 function ymdMinusDays(ymd, days) {
@@ -231,4 +270,5 @@ function ymdMinusDays(ymd, days) {
 }
 
 module.exports = { buildPlayerRows, ledgerEntry, hasExtraTime, ymdMinusDays,
+  isDue, failureLedger, dayClosed, MAX_FAILED_ATTEMPTS,
   REGULATION, WITH_EXTRA_TIME };
