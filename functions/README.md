@@ -228,10 +228,13 @@ reads each competition's season list (one request each; the EFL host 404s the
 `includePopulatedDates` query the NLS backfill uses), groups finished matches
 by UTC day, and builds past matchdays oldest first across all five
 competitions — up to 150 detail fetches inside a 200-second budget per run, so
-a season's ~1,900 matches rebuild in about fourteen runs. Days close when every
-team sheet is complete and no result is still outstanding, or once a week old;
-a day is never closed while a fetch is failing. Incomplete sheets are retried
-at most every six hours.
+a season's ~1,900 matches rebuild in about fourteen runs. Closing and retries use
+the same helpers as the NLS backfill (`nls/players.js` `isDue`,
+`failureLedger`, `dayClosed`): a failed fetch writes a ledger entry with
+`lastError`, so it is retried at most every six hours rather than hourly; a day
+closes when every team sheet is complete, or once a week old when every match
+has had its look (a failed fetch three times). A fresh day with a result still
+not entered stays open.
 
 | Path under `efl/` | Holds |
 |---|---|
@@ -245,8 +248,10 @@ at most every six hours.
 Player IDs are shared with the NLS feed — the same person has the same
 `playerID` in both (probed 26/10/2026: 95 of 97 shared names matched; the two
 that did not were different people), so `efl/` and `nls/` rows for one ID are
-one career. Cup ties settled by a shootout straight after 90 minutes are
-counted as 90-minute matches, not 120 (`efl/backfill.js`). Shaping goes through
+one career. Extra time is read from the evidence the feed carries — `extraScore` set
+(0 included), an extra-time event period, or an extra resultType — so a cup
+tie settled by a shootout straight after 90 minutes counts as 90, and one that
+went to extra time counts as 120 (`efl/backfill.js`, probed 26/10/2026). Shaping goes through
 `nls/transform.js` with the EFL competition map passed in; NLS shaping is
 unchanged. Covered by `tests/efl-players.test.mjs`.
 

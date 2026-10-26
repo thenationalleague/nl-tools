@@ -157,6 +157,35 @@ test('a tie that went to extra time keeps 120 minutes', () => {
   assert.equal(B.buildRows(d, NOW).rows.hg12_1.minutes, 120);
 });
 
+test('extra time with no goals in it (extraScore 0) then penalties is 120 minutes', () => {
+  /* The 2024/25 League One play-off final shape: extraScore 0 on both sides. */
+  const d = T.shapeDetail(detail('g13', { comp: 11, resultType: 'PenaltyShootout', extraScore: 0 }), NOW, EF.COMPETITIONS);
+  assert.equal(B.wentToExtraTime(d), true);
+  assert.equal(B.buildRows(d, NOW).rows.hg13_1.minutes, 120);
+});
+
+test('an extra-time event period means 120 even with no extraScore or extra resultType', () => {
+  for (const period of ['ExtraSecondHalf', '3', '4']) {
+    const raw = detail('g14', { comp: 10, resultType: 'Aggregate',
+      subs: [{ eventMinute: 100, eventPeriod: period, formattedEventTime: "100'",
+        substitutionEvents: { subOnID: 'hsg14', subOffID: 'hg14_9' } }] });
+    const d = T.shapeDetail(raw, NOW, EF.COMPETITIONS);
+    assert.equal(B.wentToExtraTime(d), true, period);
+    const rows = B.buildRows(d, NOW).rows;
+    assert.equal(rows.hg14_1.minutes, 120, period);
+    assert.equal(rows.hsg14.minutes, 20, period);
+  }
+});
+
+test('stoppage time past 100 minutes in normal periods is not extra time', () => {
+  const raw = detail('g15', { comp: 7, resultType: 'PenaltyShootout',
+    subs: [{ eventMinute: 102, eventPeriod: 'SecondHalf', formattedEventTime: "90'+12'",
+      substitutionEvents: { subOnID: 'hsg15', subOffID: 'hg15_9' } }] });
+  const d = T.shapeDetail(raw, NOW, EF.COMPETITIONS);
+  assert.equal(B.wentToExtraTime(d), false);
+  assert.equal(B.buildRows(d, NOW).rows.hg15_1.minutes, 90);
+});
+
 /* ── planning ──────────────────────────────────────────────────────────── */
 
 test('season boundary: June belongs to the next season', () => {
@@ -259,6 +288,63 @@ test('a failing fetch on a week-old day still does not close it', async () => {
   const store = memoryStore();
   const feed = fakeFeed({ 12: [listRow('g55', 12, '2026-09-01 14:00:00')] }, {});
   await B.runBackfill({ store, feed, now: NOW, todayYmd: TODAY, seasonID: 2026 });
+  assert.equal(await store.read('meta/player-backfill/league_two/days/2026-09-01'), null);
+});
+
+test('a failed fetch writes a ledger entry and is not due again within six hours', async () => {
+  const store = memoryStore();
+  const feed = fakeFeed({ 12: [listRow('g70', 12, '2026-10-24 14:00:00')] }, {});
+  await B.runBackfill({ store, feed, now: NOW, todayYmd: TODAY, seasonID: 2026 });
+  const l = await store.read('players/2026/matches/g70');
+  assert.equal(l.matchID, 'g70');
+  assert.equal(l.compKey, 'league_two');
+  assert.equal(l.complete, false);
+  assert.equal(l.attempts, 1);
+  assert.equal(l.writtenAt, NOW);
+  assert.match(l.lastError, /no detail g70/);
+  assert.ok(l.lastError.length <= 200);
+  await B.runBackfill({ store, feed, now: NOW + 3600e3, todayYmd: TODAY, seasonID: 2026 });
+  assert.equal(feed.calls.detail, 1, 'not refetched within six hours');
+  await B.runBackfill({ store, feed, now: NOW + B.RETRY_MS, todayYmd: TODAY, seasonID: 2026 });
+  assert.equal(feed.calls.detail, 2, 'refetched after six hours');
+  assert.equal((await store.read('players/2026/matches/g70')).attempts, 2);
+});
+
+test('a failure keeps earlier pids; a later success replaces the entry without lastError', async () => {
+  const store = memoryStore();
+  await store.update({ 'players/2026/matches/g71': { matchID: 'g71', complete: false, attempts: 1,
+    writtenAt: NOW - B.RETRY_MS, pids: { old1: true } } });
+  const feed = fakeFeed({ 12: [listRow('g71', 12, '2026-10-24 14:00:00')] }, {});
+  await B.runBackfill({ store, feed, now: NOW, todayYmd: TODAY, seasonID: 2026 });
+  let l = await store.read('players/2026/matches/g71');
+  assert.deepEqual(l.pids, { old1: true });
+  assert.equal(l.attempts, 2);
+  feed.fetchDetail = async () => detail('g71');
+  await B.runBackfill({ store, feed, now: NOW + B.RETRY_MS, todayYmd: TODAY, seasonID: 2026 });
+  l = await store.read('players/2026/matches/g71');
+  assert.equal(l.complete, true);
+  assert.equal(l.attempts, 3);
+  assert.equal(l.lastError, undefined);
+  assert.equal(l.pids.old1, undefined);
+});
+
+test('a week-old day closes after three failures', async () => {
+  const store = memoryStore();
+  const feed = fakeFeed({ 12: [listRow('g72', 12, '2026-09-01 14:00:00')] }, {});
+  for (let i = 0; i < 3; i++) {
+    await B.runBackfill({ store, feed, now: NOW + i * B.RETRY_MS, todayYmd: TODAY, seasonID: 2026 });
+    const closed = await store.read('meta/player-backfill/league_two/days/2026-09-01');
+    assert.equal(closed, i < 2 ? null : true, 'after failure ' + (i + 1));
+  }
+  assert.equal(feed.calls.detail, 3);
+});
+
+test('a fresh failure on a week-old day does not close it, even beside complete matches', async () => {
+  const store = memoryStore();
+  const feed = fakeFeed({ 12: [listRow('g73', 12, '2026-09-01 14:00:00'), listRow('g74', 12, '2026-09-01 14:00:00')] },
+    { g74: detail('g74', { ko: '2026-09-01 14:00:00' }) });
+  await B.runBackfill({ store, feed, now: NOW, todayYmd: TODAY, seasonID: 2026 });
+  assert.equal((await store.read('players/2026/matches/g74')).complete, true);
   assert.equal(await store.read('meta/player-backfill/league_two/days/2026-09-01'), null);
 });
 

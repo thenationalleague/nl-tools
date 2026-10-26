@@ -60,25 +60,37 @@ function seasonOf(date) {
   return d.getUTCMonth() >= 5 ? d.getUTCFullYear() : d.getUTCFullYear() - 1;
 }
 
-/* EFL cup ties level after 90 minutes go straight to penalties — there is no
-   extra time in the Carabao Cup before the semi-final second legs, nor in the
-   EFL Trophy. nls/players.js reads any penalty result as extra time and would
-   bill every starter 120 minutes. Probed 26/10/2026: shootout ties carry
-   resultType "PenaltyShootout" with matchTeams[].extraScore empty and no
-   event in an extra-time period, so that is the test. A tie that genuinely
-   went to extra time keeps its 120. */
-function straightToPenalties(detail) {
-  if (!detail || !/penalt/i.test(String(detail.resultType || ''))) return false;
-  const extraScore = [detail.home, detail.away].some((s) => s && s.extraScore != null);
+/* Extra time, decided on the evidence the EFL feed actually carries rather
+   than on resultType alone. nls/players.js reads any penalty result as extra
+   time, but EFL cup ties level after 90 minutes mostly go straight to
+   penalties, and an aggregate tie can go to extra time with no event in it.
+   Probed 26/10/2026 across every non-normal result and every play-off match
+   in 2023/24–2025/26 (163 matches):
+     - when extra time was played, matchTeams[].extraScore is set on both
+       sides — 0 when nobody scored in it (the 2023/24 League Two and 2024/25
+       League One play-off finals, both decided on penalties after extra
+       time) — and events carry eventPeriod ExtraFirstHalf / ExtraSecondHalf
+       or the numeric periods 3 / 4;
+     - when a tie went straight to penalties, extraScore is null and no
+       event is in an extra-time period, whatever stoppage time ran to. */
+function wentToExtraTime(detail) {
+  if (!detail) return false;
+  if (/extra/i.test(String(detail.resultType || ''))) return true;
+  if ([detail.home, detail.away].some((s) => s && s.extraScore != null)) return true;
   const evs = [].concat(detail.goals || [], detail.bookings || [], detail.subs || []);
-  const extraEvent = evs.some((e) => /extra/i.test(String(e.period || '')));
-  return !extraScore && !extraEvent;
+  return evs.some((e) => /extra|^[34]$/i.test(String(e.period == null ? '' : e.period)));
 }
 
+function straightToPenalties(detail) {
+  return Boolean(detail) && /penalt/i.test(String(detail.resultType || '')) && !wentToExtraTime(detail);
+}
+
+/* buildPlayerRows decides 90 or 120 from resultType and event periods, so the
+   EFL evidence is handed to it as a resultType it already understands. */
 function buildRows(detail, now) {
-  const input = straightToPenalties(detail)
-    ? Object.assign({}, detail, { resultType: 'NormalResult' })
-    : detail;
+  let input = detail;
+  if (wentToExtraTime(detail)) input = Object.assign({}, detail, { resultType: 'AfterExtraTime' });
+  else if (straightToPenalties(detail)) input = Object.assign({}, detail, { resultType: 'NormalResult' });
   const built = P.buildPlayerRows(input, now);
   Object.values(built.rows).forEach((r) => { r.source = 'efl'; });
   return built;
@@ -115,12 +127,6 @@ function planDays(byComp, doneByComp, todayYmd) {
   return plan.sort((a, b) => a.ymd.localeCompare(b.ymd) || a.key.localeCompare(b.key));
 }
 
-function isDue(ledger, now) {
-  if (!ledger) return true;
-  if (ledger.complete) return false;
-  return now - (ledger.writtenAt || 0) >= RETRY_MS;
-}
-
 async function mapPool(items, limit, fn) {
   let cursor = 0;
   const workers = new Array(Math.min(limit, items.length)).fill(0).map(async () => {
@@ -151,10 +157,11 @@ async function writeMatch(store, seasonID, detail, prevLedger, now) {
   Object.keys((prevLedger && prevLedger.pids) || {}).forEach((pid) => {
     if (!built.rows[pid]) updates[base + 'apps/' + pid + '/' + detail.id] = null;
   });
-  updates[base + 'matches/' + detail.id] =
-    P.ledgerEntry(detail, built, now, ((prevLedger && prevLedger.attempts) || 0) + 1);
+  /* Replaces the whole entry, so a previous lastError goes with it. */
+  const ledger = P.ledgerEntry(detail, built, now, ((prevLedger && prevLedger.attempts) || 0) + 1);
+  updates[base + 'matches/' + detail.id] = ledger;
   await store.update(updates);
-  return built;
+  return ledger;
 }
 
 /**
@@ -197,30 +204,44 @@ async function runBackfill({ store, feed, now, todayYmd, seasonID, started, cloc
     await Promise.all(day.finished.map(async (r) => {
       ledgers[r.id] = await store.read('players/' + seasonID + '/matches/' + r.id);
     }));
-    const due = day.finished.filter((r) => isDue(ledgers[r.id], now));
+    const due = day.finished.filter((r) => P.isDue(ledgers[r.id], now, RETRY_MS));
 
     let dayErrors = 0;
     let dayWritten = 0;
     await mapPool(due, CONCURRENCY, async (r) => {
       try {
         const d = T.shapeDetail(await feed.fetchDetail(r.id), now, EF.COMPETITIONS);
-        if (!d) { dayErrors += 1; return; }
-        const built = await writeMatch(store, seasonID, d, ledgers[r.id], now);
-        ledgers[r.id] = { complete: built.complete };
+        if (!d) throw new Error('detail could not be shaped');
+        ledgers[r.id] = await writeMatch(store, seasonID, d, ledgers[r.id], now);
         dayWritten += 1;
       } catch (err) {
         dayErrors += 1;
+        /* Recorded, so the six-hour retry applies instead of a refetch every
+           hour; earlier pids are kept so a corrected sheet can still remove
+           their rows (nls/players.js failureLedger). */
+        const entry = P.failureLedger(ledgers[r.id], r.id, key, now, err && err.message);
+        try {
+          await store.update({ ['players/' + seasonID + '/matches/' + r.id]: entry });
+          ledgers[r.id] = entry;
+        } catch (writeErr) {
+          /* The store itself is failing; leave the ledger as it was, so
+             the match stays due and the day stays open. */
+        }
       }
     });
     fetched += due.length;
     written += dayWritten;
     errors += dayErrors;
 
-    const allComplete = day.finished.every((r) => ledgers[r.id] && ledgers[r.id].complete);
-    const tooOld = ymd < giveUpBefore;
-    /* Never close a day while a fetch is failing, or it would be closed on
-       matches it never read. */
-    if (!dayErrors && (tooOld || (allComplete && !day.unsettled))) {
+    /* The shared closing rule (nls/players.js dayClosed): every team sheet
+       in, or — past the retry window — every match has had its look, a
+       failing fetch MAX_FAILED_ATTEMPTS times. The one EFL addition: a fresh
+       day with a result still not entered stays open, or that match would
+       never be built. */
+    const ids = day.finished.map((r) => r.id);
+    const closable = P.dayClosed(ledgers, ids, ymd, giveUpBefore) &&
+      (!day.unsettled || ymd < giveUpBefore);
+    if (closable) {
       await store.update({ ['meta/player-backfill/' + key + '/days/' + ymd]: true });
       closed[key] = (closed[key] || 0) + 1;
     }
@@ -264,6 +285,6 @@ async function runBackfill({ store, feed, now, todayYmd, seasonID, started, cloc
 
 module.exports = {
   ROOT, MATCHES_PER_RUN, TIME_BUDGET_MS, RETRY_MS, RETRY_DAYS,
-  seasonOf, straightToPenalties, buildRows, groupByDay, planDays, isDue,
+  seasonOf, wentToExtraTime, straightToPenalties, buildRows, groupByDay, planDays,
   writeMatch, runBackfill,
 };
