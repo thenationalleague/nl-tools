@@ -222,6 +222,43 @@ function ledgerEntry(detail, built, now, attempts) {
   };
 }
 
+/**
+ * One player's scorer entry for one competition, recomputed from his season
+ * rows — never incremented. The live tally in derive.js counts goals as it
+ * notices them, and North/South goals entered after the whistle slip past it
+ * (a Darlington hat-trick on 24/10/2026 was in the feed and not in the tally).
+ * Rows are rebuilt whole the day after, so a sum over them is right by
+ * construction and a corrected match corrects the table.
+ *
+ * Null when he has no goals or own goals in this competition, so the caller
+ * deletes his entry rather than keeping a zero.
+ */
+function scorerEntry(rows, compKey, now) {
+  const own = (rows || []).filter((r) => r && r.compKey === compKey);
+  let goals = 0, penalties = 0, ownGoals = 0, apps = 0, minutes = 0, minutesKnown = true;
+  let name = null, pid = null;
+  const teams = {};
+  own.forEach((r) => {
+    pid = pid || r.playerID;
+    if (r.name) name = r.name;
+    goals += r.goals || 0;
+    penalties += r.penalties || 0;
+    ownGoals += r.ownGoals || 0;
+    if (r.role === 'start' || r.role === 'sub' || r.role === 'unlisted') {
+      apps += 1;
+      if (r.minutes == null) minutesKnown = false; else minutes += r.minutes;
+    }
+    if (r.teamID && (r.goals || 0) > 0) {
+      const t = teams[r.teamID] || { teamID: r.teamID, teamName: r.teamName || null, goals: 0 };
+      t.goals += r.goals;
+      teams[r.teamID] = t;
+    }
+  });
+  if (!goals && !ownGoals) return null;
+  return { playerID: pid, name: name, compKey: compKey, goals, penalties, ownGoals,
+    apps, minutes: minutesKnown ? minutes : null, teams, updatedAt: now };
+}
+
 /* ---- Retry bookkeeping (pure, so the closing rules are testable) ----------
 
    Two different reasons a match is not complete, and they get different
@@ -270,5 +307,5 @@ function ymdMinusDays(ymd, days) {
 }
 
 module.exports = { buildPlayerRows, ledgerEntry, hasExtraTime, ymdMinusDays,
-  isDue, failureLedger, dayClosed, MAX_FAILED_ATTEMPTS,
+  isDue, failureLedger, dayClosed, MAX_FAILED_ATTEMPTS, scorerEntry,
   REGULATION, WITH_EXTRA_TIME };

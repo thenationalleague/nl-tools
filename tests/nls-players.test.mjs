@@ -205,3 +205,30 @@ test('ymdMinusDays crosses a month boundary', () => {
   assert.equal(typeof ymdMinusDays, 'function');
   assert.equal(ymdMinusDays('2026-11-03', 7), '2026-10-27');
 });
+
+test('a scorer entry is the sum of his rows in that competition only', () => {
+  const r = (matchID, compKey, teamID, goals, extra = {}) => Object.assign({
+    playerID: 'p1', name: 'Player p1', matchID, compKey, teamID, teamName: 'Club ' + teamID,
+    role: 'start', minutes: 90, goals, penalties: 0, ownGoals: 0 }, extra);
+  const rows = [
+    r('m1', 'north', 't1', 1),
+    r('m2', 'north', 't1', 3, { penalties: 1 }),
+    r('m3', 'north', 't2', 1, { role: 'sub', minutes: 20 }),
+    r('m4', 'cup', 't2', 2),
+    r('m5', 'north', 't2', 0, { role: 'unused', minutes: 0 }),
+  ];
+  const e = P.scorerEntry(rows, 'north', NOW);
+  assert.equal(e.goals, 5, 'the cup brace is another competition');
+  assert.equal(e.penalties, 1);
+  assert.equal(e.apps, 3, 'an unused sub is not an appearance');
+  assert.equal(e.minutes, 200);
+  assert.deepEqual(Object.keys(e.teams).sort(), ['t1', 't2']);
+  assert.equal(e.teams.t1.goals, 4);
+  assert.equal(P.scorerEntry(rows, 'cup', NOW).goals, 2);
+  assert.equal(P.scorerEntry(rows, 'south', NOW), null, 'no rows in a competition → no entry');
+  const og = P.scorerEntry([r('m6', 'nl', 't1', 0, { ownGoals: 1 })], 'nl', NOW);
+  assert.equal(og.goals, 0);
+  assert.equal(og.ownGoals, 1, 'an own-goal scorer keeps an entry so the gap can be explained');
+  const unlisted = P.scorerEntry([r('m7', 'nl', 't1', 1, { role: 'unlisted', minutes: null })], 'nl', NOW);
+  assert.equal(unlisted.minutes, null, 'an unknown minute makes the total unknown, not short');
+});

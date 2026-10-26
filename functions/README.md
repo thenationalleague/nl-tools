@@ -160,6 +160,7 @@ backfill — four matchdays per competition per hour, inside a 150-second budget
 |---|---|
 | `apps/<playerID>/<matchID>` | The row: team, opponent, home/away, result, `role` (`start` / `sub` / `unused` / `unlisted`), `on`, `off`, `minutes`, goals, penalties, own goals, cards, `sentOff`. A player's season is one read. |
 | `squads/<teamID>/<playerID>` | Name. Every club a player has appeared for, so mid-season moves are visible. |
+| `scorers/<compKey>/<playerID>` | The scorer table (v0.5.0): goals, penalties, own goals, apps and minutes in that competition, with goals split per club. Recomputed from the player's rows whenever a match's rows are written, so it is never short of a goal entered late — unlike the incremental `derived/scorers` tally. A one-off walk (`meta/player-scorers/<season>`) fills it for rows written before v0.5.0. |
 | `matches/<matchID>` | The ledger: both sides and the score, `complete` (both XIs named), `attempts`, and the `pids` written, so a corrected sheet can remove a row. |
 
 Minutes are on the regulation clock (90, or 120 with extra time) — stoppage
