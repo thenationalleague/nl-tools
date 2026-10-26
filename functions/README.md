@@ -143,6 +143,27 @@ event timestamp to correct against, so each witnessed list transition is
 appended to `anchors/<matchID>/transitions` as `{ from, to, observedUTC }`:
 the full state history of a match, in one node, under the same read grant.
 
+**Player rows** (v0.4.0) — one row per player per finished match, built on the
+hourly run for **past matchdays only**, by the same bounded, resumable pattern
+as the two backfills above (ledger at `meta/player-backfill/*`). Past days only
+because North and South team sheets arrive after the whistle, if at all; a
+match whose sheets are still incomplete is retried at most every six hours for
+a week, then its day is closed. The first runs after deploy are the season
+backfill — four matchdays per competition per hour, inside a 150-second budget.
+
+| Path under `nls/players/<season>/` | Holds |
+|---|---|
+| `apps/<playerID>/<matchID>` | The row: team, opponent, home/away, result, `role` (`start` / `sub` / `unused` / `unlisted`), `on`, `off`, `minutes`, goals, penalties, own goals, cards, `sentOff`. A player's season is one read. |
+| `squads/<teamID>/<playerID>` | Name. Every club a player has appeared for, so mid-season moves are visible. |
+| `matches/<matchID>` | The ledger: both sides and the score, `complete` (both XIs named), `attempts`, and the `pids` written, so a corrected sheet can remove a row. |
+
+Minutes are on the regulation clock (90, or 120 with extra time) — stoppage
+time is not counted, and `minutes` is null when the role makes it unknowable.
+A missing row means the player was not involved; it never says why. Method
+and edge cases are in `nls/players.js`, covered by `tests/nls-players.test.mjs`.
+No rules entry exists for `players/` — the root is closed, so it is readable
+only by server-side identities (the NL Data MCP) until a staff tool needs it.
+
 ### One-time setup, in addition to the list above
 
 1. **Cross-project database access.** These are the only functions here that

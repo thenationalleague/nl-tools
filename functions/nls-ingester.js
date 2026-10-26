@@ -46,9 +46,20 @@
  *   nls/events.js     state → events, the thing that cannot be backfilled
  *   nls/anchors.js    synthetic kick-off records, corrected by events (pure)
  *   nls/derive.js     tables and scorers
+ *   nls/players.js    one row per player per match
  * This file orchestrates them and owns every RTDB write.
  *
  * CHANGELOG
+ *   26/10/2026  v0.4.0  Player rows: nls/players/<season>/apps/<playerID>/
+ *                       <matchID>, one per player per finished match —
+ *                       role (start/sub/unused/unlisted), minutes, goals,
+ *                       cards, opponent and result — plus a squads/ index
+ *                       and a per-match ledger. Built on the hourly run for
+ *                       past matchdays only, because tier 7 team sheets
+ *                       arrive late; incomplete sheets are retried for a
+ *                       week. The first runs are the season backfill. Takes
+ *                       over the per-player store the vidiprinter project's
+ *                       scorer_cache/match_cache were heading towards.
  *   19/08/2026  v0.3.0  The transition ledger: every witnessed list period
  *                       change — HalfTime, FullTime, Abandoned, the lot — is
  *                       appended to anchors/<matchID>/transitions as
@@ -86,8 +97,9 @@ const S = require('./nls/schedule');
 const E = require('./nls/events');
 const A = require('./nls/anchors');
 const D = require('./nls/derive');
+const P = require('./nls/players');
 
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 
 /* nls/ lives in nl-widgets, alongside the feed/ fixture cache and the fan
    widgets that will read it in step 2. Writing it into nl-tools would put the
@@ -732,6 +744,127 @@ async function backfillAnchors(seasonID, now, todayYmd) {
   return summary;
 }
 
+/**
+ * Player rows — one per player per finished match (nls/players.js has the
+ * row and why it exists).
+ *
+ * WHY IT RUNS ON PAST DAYS ONLY, AND NOT ON THE LIVE PATH
+ * North and South team sheets arrive after the whistle, if at all, and often
+ * well after the live path's post-match cooldown has stopped fetching. Rows
+ * built at full time would be missing the bench for most of two divisions.
+ * So rows are built the day after, by the same bounded, resumable pattern as
+ * the two backfills above — which also makes the first run the season
+ * backfill, with no separate entry point.
+ *
+ * A match whose team sheets are still incomplete is looked at again, at most
+ * every RETRY_MS, until the matchday is RETRY_DAYS old. After that the day is
+ * marked done: a lineup that has not appeared in a week is not coming.
+ *
+ * Layout under nls/players/<season>/:
+ *   apps/<playerID>/<matchID>  the row — a player's season is one read
+ *   squads/<teamID>/<playerID> name — every club a player has appeared for
+ *   matches/<matchID>          the ledger — complete flag, attempts, pids
+ * Day progress: meta/player-backfill/<compKey>/days/<ymd>, /pending.
+ */
+const PLAYER_DAYS_PER_RUN = 4;
+const PLAYER_RETRY_MS = 6 * 60 * 60 * 1000;
+const PLAYER_RETRY_DAYS = 7;
+const PLAYER_TIME_BUDGET_MS = 150 * 1000;
+
+async function writePlayerMatch(seasonID, detail, prevLedger, now) {
+  const built = P.buildPlayerRows(detail, now);
+  const base = 'players/' + seasonID + '/';
+  const updates = {};
+  Object.values(built.rows).forEach((r) => {
+    updates[base + 'apps/' + r.playerID + '/' + detail.id] = r;
+    if (r.teamID) updates[base + 'squads/' + r.teamID + '/' + r.playerID] = r.name || r.playerID;
+  });
+  /* A corrected team sheet can REMOVE a player. Without this his phantom
+     appearance would sit in his season for ever. */
+  Object.keys((prevLedger && prevLedger.pids) || {}).forEach((pid) => {
+    if (!built.rows[pid]) updates[base + 'apps/' + pid + '/' + detail.id] = null;
+  });
+  updates[base + 'matches/' + detail.id] =
+    P.ledgerEntry(detail, built, now, ((prevLedger && prevLedger.attempts) || 0) + 1);
+  await updateMulti(updates);
+  return built;
+}
+
+async function backfillPlayers(seasonID, now, todayYmd, runStarted) {
+  const summary = [];
+  const giveUpBefore = P.ymdMinusDays(todayYmd, PLAYER_RETRY_DAYS);
+  const outOfTime = () => Date.now() - runStarted > PLAYER_TIME_BUDGET_MS;
+
+  for (const compId of T.COMP_IDS) {
+    const key = T.compKeyOf(compId);
+    try {
+      const cal = await read('meta/calendar/' + key);
+      if (!cal || !cal.days) continue;
+      const done = (await read('meta/player-backfill/' + key)) || {};
+      const doneDays = done.days || {};
+      const pending = Object.keys(cal.days).sort()
+        .filter((d) => d < todayYmd && !doneDays[d]);
+      if (!pending.length) continue;
+
+      /* Only days that cost a fetch count against the budget, so a run of
+         recent days waiting out their retry window cannot starve older ones. */
+      let worked = 0;
+      let finishedDays = 0;
+      for (const ymd of pending) {
+        if (worked >= PLAYER_DAYS_PER_RUN || outOfTime()) break;
+
+        const listed = await F.fetchDayList(compId, seasonID, ymd);
+        const finished = listed.rows.map((m) => T.shapeIndexRow(m, now))
+          .filter((r) => r && r.finished);
+
+        const ledgers = {};
+        await Promise.all(finished.map(async (r) => {
+          ledgers[r.id] = await read('players/' + seasonID + '/matches/' + r.id);
+        }));
+
+        const due = finished.filter((r) => {
+          const l = ledgers[r.id];
+          if (!l) return true;
+          if (l.complete) return false;
+          return now - (l.writtenAt || 0) >= PLAYER_RETRY_MS;
+        });
+
+        let errors = 0;
+        let written = 0;
+        await mapPool(due, 4, async (r) => {
+          try {
+            const d = T.shapeDetail(await F.fetchDetail(r.id, r.comp), now);
+            if (!d) { errors += 1; return; }
+            const built = await writePlayerMatch(seasonID, d, ledgers[r.id], now);
+            ledgers[r.id] = { complete: built.complete };
+            written += 1;
+          } catch (err) {
+            errors += 1;
+          }
+        });
+        if (due.length) worked += 1;
+
+        const allComplete = finished.every((r) => ledgers[r.id] && ledgers[r.id].complete);
+        /* Done when every team sheet is in, or when the day is too old for one
+           to arrive — but never while a fetch is failing, or the day would be
+           closed on matches it never managed to read. */
+        if (!errors && (allComplete || ymd < giveUpBefore)) {
+          await db().ref(ROOT + '/meta/player-backfill/' + key + '/days/' + ymd).set(true);
+          finishedDays += 1;
+        }
+        if (due.length) summary.push(key + '/' + ymd + ':' + written + (errors ? '!' + errors : ''));
+      }
+
+      await db().ref(ROOT + '/meta/player-backfill/' + key + '/pending')
+        .set(Math.max(0, pending.length - finishedDays));
+    } catch (err) {
+      const why = (err && err.message) || String(err);
+      logger.error('player backfill failed (' + key + '): ' + why, { compKey: key, reason: why });
+    }
+  }
+  return summary;
+}
+
 // ---------------------------------------------------------------------------
 // The run
 // ---------------------------------------------------------------------------
@@ -904,11 +1037,13 @@ async function runIngest(now, opts) {
      to do with tables. A competition with no live rows simply gets its
      official table with no overlay, which is correct. */
   const tableWrites = await writeTables(seasonID, indexResults, now, Boolean(options.hourly));
+  let playerSummary = [];
   if (options.hourly) {
     /* Backfill BEFORE coverage, so the gap the coverage flag reports is the
        real one rather than the catch-up still in progress. */
     await backfillScorers(seasonID, now, todayYmd);
     await backfillAnchors(seasonID, now, todayYmd);
+    playerSummary = await backfillPlayers(seasonID, now, todayYmd, started);
     await writeCoverage(seasonID, now);
   }
 
@@ -931,6 +1066,8 @@ async function runIngest(now, opts) {
     indexWrites: indexWrites,
     tablesWritten: tableWrites,
     scorersTouched: scorerTouches,
+    /* Hourly runs only — empty on the minute tick, which never builds rows. */
+    playerDays: playerSummary,
     errorCount: failed.length,
     failedCompetitions: failed,
     failureReasons: failureReasons,
@@ -975,4 +1112,5 @@ exports.nlsIngestHourly = onSchedule(
   });
 
 /* Exported for tests and for a future manual backfill entry point. */
-exports._internals = { runIngest, ingestDetail, writeTables, writeScorers, VERSION };
+exports._internals = { runIngest, ingestDetail, writeTables, writeScorers,
+  backfillPlayers, VERSION };
