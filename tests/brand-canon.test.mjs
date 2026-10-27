@@ -273,31 +273,76 @@ test('.disclosure draws its own chevron and swaps it under [open]', () => {
     'the open state is a content swap — no transform, nothing for reduced-motion to catch');
 });
 
-/* ── Division identity (v2.42) ─────────────────────────────────────────────
-   Promoted from club-directory/meta-reference's .mr-div--* pills, the only
-   mapper verified to carry the navy/amber/green pairing its CANON CANDIDATE
-   flag recorded. The tokens exist to settle that pairing: fixtures' pastel
-   row washes and vidiprinter's embed palette already tell three different
-   colour stories for the same three divisions, and a fourth invention is
-   the failure these prevent. Aliases, not hex — a brand hue change must
-   flow through, exactly as --proj-1…6 do. */
+/* ── Competition identity (v2.72) ─────────────────────────────────────────
+   The media team's content plan colours: National orange, North yellow,
+   South blue, NL Cup purple, FA Cup pink-red, FA Trophy grey (Richard,
+   27/10/2026). They replace v2.42's navy / amber / green division colours,
+   which came from one reference page and disagreed with the plan the whole
+   department reads. Aliases, not hex, so a brand hue change flows through. */
 
-test('--div-* tokens exist and alias the settled division pairing', () => {
-  assert.match(rules, /--div-national:\s*var\(--navy\)/,
-    'National is navy — an alias, so a brand navy change flows through');
-  assert.match(rules, /--div-north:\s*var\(--amber\)/,
-    'North is amber');
-  assert.match(rules, /--div-south:\s*var\(--green\)/,
-    'South is green');
+const COMP = [
+  ['nat', 'amber'], ['nor', 'yellow'], ['sou', 'blue'],
+  ['nlc', 'purple'], ['fac', 'primary-400'], ['fat', 'navy-300'],
+];
+
+test('--comp-* tokens carry the content plan colours', () => {
+  for (const [code, hue] of COMP) {
+    assert.match(rules, new RegExp(`--comp-${code}:\\s*var\\(--${hue}\\)`),
+      `--comp-${code} is --${hue}, as in the content plan`);
+  }
 });
 
-test('the --div-* parent hues still carry the values the pairing settled on', () => {
-  /* The aliases only mean what the parents say. If a semantic hue is ever
-     retuned, this fails as a prompt to re-check the North dark-text ruling
-     (white on the amber does not read) rather than silently inheriting. */
-  assert.match(rules, /--navy:\s*#223b7c/);
-  assert.match(rules, /--amber:\s*#c96f15/);
-  assert.match(rules, /--green:\s*#1a7030/);
+test('--div-* names alias the three division hues, not the retired navy / green', () => {
+  assert.match(rules, /--div-national:\s*var\(--comp-nat\)/);
+  assert.match(rules, /--div-north:\s*var\(--comp-nor\)/);
+  assert.match(rules, /--div-south:\s*var\(--comp-sou\)/);
+  assert.doesNotMatch(rules, /--div-national:\s*var\(--navy\)/, 'v2.42 navy is retired');
+});
+
+/* ── Competition pill (v2.72) ──────────────────────────────────────────────
+   Promoted from the Content Plan tool's .cp-mpill. The ink is the
+   load-bearing part: North's yellow takes dark ink because coloured text on
+   the yellow pastel does not read, and "make every modifier use its own hue
+   as ink" is exactly the tidy-up that would break it. */
+
+test('.comp-pill wears each --comp-* hue as its edge, with readable ink', () => {
+  const ink = { nat: 'amber-deep', nor: 'text', sou: 'blue', nlc: 'purple', fac: 'primary', fat: 'text-muted' };
+  for (const [code] of COMP) {
+    const m = new RegExp(`\\n\\.comp-pill--${code}\\s*\\{([^}]*)\\}`).exec(rules);
+    assert.ok(m, `.comp-pill--${code} is present`);
+    assert.match(m[1], new RegExp(`--comp-pill-edge:\\s*var\\(--comp-${code}\\)`), `.comp-pill--${code} edges in --comp-${code}`);
+    assert.match(m[1], new RegExp(`--comp-pill-ink:\\s*var\\(--${ink[code]}\\)`), `.comp-pill--${code} takes --${ink[code]} ink`);
+  }
+});
+
+test('.comp-pill sits beside .pill at the same size, and is tokened', () => {
+  const base = ruleBody('.comp-pill');
+  const pill = ruleBody('.pill');
+  for (const prop of ['padding', 'font-size', 'letter-spacing', 'text-transform', 'white-space']) {
+    const want = new RegExp(`${prop}:\\s*([^;]+);`).exec(pill)?.[1];
+    assert.ok(want, `.pill states ${prop}`);
+    assert.equal(new RegExp(`${prop}:\\s*([^;]+);`).exec(base)?.[1], want,
+      `.comp-pill ${prop} matches .pill — the two share a row`);
+  }
+  assert.doesNotMatch(base, /\bborder:/, 'the edge is an inset shadow, so the pill is no taller than .pill');
+  const i = rules.indexOf('\n.comp-pill {');
+  const block = rules.slice(i, rules.indexOf('/* ===', i));
+  assert.doesNotMatch(block, /#[0-9a-fA-F]{3,8}\b|rgba?\(/, '.comp-pill uses tokens, not hex');
+});
+
+test('the Style Guide demos all six competitions with the component', () => {
+  const sg = readFileSync(join(REPO, 'style-guide/index.html'), 'utf8');
+  for (const [code] of COMP) {
+    assert.match(sg, new RegExp(`class="comp-pill comp-pill--${code}"`), `Style Guide shows .comp-pill--${code}`);
+  }
+  assert.doesNotMatch(sg, /div-pill/, 'the unreleased .div-pill name is gone');
+});
+
+test('meta-reference wears the canon pill, not its own .mr-div', () => {
+  const mr = readFileSync(join(REPO, 'club-directory/meta-reference.html'), 'utf8');
+  assert.doesNotMatch(mr, /\.mr-div[\w-]*\s*\{/, 'local division pill rules are deleted');
+  assert.doesNotMatch(mr, /class="mr-div/, 'and nothing renders them');
+  assert.match(mr, /comp-pill--/);
 });
 
 /* ── Shared yellow (v2.43) ─────────────────────────────────────────────────
