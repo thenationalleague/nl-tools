@@ -300,6 +300,59 @@ test('the --div-* parent hues still carry the values the pairing settled on', ()
   assert.match(rules, /--green:\s*#1a7030/);
 });
 
+/* ── Division pill (v2.72) ─────────────────────────────────────────────────
+   The tokens settled the colours; .div-pill settles the pill that wears them,
+   so tools stop drawing their own (meta-reference .mr-div--*, attendance
+   .comp-badge, matchday-live .mdl-match__div). The pairing rule is the
+   load-bearing part: North takes dark ink because white on the amber does
+   not read, and a "tidy-up" that makes all four modifiers white is exactly
+   the plausible edit that silently breaks it. */
+
+test('--div-cup aliases --purple, the NL Cup hue attendance already uses', () => {
+  assert.match(rules, /--div-cup:\s*var\(--purple\)/,
+    'NL Cup is purple — an alias, and the same hue as attendance --competition-nlc');
+  assert.match(rules, /--purple:\s*#6a1b9a/,
+    'the alias only means what --purple says; re-check the white-text pairing if it moves');
+});
+
+test('.div-pill wears each --div-* token with the pairing rule\'s ink', () => {
+  for (const [mod, ink] of [['national', 'white'], ['north', 'text'], ['south', 'white'], ['cup', 'white']]) {
+    /* Not ruleBody(): the modifiers are column-aligned like .pill--*, so the
+       selector is followed by padding spaces, not exactly one. */
+    const m = new RegExp(`\\n\\.div-pill--${mod}\\s*\\{([^}]*)\\}`).exec(rules);
+    assert.ok(m, `.div-pill--${mod} is present in nl-brand.css`);
+    const body = m[1];
+    assert.match(body, new RegExp(`background:\\s*var\\(--div-${mod}\\)`),
+      `.div-pill--${mod} sits on --div-${mod}`);
+    assert.match(body, new RegExp(`(^|[;{\\s])color:\\s*var\\(--${ink}\\)`),
+      `.div-pill--${mod} takes --${ink} ink`);
+  }
+});
+
+test('.div-pill sits beside .pill at the same size, and is tokened', () => {
+  const base = ruleBody('.div-pill');
+  const pill = ruleBody('.pill');
+  for (const prop of ['padding', 'font-size', 'letter-spacing', 'text-transform', 'white-space']) {
+    const want = new RegExp(`${prop}:\\s*([^;]+);`).exec(pill)?.[1];
+    assert.ok(want, `.pill states ${prop}`);
+    assert.equal(new RegExp(`${prop}:\\s*([^;]+);`).exec(base)?.[1], want,
+      `.div-pill ${prop} matches .pill — the two share a row`);
+  }
+  const i = rules.indexOf('\n.div-pill {');
+  const block = rules.slice(i, rules.indexOf('/* ===', i));
+  assert.doesNotMatch(block, /#[0-9a-fA-F]{3,8}\b|rgba?\(/, '.div-pill uses tokens, not hex');
+});
+
+test('the Style Guide demos the division pill with the component, not inline styles', () => {
+  const sg = readFileSync(join(REPO, 'style-guide/index.html'), 'utf8');
+  for (const mod of ['national', 'north', 'south', 'cup']) {
+    assert.match(sg, new RegExp(`class="div-pill div-pill--${mod}"`),
+      `Style Guide shows .div-pill--${mod}`);
+  }
+  assert.doesNotMatch(sg, /style="[^"]*background:var\(--div-/,
+    'no inline --div-* pill left in the Style Guide — it would be the next thing copied');
+});
+
 /* ── Shared yellow (v2.43) ─────────────────────────────────────────────────
    Promoted from identical locals in wellbeing (--wb-yellow) and
    wellbeing-map (--wm-yellow). The value is load-bearing: #efb700 was
