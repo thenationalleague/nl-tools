@@ -1,142 +1,55 @@
 <!DOCTYPE html>
 <!--
   NL Tools — NLServices API Monitor
-  Version: v0.15 (19/08/2026)
+  Version: v1.0 (27/10/2026)
+  v1.0 — Rebuilt to read NLS itself. Every view now calls the NLServices API
+         from the browser and shows what NLS says right now, gaps included;
+         nothing here comes from our own store except one status line for
+         our ingester. Four jobs, four tabs: Live (any matchday, refreshing
+         while a match is in play, with each event's upstream entry time),
+         Quality (per-match gaps to chase with Stats Perform: goals with no
+         scorer, short team sheets, missing gate, referee or formation — one
+         matchday or a whole division's season, exportable), Feed health
+         (every endpoint probed: status, response time, rows, the fields we
+         rely on, table freshness) and Raw (any NLS path, as-is). The old
+         Tables & scorers tab is gone: it showed our ingester's tally, which
+         is neither NLS as-is nor our accurate store, and had fallen behind
+         both. v0.1–v0.15 (09/08–19/08/2026) read the ingester's nls/ nodes;
+         see git history for that build.
 
-  v0.15 — The whole state ledger in the Events feed, not just kick-offs.
-         Half time, full time and the oddities (abandoned, extra time, a
-         wobble back to pre-match) render from anchors/<id>/transitions —
-         each is an observation with no event timestamp to correct against,
-         so the observed time is the record and sits in the detected-at
-         column. Flips into a half are deliberately not repeated: the
-         kick-off line already carries them, corrected.
-  v0.14 — Kick-offs appear in the Events feed. Synthetic and display-only:
-         the RTDB stream stays append-only player events, because an anchor
-         REVISES backwards and a feed entry must not silently change its
-         headline time — so the lines are derived from anchors/ at render
-         time and always show the current best kick-off, its source and
-         confidence, and the measured list-flip lag. Anchor subscriptions
-         now cover every match on the selected day rather than only live
-         ones, so backfilled past days show their kick-offs too.
-  v0.13 — The PERMISSION_DENIED guidance names the fix that exists: Actions →
-         Deploy RTDB rules, target nl-widgets. It said "paste the block into
-         the console by hand" — true when written, false since the rules
-         workflow gained its nl-widgets target, and stale guidance in an
-         error message is worse than none because it is read at exactly the
-         moment someone will act on it.
-  v0.12 — Live minutes come from the ingester's kick-off anchors, not from
-         upstream's matchMinutes. NLS never emits kick-off, so the ingester
-         synthesises it (anchors/<matchID>/<1H|2H> — list flip at low
-         confidence, corrected backwards by event timestamps; method note
-         v18.0). The pill shows the derived clock — elapsed since the anchor,
-         floored, capped at 45'+n / 90'+n, frozen at the cap through half
-         time — and its tooltip names the anchor's source and confidence,
-         upstream's own minute for comparison, and the measured kick-off
-         ingest lag where one exists. Falls back to upstream's minute
-         wherever the model makes no claim (no anchor yet, extra time,
-         penalties). The clock re-derives on the 15-second health tick —
-         derived, never counted, so a reload loses nothing. Event rows
-         gained the upstream entry time (tsUTC) as a tooltip on the
-         detected-at column: the pair is the per-event ingest lag.
-  v0.11 — Every timestamp is absolute and carries seconds — "18 Aug 2026,
-         09:04:12", not "3h ago". Canon already had it: formatDateTime's
-         {seconds:true}, so no canon change and no cache-bust. Relative time
-         answers "is this recent", which is not a question anyone brings to a
-         feed monitor; the questions here are "did this arrive before or after
-         that run" and "how far behind the upstream timestamp were we", and
-         both need the real clock. It was also destroying the precision the
-         comparison depends on — two events 40 seconds apart both read "3h
-         ago". The events column is monospaced so a run of them aligns.
-  v0.10 — Substitutions name the player coming on. The feed sends the on-name
-         as `playerName` (the key every event type uses for its subject) and
-         the off-name as `playerOffName`; this page read a `playerOnName` that
-         has never existed, so every sub read "? on for [name]". The half that
-         worked is what made it hard to see — a resolving off-name looks like
-         a feed problem rather than a key that was never there. Nothing
-         upstream changed; `subOnPlayer` arrives populated.
-  v0.9 — Run intervals come from NL.formatDuration (nl-utils v1.33), which
-         this tool's humanInterval() was the flagged forerunner of (PR #808,
-         second caller: travel-planner). Small visible improvement: the
-         compound convention keeps the minutes its old rounding lost —
-         intervals here run 60–7200s from meta config, so a 90-minute
-         interval now reads "1h 30min" instead of "2 hr". A missing interval
-         reads "an unknown interval" in the Overdue sentence and drops the
-         "next in" clause entirely (canon's bare '—' fallback reads badly
-         mid-sentence).
-  v0.8 — Kick-off times come from NL.formatTime (nl-utils v1.31), the canon
-         time-only formatter this tool's kickoffTime() was the flagged
-         forerunner of (PR #808); the local split-the-last-word helper is
-         gone.
-  v0.7 — The day bar is a canon .filter-bar; the local .daybar block keeps
-         only what canon does not provide (muted-text size, select width).
-         Closes the last finding of PR #808, whose other two fixes landed
-         with v0.6.
-  v0.6 — The matchday dropdown's styling moved to canon as .nl-select
-         (nl-brand.css v2.39, second use: Fan Widgets). The markup now
-         carries the class and the local .daybar select rule keeps only
-         layout (min-width) — the look is unchanged, it just has one
-         source now.
-  File: /nls-monitor/index.html
+  WHY IT READS NLS DIRECTLY
+    Two things exist and must not blur. Our database is the ACCURATE record —
+    NLS plus hand corrections (functions/nls/players.js applyCorrections).
+    This page is the opposite: the RAW record, so a goal NLS has no scorer for
+    looks missing here even after we have corrected it in our store. Reading
+    our nodes would show our ingest, a minute behind and filtered through our
+    shaping; calling NLS shows the source. The NLS API answers browsers
+    directly — the fan embeds already depend on that.
 
-  Live view of the NLS → RTDB ingester: run health, today's matches, the event
-  stream and the derived tables and scorers.
+    One deliberate exception: the verdict carries a single line on our
+    ingester (nls/meta/ingest in nl-widgets), via the staff handshake below.
+    If that handshake fails the line says so and nothing else is affected.
 
-  WHY THIS EXISTS
-    Step 1 of the ingester build order is "the ingester writes, nothing reads —
-    run a full matchday and inspect the nodes". Inspecting them meant exporting
-    JSON out of the Firebase console by hand, which is slow, easy to get wrong,
-    and impossible to do while a matchday is actually happening. This is the
-    inspection tool that step calls for.
-
-    It is deliberately a MONITOR, not a consumer. Nothing here is a step
-    towards a fan-facing widget, nothing depends on it, and deleting it would
-    break nothing. That keeps step 1's property intact: `nls/` still has no
-    consumer, so a mistake in it is invisible to fans.
-
-  WHERE THE DATA IS
-    `nls/` lives in the SEPARATE nl-widgets project, alongside the fan data and
-    the feed/ fixture cache. This page therefore runs two Firebase apps: the
-    default one for the nl-tools staff session, and a second named app for
-    nl-widgets. It reads live over websockets rather than polling — watching a
-    Saturday tick over is the point.
-
-  HOW IT GETS IN
+  HOW THE INGESTER LINE GETS IN
     Via the fanWidgetsAuth handshake (functions/fan-widgets.js): write a
-    request, the trigger checks superadmin against the database, a custom token
-    carrying a `staff` claim comes back, sign in to nl-widgets with it.
+    request, the trigger checks superadmin against the database, a custom
+    token carrying a `staff` claim comes back, sign in to nl-widgets with it.
+    The request/grant pair lives under app-data/ops-fan-widgets/ because Fan
+    Widgets was the first tool to need it. CANON CANDIDATE (flagged
+    09/08/2026): move it to a neutral path now there are two callers.
 
-    That handshake lives under app-data/ops-fan-widgets/ because Fan Widgets
-    was the first tool to need it. This is the second, and the mechanism is not
-    really Fan Widgets' — the server gate is "is this uid a superadmin", with
-    the path incidental. CANON CANDIDATE: move the request/grant pair to a
-    neutral path and repoint the trigger, now there are two callers. Not done
-    here because it means redeploying the trigger and editing a working tool,
-    which is not this PR's business.
-
-  Storage (RTDB):
+  Storage (RTDB): reads only.
     nl-tools:    app-data/ops-fan-widgets/authRequests|authGrants/<uid>
-                 borrowed handshake, see above
-    nl-widgets:  nls/meta/ingest              run health, incl. failureReasons
-                 nls/meta/calendar/<comp>     which days have fixtures
-                 nls/live/index/<comp>/<ymd>  the ingester's last-run day
-                 nls/fixtures/<comp>/<ymd>    any other day, from the hourly run
-                 nls/events/<ymd>             the event stream
-                 nls/anchors/<matchID>        synthetic kick-off records (1H/2H)
-                 nls/derived/tables|scorers|coverage/<comp>
-                 (nls/seen is never read — internal dedup guard)
+    nl-widgets:  nls/meta/ingest — the one ingester status line
 
-  ANY DAY, NOT JUST TODAY
-    The rules grant reads per day and never at the parent, so nothing can
-    discover which days exist — you have to name one. That is correct for
-    bandwidth and licensing and useless for browsing, so the ingester writes
-    meta/calendar/<comp> from the populatedDates NLS returns free on every list
-    request, and the day bar is driven from it. live/index only ever exists for
-    the day the ingester last ran; every other day comes from fixtures/.
+  NLS REQUEST NOTES (learned the hard way in functions/nls/fetch.js)
+    - The from/to window needs a LITERAL `+` for the space; the
+      percent-encoded form is rejected. Colons stay encoded.
+    - includePopulatedDates=true returns the season's matchday calendar on
+      any list request, free. That drives the matchday picker.
+    - Days are UTC days, because that is what from/to filters on.
 
-  Access (auth-guard registry — see system/auth-guard.js):
-    superadmin only. The underlying handshake refuses anyone else server-side,
-    so a lower role would reach the page and then fail at sign-in; the registry
-    entry stops it being visible in the first place.
+  Access (auth-guard registry): superadmin only.
 -->
 <html lang="en">
 <head>
@@ -297,6 +210,19 @@
       ]
     });
 
+    window.NL_CHANGELOG.unshift({
+      date: '27/10/2026',
+      version: 'v1.0',
+      items: [
+        'Rebuilt to read NLS itself, live, from your browser — what NLS says right now, gaps included. Nothing comes from our own store except one status line for our ingester.',
+        'Live: any matchday, refreshing every 30 seconds while a match is in play; tap a match for its events and the time NLS entered each one.',
+        'Quality: every finished match checked for goals without a scorer, missing or short team sheets, no bench, no formation, no gate, no referee — one matchday or a division’s season so far, exportable as CSV for Stats Perform.',
+        'Feed health: every endpoint we depend on probed for status, response time, rows, the fields we rely on and table freshness, every five minutes.',
+        'Raw: any NLS path, as returned.',
+        'The Tables & scorers tab is gone — it showed our ingester’s tally rather than NLS, and had fallen behind both.'
+      ]
+    });
+
     /* auth-guard fires this once the session is verified + pageWrap is
        revealed. Boot the main app from here so RTDB reads happen with a
        live auth token. Do NOT read RTDB before this fires. */
@@ -331,137 +257,105 @@
   .stat--bad .stat__num    { color: var(--red); }
   .stat--bad               { border-left: 4px solid var(--red); }
 
-  /* The headline verdict. One line, readable from across a desk, because the
-     question this page answers most often is "is it working right now". */
+  /* The headline verdict: is NLS answering, right now. Tool-local since v0.1:
+     canon .banner has no ok/green variant and no headline-plus-dot layout. */
   .verdict {
     display: flex; align-items: flex-start; gap: .75rem;
     padding: 1rem 1.25rem; border-radius: var(--radius-lg);
     border: 1px solid var(--border); background: var(--navy-50);
     margin-bottom: 1.25rem;
   }
-  /* Dot rides the headline, not the box centre — with a two-line banner a
-     centred dot floats between the lines and reads as misalignment. */
-  .verdict__dot { width: 14px; height: 14px; border-radius: 50%; flex: 0 0 auto; margin-top: .45em; }
-  /* Deliberately a wide step between these two. The headline is the answer to
-     "is it working", and on a Saturday it wants reading from across a desk;
-     the sub-line is detail you lean in for. A close pair would make them read
-     as one undifferentiated block. */
+  .verdict__dot { width: 14px; height: 14px; border-radius: 50%; flex: 0 0 auto; margin-top: .45em; background: var(--navy-300); }
   .verdict__text { font-weight: 700; font-size: var(--text-lg); line-height: 1.3; }
   .verdict__sub  { color: var(--text-muted); font-size: var(--text-sm); }
   .verdict--ok   { background: var(--green-light); border-color: var(--green); }
   .verdict--ok   .verdict__dot { background: var(--green); }
   .verdict--warn { background: var(--amber-light); border-color: var(--amber); }
   .verdict--warn .verdict__dot { background: var(--amber); }
-  /* --red, never --primary: brand red is identity, --red is the error
-     semantic, and a monitor's "broken" banner is the last place to blur them. */
+  /* --red, never --primary: brand red is identity, --red is the error semantic. */
   .verdict--bad  { background: var(--red-light); border-color: var(--red); }
   .verdict--bad  .verdict__dot { background: var(--red); }
 
-  /* Day navigation: a canon .filter-bar holding prev/next plus a dropdown of
-     real matchdays (the canon .nl-select, promoted there from this very block
-     in brand v2.39). Only the width is local — enough room for
-     "day — N fixtures" without the bar jumping as the label changes. */
   .daybar .muted { font-size: var(--text-sm); }
   .daybar select { min-width: 15rem; }
 
-  /* Fixed widths so every division's score column sits in the same place.
-     table-layout: fixed is what makes the colgroup binding rather than
-     advisory — without it the browser still sizes from content. */
-  .matches { table-layout: fixed; width: 100%; }
-  .matches .col-time  { width: 4.5rem; }
-  .matches .col-score { width: 7rem; }
-  .matches .col-state { width: 5.5rem; }
-  .matches .col-flag  { width: 2.5rem; }
-  .matches .ta-r { text-align: right; }
-  .matches .ta-c { text-align: center; }
-  /* Wrap, never ellipsise: "Scunt… United" told you less than letting
-     Scunthorpe take a second line. Overflow stays hidden as the backstop for
-     a genuinely unbreakable string. */
-  .matches td { overflow: hidden; }
-  .nm-pill { font-size: var(--text-xs); padding: 2px 7px; white-space: nowrap; }
-  /* Penalty shoot-out on its own line, small — inline it forced the score
-     column wide enough to truncate on anything narrower than a desktop. */
-  .score__pens { display: block; font-weight: 400; font-size: var(--text-xs); }
-  .matches .divrow th {
-    text-align: left; padding-top: 1rem;
-    border-bottom: 1px solid var(--border);
-  }
-  .matches tr:first-child .divrow th, .matches .divrow:first-child th { padding-top: 0; }
-
+  .nm-table { table-layout: fixed; width: 100%; }
+  .nm-table td { overflow: hidden; vertical-align: top; }
+  .nm-table .col-time  { width: 4.2rem; }
+  .nm-table .col-comp  { width: 3.6rem; }
+  .nm-table .col-score { width: 5.5rem; }
+  .nm-table .col-state { width: 7.5rem; }
+  .nm-table .col-date  { width: 6.8rem; }
+  .nm-table .ta-r { text-align: right; }
+  .nm-table .ta-c { text-align: center; }
+  .nm-row { cursor: pointer; }
+  .nm-row:hover td { background: var(--navy-50); }
+  .nm-row.is-open td { background: var(--navy-50); border-bottom: 0; }
+  .nm-detail td { background: var(--navy-50); padding-top: 0; }
   @media (max-width: 640px) {
-    .matches .col-time { width: 3.4rem; }
-    .matches .col-flag { width: 1.4rem; }
-    .matches .col-score { width: 4rem; }
-    .matches .col-state { width: 3.9rem; }
+    .nm-table .col-comp { width: 3rem; }
+    .nm-table .col-date { width: 4.6rem; }
+    .nm-table .col-time { width: 3.2rem; }
+    .nm-table .col-state { width: 4.6rem; }
+    .nm-table .col-score { width: 3.8rem; }
   }
-
-  .comp-block { margin-bottom: 1.5rem; }
-  .comp-block__head {
-    display: flex; align-items: baseline; gap: .6rem;
-    margin: 0 0 .5rem; font-weight: 700;
-  }
-  .comp-block__count { color: var(--text-muted); font-weight: 400; font-size: var(--text-sm); }
-  /* Inside the navy division band the muted grey was unreadable — the count
-     needs the band's own light step, and a gap from the label. */
-  .matches .divrow .comp-block__count { color: var(--navy-100); margin-left: .6rem; }
 
   .score { font-variant-numeric: tabular-nums; font-weight: 700; white-space: nowrap; }
-  .crest { width: 20px; height: 20px; object-fit: contain; vertical-align: -4px; margin-right: .35rem; }
+  .score__pens { display: block; font-weight: 400; font-size: var(--text-xs); }
+  .nm-pill { font-size: var(--text-xs); padding: 2px 7px; white-space: nowrap; }
   .muted { color: var(--text-muted); }
   .mono  { font-family: var(--font-mono); font-size: .875em; }
-
-  /* The event feed. Ordered by detectedAt, never by match minute — a goal
-     entered late would otherwise jump into the middle of the feed. */
-  .ev { display: grid; grid-template-columns: 7rem 1fr auto; gap: .5rem 1rem;
-        padding: .6rem 0; border-bottom: 1px solid var(--border); align-items: baseline; }
-  .ev:last-child { border-bottom: 0; }
-  /* One secondary size across the page; the label role is carried by weight,
-     caps, tracking and colour rather than by a fourth almost-identical size. */
-  .ev__type { font-weight: 700; font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .06em; }
-  .ev--goal .ev__type         { color: var(--green); }
-  .ev--booking .ev__type      { color: var(--amber-deep); }
-  .ev--substitution .ev__type { color: var(--blue); }
-  .ev--lineup .ev__type       { color: var(--navy-600); }
-  .ev--withdrawal .ev__type   { color: var(--red); }
-  .ev--kick-off .ev__type     { color: var(--navy); }
-  .ev--half-time .ev__type    { color: var(--amber-deep); }
-  .ev--full-time .ev__type    { color: var(--navy-600); }
-  .ev--retracted { opacity: .55; }
-  .ev--retracted .ev__what { text-decoration: line-through; }
-  .ev__when { color: var(--text-muted); font-size: var(--text-sm); white-space: nowrap; }
-
-  @media (max-width: 640px) {
-    .ev { grid-template-columns: 1fr; gap: .15rem; }
-    .ev__when { grid-column: 1; }
-  }
-
-  .nm-note    { color: var(--text-muted); font-size: var(--text-sm); margin-top: .4rem; }
+  .nm-note { color: var(--text-muted); font-size: var(--text-sm); margin: .4rem 0 .8rem; }
   .nm-subhead { color: var(--text-muted); font-size: var(--text-sm); margin: .75rem 0 .25rem;
                 font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
-  /* Scorers are two short columns; a full-width table floats the tally into
-     the middle of the page with a football pitch of nothing between. */
-  .scorers-table { max-width: 28rem; }
-  .nm-path { min-width: 22rem; }
-  .nm-out  { white-space: pre-wrap; word-break: break-word; }
+
+  /* Event timeline inside an opened match. */
+  .ev { display: grid; grid-template-columns: 3.5rem 6.5rem 1fr auto; gap: .25rem .75rem;
+        padding: .35rem 0; border-bottom: 1px solid var(--border); align-items: baseline;
+        font-size: var(--text-sm); }
+  .ev:last-child { border-bottom: 0; }
+  .ev__type { font-weight: 700; font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .06em; }
+  .ev--goal .ev__type { color: var(--green); }
+  .ev--card .ev__type { color: var(--amber-deep); }
+  .ev--red .ev__type  { color: var(--red); }
+  .ev--sub .ev__type  { color: var(--blue); }
+  .ev__when { color: var(--text-muted); white-space: nowrap; }
+  .ev__flag { color: var(--red); font-weight: 700; }
+  /* On a phone: minute and type on one line, then who, then the entry time —
+     a four-column grid squeezed the names into a one-word-wide column. */
+  @media (max-width: 640px) {
+    .ev { grid-template-columns: 3rem 1fr; }
+    .ev > :nth-child(3), .ev__when { grid-column: 1 / -1; }
+  }
+
+  /* Quality: a flag is a cell that says what is wrong, coloured by severity. */
+  .q-bad  { color: var(--red); font-weight: 700; }
+  .q-warn { color: var(--amber-deep); font-weight: 700; }
+  .q-ok   { color: var(--text-muted); }
+
+  .nm-path { min-width: 16rem; flex: 1 1 22rem; margin: 0; }
+  .nm-out  { white-space: pre-wrap; word-break: break-word; max-height: 70vh; overflow: auto; }
 </style>
 </head>
 <body>
-
 <!-- Topbar — auto-rendered by /system/nl-topbar.js from window.NL_TOOL -->
 <div id="nlTopbar"></div>
-
 <div id="pageWrap">
   <div class="page">
-
     <div id="nmVerdict" class="verdict">
       <span class="verdict__dot"></span>
       <span>
-        <span class="verdict__text">Connecting to nl-widgets…</span><br>
-        <span class="verdict__sub">Requesting a staff token.</span>
+        <span class="verdict__text">Checking NLS…</span><br>
+        <span class="verdict__sub" id="nmIngest"></span>
       </span>
     </div>
 
-    <div id="nmStats" class="stats" hidden></div>
+    <div class="tabs" id="nmTabs">
+      <button class="tab" data-tab="live" type="button">Live</button>
+      <button class="tab" data-tab="quality" type="button">Quality</button>
+      <button class="tab" data-tab="health" type="button">Feed health</button>
+      <button class="tab" data-tab="raw" type="button">Raw</button>
+    </div>
 
     <div class="filter-bar daybar" id="nmDaybar" hidden>
       <button class="btn btn--ghost btn--sm" id="nmPrev" type="button">&larr; Previous matchday</button>
@@ -470,18 +364,10 @@
       <span class="muted" id="nmDayNote"></span>
     </div>
 
-    <div class="tabs" id="nmTabs" hidden>
-      <button class="tab" data-tab="today" type="button">Matches</button>
-      <button class="tab" data-tab="events" type="button">Events</button>
-      <button class="tab" data-tab="derived" type="button">Tables &amp; scorers</button>
-      <button class="tab" data-tab="raw" type="button">Raw</button>
-    </div>
-
-    <section id="nmToday"></section>
-    <section id="nmEvents" hidden></section>
-    <section id="nmDerived" hidden></section>
+    <section id="nmLive"></section>
+    <section id="nmQuality" hidden></section>
+    <section id="nmHealth" hidden></section>
     <section id="nmRaw" hidden></section>
-
   </div>
 </div>
 
@@ -492,89 +378,306 @@
 
   window.TOOL = window.TOOL || {};
 
-  var ROOT = 'nls';
+  var NLS = 'https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2';
   var COMPS = [
-    { key: 'nl',    label: 'National League' },
-    { key: 'north', label: 'National North' },
-    { key: 'south', label: 'National South' },
-    { key: 'cup',   label: 'National League Cup' }
+    { id: 89,   key: 'nl',    short: 'NL',   label: 'National League' },
+    { id: 373,  key: 'north', short: 'N',    label: 'National North' },
+    { id: 372,  key: 'south', short: 'S',    label: 'National South' },
+    { id: 1275, key: 'cup',   short: 'Cup',  label: 'National League Cup' }
   ];
+  var LEAGUES = COMPS.slice(0, 3);
+  var LIVE_POLL_MS = 30 * 1000;      // while anything is in play
+  var DAY_POLL_MS = 2 * 60 * 1000;   // today, nothing in play
+  var HEALTH_POLL_MS = 5 * 60 * 1000;
+  var PAGE = 100;
 
-  /* THE SAME UTC DAY THE INGESTER KEYS ON. Node paths use the UTC date because
-     that is what the NLS from/to window filters on. Deriving it from UK local
-     time here would, on any evening after 23:00 BST, ask for tomorrow's node
-     and show an empty page for a matchday that is happening. */
-  function todayYmd() { return new Date().toISOString().slice(0, 10); }
+  var esc = NL.escHtml;
 
-  var wdb = null;                       // nl-widgets database handle
   var state = {
+    season: null,
+    calendar: {},       // ymd -> { total, byComp: { key: n } }, from populatedDates
+    ymd: null,
+    day: {},            // compKey -> [row]
+    dayErr: {},         // compKey -> message
+    open: {},           // matchID -> true while its detail row is open
+    tab: 'live',
     ingest: null,
-    calendar: {},          // compKey -> { ymd: count }, from meta/calendar
-    index: {},             // today's live rows (only ever written for today)
-    fixtures: {},          // the chosen day's rows, from fixtures/<comp>/<ymd>
-    events: {},
-    anchors: {},           // matchID -> { '1H': record, '2H': record }
-    ymd: todayYmd(),
-    dayPinned: false   // true once a day is chosen, so the calendar stops moving it
+    ingestErr: null,
+    health: null,       // [{ probe result }]
+    quality: { scope: 'day', rows: null, running: false, done: 0, total: 0, showAll: false, label: '' }
   };
-  var dayRefs = [];        // live refs for the chosen day, detached on change
-  var anchorRefs = {};     // matchID -> ref; grows as rows go live, cleared with the day
-  var tab = 'today';
+  var details = {};     // matchID -> { at, res } — finished matches are kept for the session
+  var pollTimer = null;
+  var healthTimer = null;
 
   var els = {
     verdict: document.getElementById('nmVerdict'),
-    stats:   document.getElementById('nmStats'),
     tabs:    document.getElementById('nmTabs'),
     daybar:  document.getElementById('nmDaybar'),
     prev:    document.getElementById('nmPrev'),
     next:    document.getElementById('nmNext'),
     pick:    document.getElementById('nmDayPick'),
     dayNote: document.getElementById('nmDayNote'),
-    today:   document.getElementById('nmToday'),
-    events:  document.getElementById('nmEvents'),
-    derived: document.getElementById('nmDerived'),
+    live:    document.getElementById('nmLive'),
+    quality: document.getElementById('nmQuality'),
+    health:  document.getElementById('nmHealth'),
     raw:     document.getElementById('nmRaw')
   };
 
-  /* nl-utils loads synchronously in the head; a fallback that skipped
-     escaping would be an XSS hole pretending to be resilience. */
-  var esc = NL.escHtml;
+  /* The UTC day: NLS's from/to window filters on it. A local-time date would,
+     after 23:00 BST, ask for tomorrow and show an empty matchday. */
+  function todayYmd() { return new Date().toISOString().slice(0, 10); }
+
+  // -------------------------------------------------------------------------
+  // NLS requests
+  // -------------------------------------------------------------------------
+
+  /* Every request, timed. Resolves (never rejects) with what happened, because
+     on this page a failure is a result to show, not an exception to swallow. */
+  function nls(path) {
+    var url = NLS + path;
+    var t0 = performance.now();
+    var ctrl = new AbortController();
+    var timer = setTimeout(function () { ctrl.abort(); }, 20000);
+    return fetch(url, { signal: ctrl.signal }).then(function (res) {
+      return res.text().then(function (txt) {
+        var json = null;
+        try { json = txt ? JSON.parse(txt) : null; } catch (e) { /* shown as text */ }
+        return { ok: res.ok, status: res.status, ms: Math.round(performance.now() - t0),
+          json: json, text: txt, bytes: txt.length, url: url, path: path };
+      });
+    }).catch(function (err) {
+      return { ok: false, status: 0, ms: Math.round(performance.now() - t0), json: null, text: '',
+        bytes: 0, url: url, path: path,
+        error: err && err.name === 'AbortError' ? 'Timed out after 20s' : ((err && err.message) || String(err)) };
+    }).finally(function () { clearTimeout(timer); });
+  }
+
+  function describe(r) {
+    if (r.error) return r.error;
+    var body = (r.text || '').replace(/\s+/g, ' ').trim().slice(0, 160);
+    return 'HTTP ' + r.status + (body ? ' — ' + body : '');
+  }
+
+  /* A LITERAL `+` for the space: the endpoint rejects %20 here (fetch.js). */
+  function dayWindow(ymd) {
+    return 'from=' + ymd + '+00%3A00%3A00Z&to=' + ymd + '+23%3A59%3A59Z';
+  }
+
+  function dayPath(comp, ymd, extra) {
+    return '/matches/?seasonID=' + state.season + '&competitionID=' + comp.id + '&' +
+      dayWindow(ymd) + (extra || '') + '&page.size=' + PAGE;
+  }
+
+  function seasonList(comp) {
+    var rows = [];
+    function page(n) {
+      return nls('/matches/?seasonID=' + state.season + '&competitionID=' + comp.id +
+        '&sort=kickOffDateUTC&page.number=' + n + '&page.size=' + PAGE).then(function (r) {
+        if (!r.ok) throw new Error(comp.label + ' list: ' + describe(r));
+        var data = (r.json && r.json.data) || [];
+        rows = rows.concat(data);
+        var total = r.json && r.json.meta && r.json.meta.totalCount;
+        if (data.length < PAGE || (total != null && rows.length >= total) || n >= 20) return rows;
+        return page(n + 1);
+      });
+    }
+    return page(1);
+  }
+
+  /* A finished match's detail is kept for the session — it can still change
+     upstream (late scorers are the whole point of the Quality tab), so the
+     Quality scan always refetches; only the Live tab's re-renders reuse it. */
+  function detail(id, opts) {
+    var hit = details[id];
+    if (hit && !(opts && opts.fresh)) return Promise.resolve(hit.res);
+    return nls('/matches/' + encodeURIComponent(id)).then(function (res) {
+      details[id] = { at: Date.now(), res: res };
+      return res;
+    });
+  }
+
+  function mapLimit(items, limit, fn) {
+    var i = 0;
+    var out = new Array(items.length);
+    function worker() {
+      if (i >= items.length) return Promise.resolve();
+      var k = i++;
+      return Promise.resolve(fn(items[k], k)).then(function (v) { out[k] = v; return worker(); });
+    }
+    var workers = [];
+    for (var w = 0; w < Math.min(limit, items.length); w++) workers.push(worker());
+    return Promise.all(workers).then(function () { return out; });
+  }
+
+  // -------------------------------------------------------------------------
+  // Shaping — only as much as display needs; Raw shows the rest
+  // -------------------------------------------------------------------------
+
+  /* NLS timestamps are UTC with no zone marker ("2026-10-24 14:00:00").
+     NL.parseDate reads that shape as LOCAL time — right for every staff form,
+     an hour wrong here all summer — so NLS strings are parsed here. Canon
+     candidate if a second gated tool reads raw NLS: NL.parseDate(s, {utc:true}). */
+  function utc(s) {
+    if (!s) return null;
+    var iso = String(s).indexOf('T') >= 0 ? String(s) : String(s).replace(' ', 'T') + 'Z';
+    var d = new Date(iso);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  var DEAD = ['fulltime', 'postmatch', 'abandoned', 'postponed'];
+  var LIVE = ['firsthalf', 'halftime', 'secondhalf', 'extratime', 'penalties'];
+  function isLive(p) {
+    p = String(p || '').toLowerCase();
+    return DEAD.indexOf(p) < 0 && LIVE.some(function (v) { return p.indexOf(v) >= 0; });
+  }
+  function isFinished(p) {
+    p = String(p || '').toLowerCase();
+    return p === 'fulltime' || p === 'postmatch';
+  }
+
+  function shapeRow(m, comp) {
+    var a = (m && m.attributes) || {};
+    var h = a.homeTeam || {};
+    var w = a.awayTeam || {};
+    return {
+      id: String(m.id || a.matchID),
+      comp: comp,
+      ko: utc(a.kickOffDateUTC || a.kickOffUTC),
+      tbc: !!a.TBC,
+      period: String(a.matchPeriod || a.period || ''),
+      minute: a.formattedMatchTime || (a.matchMinutes != null ? a.matchMinutes + "'" : ''),
+      home: h.name || h.shortName || '?',
+      away: w.name || w.shortName || '?',
+      hs: h.score, as: w.score,
+      postponed: a.postponementReason || null,
+      resultType: a.resultType || null
+    };
+  }
+
+  function playerName(p) {
+    var n = (p && (p.playerName || p)) || {};
+    return String(n.knownName || n.customKnownName ||
+      [n.firstName, n.lastName].filter(Boolean).join(' ') || '').trim() || null;
+  }
+
+  /* matchTeams is not ordered home-first; homeTeamID says which is which. */
+  function sides(res) {
+    var a = (res && res.json && res.json.data && res.json.data.attributes) || {};
+    var teams = Array.isArray(a.matchTeams) ? a.matchTeams : [];
+    var homeID = a.homeTeamID != null ? String(a.homeTeamID) : null;
+    var home = teams.filter(function (t) { return String(t.teamID) === homeID; })[0] || teams[0] || {};
+    var away = teams.filter(function (t) { return t !== home; })[0] || {};
+    return { a: a, md: a.matchDetails || {}, home: home, away: away };
+  }
+
+  function sideFacts(t) {
+    var p = t.players || {};
+    var goals = (t.events && t.events.goals) || [];
+    var named = goals.filter(function (e) { return e && e.goalEvents && e.goalEvents.playerID; }).length;
+    var score = Number(t.score) || 0;
+    return {
+      xi: (p.Start || []).length,
+      bench: (p.Sub || []).length,
+      score: score,
+      named: named,
+      unnamed: Math.max(0, score - named),
+      formation: t.formation ? String(t.formation) : ''
+    };
+  }
+
+  function pill(row) {
+    var p = row.period.toLowerCase();
+    if (row.postponed || p === 'postponed') return '<span class="pill pill--postponed nm-pill">P-P</span>';
+    if (p === 'abandoned') return '<span class="pill pill--rejected nm-pill">Abandoned</span>';
+    if (isFinished(p)) return '<span class="pill nm-pill">FT</span>';
+    if (p.indexOf('halftime') >= 0) return '<span class="pill pill--live nm-pill">HT</span>';
+    if (isLive(p)) return '<span class="pill pill--live nm-pill">' + esc(row.minute || 'Live') + '</span>';
+    /* Upstream says PreMatch; "Pre" fits a phone's state column. The raw
+       period is in the tooltip for anything less common. */
+    return '<span class="pill pill--soon nm-pill" title="' + esc(row.period || '') + '">' +
+      (/^prematch$/i.test(row.period) || !row.period ? 'Pre' : esc(row.period)) + '</span>';
+  }
 
   // -------------------------------------------------------------------------
   // Boot
   // -------------------------------------------------------------------------
 
   window.TOOL.boot = function (session) {
-    var uid = session && session.uid;
-    if (!uid) { verdict('bad', 'No session', 'Try reloading the page.'); return; }
+    resolveSeason().then(function () {
+      return loadCalendar();
+    }).then(function () {
+      return selectDay(nearestMatchday());
+    }).then(function () {
+      /* After the day, so the match-detail probe has a finished match to use. */
+      runHealth();
+    });
+    startIngesterLine(session && session.uid);
+  };
 
+  function resolveSeason() {
+    return NL.clubs.load().then(function () {
+      state.season = NL.season.current(NL.clubs.meta()) || String(NL.season.fromDate());
+    }).catch(function () {
+      state.season = String(NL.season.fromDate());
+    });
+  }
+
+  /* includePopulatedDates on one narrow request per competition returns every
+     date in the season that has fixtures — the whole calendar, free. */
+  function loadCalendar() {
+    var today = todayYmd();
+    return Promise.all(COMPS.map(function (c) {
+      return nls(dayPath(c, today, '&includePopulatedDates=true')).then(function (r) {
+        var pd = r.json && r.json.meta && r.json.meta.populatedDates;
+        Object.keys(pd || {}).forEach(function (ymd) {
+          var v = pd[ymd];
+          var n = Number(v && v.count != null ? v.count : v);
+          if (!(n > 0)) return;
+          var day = state.calendar[ymd] || (state.calendar[ymd] = { total: 0, byComp: {} });
+          day.total += n;
+          day.byComp[c.key] = n;
+        });
+      });
+    }));
+  }
+
+  function matchdays() { return Object.keys(state.calendar).sort(); }
+
+  /* Today if it has games, else the most recent past matchday, else the next. */
+  function nearestMatchday() {
+    var days = matchdays();
+    var today = todayYmd();
+    if (!days.length) return today;
+    if (state.calendar[today]) return today;
+    var past = days.filter(function (d) { return d < today; });
+    return past.length ? past[past.length - 1] : days[0];
+  }
+
+  // -------------------------------------------------------------------------
+  // The ingester line — the one thing here that is not NLS
+  // -------------------------------------------------------------------------
+
+  function startIngesterLine(uid) {
+    if (!uid) { state.ingestErr = 'no session'; renderVerdict(); return; }
     handshake(uid).then(function (token) {
       return firebase.auth(widgetsApp).signInWithCustomToken(token);
     }).then(function () {
-      wdb = firebase.database(widgetsApp);
-    }).then(function () {
-      els.stats.hidden = false;
-      els.tabs.hidden = false;
-      listen();
+      firebase.database(widgetsApp).ref('nls/meta/ingest').on('value', function (s) {
+        state.ingest = s.val();
+        state.ingestErr = null;
+        renderVerdict();
+      }, function (err) {
+        state.ingestErr = (err && err.message) || String(err);
+        renderVerdict();
+      });
     }).catch(function (err) {
-      var msg = (err && err.message) ? err.message : String(err);
-      verdict('bad', 'Could not read nl-widgets', msg);
-      /* PERMISSION_DENIED here is almost always the rules, not the token.
-         nl-widgets rules ship from the repo like everything else — Actions →
-         Deploy RTDB rules, target nl-widgets — so a denied read means that
-         has not been run since the nls/ block last changed. This comment and
-         the message below said "paste into the console by hand" until
-         19/08/2026, months after the workflow gained its nl-widgets target,
-         and the stale advice duly misdirected a session. */
-      if (/permission_denied/i.test(msg)) {
-        verdict('bad', 'Permission denied on nls/',
-          'The nls/ rules have not been published since they last changed — Actions → “Deploy RTDB rules”, target nl-widgets, type publish.');
-      }
+      state.ingestErr = (err && err.message) || String(err);
+      renderVerdict();
     });
-  };
+  }
 
-  /* Borrowed from the Fan Widgets tool — see the file header for why, and for
-     the canon-promotion note. Write a request, wait for the grant, clean up. */
+  /* Borrowed from Fan Widgets — see the file header and its canon note. */
   function handshake(uid) {
     var reqRef   = db.ref('app-data/ops-fan-widgets/authRequests/' + uid);
     var grantRef = db.ref('app-data/ops-fan-widgets/authGrants/' + uid);
@@ -586,20 +689,16 @@
         var timer = setTimeout(function () {
           if (settled) return;
           settled = true; grantRef.off();
-          reject(new Error('The server did not respond within 30s. The fanWidgetsAuth function may not be deployed.'));
+          reject(new Error('the staff token request timed out'));
         }, 30000);
-
         grantRef.on('value', function (snap) {
           var v = snap.val();
           if (!v || settled) return;
           settled = true; clearTimeout(timer); grantRef.off();
           grantRef.remove().catch(function () {});
           if (v.ok && v.customToken) resolve(v.customToken);
-          else reject(new Error(v.error === 'not-superadmin'
-            ? 'This tool is superadmin only.'
-            : ('Token request failed: ' + (v.error || 'unknown'))));
+          else reject(new Error(v.error === 'not-superadmin' ? 'superadmin only' : ('token refused: ' + (v.error || 'unknown'))));
         });
-
         reqRef.set({ ts: Date.now() }).catch(function (e) {
           if (settled) return;
           settled = true; clearTimeout(timer); grantRef.off(); reject(e);
@@ -608,333 +707,422 @@
     });
   }
 
+  function ingesterText() {
+    if (state.ingestErr) return 'Our ingester: status unavailable (' + state.ingestErr + ').';
+    var m = state.ingest;
+    if (!m) return 'Our ingester: connecting…';
+    var stale = m.lastSuccess && (Date.now() - m.lastSuccess) > 2 * 60 * 60 * 1000;
+    return 'Our ingester v' + (m.version || '?') + ': last success ' +
+      (m.lastSuccess ? NL.formatDateTime(m.lastSuccess, { seconds: true }) : 'never') +
+      (stale ? ' — over two hours ago' : '') +
+      ', ' + (m.errorCount || 0) + ' error' + (m.errorCount === 1 ? '' : 's') + ' on its last run.';
+  }
+
   // -------------------------------------------------------------------------
-  // Live subscriptions — websockets, not polling. Watching a Saturday tick
-  // over is the whole point of the ingester, so this page should show it.
+  // Verdict — from the health probes
   // -------------------------------------------------------------------------
 
-  function listen() {
-    wdb.ref(ROOT + '/meta/ingest').on('value', function (s) {
-      state.ingest = s.val();
-      renderHealth();
-    }, onErr);
-
-    /* The season matchday calendar, written by the ingester from the free
-       `populatedDates` NLS returns on every list request. It is the only way
-       to discover WHICH days have fixtures: the rules grant reads per day and
-       never at the parent, so without this you would be guessing at dates. */
-    COMPS.forEach(function (c) {
-      wdb.ref(ROOT + '/meta/calendar/' + c.key).on('value', function (s) {
-        var v = s.val();
-        state.calendar[c.key] = (v && v.days) || {};
-        /* Land on a day that has games. Opening on an empty today and leaving
-           someone to hunt for a matchday is a date picker pretending to be an
-           answer. Only until the day is pinned by an actual choice — after
-           that, a late-arriving calendar must not yank the page away. */
-        if (!state.dayPinned) {
-          var best = nearestMatchday();
-          if (best && best !== state.ymd) { selectDay(best); return; }
-        }
-        renderDaybar();
-      }, function () { /* absent until the first successful run */ });
-    });
-
-    selectDay(state.ymd);
-
-    /* Re-check the verdict on a timer as well as on data: "no successful run
-       for six minutes" is a state that arrives through the passage of time,
-       not through a write, so a purely event-driven page would sit there
-       looking green while the ingester was dead. The derived clock rides the
-       same tick — it too is a function of the wall clock, not of a write,
-       and 15s keeps a floor-to-the-minute display at worst 15s late. */
-    setInterval(function () {
-      renderHealth();
-      if (tab === 'today' && anyLive()) renderToday();
-    }, 15000);
+  function renderVerdict() {
+    var h = state.health;
+    var level = '', text = 'Checking NLS…';
+    if (h) {
+      var bad = h.filter(function (p) { return p.level === 'bad'; });
+      var warn = h.filter(function (p) { return p.level === 'warn'; });
+      var times = h.filter(function (p) { return p.res && p.res.ok; }).map(function (p) { return p.res.ms; }).sort(function (a, b) { return a - b; });
+      var median = times.length ? times[Math.floor(times.length / 2)] : null;
+      if (bad.length === h.length) { level = 'bad'; text = 'NLS is not answering — ' + describe(bad[0].res); }
+      else if (bad.length) { level = 'bad'; text = bad.length + ' of ' + h.length + ' NLS checks failing — first: ' + bad[0].name; }
+      else if (warn.length) { level = 'warn'; text = 'NLS answering, ' + warn.length + ' check' + (warn.length === 1 ? '' : 's') + ' with gaps'; }
+      else { level = 'ok'; text = 'NLS answering normally' + (median != null ? ' — median ' + median + 'ms' : ''); }
+    }
+    els.verdict.className = 'verdict' + (level ? ' verdict--' + level : '');
+    els.verdict.innerHTML = '<span class="verdict__dot"></span><span>' +
+      '<span class="verdict__text">' + esc(text) + '</span><br>' +
+      '<span class="verdict__sub">' + esc(ingesterText()) +
+      (h ? ' Checked ' + esc(NL.formatDateTime(state.healthAt, { seconds: true })) + '.' : '') +
+      '</span></span>';
   }
 
-  /* Subscribing to a day means detaching the last one. Without this, moving
-     back through a season would leave a listener attached per day visited,
-     each still billing egress on every write. */
-  function detachDay() {
-    dayRefs.forEach(function (r) { r.off(); });
-    dayRefs = [];
-    Object.keys(anchorRefs).forEach(function (id) { anchorRefs[id].off(); });
-    anchorRefs = {};
-  }
+  // -------------------------------------------------------------------------
+  // Day selection
+  // -------------------------------------------------------------------------
 
-  function selectDay(ymd) {
-    detachDay();
-    state.ymd = ymd;
-    state.index = {};
-    state.fixtures = {};
-    state.events = {};
-    state.anchors = {};
-
-    COMPS.forEach(function (c) {
-      /* Exactly the granted slices — <comp>/<ymd>, never the parent. That
-         depth is deliberate: a consumer names the day it wants rather than
-         subscribing to the season.
-
-         Two sources, because they hold different things. live/index is only
-         ever written for the day the ingester last ran, and carries the live
-         minute; fixtures/ is the season, written hourly, and is what any past
-         or future day has. Live wins where both exist. */
-      var idx = wdb.ref(ROOT + '/live/index/' + c.key + '/' + ymd);
-      idx.on('value', function (s) {
-        state.index[c.key] = s.val() || {};
-        syncAnchorSubs();
-        if (tab === 'today') renderToday();
-      }, onErr);
-      dayRefs.push(idx);
-
-      var fx = wdb.ref(ROOT + '/fixtures/' + c.key + '/' + ymd);
-      fx.on('value', function (s) {
-        state.fixtures[c.key] = s.val() || {};
-        syncAnchorSubs();
-        if (tab === 'today') renderToday();
-      }, onErr);
-      dayRefs.push(fx);
-    });
-
-    var ev = wdb.ref(ROOT + '/events/' + ymd);
-    ev.on('value', function (s) {
-      state.events = s.val() || {};
-      if (tab === 'events') renderEvents();
-      renderHealth();
-    }, onErr);
-    dayRefs.push(ev);
-
-    renderDaybar();
-    renderToday();
-    if (tab === 'events') renderEvents();
-  }
-
-  /* One merged view of the chosen day — fixtures/ as the base, live rows on
-     top — shared by the table renderer, the anchor subscriber and the tick. */
-  function dayRows(compKey) {
-    return Object.assign({}, state.fixtures[compKey] || {}, state.index[compKey] || {});
-  }
-
-  /* Anchor subscriptions cover EVERY match on the selected day, not just the
-     live ones — the backfill gives past matchdays their derived kick-offs,
-     and the Events tab renders kick-off lines from these records whatever
-     state the match is in now. anchors/ is granted per match — like every
-     nls/ read, you name what you want — and the node is a few hundred bytes,
-     so a full card costs little. A read failure here means the anchors grant
-     has not been published yet (Actions → Deploy RTDB rules); the page just
-     shows upstream's minute and no kick-off lines, so it is not fatal. */
-  function syncAnchorSubs() {
-    COMPS.forEach(function (c) {
-      var rows = dayRows(c.key);
-      Object.keys(rows).forEach(function (id) {
-        if (anchorRefs[id]) return;
-        var ref = wdb.ref(ROOT + '/anchors/' + id);
-        anchorRefs[id] = ref;
-        ref.on('value', function (s) {
-          state.anchors[id] = s.val();
-          if (tab === 'today') renderToday();
-          if (tab === 'events') renderEvents();
-        }, function () { /* no grant yet — upstream minute stands in */ });
-      });
-    });
-  }
-
-  /* The anchor records rendered as feed lines. Synthetic and display-only:
-     the RTDB event stream stays append-only player events, while an anchor
-     REVISES backwards — so kick-off lines are derived at render time and
-     always show the current best time rather than a superseded one. Slotted
-     into the feed by when the anchor was first observed (the flip), which is
-     the same "when we knew" semantic detectedAt carries. */
-  function anchorEventRows() {
-    var names = {};
-    COMPS.forEach(function (c) {
-      var rows = dayRows(c.key);
-      Object.keys(rows).forEach(function (id) {
-        var r = rows[id];
-        names[id] = ((r.home && r.home.name) || '?') + ' v ' + ((r.away && r.away.name) || '?');
-      });
-    });
-    var out = [];
-    Object.keys(state.anchors || {}).forEach(function (id) {
-      var a = state.anchors[id];
-      if (!a) return;
-      ['1H', '2H'].forEach(function (slot) {
-        var rec = a[slot];
-        if (!rec || !rec.anchorUTC) return;
-        out.push({
-          type: 'kick-off',
-          slot: slot,
-          anchorUTC: rec.anchorUTC,
-          source: rec.source,
-          confidence: rec.confidence,
-          ingestLagMs: rec.ingestLagMs,
-          fixture: names[id] || id,
-          detectedAt: Date.parse(rec.listFlipUTC || rec.anchorUTC)
-        });
-      });
-      /* The rest of the ledger. Flips INTO a half are skipped here — the
-         kick-off line above already carries them, corrected — so what's left
-         is half time, full time, and the oddities (abandoned, extra time, a
-         wobble back to pre-match), each an observation and shown as one. */
-      (Array.isArray(a.transitions) ? a.transitions : []).forEach(function (t) {
-        if (!t || !t.to || t.to === 'firsthalf' || t.to === 'secondhalf') return;
-        out.push({
-          type: t.to === 'halftime' ? 'half-time'
-            : t.to === 'fulltime' ? 'full-time'
-              : t.to === 'postmatch' ? 'post-match' : t.to,
-          fixture: names[id] || id,
-          from: t.from || null,
-          detectedAt: Date.parse(t.observedUTC)
-        });
-      });
-    });
-    return out;
-  }
-
-  function anyLive() {
-    return COMPS.some(function (c) {
-      var rows = dayRows(c.key);
-      return Object.keys(rows).some(function (id) { return rows[id].live; });
-    });
-  }
-
-  /* Every date that has fixtures in any competition, ascending. */
-  function allMatchdays() {
-    var set = {};
-    COMPS.forEach(function (c) {
-      Object.keys(state.calendar[c.key] || {}).forEach(function (d) {
-        set[d] = (set[d] || 0) + state.calendar[c.key][d];
-      });
-    });
-    return Object.keys(set).sort().map(function (d) { return { ymd: d, count: set[d] }; });
-  }
-
-  /* Today if it has games; otherwise the most recent day that did — results
-     are more use than an empty page — and only if there is no past at all,
-     the next day coming. */
-  function nearestMatchday() {
-    var days = allMatchdays();
-    if (!days.length) return null;
-    var t = todayYmd();
-    if (days.some(function (d) { return d.ymd === t; })) return t;
-    var past = days.filter(function (d) { return d.ymd < t; });
-    if (past.length) return past[past.length - 1].ymd;
-    return days[0].ymd;
+  function dayLabel(ymd) {
+    var d = new Date(ymd + 'T12:00:00Z');
+    var c = state.calendar[ymd];
+    return NL.formatDate(d) + (ymd === todayYmd() ? ' (today)' : '') +
+      (c ? ' — ' + c.total + ' match' + (c.total === 1 ? '' : 'es') : '');
   }
 
   function renderDaybar() {
-    var days = allMatchdays();
-    els.daybar.hidden = false;
-
-    if (!days.length) {
-      els.pick.innerHTML = '<option>No calendar yet</option>';
-      els.pick.disabled = true;
-      els.prev.disabled = els.next.disabled = true;
-      els.dayNote.textContent =
-        'The matchday calendar arrives with the first successful run.';
-      return;
-    }
-
-    els.pick.disabled = false;
+    var days = matchdays();
+    if (state.ymd && days.indexOf(state.ymd) < 0) days = days.concat([state.ymd]).sort();
     els.pick.innerHTML = days.map(function (d) {
-      return '<option value="' + esc(d.ymd) + '"' + (d.ymd === state.ymd ? ' selected' : '') + '>' +
-        esc(NL.formatDateShort(d.ymd)) + ' — ' + d.count + ' match' + (d.count === 1 ? '' : 'es') +
-        '</option>';
+      return '<option value="' + esc(d) + '"' + (d === state.ymd ? ' selected' : '') + '>' + esc(dayLabel(d)) + '</option>';
     }).join('');
-
-    var i = days.findIndex(function (d) { return d.ymd === state.ymd; });
-    var before = days.filter(function (d) { return d.ymd < state.ymd; });
-    var after  = days.filter(function (d) { return d.ymd > state.ymd; });
-    els.prev.disabled = !before.length;
-    els.next.disabled = !after.length;
-    els.prev.dataset.ymd = before.length ? before[before.length - 1].ymd : '';
-    els.next.dataset.ymd = after.length ? after[0].ymd : '';
-
-    els.dayNote.textContent = i === -1
-      ? 'No fixtures on this date — ' + days.length + ' matchdays in the season.'
-      : (days.length + ' matchdays in the season');
+    var i = days.indexOf(state.ymd);
+    els.prev.disabled = i <= 0;
+    els.next.disabled = i < 0 || i >= days.length - 1;
+    els.daybar.hidden = !(state.tab === 'live' || (state.tab === 'quality' && state.quality.scope === 'day'));
   }
 
-  els.prev.addEventListener('click', function () {
-    if (this.dataset.ymd) { state.dayPinned = true; selectDay(this.dataset.ymd); }
-  });
-  els.next.addEventListener('click', function () {
-    if (this.dataset.ymd) { state.dayPinned = true; selectDay(this.dataset.ymd); }
-  });
-  els.pick.addEventListener('change', function () { state.dayPinned = true; selectDay(this.value); });
+  function selectDay(ymd) {
+    state.ymd = ymd;
+    state.day = {};
+    state.dayErr = {};
+    state.open = {};
+    renderDaybar();
+    els.live.innerHTML = '<p class="nm-note">Loading ' + esc(dayLabel(ymd)) + ' from NLS…</p>';
+    return loadDay().then(function () {
+      if (state.tab === 'quality' && state.quality.scope === 'day') scanQuality();
+    });
+  }
 
-  function onErr(err) {
-    var msg = (err && err.message) ? err.message : String(err);
-    verdict('bad', 'Read failed', msg);
+  function loadDay() {
+    var ymd = state.ymd;
+    return Promise.all(COMPS.map(function (c) {
+      return nls(dayPath(c, ymd)).then(function (r) {
+        if (ymd !== state.ymd) return;
+        if (!r.ok) { state.dayErr[c.key] = describe(r); return; }
+        state.day[c.key] = ((r.json && r.json.data) || []).map(function (m) { return shapeRow(m, c); });
+      });
+    })).then(function () {
+      if (ymd !== state.ymd) return;
+      state.dayAt = Date.now();
+      renderLive();
+      schedulePoll();
+    });
+  }
+
+  function dayRows() {
+    var rows = [];
+    COMPS.forEach(function (c) { rows = rows.concat(state.day[c.key] || []); });
+    return rows.sort(function (a, b) {
+      return ((a.ko && a.ko.getTime()) || 0) - ((b.ko && b.ko.getTime()) || 0) ||
+        COMPS.indexOf(a.comp) - COMPS.indexOf(b.comp) || a.home.localeCompare(b.home);
+    });
+  }
+
+  /* Fast while anything is in play; slow on today otherwise; never for a past
+     day, which cannot change except by correction (Quality catches those). */
+  function schedulePoll() {
+    clearTimeout(pollTimer);
+    var anyLive = dayRows().some(function (r) { return isLive(r.period); });
+    var ms = anyLive ? LIVE_POLL_MS : (state.ymd === todayYmd() ? DAY_POLL_MS : 0);
+    if (!ms) return;
+    pollTimer = setTimeout(function () {
+      if (document.hidden) { schedulePoll(); return; }
+      loadDay().then(function () {
+        Object.keys(state.open).forEach(function (id) {
+          var row = dayRows().filter(function (r) { return r.id === id; })[0];
+          if (row && !isFinished(row.period)) loadDetail(id, true);
+        });
+      });
+    }, ms);
   }
 
   // -------------------------------------------------------------------------
-  // Health
+  // Live
   // -------------------------------------------------------------------------
 
-  function verdict(level, text, sub) {
-    els.verdict.className = 'verdict verdict--' + level;
-    els.verdict.innerHTML =
-      '<span class="verdict__dot"></span><span>' +
-      '<span class="verdict__text">' + esc(text) + '</span><br>' +
-      '<span class="verdict__sub">' + esc(sub || '') + '</span></span>';
-  }
-
-  function renderHealth() {
-    var m = state.ingest;
-    if (!m) {
-      verdict('warn', 'No run recorded yet',
-        'nls/meta/ingest is empty. The scheduled functions may not have run since deploying.');
-      els.stats.innerHTML = '';
+  function renderLive() {
+    var rows = dayRows();
+    var errs = Object.keys(state.dayErr);
+    var html = '';
+    if (errs.length) {
+      html += '<div class="banner banner--error">' + errs.map(function (k) {
+        var c = COMPS.filter(function (x) { return x.key === k; })[0];
+        return esc(c.label) + ': ' + esc(state.dayErr[k]);
+      }).join('<br>') + '</div>';
+    }
+    var live = rows.filter(function (r) { return isLive(r.period); }).length;
+    html += '<p class="nm-note">' + rows.length + ' match' + (rows.length === 1 ? '' : 'es') +
+      (live ? ', ' + live + ' in play — refreshing every 30s' : '') +
+      (state.dayAt ? '. Read from NLS at ' + esc(NL.formatDateTime(state.dayAt, { seconds: true })) : '') +
+      '. Tap a match for its events.</p>';
+    if (!rows.length) {
+      els.live.innerHTML = html + (errs.length ? '' : emptyState('No matches', 'NLS lists nothing on this day.'));
       return;
     }
+    html += '<div class="table-wrap"><table class="table table--compact nm-table"><colgroup>' +
+      '<col class="col-time"><col class="col-comp"><col><col class="col-score"><col><col class="col-state">' +
+      '</colgroup><thead><tr><th>KO</th><th>Comp</th><th class="ta-r">Home</th><th class="ta-c">Score</th><th>Away</th><th>State</th></tr></thead><tbody>';
+    rows.forEach(function (r) {
+      var open = !!state.open[r.id];
+      var score = (r.hs != null && r.as != null && (isLive(r.period) || isFinished(r.period)))
+        ? r.hs + '–' + r.as : '–';
+      html += '<tr class="nm-row' + (open ? ' is-open' : '') + '" data-id="' + esc(r.id) + '">' +
+        '<td class="mono">' + (r.ko ? esc(NL.formatTime(r.ko)) : '—') + (r.tbc ? ' <span class="muted">TBC</span>' : '') + '</td>' +
+        '<td class="muted">' + esc(r.comp.short) + '</td>' +
+        '<td class="ta-r">' + esc(r.home) + '</td>' +
+        '<td class="ta-c score">' + esc(score) + '</td>' +
+        '<td>' + esc(r.away) + '</td>' +
+        '<td>' + pill(r) + '</td></tr>';
+      if (open) html += '<tr class="nm-detail"><td colspan="6" id="nmDetail-' + esc(r.id) + '">' + detailHtml(r) + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    els.live.innerHTML = html;
+  }
 
-    var now = Date.now();
-    var sinceRun = now - (m.lastRun || 0);
-    var allFailed = (m.errorCount || 0) >= COMPS.length;
-    var active = m.mode === 'live' || m.mode === 'prematch' || m.mode === 'cooldown';
+  els.live.addEventListener('click', function (e) {
+    var tr = e.target.closest('.nm-row');
+    if (!tr) return;
+    var id = tr.getAttribute('data-id');
+    if (state.open[id]) { delete state.open[id]; renderLive(); return; }
+    state.open[id] = true;
+    renderLive();
+    loadDetail(id, false);
+  });
 
-    if (allFailed) {
-      /* The reason, on screen. It used to say "check Cloud Logging", which was
-         both a worse tool and — until the logger field name was fixed — a
-         pointer to a line that had had its cause clobbered. */
-      var reasons = m.failureReasons || {};
-      var first = Object.keys(reasons).map(function (k) { return reasons[k]; })[0];
-      verdict('bad', 'Upstream unreachable',
-        first || 'Every competition fetch failed on the last run. RTDB and scheduling are fine — this is the NLServices API.');
-    } else if (active && !m.lastSuccess) {
-      verdict('bad', 'Running, but nothing has succeeded', 'No successful ingest recorded.');
-    } else if (active && (now - m.lastSuccess) > 5 * 60 * 1000) {
-      verdict('bad', 'Stale during a live window',
-        'Last success ' + NL.formatDateTime(m.lastSuccess, { seconds: true }) +
-        '. Anything reading this is showing old data.');
-    } else if (m.errorCount) {
-      verdict('warn', 'Partial failure',
-        (m.failedCompetitions || []).join(', ') + ' failed; the rest were written and the failed one keeps its last known value.');
-    } else if (sinceRun > Math.max(2 * (m.intervalSec || 3600) * 1000, 5 * 60 * 1000)) {
-      /* Canon formatDuration answers '—' for a missing interval; this
-         sentence needs a word there ('every —' reads like a typo), so the
-         caller supplies it. */
-      verdict('warn', 'Overdue',
-        'Last run ' + NL.formatDateTime(m.lastRun, { seconds: true }) +
-        ', but it asked to run every ' +
-        (m.intervalSec ? NL.formatDuration(m.intervalSec) : 'an unknown interval') + '.');
+  function loadDetail(id, fresh) {
+    var row = dayRows().filter(function (r) { return r.id === id; })[0];
+    return detail(id, { fresh: fresh || (row && !isFinished(row.period)) }).then(function () {
+      var cell = document.getElementById('nmDetail-' + id);
+      if (cell && row) cell.innerHTML = detailHtml(row);
+    });
+  }
+
+  function detailHtml(row) {
+    var hit = details[row.id];
+    if (!hit) return '<p class="nm-note">Loading match detail…</p>';
+    var res = hit.res;
+    if (!res.ok) return '<p class="nm-note">Detail failed: ' + esc(describe(res)) + '</p>';
+    var s = sides(res);
+    var hf = sideFacts(s.home), af = sideFacts(s.away);
+    var facts = [
+      'Venue ' + (s.a.venue || '—'),
+      'Ref ' + (s.md.refereeName || s.a.refereeName || '—'),
+      'Gate ' + (s.md.attendance != null ? s.md.attendance : '—'),
+      'HT ' + (s.home.halfScore != null ? s.home.halfScore + '–' + s.away.halfScore : '—'),
+      'XI ' + hf.xi + '/' + af.xi,
+      'Bench ' + hf.bench + '/' + af.bench,
+      'Formation ' + (hf.formation || '—') + ' / ' + (af.formation || '—'),
+      'Scorers named ' + (hf.named + af.named) + ' of ' + (hf.score + af.score)
+    ];
+    var evs = timeline(s, row);
+    var html = '<p class="nm-note">' + facts.map(esc).join(' · ') +
+      ' · <span class="mono">' + esc(row.id) + '</span> · fetched ' +
+      esc(NL.formatDateTime(hit.at, { seconds: true })) + '</p>';
+    if (!evs.length) return html + '<p class="nm-note">No events entered.</p>';
+    html += '<div>' + evs.map(function (ev) {
+      return '<div class="ev ev--' + ev.kind + '"><span class="mono">' + esc(ev.minute) + '</span>' +
+        '<span class="ev__type">' + esc(ev.type) + '</span>' +
+        '<span>' + ev.what + '</span>' +
+        '<span class="ev__when mono" title="Upstream entry time">' + (ev.entered ? 'entered ' + esc(NL.formatDateTime(ev.entered, { seconds: true })) : 'no entry time') + '</span></div>';
+    }).join('') + '</div>';
+    return html;
+  }
+
+  /* Every event from both sides, in match order. Goals are filed under the
+     side that BENEFITED — an own goal sits with the team it counted for. */
+  function timeline(s, row) {
+    var out = [];
+    [[s.home, row.home], [s.away, row.away]].forEach(function (pair) {
+      var t = pair[0], team = pair[1];
+      var ev = t.events || {};
+      (ev.goals || []).forEach(function (e) {
+        var g = (e && e.goalEvents) || {};
+        var type = String(g.goalType || 'Goal');
+        var who = playerName(g.player);
+        out.push({ kind: 'goal', type: type, order: order(e), minute: e.formattedEventTime || (e.eventMinute != null ? e.eventMinute + "'" : '?'),
+          entered: utc(e.eventTimestamp),
+          what: esc(team) + ' — ' + (g.playerID ? esc(who || g.playerID) : '<span class="ev__flag">no scorer</span>') });
+      });
+      (ev.bookings || []).forEach(function (e) {
+        var b = (e && e.bookingEvents) || {};
+        var red = /red/i.test(b.card || '') || /red|second/i.test(b.cardType || '');
+        out.push({ kind: red ? 'red' : 'card', type: b.card || 'Card', order: order(e),
+          minute: e.formattedEventTime || (e.eventMinute != null ? e.eventMinute + "'" : '?'),
+          entered: utc(e.eventTimestamp),
+          what: esc(team) + ' — ' + (b.playerID ? esc(playerName(b.player) || b.playerID) : '<span class="ev__flag">no player</span>') });
+      });
+      (ev.subs || []).forEach(function (e) {
+        var x = (e && e.substitutionEvents) || {};
+        out.push({ kind: 'sub', type: 'Sub', order: order(e),
+          minute: e.formattedEventTime || (e.eventMinute != null ? e.eventMinute + "'" : '?'),
+          entered: utc(e.eventTimestamp),
+          what: esc(team) + ' — ' + esc(playerName(x.subOnPlayer) || x.subOnID || '?') + ' on for ' + esc(playerName(x.subOffPlayer) || x.subOffID || '?') });
+      });
+    });
+    return out.sort(function (a, b) { return a.order - b.order; });
+  }
+
+  function order(e) {
+    var p = String((e && e.eventPeriod) || '').toLowerCase();
+    var base = p.indexOf('extra') >= 0 ? 200 : 0;
+    var m = Number(e && (e.eventMinute != null ? e.eventMinute : e.eventTime));
+    return base + (isNaN(m) ? 999 : m);
+  }
+
+  // -------------------------------------------------------------------------
+  // Quality — what NLS is missing, per match
+  // -------------------------------------------------------------------------
+
+  function renderQualityShell() {
+    if (els.quality.dataset.built) return;
+    els.quality.dataset.built = '1';
+    els.quality.innerHTML =
+      '<div class="filter-bar">' +
+        '<select id="nmQScope" class="nl-select" aria-label="Scope">' +
+          '<option value="day">The chosen matchday</option>' +
+          COMPS.map(function (c) { return '<option value="' + c.key + '">Season so far — ' + esc(c.label) + '</option>'; }).join('') +
+        '</select>' +
+        '<button class="btn btn--primary btn--sm" id="nmQRun" type="button">Scan</button>' +
+        '<label class="filter-label"><input type="checkbox" id="nmQAll"> Show matches with no gaps</label>' +
+        '<button class="btn btn--ghost btn--sm" id="nmQCsv" type="button" disabled>Export CSV</button>' +
+      '</div>' +
+      '<div id="nmQOut"></div>';
+    document.getElementById('nmQScope').addEventListener('change', function () {
+      state.quality.scope = this.value;
+      state.quality.rows = null;
+      renderDaybar();
+      renderQuality();
+      if (this.value === 'day') scanQuality();
+    });
+    document.getElementById('nmQRun').addEventListener('click', scanQuality);
+    document.getElementById('nmQAll').addEventListener('change', function () {
+      state.quality.showAll = this.checked;
+      renderQuality();
+    });
+    document.getElementById('nmQCsv').addEventListener('click', exportQuality);
+  }
+
+  function scanQuality() {
+    var q = state.quality;
+    if (q.running) return;
+    var scope = q.scope;
+    var pick;
+    if (scope === 'day') {
+      q.label = dayLabel(state.ymd);
+      pick = Promise.resolve(dayRows());
     } else {
-      verdict('ok', modeLabel(m.mode),
-        'Last run ' + NL.formatDateTime(m.lastRun, { seconds: true }) +
-        (m.intervalSec ? ' · next in ' + NL.formatDuration(m.intervalSec) : '') +
-        ' · season ' + esc(m.season) + ' · took ' + (m.durationMs || 0) + 'ms');
+      var comp = COMPS.filter(function (c) { return c.key === scope; })[0];
+      q.label = comp.label + ', season so far';
+      pick = seasonList(comp).then(function (list) {
+        return list.map(function (m) { return shapeRow(m, comp); });
+      });
     }
+    q.running = true; q.rows = []; q.done = 0; q.total = 0; q.error = null;
+    renderQuality();
+    pick.then(function (rows) {
+      var finished = rows.filter(function (r) { return isFinished(r.period); });
+      q.total = finished.length;
+      renderQuality();
+      return mapLimit(finished, 6, function (r) {
+        return detail(r.id, { fresh: true }).then(function (res) {
+          q.rows.push(assess(r, res));
+          q.done += 1;
+          if (q.done % 10 === 0 || q.done === q.total) renderQuality();
+        });
+      });
+    }).catch(function (err) {
+      q.error = (err && err.message) || String(err);
+    }).then(function () {
+      q.running = false;
+      q.rows.sort(function (a, b) { return ((a.row.ko && a.row.ko.getTime()) || 0) - ((b.row.ko && b.row.ko.getTime()) || 0); });
+      renderQuality();
+    });
+  }
 
-    els.stats.innerHTML = [
-      stat(m.matchesToday || 0, 'Matches today'),
-      stat(m.liveCount || 0, 'In play', m.liveCount ? 'ok' : ''),
-      stat(m.detailFetched || 0, 'Detail fetched last run'),
-      stat(m.eventsCreated || 0, 'Events last run', m.eventsCreated ? 'ok' : ''),
-      stat(Object.keys(state.events || {}).length, 'Events today'),
-      stat(m.errorCount || 0, 'Errors', (m.errorCount ? 'bad' : 'ok'))
-    ].join('');
+  /* bad = a fact is wrong or missing (a goal with no scorer, no team sheet);
+     warn = something useful is absent (short sheet, no gate, no referee). */
+  function assess(row, res) {
+    if (!res.ok) return { row: row, failed: describe(res), issues: [{ level: 'bad', text: 'detail failed: ' + describe(res) }] };
+    var s = sides(res);
+    var hf = sideFacts(s.home), af = sideFacts(s.away);
+    var issues = [];
+    [[hf, row.home], [af, row.away]].forEach(function (pair) {
+      var f = pair[0], team = pair[1];
+      if (f.unnamed) issues.push({ level: 'bad', kind: 'scorer', n: f.unnamed, text: team + ': ' + f.unnamed + ' goal' + (f.unnamed === 1 ? '' : 's') + ' without a scorer' });
+      if (!f.xi) issues.push({ level: 'bad', kind: 'sheet', text: team + ': no team sheet' });
+      else if (f.xi < 11) issues.push({ level: 'warn', kind: 'sheet', text: team + ': ' + f.xi + ' starters' });
+      if (f.xi && !f.bench) issues.push({ level: 'warn', kind: 'bench', text: team + ': no bench' });
+      if (f.xi && !f.formation) issues.push({ level: 'warn', kind: 'formation', text: team + ': no formation' });
+    });
+    if (s.md.attendance == null) issues.push({ level: 'warn', kind: 'gate', text: 'no gate' });
+    if (!(s.md.refereeName || s.a.refereeName)) issues.push({ level: 'warn', kind: 'ref', text: 'no referee' });
+    return { row: row, h: hf, a: af, issues: issues };
+  }
+
+  function renderQuality() {
+    renderQualityShell();
+    var q = state.quality;
+    var out = document.getElementById('nmQOut');
+    document.getElementById('nmQCsv').disabled = !(q.rows && q.rows.length && !q.running);
+    if (!q.rows) {
+      out.innerHTML = '<p class="nm-note">' + (q.scope === 'day' ? 'Scanning the chosen matchday…'
+        : 'A season scan reads every finished match’s detail from NLS — a division is a few hundred requests and takes a minute or two.') + '</p>';
+      return;
+    }
+    var html = '';
+    if (q.error) html += '<div class="banner banner--error">' + esc(q.error) + '</div>';
+    html += '<p class="nm-note">' + esc(q.label) + ': ' + (q.running
+      ? 'checked ' + q.done + ' of ' + (q.total || '…') + ' finished matches…'
+      : q.done + ' finished match' + (q.done === 1 ? '' : 'es') + ' checked against NLS') + '</p>';
+
+    var count = function (kind) {
+      return q.rows.reduce(function (n, r) {
+        return n + r.issues.filter(function (i) { return i.kind === kind; }).reduce(function (m, i) { return m + (i.n || 1); }, 0);
+      }, 0);
+    };
+    var flagged = q.rows.filter(function (r) { return r.issues.length; });
+    var badMatches = q.rows.filter(function (r) { return r.issues.some(function (i) { return i.level === 'bad'; }); }).length;
+    html += '<div class="stats">' + [
+      stat(flagged.length, 'Matches with gaps', flagged.length ? 'warn' : 'ok'),
+      stat(count('scorer'), 'Goals without a scorer', count('scorer') ? 'bad' : 'ok'),
+      stat(count('sheet'), 'Missing or short team sheets', count('sheet') ? 'warn' : 'ok'),
+      stat(count('gate'), 'No gate', count('gate') ? 'warn' : 'ok'),
+      stat(count('ref'), 'No referee', count('ref') ? 'warn' : 'ok'),
+      stat(badMatches, 'Matches with a missing fact', badMatches ? 'bad' : 'ok')
+    ].join('') + '</div>';
+
+    var list = q.showAll ? q.rows : flagged;
+    if (!list.length) {
+      out.innerHTML = html + (q.running ? '' : emptyState('No gaps',
+        'Every finished match has its scorers, team sheets, gate and referee.'));
+      return;
+    }
+    html += '<div class="table-wrap"><table class="table table--compact nm-table"><colgroup>' +
+      '<col class="col-date"><col class="col-comp"><col><col class="col-score"><col style="width:45%">' +
+      '</colgroup><thead><tr><th>Date</th><th>Comp</th><th>Match</th><th class="ta-c">Score</th><th>Gaps in NLS</th></tr></thead><tbody>';
+    list.forEach(function (r) {
+      html += '<tr><td class="mono">' + esc(r.row.ko ? NL.formatDateShort(r.row.ko) : '—') + '</td>' +
+        '<td class="muted">' + esc(r.row.comp.short) + '</td>' +
+        '<td>' + esc(r.row.home) + ' v ' + esc(r.row.away) + '<br><a href="#" class="mono muted nm-raw-link" data-id="' + esc(r.row.id) + '">' + esc(r.row.id) + '</a></td>' +
+        '<td class="ta-c score">' + esc(r.row.hs) + '–' + esc(r.row.as) + '</td>' +
+        '<td>' + (r.issues.length ? r.issues.map(function (i) {
+          return '<span class="q-' + i.level + '">' + esc(i.text) + '</span>';
+        }).join(' · ') : '<span class="q-ok">complete</span>') + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    out.innerHTML = html;
+  }
+
+  els.quality.addEventListener('click', function (e) {
+    var a = e.target.closest('.nm-raw-link');
+    if (!a) return;
+    e.preventDefault();
+    showTab('raw');
+    rawFetch('/matches/' + a.getAttribute('data-id'));
+  });
+
+  function exportQuality() {
+    var q = state.quality;
+    var rows = [['matchID', 'date', 'competition', 'home', 'away', 'score', 'goals without scorer', 'home starters', 'away starters', 'home bench', 'away bench', 'gaps']];
+    (q.showAll ? q.rows : q.rows.filter(function (r) { return r.issues.length; })).forEach(function (r) {
+      rows.push([r.row.id, r.row.ko ? r.row.ko.toISOString().slice(0, 10) : '', r.row.comp.label, r.row.home, r.row.away,
+        r.row.hs + '-' + r.row.as,
+        r.h ? r.h.unnamed + r.a.unnamed : '',
+        r.h ? r.h.xi : '', r.a ? r.a.xi : '', r.h ? r.h.bench : '', r.a ? r.a.bench : '',
+        r.issues.map(function (i) { return i.text; }).join('; ')]);
+    });
+    NL.download('nls-gaps-' + (q.scope === 'day' ? state.ymd : q.scope + '-' + state.season) + '.csv',
+      NL.csv(rows, { bom: true }), 'text/csv');
+  }
+
+  function emptyState(title, text) {
+    return '<div class="empty-state"><div class="empty-state__title">' + esc(title) + '</div>' +
+      '<div class="empty-state__text">' + esc(text) + '</div></div>';
   }
 
   function stat(num, label, mod) {
@@ -943,328 +1131,116 @@
       '<div class="stat__label">' + esc(label) + '</div></div>';
   }
 
-  function modeLabel(mode) {
-    if (mode === 'live') return 'Live — polling every minute';
-    if (mode === 'prematch') return 'Pre-match — collecting team news';
-    if (mode === 'cooldown') return 'Post-match — catching late entries';
-    return 'Idle — nothing due';
+  // -------------------------------------------------------------------------
+  // Feed health — every endpoint we depend on, probed
+  // -------------------------------------------------------------------------
+
+  function missing(obj, fields) {
+    return fields.filter(function (f) { return !obj || obj[f] === undefined; });
   }
 
-  // -------------------------------------------------------------------------
-  // Today
-  // -------------------------------------------------------------------------
-
-  function renderToday() {
-    /* ONE TABLE FOR EVERY DIVISION, with fixed column widths.
-       Rendering a table per competition let each one size its own columns
-       from its own content, so the score column landed in a different place
-       in every block and the eye had to re-find it four times. Divisions are
-       header rows inside one table instead. */
-    var blocks = [];
-
+  function runHealth() {
+    clearTimeout(healthTimer);
+    var today = todayYmd();
+    var probes = [];
     COMPS.forEach(function (c) {
-      /* Merge the two sources. fixtures/ is the season and is what any day
-         other than the ingester's last run has; live/index carries the live
-         minute and only ever exists for that run's day. Live wins on the
-         matches it has, so a past day still renders and today still ticks. */
-      var rows = Object.values(dayRows(c.key));
-      if (!rows.length) return;
-      rows.sort(function (a, b) { return String(a.ko).localeCompare(String(b.ko)); });
-      blocks.push({ comp: c, rows: rows });
+      probes.push({ name: c.label + ' — today’s list', path: dayPath(c, today, '&includePopulatedDates=true'),
+        check: function (r) {
+          var data = (r.json && r.json.data) || [];
+          var cal = r.json && r.json.meta && r.json.meta.populatedDates;
+          var gone = data[0] ? missing(data[0].attributes, ['kickOffDateUTC', 'homeTeam', 'awayTeam', 'matchPeriod']) : [];
+          return { rows: data.length + ' today', info: cal ? Object.keys(cal).length + ' matchdays in calendar' : 'no calendar',
+            warn: gone.length ? 'missing ' + gone.join(', ') : (cal ? null : 'populatedDates absent') };
+        } });
     });
-
-    if (!blocks.length) { els.today.innerHTML = emptyDay(); return; }
-
-    var html = '<div class="table-wrap"><table class="table table--compact matches">' +
-      '<colgroup>' +
-        '<col class="col-time"><col class="col-team"><col class="col-score">' +
-        '<col class="col-team"><col class="col-state"><col class="col-flag">' +
-      '</colgroup><tbody>';
-
-    blocks.forEach(function (b) {
-      html += '<tr class="divrow"><th colspan="6">' + esc(b.comp.label) +
-        '<span class="comp-block__count">' + b.rows.length + ' match' +
-        (b.rows.length === 1 ? '' : 'es') + '</span></th></tr>';
-
-      b.rows.forEach(function (r) {
-        html += '<tr>' +
-          '<td class="muted mono">' + esc(NL.formatTime(r.ko)) + '</td>' +
-          '<td class="ta-r">' + side(r.home) + '</td>' +
-          '<td class="score ta-c">' + scoreOf(r) + '</td>' +
-          '<td>' + side(r.away, true) + '</td>' +
-          '<td>' + periodPill(r) + '</td>' +
-          '<td class="muted mono">' + (r.lineupComplete ? 'XI' : '') + '</td>' +
-          '</tr>';
-      });
+    LEAGUES.forEach(function (c) {
+      probes.push({ name: c.label + ' — table', path: '/league-tables/?competitionID=' + c.id + '&seasonID=' + state.season,
+        check: function (r) {
+          var data = (r.json && r.json.data) || [];
+          var snap = r.json && r.json.meta && r.json.meta.snapshotDate;
+          var gone = data[0] ? missing(data[0].attributes, ['position', 'teamName', 'played', 'points', 'goalsFor']) : [];
+          return { rows: data.length + ' teams', info: snap ? 'snapshot ' + snap : 'no snapshotDate',
+            warn: !data.length ? 'empty table' : (gone.length ? 'missing ' + gone.join(', ') : null) };
+        } });
     });
-
-    els.today.innerHTML = html + '</tbody></table></div>';
-  }
-
-  /* Three different reasons a day can be blank, and conflating them is how a
-     working ingester gets reported as broken. */
-  function emptyDay() {
-    var m = state.ingest;
-    var known = allMatchdays().some(function (d) { return d.ymd === state.ymd; });
-
-    if (m && m.errorCount >= COMPS.length) {
-      return '<div class="empty-state">Nothing has been written for any day yet — ' +
-        'every fetch on the last run failed, so this is not "no fixtures".</div>';
+    var sample = sampleFinished();
+    if (sample) {
+      probes.push({ name: 'Match detail — ' + sample.home + ' v ' + sample.away, path: '/matches/' + sample.id,
+        check: function (r) {
+          var a = (r.json && r.json.data && r.json.data.attributes) || null;
+          var gone = missing(a, ['matchTeams', 'matchDetails', 'homeTeamID', 'period']);
+          var t = (a && a.matchTeams && a.matchTeams[0]) || {};
+          var inner = missing(t, ['players', 'events', 'score']);
+          var all = gone.concat(inner);
+          return { rows: (a && a.matchTeams ? a.matchTeams.length : 0) + ' sides', info: 'fields checked',
+            warn: all.length ? 'missing ' + all.join(', ') : null };
+        } });
     }
-    if (known) {
-      return '<div class="empty-state">' + esc(NL.formatDateShort(state.ymd)) +
-        ' has fixtures upstream, but nothing has been written for it. The season ' +
-        'fixture node is filled by the hourly run.</div>';
-    }
-    return '<div class="empty-state">No fixtures on ' + esc(NL.formatDateShort(state.ymd)) +
-      '. Use the matchday dropdown to jump to a day that has some.</div>';
-  }
-
-  function side(t, after) {
-    if (!t) return '';
-    var crest = t.crest
-      ? '<img class="crest" src="' + esc(t.crest) + '" alt="" onerror="this.style.display=\'none\'">'
-      : '';
-    return after ? crest + esc(t.name) : esc(t.name) + ' ' + crest;
-  }
-
-  /* En-dash for a match that has not produced a score, matching the display
-     convention the rest of the repo uses. The period is the master switch —
-     a finished match's minute is already null by the time it reaches here,
-     because the ingester stripped it. */
-  function scoreOf(r) {
-    if (r.postponed) return 'P–P';
-    if (r.period === 'abandoned') return 'A–A';
-    var h = r.home && r.home.score, a = r.away && r.away.score;
-    if (h == null || a == null) return '<span class="muted">v</span>';
-    var s = esc(h) + '–' + esc(a);
-    if (r.home.penScore != null) {
-      s += '<span class="score__pens muted">' + esc(r.home.penScore) + '–' + esc(r.away.penScore) + ' pens</span>';
-    }
-    return s;
-  }
-
-  /* THE CLOCK IS DERIVED, NEVER COUNTED. elapsed = now \u2212 anchorUTC, +45:00 in
-     the second half; floored to minutes; capped at 45'+n / 90'+n and frozen
-     at the cap through half time. Clock state lives on the anchor record
-     (functions/nls/anchors.js holds the method and its tests), so a reload
-     of this page loses nothing. Null wherever the model makes no claim \u2014
-     no anchor yet, extra time, penalties \u2014 and the caller falls back to
-     upstream's minute. */
-  function anchorClock(anchors, period) {
-    if (!anchors) return null;
-    var a1 = anchors['1H'] && Date.parse(anchors['1H'].anchorUTC);
-    var a2 = anchors['2H'] && Date.parse(anchors['2H'].anchorUTC);
-    var m;
-    if (period === 'firsthalf' && a1) {
-      m = Math.max(0, Math.floor((Date.now() - a1) / 60000));
-      return { text: m > 45 ? "45'+" + (m - 45) : m + "'", rec: anchors['1H'] };
-    }
-    if (period === 'halftime' && a1) {
-      return { text: "45'", rec: anchors['1H'] };
-    }
-    if (period === 'secondhalf' && a2) {
-      m = 45 + Math.max(0, Math.floor((Date.now() - a2) / 60000));
-      return { text: m > 90 ? "90'+" + (m - 90) : m + "'", rec: anchors['2H'] };
-    }
-    return null;
-  }
-
-  function periodPill(r) {
-    if (r.live) {
-      var clock = anchorClock(state.anchors[r.id], r.period);
-      if (clock) {
-        /* The tooltip is the inspection surface: which anchor the minute
-           hangs off, what upstream claims alongside, and \u2014 where an event
-           has corrected a list flip \u2014 the measured kick-off ingest lag. */
-        var tip = 'Clock from the ' + (clock.rec.source || '?') + ' anchor (' +
-          (clock.rec.confidence || '?') + ' confidence) \u00b7 upstream says ' +
-          (r.formattedMinute || (r.minute != null ? r.minute + "'" : '\u2014'));
-        if (clock.rec.ingestLagMs > 0) {
-          tip += ' \u00b7 list flip trailed kick-off by ' +
-            NL.formatDuration(Math.round(clock.rec.ingestLagMs / 1000));
+    return Promise.all(probes.map(function (p) {
+      return nls(p.path).then(function (res) {
+        var out = { name: p.name, path: p.path, res: res, level: 'bad', rows: '', info: describe(res) };
+        if (res.ok && res.json) {
+          var c = p.check(res);
+          out.level = c.warn ? 'warn' : 'ok';
+          out.rows = c.rows;
+          out.info = c.warn ? c.warn + ' · ' + c.info : c.info;
+        } else if (res.ok) {
+          out.info = 'not JSON';
         }
-        return '<span class="pill nm-pill pill--live" title="' + esc(tip) + '">' +
-          esc(clock.text) + '</span>';
-      }
-      return '<span class="pill nm-pill pill--live">' + esc(r.formattedMinute || r.minute + "'") + '</span>';
-    }
-    if (r.postponed) return '<span class="pill nm-pill pill--postponed" title="Postponed">P\u2013P</span>';
-    if (r.finished) return '<span class="pill nm-pill">FT</span>';
-    return '<span class="pill nm-pill pill--pending">' + esc(r.period || 'pre') + '</span>';
-  }
-
-  // -------------------------------------------------------------------------
-  // Events
-  // -------------------------------------------------------------------------
-
-  function renderEvents() {
-    var list = Object.values(state.events || {}).concat(anchorEventRows());
-    if (!list.length) {
-      /* Empty here is usually correct rather than broken, and saying which is
-         the difference between a tool and a shrug. Events exist only for days
-         the ingester actually watched: they are detected by diffing one poll
-         against the last, so they cannot be backfilled for a day that has
-         already happened. */
-      els.events.innerHTML = '<div class="empty-state">No events for ' +
-        esc(NL.formatDateShort(state.ymd)) + '. Events are detected live by ' +
-        'comparing one poll to the last, so a day the ingester did not watch ' +
-        'has none and cannot be given any retrospectively.</div>';
-      return;
-    }
-
-    /* ORDERED BY detectedAt, NEVER BY MINUTE. A goal scored at 67' can reach
-       the feed at 15:52 because an official was slow entering it; sorting by
-       the match minute would drop it into the middle of the feed as though it
-       had just been missed. detectedAt is when we first saw it, which is the
-       only honest order for a feed. */
-    list.sort(function (a, b) { return (b.detectedAt || 0) - (a.detectedAt || 0); });
-
-    els.events.innerHTML = list.map(function (e) {
-      var who = e.playerName || e.teamName || '';
-      var what = '';
-      if (e.type === 'goal') {
-        what = who + (e.isPenalty ? ' (pen)' : '') + (e.isOwnGoal ? ' (og)' : '') +
-          ' — ' + e.homeTeam + ' ' + e.homeScore + '\u2013' + e.awayScore + ' ' + e.awayTeam;
-      } else if (e.type === 'booking') {
-        what = who + ' — ' + (e.cardType || 'card');
-      } else if (e.type === 'substitution') {
-        /* The player coming ON is `playerName`, not `playerOnName` — an event
-           record names its subject in `playerName` whatever the type, exactly
-           as goals and bookings do above, and the substitution adds
-           `playerOffName` for the second person. There is no `playerOnName`
-           key and never was, so reading one rendered '?' for every sub since
-           the events feed shipped. Half a symptom is worse than none: the off
-           name resolved, which made the feed look like it was working on data
-           that was arriving fine all along. */
-        what = (who || '?') + ' on for ' + (e.playerOffName || '?');
-      } else if (e.type === 'lineup') {
-        what = (e.teamName || '') + ' team news' + (e.formation ? ' — ' + e.formation : '');
-      } else if (e.type === 'withdrawal') {
-        what = who + ' withdrawn from the XI';
-      } else if (e.type === 'kick-off') {
-        /* Synthetic, from the anchor record — see anchorEventRows. */
-        what = (e.slot === '2H' ? 'Second half under way' : 'Kick-off') + ' — ' +
-          e.fixture + ' · derived ' + NL.formatDateTime(e.anchorUTC, { seconds: true }) +
-          ' (' + (e.source || '?') + ', ' + (e.confidence || '?') + ')' +
-          (e.ingestLagMs > 0
-            ? ' · list flip lagged by ' + NL.formatDuration(Math.round(e.ingestLagMs / 1000))
-            : '');
-      } else if (e.fixture) {
-        /* A ledger transition — half time, full time, or an oddity. The
-           observation time is the whole record, and it sits in the
-           detected-at column where it belongs. */
-        what = e.fixture + (e.from ? ' (from ' + e.from + ')' : '');
-      }
-      var minute = e.formattedMinute ? ' <span class="muted mono">' + esc(e.formattedMinute) + '</span>' : '';
-      return '<div class="ev ev--' + esc(e.type) + (e.retracted ? ' ev--retracted' : '') + '">' +
-        '<span class="ev__type">' + esc(e.type) + '</span>' +
-        '<span class="ev__what">' + esc(what) + minute +
-          (e.retracted ? ' <span class="muted">(retracted upstream)</span>' : '') + '</span>' +
-        /* ABSOLUTE, TO THE SECOND — not '3h ago'. This column exists to be
-           compared: against the upstream eventTimestamp, against the ingest
-           run that should have caught it, against another event in the same
-           list. Relative time answers "is this recent", which is not a
-           question anyone brings to a feed monitor, and it silently loses the
-           precision the comparison needs — two events 40 seconds apart both
-           read '3h ago'. Where the record carries the upstream entry time
-           (tsUTC), it rides the tooltip: this time against that one IS the
-           per-event ingest lag. */
-        '<span class="ev__when mono"' +
-          (e.tsUTC ? ' title="' + esc('Entered upstream ' +
-            NL.formatDateTime(e.tsUTC, { seconds: true })) + '"' : '') + '>' +
-          esc(NL.formatDateTime(e.detectedAt, { seconds: true })) + '</span>' +
-        '</div>';
-    }).join('');
-  }
-
-  // -------------------------------------------------------------------------
-  // Derived
-  // -------------------------------------------------------------------------
-
-  function renderDerived() {
-    els.derived.innerHTML = '<div class="loading-row">Loading tables and scorers…</div>';
-    Promise.all(COMPS.map(function (c) {
-      return Promise.all([
-        wdb.ref(ROOT + '/derived/tables/' + c.key).once('value'),
-        wdb.ref(ROOT + '/derived/scorers/' + c.key).once('value'),
-        wdb.ref(ROOT + '/derived/coverage/' + c.key).once('value')
-      ]).then(function (snaps) {
-        return { comp: c, table: snaps[0].val(), scorers: snaps[1].val(), cov: snaps[2].val() };
+        return out;
       });
-    })).then(function (all) {
-      var html = all.map(derivedBlock).join('');
-      els.derived.innerHTML = html ||
-        '<div class="empty-state">Nothing derived yet. Tables come from the ' +
-        'hourly run; scorers accumulate from goals detected live, so they stay ' +
-        'empty until the ingester has watched a matchday.</div>';
-    }).catch(function (e) {
-      els.derived.innerHTML = '<div class="empty-state">Could not read derived nodes: ' + esc(e.message) + '</div>';
+    })).then(function (results) {
+      state.health = results;
+      state.healthAt = Date.now();
+      renderVerdict();
+      if (state.tab === 'health') renderHealth();
+      healthTimer = setTimeout(runHealth, HEALTH_POLL_MS);
     });
   }
 
-  function derivedBlock(d) {
-    if (!d.table && !d.scorers && !d.cov) return '';
-    var html = '<div class="comp-block"><div class="comp-block__head">' + esc(d.comp.label);
-
-    /* `basis` is the honest bit: 'official' is a settled table, 'official+live'
-       has in-play matches applied on top and will move again. */
-    if (d.table && d.table.basis) {
-      html += '<span class="comp-block__count">' + esc(d.table.basis) +
-        (d.table.liveMatchesApplied ? ' · ' + d.table.liveMatchesApplied + ' in play' : '') + '</span>';
-    }
-    html += '</div>';
-
-    var rows = (d.table && d.table.rows) || [];
-    if (rows.length) {
-      html += '<div class="table-wrap"><table class="table table--compact"><thead><tr>' +
-        '<th>#</th><th>Team</th><th>P</th><th>GD</th><th>Pts</th></tr></thead><tbody>' +
-        rows.slice(0, 6).map(function (r) {
-          return '<tr><td>' + esc(r.pos) + '</td><td>' + esc(r.team) + '</td><td>' + esc(r.played) +
-            '</td><td>' + esc(r.goalDifference) + '</td><td><strong>' + esc(r.points) + '</strong></td></tr>';
-        }).join('') + '</tbody></table></div>';
-    } else if (d.table && d.table.groups) {
-      html += '<div class="muted">' + Object.keys(d.table.groups).length + ' cup group(s) recorded.</div>';
-    }
-
-    var sc = Object.values(d.scorers || {})
-      .sort(function (a, b) { return b.goals - a.goals; }).slice(0, 5);
-    if (!sc.length) {
-      html += '<div class="nm-note">No scorers yet — ' +
-        'the tally is built from goals detected live, not fetched.</div>';
-    }
-    if (sc.length) {
-      html += '<div class="nm-subhead">Top scorers — from detected events</div>' +
-        '<div class="table-wrap"><table class="table table--compact scorers-table"><tbody>' +
-        sc.map(function (s) {
-          return '<tr><td>' + esc(s.scorer) + '</td><td>' + esc(s.goals) +
-            (s.penalties ? ' <span class="muted">(' + esc(s.penalties) + ' pen)</span>' : '') + '</td></tr>';
-        }).join('') + '</tbody></table></div>';
-    }
-
-    /* The coverage gap, shown rather than hidden. A scorer tally that silently
-       under-reports because clubs never entered goal events is worse than one
-       that says so. */
-    if (d.cov) {
-      var gap = d.cov.goalsUnaccounted || 0;
-      var pending = d.cov.pendingBackfillDays || 0;
-      /* Two very different things, and calling both "unaccounted" blamed the
-         upstream for matches we had simply never fetched. */
-      var why = pending
-        ? ' — <strong>' + gap + ' still to load</strong> (' + pending +
-          ' matchday' + (pending === 1 ? '' : 's') + ' left to backfill)'
-        : (gap ? ' — <strong>' + gap + ' with no scorer recorded upstream</strong>' : '');
-      html += '<div class="nm-note">' +
-        esc(d.cov.goalsAccounted) + ' of ' + esc(d.cov.goalsScored) + ' goals have a named scorer' +
-        why + '</div>';
-    }
-
-    return html + '</div>';
+  function sampleFinished() {
+    var rows = dayRows().filter(function (r) { return isFinished(r.period); });
+    return rows[0] || null;
   }
 
+  function renderHealth() {
+    var h = state.health;
+    if (!h) { els.health.innerHTML = '<p class="nm-note">Probing NLS…</p>'; return; }
+    var html = '<div class="filter-bar"><button class="btn btn--primary btn--sm" id="nmHRun" type="button">Run checks now</button>' +
+      '<span class="muted">Every five minutes while this page is open. Last run ' +
+      esc(NL.formatDateTime(state.healthAt, { seconds: true })) + '.</span></div>';
+    if (!h.some(function (p) { return /detail/i.test(p.name); })) {
+      html += '<p class="nm-note">The match-detail check runs once a matchday with a finished match is loaded.</p>';
+    }
+    html += '<div class="table-wrap"><table class="table table--compact"><thead><tr>' +
+      '<th>Endpoint</th><th>Result</th><th class="ta-r">Time</th><th>Rows</th><th>Detail</th></tr></thead><tbody>';
+    h.forEach(function (p) {
+      var label = p.level === 'ok' ? 'OK' : (p.level === 'warn' ? 'Gaps' : 'Failing');
+      var cls = p.level === 'ok' ? 'pill--approved' : (p.level === 'warn' ? 'pill--pending' : 'pill--rejected');
+      html += '<tr><td>' + esc(p.name) + '<br><a href="#" class="mono muted nm-raw-path" data-path="' + esc(p.path) + '">' + esc(p.path.slice(0, 70)) + (p.path.length > 70 ? '…' : '') + '</a></td>' +
+        '<td><span class="pill ' + cls + ' nm-pill">' + label + '</span> <span class="mono muted">' + esc(p.res.status || '—') + '</span></td>' +
+        '<td class="ta-r mono">' + esc(p.res.ms) + 'ms</td>' +
+        '<td>' + esc(p.rows) + '</td>' +
+        '<td class="muted">' + esc(p.info) + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    els.health.innerHTML = html;
+    document.getElementById('nmHRun').addEventListener('click', function () {
+      els.health.innerHTML = '<p class="nm-note">Probing NLS…</p>';
+      runHealth().then(renderHealth);
+    });
+  }
+
+  els.health.addEventListener('click', function (e) {
+    var a = e.target.closest('.nm-raw-path');
+    if (!a) return;
+    e.preventDefault();
+    showTab('raw');
+    rawFetch(a.getAttribute('data-path'));
+  });
+
   // -------------------------------------------------------------------------
-  // Raw — the escape hatch, so an unexpected shape can be read without going
-  // to the Firebase console.
+  // Raw
   // -------------------------------------------------------------------------
 
   function renderRaw() {
@@ -1272,54 +1248,89 @@
     els.raw.dataset.built = '1';
     els.raw.innerHTML =
       '<div class="filter-bar">' +
-      '<label class="filter-label" for="nmPath">Path under nls/</label>' +
-      '<input id="nmPath" class="mono nm-path" value="meta/ingest">' +
-      '<button class="btn btn--primary btn--sm" id="nmGo" type="button">Read</button>' +
-      '<button class="btn btn--ghost btn--sm" id="nmCopy" type="button">Copy</button>' +
-      '</div><pre id="nmOut" class="mono nm-out"></pre>';
-
-    var out = document.getElementById('nmOut');
-    var path = document.getElementById('nmPath');
-
+      '<div class="form-group nm-path"><label for="nmPath">NLS path</label>' +
+      '<input id="nmPath" class="mono" value="' +
+        esc('/matches/?seasonID=' + state.season + '&competitionID=89&page.size=5') + '"></div>' +
+      '<button class="btn btn--primary btn--sm" id="nmGo" type="button">Fetch</button>' +
+      '<button class="btn btn--ghost btn--sm" id="nmCopy" type="button">Copy response</button>' +
+      '<button class="btn btn--ghost btn--sm" id="nmCopyUrl" type="button">Copy URL</button>' +
+      '</div><p class="nm-note" id="nmRawMeta">Relative to ' + esc(NLS) + '</p>' +
+      '<pre id="nmOut" class="mono nm-out"></pre>';
     document.getElementById('nmGo').addEventListener('click', function () {
-      var p = String(path.value || '').replace(/^\/+|\/+$/g, '');
-      /* seen/ is the internal dedup guard and is granted to nobody. Saying so
-         is friendlier than letting the read fail with PERMISSION_DENIED. */
-      if (/^seen(\/|$)/.test(p)) {
-        out.textContent = 'nls/seen is an internal dedup guard and is deliberately not readable.';
-        return;
-      }
-      out.textContent = 'Reading nls/' + p + '…';
-      wdb.ref(ROOT + '/' + p).once('value').then(function (s) {
-        out.textContent = JSON.stringify(s.val(), null, 2) || 'null';
-      }).catch(function (e) { out.textContent = e.message; });
+      rawFetch(document.getElementById('nmPath').value);
     });
-
+    document.getElementById('nmPath').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') rawFetch(this.value);
+    });
     document.getElementById('nmCopy').addEventListener('click', function () {
-      NL.copy(out.textContent).then(function () { NL.toast('Copied', 'success'); });
+      NL.copy(document.getElementById('nmOut').textContent);
+    });
+    document.getElementById('nmCopyUrl').addEventListener('click', function () {
+      NL.copy(NLS + normalisePath(document.getElementById('nmPath').value));
+    });
+  }
+
+  function normalisePath(p) {
+    p = String(p || '').trim();
+    if (p.indexOf(NLS) === 0) p = p.slice(NLS.length);
+    return p.charAt(0) === '/' ? p : '/' + p;
+  }
+
+  function rawFetch(path) {
+    renderRaw();
+    path = normalisePath(path);
+    document.getElementById('nmPath').value = path;
+    var meta = document.getElementById('nmRawMeta');
+    var out = document.getElementById('nmOut');
+    meta.textContent = 'Fetching…';
+    out.textContent = '';
+    nls(path).then(function (r) {
+      meta.textContent = (r.error ? r.error : 'HTTP ' + r.status) + ' · ' + r.ms + 'ms · ' +
+        (r.bytes / 1024).toFixed(1) + ' KB · ' + NL.formatDateTime(Date.now(), { seconds: true });
+      out.textContent = r.json ? JSON.stringify(r.json, null, 2) : (r.text || '');
     });
   }
 
   // -------------------------------------------------------------------------
-  // Tabs
+  // Tabs and day bar
   // -------------------------------------------------------------------------
+
+  function showTab(name) {
+    state.tab = name;
+    [].forEach.call(els.tabs.querySelectorAll('.tab'), function (t) {
+      t.classList.toggle('active', t.getAttribute('data-tab') === name);
+    });
+    els.live.hidden = name !== 'live';
+    els.quality.hidden = name !== 'quality';
+    els.health.hidden = name !== 'health';
+    els.raw.hidden = name !== 'raw';
+    renderDaybar();
+    if (name === 'live') renderLive();
+    if (name === 'quality') {
+      renderQuality();
+      if (state.quality.scope === 'day' && !state.quality.rows && !state.quality.running) scanQuality();
+    }
+    if (name === 'health') renderHealth();
+    if (name === 'raw') renderRaw();
+  }
 
   els.tabs.addEventListener('click', function (e) {
     var btn = e.target.closest('.tab');
-    if (!btn) return;
-    tab = btn.dataset.tab;
-    [].forEach.call(els.tabs.querySelectorAll('.tab'), function (t) {
-      t.classList.toggle('active', t === btn);
-    });
-    els.today.hidden = tab !== 'today';
-    els.events.hidden = tab !== 'events';
-    els.derived.hidden = tab !== 'derived';
-    els.raw.hidden = tab !== 'raw';
-    if (tab === 'today') renderToday();
-    if (tab === 'events') renderEvents();
-    if (tab === 'derived') renderDerived();
-    if (tab === 'raw') renderRaw();
+    if (btn) showTab(btn.getAttribute('data-tab'));
   });
+  els.pick.addEventListener('change', function () { selectDay(this.value); });
+  els.prev.addEventListener('click', function () {
+    var days = matchdays(), i = days.indexOf(state.ymd);
+    if (i > 0) selectDay(days[i - 1]);
+  });
+  els.next.addEventListener('click', function () {
+    var days = matchdays(), i = days.indexOf(state.ymd);
+    if (i >= 0 && i < days.length - 1) selectDay(days[i + 1]);
+  });
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden && state.ymd) schedulePoll();
+  });
+
   els.tabs.querySelector('.tab').classList.add('active');
 
   /* If auth-guard fired before this script loaded, replay the session. */
