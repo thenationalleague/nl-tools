@@ -1,0 +1,105 @@
+name: NLS goal correction
+
+# Names the scorer of a goal NLS has no scorer for, so the player rows, the
+# scorer table and every player tool count it. NLS itself is not changed —
+# send the same fix to Stats Perform; once it lands at source, the ingester
+# stops applying the correction by itself (it only ever fills the gap
+# between the score and the goals the feed names).
+#
+# Writes to nl-tools RTDB nls-corrections/<matchID>/<minute>-<playerID>. The
+# hourly ingester run rebuilds the match within the hour. Nothing is written
+# to this repository: it is public, and the corrections are data.
+#
+# Inputs carry IDs only — never names — because run inputs on a public repo
+# are visible. Find the IDs with the NL Data connector: get_results with
+# missingScorers: true gives the matchID; get_player gives playerID and the
+# club's teamID.
+#
+# One line per goal, several lines (or ; between them) in one run:
+#   <matchID> <playerID> <teamID of the scorer's own club> <minute> <goal|penalty|og>
+# e.g. g2660055 p106177 t285 26 og
+
+on:
+  workflow_dispatch:
+    inputs:
+      goals:
+        description: 'One per line or ;-separated: matchID playerID teamID minute goal|penalty|og'
+        required: true
+      action:
+        description: 'add, or remove to take a correction back out'
+        type: choice
+        options: [add, remove]
+        default: add
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: nls-goal-correction
+  cancel-in-progress: false
+
+jobs:
+  correct:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DB: https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app
+      GOALS: ${{ inputs.goals }}
+      ACTION: ${{ inputs.action }}
+    steps:
+      - name: Check every line before writing any
+        id: parse
+        run: |
+          set -euo pipefail
+          node - <<'JS'
+          const fs = require('fs');
+          const lines = process.env.GOALS.split(/[;\n]+/).map(l => l.trim()).filter(Boolean);
+          const types = { goal: 'goal', penalty: 'penalty', pen: 'penalty', og: 'own goal', own: 'own goal', 'own goal': 'own goal' };
+          const out = []; const bad = [];
+          lines.forEach((l) => {
+            const m = l.match(/^(g\d+)\s+(p\d+)\s+(t\d+)\s+(\d{1,3})(?:\+\d+)?\s+(goal|penalty|pen|og|own goal|own)$/i);
+            if (!m) { bad.push(l); return; }
+            out.push({ matchID: m[1], key: m[4] + '-' + m[2],
+              value: { playerID: m[2], teamID: m[3], minute: Number(m[4]), type: types[m[5].toLowerCase()] } });
+          });
+          if (bad.length || !out.length) {
+            bad.forEach(b => console.log('::error::Not understood: "' + b + '" — expected: matchID playerID teamID minute goal|penalty|og'));
+            if (!out.length) console.log('::error::No corrections found in the input.');
+            process.exit(1);
+          }
+          fs.writeFileSync('corrections.json', JSON.stringify(out));
+          out.forEach(c => console.log(c.matchID + '  ' + c.value.playerID + ' (' + c.value.teamID + ') ' + c.value.minute + "' " + c.value.type));
+          JS
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Write the corrections
+        run: |
+          set -euo pipefail
+          TOKEN=$(gcloud auth print-access-token)
+          node - <<'JS' > requests.txt
+          const c = JSON.parse(require('fs').readFileSync('corrections.json', 'utf8'));
+          c.forEach(x => console.log(x.matchID + '/' + x.key + '\t' + JSON.stringify(x.value)));
+          JS
+          while IFS=$'\t' read -r path body; do
+            if [ "$ACTION" = "remove" ]; then
+              code=$(curl -sS -o resp.json -w '%{http_code}' -X DELETE \
+                -H "Authorization: Bearer $TOKEN" "$DB/nls-corrections/$path.json")
+            else
+              code=$(curl -sS -o resp.json -w '%{http_code}' -X PUT \
+                -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+                -d "$body" "$DB/nls-corrections/$path.json")
+            fi
+            if [ "$code" != "200" ]; then
+              echo "::error::$ACTION $path failed with HTTP $code"; cat resp.json; exit 1
+            fi
+            echo "$ACTION  $path"
+          done < requests.txt
+          echo "Done. The hourly ingester run (about quarter to the hour) rebuilds these matches."

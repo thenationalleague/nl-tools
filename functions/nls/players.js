@@ -166,6 +166,7 @@ function buildPlayerRows(detail, now) {
   (detail.goals || []).forEach((g) => {
     const r = ensure(g.playerID, g.playerName, g.teamID, !!g.isOwnGoal);
     if (!r) return;
+    if (g.corrected) r.source = 'nls+correction';
     if (g.isOwnGoal) { r.ownGoals += 1; return; }
     r.goals += 1;
     if (g.isPenalty) r.penalties += 1;
@@ -298,6 +299,73 @@ function dayClosed(ledgers, matchIDs, ymd, giveUpBefore) {
     (l.attempts || 0) >= MAX_FAILED_ATTEMPTS));
 }
 
+/**
+ * Hand corrections for goals NLS has no scorer for — a goal in the score with
+ * no event, or an event with no player. They live OUTSIDE the feed (nl-tools
+ * RTDB nls-corrections/<matchID>/<key>, written by the "NLS goal correction"
+ * Action) because this repository is public and the feed is not ours to edit.
+ *
+ * A correction is { playerID, teamID, minute, type } where teamID is the
+ * SCORER'S OWN club and type is 'goal' | 'penalty' | 'own goal'. It becomes a
+ * goal event shaped like transform.shapeGoals' output, filed the way upstream
+ * files goals: under the side that benefited, which for an own goal is the
+ * other one.
+ *
+ * Never more than the feed is missing. Per side, corrections fill only the
+ * gap between the score and the goals upstream already names, so when Stats
+ * Perform fix the match at source the correction stops applying by itself
+ * instead of counting twice. A correction that repeats an upstream goal (same
+ * player, same minute) is dropped for the same reason.
+ *
+ * Returns { detail, applied, skipped } — detail is a copy; the input is not
+ * touched.
+ */
+function applyCorrections(detail, corrections) {
+  const list = Object.keys(corrections || {}).sort().map((k) => Object.assign({ key: k }, corrections[k]))
+    .filter((c) => c && c.playerID && c.teamID);
+  if (!detail || !detail.home || !detail.away || !list.length) {
+    return { detail, applied: 0, skipped: list.length };
+  }
+  const sides = [detail.home, detail.away];
+  const sideOf = (id) => sides.find((x) => String(x.id) === String(id)) || null;
+  const otherOf = (id) => sides.find((x) => String(x.id) !== String(id)) || null;
+
+  const upstream = detail.goals || [];
+  const gap = new Map(sides.map((x) => {
+    const named = upstream.filter((g) => g.playerID && String(g.teamID) === String(x.id)).length;
+    return [String(x.id), Math.max(0, (Number(x.score) || 0) - named)];
+  }));
+
+  const added = [];
+  let skipped = 0;
+  list.sort((a, b) => (Number(a.minute) || 0) - (Number(b.minute) || 0)).forEach((c) => {
+    const type = String(c.type || 'goal').toLowerCase();
+    const own = type.includes('own');
+    const scorerSide = sideOf(c.teamID);
+    const credited = scorerSide ? (own ? otherOf(c.teamID) : scorerSide) : null;
+    const minute = c.minute == null || isNaN(Number(c.minute)) ? null : Number(c.minute);
+    const repeat = upstream.some((g) => String(g.playerID) === String(c.playerID) &&
+      (minute == null || Number(g.minute) === minute));
+    if (!credited || repeat || !(gap.get(String(credited.id)) > 0)) { skipped += 1; return; }
+    gap.set(String(credited.id), gap.get(String(credited.id)) - 1);
+    added.push({
+      idx: 'c:' + c.key,
+      teamID: String(credited.id),
+      playerID: String(c.playerID),
+      playerName: c.name || null,
+      minute: minute,
+      formattedMinute: minute != null ? minute + "'" : null,
+      period: null,
+      tsUTC: null,
+      isOwnGoal: own,
+      isPenalty: type.includes('pen'),
+      corrected: true,
+    });
+  });
+  if (!added.length) return { detail, applied: 0, skipped };
+  return { detail: Object.assign({}, detail, { goals: upstream.concat(added) }), applied: added.length, skipped };
+}
+
 /* The retry cut-off is a UTC calendar date, matching the {ymd} the calendar
    and the day lists use. */
 function ymdMinusDays(ymd, days) {
@@ -307,5 +375,5 @@ function ymdMinusDays(ymd, days) {
 }
 
 module.exports = { buildPlayerRows, ledgerEntry, hasExtraTime, ymdMinusDays,
-  isDue, failureLedger, dayClosed, MAX_FAILED_ATTEMPTS, scorerEntry,
+  isDue, failureLedger, dayClosed, MAX_FAILED_ATTEMPTS, scorerEntry, applyCorrections,
   REGULATION, WITH_EXTRA_TIME };

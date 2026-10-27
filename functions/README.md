@@ -170,6 +170,20 @@ and edge cases are in `nls/players.js`, covered by `tests/nls-players.test.mjs`.
 No rules entry exists for `players/` — the root is closed, so it is readable
 only by server-side identities (the NL Data MCP) until a staff tool needs it.
 
+### Goal corrections (since v0.6.0)
+
+When a score has goals the feed names no scorer for — find them with the NL
+Data connector, `get_results(missingScorers: true)` — name the scorer with
+**Actions → NLS goal correction → Run workflow**. One line per goal:
+`<matchID> <playerID> <teamID of the scorer's club> <minute> <goal|penalty|og>`.
+IDs only, never names: run inputs on this public repo are visible.
+
+The Action writes nl-tools RTDB `nls-corrections/<matchID>/<minute>-<playerID>`;
+the next hourly run rebuilds the match's rows and its scorers' entries.
+Corrections only ever fill the gap between the score and the goals the feed
+names, so when Stats Perform fix a match at source the correction stops
+applying by itself. Run the Action with `remove` to take one back out.
+
 ### One-time setup, in addition to the list above
 
 1. **Cross-project database access.** These are the only functions here that

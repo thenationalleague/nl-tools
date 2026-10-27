@@ -50,6 +50,13 @@
  * This file orchestrates them and owns every RTDB write.
  *
  * CHANGELOG
+ *   27/10/2026  v0.6.0  Hand corrections for goals NLS has no scorer for.
+ *                       nl-tools RTDB nls-corrections/<matchID>/<key>
+ *                       (written by the "NLS goal correction" Action) is
+ *                       read on every row build and merged as goal events —
+ *                       only up to the side's gap, so a fix at source stops
+ *                       the correction counting by itself. The hourly run
+ *                       rebuilds any built match whose corrections changed.
  *   26/10/2026  v0.5.0  Scorer table from player rows: players/<season>/
  *                       scorers/<compKey>/<playerID>, recomputed from each
  *                       affected player's season rows whenever a match's
@@ -106,7 +113,7 @@ const A = require('./nls/anchors');
 const D = require('./nls/derive');
 const P = require('./nls/players');
 
-const VERSION = '0.5.0';
+const VERSION = '0.6.0';
 
 /* nls/ lives in nl-widgets, alongside the feed/ fixture cache and the fan
    widgets that will read it in step 2. Writing it into nl-tools would put the
@@ -778,7 +785,22 @@ const PLAYER_RETRY_MS = 6 * 60 * 60 * 1000;
 const PLAYER_RETRY_DAYS = 7;
 const PLAYER_TIME_BUDGET_MS = 150 * 1000;
 
+/* Hand corrections live in the nl-tools database (the default admin app), not
+   nl-widgets: nl-widgets is the public widgets store and these are written by
+   a GitHub Action whose service account already reaches nl-tools. A read
+   failure throws, so the match records a failure and retries, rather than
+   being rebuilt without its corrections and quietly losing a goal. */
+const CORRECTIONS = 'nls-corrections';
+
+async function readCorrections(matchID) {
+  const snap = await admin.database().ref(CORRECTIONS + '/' + matchID).once('value');
+  return snap.val();
+}
+
 async function writePlayerMatch(seasonID, detail, prevLedger, now) {
+  const corrections = await readCorrections(detail.id);
+  const fixed = P.applyCorrections(detail, corrections);
+  detail = fixed.detail;
   const built = P.buildPlayerRows(detail, now);
   const base = 'players/' + seasonID + '/';
   const updates = {};
@@ -791,8 +813,12 @@ async function writePlayerMatch(seasonID, detail, prevLedger, now) {
   Object.keys((prevLedger && prevLedger.pids) || {}).forEach((pid) => {
     if (!built.rows[pid]) updates[base + 'apps/' + pid + '/' + detail.id] = null;
   });
-  updates[base + 'matches/' + detail.id] =
-    P.ledgerEntry(detail, built, now, ((prevLedger && prevLedger.attempts) || 0) + 1);
+  const ledger = P.ledgerEntry(detail, built, now, ((prevLedger && prevLedger.attempts) || 0) + 1);
+  /* Which corrections this build used — reapplyCorrections compares it with
+     the live node to know when a match needs rebuilding. */
+  ledger.corrections = corrections ? T.contentHash(corrections) : null;
+  ledger.correctionsApplied = fixed.applied;
+  updates[base + 'matches/' + detail.id] = ledger;
   await updateMulti(updates);
   await refreshScorers(seasonID, detail.compKey, built, prevLedger, now);
   return built;
@@ -865,6 +891,47 @@ async function seedScorers(seasonID, now, runStarted) {
   await db().ref(ROOT + '/' + metaPath).set({ cursor: finished ? pids.length : cursor,
     players: pids.length, seeded: finished, updatedAt: now });
   return { cursor, players: pids.length, seeded: finished };
+}
+
+/**
+ * Rebuild any built match whose corrections changed since its rows were
+ * written — added, edited or removed. The day backfill only revisits a match
+ * while its team sheet is incomplete and the day is under a week old, so a
+ * correction to an August match would otherwise never land. A match not yet
+ * built is left alone: the day backfill reads its corrections when it builds.
+ * meta/corrected/<season> remembers which matches carry corrections, so one
+ * whose corrections are all deleted is rebuilt clean rather than forgotten.
+ */
+const CORRECTIONS_PER_RUN = 20;
+
+async function reapplyCorrections(seasonID, now, runStarted) {
+  const all = (await admin.database().ref(CORRECTIONS).once('value')).val() || {};
+  const remembered = (await read('meta/corrected/' + seasonID)) || {};
+  const ids = [...new Set(Object.keys(all).concat(Object.keys(remembered)))].sort();
+  const done = [];
+  for (const id of ids) {
+    if (done.length >= CORRECTIONS_PER_RUN || Date.now() - runStarted > PLAYER_TIME_BUDGET_MS) break;
+    const ledger = await read('players/' + seasonID + '/matches/' + id);
+    if (!ledger || !ledger.compKey) continue;
+    const want = all[id] ? T.contentHash(all[id]) : null;
+    if ((ledger.corrections || null) === want) {
+      if (!want && remembered[id]) await db().ref(ROOT + '/meta/corrected/' + seasonID + '/' + id).remove();
+      continue;
+    }
+    const compId = T.COMP_IDS.find((c) => T.compKeyOf(c) === ledger.compKey);
+    try {
+      const d = T.shapeDetail(await F.fetchDetail(id, compId), now);
+      if (!d) throw new Error('detail could not be shaped');
+      const built = await writePlayerMatch(seasonID, d, ledger, now);
+      await db().ref(ROOT + '/meta/corrected/' + seasonID + '/' + id).set(want);
+      done.push(id + ':' + Object.keys(built.rows).length);
+    } catch (err) {
+      const why = (err && err.message) || String(err);
+      logger.error('correction rebuild failed (' + id + '): ' + why, { matchID: id, reason: why });
+      done.push(id + ':!');
+    }
+  }
+  return done;
 }
 
 async function backfillPlayers(seasonID, now, todayYmd, runStarted) {
@@ -1123,6 +1190,13 @@ async function runIngest(now, opts) {
     await backfillScorers(seasonID, now, todayYmd);
     await backfillAnchors(seasonID, now, todayYmd);
     playerSummary = await backfillPlayers(seasonID, now, todayYmd, started);
+    try {
+      const corrected = await reapplyCorrections(seasonID, now, started);
+      corrected.forEach((c) => playerSummary.push('corrected:' + c));
+    } catch (err) {
+      const why = (err && err.message) || String(err);
+      logger.error('corrections pass failed: ' + why, { reason: why });
+    }
     try {
       const seeded = await seedScorers(seasonID, now, started);
       if (seeded) playerSummary.push('scorer-seed:' + seeded.cursor + '/' + seeded.players);

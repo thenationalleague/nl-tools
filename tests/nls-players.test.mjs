@@ -232,3 +232,68 @@ test('a scorer entry is the sum of his rows in that competition only', () => {
   const unlisted = P.scorerEntry([r('m7', 'nl', 't1', 1, { role: 'unlisted', minutes: null })], 'nl', NOW);
   assert.equal(unlisted.minutes, null, 'an unknown minute makes the total unknown, not short');
 });
+
+// --- Hand corrections (P.applyCorrections) --------------------------------
+// The goals-without-a-scorer case: the score says 2-1, the feed names fewer.
+const fixedBuild = (r, corrections) => {
+  const d = T.shapeDetail(r, NOW);
+  const fixed = P.applyCorrections(d, corrections);
+  return Object.assign(P.buildPlayerRows(fixed.detail, NOW), { applied: fixed.applied, skipped: fixed.skipped });
+};
+
+test('a correction names a goal the feed has no scorer for, and marks the row', () => {
+  const r = fixedBuild(raw({ home: { events: { goals: [goal('h10', 20)] } }, away: { events: { goals: [goal('a9', 80)] } } }),
+    { '55-h7': { playerID: 'h7', teamID: 't1', minute: 55, type: 'goal' } });
+  assert.equal(r.applied, 1);
+  assert.equal(r.rows.h7.goals, 1);
+  assert.equal(r.rows.h7.source, 'nls+correction');
+  assert.equal(r.rows.h10.source, 'nls', 'an untouched row keeps its source');
+});
+
+test('an own-goal correction credits the other side and stays on the scorer\'s team', () => {
+  // 2-1 with no home goals named: one home goal is an away defender's own goal.
+  const r = fixedBuild(raw({ away: { events: { goals: [goal('a9', 80)] } } }),
+    { '26-a4': { playerID: 'a4', teamID: 't2', minute: 26, type: 'own goal' },
+      '34-h8': { playerID: 'h8', teamID: 't1', minute: 34, type: 'penalty' } });
+  assert.equal(r.applied, 2);
+  assert.equal(r.rows.a4.ownGoals, 1);
+  assert.equal(r.rows.a4.goals, 0);
+  assert.equal(r.rows.a4.teamID, 't2');
+  assert.equal(r.rows.h8.penalties, 1);
+});
+
+test('a scorer missing from the team sheet still gets his goal, as unlisted', () => {
+  const r = fixedBuild(raw({ home: { events: { goals: [goal('h10', 20)] } }, away: { events: { goals: [goal('a9', 80)] } } }),
+    { '65-x1': { playerID: 'x1', teamID: 't1', minute: 65, type: 'goal' } });
+  assert.equal(r.rows.x1.role, 'unlisted');
+  assert.equal(r.rows.x1.teamID, 't1');
+  assert.equal(r.rows.x1.minutes, null);
+});
+
+test('a correction stops applying once the feed is fixed at source — never counted twice', () => {
+  const r = fixedBuild(raw({ home: { events: { goals: [goal('h10', 20), goal('h7', 55)] } }, away: { events: { goals: [goal('a9', 80)] } } }),
+    { '55-h7': { playerID: 'h7', teamID: 't1', minute: 55, type: 'goal' },
+      '60-h6': { playerID: 'h6', teamID: 't1', minute: 60, type: 'goal' } });
+  assert.equal(r.applied, 0);
+  assert.equal(r.skipped, 2);
+  assert.equal(r.rows.h7.goals, 1);
+  assert.equal(r.rows.h6.goals, 0);
+});
+
+test('corrections fill the gap and no more, and a club not in the match is ignored', () => {
+  const r = fixedBuild(raw({ away: { events: { goals: [goal('a9', 80)] } } }),
+    { '10-h2': { playerID: 'h2', teamID: 't1', minute: 10, type: 'goal' },
+      '20-h3': { playerID: 'h3', teamID: 't1', minute: 20, type: 'goal' },
+      '30-h4': { playerID: 'h4', teamID: 't1', minute: 30, type: 'goal' },
+      '40-z1': { playerID: 'z1', teamID: 't99', minute: 40, type: 'goal' } });
+  assert.equal(r.applied, 2, 'home scored 2, so a third home correction is surplus');
+  assert.equal(r.rows.h4.goals, 0);
+  assert.equal(r.rows.z1, undefined);
+});
+
+test('no corrections leaves the detail untouched', () => {
+  const d = T.shapeDetail(raw(), NOW);
+  const fixed = P.applyCorrections(d, null);
+  assert.equal(fixed.detail, d);
+  assert.equal(fixed.applied, 0);
+});
