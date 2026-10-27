@@ -176,7 +176,10 @@ When a score has goals the feed names no scorer for — find them with the NL
 Data connector, `get_results(missingScorers: true)` — name the scorer with
 **Actions → NLS goal correction → Run workflow**. One line per goal:
 `<matchID> <playerID> <teamID of the scorer's club> <minute> <goal|penalty|og>`.
-IDs only, never names: run inputs on this public repo are visible.
+IDs only, never names: run inputs on this public repo are visible. The same
+Action fixes a team sheet (v0.6.1): `<matchID> <playerID> <teamID> start|bench`
+for a missing player, `<matchID> <onID> <teamID> <minute> sub <offID>` for a
+missing substitution.
 
 The Action writes nl-tools RTDB `nls-corrections/<matchID>/<minute>-<playerID>`;
 the next hourly run rebuilds the match's rows and its scorers' entries.

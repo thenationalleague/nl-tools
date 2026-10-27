@@ -124,12 +124,14 @@ function buildPlayerRows(detail, now) {
       if (!p || !p.id) return;
       const r = base(p.id, p.name, side.id);
       r.role = 'start'; r.shirt = p.shirt; r.position = p.position;
+      if (p.corrected) r.source = 'nls+correction';
       rows[p.id] = r; teamOf.set(p.id, String(side.id));
     });
     (lu.subs || []).forEach((p) => {
       if (!p || !p.id || rows[p.id]) return;
       const r = base(p.id, p.name, side.id);
       r.role = 'unused'; r.shirt = p.shirt; r.position = p.position;
+      if (p.corrected) r.source = 'nls+correction';
       rows[p.id] = r; teamOf.set(p.id, String(side.id));
     });
   });
@@ -155,6 +157,7 @@ function buildPlayerRows(detail, now) {
   (detail.subs || []).forEach((s) => {
     const m = clampMinute(s.minute, length);
     const on = ensure(s.playerOnID, s.playerOnName, s.teamID, false);
+    if (on && s.corrected) on.source = 'nls+correction';
     if (on) {
       if (on.role === 'unused' || on.role === 'unlisted') on.role = 'sub';
       on.on = m;
@@ -317,15 +320,27 @@ function dayClosed(ledgers, matchIDs, ymd, giveUpBefore) {
  * instead of counting twice. A correction that repeats an upstream goal (same
  * player, same minute) is dropped for the same reason.
  *
+ * Team-sheet corrections (since v0.6.1) use the same node:
+ *   type 'start' | 'bench'  adds the player to that side's starters or bench,
+ *                           only while the side has fewer than 11 starters
+ *                           (bench: no limit) and he is on neither list;
+ *   type 'sub' + offID      a substitution at `minute`, playerID coming on
+ *                           for offID, unless upstream already has it.
+ *
  * Returns { detail, applied, skipped } — detail is a copy; the input is not
  * touched.
  */
 function applyCorrections(detail, corrections) {
-  const list = Object.keys(corrections || {}).sort().map((k) => Object.assign({ key: k }, corrections[k]))
+  const all = Object.keys(corrections || {}).sort().map((k) => Object.assign({ key: k }, corrections[k]))
     .filter((c) => c && c.playerID && c.teamID);
-  if (!detail || !detail.home || !detail.away || !list.length) {
-    return { detail, applied: 0, skipped: list.length };
+  if (!detail || !detail.home || !detail.away || !all.length) {
+    return { detail, applied: 0, skipped: all.length };
   }
+  const kind = (c) => String(c.type || 'goal').toLowerCase();
+  const sheet = applySheetCorrections(detail, all.filter((c) => ['start', 'bench', 'sub'].includes(kind(c))));
+  detail = sheet.detail;
+  const list = all.filter((c) => !['start', 'bench', 'sub'].includes(kind(c)));
+  if (!list.length) return { detail, applied: sheet.applied, skipped: sheet.skipped };
   const sides = [detail.home, detail.away];
   const sideOf = (id) => sides.find((x) => String(x.id) === String(id)) || null;
   const otherOf = (id) => sides.find((x) => String(x.id) !== String(id)) || null;
@@ -362,8 +377,52 @@ function applyCorrections(detail, corrections) {
       corrected: true,
     });
   });
-  if (!added.length) return { detail, applied: 0, skipped };
-  return { detail: Object.assign({}, detail, { goals: upstream.concat(added) }), applied: added.length, skipped };
+  skipped += sheet.skipped;
+  if (!added.length) return { detail, applied: sheet.applied, skipped };
+  return { detail: Object.assign({}, detail, { goals: upstream.concat(added) }),
+    applied: sheet.applied + added.length, skipped };
+}
+
+function applySheetCorrections(detail, list) {
+  if (!list.length) return { detail, applied: 0, skipped: 0 };
+  const copySide = (x) => Object.assign({}, x, { lineup: {
+    start: ((x.lineup && x.lineup.start) || []).slice(),
+    subs: ((x.lineup && x.lineup.subs) || []).slice() } });
+  const home = copySide(detail.home);
+  const away = copySide(detail.away);
+  const sides = [home, away];
+  const sideOf = (id) => sides.find((x) => String(x.id) === String(id)) || null;
+  const listed = (pid) => sides.some((x) => x.lineup.start.concat(x.lineup.subs)
+    .some((p) => String(p.id) === String(pid)));
+  const subs = (detail.subs || []).slice();
+  let applied = 0;
+  let skipped = 0;
+  /* Sheet entries before substitutions, so a sub can name a player the same
+     batch has just put on the sheet. */
+  const order = { start: 0, bench: 1, sub: 2 };
+  list.slice().sort((a, b) => order[String(a.type).toLowerCase()] - order[String(b.type).toLowerCase()])
+    .forEach((c) => {
+      const type = String(c.type).toLowerCase();
+      const side = sideOf(c.teamID);
+      if (!side) { skipped += 1; return; }
+      if (type === 'start' || type === 'bench') {
+        const full = type === 'start' && side.lineup.start.length >= 11;
+        if (full || listed(c.playerID)) { skipped += 1; return; }
+        side.lineup[type === 'start' ? 'start' : 'subs'].push({ id: String(c.playerID), name: c.name || null,
+          shirt: null, position: null, subPosition: null, formationPlace: null, corrected: true });
+        applied += 1;
+        return;
+      }
+      const minute = c.minute == null || isNaN(Number(c.minute)) ? null : Number(c.minute);
+      const known = subs.some((x) => String(x.playerOnID) === String(c.playerID) ||
+        (c.offID && String(x.playerOffID) === String(c.offID)));
+      if (!c.offID || minute == null || known) { skipped += 1; return; }
+      subs.push({ idx: 'c:' + c.key, teamID: String(side.id), playerOnID: String(c.playerID), playerOnName: null,
+        playerOffID: String(c.offID), playerOffName: null, minute: minute, formattedMinute: minute + "'",
+        period: null, tsUTC: null, reason: null, corrected: true });
+      applied += 1;
+    });
+  return { detail: Object.assign({}, detail, { home, away, subs }), applied, skipped };
 }
 
 /* The retry cut-off is a UTC calendar date, matching the {ymd} the calendar
