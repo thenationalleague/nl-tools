@@ -1,7 +1,12 @@
 <!DOCTYPE html>
 <!--
   NL Tools — NLServices API Monitor
-  Version: v1.1 (27/10/2026)
+  Version: v1.2 (27/10/2026)
+  v1.2 — Live is grouped by competition, each block under a section head with
+         the canon competition pill (brand v2.72 .comp-pill, the content
+         plan's colours) and its own match count; Quality's competition
+         column is the same pill. A Tuesday night is thirty-odd matches and
+         one undivided list was unreadable.
   v1.1 — An empty day is empty, not an error: NLS answers a list window with
          no matches as HTTP 404 "No matches found", which v1.0 showed as a
          Cup failure on every day without Cup games, and which also lost the
@@ -236,6 +241,14 @@
         'Club crests on every match, and match-state pills that read the same as Matchday Live’s.'
       ]
     });
+    window.NL_CHANGELOG.unshift({
+      date: '27/10/2026',
+      version: 'v1.2',
+      items: [
+        'Live is split by competition — National League, North, South, NL Cup — each under its own heading with its competition pill and match count.',
+        'Competition pills in the content plan colours (NAT orange, NOR yellow, SOU blue, NLC purple), here and in Quality.'
+      ]
+    });
 
     /* auth-guard fires this once the session is verified + pageWrap is
        revealed. Boot the main app from here so RTDB reads happen with a
@@ -296,7 +309,7 @@
   .nm-table { table-layout: fixed; width: 100%; }
   .nm-table td { overflow: hidden; vertical-align: top; }
   .nm-table .col-time  { width: 4.2rem; }
-  .nm-table .col-comp  { width: 3.6rem; }
+  .nm-table .col-comp  { width: 4.8rem; }
   .nm-table .col-score { width: 5.5rem; }
   .nm-table .col-state { width: 7.5rem; }
   .nm-table .col-date  { width: 6.8rem; }
@@ -306,12 +319,15 @@
      table rather than restyling the class. */
   .nm-table { --crest-size: 20px; }
   .nm-table td > img { vertical-align: -5px; }
+  .nm-comp-head { margin: 1.25rem 0 .5rem; }
+  .nm-comp-head h2 { display: flex; align-items: center; gap: .5rem; }
+  .nm-comp-head .muted { font-size: var(--text-sm); }
   .nm-row { cursor: pointer; }
   .nm-row:hover td { background: var(--navy-50); }
   .nm-row.is-open td { background: var(--navy-50); border-bottom: 0; }
   .nm-detail td { background: var(--navy-50); padding-top: 0; }
   @media (max-width: 640px) {
-    .nm-table .col-comp { width: 3rem; }
+    .nm-table .col-comp { width: 4.4rem; }
     .nm-table .col-date { width: 4.6rem; }
     .nm-table .col-time { width: 3.2rem; }
     .nm-table .col-state { width: 4.6rem; }
@@ -398,10 +414,12 @@
 
   var NLS = 'https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2';
   var COMPS = [
-    { id: 89,   key: 'nl',    short: 'NL',   label: 'National League' },
-    { id: 373,  key: 'north', short: 'N',    label: 'National North' },
-    { id: 372,  key: 'south', short: 'S',    label: 'National South' },
-    { id: 1275, key: 'cup',   short: 'Cup',  label: 'National League Cup' }
+    /* code = the canon competition code (.comp-pill--<code>), shown in
+       capitals as the label — the three letters the content plan uses. */
+    { id: 89,   key: 'nl',    code: 'nat', label: 'National League' },
+    { id: 373,  key: 'north', code: 'nor', label: 'National League North' },
+    { id: 372,  key: 'south', code: 'sou', label: 'National League South' },
+    { id: 1275, key: 'cup',   code: 'nlc', label: 'National League Cup' }
   ];
   var LEAGUES = COMPS.slice(0, 3);
   var LIVE_POLL_MS = 30 * 1000;      // while anything is in play
@@ -637,6 +655,10 @@
   /* Crests from canon: clubs-meta keys crests by club name, so the NLS
      teamID goes through NL.clubs.byOpta first; a side not in clubs-meta (a
      cup guest) falls back to NLS's own name and hides if there is no file. */
+  function compPill(comp) {
+    return '<span class="comp-pill comp-pill--' + comp.code + '">' + esc(comp.code.toUpperCase()) + '</span>';
+  }
+
   function crest(teamID, name) {
     var club = teamID ? NL.clubs.byOpta(teamID) : null;
     return NL.clubs.crestImgHtml(club ? club.name : name, 'thumb', { className: 'nl-crest' });
@@ -894,28 +916,38 @@
     html += '<p class="nm-note">' + rows.length + ' match' + (rows.length === 1 ? '' : 'es') +
       (live ? ', ' + live + ' in play — refreshing every 30s' : '') +
       (state.dayAt ? '. Read from NLS at ' + esc(NL.formatDateTime(state.dayAt, { seconds: true })) : '') +
-      '. Tap a match for its events.</p>';
+      '.</p>';
     if (!rows.length) {
       els.live.innerHTML = html + (errs.length ? '' : emptyState('No matches', 'NLS lists nothing on this day.'));
       return;
     }
-    html += '<div class="table-wrap"><table class="table table--compact nm-table"><colgroup>' +
-      '<col class="col-time"><col class="col-comp"><col><col class="col-score"><col><col class="col-state">' +
-      '</colgroup><thead><tr><th>KO</th><th>Comp</th><th class="ta-r">Home</th><th class="ta-c">Score</th><th>Away</th><th>State</th></tr></thead><tbody>';
-    rows.forEach(function (r) {
-      var open = !!state.open[r.id];
-      var score = (r.hs != null && r.as != null && (isLive(r.period) || isFinished(r.period)))
-        ? r.hs + '–' + r.as : '–';
-      html += '<tr class="nm-row' + (open ? ' is-open' : '') + '" data-id="' + esc(r.id) + '">' +
-        '<td class="mono">' + (r.ko ? esc(NL.formatTime(r.ko)) : '—') + (r.tbc ? ' <span class="muted">TBC</span>' : '') + '</td>' +
-        '<td class="muted">' + esc(r.comp.short) + '</td>' +
-        '<td class="ta-r">' + esc(r.home) + ' ' + crest(r.homeID, r.home) + '</td>' +
-        '<td class="ta-c score">' + esc(score) + '</td>' +
-        '<td>' + crest(r.awayID, r.away) + ' ' + esc(r.away) + '</td>' +
-        '<td>' + pill(r) + '</td></tr>';
-      if (open) html += '<tr class="nm-detail"><td colspan="6" id="nmDetail-' + esc(r.id) + '">' + detailHtml(r) + '</td></tr>';
+    /* One block per competition, in league order, each under its own
+       heading with the competition pill — a Tuesday night is thirty-odd
+       matches, and one undivided list of them is unreadable. */
+    COMPS.forEach(function (c) {
+      var list = rows.filter(function (r) { return r.comp === c; });
+      if (!list.length) return;
+      var inPlay = list.filter(function (r) { return isLive(r.period); }).length;
+      html += '<div class="section-head nm-comp-head"><h2>' + compPill(c) + ' ' + esc(c.label) + '</h2>' +
+        '<span class="muted">' + list.length + ' match' + (list.length === 1 ? '' : 'es') +
+        (inPlay ? ', ' + inPlay + ' in play' : '') + '</span></div>';
+      html += '<div class="table-wrap"><table class="table table--compact nm-table"><colgroup>' +
+        '<col class="col-time"><col><col class="col-score"><col><col class="col-state">' +
+        '</colgroup><thead><tr><th>KO</th><th class="ta-r">Home</th><th class="ta-c">Score</th><th>Away</th><th>State</th></tr></thead><tbody>';
+      list.forEach(function (r) {
+        var open = !!state.open[r.id];
+        var score = (r.hs != null && r.as != null && (isLive(r.period) || isFinished(r.period)))
+          ? r.hs + '–' + r.as : '–';
+        html += '<tr class="nm-row' + (open ? ' is-open' : '') + '" data-id="' + esc(r.id) + '">' +
+          '<td class="mono">' + (r.ko ? esc(NL.formatTime(r.ko)) : '—') + (r.tbc ? ' <span class="muted">TBC</span>' : '') + '</td>' +
+          '<td class="ta-r">' + esc(r.home) + ' ' + crest(r.homeID, r.home) + '</td>' +
+          '<td class="ta-c score">' + esc(score) + '</td>' +
+          '<td>' + crest(r.awayID, r.away) + ' ' + esc(r.away) + '</td>' +
+          '<td>' + pill(r) + '</td></tr>';
+        if (open) html += '<tr class="nm-detail"><td colspan="5" id="nmDetail-' + esc(r.id) + '">' + detailHtml(r) + '</td></tr>';
+      });
+      html += '</tbody></table></div>';
     });
-    html += '</tbody></table></div>';
     els.live.innerHTML = html;
     NL.clubs.wireCrestImgs(els.live, true);
   }
@@ -1143,7 +1175,7 @@
       '</colgroup><thead><tr><th>Date</th><th>Comp</th><th>Match</th><th class="ta-c">Score</th><th>Gaps in NLS</th></tr></thead><tbody>';
     list.forEach(function (r) {
       html += '<tr><td class="mono">' + esc(r.row.ko ? NL.formatDateShort(r.row.ko) : '—') + '</td>' +
-        '<td class="muted">' + esc(r.row.comp.short) + '</td>' +
+        '<td>' + compPill(r.row.comp) + '</td>' +
         '<td>' + esc(r.row.home) + ' v ' + esc(r.row.away) + '<br><a href="#" class="mono muted nm-raw-link" data-id="' + esc(r.row.id) + '">' + esc(r.row.id) + '</a></td>' +
         '<td class="ta-c score">' + esc(r.row.hs) + '–' + esc(r.row.as) + '</td>' +
         '<td>' + (r.issues.length ? r.issues.map(function (i) {
