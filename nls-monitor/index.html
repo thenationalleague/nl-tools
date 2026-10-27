@@ -257,7 +257,8 @@
   .stat--bad .stat__num    { color: var(--red); }
   .stat--bad               { border-left: 4px solid var(--red); }
 
-  /* The headline verdict: is NLS answering, right now. */
+  /* The headline verdict: is NLS answering, right now. Tool-local since v0.1:
+     canon .banner has no ok/green variant and no headline-plus-dot layout. */
   .verdict {
     display: flex; align-items: flex-start; gap: .75rem;
     padding: 1rem 1.25rem; border-radius: var(--radius-lg);
@@ -332,7 +333,7 @@
   .q-warn { color: var(--amber-deep); font-weight: 700; }
   .q-ok   { color: var(--text-muted); }
 
-  .nm-path { min-width: 22rem; flex: 1 1 22rem; }
+  .nm-path { min-width: 16rem; flex: 1 1 22rem; margin: 0; }
   .nm-out  { white-space: pre-wrap; word-break: break-word; max-height: 70vh; overflow: auto; }
 </style>
 </head>
@@ -513,6 +514,10 @@
   // Shaping — only as much as display needs; Raw shows the rest
   // -------------------------------------------------------------------------
 
+  /* NLS timestamps are UTC with no zone marker ("2026-10-24 14:00:00").
+     NL.parseDate reads that shape as LOCAL time — right for every staff form,
+     an hour wrong here all summer — so NLS strings are parsed here. Canon
+     candidate if a second gated tool reads raw NLS: NL.parseDate(s, {utc:true}). */
   function utc(s) {
     if (!s) return null;
     var iso = String(s).indexOf('T') >= 0 ? String(s) : String(s).replace(' ', 'T') + 'Z';
@@ -836,7 +841,7 @@
       (state.dayAt ? '. Read from NLS at ' + esc(NL.formatDateTime(state.dayAt, { seconds: true })) : '') +
       '. Tap a match for its events.</p>';
     if (!rows.length) {
-      els.live.innerHTML = html + (errs.length ? '' : '<p class="nm-note">NLS lists no matches on this day.</p>');
+      els.live.innerHTML = html + (errs.length ? '' : emptyState('No matches', 'NLS lists nothing on this day.'));
       return;
     }
     html += '<div class="table-wrap"><table class="table table--compact nm-table"><colgroup>' +
@@ -963,7 +968,7 @@
           COMPS.map(function (c) { return '<option value="' + c.key + '">Season so far — ' + esc(c.label) + '</option>'; }).join('') +
         '</select>' +
         '<button class="btn btn--primary btn--sm" id="nmQRun" type="button">Scan</button>' +
-        '<label class="muted"><input type="checkbox" id="nmQAll"> Show matches with no gaps</label>' +
+        '<label class="filter-label"><input type="checkbox" id="nmQAll"> Show matches with no gaps</label>' +
         '<button class="btn btn--ghost btn--sm" id="nmQCsv" type="button" disabled>Export CSV</button>' +
       '</div>' +
       '<div id="nmQOut"></div>';
@@ -1073,7 +1078,8 @@
 
     var list = q.showAll ? q.rows : flagged;
     if (!list.length) {
-      out.innerHTML = html + '<p class="nm-note">' + (q.running ? '' : 'No gaps. Every finished match has its scorers, team sheets, gate and referee.') + '</p>';
+      out.innerHTML = html + (q.running ? '' : emptyState('No gaps',
+        'Every finished match has its scorers, team sheets, gate and referee.'));
       return;
     }
     html += '<div class="table-wrap"><table class="table table--compact nm-table"><colgroup>' +
@@ -1112,6 +1118,11 @@
     });
     NL.download('nls-gaps-' + (q.scope === 'day' ? state.ymd : q.scope + '-' + state.season) + '.csv',
       NL.csv(rows, { bom: true }), 'text/csv');
+  }
+
+  function emptyState(title, text) {
+    return '<div class="empty-state"><div class="empty-state__title">' + esc(title) + '</div>' +
+      '<div class="empty-state__text">' + esc(text) + '</div></div>';
   }
 
   function stat(num, label, mod) {
@@ -1237,12 +1248,13 @@
     els.raw.dataset.built = '1';
     els.raw.innerHTML =
       '<div class="filter-bar">' +
-      '<input id="nmPath" class="mono nm-path" aria-label="NLS path" value="' +
-        esc('/matches/?seasonID=' + state.season + '&competitionID=89&page.size=5') + '">' +
+      '<div class="form-group nm-path"><label for="nmPath">NLS path</label>' +
+      '<input id="nmPath" class="mono" value="' +
+        esc('/matches/?seasonID=' + state.season + '&competitionID=89&page.size=5') + '"></div>' +
       '<button class="btn btn--primary btn--sm" id="nmGo" type="button">Fetch</button>' +
       '<button class="btn btn--ghost btn--sm" id="nmCopy" type="button">Copy response</button>' +
       '<button class="btn btn--ghost btn--sm" id="nmCopyUrl" type="button">Copy URL</button>' +
-      '</div><p class="nm-note" id="nmRawMeta">Any path under ' + esc(NLS) + '</p>' +
+      '</div><p class="nm-note" id="nmRawMeta">Relative to ' + esc(NLS) + '</p>' +
       '<pre id="nmOut" class="mono nm-out"></pre>';
     document.getElementById('nmGo').addEventListener('click', function () {
       rawFetch(document.getElementById('nmPath').value);
