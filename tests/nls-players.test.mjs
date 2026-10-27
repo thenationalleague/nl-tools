@@ -297,3 +297,34 @@ test('no corrections leaves the detail untouched', () => {
   assert.equal(fixed.detail, d);
   assert.equal(fixed.applied, 0);
 });
+
+test('a team-sheet correction adds a missing starter, who then plays the full match', () => {
+  const r = fixedBuild(raw({ away: { start: xi('a', 10) } }),
+    { 'start-a11': { playerID: 'a11', teamID: 't2', type: 'start' } });
+  assert.equal(r.applied, 1);
+  assert.equal(r.rows.a11.role, 'start');
+  assert.equal(r.rows.a11.minutes, 90);
+  assert.equal(r.rows.a11.source, 'nls+correction');
+  assert.equal(r.complete, true, 'eleven starters a side now');
+});
+
+test('a corrected starter and substitution give both players their minutes', () => {
+  const r = fixedBuild(raw({ home: { start: xi('h', 9), subs: [player('hs1', 12)] } }),
+    { 'start-h10': { playerID: 'h10', teamID: 't1', type: 'start' },
+      'sub-85-hs1': { playerID: 'hs1', offID: 'h10', teamID: 't1', minute: 85, type: 'sub' } });
+  assert.equal(r.applied, 2);
+  assert.equal(r.rows.h10.minutes, 85);
+  assert.equal(r.rows.h10.off, 85);
+  assert.equal(r.rows.hs1.role, 'sub');
+  assert.equal(r.rows.hs1.minutes, 5);
+});
+
+test('team-sheet corrections stop once the sheet is right at source', () => {
+  const r = fixedBuild(raw({ home: { events: { subs: [sub('hs1', 'h10', 85)] } } }),
+    { 'start-h12': { playerID: 'h12', teamID: 't1', type: 'start' },
+      'start-h3': { playerID: 'h3', teamID: 't1', type: 'bench' },
+      'sub-85-hs1': { playerID: 'hs1', offID: 'h10', teamID: 't1', minute: 85, type: 'sub' } });
+  assert.equal(r.applied, 0, 'XI full, player already listed, substitution already there');
+  assert.equal(r.skipped, 3);
+  assert.equal(r.rows.h12, undefined);
+});

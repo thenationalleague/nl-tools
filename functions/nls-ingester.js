@@ -50,6 +50,10 @@
  * This file orchestrates them and owns every RTDB write.
  *
  * CHANGELOG
+ *   27/10/2026  v0.6.1  Corrections can fix the team sheet too: start,
+ *                       bench and substitution entries. A corrected player's
+ *                       name comes from his club's squad list, never the bare
+ *                       ID written over it.
  *   27/10/2026  v0.6.0  Hand corrections for goals NLS has no scorer for.
  *                       nl-tools RTDB nls-corrections/<matchID>/<key>
  *                       (written by the "NLS goal correction" Action) is
@@ -113,7 +117,7 @@ const A = require('./nls/anchors');
 const D = require('./nls/derive');
 const P = require('./nls/players');
 
-const VERSION = '0.6.0';
+const VERSION = '0.6.1';
 
 /* nls/ lives in nl-widgets, alongside the feed/ fixture cache and the fan
    widgets that will read it in step 2. Writing it into nl-tools would put the
@@ -803,10 +807,21 @@ async function writePlayerMatch(seasonID, detail, prevLedger, now) {
   detail = fixed.detail;
   const built = P.buildPlayerRows(detail, now);
   const base = 'players/' + seasonID + '/';
+  /* A corrected player carries no name — corrections hold IDs only. Take it
+     from the club's squad list rather than writing the bare ID over it. */
+  const nameless = Object.values(built.rows).filter((r) => !r.name && r.teamID);
+  const listedNameless = new Set();
+  await mapPool(nameless, 6, async (r) => {
+    const known = await read(base + 'squads/' + r.teamID + '/' + r.playerID);
+    if (known && known !== r.playerID) r.name = known;
+    else if (known) listedNameless.add(r);
+  });
   const updates = {};
   Object.values(built.rows).forEach((r) => {
     updates[base + 'apps/' + r.playerID + '/' + detail.id] = r;
-    if (r.teamID) updates[base + 'squads/' + r.teamID + '/' + r.playerID] = r.name || r.playerID;
+    if (r.teamID && !listedNameless.has(r)) {
+      updates[base + 'squads/' + r.teamID + '/' + r.playerID] = r.name || r.playerID;
+    }
   });
   /* A corrected team sheet can REMOVE a player. Without this his phantom
      appearance would sit in his season for ever. */
