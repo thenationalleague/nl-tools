@@ -1,7 +1,13 @@
 <!DOCTYPE html>
 <!--
   NL Tools — NLServices API Monitor
-  Version: v1.0 (27/10/2026)
+  Version: v1.1 (27/10/2026)
+  v1.1 — An empty day is empty, not an error: NLS answers a list window with
+         no matches as HTTP 404 "No matches found", which v1.0 showed as a
+         Cup failure on every day without Cup games, and which also lost the
+         Cup's calendar. The calendar is now asked for without a day window.
+         Crests and match-state pills from canon, mapped as Matchday Live
+         maps them, so a match reads the same in both tools.
   v1.0 — Rebuilt to read NLS itself. Every view now calls the NLServices API
          from the browser and shows what NLS says right now, gaps included;
          nothing here comes from our own store except one status line for
@@ -222,6 +228,14 @@
         'The Tables & scorers tab is gone — it showed our ingester’s tally rather than NLS, and had fallen behind both.'
       ]
     });
+    window.NL_CHANGELOG.unshift({
+      date: '27/10/2026',
+      version: 'v1.1',
+      items: [
+        'A competition with no matches on the chosen day shows as empty, not as a failure — NLS answers that with a “No matches found” error. The Cup’s matchdays now appear in the picker too.',
+        'Club crests on every match, and match-state pills that read the same as Matchday Live’s.'
+      ]
+    });
 
     /* auth-guard fires this once the session is verified + pageWrap is
        revealed. Boot the main app from here so RTDB reads happen with a
@@ -288,6 +302,10 @@
   .nm-table .col-date  { width: 6.8rem; }
   .nm-table .ta-r { text-align: right; }
   .nm-table .ta-c { text-align: center; }
+  /* Canon .nl-crest sizes from --crest-size, which inherits — set it on the
+     table rather than restyling the class. */
+  .nm-table { --crest-size: 20px; }
+  .nm-table td > img { vertical-align: -5px; }
   .nm-row { cursor: pointer; }
   .nm-row:hover td { background: var(--navy-50); }
   .nm-row.is-open td { background: var(--navy-50); border-bottom: 0; }
@@ -453,6 +471,18 @@
     }).finally(function () { clearTimeout(timer); });
   }
 
+  /* NLS answers a list window with nothing in it as HTTP 404 "No matches
+     found" rather than an empty list — seen on 27/10/2026 for the Cup on a
+     day without Cup games. That is an empty result, not a failure. */
+  function noMatches(r) {
+    if (r.status !== 404 || !r.json || !Array.isArray(r.json.errors)) return false;
+    return r.json.errors.some(function (e) { return /no matches found/i.test((e && e.detail) || ''); });
+  }
+
+  function listData(r) {
+    return noMatches(r) ? [] : ((r.json && r.json.data) || []);
+  }
+
   function describe(r) {
     if (r.error) return r.error;
     var body = (r.text || '').replace(/\s+/g, ' ').trim().slice(0, 160);
@@ -474,8 +504,8 @@
     function page(n) {
       return nls('/matches/?seasonID=' + state.season + '&competitionID=' + comp.id +
         '&sort=kickOffDateUTC&page.number=' + n + '&page.size=' + PAGE).then(function (r) {
-        if (!r.ok) throw new Error(comp.label + ' list: ' + describe(r));
-        var data = (r.json && r.json.data) || [];
+        if (!r.ok && !noMatches(r)) throw new Error(comp.label + ' list: ' + describe(r));
+        var data = listData(r);
         rows = rows.concat(data);
         var total = r.json && r.json.meta && r.json.meta.totalCount;
         if (data.length < PAGE || (total != null && rows.length >= total) || n >= 20) return rows;
@@ -549,6 +579,8 @@
       minute: a.formattedMatchTime || (a.matchMinutes != null ? a.matchMinutes + "'" : ''),
       home: h.name || h.shortName || '?',
       away: w.name || w.shortName || '?',
+      homeID: h.teamID != null ? String(h.teamID) : null,
+      awayID: w.teamID != null ? String(w.teamID) : null,
       hs: h.score, as: w.score,
       postponed: a.postponementReason || null,
       resultType: a.resultType || null
@@ -586,17 +618,28 @@
     };
   }
 
+  /* The match-state pill, mapped the way Matchday Live maps it — FT info, HT
+     pending, in play live with the minute, not started soon with the kick-off
+     — so the same match reads the same in both tools. CANON CANDIDATE
+     (27/10/2026): second tool with this mapping; promote as a helper over the
+     canon pills if a third needs it. The raw period is in the tooltip. */
   function pill(row) {
     var p = row.period.toLowerCase();
-    if (row.postponed || p === 'postponed') return '<span class="pill pill--postponed nm-pill">P-P</span>';
-    if (p === 'abandoned') return '<span class="pill pill--rejected nm-pill">Abandoned</span>';
-    if (isFinished(p)) return '<span class="pill nm-pill">FT</span>';
-    if (p.indexOf('halftime') >= 0) return '<span class="pill pill--live nm-pill">HT</span>';
-    if (isLive(p)) return '<span class="pill pill--live nm-pill">' + esc(row.minute || 'Live') + '</span>';
-    /* Upstream says PreMatch; "Pre" fits a phone's state column. The raw
-       period is in the tooltip for anything less common. */
-    return '<span class="pill pill--soon nm-pill" title="' + esc(row.period || '') + '">' +
-      (/^prematch$/i.test(row.period) || !row.period ? 'Pre' : esc(row.period)) + '</span>';
+    var t = ' title="' + esc(row.period || '') + '"';
+    if (row.postponed || p === 'postponed') return '<span class="pill pill--postponed nm-pill"' + t + '>Postponed</span>';
+    if (p === 'abandoned') return '<span class="pill pill--rejected nm-pill"' + t + '>Abandoned</span>';
+    if (isFinished(p)) return '<span class="pill pill--info nm-pill"' + t + '>FT</span>';
+    if (p.indexOf('halftime') >= 0) return '<span class="pill pill--pending nm-pill"' + t + '>HT</span>';
+    if (isLive(p)) return '<span class="pill pill--live nm-pill"' + t + '>' + esc(row.minute || 'Live') + '</span>';
+    return '<span class="pill pill--soon nm-pill"' + t + '>' + (row.ko ? esc(NL.formatTime(row.ko)) : 'Pre-match') + '</span>';
+  }
+
+  /* Crests from canon: clubs-meta keys crests by club name, so the NLS
+     teamID goes through NL.clubs.byOpta first; a side not in clubs-meta (a
+     cup guest) falls back to NLS's own name and hides if there is no file. */
+  function crest(teamID, name) {
+    var club = teamID ? NL.clubs.byOpta(teamID) : null;
+    return NL.clubs.crestImgHtml(club ? club.name : name, 'thumb', { className: 'nl-crest' });
   }
 
   // -------------------------------------------------------------------------
@@ -623,13 +666,25 @@
     });
   }
 
-  /* includePopulatedDates on one narrow request per competition returns every
-     date in the season that has fixtures — the whole calendar, free. */
+  /* includePopulatedDates returns every date in the season that has fixtures
+     — the whole calendar, free. Asked with no day window first: a day window
+     with nothing in it comes back 404 with no meta at all, which lost the
+     Cup's calendar on any day without Cup games. The day-window form (what
+     the ingester uses, so known to carry it) is the fallback. */
+  function calendarFor(c) {
+    return nls('/matches/?seasonID=' + state.season + '&competitionID=' + c.id +
+      '&includePopulatedDates=true&page.size=1').then(function (r) {
+      var pd = r.json && r.json.meta && r.json.meta.populatedDates;
+      if (pd) return pd;
+      return nls(dayPath(c, todayYmd(), '&includePopulatedDates=true')).then(function (r2) {
+        return (r2.json && r2.json.meta && r2.json.meta.populatedDates) || null;
+      });
+    });
+  }
+
   function loadCalendar() {
-    var today = todayYmd();
     return Promise.all(COMPS.map(function (c) {
-      return nls(dayPath(c, today, '&includePopulatedDates=true')).then(function (r) {
-        var pd = r.json && r.json.meta && r.json.meta.populatedDates;
+      return calendarFor(c).then(function (pd) {
         Object.keys(pd || {}).forEach(function (ymd) {
           var v = pd[ymd];
           var n = Number(v && v.count != null ? v.count : v);
@@ -783,8 +838,8 @@
     return Promise.all(COMPS.map(function (c) {
       return nls(dayPath(c, ymd)).then(function (r) {
         if (ymd !== state.ymd) return;
-        if (!r.ok) { state.dayErr[c.key] = describe(r); return; }
-        state.day[c.key] = ((r.json && r.json.data) || []).map(function (m) { return shapeRow(m, c); });
+        if (!r.ok && !noMatches(r)) { state.dayErr[c.key] = describe(r); return; }
+        state.day[c.key] = listData(r).map(function (m) { return shapeRow(m, c); });
       });
     })).then(function () {
       if (ymd !== state.ymd) return;
@@ -854,14 +909,15 @@
       html += '<tr class="nm-row' + (open ? ' is-open' : '') + '" data-id="' + esc(r.id) + '">' +
         '<td class="mono">' + (r.ko ? esc(NL.formatTime(r.ko)) : '—') + (r.tbc ? ' <span class="muted">TBC</span>' : '') + '</td>' +
         '<td class="muted">' + esc(r.comp.short) + '</td>' +
-        '<td class="ta-r">' + esc(r.home) + '</td>' +
+        '<td class="ta-r">' + esc(r.home) + ' ' + crest(r.homeID, r.home) + '</td>' +
         '<td class="ta-c score">' + esc(score) + '</td>' +
-        '<td>' + esc(r.away) + '</td>' +
+        '<td>' + crest(r.awayID, r.away) + ' ' + esc(r.away) + '</td>' +
         '<td>' + pill(r) + '</td></tr>';
       if (open) html += '<tr class="nm-detail"><td colspan="6" id="nmDetail-' + esc(r.id) + '">' + detailHtml(r) + '</td></tr>';
     });
     html += '</tbody></table></div>';
     els.live.innerHTML = html;
+    NL.clubs.wireCrestImgs(els.live, true);
   }
 
   els.live.addEventListener('click', function (e) {
@@ -1146,7 +1202,7 @@
     COMPS.forEach(function (c) {
       probes.push({ name: c.label + ' — today’s list', path: dayPath(c, today, '&includePopulatedDates=true'),
         check: function (r) {
-          var data = (r.json && r.json.data) || [];
+          var data = listData(r);
           var cal = r.json && r.json.meta && r.json.meta.populatedDates;
           var gone = data[0] ? missing(data[0].attributes, ['kickOffDateUTC', 'homeTeam', 'awayTeam', 'matchPeriod']) : [];
           return { rows: data.length + ' today', info: cal ? Object.keys(cal).length + ' matchdays in calendar' : 'no calendar',
@@ -1179,7 +1235,10 @@
     return Promise.all(probes.map(function (p) {
       return nls(p.path).then(function (res) {
         var out = { name: p.name, path: p.path, res: res, level: 'bad', rows: '', info: describe(res) };
-        if (res.ok && res.json) {
+        if (noMatches(res)) {
+          out.level = 'ok'; out.rows = '0 today';
+          out.info = 'NLS answers an empty day with 404 “No matches found” — expected';
+        } else if (res.ok && res.json) {
           var c = p.check(res);
           out.level = c.warn ? 'warn' : 'ok';
           out.rows = c.rows;
