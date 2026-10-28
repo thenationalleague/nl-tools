@@ -134,7 +134,8 @@ marks a file done — including "ran, image too small to need any" — so the
 button is idempotent and failures are retried on the next press.
 
 **Bulk download** is a stored (uncompressed) zip built in the browser —
-`programme/_zip.js`, no dependency and no build step. What goes in these packs
+`NL.zip` in `system/nl-utils.js` (canon since 28/10/2026, shared with the
+Document Library; it was `programme/_zip.js`), no dependency and no build step. What goes in these packs
 is PNG, JPEG and PDF, all already compressed, so deflate would spend CPU for a
 percent or two. Right-click a folder (or use its ⋯ button) for that folder and
 everything under it; the club root offers the whole pack.

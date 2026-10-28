@@ -1,5 +1,11 @@
 /*
   Programme Packs — shared runtime for the library + admin console
+  Version: v1.6 (28/10/2026) — the file helpers are canon (NL.files, nl-utils
+           v1.46): safeName, humanSize, uploadType, fileKind, kindIcon and
+           the preview tiers are now the canon functions under their old PP
+           names. Promoted on their second caller, the Document Library.
+           Storage paths stay here — they are this tool's data. Load order
+           flips: this file now loads AFTER nl-utils.js.
   Version: v1.5 (21/08/2026) — PP.codesRef / PP.CODES_ROOT. The club codes
            moved out from under this tool to app-data/club-codes: they
            are one credential now, opening Programme Packs and the Handbook
@@ -145,221 +151,29 @@
     return String(s == null ? '' : s).toUpperCase().replace(/[^A-Z0-9]/g, '');
   }
 
-  /* A filename becomes part of a Storage object path, so strip anything that
-     would break the path or let a name climb out of its folder. Keeps the
-     extension readable; the unique fileId in front guarantees no collision. */
-  function safeName(s) {
-    var name = String(s == null ? '' : s).trim();
-    name = name.replace(/[\\/]/g, '-');              // no path separators
-    name = name.replace(/\.{2,}/g, '.');             // no traversal
-    name = name.replace(/[^A-Za-z0-9._ -]/g, '');    // conservative allowlist
-    name = name.replace(/-{2,}/g, '-');              // collapse runs left by the above
-    name = name.replace(/^[.\-\s]+/, '');            // '../../etc/x' → 'etc-x', not '.-.-etc-x'
-    name = name.replace(/\s+/g, ' ').trim();
-    if (!name || name === '.' || name === '..') name = 'file';
-    return name.slice(0, 120);
-  }
+  /* The file helpers (safeName, humanSize, the content type, the kind, the
+     image previews) are canon since nl-utils v1.46 — NL.files. They were
+     written here first and promoted when the Document Library became their
+     second caller. PP keeps its own names for them so nothing below had to
+     change; each is the canon function, not a copy. */
+  var F = window.NL.files;
 
   /* programme/<CODE>/<folderId>/<fileId>-<name>
      <CODE> is the clubs-meta 3-letter code (or NL) and is the segment the
      Storage rules match on — never change its position in this path without
      changing system/storage/rules.snapshot.rules. */
   function storagePath(club, folderId, fileId, name) {
-    return STORAGE_ROOT + '/' + club + '/' + folderId + '/' + fileId + '-' + safeName(name);
+    return STORAGE_ROOT + '/' + club + '/' + folderId + '/' + fileId + '-' + F.safeName(name);
   }
 
-  function humanSize(bytes) {
-    var b = Number(bytes) || 0;
-    if (b < 1024) return b + ' B';
-    var units = ['KB', 'MB', 'GB'], i = -1, v = b;
-    do { v = v / 1024; i++; } while (v >= 1024 && i < units.length - 1);
-    return (v >= 10 ? Math.round(v) : Math.round(v * 10) / 10) + ' ' + units[i];
-  }
-
-  /* What to store as the file's content type.
-     Extension first, browser second. The browser's own File.type is derived
-     from the OS registry on Windows and reports a .zip as
-     application/x-zip-compressed — which the Storage rule used to refuse
-     outright, so a perfectly ordinary 51MB zip failed to upload with a
-     permission error (04/08/2026). Plenty of files also arrive with no type at
-     all, and an empty type makes a browser guess when the file is downloaded
-     later. A canonical type here fixes both ends. */
-  var EXT_TYPE = {
-    zip: 'application/zip', pdf: 'application/pdf',
-    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
-    webp: 'image/webp', svg: 'image/svg+xml', tif: 'image/tiff', tiff: 'image/tiff',
-    psd: 'image/vnd.adobe.photoshop',
-    eps: 'application/postscript', ai: 'application/postscript',
-    doc: 'application/msword',
-    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    xls: 'application/vnd.ms-excel',
-    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    ppt: 'application/vnd.ms-powerpoint',
-    pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    csv: 'text/csv', txt: 'text/plain', rtf: 'application/rtf',
-    mp4: 'video/mp4', mov: 'video/quicktime', mp3: 'audio/mpeg'
-  };
-
-  function uploadType(file) {
-    var name = String((file && file.name) || '');
-    var dot = name.lastIndexOf('.');
-    var ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
-    if (EXT_TYPE[ext]) return EXT_TYPE[ext];
-    return (file && file.type) || 'application/octet-stream';
-  }
-
-  function fileKind(contentType, name) {
-    var t = String(contentType || '').toLowerCase();
-    var ext = String(name || '').toLowerCase().split('.').pop();
-    if (t.indexOf('image/') === 0) return 'image';
-    if (t.indexOf('video/') === 0 || /^(mp4|mov|m4v|webm)$/.test(ext)) return 'video';
-    if (t.indexOf('audio/') === 0 || /^(mp3|wav|m4a|aac|ogg)$/.test(ext)) return 'audio';
-    if (t === 'application/pdf' || ext === 'pdf') return 'pdf';
-    if (t.indexOf('word') !== -1 || ext === 'doc' || ext === 'docx') return 'doc';
-    if (t.indexOf('sheet') !== -1 || t.indexOf('excel') !== -1 || ext === 'xls' || ext === 'xlsx' || ext === 'csv') return 'sheet';
-    return 'file';
-  }
-
-  var KIND_ICON = { image: '🖼️', video: '🎬', audio: '🎵', pdf: '📕', doc: '📄', sheet: '📊', file: '📎' };
-
-  /* ── Previews — three sizes per image ─────────────────────────────────
-     Same vocabulary as the canon crest tiers (NL.clubs.crestUrl):
-
-       thumb   360px long edge  — the grid tile (128px box, retina-covered)
-       medium  1600px long edge — the eye/preview modal (70vh, wide)
-       full    the original     — download only
-
-     Rendered in the BROWSER at upload time with a canvas, and their URLs
-     stored on the file record next to `url`. NOT an on-demand resize
-     endpoint: the org policy blocking public invokers on new Cloud Run
-     services (see the header) makes such a URL unreachable, and the
-     RTDB-trigger workaround pays ~15-20s of Eventarc latency per request —
-     the exact combination that killed the retired footage tool's previews.
-     Pre-rendering at upload costs the uploader a second and nobody else
-     anything, which is the same trade the crest tiers made.
-
-     Variants live at programme/<CODE>/_previews/<fileId>-<tier>.<ext> —
+  /* Variants live at programme/<CODE>/_previews/<fileId>-<tier>.<ext> —
      inside the club's own prefix, so the existing Storage rules already
      cover them (write-own, clubs cannot delete), and keyed on fileId alone,
      so moving a file between folders (an RTDB-only change) never strands
      them. '_previews' cannot collide with a real folder segment: folderIds
      are push keys, which always start with '-' (or the literal '_root'). */
-  var PREVIEW_TIERS = { thumb: 360, medium: 1600 };
-  var PREVIEW_QUALITY = 0.82;
-
-  /* Raster types every engine can decode AND draw to a canvas. SVG is left
-     out (already small, scales by itself, and can taint a canvas); TIFF and
-     PSD because no browser decodes them at all; GIF because a canvas keeps
-     only the first frame, and a tile that used to animate would freeze. */
-  var DECODABLE = { 'image/png': 1, 'image/jpeg': 1, 'image/webp': 1 };
-
-  /* What an <img> can display at all — the no-variant fallback decision.
-     Broader than DECODABLE: SVG and AVIF render fine, we just don't resize
-     them. A type outside this set (TIFF, PSD, EPS) shows its kind icon
-     instead of a broken image. */
-  var PREVIEW_RENDERABLE = { 'image/png': 1, 'image/jpeg': 1, 'image/webp': 1,
-    'image/gif': 1, 'image/svg+xml': 1, 'image/avif': 1 };
-
-  function previewEligible(contentType) {
-    return DECODABLE[String(contentType || '').toLowerCase()] === 1;
-  }
-  function previewRenderable(contentType) {
-    return PREVIEW_RENDERABLE[String(contentType || '').toLowerCase()] === 1;
-  }
-
-  /* PNG sources keep alpha, so their variants stay PNG; everything else
-     flattens to JPEG (with a white underfill, for WebP alpha). GIF maps to
-     PNG for totality, though eligibility filters it out before this runs. */
-  function previewOutput(contentType) {
-    var t = String(contentType || '').toLowerCase();
-    return (t === 'image/png' || t === 'image/gif')
-      ? { type: 'image/png', ext: 'png' }
-      : { type: 'image/jpeg', ext: 'jpg' };
-  }
-
-  /* Long edge down to `max`, aspect kept, never upscaled, never below 1px. */
-  function fitWithin(w, h, max) {
-    w = Math.max(1, Math.round(Number(w) || 0));
-    h = Math.max(1, Math.round(Number(h) || 0));
-    var edge = Math.max(w, h);
-    if (edge <= max) return { w: w, h: h };
-    var scale = max / edge;
-    return { w: Math.max(1, Math.round(w * scale)), h: Math.max(1, Math.round(h * scale)) };
-  }
-
   function previewPath(club, fileId, tier, ext) {
     return STORAGE_ROOT + '/' + club + '/_previews/' + fileId + '-' + tier + '.' + ext;
-  }
-
-  /* Decode with EXIF orientation applied, so a portrait phone photo does not
-     thumb sideways. Engines that don't know the option throw — fall back to
-     a plain decode, then to an <img>, which modern engines orient anyway. */
-  function decodeImage(blob) {
-    if (typeof createImageBitmap === 'function') {
-      return createImageBitmap(blob, { imageOrientation: 'from-image' })
-        .catch(function () { return createImageBitmap(blob); })
-        .catch(function () { return decodeViaImg(blob); });
-    }
-    return decodeViaImg(blob);
-  }
-  function decodeViaImg(blob) {
-    return new Promise(function (resolve, reject) {
-      var url = URL.createObjectURL(blob);
-      var img = new Image();
-      img.onload = function () { URL.revokeObjectURL(url); resolve(img); };
-      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('undecodable')); };
-      img.src = url;
-    });
-  }
-
-  function encodeTier(src, w, h, max, out) {
-    var dims = fitWithin(w, h, max);
-    var canvas = document.createElement('canvas');
-    canvas.width = dims.w;
-    canvas.height = dims.h;
-    var ctx = canvas.getContext('2d');
-    if (!ctx) return Promise.resolve(null);
-    if (out.type === 'image/jpeg') {   // WebP alpha would composite onto black
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(0, 0, dims.w, dims.h);
-    }
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(src, 0, 0, dims.w, dims.h);
-    return new Promise(function (resolve) {
-      canvas.toBlob(function (b) { resolve(b || null); }, out.type, PREVIEW_QUALITY);
-    });
-  }
-
-  /* blob + canonical content type
-       → { thumb?: {blob, contentType, ext}, medium?: {…} }  tiers rendered
-       → {}    generation ran and the image is small enough to need none
-       → null  ineligible type, or the decode/encode failed (retryable later)
-     Resolves rather than rejects for everything expected — a missing preview
-     must never block or fail the upload it belongs to. A tier the source
-     already fits inside is skipped: a 1200px photo gets a thumb but no
-     medium, and the modal simply shows the original. Browser only. */
-  function makePreviews(blob, contentType) {
-    if (!previewEligible(contentType)) return Promise.resolve(null);
-    return decodeImage(blob).then(function (src) {
-      var w = src.naturalWidth || src.width, h = src.naturalHeight || src.height;
-      if (!w || !h) return null;
-      var out = previewOutput(contentType);
-      var tiers = Object.keys(PREVIEW_TIERS).filter(function (t) {
-        return Math.max(w, h) > PREVIEW_TIERS[t];
-      });
-      return tiers.reduce(function (chain, tier) {
-        return chain.then(function (acc) {
-          return encodeTier(src, w, h, PREVIEW_TIERS[tier], out).then(function (b) {
-            if (b) acc[tier] = { blob: b, contentType: out.type, ext: out.ext };
-            return acc;
-          });
-        });
-      }, Promise.resolve({})).then(function (acc) {
-        if (src.close) src.close();
-        return acc;
-      });
-    }).catch(function () { return null; });
   }
 
   /* Upload rendered tiers into the club's prefix and hand back the record
@@ -764,21 +578,21 @@
     MAX_BYTES: 100 * 1024 * 1024,   // must match storage.rules.snapshot
 
     normCode: normCode,
-    safeName: safeName,
+    safeName: F.safeName,
     storagePath: storagePath,
-    humanSize: humanSize,
-    fileKind: fileKind,
-    uploadType: uploadType,
-    kindIcon: function (kind) { return KIND_ICON[kind] || KIND_ICON.file; },
+    humanSize: F.humanSize,
+    fileKind: F.kind,
+    uploadType: F.typeFor,
+    kindIcon: F.kindIcon,
 
     previews: {
-      TIERS: PREVIEW_TIERS,
-      eligible: previewEligible,
-      renderable: previewRenderable,
-      output: previewOutput,
-      fitWithin: fitWithin,
+      TIERS: F.previews.TIERS,
+      eligible: F.previews.eligible,
+      renderable: F.previews.renderable,
+      output: F.previews.output,
+      fitWithin: F.previews.fitWithin,
       path: previewPath,
-      make: makePreviews,
+      make: F.previews.make,
       store: storePreviews
     },
 
