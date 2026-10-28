@@ -128,9 +128,10 @@ playoff round dates, free-vs-used midweeks per division (the orange/yellow of
 the League schedule PDF), and the blocked-hours window and exemptions. Data,
 editable each season — the source dates are "subject to change".
 
-**Candidate slots.** Saturday and Tuesday anchors where both clubs are free in
-every competition. Thursdays behind an off-by-default "include Thursdays"
-switch. Easter: Good Friday + Easter Monday, never Easter Saturday. **Last
+**Candidate slots.** Saturdays, Tuesdays and Wednesdays where both clubs are
+free in every competition (Wednesday added 28/10/2026). Mondays and Thursdays
+each behind an off-by-default switch. A slot is out when either club plays
+the day before, the day itself or the day after. Easter: Good Friday + Easter Monday, never Easter Saturday. **Last
 usable slot is the midweek before the final matchday** — every league game
 must be played before MD46 (Tue 20/04/2027, or Thu 22/04 with the switch).
 
@@ -165,8 +166,11 @@ fixture date**, **both ways** (changed 28/10/2026: a game postponed well
 ahead can be brought forward); slots beyond it show under a divider, not
 hidden, and fade on the calendar.
 
-**Display.** Dual month calendar, Mon–Sun: home club on top, away club below,
-same columns; opponent crests, clear H/A; candidate, reserved, pencilled and
+**Display.** *(Changed 28/10/2026.)* One calendar, Mon–Sun, each day split:
+the home club's game in the top half, the away club's below; a continuous run
+of weeks opening on the original date, not month pages, with month starts
+marked and distant weeks faded. Previously: dual month calendar, home club on
+top, away club below, same columns; opponent crests, clear H/A; candidate, reserved, pencilled and
 replay days each styled. No canon month calendar exists — build it as a
 canon component (Content Plan's is the reference, not the template; improve
 on it). The journey map is **out of scope** for now.

@@ -38,15 +38,26 @@ const postponed = (home, away, was) => g(home, away, null, { state: 'postponed',
 const run = (game, recs, opts, more = {}) => X.slots(game, { fixtures: fx(game, ...recs), calendar: CAL, rounds: {}, distances: more.distances || { pairs: {} }, today: more.today || '2026-10-28' }, opts);
 const on = (res, d) => res.slots.find((s) => s.date === d);
 
-test('slots are Saturdays and Tuesdays only, Thursdays behind the switch', () => {
+test('slots are Saturdays, Tuesdays and Wednesdays; Mondays and Thursdays behind their switches', () => {
   const game = postponed(A, B, '2026-10-24');
   const res = run(game, []);
   assert.ok(res.slots.length > 0);
-  assert.ok(res.slots.every((s) => s.day === 'Sat' || s.day === 'Tue'));
+  assert.deepEqual([...new Set(res.slots.map((s) => s.day))].sort(), ['Sat', 'Tue', 'Wed']);
   assert.equal(on(res, '2026-10-29'), undefined);
+  assert.equal(on(res, '2026-11-02'), undefined);
   const thu = run(game, [], { thursdays: true });
   assert.equal(on(thu, '2026-10-29').day, 'Thu');
   assert.ok(on(thu, '2026-10-29').flags.some((f) => f.text === 'Thursday'));
+  const mon = run(game, [], { mondays: true });
+  assert.equal(on(mon, '2026-11-02').day, 'Mon');
+});
+
+test('a game the day before or after takes the slot out', () => {
+  const game = postponed(A, B, '2026-10-24');
+  /* Alpha play Tuesday 03/11: Wednesday 04/11 is out, Saturday 07/11 is in. */
+  const res = run(game, [g(A, C, '2026-11-03')]);
+  assert.equal(on(res, '2026-11-04'), undefined);
+  assert.ok(on(res, '2026-11-07'));
 });
 
 test('a game in the anchor window takes the slot out; Monday belongs to Tuesday, Sunday to Saturday', () => {
