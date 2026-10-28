@@ -1,8 +1,11 @@
 /* =============================================================================
    NL Tools — Fixture Management: the rearrangement date finder
    File: /fixtures/_finder.js
-   Version: v1.3 (28/10/2026)
+   Version: v1.4 (28/10/2026)
    CHANGELOG
+     v1.4 (28/10/2026) — Every flag carries a category (flag.cat, CATS) so
+       the page can group them under headings. A within-48h or pencilled
+       flag lists the games behind it, with kick-off.
      v1.3 (28/10/2026) — From the ops team's rules: a game two days either
        side is "within 48h"; two away games in a row each over 200 miles
        round trip are flagged (fixed; opts.longTrip is for tests); international
@@ -32,8 +35,8 @@
                  longTrip: round-trip miles, default 200 (tests only; the
                  page uses the default, Richard 28/10/2026) }
    OUTPUT
-     { slots: [{ date, day, ko, within35, flags: [{ level, text, items? }], weight }],
-     items: [{ date, text }], the games behind a run or long-trip flag.
+     { slots: [{ date, day, ko, within35, flags: [{ level, cat, text, items? }], weight }],
+     items: [{ date, text }], the games behind a flag. cat is a key of CATS.
        from, to, original }
      level 'red' | 'amber' | 'info'. Slots within 35 days of the original
      date, before or after it, come first; then cleanest first (fewest and
@@ -52,6 +55,16 @@
   'use strict';
 
   var DAY = 864e5;
+  /* Flag categories, in the order the page shows them. */
+  var CATS = [
+    { key: 'run', label: 'Consecutive games' },
+    { key: 'proximity', label: 'Match proximity' },
+    { key: 'cup', label: 'Cup rounds' },
+    { key: 'international', label: 'International window' },
+    { key: 'broadcast', label: 'Broadcast' },
+    { key: 'pencil', label: 'Pencilled' },
+    { key: 'day', label: 'Day' }
+  ];
   var WINDOW = 35;
   var LONG_TRIP = 200;   /* round-trip miles: ops team's suggested limit */
   var DIVISION_LABEL = { national: 'National', north: 'North', south: 'South' };
@@ -67,6 +80,11 @@
   function windowOf(d) { return [add(d, -1), d, add(d, 1)]; }
 
   function nameOf(side) { return side && side.name; }
+  /* One game in a flag's list, from a club's side: 'Gillingham (A) · 15:00'. */
+  function gameItem(r, club) {
+    var home = nameOf(r.home) === club;
+    return { date: r.date, text: nameOf(home ? r.away : r.home) + ' (' + (home ? 'H' : 'A') + ')' + (r.ko ? ' · ' + r.ko : '') };
+  }
   /* A club in a flag: its code, which is short, or its name. */
   function tag(side) { return (side && (side.code || side.name)) || '?'; }
   function plays(r, club) { return nameOf(r.home) === club || nameOf(r.away) === club; }
@@ -204,23 +222,28 @@
         var mine = dated.filter(function (r) { return plays(r, club); });
         var nearest = mine.reduce(function (m, r) { var g = gap(r.date, d); return g < m ? g : m; }, 99);
         if (nearest < 2) tooClose = true;
-        else if (nearest === 2) flags.push({ level: 'amber', text: tags[club] + ' within 48h' });
+        else if (nearest === 2) {
+          flags.push({ level: 'amber', cat: 'proximity', text: tags[club] + ' within 48h',
+            items: mine.filter(function (r) { return gap(r.date, d) === 2; }).map(function (r) { return gameItem(r, club); }) });
+        }
       });
       if (tooClose) continue;
 
-      if (day === 'Thu') flags.push({ level: 'info', text: 'Thursday' });
-      if (day === 'Mon') flags.push({ level: 'info', text: 'Monday' });
-      if (day === 'Fri') flags.push({ level: 'info', text: 'Friday' });
-      if (day === 'Sun') flags.push({ level: 'info', text: 'Sunday' });
+      if (day === 'Thu') flags.push({ level: 'info', cat: 'day', text: 'Thursday' });
+      if (day === 'Mon') flags.push({ level: 'info', cat: 'day', text: 'Monday' });
+      if (day === 'Fri') flags.push({ level: 'info', cat: 'day', text: 'Friday' });
+      if (day === 'Sun') flags.push({ level: 'info', cat: 'day', text: 'Sunday' });
 
       /* International windows: a soft flag; a few clubs lose players. */
       (cal.internationalWindows || []).forEach(function (iw) {
-        if (d >= iw.from && d <= iw.to) flags.push({ level: 'info', text: 'International window' });
+        if (d >= iw.from && d <= iw.to) flags.push({ level: 'info', cat: 'international', text: 'International window',
+          items: [{ date: iw.from, text: 'to ' + iw.to.slice(8) + '/' + iw.to.slice(5, 7) }] });
       });
 
       pencils.forEach(function (r) {
         if (win.indexOf(r.pencil.date) !== -1) {
-          flags.push({ level: 'amber', text: 'Pencilled ' + tag(r.home) + ' v ' + tag(r.away) });
+          flags.push({ level: 'amber', cat: 'pencil', text: 'Pencilled ' + tag(r.home) + ' v ' + tag(r.away),
+            items: [{ date: r.pencil.date, text: nameOf(r.home) + ' v ' + nameOf(r.away) + (r.pencil.ko ? ' · ' + r.pencil.ko : '') }] });
         }
       });
 
@@ -236,18 +259,18 @@
           /* Only a replay date in the window, and the tie already decided:
              no replay to make room for. */
           if (!on && replayOn && decided(fx, club, c.comp, c.round)) return;
-          flags.push({ level: 'amber', text: tags[club] + ' in ' + label + (replayOn ? ' replay' : '') + '?' });
+          flags.push({ level: 'amber', cat: 'cup', text: tags[club] + ' in ' + label + (replayOn ? ' replay' : '') + '?' });
         });
         if (on && day === 'Sat' && states[0] !== 'possible' && states[1] !== 'possible' &&
             LEAGUE[game.comp] && !matchdayOn(ctx.rounds, game.comp, d)) {
-          flags.push({ level: 'info', text: label + ' Saturday, both out' });
+          flags.push({ level: 'info', cat: 'cup', text: label + ' Saturday, both out' });
         }
       });
 
       /* Article 48 (FA blocked hours notice): a game shown in the UK loses
          that on a blocked Saturday at 15:00. 12:30 and 17:30 keep it. */
       if (ukShown(game) && day === 'Sat' && blocked(cal, d)) {
-        flags.push({ level: 'amber', text: 'Blocked hours at 15:00' });
+        flags.push({ level: 'amber', cat: 'broadcast', text: 'Blocked hours at 15:00' });
       }
 
       runFlags(game, d, dated, ctx.distances, flags, opts.longTrip || LONG_TRIP);
@@ -296,7 +319,7 @@
       while (hi < seq.length - 1 && seq[hi + 1].side === pair[1]) hi++;
       var run = hi - lo + 1;
       if (run >= 3) {
-        flags.push({ level: run >= 4 ? 'red' : 'amber',
+        flags.push({ level: run >= 4 ? 'red' : 'amber', cat: 'run',
           text: who + ' ' + run + ' ' + (pair[1] === 'H' ? 'home' : 'away') + ' in a row',
           items: seq.slice(lo, hi + 1).map(item) });
       }
@@ -310,7 +333,7 @@
           var mi = oneWay(nb.r);
           if (mi == null || mi * 2 <= longTrip) return;
           var two = nb.date < d ? [nb, seq[i]] : [seq[i], nb];
-          flags.push({ level: 'amber', text: who + ' 2 long trips in a row', items: two.map(item) });
+          flags.push({ level: 'amber', cat: 'run', text: who + ' 2 long trips in a row', items: two.map(item) });
         });
       }
     });
@@ -359,6 +382,7 @@
   }
 
   root.FixturesFinder = {
+    CATS: CATS,
     slots: slots,
     todo: todo,
     pencil: pencil,
