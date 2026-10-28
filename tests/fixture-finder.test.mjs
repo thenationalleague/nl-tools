@@ -232,3 +232,22 @@ test('every flag has a category, and a within-48h flag lists the nearby game wit
   assert.equal(near.text, 'ALP within 48h');
   assert.deepEqual(JSON.parse(JSON.stringify(near.items)), [{ date: '2026-11-05', text: 'Gamma City (H) · 15:00' }]);
 });
+
+test('a cup flag says where the club is: an undecided tie and its date, a won round and the next, or the entry round', () => {
+  const game = postponed(A, B, '2026-10-24');
+  /* Beta's 4Q tie is drawn for 17 Oct and unplayed; Alpha won 4Q. R1 is 07/11. */
+  const ties = [
+    g(B, D, '2026-11-01', { comp: 'fa-cup', round: '4Q' }),
+    g(A, C, '2026-10-17', { comp: 'fa-cup', round: '4Q', result: { h: 2, a: 1 } }),
+  ];
+  const s = on(run(game, ties, {}, { today: '2026-10-28' }), '2026-11-07');
+  const bet = s.flags.find((f) => f.text === 'BET in FAC R1?');
+  assert.deepEqual(JSON.parse(JSON.stringify(bet.items)), [{ date: '2026-11-01', text: '4Q: Delta Rovers (H) · 15:00' }]);
+  const alp = s.flags.find((f) => f.text === 'ALP in FAC R1?');
+  assert.deepEqual(JSON.parse(JSON.stringify(alp.items)), [
+    { date: '2026-10-17', text: 'Won 4Q v Gamma City' },
+    { date: '2026-11-07', text: 'Next: R1, tie not drawn' }]);
+  /* No tie at all: the round National clubs enter. */
+  const none = on(run(game, [], {}, { today: '2026-10-28' }), '2026-11-07').flags.find((f) => f.text === 'ALP in FAC R1?');
+  assert.deepEqual(JSON.parse(JSON.stringify(none.items)), [{ date: '2026-10-17', text: 'Enters at 4Q, no tie entered yet' }]);
+});
