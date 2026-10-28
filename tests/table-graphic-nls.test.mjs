@@ -224,3 +224,101 @@ test('Mark by position on a cup group marks the two qualifiers as Q and nothing 
   t.clearZones();
   assert.ok(t.state.rows.every(r => r.flag === '-'));
 });
+
+/* ---- A table at an earlier date (added 28/10/2026) ----
+   The match shape below is the NLS /matches list, trimmed to the fields the
+   rebuild reads. Taken from a live call on 28/10/2026
+   (/v2/matches/?seasonID=2026&competitionID=89): attributes.homeTeam and
+   awayTeam carry teamID, name and score (null before kick-off), and
+   matchPeriod is "FullTime" once a game is over, "PreMatch" before it. The
+   same day, rowsFromMatches over every finished game reproduced the live
+   National, North and South tables row for row. */
+
+function loadCard() {
+  const win = {};
+  new Function('window', readFileSync(CARD, 'utf8'))(win);
+  return win.NL_TABLE_CARD;
+}
+function match(home, hs, away, as, period = 'FullTime') {
+  return { attributes: { matchPeriod: period,
+    homeTeam: { teamID: home, name: home, score: hs },
+    awayTeam: { teamID: away, name: away, score: as } } };
+}
+const noClubs = { byOpta: () => null };
+
+test('a table worked out from results counts P W D L F A and points', () => {
+  const T = loadCard();
+  const rows = T.rowsFromMatches([
+    match('a', 2, 'b', 0),
+    match('b', 1, 'c', 1),
+    match('c', 0, 'a', 3)
+  ], noClubs);
+  assert.deepEqual(rows.map(r => [r.team, r.p, r.w, r.d, r.l, r.f, r.a, r.gd, r.pts]), [
+    ['a', '2', '2', '0', '0', '5', '0', '+5', '6'],
+    ['b', '2', '0', '1', '1', '1', '3', '-2', '1'],   /* level on points with c, better GD */
+    ['c', '2', '0', '1', '1', '1', '4', '-3', '1']
+  ]);
+});
+
+test('only finished games count; one not yet played or abandoned does not', () => {
+  const T = loadCard();
+  const rows = T.rowsFromMatches([
+    match('a', 1, 'b', 0),
+    match('a', null, 'c', null, 'PreMatch'),
+    match('b', 2, 'c', 2, 'Abandoned')
+  ], noClubs);
+  assert.deepEqual(rows.map(r => r.team), ['a', 'b'], 'c has no finished game, so no row');
+  assert.equal(rows[0].p, '1');
+});
+
+test('ties split on goal difference, then goals scored', () => {
+  const T = loadCard();
+  const rows = T.rowsFromMatches([
+    match('a', 1, 'x', 0),   /* a: 3 pts, GD +1, F 1 */
+    match('b', 3, 'y', 2),   /* b: 3 pts, GD +1, F 3 */
+    match('c', 2, 'z', 0)    /* c: 3 pts, GD +2 */
+  ], noClubs);
+  assert.deepEqual(rows.slice(0, 3).map(r => r.team), ['c', 'b', 'a']);
+});
+
+test('a deduction comes off the points and moves the club down', () => {
+  const T = loadCard();
+  const games = [match('a', 1, 'b', 0), match('c', 0, 'd', 0)];
+  assert.equal(T.rowsFromMatches(games, noClubs)[0].team, 'a');
+  const rows = T.rowsFromMatches(games, noClubs, { a: 3 });
+  assert.equal(rows.find(r => r.team === 'a').pts, '0');
+  assert.deepEqual(rows.slice(0, 2).map(r => r.team), ['c', 'd']);
+});
+
+test('points from results alone, for finding the deductions the live table has', () => {
+  const T = loadCard();
+  assert.deepEqual(T.pointsFromMatches([match('a', 1, 'b', 0), match('b', 1, 'a', 1)]), { a: 4, b: 1 });
+});
+
+test('clubs resolve on teamID, and a U21 guest prints as PL2', () => {
+  const T = loadCard();
+  const halifax = optaFor('FC Halifax Town');
+  const rows = T.rowsFromMatches([
+    { attributes: { matchPeriod: 'FullTime',
+      homeTeam: { teamID: halifax, name: 'Halifax', score: 1 },
+      awayTeam: { teamID: 't0000000', name: 'Norwich City U21', score: 0 } } }
+  ], { byOpta: id => optaIndex[id] || null });
+  assert.deepEqual(rows.map(r => r.team), ['FC Halifax Town', 'Norwich City PL2']);
+  assert.equal(rows[0].id, halifax, 'each row keeps its teamID for deductions');
+});
+
+test('titles: a number is a matchday, final and blank are standings, anything else prints as typed', () => {
+  const T = loadCard();
+  assert.equal(T.title('15'), 'MATCHDAY 15');
+  assert.equal(T.title(''), 'CURRENT STANDINGS');
+  assert.equal(T.title('final'), 'FINAL STANDINGS');
+  assert.equal(T.title('Final'), 'FINAL STANDINGS');
+  assert.equal(T.title('GROUP STAGE – MATCHDAY 3'), 'GROUP STAGE – MATCHDAY 3');
+  assert.equal(T.title('after boxing day'), 'AFTER BOXING DAY');
+});
+
+test('no TIC Health logo on a Cup group; every league table keeps it', () => {
+  const T = loadCard();
+  ['CupA', 'CupB', 'CupC', 'CupD'].forEach(d => assert.equal(T.showsSponsor(d), false, d));
+  ['National', 'North', 'South'].forEach(d => assert.equal(T.showsSponsor(d), true, d));
+});
