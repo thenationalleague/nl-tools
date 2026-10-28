@@ -1,8 +1,11 @@
 /* =============================================================================
    NL Tools — Fixture Management: the rearrangement date finder
    File: /fixtures/_finder.js
-   Version: v1.4 (28/10/2026)
+   Version: v1.5 (28/10/2026)
    CHANGELOG
+     v1.5 (28/10/2026) — A cup flag ("BRW in FAT R4?") says where the club
+       is in that cup: the tie still to be decided with its date, the
+       round won and the next round's date, or the round it enters at.
      v1.4 (28/10/2026) — Every flag carries a category (flag.cat, CATS) so
        the page can group them under headings. A within-48h or pencilled
        flag lists the games behind it, with kick-off.
@@ -150,6 +153,39 @@
     });
   }
 
+  /* Where a club is in a cup, so a "may be in" flag says when it will be
+     known (Richard, 28/10/2026): its latest tie, if undecided, with date
+     and kick-off; if won, the next round's date; with no tie yet, the
+     round its division enters at. */
+  function cupWhere(ctx, club, comp) {
+    var cal = ctx.calendar, fx = ctx.fixtures;
+    var rounds = (cal.cups || []).filter(function (c) { return c.comp === comp; });
+    var ties = Object.keys(fx).map(function (k) { return fx[k]; })
+      .filter(function (r) { return r.comp === comp && plays(r, club); })
+      .sort(function (a, b) { return (a.date || '9') < (b.date || '9') ? -1 : 1; });
+    var last = ties[ties.length - 1];
+    if (!last) {
+      var div = divisionOf(fx, club);
+      var entry = cal.entry && cal.entry[comp] && div ? cal.entry[comp][div] : null;
+      var er = rounds.filter(function (c) { return c.round === entry; })[0];
+      return er ? [{ date: er.date, text: 'Enters at ' + entry + ', no tie entered yet' }] : [{ date: null, text: 'No tie entered yet' }];
+    }
+    var rd = last.round ? last.round + ': ' : '';
+    var w = winnerSide(last);
+    if (!w) {
+      var it = gameItem(last, club);
+      it.text = rd + it.text + (last.date && last.date < ctx.today ? ' · result due' : '');
+      return [it];
+    }
+    var mine = nameOf(last.home) === club ? 'home' : 'away';
+    var opp = nameOf(mine === 'home' ? last.away : last.home);
+    var out = [{ date: last.date, text: 'Won ' + rd.replace(/: $/, '') + ' v ' + opp }];
+    var i = rounds.map(function (c) { return c.round; }).indexOf(last.round);
+    var next = i >= 0 ? rounds[i + 1] : null;
+    if (next) out.push({ date: next.date, text: 'Next: ' + next.round + ', tie not drawn' });
+    return out;
+  }
+
   /* A division's league matchday covering a date, from rounds-2026-27. */
   function matchdayOn(rounds, comp, d) {
     var list = (rounds && rounds[DIVISION_LABEL[comp]]) || [];
@@ -259,7 +295,8 @@
           /* Only a replay date in the window, and the tie already decided:
              no replay to make room for. */
           if (!on && replayOn && decided(fx, club, c.comp, c.round)) return;
-          flags.push({ level: 'amber', cat: 'cup', text: tags[club] + ' in ' + label + (replayOn ? ' replay' : '') + '?' });
+          flags.push({ level: 'amber', cat: 'cup', text: tags[club] + ' in ' + label + (replayOn ? ' replay' : '') + '?',
+            items: cupWhere(ctx, club, c.comp) });
         });
         if (on && day === 'Sat' && states[0] !== 'possible' && states[1] !== 'possible' &&
             LEAGUE[game.comp] && !matchdayOn(ctx.rounds, game.comp, d)) {
