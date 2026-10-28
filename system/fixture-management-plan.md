@@ -1,4 +1,4 @@
-# Fixture Management — plan (not built)
+# Fixture Management — plan (partly built)
 
 Settled 27–28/10/2026 in a grilling session with Richard. Every decision below
 was argued out; the reasoning is kept so a build session does not re-open it.
@@ -212,11 +212,20 @@ Next, in order (re-ordered 28/10/2026):
    - Then FixtureSync's trigger is switched off, the file deleted and its
      copied fixture list cleared. Not before: switched off first, Attendance
      would stop seeing new ties and kick-off changes.
-2. Season calendar file + club-distances file (data only).
+2. ~~Season calendar file + club-distances file (data only).~~ Built
+   28/10/2026: `assets/data/calendar-2026-27.json` (final matchday, Easter,
+   blocked hours, cup entry rounds and dates) and
+   `assets/data/club-distances.json`.
 3. ~~Broadcast and AMI tabs; review-broadcast list.~~ Built 28/10/2026 as one
    Broadcast tab (DAZN and AMI together, at Richard's ask); Settings tab holds
    Results, Add cup tie and the imports. Article 48 check comes with step 4.
-4. Rearrangements tab with the date finder and the canon month calendar.
+4. ~~Rearrangements tab with the date finder.~~ Built 28/10/2026: the
+   finder is `fixtures/_finder.js` (pure, tested in
+   `tests/fixture-finder.test.mjs`). The month calendar is tool-local for
+   now and flagged as a canon candidate. Not built yet: working out NL
+   Cup group qualification from group results. Until the QF ties are
+   entered, every entrant reads as possibly in. A pencil is
+   `pencil: { date, ko, at }` on the record and never reaches `public/`.
 5. DAZN Viewership onto the record (availability and moves from Broadcast,
    not the workbook).
 6. The public `/fixtures/` page for clubs.
