@@ -60,6 +60,9 @@ divergence is not a fault. There is no reconciliation queue.
   `optaID` is a separate nullable field, with a "missing Opta ID" list (all 64
   NL Cup rows lack one in the sheet; one National row too).
 - **Entered by hand:** NL Cup knockouts, playoffs, FA Cup, FA Trophy.
+- **Play-offs belong to their division** (changed 28/10/2026): a National,
+  North or South record marked `playoff`, with its round (QF/SF/F) — the
+  way NLS files them — not a competition of its own.
 - **Outside clubs** (FA Cup/Trophy opponents): a plain name with suggestions of
   names already used, crest if one exists, no codes or colours. Name is the
   join, so a crest added later backfills every tie. Our side of a tie always

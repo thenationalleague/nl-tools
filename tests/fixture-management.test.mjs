@@ -225,7 +225,7 @@ test('the public view shows only Worldwide or Overseas, and never AMI or the his
     lg({ Date: '08/08/2026', 'Home team': 'Beta United', 'Away team': 'Gamma City', OptaID: 'g3', Broadcast: 'TBC' })));
   const p1 = F.publicView(r.fixtures.g1);
   assert.equal(p1.broadcast, 'worldwide');
-  assert.deepEqual(Object.keys(p1).sort(), ['away', 'broadcast', 'comp', 'date', 'home', 'ko', 'neutral', 'optaID', 'result', 'round', 'score', 'venue']);
+  assert.deepEqual(Object.keys(p1).sort(), ['away', 'broadcast', 'comp', 'date', 'home', 'ko', 'neutral', 'optaID', 'playoff', 'result', 'round', 'score', 'venue']);
   assert.equal(F.publicView(r.fixtures.g2).broadcast, null);
   assert.equal(F.publicView(r.fixtures.g3).broadcast, null);
 });
@@ -384,8 +384,9 @@ test('a league game after a club has played its whole league season is a play-of
     g('g4', '1-22', 't2', 't1'), g('g5', '1-29', 't3', 't2'), g('g6', '2-05', 't1', 't3'),
     g('g7', '5-01', 't1', 't2'),
   ]));
-  assert.equal(r.fixtures.g6.comp, 'national');
-  assert.equal(r.fixtures.g7.comp, 'playoffs');
+  assert.equal(r.fixtures.g6.playoff, null);
+  assert.equal(r.fixtures.g7.comp, 'national');
+  assert.equal(r.fixtures.g7.playoff, true);
 });
 
 test('an Attendance game left postponed with no score comes over awaiting a date', () => {
@@ -412,7 +413,9 @@ test('a workbook row kept for a postponed date folds into the played game as a l
 test('the 2025-26 sheet\'s play-off labels and DAZN pick column read correctly', () => {
   const r = build(sheet(
     { Date: '03/05/2026', Time: '3pm', MD: 'SF', Competition: 'National Playoffs', 'Home team': 'Alpha Town', 'Away team': 'Beta United' }));
-  assert.equal(Object.values(r.fixtures)[0].comp, 'playoffs');
+  const po = Object.values(r.fixtures)[0];
+  assert.equal(po.comp, 'national', 'a play-off belongs to its division');
+  assert.equal(po.playoff, true);
 });
 
 test('a past season keys to the Attendance archive: Opta IDs by date and clubs, FA ties by the archive or its ID formula', () => {
@@ -444,4 +447,23 @@ test('a held extra-time result agrees with NLS\'s single final score', () => {
   assert.equal(F.agreesWithNls(F.parseScore('2-0'), F.parseScore('3-1')), false);
   assert.equal(F.agreesWithNls(F.parseScore('1-1 (4-5 p)'), F.parseScore('1-1 (4-5 p)')), true);
   assert.equal(F.agreesWithNls(F.parseScore('1-1 (4-5 p)'), F.parseScore('1-1 (5-4 p)')), false);
+});
+
+test('a play-off between clubs who also met in the league is its own game, not a duplicate', () => {
+  const r = build(sheet(
+    lg({ Date: '10/01/2026', Competition: 'South', 'Home team': 'Alpha Town', 'Away team': 'Beta United', 'Goals H': '1', 'Goals A': '0' }),
+    { Date: '02/05/2026', Time: '3pm', MD: 'SF', Competition: 'South Playoffs', 'Home team': 'Alpha Town', 'Away team': 'Beta United', 'Goals H': '2', 'Goals A': '2' }));
+  assert.equal(r.counts.total, 2);
+  assert.equal(r.counts.playoffs, 1);
+  assert.equal(r.problems.filter((p) => p.kind === 'duplicate' || p.kind === 'reversed').length, 0);
+  const po = Object.values(r.fixtures).find((f) => f.playoff);
+  assert.equal(po.comp, 'south');
+  assert.equal(po.round, 'SF');
+});
+
+test('a bare Playoffs label takes the home club\'s division', () => {
+  const r = F.build({ fixtures: sheet({ Date: '02/05/2026', Time: '3pm', MD: 'SF', Competition: 'Playoffs',
+    'Home team': 'Alpha Town', 'Away team': 'Beta United' }), clubOf, parseDate: NL.parseDate,
+    divisionOf: (n) => (n === 'Alpha Town' ? 'North' : null) });
+  assert.equal(Object.values(r.fixtures)[0].comp, 'north');
 });
