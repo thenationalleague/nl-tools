@@ -21,6 +21,7 @@ when someone asks for it, and when they do, this is where the thinking is.
 | [`fixtures.md`](fixtures.md) | 12/10/2026 | Hand-imported fixture list plus scheduling history. The list is now synced from NLS; the postponement model is what's worth keeping. |
 | [`photoshelter-onboarding.md`](photoshelter-onboarding.md) | 15/10/2026 | Open sign-up for the August 2026 PhotoShelter training. Bookings deleted and rules removed the same day. |
 | [`club-contacts-and-signoff.md`](club-contacts-and-signoff.md) | 15/10/2026 | The summer 2026 collection and check that built the Club Directory. Submissions kept: the Directory editor reads them. Token links closed. |
+| [`single-fixture-and-top-scorers.md`](single-fixture-and-top-scorers.md) | 31/10/2026 | Two canvas graphics: one game on a card (Match Graphic does it in four sizes), and a hand-typed top-eight scorers card. Scorer totals must never be summed from NLS goal events. |
 
 ## Why one place
 
