@@ -1,7 +1,7 @@
 /* ============================================================
    League Table Card — shared renderer
    File: /graphics/_shared/table-card.js
-   Version: v1.2 (10/10/2026)
+   Version: v1.3 (28/10/2026)
 
    Single source of truth for the league-table artwork. The League Table
    Graphic tool (/graphics/table-graphic/) and the scheduled batch
@@ -16,13 +16,24 @@
        card = { division, format, dir, matchday, season, rows }
        division  National | North | South | CupA | CupB | CupC | CupD
        matchday  "" → CURRENT STANDINGS, "final" → FINAL STANDINGS,
-                 "13" → MATCHDAY 13
+                 "13" → MATCHDAY 13, any other text prints as typed
+                 ("GROUP STAGE – MATCHDAY 3")
        rows      [{ team, flag, p, w, d, l, f, a, gd, pts }]
      buildRows(nlsLeagueTable, clubs) → rows (flags cleared: NLS has no zones)
+     rowsFromMatches(nlsMatches, clubs, deductions)
+                                 → rows worked out from finished results, for a
+                                   table at an earlier date. deductions =
+                                   { teamID: points }. Each row carries its
+                                   teamID as `id`.
+     pointsFromMatches(nlsMatches) → { teamID: points } from results alone
+     showsSponsor(division)      → false for a Cup group
      toPng(gfx, format)          → Promise<{ blob, late, missing[] }>
      title, FORMAT_H, COMPETITION_ID, CUP_ROUND, NLS_BASE
 
    CHANGELOG
+     v1.3 28/10/2026  No TIC Health logo on a Cup group table. A title that
+                      isn't a number prints as typed. rowsFromMatches and
+                      pointsFromMatches, for the tool's earlier-date table.
      v1.2 10/10/2026  Sponsor logo from a 480px copy (TIC Health 480.png).
      v1.1 09/10/2026  Cup guests print without PL2 / U21 / U23.
      v1.0 09/10/2026  Lifted out of table-graphic/app.js v1.10 unchanged, so
@@ -84,12 +95,20 @@
       .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
 
+  /* A number is a matchday; "final" and blank are the two standings
+     titles; anything else is a title typed by hand and prints as it is
+     ("GROUP STAGE – MATCHDAY 3", "AFTER THE BOXING DAY GAMES"). */
   function title(matchday) {
     var m = String(matchday == null ? "" : matchday).trim();
-    if (m === "final") return "FINAL STANDINGS";
+    if (m.toLowerCase() === "final") return "FINAL STANDINGS";
     if (!m) return "CURRENT STANDINGS";
-    return "MATCHDAY " + m;
+    if (/^\d+$/.test(m)) return "MATCHDAY " + m;
+    return m.toUpperCase();
   }
+
+  /* The TIC Health logo belongs to the league tables, not the National
+     League Cup (Richard, 28/10/2026). */
+  function showsSponsor(division) { return !CUP_ROUND[division]; }
 
   /* A guest side is a PL2 side whatever NLS calls it: "<club> U21" and
      "<club> U23" normalise to "<club> PL2" the moment a name comes in, so
@@ -217,13 +236,17 @@
       rowsEl.appendChild(rowEl);
     });
 
-    /* footer — sponsor logo, centred */
-    var legend = document.createElement("div");
-    legend.className = "gfx-foot";
-    legend.innerHTML =
-      '<div class="sponsor">' +
-        '<img class="sponsor-logo" crossorigin="anonymous" src="' + SPONSOR_URL + '" onerror="this.style.display=\'none\'">' +
-      '</div>';
+    /* footer — sponsor logo, centred. A Cup group has none, and no footer:
+       the rows take the space. */
+    var legend = null;
+    if (showsSponsor(div)) {
+      legend = document.createElement("div");
+      legend.className = "gfx-foot";
+      legend.innerHTML =
+        '<div class="sponsor">' +
+          '<img class="sponsor-logo" crossorigin="anonymous" src="' + SPONSOR_URL + '" onerror="this.style.display=\'none\'">' +
+        '</div>';
+    }
 
     /* column header + rows travel together, so a short table can sit
        centred in the space a full division would fill */
@@ -238,12 +261,12 @@
       frame.className = "frame";
       frame.appendChild(head);
       frame.appendChild(table);
-      frame.appendChild(legend);
+      if (legend) frame.appendChild(legend);
       gfx.appendChild(frame);
     } else {
       gfx.appendChild(head);
       gfx.appendChild(table);
-      gfx.appendChild(legend);
+      if (legend) gfx.appendChild(legend);
     }
 
     host.innerHTML = "";
@@ -318,8 +341,71 @@
     });
   }
 
+  /* ---------------- a table at an earlier date ----------------
+     The feed only serves the table as it stands (league-tables ignores any
+     date; checked against the live API 28/10/2026), so an earlier table is
+     worked out from the results instead. Checked the same day: rebuilt from
+     every finished match, all 72 clubs in the three divisions matched the
+     live table on P, F, A and Pts, and the order matched on points, then goal
+     difference, then goals scored. The one thing results cannot carry is a
+     points deduction, so the caller passes those in.
+
+     Matches are the NLS /matches list: attributes.homeTeam / awayTeam carry
+     teamID, name and score; matchPeriod FullTime or PostMatch is a finished
+     game (an abandoned game doesn't count). */
+  function isFinished(m) {
+    var p = String(((m && m.attributes) || {}).matchPeriod || "").toLowerCase();
+    return p === "fulltime" || p === "postmatch";
+  }
+  function tally(matches) {
+    var t = {};
+    function side(team) {
+      return t[team.teamID] || (t[team.teamID] = { id: team.teamID, name: team.name || "",
+        p: 0, w: 0, d: 0, l: 0, f: 0, a: 0, pts: 0 });
+    }
+    (matches || []).filter(isFinished).forEach(function (m) {
+      var a = m.attributes, h = a.homeTeam, w = a.awayTeam;
+      if (!h || !w || !h.teamID || !w.teamID) return;
+      var hs = Number(h.score), as = Number(w.score);
+      if (h.score == null || w.score == null || isNaN(hs) || isNaN(as)) return;
+      [[side(h), hs, as], [side(w), as, hs]].forEach(function (x) {
+        var s = x[0], gf = x[1], ga = x[2];
+        s.p++; s.f += gf; s.a += ga;
+        if (gf > ga) { s.w++; s.pts += 3; } else if (gf === ga) { s.d++; s.pts += 1; } else s.l++;
+      });
+    });
+    return t;
+  }
+  function pointsFromMatches(matches) {
+    var t = tally(matches), out = {};
+    Object.keys(t).forEach(function (id) { out[id] = t[id].pts; });
+    return out;
+  }
+  function rowsFromMatches(matches, clubs, deductions) {
+    var t = tally(matches), ded = deductions || {};
+    var list = Object.keys(t).map(function (id) {
+      var s = t[id];
+      s.pts -= Number(ded[id]) || 0;
+      return s;
+    });
+    list.sort(function (x, y) {
+      return (y.pts - x.pts) || ((y.f - y.a) - (x.f - x.a)) || (y.f - x.f) ||
+        String(x.name).localeCompare(String(y.name));
+    });
+    return list.map(function (s) {
+      var club = clubs && clubs.byOpta && clubs.byOpta(s.id);
+      return {
+        id: s.id,
+        team: (club && club.name) || pl2Name(s.name),
+        flag: "-",
+        p: String(s.p), w: String(s.w), d: String(s.d), l: String(s.l),
+        f: String(s.f), a: String(s.a), gd: gdText(s.f - s.a), pts: String(s.pts)
+      };
+    });
+  }
+
   root.NL_TABLE_CARD = {
-    VERSION: "v1.0",
+    VERSION: "v1.3",
     FORMAT_H: FORMAT_H,
     NLS_BASE: NLS_BASE,
     COMPETITION_ID: COMPETITION_ID,
@@ -329,6 +415,9 @@
     render: render,
     toPng: toPng,
     buildRows: buildRows,
+    rowsFromMatches: rowsFromMatches,
+    pointsFromMatches: pointsFromMatches,
+    showsSponsor: showsSponsor,
     title: title,
     pl2Name: pl2Name,
     teamDisplay: teamDisplay,

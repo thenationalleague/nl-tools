@@ -1,8 +1,18 @@
 <!DOCTYPE html>
 <!--
   League Table Graphic — NL Tools (Graphics sub-tool)
-  Version: v1.15 (10/10/2026)
+  Version: v2.0 (28/10/2026)
   File: /graphics/table-graphic/index.html
+
+  v2.0 (28/10/2026) — Rebuilt around the feed, the way the fixtures tool
+    works. The live table loads on picking a competition; the title fills in
+    from the round dates (MATCHDAY 15, GROUP STAGE – MATCHDAY 3, or CURRENT
+    STANDINGS) and can be typed over. "Table at an earlier date" works the
+    table out from results, with points deductions set inline. Download all
+    sizes or one. No TIC Health logo on Cup groups. The sample table, the
+    Table from switch and the Load button are gone; zone marks, the row
+    editor and the paste box are under Edit by hand. The preview fits a
+    1080p window without the page scrolling.
 
   v1.15 (10/10/2026) — The TIC Health logo no longer drops out of exports in
     Safari, and a table with an image that didn't load is never downloaded.
@@ -92,6 +102,19 @@
   var NL_TOOL_KEY = 'staff-graphics';
 
   window.NL_CHANGELOG = [
+    {
+      date: '28/10/2026',
+      version: 'v2.0',
+      items: [
+        'Pick a competition and the live table loads – no Load button, no sample table first.',
+        'The title fills in from the season\'s round dates: MATCHDAY 15, GROUP STAGE – MATCHDAY 3 on a Cup group, or CURRENT STANDINGS between rounds. Type over it to change it; a number reads MATCHDAY, final reads FINAL STANDINGS, anything else prints as typed.',
+        'Download all three sizes in one go, or just the one you need.',
+        'Table at an earlier date: pick a day and the table is worked out from the results up to then. Points deductions the live table shows are filled in, and can be changed, removed or added.',
+        'No TIC Health logo on National League Cup tables.',
+        'Zone marks, the row editor and the paste box are under Edit by hand.',
+        'The page no longer scrolls slightly on a 1080p screen: the preview now fits the window exactly.'
+      ]
+    },
     {
       date: '10/10/2026',
       version: 'v1.15',
@@ -367,12 +390,32 @@
     text-transform: uppercase; color: var(--nl-grey-500); padding-top: 4px;
   }
   .note { font-size: var(--text-xs); color: var(--nl-grey-500); line-height: 1.5; font-family: var(--font-regular); }
-  /* one source at a time — the grid editor below is shared by both */
-  body[data-source="manual"] #nlsCard { display: none; }
-  body[data-source="feed"] #pasteCard { display: none; }
+  /* ---- size choice sits in the preview header ---- */
+  .preview-head .seg { width: auto; }
+  .preview-head .seg button { flex: 0 0 auto; padding: 6px 12px; }
+
+  /* ---- downloads: all sizes, then one button per size ---- */
+  .dl { display: flex; flex-direction: column; gap: 8px; }
+  .dl-one { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .dl-one .btn { padding: 9px 8px; text-align: center; justify-content: center; background: var(--nl-white); color: var(--nl-league-navy);
+    border: 1px solid var(--nl-grey-300); }
+  .dl-one .btn:hover { border-color: var(--nl-league-navy); filter: none; }
+  .btn:disabled { opacity: .5; cursor: default; filter: none; }
+
+  /* ---- the two tucked-away sections ---- */
+  .hand { display: flex; flex-direction: column; gap: 12px; padding-top: 12px; }
+  .hidden { display: none !important; }
+  .ded { display: grid; grid-template-columns: minmax(0, 1fr) 64px 28px; gap: 8px; align-items: center;
+    padding: 6px 0; border-bottom: 1px solid var(--nl-grey-100); font-size: var(--text-sm); }
+  .ded input { padding: 6px 7px; text-align: center; }
+  .ded-del { border: none; background: var(--nl-grey-100); color: var(--nl-grey-700); width: 28px; height: 28px;
+    border-radius: var(--radius-sm); cursor: pointer; }
+  .ded-del:hover { background: var(--nl-red-100); color: var(--nl-rose-red); }
+  .ded-none { font-size: var(--text-sm); color: var(--nl-grey-500); padding: 4px 0; }
+  .ded-add { margin-top: 6px; }
 </style>
 </head>
-<body data-source="feed">
+<body>
 
 <div id="pageWrap">
 
@@ -384,7 +427,12 @@
   <!-- PREVIEW -->
   <div class="preview">
     <div class="preview-head">
-      <span class="eyebrow">Live preview</span>
+      <span class="eyebrow">Preview</span>
+      <div class="seg" id="sizeSeg">
+        <button type="button" class="size-btn active" data-fmt="1x1">1:1</button>
+        <button type="button" class="size-btn" data-fmt="4x5">4:5</button>
+        <button type="button" class="size-btn" data-fmt="9x16">9:16</button>
+      </div>
     </div>
     <div class="stage-wrap" id="stageWrap">
       <div id="gfxHost"></div>
@@ -395,84 +443,77 @@
   <div class="panel">
 
     <div class="card">
-      <h2>Setup</h2>
       <div class="field">
-        <label>Table from</label>
-        <div class="seg" id="sourceSeg">
-          <button type="button" class="src-btn active" data-src="feed">The feed</button>
-          <button type="button" class="src-btn" data-src="manual">Typed in</button>
-        </div>
+        <label for="divisionSel">Competition</label>
+        <select id="divisionSel">
+          <option value="National">National League</option>
+          <option value="North">National League North</option>
+          <option value="South">National League South</option>
+          <option value="CupA">NL Cup · Group A</option>
+          <option value="CupB">NL Cup · Group B</option>
+          <option value="CupC">NL Cup · Group C</option>
+          <option value="CupD">NL Cup · Group D</option>
+        </select>
       </div>
-      <div class="row2">
+      <div class="field">
+        <label for="matchdayInput">Matchday or title</label>
+        <input type="text" id="matchdayInput" maxlength="48" placeholder="15 · blank for CURRENT STANDINGS · final">
+      </div>
+    </div>
+
+    <div class="dl">
+      <button type="button" class="btn btn--primary" id="downloadBtn">Download all sizes</button>
+      <div class="dl-one">
+        <button type="button" class="btn btn--ghost dl-btn" data-fmt="1x1">1:1 only</button>
+        <button type="button" class="btn btn--ghost dl-btn" data-fmt="4x5">4:5 only</button>
+        <button type="button" class="btn btn--ghost dl-btn" data-fmt="9x16">9:16 only</button>
+      </div>
+    </div>
+
+    <details class="disclosure card" id="earlier">
+      <summary>Table at an earlier date</summary>
+      <div class="hand">
         <div class="field">
-          <label for="divisionSel">Division</label>
-          <select id="divisionSel">
-            <option value="National">National League</option>
-            <option value="North">National League North</option>
-            <option value="South">National League South</option>
-            <option value="CupA">NL Cup · Group A</option>
-            <option value="CupB">NL Cup · Group B</option>
-            <option value="CupC">NL Cup · Group C</option>
-            <option value="CupD">NL Cup · Group D</option>
-          </select>
+          <label for="asAtSel">Table after</label>
+          <select id="asAtSel"><option value="">Live table (as it stands)</option></select>
+        </div>
+        <div class="field">
+          <label>Points deducted</label>
+          <div id="dedList"><div class="ded-none">Checking…</div></div>
+          <select id="dedAdd" class="ded-add"><option value="">Add a deduction…</option></select>
+          <p class="note">Worked out from the results, which don't carry deductions. Each one here is taken off at every date: remove it for a date before it was made.</p>
         </div>
       </div>
-      <div class="field">
-        <label for="matchdaySel">Matchday</label>
-        <select id="matchdaySel"></select>
-      </div>
-      <div class="field">
-        <label for="subIn">Season</label>
-        <input type="text" id="subIn" maxlength="48">
-      </div>
-    </div>
+    </details>
 
-    <div class="card">
-      <h2>Format</h2>
-      <div class="field">
-        <label>Size</label>
-        <div class="seg" id="sizeSeg">
-          <button type="button" class="size-btn active" data-fmt="1x1">1:1</button>
-          <button type="button" class="size-btn" data-fmt="4x5">4:5</button>
-          <button type="button" class="size-btn" data-fmt="9x16">9:16</button>
+    <details class="disclosure card" id="handEdit">
+      <summary>Edit by hand</summary>
+      <div class="hand">
+        <div class="field">
+          <label for="subIn">Season</label>
+          <input type="text" id="subIn" maxlength="48">
         </div>
+        <div class="grid-scroller">
+          <table class="grid">
+            <thead><tr>
+              <th style="width:26px">#</th><th style="width:78px">Zone</th><th>Club</th>
+              <th style="width:40px">P</th><th style="width:52px">GD</th><th style="width:52px">Pts</th>
+            </tr></thead>
+            <tbody id="gridBody"></tbody>
+          </table>
+        </div>
+        <div class="btns">
+          <button type="button" class="btn btn--ghost" id="zoneFillBtn">Mark by position</button>
+          <button type="button" class="btn btn--ghost" id="zoneClearBtn">Clear marks</button>
+        </div>
+        <div class="field">
+          <label for="pasteIn">Paste a table</label>
+          <textarea id="pasteIn" rows="6" placeholder="flag/pos · club · P · W · D · L · F · A · GD · Pts"></textarea>
+          <p class="note">Column 1 takes <b>C</b> (champion), <b>SF</b>/<b>QF</b> (play-offs), <b>R</b> (relegation) or a position.</p>
+        </div>
+        <div class="btns"><button type="button" class="btn btn--ghost" id="reloadBtn">Reload the live table</button></div>
       </div>
-    </div>
-
-    <div class="card" id="nlsCard">
-      <h2>Load from National League Services</h2>
-      <div class="btns">
-        <button type="button" class="btn btn--primary" id="nlsLoadBtn">Load current table</button>
-      </div>
-    </div>
-
-    <div class="card" id="pasteCard">
-      <h2>Paste table (CSV / TSV)</h2>
-      <textarea id="pasteIn" rows="7" placeholder="Paste columns: flag/pos · team · P · W · D · L · F · A · GD · Pts"></textarea>
-      <p class="note" style="margin:8px 0 0;">Column 1 accepts <b>C</b> (champion), <b>SF</b>/<b>QF</b> (play-offs), <b>R</b> (relegation) or a plain position number. P, GD and Pts are shown.</p>
-    </div>
-
-    <div class="card">
-      <h2>Grid editor</h2>
-      <div class="grid-scroller">
-        <table class="grid">
-          <thead><tr>
-            <th style="width:26px">#</th><th style="width:78px">Zone</th><th>Club</th>
-            <th style="width:40px">P</th><th style="width:52px">GD</th><th style="width:52px">Pts</th>
-          </tr></thead>
-          <tbody id="gridBody"></tbody>
-        </table>
-      </div>
-      <div class="btns" style="margin-top:10px">
-        <button type="button" class="btn btn--ghost" id="zoneFillBtn">Mark by position</button>
-        <button type="button" class="btn btn--ghost" id="zoneClearBtn">Clear marks</button>
-      </div>
-    </div>
-
-    <div class="btns">
-      <button type="button" class="btn btn--primary" id="downloadBtn">Download PNG</button>
-      <button type="button" class="btn btn--ghost" id="resetBtn">Reset</button>
-    </div>
+    </details>
 
     <footer class="status">
       <span id="status">Ready</span>
@@ -484,6 +525,8 @@
 </div><!-- /#pageWrap -->
 
 <script src="/graphics/_shared/png-export.js"></script>
+<script src="/graphics/_shared/preview-fit.js"></script>
+<script src="/graphics/_shared/rounds.js"></script>
 <script src="/graphics/_shared/table-card.js"></script>
 <script src="engine.js"></script>
 <script src="app.js"></script>

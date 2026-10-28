@@ -1,7 +1,7 @@
 /* ============================================================
    Fixtures & Results Graphic — the tool
    File: /graphics/fixtures-graphic/fixtures-app.js
-   Version: v2.2 (13/10/2026)
+   Version: v2.3 (28/10/2026)
 
    ONE TOOL, TWO DOORS. This file is the whole tool and both editions load
    it: /graphics/fixtures-graphic/ (behind a login) and
@@ -22,6 +22,9 @@
      "Edit by hand" holds the full editor for anything else.
 
    CHANGELOG
+     v2.3 28/10/2026  Download one size or all three. Preview sizing moved to
+                      _shared/preview-fit.js, which stops the page overrunning
+                      a 1080p window by ~34px.
      v2.2 13/10/2026  Kick-off times tick the way the timer's cards do: all
                       but 15:00 at the weekend and 19:45 on a weeknight; every
                       time on a Cup card.
@@ -105,7 +108,7 @@
           '<div class="preview-head">' +
             '<span class="eyebrow">Preview</span>' +
             '<div class="seg" id="sizeSeg">' + FORMATS.map(function (f) {
-              return '<button type="button" class="size-btn" data-fmt="' + f + '">' + f.replace("x", ":") + '</button>';
+              return '<button type="button" class="size-btn" data-fmt="' + f + '">' + f.replace("x", ":") + ' only</button>';
             }).join("") + '</div>' +
           '</div>' +
           '<div class="stage-wrap" id="stageWrap"><div id="gfxHost"></div></div>' +
@@ -140,8 +143,11 @@
           '<div class="card">' +
             '<div class="picks" id="picks"><div class="picks-empty">Loading games…</div></div>' +
           '</div>' +
-          '<div class="btns">' +
+          '<div class="dl">' +
             '<button type="button" class="btn btn--primary" id="downloadBtn">Download all sizes</button>' +
+            '<div class="dl-one">' + FORMATS.map(function (f) {
+              return '<button type="button" class="btn btn--ghost dl-btn" data-fmt="' + f + '">' + f.replace("x", ":") + ' only</button>';
+            }).join("") + '</div>' +
           '</div>' +
           '<details class="disclosure card" id="handEdit">' +
             '<summary>Edit by hand</summary>' +
@@ -215,41 +221,10 @@
     }, NL.clubs).then(fitStage);
   }
 
+  /* Sizing the preview is shared with the other graphics tools:
+     /graphics/_shared/preview-fit.js. */
   function fitStage() {
-    var gfx = gfxHost.querySelector(".gfx");
-    if (!gfx) return;
-    var h = C.FORMAT_H[state.format];
-    var availW = stageWrap.clientWidth - 24;
-
-    /* The height budget must NOT be read from where the stage happens to sit.
-       .preview is sticky, so a taller graphic pushes the pinned panel further
-       up, which lowers stageWrap's top, which hands out more height, which
-       grows the graphic again. Once the page was scrolled the graphic gained
-       ~22px on EVERY re-render — pressing show/hide times a few times inflated
-       it off the screen, and it crept on keystrokes too.
-
-       Derive the budget instead from the sticky offset plus the preview's own
-       chrome. The first is fixed by CSS; the second is the height of the
-       preview header. Neither moves when the stage resizes, so the measurement
-       can't feed back into the thing it measures. */
-    var preview = stageWrap.closest ? stageWrap.closest(".preview") : stageWrap.parentNode;
-    var availH = window.innerHeight - 24;
-    if (preview) {
-      var pv = getComputedStyle(preview);
-      var pinned = (pv.position === "sticky" || pv.position === "fixed") ? parseFloat(pv.top) : NaN;
-      /* Not pinned (the single-column layout) — the stage scrolls with the
-         page, so the viewport is the only limit worth applying. */
-      if (!isNaN(pinned)) {
-        var chrome = stageWrap.getBoundingClientRect().top - preview.getBoundingClientRect().top;
-        availH = window.innerHeight - pinned - chrome - 24;
-      }
-    }
-    var scale = Math.min(1, availW / 1080);
-    if (availH > 160) scale = Math.min(scale, availH / h);
-    gfx.style.transformOrigin = "top left";
-    gfx.style.transform = "scale(" + scale + ")";
-    gfxHost.style.width = (1080 * scale) + "px";
-    gfxHost.style.height = (h * scale) + "px";
+    window.NL_GFX_FIT.fit(stageWrap, gfxHost, 1080, C.FORMAT_H[state.format]);
   }
 
   /* ---------------- grid editor ---------------- */
@@ -592,26 +567,34 @@
       gfx.style.transform = prevT; gfxHost.style.width = prevW; gfxHost.style.height = prevH;
     }
   }
-  async function downloadAll() {
-    if (!window.htmlToImage) return;
-    var btn = $("downloadBtn"), keep = state.format, missing = [];
-    btn.disabled = true;
-    setStatus("Making 3 PNGs…", 30000);
+  /* One size or all three. Every download button is disabled while a run is
+     going, so two runs can't interleave their renders. */
+  async function downloadSizes(list) {
+    if (!window.htmlToImage) {
+      NL.toast("The download didn't start – part of the page didn't load. Reload and try again.", "error");
+      return;
+    }
+
+    var btns = document.querySelectorAll("#downloadBtn, .dl-btn"), keep = state.format, missing = [];
+    btns.forEach(function (b) { b.disabled = true; });
+    var words = list.map(function (f) { return f.replace("x", ":"); });
+    setStatus(list.length > 1 ? "Making " + list.length + " PNGs…" : "Making the " + words[0] + "…", 30000);
     try {
-      for (var i = 0; i < FORMATS.length; i++) {
-        var m = await exportOne(FORMATS[i]);
+      for (var i = 0; i < list.length; i++) {
+        var m = await exportOne(list[i]);
         m.forEach(function (x) { if (missing.indexOf(x) < 0) missing.push(x); });
       }
       if (missing.length) {
-        var msg = "Not all sizes downloaded – " + missing.join(", ") +
+        var msg = "Not downloaded – " + missing.join(", ") +
                   " didn't load. Check your connection and press Download again.";
         NL.toast(msg, "error"); setStatus(msg, 15000);
-      } else setStatus("Downloaded 1:1, 4:5 and 9:16", 4000);
+      } else setStatus("Downloaded " + words.join(", ").replace(/, ([^,]*)$/, " and $1"), 4000);
     } catch (err) {
       console.error(err);
       setStatus("Export blocked — use a screenshot.", 6000);
     } finally {
-      state.format = keep; syncSeg(".size-btn", "data-fmt", keep); render(); btn.disabled = false;
+      state.format = keep; syncSeg(".size-btn", "data-fmt", keep); render();
+      btns.forEach(function (b) { b.disabled = false; });
     }
   }
 
@@ -678,7 +661,10 @@
     pasteEl.addEventListener("input", function () { clearTimeout(pt); pt = setTimeout(syncRowsFromPaste, 140); });
     gridBody.addEventListener("input", gridChanged);
     gridBody.addEventListener("click", gridClicked);
-    $("downloadBtn").addEventListener("click", downloadAll);
+    $("downloadBtn").addEventListener("click", function () { downloadSizes(FORMATS); });
+    document.querySelectorAll(".dl-btn").forEach(function (b) {
+      b.addEventListener("click", function () { downloadSizes([b.getAttribute("data-fmt")]); });
+    });
 
     window.addEventListener("resize", fitStage);
     /* clubs-meta carries the season and the optaID → club index the feed's

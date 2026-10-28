@@ -548,30 +548,11 @@
     }
   }
 
+  /* Sizing the preview is shared with the other graphics tools:
+     /graphics/_shared/preview-fit.js. */
   function fitStage() {
-    var gfx = gfxHost.querySelector(".gfx");
-    if (!gfx) return;
     var h = (state.format === "1x1" ? 1080 : state.format === "4x5" ? 1350 : 1920);
-    var availW = stageWrap.clientWidth - 24;
-    /* The height budget is derived from the sticky offset plus the preview's
-       own chrome, never from where the stage happens to sit — a pinned
-       preview that measures itself grows a little on every redraw. */
-    var preview = stageWrap.closest ? stageWrap.closest(".preview") : stageWrap.parentNode;
-    var availH = window.innerHeight - 24;
-    if (preview) {
-      var pv = getComputedStyle(preview);
-      var pinned = (pv.position === "sticky" || pv.position === "fixed") ? parseFloat(pv.top) : NaN;
-      if (!isNaN(pinned)) {
-        var chrome = stageWrap.getBoundingClientRect().top - preview.getBoundingClientRect().top;
-        availH = window.innerHeight - pinned - chrome - 24;
-      }
-    }
-    var scale = Math.min(1, availW / 1080);
-    if (availH > 160) scale = Math.min(scale, availH / h);
-    gfx.style.transformOrigin = "top left";
-    gfx.style.transform = "scale(" + scale + ")";
-    gfxHost.style.width = (1080 * scale) + "px";
-    gfxHost.style.height = (h * scale) + "px";
+    window.NL_GFX_FIT.fit(stageWrap, gfxHost, 1080, h);
   }
 
   /* ---------------- grid editors ---------------- */
