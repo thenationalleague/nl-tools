@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixture Management
-  Version: v1.2 (28/10/2026)
+  Version: v1.3 (28/10/2026)
   File: /fixtures/admin/index.html
 
   The League's master fixture record: every game in every competition, with
@@ -9,6 +9,12 @@
   behind it, is system/fixture-management-plan.md.
 
   CHANGELOG
+    v1.3 (28/10/2026) — Seasons: a switcher, and a past season brought in
+      from the Attendance tool's archive (its match IDs stay the keys, so
+      club-submitted crowds stay joined). Each game shows its crowd, read
+      from Attendance — never copied — and a No crowd card lists played home
+      games of League clubs with none. Neutral venue (and its name) is set
+      in a game's dialog; Attendance reads it from here.
     v1.2 (28/10/2026) — A fixture can be postponed or abandoned from its
       dialog (reason, and the minute for an abandonment), and a mistaken
       lost date removed. Results: imported from the workbook, edited in the
@@ -93,6 +99,15 @@
     window.NL_CHANGELOG = [
       {
         date: '28/10/2026',
+        version: 'v1.3',
+        items: [
+          'Season switcher, and last season brought in from Attendance with its crowds.',
+          'Each game shows its crowd from Attendance; a No crowd card lists the games still missing one.',
+          'Neutral venue is set in a game\u2019s dialog.'
+        ]
+      },
+      {
+        date: '28/10/2026',
         version: 'v1.2',
         items: [
           'Postpone or abandon a fixture from its dialog, and remove a lost date entered by mistake.',
@@ -142,7 +157,7 @@
   <script src="/system/auth-guard.js?v=17"></script>
 
   <!-- Tool data layer (pure; tested in tests/fixture-management.test.mjs) -->
-  <script src="/fixtures/_core.js?v=2"></script>
+  <script src="/fixtures/_core.js?v=3"></script>
 
 <style>
   /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
@@ -155,13 +170,16 @@
 
   /* Fixed columns: every table on the page shares one colgroup, so the
      centre line sits in the same place in all of them. */
-  .fm-table { table-layout: fixed; width: 100%; min-width: 1040px; }
+  .fm-table { table-layout: fixed; width: 100%; min-width: 1130px; }
   .fm-table col.c-ko { width: 108px; }
   .fm-table col.c-comp { width: 136px; }
   .fm-table col.c-rd { width: 64px; }
   .fm-table col.c-mid { width: 150px; }
   .fm-table col.c-bc { width: 150px; }
   .fm-table col.c-flag { width: 150px; }
+  .fm-table col.c-crowd { width: 92px; }
+  .fm-crowd { text-align: right; font-variant-numeric: tabular-nums; }
+  .fm-crowd--none { color: var(--text-muted); }
   .fm-table td { white-space: nowrap; }
   .fm-day td { background: var(--off-white) !important; font-weight: 800; font-variation-settings: 'wght' 800; color: var(--navy); }
   .fm-row { cursor: pointer; }
@@ -209,6 +227,7 @@
     <div class="section-head">
       <h2 id="fmSeason">Fixtures</h2>
       <div id="fmActions" hidden>
+        <button class="btn btn--ghost btn--sm" type="button" id="fmFromAtt" hidden>Bring in from Attendance</button>
         <button class="btn btn--ghost btn--sm" type="button" id="fmImport">Import workbook</button>
         <button class="btn btn--navy btn--sm" type="button" id="fmResults">Results</button>
         <button class="btn btn--primary btn--sm" type="button" id="fmAdd">Add cup tie</button>
@@ -216,6 +235,7 @@
     </div>
 
     <div class="filter-bar">
+      <div class="chip-group" id="fmSeasons" role="group" aria-label="Season"></div>
       <div class="chip-group" id="fmComps" role="group" aria-label="Competition"></div>
       <div class="fm-picker" id="fmClub"></div>
       <div class="chip-group" id="fmWhen" role="group" aria-label="Dates">
@@ -258,7 +278,10 @@
     when: 'upcoming',
     need: null,          /* 'awaiting' | 'noOpta' | 'cupDue' — a stat card filter */
     picker: null,
-    limit: PAGE
+    limit: PAGE,
+    current: null,       /* the current season key */
+    listen: null,        /* the live fixtures ref for the viewed season */
+    crowds: {}           /* matchID → { total, away } from Attendance */
   };
 
   function today() { return F.ymdOf(new Date()); }
@@ -301,20 +324,14 @@
         S.guests = r[1] || [];
         ((r[2] && r[2].names) || []).forEach(function (n) { S.crests[n] = true; });
         S.reasons = ((r[3] && r[3].reasons) || []).map(function (x) { return x.label; });
-        S.season = NL.season.current(S.meta) || String(NL.season.fromDate());
-        document.getElementById('fmSeason').textContent = 'Fixtures ' + NL.season.label(S.meta, S.season);
+        S.current = NL.season.current(S.meta) || String(NL.season.fromDate());
         S.picker = NL.clubPicker('#fmClub', {
           mode: 'search', season: 'all', clearable: true, extraClubs: S.guests,
           placeholder: 'Any club',
           onSelect: function (sel) { S.club = sel ? sel.name : null; S.limit = PAGE; render(); }
         });
-        ref('fixtures').on('value', function (snap) {
-          S.fixtures = snap.val() || {};
-          render();
-        }, function (err) {
-          document.getElementById('fmBody').innerHTML =
-            '<div class="banner banner--error">Could not read fixtures: ' + esc(err.message) + '</div>';
-        });
+        renderSeasons();
+        openSeason(S.current);
       })
       .catch(function (err) {
         document.getElementById('fmBody').innerHTML =
@@ -322,7 +339,74 @@
       });
   };
 
+  /* ── Seasons ──────────────────────────────────────────────────────────
+     A closed set: the seasons clubs-meta knows. The workbook import is for
+     the current one; a past one comes in from Attendance. */
+  function renderSeasons() {
+    document.getElementById('fmSeasons').innerHTML = NL.season.keys(S.meta).map(function (k) {
+      return '<button class="chip' + (k === S.current ? ' active' : '') + '" type="button" data-season="' + esc(k) + '">' +
+        esc(NL.season.label(S.meta, k)) + '</button>';
+    }).join('');
+  }
+
+  function openSeason(key) {
+    if (S.listen) S.listen.off();
+    S.season = key;
+    S.fixtures = {};
+    S.crowds = {};
+    S.limit = PAGE;
+    var past = key !== S.current;
+    document.getElementById('fmSeason').textContent = 'Fixtures ' + NL.season.label(S.meta, key);
+    document.getElementById('fmFromAtt').hidden = !past;
+    document.getElementById('fmImport').hidden = past;
+    document.getElementById('fmAdd').hidden = past;
+    loadCrowds(key);
+    S.listen = ref('fixtures');
+    S.listen.on('value', function (snap) {
+      S.fixtures = snap.val() || {};
+      render();
+    }, function (err) {
+      document.getElementById('fmBody').innerHTML =
+        '<div class="banner banner--error">Could not read fixtures: ' + esc(err.message) + '</div>';
+    });
+  }
+
+  /* Crowds are club submissions in the Attendance tool, filed under the
+     match ID. Read, never copied: a figure lives in one place. */
+  function attPath(key, node) {
+    return 'app-data/ops-attendance/' + (key === S.current ? '' : 'archive/' + key + '/') + node;
+  }
+  function loadCrowds(key) {
+    NL.ensureAuth()
+      .then(function () { return db.ref(attPath(key, 'submissions')).once('value'); })
+      .then(function (snap) {
+        if (S.season !== key) return;
+        var subs = snap.val() || {};
+        Object.keys(subs).forEach(function (id) {
+          var x = subs[id] || {};
+          if (x.total != null) S.crowds[id] = { total: +x.total, away: x.awayRecorded !== false && x.away != null ? +x.away : null };
+        });
+        render();
+      })
+      .catch(function () { /* no crowds is not an error: the column stays empty */ });
+  }
+
+  /* A crowd is expected for a game a League club hosted (or a neutral
+     one), once it has a result or its date has passed. */
+  function crowdDue(r, t) {
+    if (!r.date || S.crowds[r.key]) return false;
+    if (!(r.result || r.date < t)) return false;
+    return !!(r.home.code || r.neutral);
+  }
+
   function wireStatic() {
+    document.getElementById('fmSeasons').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-season]');
+      if (!b || b.getAttribute('data-season') === S.season) return;
+      setActive('fmSeasons', b);
+      openSeason(b.getAttribute('data-season'));
+    });
+    document.getElementById('fmFromAtt').addEventListener('click', openFromAttendance);
     document.getElementById('fmImport').addEventListener('click', openImport);
     document.getElementById('fmResults').addEventListener('click', openResults);
     document.getElementById('fmAdd').addEventListener('click', function () { openEdit(null); });
@@ -378,6 +462,7 @@
     if (S.need === 'awaiting' && !F.awaiting(r)) return false;
     if (S.need === 'noOpta' && (r.optaID || F.COMP_BY_KEY[r.comp].fa)) return false;
     if (S.need === 'cupDue' && !F.cupResultDue(r, t)) return false;
+    if (S.need === 'noCrowd' && !crowdDue(r, t)) return false;
     if (!S.need && S.when === 'upcoming' && r.date && r.date < t) return false;
     return true;
   }
@@ -427,11 +512,14 @@
   }
 
   function renderStats(c) {
+    var t = today(), noCrowd = 0;
+    Object.keys(S.fixtures).forEach(function (k) { if (crowdDue(S.fixtures[k], t)) noCrowd++; });
     var cards = [
       ['all', c.total, 'Fixtures'],
       ['awaiting', c.awaiting, 'Awaiting a date'],
       ['noOpta', c.noOpta, 'No Opta ID'],
-      ['cupDue', c.cupDue, 'FA results due']
+      ['cupDue', c.cupDue, 'FA results due'],
+      ['noCrowd', noCrowd, 'No crowd']
     ];
     document.getElementById('fmStats').innerHTML = cards.map(function (x) {
       return '<div class="stat fm-card' + (S.need === x[0] ? ' is-on' : '') + '" data-need="' + x[0] + '" role="button" tabindex="0">' +
@@ -489,19 +577,26 @@
     return '<td class="fm-mid fm-mid--v">' + (r.date && r.date < t ? '–' : 'v') + '</td>';
   }
 
+  function crowdCell(r, t) {
+    var c = S.crowds[r.key];
+    if (c) return '<td class="fm-crowd" title="' + (c.away != null ? esc(c.away.toLocaleString('en-GB') + ' away') : '') + '">' +
+      esc(c.total.toLocaleString('en-GB')) + '</td>';
+    return '<td class="fm-crowd fm-crowd--none">' + (crowdDue(r, t) ? '–' : '') + '</td>';
+  }
+
   var COLS = '<colgroup><col class="c-ko"><col class="c-comp"><col class="c-rd"><col>' +
-    '<col class="c-mid"><col><col class="c-bc"><col class="c-flag"></colgroup>';
+    '<col class="c-mid"><col><col class="c-crowd"><col class="c-bc"><col class="c-flag"></colgroup>';
 
   function tableOf(rows, waiting) {
     var t = today();
     var html = '<div class="table-wrap"><table class="table table--compact fm-table">' + COLS + '<thead><tr>' +
       '<th>' + (waiting ? 'Lost' : 'KO') + '</th><th>Comp</th><th>Rd</th><th class="ta-right">Home</th>' +
-      '<th class="ta-center"></th><th>Away</th><th>Broadcast</th><th></th></tr></thead><tbody>';
+      '<th class="ta-center"></th><th>Away</th><th class="ta-right">Crowd</th><th>Broadcast</th><th></th></tr></thead><tbody>';
     var day = null;
     rows.forEach(function (r) {
       if (!waiting && r.date !== day) {
         day = r.date;
-        html += '<tr class="fm-day"><td colspan="8">' + esc(NL.formatDate(r.date)) + '</td></tr>';
+        html += '<tr class="fm-day"><td colspan="9">' + esc(NL.formatDate(r.date)) + '</td></tr>';
       }
       var last = waiting ? r.attempts[r.attempts.length - 1] : null;
       html += '<tr class="fm-row" data-key="' + esc(r.key) + '">' +
@@ -511,6 +606,7 @@
         '<td>' + team(r.home, true) + '</td>' +
         middle(r, t) +
         '<td>' + team(r.away, false) + '</td>' +
+        crowdCell(r, t) +
         '<td>' + broadcastPill(r) + '</td>' +
         '<td>' + flags(r, t) + '</td></tr>';
     });
@@ -588,6 +684,9 @@
             '<option value="away">Away</option>' +
             '<option value="replay">Drawn: replay</option>' +
           '</select></div>' +
+        '<div class="form-group"><label><input id="fmeNeutral" type="checkbox"' + (rec && rec.neutral ? ' checked' : '') + dis +
+          '> Neutral venue</label>' +
+          '<input id="fmeVenue" type="text" placeholder="Venue" value="' + esc(rec && rec.venue || '') + '"' + dis + '></div>' +
         (hist ? '<div class="form-group span2"><label>Lost dates</label>' + hist + '</div>' : '') +
       '</div>';
 
@@ -754,6 +853,11 @@
     next.home = clubOf(homeName) || { name: homeName.trim() };
     next.away = clubOf(awayName) || { name: awayName.trim() };
     if (!comp.fa) next.optaID = opta;
+    var neutral = wrap.querySelector('#fmeNeutral').checked;
+    var venue = wrap.querySelector('#fmeVenue').value.trim();
+    if (neutral && !venue) return no('Name the neutral venue');
+    next.neutral = neutral || null;
+    next.venue = neutral ? venue : null;
     if (date) next = F.setDate(next, date, ko, now());
     if (!next.original) next.original = { date: next.date, ko: next.ko };
 
@@ -807,6 +911,7 @@
   }
 
   var LONDON = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' });
+  var LONDON_T = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
   function londonYmd(t) { return LONDON.format(new Date(t)); }
 
   function openResults() {
@@ -904,6 +1009,59 @@
         }}
       ]
     });
+  }
+
+  /* ── A past season from Attendance ───────────────────────────────────
+     The Attendance tool archived every game of a finished season with the
+     crowds clubs submitted against it. Bringing those games across keeps
+     their match IDs as keys, so the crowds stay joined without a copy. */
+  function openFromAttendance() {
+    var key = S.season;
+    var label = NL.season.label(S.meta, key);
+    NL.ensureAuth()
+      .then(function () { return db.ref(attPath(key, 'fixtures')).once('value'); })
+      .then(function (snap) {
+        var res = F.fromAttendance(snap.val() || {}, {
+          clubByOpta: function (id) { var c = NL.clubs.byOpta(id); return c ? { name: c.name, code: c.code } : null; },
+          clubOf: clubOf,
+          london: function (t) {
+            var d = new Date(t);
+            return { date: londonYmd(t), ko: LONDON_T.format(d) };
+          }
+        });
+        var n = Object.keys(res.fixtures).length;
+        if (!n) { NL.alert('Attendance has no fixtures archived for ' + label + '.', { title: 'Nothing to bring in' }); return; }
+        var by = {}, crowds = 0;
+        Object.keys(res.fixtures).forEach(function (k) {
+          var r = res.fixtures[k];
+          by[r.comp] = (by[r.comp] || 0) + 1;
+          if (S.crowds[k]) crowds++;
+        });
+        var lines = F.COMPS.filter(function (c) { return by[c.key]; }).map(function (c) { return c.label + ' ' + by[c.key]; }).join(' · ');
+        var existing = Object.keys(S.fixtures).length;
+        return NL.confirm(n + ' games for ' + label + ' (' + lines + '), ' + crowds + ' with a crowd.' +
+          (existing ? '\nThis replaces the ' + existing + ' already here.' : '') +
+          (res.problems.length ? '\n' + res.problems.length + ' to check: ' + res.problems.slice(0, 3).map(function (p) { return p.text; }).join('; ') : ''),
+          { title: 'Bring in ' + label, confirmText: 'Bring in', variant: existing ? 'danger' : 'primary' })
+          .then(function (yes) {
+            if (!yes) return;
+            var fx = {}, pub = {}, stamp = now();
+            Object.keys(res.fixtures).forEach(function (k) {
+              var r = res.fixtures[k];
+              r.updatedAt = stamp;
+              fx[k] = clean(r);
+              var p = F.publicView(r);
+              if (p) pub[k] = clean(p);
+            });
+            return ref().set({ fixtures: fx, public: pub,
+              meta: { importedAt: stamp, importedBy: (S.session && S.session.email) || null, from: 'attendance' } })
+              .then(function () {
+                NL.writeAudit('fixtures_from_attendance', label + ': ' + n + ' games');
+                NL.toast(n + ' games brought in', 'success');
+              });
+          });
+      })
+      .catch(function (e) { NL.toast('Could not bring in: ' + e.message, 'error'); });
   }
 
   /* ── Import ──────────────────────────────────────────────────────────

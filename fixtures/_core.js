@@ -1,8 +1,14 @@
 /* =============================================================================
    NL Tools — Fixture Management: data layer
    File: /fixtures/_core.js
-   Version: v1.1 (28/10/2026)
+   Version: v1.2 (28/10/2026)
    CHANGELOG
+     v1.2 (28/10/2026) — fromAttendance: a past season built from the
+       Attendance tool's archive (its fixtures keep their match IDs as keys,
+       so the club-submitted crowds stay joined). Play-offs found as league
+       games played after a club's full league season. Records carry
+       neutral/venue; the public projection adds them and a numeric score,
+       for Attendance to read.
      v1.1 (28/10/2026) — Results: the sheet's goals, extra time and
        penalties import as `result`; resultText formats them as the sheet
        does ('0-0 (1-1 aet, 4-3 p)'); an FA tie's winner comes from the score
@@ -57,6 +63,9 @@
                     never inferred (plan, Broadcast).
      wentThrough    'home' | 'away' | 'replay' | null, for FA Cup and FA
                     Trophy ties. 'replay' is a draw; the replay row decides.
+     neutral, venue a game away from the home club's ground (a final at
+                    Wembley): true + the venue name, else null. Attendance
+                    keeps such crowds out of a club's home average.
      result         { h, a, aet: {h,a}|null, pens: {h,a}|null, source } or
                     null. h/a are the 90-minute score; aet the score after
                     extra time; pens the shoot-out. source is 'import',
@@ -636,6 +645,89 @@
     return { matches: matches, unmatched: unmatched };
   }
 
+  /* ── Attendance ─────────────────────────────────────────────────────────
+     A past season from the Attendance tool's archive
+     (app-data/ops-attendance/archive/<season>/fixtures/<matchID>). Its
+     records come in two kinds, by gas/FixtureSync.js and by hand:
+       NLS copy   matchID 'g2578817', kickoffUTC '2025-08-09 14:00:00' (UTC),
+                  competitionKey nl|north|south|nl-cup, homeTeamID 't3360',
+                  homeScore/awayScore, matchPeriod, postponementReason
+       by hand    matchID 'manual_fa-cup_20251101_…', kickoffUTC
+                  '2025-11-01T15:00:00' — typed as UK time, despite the name
+     Both may carry isNeutral + venueName. The matchID stays the record's
+     key, because the club-submitted crowds are filed under it.
+     o: { clubByOpta(teamID), clubOf(name) → {name, code}|null,
+          london(utcMs) → { date, ko } }
+     → { fixtures, problems } */
+  var ATT_COMP = { nl: 'national', north: 'north', south: 'south', 'nl-cup': 'nl-cup', 'fa-cup': 'fa-cup', 'fa-trophy': 'fa-trophy' };
+
+  function fromAttendance(att, o) {
+    var out = {}, problems = [];
+    var rows = Object.keys(att || {}).map(function (id) { return { id: id, f: att[id] || {} }; });
+    rows.forEach(function (x) {
+      var f = x.f, comp = COMP_BY_KEY[ATT_COMP[f.competitionKey]];
+      if (!comp) { problems.push({ kind: 'row', text: x.id + ': unknown competition "' + f.competitionKey + '"' }); return; }
+      var when = null, raw = String(f.kickoffUTC || '');
+      var local = raw.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/);
+      if (local && raw.indexOf('Z') === -1) when = { date: local[1], ko: local[2] };
+      else {
+        var t = Date.parse(raw.replace(' ', 'T') + (/[Z+]/.test(raw) ? '' : 'Z'));
+        if (!isNaN(t)) when = o.london(t);
+      }
+      if (!when) { problems.push({ kind: 'row', text: x.id + ': no kick-off' }); return; }
+      function side(id, name) {
+        var c = (id && o.clubByOpta(id)) || o.clubOf(name);
+        if (c) return { name: c.name, code: c.code || null };
+        if (comp.league) problems.push({ kind: 'club', text: '"' + name + '" is not a League club (' + comp.label + ')' });
+        return { name: String(name || '?').trim() };
+      }
+      var h = f.homeScore, a = f.awayScore;
+      var result = h != null && a != null && h !== '' && a !== ''
+        ? { h: +h, a: +a, aet: null, pens: null, source: 'attendance' } : null;
+      var period = norm(f.matchPeriod);
+      var rec = {
+        key: x.id,
+        optaID: /^g\d+$/.test(x.id) ? x.id : null,
+        comp: comp.key,
+        round: null,
+        home: side(f.homeTeamID, f.homeTeamName),
+        away: side(f.awayTeamID, f.awayTeamName),
+        date: when.date, ko: when.ko,
+        state: 'scheduled',
+        original: { date: when.date, ko: when.ko },
+        attempts: [],
+        broadcast: { availability: null, enhanced: false, daznMove: false, ami: false },
+        result: result,
+        wentThrough: comp.fa ? faWinner(result, null) : null,
+        neutral: f.isNeutral ? true : null,
+        venue: f.isNeutral && f.venueName ? String(f.venueName) : null,
+        source: 'attendance'
+      };
+      if (!result && (period === 'postponed' || period === 'abandoned')) {
+        rec.attempts.push({ date: when.date, ko: when.ko, outcome: period, reason: f.postponementReason || null,
+          noticeAt: null, rescheduledAt: null, minute: null });
+        rec.date = null; rec.ko = null; rec.state = period;
+      }
+      out[x.id] = rec;
+    });
+
+    /* Play-offs arrive in NLS under the league's own competition. A league
+       game is a play-off when either club had already played its whole
+       league season (2 × (clubs − 1) games) before it kicked off. */
+    ['national', 'north', 'south'].forEach(function (ck) {
+      var games = Object.keys(out).map(function (k) { return out[k]; })
+        .filter(function (r) { return r.comp === ck && r.date; }).sort(compare);
+      var clubs = {};
+      games.forEach(function (r) { clubs[r.home.name] = 0; clubs[r.away.name] = 0; });
+      var full = 2 * (Object.keys(clubs).length - 1);
+      games.forEach(function (r) {
+        if (clubs[r.home.name] >= full || clubs[r.away.name] >= full) { r.comp = 'playoffs'; return; }
+        clubs[r.home.name]++; clubs[r.away.name]++;
+      });
+    });
+    return { fixtures: out, problems: problems };
+  }
+
   /* ── Order ──────────────────────────────────────────────────────────────
      A day reads by competition (National, North, South, then the cups),
      then kick-off, then home club. */
@@ -694,7 +786,10 @@
       away: rec.away,
       optaID: rec.optaID || null,
       broadcast: a && a.public ? a.key : null,
-      result: rec.result ? resultText(rec.result) : null
+      result: rec.result ? resultText(rec.result) : null,
+      score: rec.result ? { h: (rec.result.aet || rec.result).h, a: (rec.result.aet || rec.result).a } : null,
+      neutral: rec.neutral || null,
+      venue: rec.neutral ? (rec.venue || null) : null
     };
   }
 
@@ -722,6 +817,7 @@
     nlsResults: nlsResults,
     matchNls: matchNls,
     compare: compare,
+    fromAttendance: fromAttendance,
     parseScore: parseScore,
     resultsFromPaste: resultsFromPaste,
     table: table,

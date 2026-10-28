@@ -10,6 +10,24 @@
 
      TECHNICAL CHANGELOG
      -------------------
+     v2.12.0 (2026-10-28) Fixtures come from Fixture Management. For any
+                         season it holds, loadFixturesAndSubmissions reads
+                         app-data/ops-fixture-management/seasons/<season>/
+                         public (the public projection of the League's own
+                         record — fixtures/_core.js publicView) and turns each
+                         row into the fixture shape this page already uses
+                         (fromFixtureRecord). Only a season it does not hold
+                         reads this tool's own fixtures node, which
+                         gas/FixtureSync.js fills from NLS and which retires
+                         once nothing reads it (system/gas-to-functions-
+                         migration.md, Phase 5). The record's keys are its
+                         match IDs (Opta IDs; a past season keeps this
+                         tool's own IDs), so submissions are untouched. Its
+                         dates are the League's, not whatever NLS last said;
+                         a game awaiting a new date is not in it, so it
+                         cannot be submitted against. "+ Add cup fixture"
+                         and "Neutral venues" hide for such a season: cup ties
+                         and neutral venues are set in Fixture Management.
      v2.11.1 (2026-10-01) Export CSV dropped away/home fans for legacy
                          submissions with no awayRecorded flag (required it
                          truthy). Now awayRecorded !== false, matching the
@@ -1162,6 +1180,13 @@
   var NL_TOOL_KEY = 'ops-attendance';
 
   window.NL_CHANGELOG = [
+    {
+      date: '28 Oct 2026',
+      version: 'v2.12.0',
+      items: [
+        'Fixtures now come from Fixture Management, the League\u2019s own record, so dates and kick-offs are the ones the League has agreed. Cup ties and neutral venues are set there too.'
+      ]
+    },
     {
       date: '1 Oct 2026',
       version: 'v2.11.1',
@@ -3401,17 +3426,78 @@
       });
   }
 
+  /* Fixture Management's public projection → this page's fixture shape.
+     The projection (fixtures/_core.js publicView) carries a UK date and
+     kick-off, so kickoffUTC is worked back to UTC here, in the
+     'YYYY-MM-DD HH:MM:SS' form parseKickoff reads. Play-offs file under the
+     league key, as they always arrived from NLS. */
+  var FM_BASE = 'app-data/ops-fixture-management/seasons/';
+  var FM_COMP = { 'national': 'nl', 'north': 'north', 'south': 'south', 'nl-cup': 'nl-cup',
+    'fa-cup': 'fa-cup', 'fa-trophy': 'fa-trophy', 'playoffs': 'nl' };
+  var FM_COMP_ID = { 'national': 89, 'north': 373, 'south': 372, 'nl-cup': 1275 };
+  /* Hours after kick-off that a game with no score yet counts as played, so
+     its club can submit before anyone has entered the result. */
+  var FM_PLAYED_AFTER_MS = 3 * 3600 * 1000;
+
+  function ukToUtcString(ymd, hm) {
+    var p = ymd.split('-'), t = (hm || '15:00').split(':');
+    var guess = Date.UTC(+p[0], +p[1] - 1, +p[2], +t[0], +t[1]);
+    var d = new Date(guess);
+    var offset = Date.parse(d.toLocaleString('en-US', { timeZone: 'Europe/London' })) -
+                 Date.parse(d.toLocaleString('en-US', { timeZone: 'UTC' }));
+    return new Date(guess - offset).toISOString().slice(0, 19).replace('T', ' ');
+  }
+
+  function fromFixtureRecord(key, p) {
+    var home = p.home || {}, away = p.away || {};
+    var hc = home.code ? NL.clubs.byCode(home.code) : null;
+    var ac = away.code ? NL.clubs.byCode(away.code) : null;
+    var kickoffUTC = ukToUtcString(p.date, p.ko);
+    var score = p.score || null;
+    var period = score ? 'FullTime'
+      : (Date.now() - parseKickoff(kickoffUTC).getTime() > FM_PLAYED_AFTER_MS ? 'PostMatch' : 'PreMatch');
+    return {
+      matchID:        key,
+      competitionID:  FM_COMP_ID[p.comp] || null,
+      competitionKey: FM_COMP[p.comp] || p.comp,
+      kickoffUTC:     kickoffUTC,
+      matchPeriod:    period,
+      homeTeamID:     hc ? hc.optaID : null,
+      homeTeamName:   home.name,
+      homeScore:      score ? score.h : null,
+      awayTeamID:     ac ? ac.optaID : null,
+      awayTeamName:   away.name,
+      awayScore:      score ? score.a : null,
+      isNeutral:      p.neutral ? true : null,
+      venueName:      p.neutral ? (p.venue || null) : null,
+      source:         'fixture-management'
+    };
+  }
+
   function loadFixturesAndSubmissions() {
+    var key = S.season || S.currentSeason;
+    var db;
     return NL.ensureAuth().then(function() {
-      var db = firebase.database();
+      db = firebase.database();
       return Promise.all([
-        db.ref(fixturesPath()).once('value'),
+        db.ref(FM_BASE + key + '/public').once('value'),
         db.ref(submissionsPath()).once('value')
       ]);
     })
     .then(function(snaps) {
-      S.fixtures = filterFixturesToSeason(snaps[0].val() || {}, S.season || S.currentSeason);
       S.submissions = snaps[1].val() || {};
+      var rec = snaps[0].val();
+      if (rec) {
+        S.fixturesFrom = 'record';
+        var fx = {};
+        Object.keys(rec).forEach(function(k) { if (rec[k] && rec[k].date) fx[k] = fromFixtureRecord(k, rec[k]); });
+        S.fixtures = fx;
+        return;
+      }
+      S.fixturesFrom = 'attendance';
+      return db.ref(fixturesPath()).once('value').then(function(snap) {
+        S.fixtures = filterFixturesToSeason(snap.val() || {}, key);
+      });
     });
   }
 
@@ -3918,7 +4004,8 @@
        superadmin on the live season; superadmins also on archived seasons, so a
        missed cup tie / playoff fixture can be corrected after rollover. */
     var acfTab = document.getElementById('addCupFixtureTab');
-    if (isAdmin && (seasonIsCurrent() || canBackfillArchive())) {
+    var ownFixtures = S.fixturesFrom !== 'record';
+    if (isAdmin && ownFixtures && (seasonIsCurrent() || canBackfillArchive())) {
       acfTab.style.display = '';
       wireAddCupFixtureForm();
     } else {
@@ -3930,7 +4017,7 @@
        Wembley tie can be corrected after rollover. */
     var nvTab = document.getElementById('neutralVenuesTab');
     if (nvTab) {
-      if (isAdmin && (seasonIsCurrent() || canBackfillArchive())) {
+      if (isAdmin && ownFixtures && (seasonIsCurrent() || canBackfillArchive())) {
         nvTab.style.display = '';
         wireNeutralVenues();
       } else {
