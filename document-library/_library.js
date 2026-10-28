@@ -1,5 +1,8 @@
 /*
   Document Library — the library browser, shared by both pages
+  Version: v1.2 (28/10/2026) — the view switch's icons load: the sprite is
+           requested as sprites.svg?v=1.4, because a browser holding last
+           week's sheet had no list or grid icon and drew an empty square.
   Version: v1.1 (28/10/2026) — one head, two lines: the breadcrumb is the title
            (so "Document Library" appears once, as the top of the path) with
            search and the view switch beside it, and the actions on the line
@@ -62,9 +65,16 @@
 
   var esc = function (s) { return NL.escHtml(s); };
 
+  /* The sprite's version is in the URL because this page uses icons added in
+     sprites v1.4 (list, grid). /assets/icons/* is cached for a week, so a
+     browser holding the older sheet drew the view switch as an empty navy
+     square and an invisible button (28/10/2026). A new query string is a new
+     file to the browser. Bump it when this page starts using a newer icon. */
+  var SPRITE = '/assets/icons/sprites.svg?v=1.4';
+
   function iconHtml(name) {
     return '<svg class="icon icon--sm" aria-hidden="true">' +
-      '<use href="/assets/icons/sprites.svg#icon-' + name + '"></use></svg>';
+      '<use href="' + SPRITE + '#icon-' + name + '"></use></svg>';
   }
 
   function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
