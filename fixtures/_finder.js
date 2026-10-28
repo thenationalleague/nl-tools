@@ -1,8 +1,14 @@
 /* =============================================================================
    NL Tools — Fixture Management: the rearrangement date finder
    File: /fixtures/_finder.js
-   Version: v1.5 (28/10/2026)
+   Version: v1.6 (28/10/2026)
    CHANGELOG
+     v1.6 (28/10/2026) — A game holds a shortlist of up to three pencils
+       (rec.pencils; the single rec.pencil still reads). A date can be
+       ruled out, hard: for one game (rec.ruledOut) or, season-wide, for a
+       club that cannot host or cannot travel on it (ctx.unavailable).
+       opts.anchor sets the date the 35 days count from, for a fixture
+       being moved that has not lost its date.
      v1.5 (28/10/2026) — A cup flag ("BRW in FAT R4?") says where the club
        is in that cup: the tie still to be decided with its date, the
        round won and the next round's date, or the round it enters at.
@@ -33,8 +39,10 @@
                  calendar   assets/data/calendar-2026-27.json,
                  rounds     assets/data/rounds-2026-27.json,
                  distances  assets/data/club-distances.json,
-                 today      'YYYY-MM-DD' }
-     opts      { mondays, thursdays, fridays, sundays: bool,
+                 today      'YYYY-MM-DD',
+                 unavailable [{ club, side: 'home'|'away'|'any', date, reason }] }
+     opts      { anchor: 'YYYY-MM-DD', the date the 35 days count from,
+                 mondays, thursdays, fridays, sundays: bool,
                  longTrip: round-trip miles, default 200 (tests only; the
                  page uses the default, Richard 28/10/2026) }
    OUTPUT
@@ -50,8 +58,8 @@
      A Saturday, Tuesday or Wednesday, with Monday, Thursday, Friday and
      Sunday each behind a switch. A slot is taken out only when it cannot be played: either
      club already has a game the day before, the day itself or the day
-     after (its window), it is on or after the final matchday, or it is in
-     calendar.noRearrange.
+     after (its window), it is on or after the final matchday, it is in
+     calendar.noRearrange, or it is ruled out (offLimits).
      Everything else is a flag, never a block.
    ============================================================================= */
 (function (root) {
@@ -220,7 +228,7 @@
     var cal = ctx.calendar, fx = ctx.fixtures;
     var home = nameOf(game.home), away = nameOf(game.away);
     var tags = {}; tags[home] = tag(game.home); tags[away] = tag(game.away);
-    var original = (game.original && game.original.date) ||
+    var original = opts.anchor || (game.original && game.original.date) ||
       (game.attempts && game.attempts.length ? game.attempts[0].date : game.date);
 
     /* Every other dated game of either club, and every other pencil. */
@@ -230,7 +238,7 @@
       if (k === game.key) return;
       if (!(plays(r, home) || plays(r, away))) return;
       if (r.date) dated.push(r);
-      if (r.pencil && r.pencil.date) pencils.push(r);
+      pencilsOf(r).forEach(function (p) { pencils.push({ r: r, p: p }); });
     });
 
     /* The last usable day: the midweek before the final matchday — every
@@ -247,7 +255,8 @@
       var day = w === 6 ? 'Sat' : w === 2 ? 'Tue' : w === 3 ? 'Wed' :
         (w === 1 && opts.mondays) ? 'Mon' : (w === 4 && opts.thursdays) ? 'Thu' :
         (w === 5 && opts.fridays) ? 'Fri' : (w === 0 && opts.sundays) ? 'Sun' : null;
-      if (!day || no[d]) continue;
+      /* Never the date the game already has (a fixture being moved). */
+      if (!day || no[d] || d === game.date || offLimits(game, ctx.unavailable, d)) continue;
       var win = windowOf(d);
       var clash = dated.some(function (r) { return win.indexOf(r.date) !== -1; });
       if (clash) continue;
@@ -276,10 +285,10 @@
           items: [{ date: iw.from, text: 'to ' + iw.to.slice(8) + '/' + iw.to.slice(5, 7) }] });
       });
 
-      pencils.forEach(function (r) {
-        if (win.indexOf(r.pencil.date) !== -1) {
-          flags.push({ level: 'amber', cat: 'pencil', text: 'Pencilled ' + tag(r.home) + ' v ' + tag(r.away),
-            items: [{ date: r.pencil.date, text: nameOf(r.home) + ' v ' + nameOf(r.away) + (r.pencil.ko ? ' · ' + r.pencil.ko : '') }] });
+      pencils.forEach(function (x) {
+        if (win.indexOf(x.p.date) !== -1) {
+          flags.push({ level: 'amber', cat: 'pencil', text: 'Pencilled ' + tag(x.r.home) + ' v ' + tag(x.r.away),
+            items: [{ date: x.p.date, text: nameOf(x.r.home) + ' v ' + nameOf(x.r.away) + (x.p.ko ? ' · ' + x.p.ko : '') }] });
         }
       });
 
@@ -382,18 +391,63 @@
     return Math.round(p[0]) + 'mi ' + Math.floor(m / 60) + 'h' + ('0' + (m % 60)).slice(-2);
   }
 
-  /* Pencilled: staff only, and a soft block on the same slot for the
-     clubs' other games (plan, "States"). Confirming goes through
-     FixturesCore.setDate, which stamps the decision; the pencil goes. */
-  function pencil(rec, date, ko, at) {
-    var n = JSON.parse(JSON.stringify(rec));
-    n.pencil = { date: date, ko: ko || null, at: at };
-    return n;
+  /* Pencils: a shortlist of up to three dates offered to the clubs, staff
+     only, each a soft block on the same slot for the clubs' other games
+     (plan, "States"). Confirming one goes through FixturesCore.setDate,
+     which stamps the decision; then every pencil goes. A record from
+     before the shortlist holds one, as rec.pencil. */
+  var MAX_PENCILS = 3;
+  function pencilsOf(rec) {
+    var list = (rec && rec.pencils) || (rec && rec.pencil && rec.pencil.date ? [rec.pencil] : []);
+    return list.filter(function (p) { return p && p.date; })
+      .sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
   }
-  function unpencil(rec) {
+  /* Adds or re-times a date; null when the shortlist is already full. */
+  function pencil(rec, date, ko, at) {
+    var list = pencilsOf(rec).filter(function (p) { return p.date !== date; });
+    if (list.length >= MAX_PENCILS) return null;
     var n = JSON.parse(JSON.stringify(rec));
     delete n.pencil;
+    n.pencils = list.concat([{ date: date, ko: ko || null, at: at }])
+      .sort(function (a, b) { return a.date < b.date ? -1 : 1; });
     return n;
+  }
+  /* Removes one date, or every pencil with no date given. */
+  function unpencil(rec, date) {
+    var n = JSON.parse(JSON.stringify(rec));
+    var left = date ? pencilsOf(rec).filter(function (p) { return p.date !== date; }) : [];
+    delete n.pencil;
+    if (left.length) n.pencils = left; else delete n.pencils;
+    return n;
+  }
+
+  /* Ruled out, a hard block. For this game only: rec.ruledOut, a list of
+     { date, reason, at }. For a club, season-wide: ctx.unavailable
+     entries, kept beside the fixtures; side 'home' is a club that cannot
+     host that day (a ground share), 'away' one that cannot travel, 'any'
+     either. Asked once, so the question is not asked again for the next
+     postponement (Richard, 28/10/2026). */
+  function ruleOut(rec, date, reason, at) {
+    var n = JSON.parse(JSON.stringify(rec));
+    n.ruledOut = (n.ruledOut || []).filter(function (x) { return x.date !== date; })
+      .concat([{ date: date, reason: reason, at: at }]);
+    var left = pencilsOf(n).filter(function (p) { return p.date !== date; });
+    delete n.pencil;
+    if (left.length) n.pencils = left; else delete n.pencils;
+    return n;
+  }
+  /* Why a date is ruled out for a game, or null: { reason, club, side }. */
+  function offLimits(game, unavailable, d) {
+    var own = (game.ruledOut || []).filter(function (x) { return x.date === d; })[0];
+    if (own) return { reason: own.reason, club: null, side: null };
+    var home = nameOf(game.home), away = nameOf(game.away);
+    var hit = (unavailable || []).filter(function (u) {
+      if (u.date !== d) return false;
+      if (u.club === home) return u.side === 'home' || u.side === 'any';
+      if (u.club === away) return u.side === 'away' || u.side === 'any';
+      return false;
+    })[0];
+    return hit ? { reason: hit.reason, club: hit.club, side: hit.side } : null;
   }
 
   /* The to-do list: every game awaiting a date, oldest original date
@@ -424,6 +478,10 @@
     todo: todo,
     pencil: pencil,
     unpencil: unpencil,
+    pencilsOf: pencilsOf,
+    MAX_PENCILS: MAX_PENCILS,
+    ruleOut: ruleOut,
+    offLimits: offLimits,
     trip: trip,
     cupStatus: cupStatus,
     windowOf: windowOf,

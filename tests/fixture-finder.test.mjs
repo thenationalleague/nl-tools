@@ -175,7 +175,10 @@ test('another game pencilled into the slot is a soft flag, not a block', () => {
   const s = on(run(game, [other]), '2026-11-10');
   assert.ok(s, 'slot still offered');
   assert.ok(s.flags.some((f) => f.text === 'Pencilled ALP v GAM'));
-  assert.equal(X.unpencil(other).pencil, undefined);
+  assert.equal(X.unpencil(other).pencils, undefined);
+  /* A record from before the shortlist, with one rec.pencil, still counts. */
+  const legacy = { ...postponed(A, D, '2026-10-17'), pencil: { date: '2026-11-17', ko: '19:45', at: 1 } };
+  assert.ok(on(run(game, [legacy]), '2026-11-17').flags.some((f) => f.text === 'Pencilled ALP v DEL'));
 });
 
 test('the to-do list runs oldest original first with each club\'s backlog', () => {
@@ -250,4 +253,41 @@ test('a cup flag says where the club is: an undecided tie and its date, a won ro
   /* No tie at all: the round National clubs enter. */
   const none = on(run(game, [], {}, { today: '2026-10-28' }), '2026-11-07').flags.find((f) => f.text === 'ALP in FAC R1?');
   assert.deepEqual(JSON.parse(JSON.stringify(none.items)), [{ date: '2026-10-17', text: 'Enters at 4Q, no tie entered yet' }]);
+});
+
+test('a shortlist holds up to three pencils; confirming or clearing one leaves the rest', () => {
+  let r = postponed(A, B, '2026-10-24');
+  r = X.pencil(r, '2026-11-17', '19:45', 1);
+  r = X.pencil(r, '2026-11-10', '19:45', 2);
+  r = X.pencil(r, '2026-11-24', '19:45', 3);
+  assert.deepEqual([...X.pencilsOf(r).map((p) => p.date)], ['2026-11-10', '2026-11-17', '2026-11-24']);
+  assert.equal(X.pencil(r, '2026-12-01', '19:45', 4), null, 'a fourth is refused');
+  assert.equal(X.pencil(r, '2026-11-10', '20:00', 5).pencils.length, 3, 're-timing an existing date is not a fourth');
+  assert.deepEqual([...X.pencilsOf(X.unpencil(r, '2026-11-17')).map((p) => p.date)], ['2026-11-10', '2026-11-24']);
+  assert.equal(X.unpencil(r).pencils, undefined);
+});
+
+test('a ruled-out date is never offered: for this game, or for a club that cannot host or travel', () => {
+  const game = postponed(A, B, '2026-10-24');
+  const one = X.ruleOut(X.pencil(game, '2026-11-10', '19:45', 1), '2026-11-10', 'Both clubs said no', 2);
+  assert.equal(on(run(one, []), '2026-11-10'), undefined);
+  assert.equal(one.pencils, undefined, 'ruling a pencilled date out drops the pencil');
+  assert.ok(on(run(game, []), '2026-11-10'), 'another game is untouched');
+  const ctx = (unavailable) => X.slots(game, { fixtures: fx(game), calendar: CAL, rounds: {}, distances: { pairs: {} }, today: '2026-10-28', unavailable }, {});
+  /* Alpha cannot host on 17 Nov (a ground share): Alpha are at home here. */
+  assert.equal(on(ctx([{ club: 'Alpha Town', side: 'home', date: '2026-11-17', reason: 'Ground share' }]), '2026-11-17'), undefined);
+  /* Alpha cannot travel on 17 Nov: irrelevant, they are at home. */
+  assert.ok(on(ctx([{ club: 'Alpha Town', side: 'away', date: '2026-11-17', reason: 'No coach' }]), '2026-11-17'));
+  /* Beta cannot travel on 17 Nov: Beta are away here. */
+  assert.equal(on(ctx([{ club: 'Beta United', side: 'away', date: '2026-11-17', reason: 'No coach' }]), '2026-11-17'), undefined);
+  assert.equal(X.offLimits(game, [{ club: 'Beta United', side: 'any', date: '2026-11-17', reason: 'x' }], '2026-11-17').club, 'Beta United');
+});
+
+test('a fixture being moved counts its 35 days from the anchor it is given', () => {
+  const game = g(A, B, '2027-01-16');
+  const res = run(game, [], { anchor: '2027-01-16' });
+  assert.equal(res.original, '2027-01-16');
+  assert.equal(on(res, '2026-12-15').within35, true);
+  assert.equal(on(res, '2026-11-24').within35, false);
+  assert.equal(on(res, '2027-01-16'), undefined, 'its own date is never offered');
 });

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixture Management
-  Version: v2.6 (28/10/2026)
+  Version: v2.7 (28/10/2026)
   File: /fixtures/admin/index.html
 
   The League's master fixture record: every game in every competition, with
@@ -9,6 +9,18 @@
   behind it, is system/fixture-management-plan.md.
 
   CHANGELOG
+    v2.7 (28/10/2026) — Rearrangements: Move a fixture, beside Awaiting a
+      date, finds a new date for a game that still has one, chosen by home
+      club then away club; its 35 days count from its current date and
+      confirming records the old date as moved. Pencils are a shortlist of
+      up to three dates, each confirmed or removed on its own. A date can
+      be ruled out with a reason, for this game only, or for a club that
+      cannot host or cannot travel that day, which then holds for every
+      game this season and shows hatched on the calendar. The Fixtures tab
+      marks pencilled games and has a Pencilled card; Crowd is
+      Attendance, the away figure in brackets; counts carry their thousands
+      comma; Upcoming/All is Fixtures/Results, and a past season shows
+      results only.
     v2.6 (28/10/2026) — A cup flag ("BRW in FAT R4?") lists where the club
       is in that cup: the tie still to be decided with its date and kick-off,
       the round won and the next round's date, or the round it enters at.
@@ -181,6 +193,15 @@
     window.NL_CHANGELOG = [
       {
         date: '28/10/2026',
+        version: 'v2.7',
+        items: [
+          'Move a fixture: find a new date for any game, not just one awaiting a date.',
+          'Pencil up to three dates per game; rule a date out for this game or, season-wide, for a club that can\u2019t host or travel.',
+          'Fixtures / Results in place of Upcoming / All; a past season shows its results. Attendance with the away figure in brackets.'
+        ]
+      },
+      {
+        date: '28/10/2026',
         version: 'v2.6',
         items: [
           'Cup flags say where the club is in that cup and when it will be known: the tie to play and its date, or the round won and the next.'
@@ -336,7 +357,7 @@
 
   <!-- Tool data layer (pure; tested in tests/fixture-management.test.mjs) -->
   <script src="/fixtures/_core.js?v=6"></script>
-  <script src="/fixtures/_finder.js?v=6"></script>
+  <script src="/fixtures/_finder.js?v=7"></script>
 
 <style>
   /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
@@ -356,7 +377,8 @@
   .fm-table col.c-mid { width: 150px; }
   .fm-table col.c-bc { width: 150px; }
   .fm-table col.c-flag { width: 150px; }
-  .fm-table col.c-crowd { width: 92px; }
+  .fm-table col.c-crowd { width: 132px; }
+  .fm-crowd__away { color: var(--text-muted); }
   .fm-crowd { text-align: right; font-variant-numeric: tabular-nums; }
   .fm-crowd--none { color: var(--text-muted); }
   .fm-table td { white-space: nowrap; }
@@ -416,6 +438,19 @@
   .fm-rr-app { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 10px; height: var(--app-h, auto); }
   /* The games awaiting a date: a dropdown, so the calendar has the width. */
   .fm-rr-pick { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; min-width: 0; }
+  .fm-rr-pick .chip-group { margin: 0; }
+  .fm-rr-pick .fm-picker { min-width: 220px; }
+  .fm-rr-v { color: var(--text-muted); }
+  .fm-pen { display: inline-flex; gap: 4px; align-items: center; font-size: var(--text-sm); color: var(--text-muted); }
+  .fm-pen__full { font-size: var(--text-xs); color: var(--text-muted); }
+  .fm-match__ruled { margin-top: 4px; }
+  .fm-ro { display: grid; gap: 6px; }
+  .fm-ro label { display: flex; gap: 8px; align-items: center; font-weight: 400; text-transform: none; letter-spacing: 0; font-size: var(--text-sm); color: var(--text); }
+  /* A date ruled out: hatched, with the reason. */
+  .fm-half.is-blocked, .fm-ruled { display: flex; flex-direction: column; justify-content: center; gap: 1px; padding: 2px 8px;
+    background: repeating-linear-gradient(135deg, var(--off-white) 0 6px, var(--navy-50) 6px 12px); color: var(--text-muted); font-weight: 700; }
+  .fm-ruled { position: absolute; inset: 0; align-items: center; text-align: center; }
+  .fm-half__why, .fm-ruled span { font-weight: 400; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .fm-rr-pick select { flex: 0 1 auto; width: auto; min-width: 0; max-width: 100%; }
   .fm-rr-pick span { font-size: var(--text-sm); color: var(--text-muted); white-space: nowrap; }
   .fm-rr-game { display: grid; grid-template-columns: minmax(0, 1fr) clamp(230px, 17vw, 300px); grid-template-rows: auto minmax(0, 1fr);
@@ -497,7 +532,8 @@
     background: var(--navy-100); border-radius: 0 0 var(--radius) var(--radius); }
   .fm-match__when { display: flex; gap: 2px 18px; flex-wrap: wrap; align-items: baseline; margin: 0; font-size: var(--text-sm); color: var(--navy); }
   .fm-match__when strong { font-size: var(--text-base); font-weight: 800; font-variation-settings: 'wght' 800; }
-  .fm-match__pencil { display: flex; gap: 8px; align-items: center; margin: 8px 0 0; }
+  .fm-match__pencil { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; margin: 8px 0 0; font-size: var(--text-sm); }
+  .fm-match__pencil > strong { color: var(--navy); }
   .fm-more { font-size: var(--text-sm); }
   .fm-more > summary { padding: 2px 6px; }
   .fm-more__body { position: absolute; right: 0; top: 100%; z-index: 5; width: 280px; display: flex; gap: 8px 14px; flex-wrap: wrap; align-items: center;
@@ -609,6 +645,7 @@
   .fm-cal__key .k-out::before { background: var(--green-light); box-shadow: inset 0 0 0 2px var(--green); opacity: .5; }
   .fm-cal__key .k-pencil::before { background: var(--amber-light); }
   .fm-cal__key .k-orig::before { box-shadow: inset 0 0 0 2px var(--primary); }
+  .fm-cal__key .k-ruled::before { background: repeating-linear-gradient(135deg, var(--off-white) 0 3px, var(--navy-100) 3px 6px); }
   .fm-problems { max-height: 260px; overflow: auto; margin: 8px 0 0; padding-left: 18px; font-size: var(--text-sm); }
 </style>
 </head>
@@ -636,8 +673,8 @@
         <div class="chip-group" id="fmComps" role="group" aria-label="Competition"></div>
         <div class="fm-picker" id="fmClub"></div>
         <div class="chip-group" id="fmWhen" role="group" aria-label="Dates">
-          <button class="chip active" type="button" data-when="upcoming">Upcoming</button>
-          <button class="chip" type="button" data-when="all">All</button>
+          <button class="chip active" type="button" data-when="fixtures">Fixtures</button>
+          <button class="chip" type="button" data-when="results">Results</button>
         </div>
       </div>
       <div id="fmBody"></div>
@@ -710,19 +747,24 @@
     fixtures: {},
     comp: 'all',
     club: null,
-    when: 'upcoming',
+    when: 'fixtures',    /* 'fixtures' (today on) | 'results' (played); a past season is results only */
     need: null,          /* 'awaiting' | 'noOpta' | 'cupDue' — a stat card filter */
     picker: null,
     limit: PAGE,
     tab: 'fixtures',
     bc: { comp: 'all', status: 'all', when: 'upcoming', limit: PAGE },
-    rr: { key: null, mondays: false, thursdays: false, fridays: false, sundays: false, moreOpen: false, anchor: null, scroll: null, drawn: null, slot: null, data: {} },
+    rr: { mode: 'waiting', moveHome: null, moveAway: null, moveKey: null, key: null, mondays: false, thursdays: false, fridays: false, sundays: false, moreOpen: false, anchor: null, scroll: null, drawn: null, slot: null, data: {} },
     current: null,       /* the current season key */
     listen: null,        /* the live fixtures ref for the viewed season */
-    crowds: {}           /* matchID → { total, away } from Attendance */
+    crowds: {},          /* matchID → { total, away } from Attendance */
+    unavail: {},         /* id → { club, side, date, reason, at }: dates a club cannot host or travel */
+    unavRef: null
   };
 
   function today() { return F.ymdOf(new Date()); }
+  /* A count with its thousands comma: 1,890. Canon candidate (28/10/2026):
+     every tool that shows a count wants the same. */
+  function num(n) { return Number(n || 0).toLocaleString('en-GB'); }
   function ref(path) { return db.ref(BASE + S.season + (path ? '/' + path : '')); }
   function now() { return new Date().toISOString(); }
 
@@ -795,8 +837,17 @@
     var past = key !== S.current;
     document.getElementById('fmSeasonSel').value = key;
     document.getElementById('fmFromAttRow').hidden = !past;
+    /* A past season has only results: no toggle, nothing "upcoming". */
+    S.when = past ? 'results' : 'fixtures';
+    var when = document.getElementById('fmWhen');
+    when.hidden = past;
+    Array.prototype.forEach.call(when.children, function (c) { c.classList.toggle('active', c.getAttribute('data-when') === S.when); });
     document.getElementById('fmAddRow').hidden = past;
     loadCrowds(key);
+    if (S.unavRef) S.unavRef.off();
+    S.unavail = {};
+    S.unavRef = ref('unavailable');
+    S.unavRef.on('value', function (snap) { S.unavail = snap.val() || {}; if (S.tab === 'rearrange') renderRearrange(); });
     S.listen = ref('fixtures');
     S.listen.on('value', function (snap) {
       S.fixtures = snap.val() || {};
@@ -924,7 +975,10 @@
     if (S.need === 'noOpta' && (r.optaID || F.COMP_BY_KEY[r.comp].fa)) return false;
     if (S.need === 'cupDue' && !F.cupResultDue(r, t)) return false;
     if (S.need === 'noCrowd' && !crowdDue(r, t)) return false;
-    if (!S.need && S.when === 'upcoming' && r.date && r.date < t) return false;
+    if (S.need === 'pencilled' && !X.pencilsOf(r).length) return false;
+    if (!S.need && S.when === 'fixtures' && r.date && r.date < t && !r.result) return false;
+    if (!S.need && S.when === 'fixtures' && r.result && r.date < t) return false;
+    if (!S.need && S.when === 'results' && !(r.date && (r.date < t || r.result))) return false;
     return true;
   }
 
@@ -948,7 +1002,9 @@
       var x = lastLost(a), y = lastLost(b);
       return x !== y ? (x < y ? -1 : 1) : F.compare(a, b);
     });
-    var dated = list.filter(function (r) { return !F.awaiting(r); }).sort(F.compare);
+    /* Results run newest first; fixtures from the next one on. */
+    var dated = list.filter(function (r) { return !F.awaiting(r); }).sort(S.when === 'results' && !S.need
+      ? function (a, b) { return a.date !== b.date ? (a.date < b.date ? 1 : -1) : F.compare(a, b); } : F.compare);
 
     var html = '';
     if (waiting.length) {
@@ -982,11 +1038,12 @@
       ['awaiting', c.awaiting, 'Awaiting a date'],
       ['noOpta', c.noOpta, 'No Opta ID'],
       ['cupDue', c.cupDue, 'FA results due'],
-      ['noCrowd', noCrowd, 'No crowd']
+      ['pencilled', Object.keys(S.fixtures).filter(function (k) { return X.pencilsOf(S.fixtures[k]).length; }).length, 'Pencilled'],
+      ['noCrowd', noCrowd, 'No attendance']
     ];
     document.getElementById('fmStats').innerHTML = cards.map(function (x) {
       return '<div class="stat fm-card' + (S.need === x[0] ? ' is-on' : '') + '" data-need="' + x[0] + '" role="button" tabindex="0">' +
-        '<div class="stat__num">' + x[1] + '</div><div class="stat__label">' + esc(x[2]) + '</div></div>';
+        '<div class="stat__num">' + num(x[1]) + '</div><div class="stat__label">' + esc(x[2]) + '</div></div>';
     }).join('');
   }
 
@@ -1037,6 +1094,9 @@
     else if (lost) out.push('<span class="pill pill--info">Moved' + (lost > 1 ? ' ×' + lost : '') + '</span>');
     if (!r.optaID && !F.COMP_BY_KEY[r.comp].fa) out.push('<span class="pill pill--pending">No Opta ID</span>');
     if (F.cupResultDue(r, t)) out.push('<span class="pill pill--pending">Result due</span>');
+    var pens = X.pencilsOf(r);
+    if (pens.length) out.push('<span class="pill pill--info" title="Pencilled, not confirmed">Pencilled ' +
+      esc(pens.map(function (p) { return +p.date.slice(8) + '/' + +p.date.slice(5, 7); }).join(' · ')) + '</span>');
     return '<div class="fm-flags">' + out.join('') + '</div>';
   }
 
@@ -1047,8 +1107,9 @@
 
   function crowdCell(r, t) {
     var c = S.crowds[r.key];
-    if (c) return '<td class="fm-crowd" title="' + (c.away != null ? esc(c.away.toLocaleString('en-GB') + ' away') : '') + '">' +
-      esc(c.total.toLocaleString('en-GB')) + '</td>';
+    /* Total, then the away following in brackets: 2,145 (312). */
+    if (c) return '<td class="fm-crowd">' + esc(num(c.total)) +
+      (c.away != null ? ' <span class="fm-crowd__away">(' + esc(num(c.away)) + ')</span>' : '') + '</td>';
     return '<td class="fm-crowd fm-crowd--none">' + (crowdDue(r, t) ? '–' : '') + '</td>';
   }
 
@@ -1059,7 +1120,7 @@
     var t = today();
     var html = '<div class="table-wrap"><table class="table table--compact fm-table">' + COLS + '<thead><tr>' +
       '<th>' + (waiting ? 'Lost' : 'KO') + '</th><th>Comp</th><th>Rd</th><th class="ta-right">Home</th>' +
-      '<th class="ta-center"></th><th>Away</th><th class="ta-right">Crowd</th><th>Broadcast</th><th></th></tr></thead><tbody>';
+      '<th class="ta-center"></th><th>Away</th><th class="ta-right">Attendance</th><th>Broadcast</th><th></th></tr></thead><tbody>';
     var day = null;
     rows.forEach(function (r) {
       if (!waiting && r.date !== day) {
@@ -1225,9 +1286,31 @@
     return null;
   }
 
+  /* The game on screen: the one awaiting a date, or the one being moved. */
+  function curRec() { return S.fixtures[S.rr.mode === 'move' ? S.rr.moveKey : S.rr.key]; }
+  function unavailList() { return Object.keys(S.unavail || {}).map(function (k) { return Object.assign({ id: k }, S.unavail[k]); }); }
+
   function wireRearrange() {
     var body = document.getElementById('fmRrBody');
     body.addEventListener('click', function (e) {
+      var mode = e.target.closest('[data-rr-mode]');
+      if (mode) { S.rr.mode = mode.getAttribute('data-rr-mode'); S.rr.slot = null; renderRearrange(); return; }
+      var lift = e.target.closest('[data-unavail-off]');
+      if (lift) {
+        NL.ensureAuth().then(function () { return ref('unavailable/' + lift.getAttribute('data-unavail-off')).remove(); })
+          .then(function () { NL.toast('No longer ruled out', 'success'); })
+          .catch(function (err) { NL.toast('Save failed: ' + err.message, 'error'); });
+        return;
+      }
+      var unrule = e.target.closest('[data-unrule]');
+      if (unrule) {
+        var g = JSON.parse(JSON.stringify(curRec()));
+        g.ruledOut = (g.ruledOut || []).filter(function (x) { return x.date !== unrule.getAttribute('data-unrule'); });
+        if (!g.ruledOut.length) delete g.ruledOut;
+        save(g).then(function () { NL.toast('No longer ruled out', 'success'); })
+          .catch(function (err) { NL.toast('Save failed: ' + err.message, 'error'); });
+        return;
+      }
       var item = e.target.closest('[data-rr]');
       if (item) { S.rr.key = item.getAttribute('data-rr'); S.rr.slot = null; renderRearrange(); return; }
       var pick = e.target.closest('[data-slot]');
@@ -1237,18 +1320,21 @@
         var cell = e.target.closest('.fm-slots') && document.querySelector('#fmRrWeeks [data-week="' + mondayOf(S.rr.slot) + '"]');
         if (cell) { var box = document.getElementById('fmRrWeeks'); box.scrollTop = Math.max(0, cell.offsetTop - cell.offsetHeight / 2); }
         hideTip();
-        if (S.canEdit && e.target.closest('[data-choose]')) openChoose(S.fixtures[S.rr.key], S.rr.slot);
+        if (S.canEdit && e.target.closest('[data-choose]')) openChoose(curRec(), S.rr.slot);
         else renderRearrange();
         return;
       }
-      if (e.target.closest('[data-unpencil]')) {
-        save(X.unpencil(S.fixtures[S.rr.key])).then(function () { NL.toast('Pencil cleared', 'success'); })
+      var unp = e.target.closest('[data-unpencil]');
+      if (unp) {
+        save(X.unpencil(curRec(), unp.getAttribute('data-unpencil'))).then(function () { NL.toast('Pencil removed', 'success'); })
           .catch(function (err) { NL.toast('Save failed: ' + err.message, 'error'); });
         return;
       }
-      if (e.target.closest('[data-confirm-pencil]')) {
-        var rec = S.fixtures[S.rr.key];
-        confirmDate(rec, rec.pencil.date, rec.pencil.ko);
+      var conf = e.target.closest('[data-confirm-pencil]');
+      if (conf) {
+        var rec = curRec(), d = conf.getAttribute('data-confirm-pencil');
+        var p = X.pencilsOf(rec).filter(function (x) { return x.date === d; })[0];
+        if (p) confirmDate(rec, p.date, p.ko);
       }
     });
     body.addEventListener('mouseover', function (e) {
@@ -1269,6 +1355,7 @@
     }, true);
     body.addEventListener('change', function (e) {
       if (e.target.id === 'fmRrPick') { S.rr.key = e.target.value; S.rr.slot = null; renderRearrange(); return; }
+      if (e.target.id === 'fmRrFix') { S.rr.moveKey = e.target.value || null; S.rr.slot = null; renderRearrange(); return; }
       var dayBox = e.target.getAttribute && e.target.getAttribute('data-day');
       if (dayBox) { S.rr[dayBox] = e.target.checked; renderRearrange(); }
     });
@@ -1284,17 +1371,27 @@
       return;
     }
     var list = X.todo(S.fixtures);
-    if (!list.length) {
-      body.innerHTML = '<div class="empty-state"><div class="empty-state__title">Nothing awaiting a date</div></div>';
-      return;
+    var moving = S.rr.mode === 'move';
+    var rec = null;
+    /* Drawn first: it settles which fixture is being moved. */
+    var picks = moving ? movePickers() : list.length ? todoPicker(list) : '';
+    if (moving) {
+      rec = S.rr.moveKey && S.fixtures[S.rr.moveKey] ? S.fixtures[S.rr.moveKey] : null;
+    } else if (list.length) {
+      if (!S.rr.key || !S.fixtures[S.rr.key] || S.fixtures[S.rr.key].date) S.rr.key = list[0].rec.key;
+      rec = S.fixtures[S.rr.key];
     }
-    if (!S.rr.key || !S.fixtures[S.rr.key] || S.fixtures[S.rr.key].date) S.rr.key = list[0].rec.key;
-    var same = S.rr.drawn === S.rr.key;
-    body.innerHTML = '<div class="fm-rr-app">' + todoPicker(list) +
-      gameOf(S.fixtures[S.rr.key], list, data) + '</div>';
+    var key = rec ? rec.key : null;
+    var same = S.rr.drawn === key;
+    var top = '<div class="fm-rr-pick">' + modeBar(list.length) + picks + '</div>';
+    var main = rec ? gameOf(rec, list, data, moving)
+      : '<div class="empty-state"><div class="empty-state__title">' +
+        (moving ? 'Choose the home club, then the away club' : 'Nothing awaiting a date') + '</div></div>';
+    body.innerHTML = '<div class="fm-rr-app">' + top + main + '</div>';
+    if (moving) mountMovePickers();
     fitRearrange();
-    wireWeeks(same ? S.rr.scroll : null);
-    S.rr.drawn = S.rr.key;
+    if (rec) wireWeeks(same ? S.rr.scroll : null);
+    S.rr.drawn = key;
     NL.clubs.wireCrestImgs(body);
   }
 
@@ -1312,6 +1409,45 @@
   }
   window.addEventListener('resize', function () { if (S.tab === 'rearrange') fitRearrange(); });
 
+  /* Two jobs, a closed set: games that have lost their date, and any
+     fixture that has one but needs to move. */
+  function modeBar(waiting) {
+    return '<div class="chip-group" role="group" aria-label="Rearrange">' +
+      '<button class="chip' + (S.rr.mode === 'waiting' ? ' active' : '') + '" type="button" data-rr-mode="waiting">Awaiting a date (' + num(waiting) + ')</button>' +
+      '<button class="chip' + (S.rr.mode === 'move' ? ' active' : '') + '" type="button" data-rr-mode="move">Move a fixture</button></div>';
+  }
+
+  /* Move a fixture: the home club, the away club, then which of their
+     games (league, cup) if more than one. */
+  function movePickers() {
+    var games = Object.keys(S.fixtures).map(function (k) { return S.fixtures[k]; }).filter(function (r) {
+      return S.rr.moveHome && S.rr.moveAway && r.home.name === S.rr.moveHome && r.away.name === S.rr.moveAway;
+    }).sort(F.compare);
+    if (games.length === 1) S.rr.moveKey = games[0].key;
+    else if (!games.some(function (r) { return r.key === S.rr.moveKey; })) S.rr.moveKey = null;
+    var pick = '';
+    if (S.rr.moveHome && S.rr.moveAway) {
+      pick = games.length
+        ? '<select class="nl-select" id="fmRrFix" aria-label="Fixture">' + (games.length > 1 ? '<option value="">Which game?</option>' : '') +
+          games.map(function (r) {
+            var comp = F.COMP_BY_KEY[r.comp];
+            return '<option value="' + esc(r.key) + '"' + (r.key === S.rr.moveKey ? ' selected' : '') + '>' +
+              esc((r.date ? dayKo(r.date, r.ko) : 'Awaiting a date') + ' · ' + (comp ? comp.label : r.comp) +
+                (r.playoff ? ' play-off' : '') + (r.round && !(comp && comp.league && !r.playoff) ? ' ' + r.round : '')) + '</option>';
+          }).join('') + '</select>'
+        : '<span>No fixture between them this season</span>';
+    }
+    return '<div class="fm-picker" id="fmRrHome"></div><span class="fm-rr-v">v</span><div class="fm-picker" id="fmRrAway"></div>' + pick;
+  }
+  function mountMovePickers() {
+    [['#fmRrHome', 'moveHome', 'Home club'], ['#fmRrAway', 'moveAway', 'Away club']].forEach(function (x) {
+      NL.clubPicker(x[0], {
+        mode: 'search', season: 'all', extraClubs: S.guests, placeholder: x[2], value: S.rr[x[1]],
+        onSelect: function (sel) { S.rr[x[1]] = sel ? sel.name : null; S.rr.moveKey = null; S.rr.slot = null; renderRearrange(); }
+      });
+    });
+  }
+
   /* The games awaiting a date, oldest original date first, as a dropdown:
      the list can run to dozens in a wet winter (CLAUDE.md, tabs and pills
      are for closed sets). +N marks a club with others waiting; a pencil
@@ -1322,23 +1458,26 @@
       var more = [[r.home, x.backlog.home], [r.away, x.backlog.away]].filter(function (p) { return p[1] > 0; })
         .map(function (p) { return (p[0].code || p[0].name) + ' +' + p[1]; });
       var label = day(x.original) + ' · ' + r.home.name + ' v ' + r.away.name + ' · ' + (comp ? comp.label : r.comp) +
-        (more.length ? ' · ' + more.join(', ') : '') + (r.pencil ? ' · pencilled ' + day(r.pencil.date) : '');
+        (more.length ? ' · ' + more.join(', ') : '') +
+        (X.pencilsOf(r).length ? ' · pencilled ' + X.pencilsOf(r).map(function (p) { return day(p.date); }).join(', ') : '');
       return '<option value="' + esc(r.key) + '"' + (r.key === S.rr.key ? ' selected' : '') + '>' + esc(label) + '</option>';
     }).join('');
-    return '<div class="fm-rr-pick"><select class="nl-select" id="fmRrPick" aria-label="Game awaiting a date">' + opts + '</select>' +
-      '<span>' + list.length + ' awaiting a date</span></div>';
+    return '<select class="nl-select" id="fmRrPick" aria-label="Game awaiting a date">' + opts + '</select>';
   }
 
-  function gameOf(rec, list, data) {
+  function gameOf(rec, list, data, moving) {
+    var unav = unavailList();
     var res = X.slots(rec, {
       fixtures: S.fixtures, calendar: data.calendar, rounds: data.rounds,
-      distances: data.distances, today: today()
-    }, { mondays: S.rr.mondays, thursdays: S.rr.thursdays, fridays: S.rr.fridays, sundays: S.rr.sundays });
+      distances: data.distances, today: today(), unavailable: unav
+    }, { anchor: moving && rec.date ? rec.date : null,
+      mondays: S.rr.mondays, thursdays: S.rr.thursdays, fridays: S.rr.fridays, sundays: S.rr.sundays });
     S.rr.slots = res.slots;
     var lost = rec.attempts || [], last = lost[lost.length - 1];
     var journey = milesOf(data.distances, rec.home, rec.away, true);
     var orig = rec.original || {};
-    var focus = S.rr.slot || (rec.pencil && rec.pencil.date) || null;
+    var pens = X.pencilsOf(rec);
+    var focus = S.rr.slot || (pens[0] && pens[0].date) || null;
     S.rr.anchor = focus || res.original || res.from;
 
     /* The rarer days, folded away in the header; open, it floats rather
@@ -1354,9 +1493,27 @@
       }).join('') +
       '</div></details>';
 
-    var pencilLine = rec.pencil ? '<p class="fm-match__pencil"><span class="pill pill--info">Pencilled ' + esc(dayKo(rec.pencil.date, rec.pencil.ko)) + '</span>' +
-      (S.canEdit ? '<button class="btn btn--primary btn--sm" type="button" data-confirm-pencil>Confirm</button>' +
-        '<button class="btn btn--ghost btn--sm" type="button" data-unpencil>Clear</button>' : '') + '</p>' : '';
+    /* The shortlist: each pencilled date with Confirm and remove. */
+    var pencilLine = pens.length ? '<div class="fm-match__pencil"><strong>Pencilled</strong>' + pens.map(function (p) {
+      return '<span class="fm-pen"><span class="pill pill--info">' + esc(dayKo(p.date, p.ko)) + '</span>' +
+        (S.canEdit ? '<button class="btn btn--primary btn--sm" type="button" data-confirm-pencil="' + p.date + '">Confirm</button>' +
+          '<button class="btn btn--ghost btn--sm" type="button" data-unpencil="' + p.date + '" aria-label="Remove ' + esc(day(p.date)) + '">×</button>' : '') + '</span>';
+    }).join('') + (pens.length < X.MAX_PENCILS ? '' : '<span class="fm-pen__full">Shortlist full</span>') + '</div>' : '';
+    /* Dates ruled out that bear on this game, still to come: its own, and
+       either club's season-wide ones. */
+    var t = today();
+    var mine = (rec.ruledOut || []).filter(function (x) { return x.date > t; }).map(function (x) {
+      return '<span class="fm-pen"><span class="pill pill--rejected">' + esc(day(x.date)) + '</span>' + esc(x.reason) +
+        (S.canEdit ? ' <button class="btn btn--ghost btn--sm" type="button" data-unrule="' + x.date + '" aria-label="Lift">×</button>' : '') + '</span>';
+    });
+    var clubs = unav.filter(function (u) {
+      return u.date > t && ((u.club === rec.home.name && u.side !== 'away') || (u.club === rec.away.name && u.side !== 'home'));
+    }).sort(function (a, b) { return a.date < b.date ? -1 : 1; }).map(function (u) {
+      return '<span class="fm-pen"><span class="pill pill--rejected">' + esc(day(u.date)) + '</span>' +
+        esc(shortName(u.club) + (u.side === 'home' ? ' can’t host' : u.side === 'away' ? ' can’t travel' : ' can’t play') + ': ' + u.reason) +
+        (S.canEdit ? ' <button class="btn btn--ghost btn--sm" type="button" data-unavail-off="' + esc(u.id) + '" aria-label="Lift">×</button>' : '') + '</span>';
+    });
+    var ruledLine = mine.length || clubs.length ? '<div class="fm-match__pencil fm-match__ruled"><strong>Ruled out</strong>' + mine.concat(clubs).join('') + '</div>' : '';
 
     /* The match as a banner: both clubs and their crests in navy, then a
        strip with the date, what happened to it and the journey. */
@@ -1365,10 +1522,12 @@
         '<span class="fm-match__club">' + crest(rec.home.name) + '<span>' + esc(rec.home.name) + '</span></span>' +
         '<span class="fm-match__club">' + crest(rec.away.name) + '<span>' + esc(rec.away.name) + '</span></span></h2>' +
         '<div class="fm-match__tags">' + compPill(rec.comp) + broadcastPill(rec) + '</div></div>' +
-      '<div class="fm-match__sub"><p class="fm-match__when"><strong>' + esc(dayKo(res.original, orig.date === res.original ? orig.ko : null)) + '</strong>' +
+      '<div class="fm-match__sub"><p class="fm-match__when">' +
+        (moving && rec.date ? '<strong>Currently ' + esc(dayKo(rec.date, rec.ko)) + '</strong>'
+          : '<strong>' + esc(dayKo(res.original, orig.date === res.original ? orig.ko : null)) + '</strong>') +
         lostDates(rec, res.original) +
         (journey ? '<span>' + esc(rec.away.name) + ' travel ' + esc(journey) + '</span>' : '') + '</p>' +
-        more + '</div>' + pencilLine + '</div>';
+        more + '</div>' + pencilLine + ruledLine + '</div>';
 
     html += '<div class="fm-rr-cal">' + calendar(rec, res, data, focus) + '</div>' +
       '<div class="fm-rr-dates" id="fmRrSlots">' + slotList(res, focus) + '</div></div>';
@@ -1401,7 +1560,7 @@
   }
 
   var KEY = '<div class="fm-cal__key"><span class="k-free">Free, clear</span><span class="k-flag">Free, with flags</span>' +
-    '<span class="k-out">35+ days out</span><span class="k-pencil">Pencilled</span><span class="k-orig">Original date</span></div>';
+    '<span class="k-out">35+ days out</span><span class="k-pencil">Pencilled</span><span class="k-orig">Original date</span><span class="k-ruled">Ruled out</span></div>';
 
   function slotList(res, focus) {
     if (!res.slots.length) return '<div class="banner banner--amber">No date free for both clubs before ' + esc(day(res.to)) + '.</div>';
@@ -1469,9 +1628,9 @@
       var r = S.fixtures[k];
       if (r.key === rec.key) return;
       if (r.date) (byDay[r.date] = byDay[r.date] || []).push({ r: r, pencil: false });
-      if (r.pencil && r.pencil.date) (byDay[r.pencil.date] = byDay[r.pencil.date] || []).push({ r: r, pencil: true });
+      X.pencilsOf(r).forEach(function (p) { (byDay[p.date] = byDay[p.date] || []).push({ r: r, pencil: true }); });
     });
-    var c = { rec: rec, res: res, slotOf: slotOf, cups: cups, byDay: byDay, focus: focus, t: today(),
+    var c = { rec: rec, res: res, slotOf: slotOf, cups: cups, byDay: byDay, focus: focus, t: today(), unav: unavailList(),
       distances: data.distances, windows: data.calendar.internationalWindows || [] };
     /* From two weeks before the earlier of today and the original date, to
        the week of the last usable date. */
@@ -1558,7 +1717,10 @@
     if (dn === 1) cls.push('is-mfirst');
     var halves = [half(c.rec.home.name, d, c, 'top'), half(c.rec.away.name, d, c, 'bot')];
     var s = c.slotOf[d], body;
-    if (s) {
+    var own = (c.rec.ruledOut || []).filter(function (x) { return x.date === d; })[0];
+    if (own && d > c.t) {
+      body = '<div class="fm-ruled"><strong>Ruled out</strong><span>' + esc(own.reason) + '</span></div>';
+    } else if (s) {
       var lv = slotLevel(s);
       body = '<button type="button" class="fm-free' + (lv !== 'green' ? ' fm-free--' + lv : '') + '" data-slot="' + d + '" data-choose data-tip-slot="' + d + '">' +
         '<strong>Free</strong>' + (s.flags.length ? '<span>' + s.flags.length + ' flag' + (s.flags.length > 1 ? 's' : '') + '</span>' : '') + '</button>';
@@ -1585,7 +1747,14 @@
   function half(club, d, c, pos) {
     var games = (c.byDay[d] || []).filter(function (g) { return g.r.home.name === club || g.r.away.name === club; });
     var g = games[0];
-    if (!g) return '<div class="fm-half fm-half--' + pos + '"></div>';
+    if (!g) {
+      /* A club that cannot host (top half, the home club) or travel
+         (bottom half, the away club) that day: said once, kept all season. */
+      var side = pos === 'top' ? 'home' : 'away';
+      var u = d > c.t && (c.unav || []).filter(function (x) { return x.club === club && x.date === d && (x.side === side || x.side === 'any'); })[0];
+      return u ? '<div class="fm-half fm-half--' + pos + ' is-blocked"><span>' + esc(side === 'home' ? 'Can’t host' : 'Can’t travel') +
+        '</span><span class="fm-half__why">' + esc(u.reason) + '</span></div>' : '<div class="fm-half fm-half--' + pos + '"></div>';
+    }
     var r = g.r, home = r.home.name === club, opp = home ? r.away : r.home;
     var comp = F.COMP_BY_KEY[r.comp];
     var label = COMP_SHORT[r.comp] + (r.playoff ? ' PO' : '') + (comp.league || !r.round ? '' : ' ' + r.round);
@@ -1636,13 +1805,16 @@
       title: rec.home.name + ' v ' + rec.away.name,
       body: wrap,
       buttons: [
+        { label: 'Rule out', className: 'btn--ghost', onClick: function (m) { m.close(); openRuleOut(rec, date); } },
         { label: 'Cancel', className: 'btn--ghost', onClick: function (m) { m.close(); } },
         { label: 'Pencil', className: 'btn--ghost', onClick: function (m) {
           var k = koOf();
           if (!k) return;
+          var next = X.pencil(rec, date, k, now());
+          if (!next) { NL.toast('Up to ' + X.MAX_PENCILS + ' pencilled dates: remove one first', 'error'); return; }
           article48(rec, date, k).then(function (ok) {
             if (!ok) return;
-            save(X.pencil(rec, date, k, now())).then(function () {
+            save(next).then(function () {
               NL.toast('Pencilled for ' + day(date), 'success'); m.close();
             }).catch(function (e) { NL.toast('Save failed: ' + e.message, 'error'); });
           });
@@ -1650,6 +1822,40 @@
         { label: 'Confirm date', className: 'btn--primary', onClick: function (m) {
           var k = koOf();
           if (k) confirmDate(rec, date, k, m);
+        }}
+      ]
+    });
+  }
+
+  /* Rule a date out, with a reason: for this game only, or for a club
+     that cannot host or cannot travel that day, which then holds for
+     every game this season so the question is not asked again. */
+  function openRuleOut(rec, date) {
+    var wrap = document.createElement('div');
+    wrap.innerHTML =
+      '<p class="fm-choose__date">' + esc(day(date)) + '</p>' +
+      '<div class="form-group"><label for="froWhy">Reason</label><input id="froWhy" type="text" maxlength="120"></div>' +
+      '<div class="form-group fm-ro"><label><input type="radio" name="froScope" value="game" checked> This game only</label>' +
+        '<label><input type="radio" name="froScope" value="home"> ' + esc(rec.home.name) + ' can’t host that day, for any game</label>' +
+        '<label><input type="radio" name="froScope" value="away"> ' + esc(rec.away.name) + ' can’t travel that day, for any game</label></div>';
+    NL.modal({
+      title: rec.home.name + ' v ' + rec.away.name,
+      body: wrap,
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (m) { m.close(); } },
+        { label: 'Rule out', className: 'btn--primary', onClick: function (m) {
+          var why = wrap.querySelector('#froWhy').value.trim();
+          if (!why) { NL.toast('Give a reason', 'error'); return; }
+          var scope = wrap.querySelector('input[name="froScope"]:checked').value;
+          var done = scope === 'game'
+            ? save(X.ruleOut(rec, date, why, now()))
+            : NL.ensureAuth().then(function () {
+                return ref('unavailable').push({ club: scope === 'home' ? rec.home.name : rec.away.name, side: scope, date: date, reason: why, at: now() });
+              }).then(function () {
+                return X.pencilsOf(rec).some(function (p) { return p.date === date; }) ? save(X.unpencil(rec, date)) : null;
+              });
+          done.then(function () { NL.toast('Ruled out ' + day(date), 'success'); m.close(); })
+            .catch(function (e) { NL.toast('Save failed: ' + e.message, 'error'); });
         }}
       ]
     });
@@ -1678,10 +1884,16 @@
   function confirmDate(rec, date, ko, modal) {
     article48(rec, date, ko).then(function (ok) {
       if (!ok) return;
+      var moved = !!rec.date;
       var next = X.unpencil(F.setDate(rec, date, ko, now()));
       save(next).then(function () {
-        NL.toast('Rescheduled for ' + dayKo(date, ko), 'success');
-        S.rr.key = null; S.rr.slot = null;
+        NL.toast((moved ? 'Moved to ' : 'Rescheduled for ') + dayKo(date, ko), 'success');
+        /* The save has already redrawn the tab (the listener fires first),
+           so redraw again now the selection is reset; otherwise the next
+           click finds no game. */
+        if (!moved) S.rr.key = null;
+        S.rr.slot = null;
+        renderRearrange();
         if (modal) modal.close();
       }).catch(function (e) { NL.toast('Save failed: ' + e.message, 'error'); });
     });
@@ -1768,7 +1980,7 @@
             '<option value="away">Away</option>' +
             '<option value="replay">Drawn: replay</option>' +
           '</select></div>' +
-        (rec && rec.date ? '<div class="form-group"><label>Crowd</label><div class="fm-score">' +
+        (rec && rec.date ? '<div class="form-group"><label>Attendance</label><div class="fm-score">' +
           numIn('fmeCrowd', S.crowds[rec.key] ? S.crowds[rec.key].total : null, dis) + '<span class="fm-dash">away</span>' +
           numIn('fmeCrowdAway', S.crowds[rec.key] ? S.crowds[rec.key].away : null, dis) + '</div></div>' : '') +
         '<div class="form-group"><label><input id="fmeNeutral" type="checkbox"' + (rec && rec.neutral ? ' checked' : '') + dis +

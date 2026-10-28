@@ -121,6 +121,14 @@ notice time stamped) → **Pencilled** (staff only, soft-blocks both clubs'
 other postponed games) → **Rescheduled** (decision time stamped; reappears
 publicly). Latency comes free from the stamps.
 
+*(Added 28/10/2026.)* **Pencilled is a shortlist** of up to three dates
+offered to the clubs (`pencils`); confirming one clears the rest. **Ruled
+out** is a hard block with a reason: for one game (`ruledOut` on the record),
+or season-wide for a club that cannot host or cannot travel on a date
+(`seasons/<season>/unavailable`), so the question is asked once. **Move a
+fixture** runs the finder on a game that still has a date, chosen by home
+then away club; its 35 days count from its current date.
+
 **Calendar.** Season calendar = `assets/data/rounds-2026-27.json` (46
 matchdays per division with windows: midweek Mon–Wed on Tue, weekend Fri–Sun
 on Sat, Thu–Sat beside a Friday), extended with: FA Cup / Trophy / NL Cup KO /
