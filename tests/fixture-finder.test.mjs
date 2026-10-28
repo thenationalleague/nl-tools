@@ -67,11 +67,17 @@ test('the last slot is the midweek before the final matchday, and Easter Saturda
   assert.equal(on(run(game, []), '2027-04-20').day, 'Tue');
 });
 
-test('the 35-day window counts from the original date and later slots still show', () => {
+test('the 35-day window runs both ways from the original date and later slots still show', () => {
   const game = postponed(A, B, '2026-10-24');
   const res = run(game, []);
   assert.equal(on(res, '2026-11-28').within35, true);
   assert.equal(on(res, '2026-12-01').within35, false);
+  /* Postponed well ahead: a date before the original can bring it forward. */
+  const ahead = run(postponed(A, B, '2026-12-19'), []);
+  assert.equal(on(ahead, '2026-11-17').within35, true, '32 days before');
+  assert.equal(on(ahead, '2026-11-10').within35, false, '39 days before');
+  assert.equal(ahead.windowFrom, '2026-11-14');
+  assert.equal(ahead.windowTo, '2027-01-23');
   assert.ok(on(res, '2027-02-02'));
   const firstOut = res.slots.findIndex((s) => !s.within35);
   assert.ok(res.slots.slice(firstOut).every((s) => !s.within35), 'within 35 days sorts first');
@@ -82,7 +88,7 @@ test('cleanest first: a flagged slot sorts after an unflagged one inside the win
   /* Alpha play Thursday 05/11, so Tuesday 03/11 has two days' rest. */
   const res = run(game, [g(A, C, '2026-11-05')]);
   const s = on(res, '2026-11-03');
-  assert.ok(s.flags.some((f) => /two days/.test(f.text)));
+  assert.ok(s.flags.some((f) => /2 days/.test(f.text)));
   assert.ok(res.slots.indexOf(s) > res.slots.indexOf(on(res, '2026-11-10')));
 });
 
@@ -95,18 +101,18 @@ test('a club possibly still in the FA Cup has the round flagged; one beaten is n
   ];
   const s = on(run(game, ties, {}, { today: '2026-10-28' }), '2026-11-07');
   const texts = s.flags.map((f) => f.text);
-  assert.ok(texts.some((t) => /^Beta United may be in FA Cup R1/.test(t)));
-  assert.ok(!texts.some((t) => /^Alpha Town may be in/.test(t)));
+  assert.ok(texts.some((t) => t === 'BET in FAC R1?'));
+  assert.ok(!texts.some((t) => /^ALP in/.test(t)));
 });
 
 test('a round drawn without a club means it is out; a round before its division enters means nothing', () => {
   const game = postponed(A, B, '2026-09-12');
   const drawn = [g(C, D, null, { comp: 'fa-cup', round: 'R1' })];
   const r1 = on(run(game, drawn, {}, { today: '2026-11-01' }), '2026-11-07');
-  assert.deepEqual([...r1.flags.map((f) => f.text)], ['FA Cup R1 Saturday, both clubs out']);
+  assert.deepEqual([...r1.flags.map((f) => f.text)], ['FAC R1 Saturday, both out']);
   /* National clubs enter at 4Q: the 2Q replay Tuesday is no concern of theirs. */
   const q2 = on(run(game, [], {}, { today: '2026-09-13' }), '2026-09-22');
-  assert.ok(!q2.flags.some((f) => /FA Cup/.test(f.text)));
+  assert.ok(!q2.flags.some((f) => /FAC/.test(f.text)));
 });
 
 test('a qualifying replay Tuesday is flagged for a club still in', () => {
@@ -114,10 +120,10 @@ test('a qualifying replay Tuesday is flagged for a club still in', () => {
   const tie = g(A, C, '2026-10-17', { comp: 'fa-cup', round: '4Q' });
   /* Tie unplayed as of today: Alpha might be replaying on Tue 20/10. */
   const s = on(run(game, [tie], {}, { today: '2026-10-12' }), '2026-10-20');
-  assert.ok(s.flags.some((f) => f.text === 'Alpha Town may be in FA Cup 4Q replay'));
+  assert.ok(s.flags.some((f) => f.text === 'ALP in FAC 4Q replay?'));
   const done = { ...tie, result: { h: 2, a: 0 } };
   const after = on(run(game, [done], {}, { today: '2026-10-18' }), '2026-10-20');
-  assert.ok(!after.flags.some((f) => /^Alpha Town may be in/.test(f.text)), 'a decided tie needs no replay');
+  assert.ok(!after.flags.some((f) => /^ALP in/.test(f.text)), 'a decided tie needs no replay');
 });
 
 test('Article 48: a worldwide game on a blocked Saturday is flagged, an exempt Saturday and a Tuesday are not', () => {
@@ -137,7 +143,7 @@ test('three away in a row is amber with each trip terse; four is red', () => {
   const three = on(run(game, [g(C, B, '2026-11-14'), g(D, B, '2026-11-21')], {}, { distances }), '2026-11-10');
   const f3 = three.flags.find((f) => /away in a row/.test(f.text));
   assert.equal(f3.level, 'amber');
-  assert.equal(f3.text, 'Beta United: 3 away in a row: 186 mi · 3h10, 40 mi · 0h55, 12 mi · 0h25');
+  assert.equal(f3.text, 'BET 3 away in a row: 186mi 3h10 · 40mi 0h55 · 12mi 0h25');
   const four = on(run(game, [g(C, B, '2026-11-14'), g(D, B, '2026-11-21'), g(C, B, '2026-11-28', { comp: 'fa-trophy' })], {}, { distances }), '2026-11-10');
   assert.equal(four.flags.find((f) => /away in a row/.test(f.text)).level, 'red');
 });
@@ -145,7 +151,7 @@ test('three away in a row is amber with each trip terse; four is red', () => {
 test('a neutral game neither breaks nor extends a run', () => {
   const game = postponed(A, B, '2026-10-24');
   const res = run(game, [g(A, C, '2026-11-14'), g(C, A, '2026-11-17', { neutral: true }), g(A, D, '2026-11-21')]);
-  assert.ok(on(res, '2026-11-10').flags.some((f) => f.text === 'Alpha Town: 3 home in a row'));
+  assert.ok(on(res, '2026-11-10').flags.some((f) => f.text === 'ALP 3 home in a row'));
 });
 
 test('another game pencilled into the slot is a soft flag, not a block', () => {
@@ -153,7 +159,7 @@ test('another game pencilled into the slot is a soft flag, not a block', () => {
   const other = X.pencil(postponed(A, C, '2026-10-17'), '2026-11-10', '19:45', 1);
   const s = on(run(game, [other]), '2026-11-10');
   assert.ok(s, 'slot still offered');
-  assert.ok(s.flags.some((f) => f.text === 'Pencilled: Alpha Town v Gamma City'));
+  assert.ok(s.flags.some((f) => f.text === 'Pencilled ALP v GAM'));
   assert.equal(X.unpencil(other).pencil, undefined);
 });
 

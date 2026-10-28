@@ -161,7 +161,9 @@ must be played before MD46 (Tue 20/04/2027, or Thu 22/04 with the switch).
 
 **Order.** To-do list oldest original date first. Slots: **cleanest first**
 (fewest flags), date order within. 35-day window counts from the **original
-fixture date**; slots beyond it show under a divider, not hidden.
+fixture date**, **both ways** (changed 28/10/2026: a game postponed well
+ahead can be brought forward); slots beyond it show under a divider, not
+hidden, and fade on the calendar.
 
 **Display.** Dual month calendar, Mon–Sun: home club on top, away club below,
 same columns; opponent crests, clear H/A; candidate, reserved, pencilled and

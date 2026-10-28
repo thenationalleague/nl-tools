@@ -1,8 +1,11 @@
 /* =============================================================================
    NL Tools — Fixture Management: the rearrangement date finder
    File: /fixtures/_finder.js
-   Version: v1.0 (28/10/2026)
+   Version: v1.1 (28/10/2026)
    CHANGELOG
+     v1.1 (28/10/2026) — The 35-day window runs both ways from the original
+       date, so a game postponed well ahead can be brought forward (Richard,
+       28/10/2026). Flags name clubs by code and say less.
      v1.0 (28/10/2026) — First build. Every rule is the one settled in
        system/fixture-management-plan.md, "Rearrangements and the date
        finder"; this file says how, the plan says why.
@@ -20,9 +23,10 @@
    OUTPUT
      { slots: [{ date, day, ko, within35, flags: [{ level, text }], weight }],
        from, to, original }
-     level 'red' | 'amber' | 'info'. Slots come cleanest first (fewest and
-     mildest flags), within 35 days of the original date before the rest,
-     then by date.
+     level 'red' | 'amber' | 'info'. Slots within 35 days of the original
+     date, before or after it, come first; then cleanest first (fewest and
+     mildest flags), then by date. Also windowFrom/windowTo, the 35-day
+     window's ends.
 
    WHAT A SLOT IS
      A Saturday or a Tuesday, with Thursday behind a switch. A slot is taken
@@ -36,6 +40,7 @@
   'use strict';
 
   var DAY = 864e5;
+  var WINDOW = 35;
   var DIVISION_LABEL = { national: 'National', north: 'North', south: 'South' };
   var LEAGUE = { national: true, north: true, south: true };
 
@@ -54,6 +59,8 @@
   }
 
   function nameOf(side) { return side && side.name; }
+  /* A club in a flag: its code, which is short, or its name. */
+  function tag(side) { return (side && (side.code || side.name)) || '?'; }
   function plays(r, club) { return nameOf(r.home) === club || nameOf(r.away) === club; }
 
   /* A club's division, from any league game of its season. */
@@ -150,6 +157,7 @@
     opts = opts || {};
     var cal = ctx.calendar, fx = ctx.fixtures;
     var home = nameOf(game.home), away = nameOf(game.away);
+    var tags = {}; tags[home] = tag(game.home); tags[away] = tag(game.away);
     var original = (game.original && game.original.date) ||
       (game.attempts && game.attempts.length ? game.attempts[0].date : game.date);
 
@@ -186,7 +194,7 @@
         var mine = dated.filter(function (r) { return plays(r, club); });
         var nearest = mine.reduce(function (m, r) { var g = gap(r.date, d); return g < m ? g : m; }, 99);
         if (nearest < 2) tooClose = true;
-        else if (nearest === 2) flags.push({ level: 'amber', text: club + ': two days’ rest' });
+        else if (nearest === 2) flags.push({ level: 'amber', text: tags[club] + ' 2 days’ rest' });
       });
       if (tooClose) continue;
 
@@ -194,7 +202,7 @@
 
       pencils.forEach(function (r) {
         if (win.indexOf(r.pencil.date) !== -1) {
-          flags.push({ level: 'amber', text: 'Pencilled: ' + nameOf(r.home) + ' v ' + nameOf(r.away) });
+          flags.push({ level: 'amber', text: 'Pencilled ' + tag(r.home) + ' v ' + tag(r.away) });
         }
       });
 
@@ -203,30 +211,30 @@
       (cal.cups || []).forEach(function (c) {
         var on = win.indexOf(c.date) !== -1, replayOn = c.replay && win.indexOf(c.replay) !== -1;
         if (!on && !replayOn) return;
-        var label = (c.comp === 'fa-cup' ? 'FA Cup' : c.comp === 'fa-trophy' ? 'FA Trophy' : 'NL Cup') + ' ' + c.round;
+        var label = (c.comp === 'fa-cup' ? 'FAC' : c.comp === 'fa-trophy' ? 'FAT' : 'NLC') + ' ' + c.round;
         var states = [home, away].map(function (club) { return cupStatus(ctx, club, c.comp, c.round, c.date); });
         [home, away].forEach(function (club, i) {
           if (states[i] !== 'possible') return;
           /* Only a replay date in the window, and the tie already decided:
              no replay to make room for. */
           if (!on && replayOn && decided(fx, club, c.comp, c.round)) return;
-          flags.push({ level: 'amber', text: club + ' may be in ' + label + (replayOn ? ' replay' : '') });
+          flags.push({ level: 'amber', text: tags[club] + ' in ' + label + (replayOn ? ' replay' : '') + '?' });
         });
         if (on && day === 'Sat' && states[0] !== 'possible' && states[1] !== 'possible' &&
             LEAGUE[game.comp] && !matchdayOn(ctx.rounds, game.comp, d)) {
-          flags.push({ level: 'info', text: label + ' Saturday, both clubs out' });
+          flags.push({ level: 'info', text: label + ' Saturday, both out' });
         }
       });
 
       /* Article 48 (FA blocked hours notice): a game shown in the UK loses
          that on a blocked Saturday at 15:00. 12:30 and 17:30 keep it. */
       if (ukShown(game) && day === 'Sat' && blocked(cal, d)) {
-        flags.push({ level: 'amber', text: 'Blocked hours at 15:00: 12:30 or 17:30 keeps it on in the UK' });
+        flags.push({ level: 'amber', text: 'Blocked hours at 15:00' });
       }
 
       runFlags(game, d, dated, ctx.distances, flags);
 
-      var within35 = !!original && gap(original, d) <= 35 && d >= original;
+      var within35 = !!original && gap(original, d) <= WINDOW;
       var weight = flags.reduce(function (s, f) { return s + (f.level === 'red' ? 10 : f.level === 'amber' ? 1 : 0); }, 0);
       out.push({ date: d, day: day, ko: day === 'Sat' ? '15:00' : '19:45', within35: within35, flags: flags, weight: weight });
     }
@@ -236,7 +244,8 @@
       if (a.weight !== b.weight) return a.weight - b.weight;
       return a.date < b.date ? -1 : 1;
     });
-    return { slots: out, from: from, to: to, original: original };
+    return { slots: out, from: from, to: to, original: original,
+      windowFrom: original ? add(original, -WINDOW) : null, windowTo: original ? add(original, WINDOW) : null };
   }
 
   /* Home and away runs, every competition counted (plan: staffing and
@@ -248,7 +257,7 @@
   function runFlags(game, d, dated, distances, flags) {
     var pairs = (distances && distances.pairs) || {};
     [['home', 'H'], ['away', 'A']].forEach(function (pair) {
-      var club = nameOf(game[pair[0]]);
+      var club = nameOf(game[pair[0]]), who = tag(game[pair[0]]);
       var seq = dated.filter(function (r) { return plays(r, club) && !r.neutral; })
         .map(function (r) { return { date: r.date, side: nameOf(r.home) === club ? 'H' : 'A', r: r }; });
       seq.push({ date: d, side: pair[1], r: game, here: true });
@@ -259,13 +268,13 @@
       while (hi < seq.length - 1 && seq[hi + 1].side === pair[1]) hi++;
       var run = hi - lo + 1;
       if (run < 3) return;
-      var text = club + ': ' + run + ' ' + (pair[1] === 'H' ? 'home' : 'away') + ' in a row';
+      var text = who + ' ' + run + ' ' + (pair[1] === 'H' ? 'home' : 'away') + ' in a row';
       if (pair[1] === 'A') {
         var trips = seq.slice(lo, hi + 1).map(function (x) {
           var h = x.r.home && x.r.home.code, a = x.r.away && x.r.away.code;
           return trip(h && a ? pairs[h + '|' + a] : null);
         });
-        text += ': ' + trips.join(', ');
+        text += ': ' + trips.join(' · ');
       }
       flags.push({ level: run >= 4 ? 'red' : 'amber', text: text });
     });
@@ -274,7 +283,7 @@
   function trip(p) {
     if (!p) return '?';
     var m = Math.round(p[1]);
-    return Math.round(p[0]) + ' mi · ' + Math.floor(m / 60) + 'h' + ('0' + (m % 60)).slice(-2);
+    return Math.round(p[0]) + 'mi ' + Math.floor(m / 60) + 'h' + ('0' + (m % 60)).slice(-2);
   }
 
   /* Pencilled: staff only, and a soft block on the same slot for the
