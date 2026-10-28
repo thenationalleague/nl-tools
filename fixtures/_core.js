@@ -1,8 +1,16 @@
 /* =============================================================================
    NL Tools — Fixture Management: data layer
    File: /fixtures/_core.js
-   Version: v1.2 (28/10/2026)
+   Version: v1.3 (28/10/2026)
    CHANGELOG
+     v1.3 (28/10/2026) — A past season from its workbook, keyed to the
+       Attendance archive (keyToAttendance), so its crowds stay attached:
+       the 2025-26 sheet matched all 1,742 league, NL Cup and play-off games
+       to NLS one-to-one. A workbook that keeps a postponed date as its own
+       row, as that sheet does, has the row folded into the played game as
+       a lost date. 'National/North/South Playoffs' read as play-offs, and
+       'DAZN pick' as the DAZN column. Each row's sheet crowd rides along
+       as sheetCrowd, for the import's cross-check only — never stored.
      v1.2 (28/10/2026) — fromAttendance: a past season built from the
        Attendance tool's archive (its fixtures keep their match IDs as keys,
        so the club-submitted crowds stay joined). Play-offs found as league
@@ -81,7 +89,8 @@
     { key: 'nl-cup',    label: 'NL Cup',    sheet: ['nl cup', 'national league cup'],           pill: 'nlc' },
     { key: 'fa-cup',    label: 'FA Cup',    sheet: ['fa cup'],                                  pill: 'fac', fa: true },
     { key: 'fa-trophy', label: 'FA Trophy', sheet: ['fa trophy'],                               pill: 'fat', fa: true },
-    { key: 'playoffs',  label: 'Play-offs', sheet: ['playoffs', 'play-offs', 'play offs'],      pill: null }
+    { key: 'playoffs',  label: 'Play-offs', sheet: ['playoffs', 'play-offs', 'play offs', 'national playoffs',
+                                                 'north playoffs', 'south playoffs'],          pill: null }
   ];
   var COMP_BY_KEY = {};
   var COMP_BY_SHEET = {};
@@ -252,6 +261,16 @@
     return k(x) === k(y);
   }
 
+  /* NLS keeps one score — the final one, after extra time — and the
+     shoot-out. A held result agrees with it when its final score (after
+     extra time if played, else full time) and penalties match. */
+  function agreesWithNls(held, nls) {
+    var f = held.aet || held;
+    var p1 = held.pens ? held.pens.h + '-' + held.pens.a : '';
+    var p2 = nls.pens ? nls.pens.h + '-' + nls.pens.a : '';
+    return f.h === nls.h && f.a === nls.a && p1 === p2;
+  }
+
   /* An FA tie's winner: from the score when it settles it, else the sheet's
      Result column. The column alone is wrong for replays decided in extra
      time — it records the 90 minutes ('D Cup' for a 5-4 aet win). */
@@ -377,17 +396,40 @@
         broadcast: {
           availability: availOf(r['broadcast'], comp),
           enhanced: norm(r['production']) === 'enhanced',
-          daznMove: norm(r['dazn']) === 'dazn',
+          daznMove: norm(r['dazn'] || r['dazn pick']) === 'dazn',
           ami: norm(r['ami']) === 'ami'
         },
         result: resultOfRow(r, 'import'),
         wentThrough: null,
-        source: 'import'
+        source: 'import',
+        sheetCrowd: num(r['attendance total'])
       };
       if (comp.fa) rec.wentThrough = faWinner(rec.result, r['result h/d/a']);
       if (comp.league && !rec.optaID) problem('opta', line + ': no Opta ID');
       var pk = pairKey(comp.key, rec.home.name, rec.away.name);
       (byPair[pk] = byPair[pk] || []).push(rec);
+    });
+
+    /* A workbook may keep a lost date as its own row (Match State
+       'Postponed' or 'Abandoned') beside the row the game was played on —
+       the 2025-26 sheet does, 212 times. Such a row is a lost date of the
+       played game, folded in as an attempt, not a second fixture. */
+    Object.keys(byPair).forEach(function (pk) {
+      var recs = byPair[pk];
+      if (recs.length < 2) return;
+      var played = recs.filter(function (r) { return r.state === 'scheduled'; });
+      if (played.length !== 1) return;
+      var game = played[0];
+      /* Before the played date, or after it: a game brought forward lost
+         its later date (three in 2025-26, Worthing v Hampton among them). */
+      var lostRows = recs.filter(function (r) { return r.state !== 'scheduled'; });
+      if (!lostRows.length) return;
+      lostRows.forEach(function (l) {
+        game.attempts.push({ date: l.date, ko: l.ko, outcome: l.state, reason: null,
+          noticeAt: null, rescheduledAt: null, minute: null });
+        if (!game.optaID && l.optaID) game.optaID = l.optaID;
+      });
+      byPair[pk] = recs.filter(function (r) { return lostRows.indexOf(r) === -1; });
     });
 
     /* A league pairing meets once a season, so two rows for one pairing is
@@ -594,7 +636,7 @@
       }
       if (!rec || (!n.result && !fill)) return;
       out.push({ key: rec.key, nls: n.id, optaID: fill, result: n.result, current: rec.result || null,
-        differs: !!n.result && !!rec.result && !sameResult(rec.result, n.result) });
+        differs: !!n.result && !!rec.result && !agreesWithNls(rec.result, n.result) });
     });
     return out;
   }
@@ -728,6 +770,59 @@
     return { fixtures: out, problems: problems };
   }
 
+  /* Key a past season's workbook records to the Attendance archive, whose
+     match IDs the club-submitted crowds are filed under. A record takes the
+     ID of the archived game with the same date and clubs (names compared
+     loosely: '&' and 'and', case, spacing), else the same date and home
+     club. NLS games' IDs are Opta IDs, so a league or NL Cup record also
+     gains its optaID. An FA tie added by hand in Attendance has an ID made
+     from competition, date and clubs (attendance/index.html,
+     buildSyntheticCupMatchID); one with no archived match takes that ID,
+     so it still meets its crowd if one was filed under it.
+     → { fixtures (re-keyed), matched, formula, unmatched: [record] } */
+  function attSlug(name) {
+    return String(name).toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '').substring(0, 20);
+  }
+  function loose(s) { return norm(s).replace(/&/g, 'and').replace(/[^a-z0-9 ]/g, ''); }
+
+  function keyToAttendance(fixtures, archive) {
+    var byDay = {}, byHome = {};
+    Object.keys(archive || {}).forEach(function (id) {
+      var f = archive[id] || {};
+      /* Both kinds of kickoffUTC start with the date: the NLS copy's is UTC,
+         a hand-added tie's UK time. They differ only after 23:00 UK, when no
+         fixture kicks off, so the first ten characters are the London date. */
+      var day = /^\d{4}-\d{2}-\d{2}/.test(String(f.kickoffUTC || '')) ? String(f.kickoffUTC).slice(0, 10) : null;
+      if (!day) return;
+      var k = day + '|' + loose(f.homeTeamName) + '|' + loose(f.awayTeamName);
+      (byDay[k] = byDay[k] || []).push(id);
+      var h = day + '|' + loose(f.homeTeamName);
+      (byHome[h] = byHome[h] || []).push(id);
+    });
+    var out = {}, matched = 0, formula = 0, unmatched = [], taken = {};
+    Object.keys(fixtures).forEach(function (k) {
+      var r = fixtures[k];
+      var ids = r.date ? (byDay[r.date + '|' + loose(r.home.name) + '|' + loose(r.away.name)] ||
+        byHome[r.date + '|' + loose(r.home.name)] || []) : [];
+      ids = ids.filter(function (id) { return !taken[id]; });
+      var n = copy(r);
+      if (ids.length === 1) {
+        n.key = ids[0]; taken[ids[0]] = true; matched++;
+        if (/^g\d+$/.test(ids[0])) n.optaID = ids[0];
+      } else if (COMP_BY_KEY[r.comp].fa && r.date) {
+        n.key = 'manual_' + r.comp + '_' + r.date.replace(/-/g, '') + '_' + attSlug(r.home.name) + '_v_' + attSlug(r.away.name);
+        formula++;
+      } else {
+        unmatched.push(r);
+      }
+      var key = n.key, i = 2;
+      while (out[key]) key = n.key + '-' + (i++);
+      n.key = key;
+      out[key] = n;
+    });
+    return { fixtures: out, matched: matched, formula: formula, unmatched: unmatched };
+  }
+
   /* ── Order ──────────────────────────────────────────────────────────────
      A day reads by competition (National, North, South, then the cups),
      then kick-off, then home club. */
@@ -811,6 +906,7 @@
     winnerOf: winnerOf,
     faWinner: faWinner,
     sameResult: sameResult,
+    agreesWithNls: agreesWithNls,
     loseDate: loseDate,
     setDate: setDate,
     dropAttempt: dropAttempt,
@@ -818,6 +914,7 @@
     matchNls: matchNls,
     compare: compare,
     fromAttendance: fromAttendance,
+    keyToAttendance: keyToAttendance,
     parseScore: parseScore,
     resultsFromPaste: resultsFromPaste,
     table: table,

@@ -394,3 +394,54 @@ test('an Attendance game left postponed with no score comes over awaiting a date
   assert.equal(r.fixtures.g9.date, null);
   assert.equal(r.fixtures.g9.attempts[0].reason, 'Frozen pitch');
 });
+
+test('a workbook row kept for a postponed date folds into the played game as a lost date', () => {
+  /* The 2025-26 sheet keeps each lost date as its own row beside the
+     played one (212 of them). */
+  const r = build(sheet(
+    lg({ Date: '09/08/2025', 'Home team': 'Alpha Town', 'Away team': 'Beta United', 'Match State': 'Postponed' }),
+    lg({ Date: '16/09/2025', Time: '7.45pm', 'Home team': 'Alpha Town', 'Away team': 'Beta United', 'Goals H': '1', 'Goals A': '0' })));
+  assert.equal(r.counts.total, 1);
+  const f = Object.values(r.fixtures)[0];
+  assert.equal(f.date, '2025-09-16');
+  assert.equal(f.attempts[0].date, '2025-08-09');
+  assert.equal(f.attempts[0].outcome, 'postponed');
+  assert.equal(r.problems.filter((p) => p.kind === 'duplicate').length, 0);
+});
+
+test('the 2025-26 sheet\'s play-off labels and DAZN pick column read correctly', () => {
+  const r = build(sheet(
+    { Date: '03/05/2026', Time: '3pm', MD: 'SF', Competition: 'National Playoffs', 'Home team': 'Alpha Town', 'Away team': 'Beta United' }));
+  assert.equal(Object.values(r.fixtures)[0].comp, 'playoffs');
+});
+
+test('a past season keys to the Attendance archive: Opta IDs by date and clubs, FA ties by the archive or its ID formula', () => {
+  const r = build(sheet(
+    lg({ Date: '09/08/2025', 'Home team': 'Alpha Town', 'Away team': 'Beta United' }),
+    { Date: '01/11/2025', MD: 'R1', Competition: 'FA Cup', 'Home team': 'Gamma City', 'Away team': 'Nowhere & District' },
+    { Date: '08/11/2025', MD: 'R2', Competition: 'FA Trophy', 'Home team': 'Gamma City', 'Away team': 'Somewhere FC' },
+    lg({ Date: '10/08/2025', 'Home team': 'Delta Rovers', 'Away team': 'Gamma City' })));
+  /* Shapes as gas/FixtureSync.js and attendance's Add cup fixture write them. */
+  const archive = {
+    g500: { kickoffUTC: '2025-08-09 14:00:00', homeTeamName: 'Alpha Town', awayTeamName: 'Beta United' },
+    manual_fa_trophy_20251108_x: { kickoffUTC: '2025-11-08T15:00:00', homeTeamName: 'Gamma City', awayTeamName: 'Somewhere F.C.' },
+  };
+  const k = F.keyToAttendance(r.fixtures, archive);
+  const keys = Object.keys(k.fixtures).sort();
+  assert.ok(keys.includes('g500'));
+  assert.equal(k.fixtures.g500.optaID, 'g500');
+  assert.ok(keys.includes('manual_fa_trophy_20251108_x'), 'matched on date and home club when names differ');
+  assert.ok(keys.includes('manual_fa-cup_20251101_gammacity_v_nowhereanddistrict'), 'no archive match: Attendance\'s own ID formula');
+  assert.equal(k.matched, 2);
+  assert.equal(k.formula, 1);
+  assert.equal(k.unmatched.length, 1);
+  assert.equal(k.unmatched[0].home.name, 'Delta Rovers');
+});
+
+test('a held extra-time result agrees with NLS\'s single final score', () => {
+  const held = F.parseScore('0-0 (1-0 aet)');
+  assert.equal(F.agreesWithNls(held, F.parseScore('1-0')), true);
+  assert.equal(F.agreesWithNls(F.parseScore('2-0'), F.parseScore('3-1')), false);
+  assert.equal(F.agreesWithNls(F.parseScore('1-1 (4-5 p)'), F.parseScore('1-1 (4-5 p)')), true);
+  assert.equal(F.agreesWithNls(F.parseScore('1-1 (4-5 p)'), F.parseScore('1-1 (5-4 p)')), false);
+});

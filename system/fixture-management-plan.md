@@ -190,8 +190,9 @@ Next, in order (re-ordered 28/10/2026):
 
 1. **Attendance onto the record.** *(Built 28/10/2026: the season switcher,
    "Bring in from Attendance" for a past season, the crowd column, and
-   Attendance reading `public/` for any season the record holds. Left: run
-   the bring-in for 2025-26, watch a matchday or two, then retire
+   Attendance reading `public/` for any season the record holds. Left: import
+   the 2025-26 workbook (keyed to the Attendance archive by keyToAttendance;
+   "Bring in from Attendance" is the fallback with no workbook), watch a matchday or two, then retire
    FixtureSync.)* Attendance figures are 100% club
    submissions, keyed by Opta match ID; only its fixture list comes from
    NLS, copied four times a day by `gas/FixtureSync.js` into

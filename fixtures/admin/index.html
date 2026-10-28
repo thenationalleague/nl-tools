@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixture Management
-  Version: v1.4 (28/10/2026)
+  Version: v1.5 (28/10/2026)
   File: /fixtures/admin/index.html
 
   The League's master fixture record: every game in every competition, with
@@ -9,6 +9,12 @@
   behind it, is system/fixture-management-plan.md.
 
   CHANGELOG
+    v1.5 (28/10/2026) — Import workbook on a past season: the sheet is
+      keyed to the Attendance archive (fixtures/_core.js keyToAttendance),
+      so every game keeps the ID its crowd is filed under — Opta IDs for
+      league, NL Cup and play-offs, Attendance's own for FA ties. The check
+      lists anything unmatched and any crowd more than 10% from the sheet's.
+      NLS results now agree with an extra-time score held as full time + aet.
     v1.4 (28/10/2026) — A grey shield stands in for a club with no crest.
     v1.3 (28/10/2026) — Seasons: a switcher, and a past season brought in
       from the Attendance tool's archive (its match IDs stay the keys, so
@@ -100,6 +106,14 @@
     window.NL_CHANGELOG = [
       {
         date: '28/10/2026',
+        version: 'v1.5',
+        items: [
+          'Last season can be imported from its workbook; every game keeps the ID its Attendance crowd is filed under.',
+          'NLS results no longer flag an extra-time game as different.'
+        ]
+      },
+      {
+        date: '28/10/2026',
         version: 'v1.4',
         items: ['A grey shield stands in for a club with no crest.']
       },
@@ -163,7 +177,7 @@
   <script src="/system/auth-guard.js?v=17"></script>
 
   <!-- Tool data layer (pure; tested in tests/fixture-management.test.mjs) -->
-  <script src="/fixtures/_core.js?v=3"></script>
+  <script src="/fixtures/_core.js?v=4"></script>
 
 <style>
   /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
@@ -365,7 +379,7 @@
     var past = key !== S.current;
     document.getElementById('fmSeason').textContent = 'Fixtures ' + NL.season.label(S.meta, key);
     document.getElementById('fmFromAtt').hidden = !past;
-    document.getElementById('fmImport').hidden = past;
+    document.getElementById('fmImport').hidden = false;
     document.getElementById('fmAdd').hidden = past;
     loadCrowds(key);
     S.listen = ref('fixtures');
@@ -1104,8 +1118,16 @@
     function check() {
       var out = wrap.querySelector('#fmiOut');
       out.innerHTML = '<div class="banner banner--info">Checking…</div>';
+      var past = S.season !== S.current;
       var seedP = S.season === '2026' ? getJson(SEED_URL) : Promise.resolve(null);
-      seedP.then(function (seed) {
+      /* A past season is keyed to the Attendance archive so its crowds stay
+         attached; the current one keeps its Opta IDs from the sheet. */
+      var archP = past
+        ? NL.ensureAuth().then(function () { return db.ref(attPath(S.season, 'fixtures')).once('value'); })
+            .then(function (snap) { return snap.val() || {}; })
+        : Promise.resolve(null);
+      Promise.all([seedP, archP]).then(function (got) {
+        var seed = got[0], archive = got[1];
         result = F.build({
           fixtures: wrap.querySelector('#fmiFix').value,
           rearrangements: wrap.querySelector('#fmiRe').value.trim() || null,
@@ -1114,13 +1136,23 @@
           parseDate: NL.parseDate
         });
         if (result.error) { out.innerHTML = '<div class="banner banner--error">' + esc(result.error) + '</div>'; result = null; return; }
+        var keyed = null;
+        if (archive) {
+          keyed = F.keyToAttendance(result.fixtures, archive);
+          result.fixtures = keyed.fixtures;
+          result.counts = F.counts(keyed.fixtures);
+          /* "No Opta ID" lines are answered by the keying; what is left
+             unmatched is listed below instead. */
+          result.problems = result.problems.filter(function (p) { return p.kind !== 'opta'; });
+        }
         var c = result.counts;
         var by = F.COMPS.map(function (x) { return c.byComp[x.key] ? esc(x.label) + ' ' + c.byComp[x.key] : null; })
           .filter(Boolean).join(' · ');
         var withResult = Object.keys(result.fixtures).filter(function (k) { return result.fixtures[k].result; }).length;
         var html = '<div class="banner banner--info"><strong>' + c.total + ' fixtures.</strong> ' + by +
           '. ' + withResult + ' with results. ' + c.awaiting + ' awaiting a date.' +
-          (seed ? '' : ' No published schedule found, so original dates come from the history.') + '</div>';
+          (seed || past ? '' : ' No published schedule found, so original dates come from the history.') + '</div>';
+        if (keyed) html += attendanceCheck(keyed);
         if (result.problems.length) {
           html += '<details class="disclosure"><summary>' + result.problems.length + ' to check after import' +
             '<span class="disclosure__meta">none stop the import</span></summary><ul class="fm-problems">' +
@@ -1128,6 +1160,38 @@
         }
         out.innerHTML = html;
       });
+    }
+
+    /* How the past season meets its crowds: games matched to the
+       Attendance archive, FA ties given Attendance's own ID, anything left;
+       then crowds attached, and the sheet's crowd column checked against
+       them (more than 10% apart is listed). Attendance's figure is the one
+       kept. */
+    function attendanceCheck(k) {
+      var attached = 0, apart = [];
+      Object.keys(k.fixtures).forEach(function (key) {
+        var r = k.fixtures[key], c = S.crowds[key];
+        if (!c) return;
+        attached++;
+        if (r.sheetCrowd != null && Math.abs(r.sheetCrowd - c.total) > 0.1 * Math.max(c.total, 1)) {
+          apart.push(r.home.name + ' v ' + r.away.name + ' (' + F.fmt(r.date) + '): Attendance ' +
+            c.total.toLocaleString('en-GB') + ', sheet ' + r.sheetCrowd.toLocaleString('en-GB'));
+        }
+      });
+      var h = '<div class="banner ' + (k.unmatched.length ? 'banner--amber' : 'banner--info') + '"><strong>' +
+        k.matched + ' matched to Attendance</strong>, ' + k.formula + ' FA ties by Attendance\u2019s own ID, ' +
+        k.unmatched.length + ' unmatched. ' + attached + ' crowds attached.</div>';
+      if (k.unmatched.length) {
+        h += '<details class="disclosure" open><summary>' + k.unmatched.length + ' not matched</summary><ul class="fm-problems">' +
+          k.unmatched.map(function (r) { return '<li>' + esc(F.COMP_BY_KEY[r.comp].label + ' ' + r.home.name + ' v ' + r.away.name + ' ' + F.fmt(r.date)) + '</li>'; }).join('') +
+          '</ul></details>';
+      }
+      if (apart.length) {
+        h += '<details class="disclosure"><summary>' + apart.length + ' crowds differ from the sheet' +
+          '<span class="disclosure__meta">Attendance\u2019s figure is kept</span></summary><ul class="fm-problems">' +
+          apart.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul></details>';
+      }
+      return h;
     }
 
     function commit(m) {
@@ -1143,6 +1207,7 @@
         Object.keys(result.fixtures).forEach(function (k) {
           var r = result.fixtures[k];
           r.updatedAt = stamp;
+          delete r.sheetCrowd;
           fx[k] = clean(r);
           var p = F.publicView(r);
           if (p) pub[k] = clean(p);
