@@ -1,7 +1,7 @@
 /* ============================================================
    Graphic preview fit — shared
    File: /graphics/_shared/preview-fit.js
-   Version: v1.0 (28/10/2026)
+   Version: v1.1 (31/10/2026)
 
    Scales a graphic drawn at full size (1080 wide) down to fit the preview
    column and the window, so the whole card is on screen without the page
@@ -24,6 +24,19 @@
    Together that overran a 1080p window by about 34px: the "ever so slight
    scroll" reported on 28/10/2026.
 
+   THE CONTROL COLUMN
+   The preview fitting was not enough on its own: a long column of controls
+   beside it (a 12-game list) still made the page scroll. So fit() also
+   sets --column-h on the page: the height left for a column, top to the
+   bottom of the window. A tool caps its control panel at that height and
+   lets one flexible part (a list) take the space that is left and scroll
+   by itself. Unset (none) in the single-column layout, where the page
+   scrolls anyway.
+
+   CHANGELOG
+     v1.1 31/10/2026  Sets --column-h for the control panel.
+     v1.0 28/10/2026  Lifted out of the three tools.
+
    API (window.NL_GFX_FIT)
      fit(stageWrap, gfxHost, width, height)
        stageWrap  the element the preview sits in (inside .preview)
@@ -40,6 +53,7 @@
     if (!gfx) return;
     var availW = stageWrap.clientWidth - 24;
     var availH = root.innerHeight - 24;
+    var column = "none";
 
     var preview = stageWrap.closest ? stageWrap.closest(".preview") : stageWrap.parentNode;
     if (preview) {
@@ -57,7 +71,9 @@
         var chrome = stageWrap.getBoundingClientRect().top - preview.getBoundingClientRect().top;
         var below = px(pv.paddingBottom) + px(pv.borderBottomWidth) + px(pg.paddingBottom);
         availH = root.innerHeight - top - chrome - below - 2;
+        column = Math.max(320, Math.floor(root.innerHeight - unscrolled - px(pg.paddingBottom) - 2)) + "px";
       }
+      preview.parentNode.style.setProperty("--column-h", column);
     }
 
     var scale = Math.min(1, availW / width);
@@ -68,5 +84,5 @@
     gfxHost.style.height = (height * scale) + "px";
   }
 
-  root.NL_GFX_FIT = { VERSION: "v1.0", fit: fit };
+  root.NL_GFX_FIT = { VERSION: "v1.1", fit: fit };
 })(typeof window !== "undefined" ? window : this);
