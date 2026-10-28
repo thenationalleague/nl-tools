@@ -1,8 +1,12 @@
 /* =============================================================================
    NL Tools — Fixture Management: data layer
    File: /fixtures/_core.js
-   Version: v1.4 (28/10/2026)
+   Version: v1.5 (28/10/2026)
    CHANGELOG
+     v1.5 (28/10/2026) — A broadcast game given a new date is marked
+       broadcast.review, for the Broadcast tab's review list (plan,
+       Broadcast: "its status holds until confirmed"). DAZN_MOVES, the
+       season's allocation of moves at DAZN's request.
      v1.4 (28/10/2026) — Play-offs belong to their division: a play-off is
        a National, North or South record with playoff: true and its round
        (QF/SF/F), not a competition of its own. 'North Playoffs' and the like
@@ -121,6 +125,8 @@
     { key: 'not-selected', label: 'Not selected' },
     { key: 'cup',          label: 'Cup' }
   ];
+  /* DAZN's allocation of games moved at its request, per season (plan). */
+  var DAZN_MOVES = 120;
   var AVAIL_BY_KEY = {};
   AVAILABILITY.forEach(function (a) { AVAIL_BY_KEY[a.key] = a; });
 
@@ -580,6 +586,14 @@
       n.attempts.push({ date: rec.date, ko: rec.ko || null, outcome: 'moved', reason: null,
         noticeAt: at, rescheduledAt: at, minute: null });
     }
+    /* A game shown, or moved at DAZN's request, keeps its status on a new
+       date until someone confirms it still holds there. */
+    var b = n.broadcast || {};
+    var dateChanged = rec.date ? (rec.date !== date || (rec.ko || null) !== (ko || null)) : true;
+    if (dateChanged && (b.availability === 'worldwide' || b.availability === 'overseas' || b.daznMove)) {
+      n.broadcast = copy(b);
+      n.broadcast.review = true;
+    }
     n.date = date;
     n.ko = ko || null;
     n.state = 'scheduled';
@@ -916,6 +930,7 @@
     COMP_BY_KEY: COMP_BY_KEY,
     AVAILABILITY: AVAILABILITY,
     AVAIL_BY_KEY: AVAIL_BY_KEY,
+    DAZN_MOVES: DAZN_MOVES,
     parseTsv: parseTsv,
     parseKo: parseKo,
     mintKey: mintKey,

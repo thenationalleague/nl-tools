@@ -467,3 +467,13 @@ test('a bare Playoffs label takes the home club\'s division', () => {
     divisionOf: (n) => (n === 'Alpha Town' ? 'North' : null) });
   assert.equal(Object.values(r.fixtures)[0].comp, 'north');
 });
+
+test('a broadcast game given a new date is marked for review; an unavailable one is not', () => {
+  const r = build(sheet(
+    lg({ Date: '07/11/2026', 'Home team': 'Alpha Town', 'Away team': 'Beta United', OptaID: 'g1', Broadcast: 'Worldwide' }),
+    lg({ Date: '07/11/2026', 'Home team': 'Gamma City', 'Away team': 'Delta Rovers', OptaID: 'g2', Broadcast: 'Unavailable' })));
+  const at = '2026-11-01T10:00:00.000Z';
+  assert.equal(F.setDate(r.fixtures.g1, '2026-11-10', '19:45', at).broadcast.review, true);
+  assert.equal(F.setDate(r.fixtures.g2, '2026-11-10', '19:45', at).broadcast.review, undefined);
+  assert.equal(F.setDate(r.fixtures.g1, '2026-11-07', '15:00', at).broadcast.review, undefined, 'same date and kick-off: nothing to review');
+});

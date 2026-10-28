@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixture Management
-  Version: v1.8 (28/10/2026)
+  Version: v1.9 (28/10/2026)
   File: /fixtures/admin/index.html
 
   The League's master fixture record: every game in every competition, with
@@ -9,6 +9,13 @@
   behind it, is system/fixture-management-plan.md.
 
   CHANGELOG
+    v1.9 (28/10/2026) — Tabs: Fixtures, Broadcast, Settings. Broadcast lists
+      every league and NL Cup game with its availability, Enhanced, moved by
+      DAZN (count against the 120) and AMI (worldwide games only), changed in
+      place; a broadcast game given a new date waits on a review list.
+      Settings holds Results, Add cup tie and the imports. The season is a
+      dropdown above the tabs and no longer repeated in a heading. Clearing
+      the club filter (× or an emptied box) now clears it.
     v1.8 (28/10/2026) — Import works out a sheet's season from its own dates
       (1 July to 30 June) and imports into that season whatever is on screen,
       leaving out and counting rows dated outside it — on 28/10/2026 last
@@ -116,6 +123,15 @@
     window.NL_CHANGELOG = [
       {
         date: '28/10/2026',
+        version: 'v1.9',
+        items: [
+          'Tabs: Fixtures, Broadcast and Settings.',
+          'Broadcast: availability, Enhanced, DAZN moves (out of 120) and AMI for every game, changed in place, with a review list for broadcast games that move.',
+          'The season is a dropdown; clearing the club filter now clears it.'
+        ]
+      },
+      {
+        date: '28/10/2026',
         version: 'v1.8',
         items: [
           'Import works out the season from the sheet\u2019s dates and imports into that season, whichever one is on screen.',
@@ -201,7 +217,7 @@
   <script src="/system/auth-guard.js?v=17"></script>
 
   <!-- Tool data layer (pure; tested in tests/fixture-management.test.mjs) -->
-  <script src="/fixtures/_core.js?v=5"></script>
+  <script src="/fixtures/_core.js?v=6"></script>
 
 <style>
   /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
@@ -256,6 +272,19 @@
   .fm-history { margin: 0; padding-left: 18px; font-size: var(--text-sm); }
   .fm-gap { margin-top: 28px; }
   .fm-history li { margin-bottom: 4px; }
+  .fm-top { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+  .fm-season { width: auto; min-width: 130px; }
+  .fm-tabs { flex: 1; margin-bottom: 0; min-width: 280px; }
+  .fm-settings { display: grid; gap: 12px; max-width: 640px; }
+  .fm-setting { display: flex; gap: 14px; align-items: center; }
+  .fm-setting__btn { min-width: 210px; }
+  .fm-setting span { color: var(--text-muted); font-size: var(--text-sm); }
+  .fm-bc-tally { font-size: var(--text-sm); color: var(--text-muted); margin: 0 0 12px; }
+  .fm-bc-tally strong { color: var(--text); }
+  .fm-bc-table col.c-av { width: 168px; }
+  .fm-bc-table col.c-tick { width: 92px; }
+  .fm-bc-table td.ta-center input { width: 18px; height: 18px; }
+  .fm-bc-av { width: 100%; }
   .fm-problems { max-height: 260px; overflow: auto; margin: 8px 0 0; padding-left: 18px; font-size: var(--text-sm); }
 </style>
 </head>
@@ -267,29 +296,61 @@
 <div id="pageWrap">
   <div class="page">
 
-    <div class="stats" id="fmStats"></div>
-
-    <div class="section-head">
-      <h2 id="fmSeason">Fixtures</h2>
-      <div id="fmActions" hidden>
-        <button class="btn btn--ghost btn--sm" type="button" id="fmFromAtt" hidden>Bring in from Attendance</button>
-        <button class="btn btn--ghost btn--sm" type="button" id="fmImport">Import workbook</button>
-        <button class="btn btn--navy btn--sm" type="button" id="fmResults">Results</button>
-        <button class="btn btn--primary btn--sm" type="button" id="fmAdd">Add cup tie</button>
+    <div class="fm-top">
+      <select class="nl-select fm-season" id="fmSeasonSel" aria-label="Season"></select>
+      <div class="tabs fm-tabs" id="fmTabs" role="tablist">
+        <button class="tab active" type="button" role="tab" data-tab="fixtures">Fixtures</button>
+        <button class="tab" type="button" role="tab" data-tab="broadcast">Broadcast</button>
+        <button class="tab" type="button" role="tab" data-tab="settings" id="fmSettingsTab" hidden>Settings</button>
       </div>
     </div>
 
-    <div class="filter-bar">
-      <div class="chip-group" id="fmSeasons" role="group" aria-label="Season"></div>
-      <div class="chip-group" id="fmComps" role="group" aria-label="Competition"></div>
-      <div class="fm-picker" id="fmClub"></div>
-      <div class="chip-group" id="fmWhen" role="group" aria-label="Dates">
-        <button class="chip active" type="button" data-when="upcoming">Upcoming</button>
-        <button class="chip" type="button" data-when="all">All</button>
+    <section data-panel="fixtures">
+      <div class="stats" id="fmStats"></div>
+      <div class="filter-bar">
+        <div class="chip-group" id="fmComps" role="group" aria-label="Competition"></div>
+        <div class="fm-picker" id="fmClub"></div>
+        <div class="chip-group" id="fmWhen" role="group" aria-label="Dates">
+          <button class="chip active" type="button" data-when="upcoming">Upcoming</button>
+          <button class="chip" type="button" data-when="all">All</button>
+        </div>
       </div>
-    </div>
+      <div id="fmBody"></div>
+    </section>
 
-    <div id="fmBody"></div>
+    <section data-panel="broadcast" hidden>
+      <div class="filter-bar">
+        <div class="chip-group" id="fmBcComps" role="group" aria-label="Competition"></div>
+        <div class="chip-group" id="fmBcStatus" role="group" aria-label="Status"></div>
+        <div class="chip-group" id="fmBcWhen" role="group" aria-label="Dates">
+          <button class="chip active" type="button" data-when="upcoming">Upcoming</button>
+          <button class="chip" type="button" data-when="all">All</button>
+        </div>
+      </div>
+      <p class="fm-bc-tally" id="fmBcTally"></p>
+      <div id="fmBcBody"></div>
+    </section>
+
+    <section data-panel="settings" hidden>
+      <div class="fm-settings">
+        <div class="fm-setting">
+          <button class="btn btn--navy btn--sm fm-setting__btn" type="button" id="fmResults">Results</button>
+          <span>Fill a day’s results from NLS, or paste rows.</span>
+        </div>
+        <div class="fm-setting" id="fmAddRow">
+          <button class="btn btn--primary btn--sm fm-setting__btn" type="button" id="fmAdd">Add cup tie</button>
+          <span>NL Cup knockouts, play-offs, FA Cup and FA Trophy.</span>
+        </div>
+        <div class="fm-setting">
+          <button class="btn btn--ghost btn--sm fm-setting__btn" type="button" id="fmImport">Import workbook</button>
+          <span>Replaces every fixture in the sheet’s season.</span>
+        </div>
+        <div class="fm-setting" id="fmFromAttRow" hidden>
+          <button class="btn btn--ghost btn--sm fm-setting__btn" type="button" id="fmFromAtt">Bring in from Attendance</button>
+          <span>A past season from Attendance’s own record, when there is no sheet.</span>
+        </div>
+      </div>
+    </section>
 
   </div>
 </div>
@@ -324,6 +385,8 @@
     need: null,          /* 'awaiting' | 'noOpta' | 'cupDue' — a stat card filter */
     picker: null,
     limit: PAGE,
+    tab: 'fixtures',
+    bc: { comp: 'all', status: 'all', when: 'upcoming', limit: PAGE },
     current: null,       /* the current season key */
     listen: null,        /* the live fixtures ref for the viewed season */
     crowds: {}           /* matchID → { total, away } from Attendance */
@@ -351,7 +414,7 @@
   window.TOOL.boot = function (session) {
     S.session = session;
     S.canEdit = session.toolLevel === 'admin';
-    document.getElementById('fmActions').hidden = !S.canEdit;
+    document.getElementById('fmSettingsTab').hidden = !S.canEdit;
     renderComps();
     wireStatic();
 
@@ -388,9 +451,8 @@
      A closed set: the seasons clubs-meta knows. The workbook import is for
      the current one; a past one comes in from Attendance. */
   function renderSeasons() {
-    document.getElementById('fmSeasons').innerHTML = NL.season.keys(S.meta).map(function (k) {
-      return '<button class="chip' + (k === S.current ? ' active' : '') + '" type="button" data-season="' + esc(k) + '">' +
-        esc(NL.season.label(S.meta, k)) + '</button>';
+    document.getElementById('fmSeasonSel').innerHTML = NL.season.keys(S.meta).map(function (k) {
+      return '<option value="' + esc(k) + '"' + (k === S.current ? ' selected' : '') + '>' + esc(NL.season.label(S.meta, k)) + '</option>';
     }).join('');
   }
 
@@ -401,10 +463,9 @@
     S.crowds = {};
     S.limit = PAGE;
     var past = key !== S.current;
-    document.getElementById('fmSeason').textContent = 'Fixtures ' + NL.season.label(S.meta, key);
-    document.getElementById('fmFromAtt').hidden = !past;
-    document.getElementById('fmImport').hidden = false;
-    document.getElementById('fmAdd').hidden = past;
+    document.getElementById('fmSeasonSel').value = key;
+    document.getElementById('fmFromAttRow').hidden = !past;
+    document.getElementById('fmAddRow').hidden = past;
     loadCrowds(key);
     S.listen = ref('fixtures');
     S.listen.on('value', function (snap) {
@@ -449,12 +510,32 @@
   }
 
   function wireStatic() {
-    document.getElementById('fmSeasons').addEventListener('click', function (e) {
-      var b = e.target.closest('[data-season]');
-      if (!b || b.getAttribute('data-season') === S.season) return;
-      setActive('fmSeasons', b);
-      openSeason(b.getAttribute('data-season'));
+    document.getElementById('fmSeasonSel').addEventListener('change', function (e) {
+      if (e.target.value !== S.season) openSeason(e.target.value);
     });
+    document.getElementById('fmTabs').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-tab]');
+      if (!b) return;
+      S.tab = b.getAttribute('data-tab');
+      setActive('fmTabs', b);
+      Array.prototype.forEach.call(document.querySelectorAll('[data-panel]'), function (p) {
+        p.hidden = p.getAttribute('data-panel') !== S.tab;
+      });
+      render();
+    });
+    /* NL.clubPicker's × and an emptied box clear the picker without calling
+       onSelect, so the filter would stay on. Watch for both here.
+       Canon candidate (28/10/2026): the picker should tell its caller. */
+    var club = document.getElementById('fmClub');
+    /* Capture phase: the × stops its click from bubbling. */
+    club.addEventListener('click', function (e) {
+      if (!e.target.closest('.club-picker__clear')) return;
+      S.club = null; S.limit = PAGE; render();
+    }, true);
+    club.addEventListener('input', function (e) {
+      if (e.target.value === '' && S.club) { S.club = null; S.limit = PAGE; render(); }
+    });
+    wireBroadcast();
     document.getElementById('fmFromAtt').addEventListener('click', openFromAttendance);
     document.getElementById('fmImport').addEventListener('click', openImport);
     document.getElementById('fmResults').addEventListener('click', openResults);
@@ -517,6 +598,7 @@
   }
 
   function render() {
+    if (S.tab === 'broadcast') { renderBroadcast(); return; }
     var t = today();
     var all = Object.keys(S.fixtures).map(function (k) { return S.fixtures[k]; });
     renderStats(F.counts(S.fixtures, t));
@@ -665,6 +747,115 @@
         '<td>' + flags(r, t) + '</td></tr>';
     });
     return html + '</tbody></table></div>';
+  }
+
+  /* ── Broadcast ───────────────────────────────────────────────────────
+     Every game's availability, Enhanced, moved at DAZN's request and AMI,
+     changed in place and saved at once. A broadcast game given a new date
+     is flagged for review until confirmed here. FA ties are not ours to
+     show, so they are not listed. */
+  var BC_COMPS = ['national', 'north', 'south', 'nl-cup'];
+  var BC_STATUS = [['all', 'All'], ['tbc', 'TBC'], ['worldwide', 'Worldwide'], ['overseas', 'Overseas'],
+    ['not-selected', 'Not selected'], ['unavailable', 'Unavailable'], ['review', 'Review']];
+
+  function wireBroadcast() {
+    var comps = document.getElementById('fmBcComps');
+    comps.innerHTML = '<button class="chip active" type="button" data-v="all">All</button>' + BC_COMPS.map(function (k) {
+      return '<button class="chip" type="button" data-v="' + k + '">' + esc(F.COMP_BY_KEY[k].label) + '</button>';
+    }).join('');
+    var status = document.getElementById('fmBcStatus');
+    status.innerHTML = BC_STATUS.map(function (x, i) {
+      return '<button class="chip' + (i ? '' : ' active') + '" type="button" data-v="' + x[0] + '">' + esc(x[1]) + '</button>';
+    }).join('');
+    [['fmBcComps', 'comp'], ['fmBcStatus', 'status'], ['fmBcWhen', 'when']].forEach(function (g) {
+      document.getElementById(g[0]).addEventListener('click', function (e) {
+        var b = e.target.closest('[data-v],[data-when]');
+        if (!b) return;
+        S.bc[g[1]] = b.getAttribute('data-v') || b.getAttribute('data-when');
+        S.bc.limit = PAGE;
+        setActive(g[0], b);
+        renderBroadcast();
+      });
+    });
+    var body = document.getElementById('fmBcBody');
+    body.addEventListener('change', function (e) {
+      var tr = e.target.closest('[data-key]');
+      if (!tr || !S.canEdit) return;
+      var rec = S.fixtures[tr.getAttribute('data-key')];
+      if (!rec) return;
+      var n = clean(rec), field = e.target.getAttribute('data-f');
+      n.broadcast = n.broadcast || {};
+      if (field === 'availability') n.broadcast.availability = e.target.value;
+      else n.broadcast[field] = e.target.checked;
+      /* AMI takes only games shown in the UK (plan, AMI). */
+      if (n.broadcast.availability !== 'worldwide') n.broadcast.ami = false;
+      delete n.broadcast.review;
+      save(n).catch(function (err) { NL.toast('Save failed: ' + err.message, 'error'); renderBroadcast(); });
+    });
+    body.addEventListener('click', function (e) {
+      if (e.target.closest('[data-more]')) { S.bc.limit += PAGE; renderBroadcast(); return; }
+      var ok = e.target.closest('[data-reviewed]');
+      if (!ok || !S.canEdit) return;
+      var rec = S.fixtures[ok.closest('[data-key]').getAttribute('data-key')];
+      var n = clean(rec);
+      delete n.broadcast.review;
+      save(n).catch(function (err) { NL.toast('Save failed: ' + err.message, 'error'); });
+    });
+  }
+
+  function renderBroadcast() {
+    var t = today(), f = S.bc;
+    var all = Object.keys(S.fixtures).map(function (k) { return S.fixtures[k]; })
+      .filter(function (r) { return BC_COMPS.indexOf(r.comp) !== -1; });
+    var moves = all.filter(function (r) { return r.broadcast && r.broadcast.daznMove; }).length;
+    var ami = all.filter(function (r) { return r.broadcast && r.broadcast.ami; }).length;
+    var review = all.filter(function (r) { return r.broadcast && r.broadcast.review; }).length;
+    document.getElementById('fmBcTally').innerHTML = 'Moved by DAZN <strong>' + moves + ' / ' + F.DAZN_MOVES + '</strong> · AMI <strong>' +
+      ami + '</strong>' + (review ? ' · <strong>' + review + '</strong> to review' : '');
+
+    var list = all.filter(function (r) {
+      var b = r.broadcast || {};
+      if (!r.date) return false;
+      if (f.comp !== 'all' && r.comp !== f.comp) return false;
+      if (f.status === 'review') { if (!b.review) return false; }
+      else if (f.status !== 'all' && b.availability !== f.status) return false;
+      if (f.when === 'upcoming' && f.status !== 'review' && r.date < t) return false;
+      return true;
+    }).sort(F.compare);
+
+    var body = document.getElementById('fmBcBody');
+    if (!list.length) { body.innerHTML = '<div class="empty-state"><div class="empty-state__title">Nothing matches</div></div>'; return; }
+    var dis = S.canEdit ? '' : ' disabled';
+    var html = '<div class="table-wrap"><table class="table table--compact fm-table fm-bc-table"><colgroup>' +
+      '<col class="c-ko"><col class="c-comp"><col><col class="c-mid"><col><col class="c-av"><col class="c-tick"><col class="c-tick"><col class="c-tick"></colgroup>' +
+      '<thead><tr><th>KO</th><th>Comp</th><th class="ta-right">Home</th><th class="ta-center"></th><th>Away</th>' +
+      '<th>Availability</th><th class="ta-center">Enhanced</th><th class="ta-center">DAZN move</th><th class="ta-center">AMI</th></tr></thead><tbody>';
+    var day = null;
+    list.slice(0, f.limit).forEach(function (r) {
+      var b = r.broadcast || {};
+      if (r.date !== day) { day = r.date; html += '<tr class="fm-day"><td colspan="9">' + esc(NL.formatDate(r.date)) + '</td></tr>'; }
+      var opts = F.AVAILABILITY.filter(function (a) { return a.key !== 'cup'; }).map(function (a) {
+        return '<option value="' + a.key + '"' + (b.availability === a.key ? ' selected' : '') + '>' + esc(a.label) + '</option>';
+      }).join('');
+      html += '<tr data-key="' + esc(r.key) + '">' +
+        '<td class="fm-ko">' + esc(r.ko || '—') + '</td>' +
+        '<td>' + compPill(r.comp) + '</td>' +
+        '<td>' + team(r.home, true) + '</td>' + middle(r, t) + '<td>' + team(r.away, false) + '</td>' +
+        '<td>' + (b.review ? '<div class="fm-flags"><span class="pill pill--pending">Moved: review</span>' +
+          (S.canEdit ? '<button class="btn btn--ghost btn--sm" type="button" data-reviewed>Still right</button>' : '') + '</div>' : '') +
+          '<select class="nl-select fm-bc-av" data-f="availability"' + dis + '>' + opts + '</select></td>' +
+        '<td class="ta-center"><input type="checkbox" data-f="enhanced"' + (b.enhanced ? ' checked' : '') + dis + ' aria-label="Enhanced"></td>' +
+        '<td class="ta-center"><input type="checkbox" data-f="daznMove"' + (b.daznMove ? ' checked' : '') + dis + ' aria-label="Moved by DAZN"></td>' +
+        '<td class="ta-center"><input type="checkbox" data-f="ami"' + (b.ami ? ' checked' : '') +
+          (b.availability === 'worldwide' ? dis : ' disabled') + ' aria-label="AMI"></td></tr>';
+    });
+    html += '</tbody></table></div>';
+    if (list.length > f.limit) {
+      html += '<div class="filter-bar fm-gap"><button class="btn btn--ghost btn--sm" type="button" data-more>Show ' +
+        Math.min(PAGE, list.length - f.limit) + ' more of ' + (list.length - f.limit) + '</button></div>';
+    }
+    body.innerHTML = html;
+    NL.clubs.wireCrestImgs(body);
   }
 
   /* ── Save ─────────────────────────────────────────────────────────── */
@@ -1374,8 +1565,6 @@
             NL.toast('Imported ' + result.counts.total + ' fixtures into ' + NL.season.label(S.meta, target), 'success');
             m.close();
             if (target !== S.season) {
-              var chip = document.querySelector('#fmSeasons [data-season="' + target + '"]');
-              if (chip) setActive('fmSeasons', chip);
               openSeason(target);
             }
           })
