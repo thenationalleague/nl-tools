@@ -152,8 +152,8 @@ must be played before MD46 (Tue 20/04/2027, or Thu 22/04 with the switch).
 
 **Flags, never blocks** (except dates actually taken). The ops team's rules
 (28/10/2026) all land here as flags: a game within 48 hours; three away in a
-row; two away in a row each over a round-trip limit (200 miles, adjustable on
-the page); a cup round while still in; an international window
+row; two away in a row each over 200 miles round trip (fixed: no slider,
+Richard 28/10/2026); a cup round while still in; an international window
 (`internationalWindows` in the season calendar).
 - Possible cup date; replay Tuesday; Article 48 (above); Thursday.
 - **Home/away runs**, all competitions counted (staffing and cost do not care

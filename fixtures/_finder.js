@@ -4,8 +4,8 @@
    Version: v1.3 (28/10/2026)
    CHANGELOG
      v1.3 (28/10/2026) — From the ops team's rules: a game two days either
-       side is "within 48h"; two away games in a row each over a round-trip
-       limit (default 200 miles, opts.longTrip) are flagged; international
+       side is "within 48h"; two away games in a row each over 200 miles
+       round trip are flagged (fixed; opts.longTrip is for tests); international
        windows (calendar.internationalWindows) are flagged. Friday and
        Sunday join Monday and Thursday as switches. A run flag lists its
        games (flag.items) so the reader sees how far apart they are.
@@ -29,7 +29,8 @@
                  distances  assets/data/club-distances.json,
                  today      'YYYY-MM-DD' }
      opts      { mondays, thursdays, fridays, sundays: bool,
-                 longTrip: round-trip miles (default 200) }
+                 longTrip: round-trip miles, default 200 (tests only; the
+                 page uses the default, Richard 28/10/2026) }
    OUTPUT
      { slots: [{ date, day, ko, within35, flags: [{ level, text, items? }], weight }],
      items: [{ date, text }], the games behind a run or long-trip flag.
