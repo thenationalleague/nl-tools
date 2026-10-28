@@ -3,6 +3,12 @@
 <head>
 <!--
   Programme Packs — club library (standalone, passcode; ?master=1 for admins)
+  Version: v1.21 (28/10/2026) - the file machinery is canon, shared with the
+           Document Library (nl-utils v1.46): NL.zip replaces _zip.js (deleted),
+           NL.files.renderDocx the local Word loader (vendor files now at
+           /system/_vendor/), NL.files.dropEntries/readAll/fileOf the folder
+           walk, NL.files.queue the upload pump and NL.files.save the single
+           download. Same behaviour; PowerPoint files get their own 📽️ icon.
   Version: v1.20 (04/08/2026) - a download saves the file: the tile, the preview
            and a single ticked file all fetch to a Blob rather than navigating to
            the Storage URL, which opened a PDF as a page.
@@ -122,9 +128,8 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
-<script src="/programme/_zip.js?v=5"></script>
-<script src="/programme/_shared.js?v=5"></script>
-<script src="/system/nl-utils.js?v=49"></script>
+<script src="/system/nl-utils.js?v=50"></script>
+<script src="/programme/_shared.js?v=6"></script>
 <!-- GA4 for nl.tools — cookieless, no banner, no identity. See system/nl-analytics.js -->
 <script src="/system/nl-analytics.js?v=1"></script>
 <link rel="stylesheet" href="/programme/_shared.css?v=5">
@@ -817,40 +822,11 @@
   /* The eye reaches what can be shown without anyone else involved: images,
      PDFs, video and audio are the browser's own abilities; Word is rendered
      by vendored code below. Spreadsheets and the rest download instead. */
-  /* Word previews render CLIENT-SIDE (programme/_vendor/ — docx-preview +
-     its JSZip dependency), because the zero-effort routes are Microsoft's
-     and Google's embedded viewers, which work by handing the file's URL to a
-     third party to fetch — a club's material shipped to someone else for a
-     convenience. Rendering here, the bytes never leave Firebase. The two
-     scripts load lazily on the first Word preview, never on page load.
-     Only .docx: the 2003 binary .doc format needs Word itself. */
-  function isDocx(f) {
-    return String(f.contentType || '').toLowerCase() ===
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-      /\.docx$/i.test(String(f.name || ''));
-  }
-
-  var docxVendor = null;
-  function loadDocxVendor() {
-    if (docxVendor) return docxVendor;
-    docxVendor = ['/programme/_vendor/jszip.min.js', '/programme/_vendor/docx-preview.min.js']
-      .reduce(function (chain, src) {
-        return chain.then(function () {
-          return new Promise(function (resolve, reject) {
-            var s = document.createElement('script');
-            s.src = src;
-            s.onload = resolve;
-            s.onerror = function () { reject(new Error('The document viewer did not load.')); };
-            document.head.appendChild(s);
-          });
-        });
-      }, Promise.resolve())
-      .catch(function (e) {
-        docxVendor = null;   // a network blip must not wedge every later preview
-        throw e;
-      });
-    return docxVendor;
-  }
+  /* Word previews render CLIENT-SIDE, through canon NL.files.renderDocx
+     (vendored docx-preview at /system/_vendor/), never an embedded
+     Microsoft/Google viewer, which would hand a club's file URL to a third
+     party. Only .docx: the 2003 binary .doc format needs Word itself. */
+  var isDocx = NL.files.isDocx;
 
   function canPreview(f) {
     var kind = PP.fileKind(f.contentType, f.name);
@@ -926,18 +902,7 @@
          so the wait happens behind "Preparing" rather than a dead eye
          button. Every failure lands in the same place: the modal stays
          useful because Download is already there. */
-      loadDocxVendor()
-        .then(function () { return fetch(f.url); })
-        .then(function (r) {
-          if (!r.ok) throw new Error('fetch ' + r.status);
-          return r.blob();
-        })
-        .then(function (blob) {
-          var host = el('prevDocx');
-          if (!host || !document.body.contains(host)) return;   // modal already closed
-          host.textContent = '';
-          return window.docx.renderAsync(blob, host);
-        })
+      NL.files.renderDocx(f.url, el('prevDocx'))
         .catch(function () {
           var host = el('prevDocx');
           if (host && document.body.contains(host)) {
@@ -1215,36 +1180,11 @@
 
      A folder whose name already exists at that level is reused rather than
      duplicated, the way copying into a folder on a desktop merges. */
-  function entriesFrom(dt) {
-    var items = dt && dt.items ? Array.prototype.slice.call(dt.items) : [];
-    var out = [];
-    items.forEach(function (it) {
-      var entry = it.webkitGetAsEntry ? it.webkitGetAsEntry() : null;
-      if (entry) out.push(entry);
-    });
-    /* No entry API (or nothing resolved): the caller falls back to .files,
-       which is right for loose files and is the best available for a folder. */
-    return out.some(function (e) { return e.isDirectory; }) ? out : [];
-  }
-
-  /* readEntries returns at most 100 at a time and signals the end with an
-     empty batch. Calling it once silently truncates a folder of 150 stills. */
-  function readAll(reader) {
-    return new Promise(function (resolve, reject) {
-      var all = [];
-      (function next() {
-        reader.readEntries(function (batch) {
-          if (!batch.length) return resolve(all);
-          all = all.concat(Array.prototype.slice.call(batch));
-          next();
-        }, reject);
-      })();
-    });
-  }
-
-  function fileOf(entry) {
-    return new Promise(function (resolve, reject) { entry.file(resolve, reject); });
-  }
+  /* Reading the dropped tree is canon (NL.files.dropEntries / readAll /
+     fileOf); filing it into this club's folders is this page's. */
+  var entriesFrom = NL.files.dropEntries;
+  var readAll = NL.files.readAll;
+  var fileOf = NL.files.fileOf;
 
   function ingestDrop(code, entries, into, level) {
     /* Folders created during this walk are not in FOLDERS yet — the RTDB
@@ -1498,8 +1438,8 @@
 
   /* ── Zip download ─────────────────────────────────────────────────────
      Everything at or below a folder, or the whole club pack. Files are fetched
-     from their Storage download URLs and assembled in the tab — see _zip.js for
-     why the archive is stored rather than deflated.
+     from their Storage download URLs and assembled in the tab — see NL.zip in
+     nl-utils.js for why the archive is stored rather than deflated.
 
      The one thing that can stop this is CORS: a browser may only read bytes
      cross-origin if the bucket allows it. Downloading a single file never hits
@@ -1528,18 +1468,7 @@
   function downloadFile(code, f) {
     if (!f || !f.url) return;
     PP.audit('download', { club: code, detail: f.name });
-    fetch(f.url).then(function (r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.blob();
-    }).then(function (blob) {
-      NL.download(f.name, blob, blob.type || f.contentType);
-    }).catch(function (e) {
-      console.error('[programme] download', e);
-      NL.toast(e instanceof TypeError
-        ? 'Saving is blocked by the bucket\u2019s CORS settings \u2014 opening it instead'
-        : 'Could not save ' + f.name + ': ' + (e.message || e), 'error');
-      window.open(f.url, '_blank');
-    });
+    NL.files.save(f.url, f.name, f.contentType);
   }
 
   function zipFrom(list, label) {
@@ -1566,7 +1495,7 @@
             return r.arrayBuffer();
           }).then(function (buf) {
             entries.push({
-              name: PPZip.uniqueName(item.path + PP.safeName(item.file.name), taken),
+              name: NL.zip.uniqueName(item.path + PP.safeName(item.file.name), taken),
               data: new Uint8Array(buf),
               date: item.file.uploadedAt
             });
@@ -1575,7 +1504,7 @@
       }, Promise.resolve());
 
       return chain.then(function () {
-        NL.download(PP.safeName(label) + '.zip', PPZip.build(entries), 'application/zip');
+        NL.download(PP.safeName(label) + '.zip', NL.zip.build(entries), 'application/zip');
         NL.toast('Downloaded ' + entries.length + ' file' + (entries.length === 1 ? '' : 's'), 'success');
         PP.audit('download-zip', { club: view.club, detail: label + ' (' + entries.length + ' files)' });
       });
@@ -1770,19 +1699,9 @@
      simultaneous Storage puts gets every one of them slower and the browser's
      own connection limit turns the progress list into a wall of stalled bars.
      Four at a time finishes sooner and looks like it is working. */
-  var UP_MAX = 4;
-  var upQueue = [], upActive = 0;
-
-  function upPump() {
-    while (upActive < UP_MAX && upQueue.length) {
-      upActive++;
-      upQueue.shift()().then(upNext, upNext);
-    }
-  }
-  function upNext() { upActive--; upPump(); }
+  var upQueue = NL.files.queue(4);
   function enqueueUpload(code, folderId, file) {
     upQueue.push(function () { return uploadOne(code, folderId, file); });
-    upPump();
   }
 
   /* ── Remove (soft) ────────────────────────────────────────────────────

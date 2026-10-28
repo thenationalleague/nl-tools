@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { webcrypto } from 'node:crypto';
 import vm from 'node:vm';
+import { NL as CANON } from './load-canon.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, '..');
@@ -32,6 +33,9 @@ const sandbox = {
   Error, Promise, parseInt, parseFloat, isNaN, isFinite, URLSearchParams,
   encodeURIComponent, decodeURIComponent, Uint32Array,
   crypto: webcrypto,
+  /* _shared.js v1.6 aliases its file helpers to canon NL.files, so it loads
+     after nl-utils.js in the page — and after the real canon here. */
+  NL: CANON,
   localStorage: {
     _v: {},
     getItem(k) { return Object.prototype.hasOwnProperty.call(this._v, k) ? this._v[k] : null; },
@@ -244,101 +248,8 @@ test('fileKind classifies on content type first, extension second', () => {
   assert.equal(PP.fileKind('', ''), 'file');
 });
 
-/* ── ZIP writer ────────────────────────────────────────────────────────
-   The archive is assembled by hand in programme/_zip.js, so the parts that
-   would silently produce a corrupt file are pinned here. Structural validity
-   is also checked against real `unzip` during development — see the PR. */
-
-const zipSandbox = {
-  console, Date, Math, JSON, Object, Array, String, Number, Boolean, RegExp,
-  Error, Promise, Uint8Array, Uint32Array, TextEncoder,
-  unescape: globalThis.unescape, encodeURIComponent,
-  /* Enough of Blob to inspect what was written. */
-  Blob: class { constructor(parts) { this.parts = parts; } },
-};
-zipSandbox.window = zipSandbox;
-zipSandbox.globalThis = zipSandbox;
-vm.createContext(zipSandbox);
-vm.runInContext(readFileSync(join(REPO, 'programme/_zip.js'), 'utf8'), zipSandbox,
-  { filename: 'programme/_zip.js' });
-const Zip = zipSandbox.PPZip;
-
-test('crc32 matches the standard IEEE test vector', () => {
-  const bytes = new TextEncoder().encode('The quick brown fox jumps over the lazy dog');
-  assert.equal(Zip.crc32(bytes), 0x414FA339);
-});
-
-test('crc32 of empty input is 0', () => {
-  assert.equal(Zip.crc32(new Uint8Array(0)), 0);
-});
-
-test('uniqueName suffixes collisions the way a desktop would', () => {
-  const taken = {};
-  assert.equal(Zip.uniqueName('crest.png', taken), 'crest.png');
-  assert.equal(Zip.uniqueName('crest.png', taken), 'crest (2).png');
-  assert.equal(Zip.uniqueName('crest.png', taken), 'crest (3).png');
-  assert.equal(Zip.uniqueName('README', taken), 'README');
-  assert.equal(Zip.uniqueName('README', taken), 'README (2)');
-});
-
-test('uniqueName never returns a duplicate — a zip with two identical entries unpacks unpredictably', () => {
-  const taken = {}, seen = new Set();
-  for (let i = 0; i < 200; i++) {
-    const n = Zip.uniqueName('same.jpg', taken);
-    assert.ok(!seen.has(n), `duplicate entry name: ${n}`);
-    seen.add(n);
-  }
-});
-
-test('build emits the ZIP magic numbers and one central entry per file', () => {
-  const enc = new TextEncoder();
-  const blob = Zip.build([
-    { name: 'a/one.txt', data: enc.encode('one') },
-    { name: 'b/two.txt', data: enc.encode('two') },
-  ]);
-  const flat = [];
-  for (const part of blob.parts) for (const b of part) flat.push(b);
-  const bytes = Uint8Array.from(flat);
-
-  function count(sig) {
-    let n = 0;
-    for (let i = 0; i + 3 < bytes.length; i++) {
-      if (bytes[i] === sig[0] && bytes[i + 1] === sig[1] && bytes[i + 2] === sig[2] && bytes[i + 3] === sig[3]) n++;
-    }
-    return n;
-  }
-  assert.equal(count([0x50, 0x4b, 0x03, 0x04]), 2, 'one local header per entry');
-  assert.equal(count([0x50, 0x4b, 0x01, 0x02]), 2, 'one central directory entry per file');
-  assert.equal(count([0x50, 0x4b, 0x05, 0x06]), 1, 'exactly one end-of-central-directory');
-});
-
-test('dosStamp packs a real date — zero renders as 30 Nov 1979 and looks corrupt', () => {
-  const stamp = Zip.dosStamp(Date.UTC(2026, 7, 3, 14, 30, 20));
-  /* Read the packed fields back out. Local time, because that is what the
-     format stores and what an unzip tool will show. */
-  const d = new Date(Date.UTC(2026, 7, 3, 14, 30, 20));
-  assert.equal(stamp.date >> 9, d.getFullYear() - 1980);
-  assert.equal((stamp.date >> 5) & 0x0F, d.getMonth() + 1);
-  assert.equal(stamp.date & 0x1F, d.getDate());
-  assert.equal(stamp.time >> 11, d.getHours());
-  assert.equal((stamp.time >> 5) & 0x3F, d.getMinutes());
-});
-
-test('dosStamp clamps anything before the DOS epoch rather than wrapping', () => {
-  const early = Zip.dosStamp(Date.UTC(1970, 0, 1));
-  assert.equal(early.date >> 9, 0, 'year 1980');
-  assert.equal((early.date >> 5) & 0x0F, 1);
-  assert.equal(early.date & 0x1F, 1);
-  assert.ok(Zip.dosStamp(NaN).date > 0, 'a junk date still yields a valid field');
-});
-
-test('build marks names UTF-8 so accented club names survive', () => {
-  const blob = Zip.build([{ name: 'Àccented.txt', data: new Uint8Array([1]) }]);
-  const flat = [];
-  for (const part of blob.parts) for (const b of part) flat.push(b);
-  /* General-purpose flag is bytes 6-7 of the local header; bit 11 = 0x0800. */
-  assert.equal(flat[6] | (flat[7] << 8), 0x0800);
-});
+/* The ZIP writer is canon now (NL.zip, nl-utils v1.46) and is tested in
+   tests/files-canon.test.mjs. */
 
 /* ── Credentials ──────────────────────────────────────────────────────── */
 

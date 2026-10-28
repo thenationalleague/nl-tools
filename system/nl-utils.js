@@ -1,7 +1,29 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.45 (19/10/2026)
+   Version: v1.46 (28/10/2026)
+
+   v1.46 — NL.files and NL.zip: the file-library helpers, promoted on their
+   second use (cache-bust ?v=49 -> ?v=50, nl-brand unchanged). Programme
+   Packs wrote them first; the Document Library needed every one of them,
+   and two copies of a hand-built zip writer is the drift this rule exists
+   to kill. What moved, unchanged in behaviour:
+   · NL.files.safeName / humanSize / typeFor (was PP.uploadType) / kind
+     (was PP.fileKind) / kindIcon
+   · NL.files.previews — the thumb/medium canvas tiers, minus the Storage
+     upload, which is each tool's own path
+   · NL.files.isDocx / renderDocx — the vendored Word viewer, now at
+     /system/_vendor/ (was /programme/_vendor/)
+   · NL.files.dropEntries / readAll / fileOf — reading a dropped folder
+   · NL.files.queue(limit) — the four-at-a-time upload pump
+   · NL.files.save(url, name, type) — fetch-to-Blob download with the CORS
+     fallback
+   · NL.zip — the stored-zip writer (was programme/_zip.js, PPZip)
+   And what is new, for a library that behaves like a desktop folder:
+   · NL.files.cleanName / keepExt / uniqueIn / contentDisposition — rename
+     rules (no characters a desktop refuses, extension kept, no two names
+     alike in one folder) and the header that makes a renamed file download
+     under its new name.
 
    v1.45 — Two things, one cache-bust (?v=48 -> ?v=49, nl-brand unchanged):
    · NL.month — month keys ('YYYY-MM'): key(date), label(key) → 'September
@@ -3064,6 +3086,554 @@
     return {
       order: function() { return ids(); }
     };
+  };
+
+  /* ===================================================================
+     NL.files — the file-library helpers (v1.46)
+
+     A tool that stores files in Firebase Storage and lists them like a
+     folder on a desktop needs the same dozen things: a safe name, a size a
+     person can read, the right content type, previews, a dropped folder read
+     as a tree, an upload queue, a download that saves rather than navigates,
+     and a zip. Programme Packs wrote these first; the Document Library is the
+     second caller, which is when they move here.
+
+     Storage paths and RTDB shapes are NOT here — those are each tool's own
+     data, and its rules are written against them.
+     =================================================================== */
+
+  /* A filename on its way into a Storage object path: nothing that breaks
+     the path or lets a name climb out of its folder. NOT a display rule —
+     cleanName below is the one for names people see. */
+  function filesSafeName(s) {
+    var name = String(s == null ? '' : s).trim();
+    name = name.replace(/[\\/]/g, '-');
+    name = name.replace(/\.{2,}/g, '.');
+    name = name.replace(/[^A-Za-z0-9._ -]/g, '');
+    name = name.replace(/-{2,}/g, '-');
+    name = name.replace(/^[.\-\s]+/, '');
+    name = name.replace(/\s+/g, ' ').trim();
+    if (!name || name === '.' || name === '..') name = 'file';
+    return name.slice(0, 120);
+  }
+
+  function filesHumanSize(bytes) {
+    var b = Number(bytes) || 0;
+    if (b < 1024) return b + ' B';
+    var units = ['KB', 'MB', 'GB'], i = -1, v = b;
+    do { v = v / 1024; i++; } while (v >= 1024 && i < units.length - 1);
+    return (v >= 10 ? Math.round(v) : Math.round(v * 10) / 10) + ' ' + units[i];
+  }
+
+  /* Extension first, browser second. Windows derives File.type from its
+     registry and reports a .zip as application/x-zip-compressed, and plenty
+     of files arrive with no type at all, which makes the browser guess on
+     download later. A canonical type fixes both ends. */
+  var FILES_EXT_TYPE = {
+    zip: 'application/zip', pdf: 'application/pdf',
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+    webp: 'image/webp', svg: 'image/svg+xml', tif: 'image/tiff', tiff: 'image/tiff',
+    psd: 'image/vnd.adobe.photoshop',
+    eps: 'application/postscript', ai: 'application/postscript',
+    doc: 'application/msword',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xls: 'application/vnd.ms-excel',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ppt: 'application/vnd.ms-powerpoint',
+    pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    csv: 'text/csv', txt: 'text/plain', rtf: 'application/rtf',
+    mp4: 'video/mp4', mov: 'video/quicktime', mp3: 'audio/mpeg'
+  };
+
+  function filesExt(name) {
+    name = String(name || '');
+    var dot = name.lastIndexOf('.');
+    return dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
+  }
+
+  function filesTypeFor(file) {
+    var t = FILES_EXT_TYPE[filesExt(file && file.name)];
+    if (t) return t;
+    return (file && file.type) || 'application/octet-stream';
+  }
+
+  function filesKind(contentType, name) {
+    var t = String(contentType || '').toLowerCase();
+    var ext = String(name || '').toLowerCase().split('.').pop();
+    if (t.indexOf('image/') === 0) return 'image';
+    if (t.indexOf('video/') === 0 || /^(mp4|mov|m4v|webm)$/.test(ext)) return 'video';
+    if (t.indexOf('audio/') === 0 || /^(mp3|wav|m4a|aac|ogg)$/.test(ext)) return 'audio';
+    if (t === 'application/pdf' || ext === 'pdf') return 'pdf';
+    if (t.indexOf('word') !== -1 || ext === 'doc' || ext === 'docx') return 'doc';
+    if (t.indexOf('sheet') !== -1 || t.indexOf('excel') !== -1 || ext === 'xls' || ext === 'xlsx' || ext === 'csv') return 'sheet';
+    if (t.indexOf('presentation') !== -1 || t.indexOf('powerpoint') !== -1 || ext === 'ppt' || ext === 'pptx') return 'slides';
+    return 'file';
+  }
+
+  var FILES_KIND_ICON = { image: '🖼️', video: '🎬', audio: '🎵', pdf: '📕', doc: '📄',
+    sheet: '📊', slides: '📽️', file: '📎' };
+
+  /* ── Names people see ──────────────────────────────────────────────────
+     A library that behaves like a folder on a desktop refuses the names a
+     desktop refuses. These are the Windows reserved characters — the
+     strictest of the three systems a downloaded file can land on — so a
+     name that is valid here is valid wherever the file is saved, and the
+     name on screen is exactly the name on disk.
+
+     Returns { ok, name } or { ok: false, error }. The error is written for
+     the person typing, not for a log. */
+  var FILES_BAD_CHARS = /[\\\/:*?"<>|\u0000-\u001f]/;
+  var FILES_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
+
+  function filesCleanName(s) {
+    var name = String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+    if (!name) return { ok: false, error: 'A name is needed.' };
+    if (FILES_BAD_CHARS.test(name)) {
+      return { ok: false, error: 'A name can\u2019t contain any of  \\ / : * ? " < > |' };
+    }
+    /* Windows strips a trailing dot or space when saving, which would make
+       the name on disk differ from the name here. */
+    name = name.replace(/[. ]+$/, '');
+    if (!name || /^\.+$/.test(name)) return { ok: false, error: 'A name is needed.' };
+    if (FILES_RESERVED.test(name)) return { ok: false, error: '\u201c' + name + '\u201d is reserved by Windows.' };
+    if (name.length > 160) return { ok: false, error: 'Names are limited to 160 characters.' };
+    return { ok: true, name: name };
+  }
+
+  /* A rename keeps the file's extension, because the extension is what
+     tells the computer it lands on how to open it. Type a new name without
+     one and it is put back; type a different one and the old is appended —
+     "Report.docx" renamed to "Final.pdf" is still a Word file, so it becomes
+     "Final.pdf.docx" rather than a file that will not open. */
+  function filesKeepExt(newName, oldName) {
+    var ext = filesExt(oldName);
+    if (!ext) return newName;
+    return filesExt(newName) === ext ? newName : newName + '.' + ext;
+  }
+
+  /* No two names alike in one folder, ignoring case — Windows and macOS
+     both treat "Budget.pdf" and "budget.pdf" as the same file, so a zip of a
+     folder holding both would lose one on unpacking. `taken` is the names
+     already there. Suffixes the way a desktop does: "Report (2).pdf". */
+  function filesUniqueIn(name, taken) {
+    var seen = {};
+    (taken || []).forEach(function (t) { seen[String(t).toLowerCase()] = true; });
+    if (!seen[String(name).toLowerCase()]) return name;
+    var dot = name.lastIndexOf('.');
+    var stem = dot > 0 ? name.slice(0, dot) : name;
+    var ext = dot > 0 ? name.slice(dot) : '';
+    for (var n = 2; n < 10000; n++) {
+      var candidate = stem + ' (' + n + ')' + ext;
+      if (!seen[candidate.toLowerCase()]) return candidate;
+    }
+    return stem + ' (' + Date.now() + ')' + ext;
+  }
+
+  /* The Content-Disposition a Storage object carries, so its download URL
+     saves under the name on screen. `inline`, not `attachment`: the PDF
+     preview loads the same URL in an iframe, and attachment would turn the
+     preview into a download. Chrome, Edge, Firefox and Safari all take the
+     filename from an inline header for Save as.
+     RFC 6266: the quoted `filename` is an ASCII fallback (anything else
+     becomes _), `filename*` carries the real UTF-8 name. */
+  function filesContentDisposition(name) {
+    name = String(name || 'file');
+    var ascii = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
+    var utf = encodeURIComponent(name).replace(/['()*]/g, function (c) {
+      return '%' + c.charCodeAt(0).toString(16).toUpperCase();
+    });
+    return 'inline; filename="' + ascii + '"; filename*=UTF-8\'\'' + utf;
+  }
+
+  /* ── Previews — three sizes per image ─────────────────────────────────
+     thumb 360px long edge (a grid tile), medium 1600px (the preview modal),
+     full = the original (download only). The same vocabulary as the crest
+     tiers. Rendered in the browser at upload with a canvas, because the org
+     policy blocking public invokers on Cloud Run makes an on-demand resize
+     URL unreachable — see programme/README.md. Uploading the tiers is the
+     tool's job: the paths are its own. */
+  var PREVIEW_TIERS = { thumb: 360, medium: 1600 };
+  var PREVIEW_QUALITY = 0.82;
+  /* Decodable and drawable everywhere. Not SVG (taints a canvas, scales by
+     itself), not TIFF/PSD (no browser decodes them), not GIF (a canvas keeps
+     one frame and the tile would freeze). */
+  var PREVIEW_DECODABLE = { 'image/png': 1, 'image/jpeg': 1, 'image/webp': 1 };
+  /* What an <img> can show at all — broader than the above. */
+  var PREVIEW_RENDERABLE = { 'image/png': 1, 'image/jpeg': 1, 'image/webp': 1,
+    'image/gif': 1, 'image/svg+xml': 1, 'image/avif': 1 };
+
+  function previewEligible(contentType) {
+    return PREVIEW_DECODABLE[String(contentType || '').toLowerCase()] === 1;
+  }
+  function previewRenderable(contentType) {
+    return PREVIEW_RENDERABLE[String(contentType || '').toLowerCase()] === 1;
+  }
+  /* PNG keeps alpha and stays PNG; everything else flattens to JPEG. */
+  function previewOutput(contentType) {
+    var t = String(contentType || '').toLowerCase();
+    return (t === 'image/png' || t === 'image/gif')
+      ? { type: 'image/png', ext: 'png' }
+      : { type: 'image/jpeg', ext: 'jpg' };
+  }
+  /* Long edge down to `max`, aspect kept, never upscaled, never below 1px. */
+  function previewFit(w, h, max) {
+    w = Math.max(1, Math.round(Number(w) || 0));
+    h = Math.max(1, Math.round(Number(h) || 0));
+    var edge = Math.max(w, h);
+    if (edge <= max) return { w: w, h: h };
+    var scale = max / edge;
+    return { w: Math.max(1, Math.round(w * scale)), h: Math.max(1, Math.round(h * scale)) };
+  }
+  /* EXIF orientation applied, so a portrait phone photo does not thumb
+     sideways. Engines without the option throw; fall back twice. */
+  function previewDecode(blob) {
+    if (typeof createImageBitmap === 'function') {
+      return createImageBitmap(blob, { imageOrientation: 'from-image' })
+        .catch(function () { return createImageBitmap(blob); })
+        .catch(function () { return previewDecodeViaImg(blob); });
+    }
+    return previewDecodeViaImg(blob);
+  }
+  function previewDecodeViaImg(blob) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(blob);
+      var img = new Image();
+      img.onload = function () { URL.revokeObjectURL(url); resolve(img); };
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('undecodable')); };
+      img.src = url;
+    });
+  }
+  function previewEncode(src, w, h, max, out) {
+    var dims = previewFit(w, h, max);
+    var canvas = document.createElement('canvas');
+    canvas.width = dims.w;
+    canvas.height = dims.h;
+    var ctx = canvas.getContext('2d');
+    if (!ctx) return Promise.resolve(null);
+    if (out.type === 'image/jpeg') {   // WebP alpha would composite onto black
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, dims.w, dims.h);
+    }
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(src, 0, 0, dims.w, dims.h);
+    return new Promise(function (resolve) {
+      canvas.toBlob(function (b) { resolve(b || null); }, out.type, PREVIEW_QUALITY);
+    });
+  }
+  /* blob + canonical type
+       → { thumb?: {blob, contentType, ext}, medium?: {…} }  tiers rendered
+       → {}    ran, and the image is small enough to need none
+       → null  ineligible, or decode/encode failed (retryable later)
+     Never rejects for anything expected: a missing preview must not fail
+     the upload it belongs to. Browser only. */
+  function previewMake(blob, contentType) {
+    if (!previewEligible(contentType)) return Promise.resolve(null);
+    return previewDecode(blob).then(function (src) {
+      var w = src.naturalWidth || src.width, h = src.naturalHeight || src.height;
+      if (!w || !h) return null;
+      var out = previewOutput(contentType);
+      var tiers = Object.keys(PREVIEW_TIERS).filter(function (t) {
+        return Math.max(w, h) > PREVIEW_TIERS[t];
+      });
+      return tiers.reduce(function (chain, tier) {
+        return chain.then(function (acc) {
+          return previewEncode(src, w, h, PREVIEW_TIERS[tier], out).then(function (b) {
+            if (b) acc[tier] = { blob: b, contentType: out.type, ext: out.ext };
+            return acc;
+          });
+        });
+      }, Promise.resolve({})).then(function (acc) {
+        if (src.close) src.close();
+        return acc;
+      });
+    })['catch'](function () { return null; });
+  }
+
+  /* ── Word previews ─────────────────────────────────────────────────────
+     Rendered in the viewer's own browser by vendored docx-preview (and its
+     JSZip dependency) from /system/_vendor/, loaded on the first Word
+     preview and never on page load. The zero-effort alternatives —
+     Microsoft's and Google's embedded viewers — work by handing the file's
+     URL to a third party to fetch. Here the bytes never leave Storage.
+     .docx only: the 2003 binary .doc needs Word itself. */
+  var DOCX_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  function filesIsDocx(f) {
+    return String((f && f.contentType) || '').toLowerCase() === DOCX_TYPE ||
+      /\.docx$/i.test(String((f && f.name) || ''));
+  }
+  var docxVendor = null;
+  function loadDocxVendor() {
+    if (docxVendor) return docxVendor;
+    docxVendor = ['/system/_vendor/jszip.min.js', '/system/_vendor/docx-preview.min.js']
+      .reduce(function (chain, src) {
+        return chain.then(function () {
+          return new Promise(function (resolve, reject) {
+            var s = document.createElement('script');
+            s.src = src;
+            s.onload = resolve;
+            s.onerror = function () { reject(new Error('The document viewer did not load.')); };
+            document.head.appendChild(s);
+          });
+        });
+      }, Promise.resolve())
+      ['catch'](function (e) {
+        docxVendor = null;   // a network blip must not wedge every later preview
+        throw e;
+      });
+    return docxVendor;
+  }
+  /* Fetches `url`, renders it into `host`. Rejects on any failure, and the
+     caller says so in place — its Download button is already on screen. */
+  function filesRenderDocx(url, host) {
+    return loadDocxVendor()
+      .then(function () { return fetch(url); })
+      .then(function (r) {
+        if (!r.ok) throw new Error('fetch ' + r.status);
+        return r.blob();
+      })
+      .then(function (blob) {
+        if (!host || !document.body.contains(host)) return;   // closed meanwhile
+        host.textContent = '';
+        return window.docx.renderAsync(blob, host);
+      });
+  }
+
+  /* ── Reading a dropped folder ──────────────────────────────────────────
+     dataTransfer.files reports a dropped directory as a zero-byte File with
+     no type, so the obvious code uploads a 0-byte "file" named after the
+     folder and throws its contents away. The entry API is the only way to
+     see a directory and walk into it.
+
+     dropEntries MUST be called inside the drop handler, synchronously —
+     dataTransfer.items are emptied the moment the event returns. It answers
+     [] when nothing dropped was a folder, so the caller uses .files for the
+     ordinary loose-files case. */
+  function filesDropEntries(dt) {
+    var items = dt && dt.items ? Array.prototype.slice.call(dt.items) : [];
+    var out = [];
+    items.forEach(function (it) {
+      var entry = it.webkitGetAsEntry ? it.webkitGetAsEntry() : null;
+      if (entry) out.push(entry);
+    });
+    return out.some(function (e) { return e.isDirectory; }) ? out : [];
+  }
+  /* readEntries returns at most 100 at a time and signals the end with an
+     empty batch; calling it once silently truncates a folder of 150. */
+  function filesReadAll(reader) {
+    return new Promise(function (resolve, reject) {
+      var all = [];
+      (function next() {
+        reader.readEntries(function (batch) {
+          if (!batch.length) return resolve(all);
+          all = all.concat(Array.prototype.slice.call(batch));
+          next();
+        }, reject);
+      })();
+    });
+  }
+  function filesFileOf(entry) {
+    return new Promise(function (resolve, reject) { entry.file(resolve, reject); });
+  }
+
+  /* ── Upload queue ──────────────────────────────────────────────────────
+     A dropped folder can be two hundred files. Two hundred simultaneous
+     Storage puts make every one slower and turn a progress list into a wall
+     of stalled bars; four at a time finishes sooner and looks like it is
+     working. push(fn) where fn returns a promise; failures do not stop the
+     queue. */
+  function filesQueue(limit) {
+    limit = Math.max(1, limit || 4);
+    var waiting = [], active = 0;
+    function pump() {
+      while (active < limit && waiting.length) {
+        active++;
+        Promise.resolve().then(waiting.shift()).then(next, next);
+      }
+    }
+    function next() { active--; pump(); }
+    return {
+      push: function (fn) { waiting.push(fn); pump(); },
+      size: function () { return waiting.length + active; }
+    };
+  }
+
+  /* ── Saving one file ───────────────────────────────────────────────────
+     A bare <a href download> at a Storage URL navigates instead of saving:
+     browsers honour `download` only same-origin, blob: or data:, and a PDF
+     opens as a page. Fetching to a Blob makes the attribute work. If the
+     fetch is refused — bucket CORS, the one thing that stops it — open the
+     file in a tab instead, and say why. Resolves true when saved. */
+  function filesSave(url, name, type) {
+    return fetch(url).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.blob();
+    }).then(function (blob) {
+      window.NL.download(name, blob, blob.type || type);
+      return true;
+    })['catch'](function (e) {
+      if (window.NL.toast) {
+        window.NL.toast(e instanceof TypeError
+          ? 'Saving is blocked by the bucket\u2019s CORS settings \u2014 opening it instead'
+          : 'Could not save ' + name + ': ' + (e.message || e), 'error');
+      }
+      window.open(url, '_blank');
+      return false;
+    });
+  }
+
+  window.NL.files = {
+    safeName: filesSafeName,
+    humanSize: filesHumanSize,
+    EXT_TYPE: FILES_EXT_TYPE,
+    ext: filesExt,
+    typeFor: filesTypeFor,
+    kind: filesKind,
+    kindIcon: function (kind) { return FILES_KIND_ICON[kind] || FILES_KIND_ICON.file; },
+    cleanName: filesCleanName,
+    keepExt: filesKeepExt,
+    uniqueIn: filesUniqueIn,
+    contentDisposition: filesContentDisposition,
+    previews: {
+      TIERS: PREVIEW_TIERS,
+      eligible: previewEligible,
+      renderable: previewRenderable,
+      output: previewOutput,
+      fitWithin: previewFit,
+      make: previewMake
+    },
+    isDocx: filesIsDocx,
+    renderDocx: filesRenderDocx,
+    dropEntries: filesDropEntries,
+    readAll: filesReadAll,
+    fileOf: filesFileOf,
+    queue: filesQueue,
+    save: filesSave
+  };
+
+  /* ===================================================================
+     NL.zip — a stored (uncompressed) ZIP built in the browser (v1.46)
+
+     No dependency and no build step, which is the repo's whole posture.
+     Stored, not deflated: what goes into these libraries is PDF, PNG, JPEG
+     and Office files — all already compressed — so deflate would spend CPU
+     to save a percent or two. A stored ZIP is a completely standard archive;
+     Finder, File Explorer and every unzip tool open it without comment.
+
+     Assembled in memory, not streamed. The caller is responsible for not
+     asking for something absurd — warn before a few hundred MB.
+
+       NL.zip.build([{ name, data: Uint8Array, date?: epochMs }]) → Blob
+       NL.zip.uniqueName(name, takenMap) → a non-colliding entry name
+     =================================================================== */
+  var ZIP_TABLE = null;
+  function zipTable() {
+    if (ZIP_TABLE) return ZIP_TABLE;
+    ZIP_TABLE = new Uint32Array(256);
+    for (var n = 0; n < 256; n++) {
+      var c = n;
+      for (var k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      ZIP_TABLE[n] = c >>> 0;
+    }
+    return ZIP_TABLE;
+  }
+  /* Standard CRC-32 (IEEE 802.3). */
+  function zipCrc32(bytes) {
+    var t = zipTable(), c = 0xFFFFFFFF;
+    for (var i = 0; i < bytes.length; i++) c = t[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+  }
+  /* Names are written UTF-8 with the language-encoding flag set, so accented
+     names survive the round trip instead of arriving as mojibake. */
+  function zipUtf8(str) {
+    if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(str);
+    var out = [], s = unescape(encodeURIComponent(String(str)));
+    for (var i = 0; i < s.length; i++) out.push(s.charCodeAt(i) & 0xFF);
+    return new Uint8Array(out);
+  }
+  /* A ZIP with duplicate entries unpacks unpredictably, so later ones are
+     suffixed the way a desktop would: "crest (2).png". */
+  function zipUniqueName(name, taken) {
+    name = String(name || 'file');
+    if (!taken[name]) { taken[name] = true; return name; }
+    var dot = name.lastIndexOf('.');
+    var stem = dot > 0 ? name.slice(0, dot) : name;
+    var ext = dot > 0 ? name.slice(dot) : '';
+    for (var n = 2; n < 10000; n++) {
+      var candidate = stem + ' (' + n + ')' + ext;
+      if (!taken[candidate]) { taken[candidate] = true; return candidate; }
+    }
+    taken[name + '-' + Date.now()] = true;
+    return name + '-' + Date.now();
+  }
+  /* MS-DOS date/time, the only timestamp a local header carries. Zeroed
+     fields render as 30 Nov 1979 and look like corruption.
+     time = h<<11 | m<<5 | s/2, date = (y-1980)<<9 | m<<5 | d. */
+  function zipDosStamp(ms) {
+    /* `== null`, not falsy: epoch 0 is a real timestamp. */
+    var d = ms == null ? new Date() : new Date(ms);
+    if (isNaN(d.getTime()) || d.getFullYear() < 1980) d = new Date(1980, 0, 1);
+    return {
+      time: ((d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1)) & 0xFFFF,
+      date: (((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate()) & 0xFFFF
+    };
+  }
+  function zipU16(v) { return [v & 0xFF, (v >>> 8) & 0xFF]; }
+  function zipU32(v) { return [v & 0xFF, (v >>> 8) & 0xFF, (v >>> 16) & 0xFF, (v >>> 24) & 0xFF]; }
+
+  function zipBuild(entries) {
+    var parts = [], central = [], offset = 0;
+    var FLAG_UTF8 = 0x0800;
+    var u16 = zipU16, u32 = zipU32;
+
+    entries.forEach(function (e) {
+      var nameBytes = zipUtf8(e.name);
+      var data = e.data instanceof Uint8Array ? e.data : new Uint8Array(e.data || 0);
+      var crc = zipCrc32(data);
+      var when = zipDosStamp(e.date);
+
+      var local = [].concat(
+        u32(0x04034b50), u16(20), u16(FLAG_UTF8), u16(0),
+        u16(when.time), u16(when.date),
+        u32(crc), u32(data.length), u32(data.length),
+        u16(nameBytes.length), u16(0)
+      );
+      parts.push(new Uint8Array(local), nameBytes, data);
+
+      central.push([].concat(
+        u32(0x02014b50), u16(20), u16(20), u16(FLAG_UTF8), u16(0),
+        u16(when.time), u16(when.date),
+        u32(crc), u32(data.length), u32(data.length),
+        u16(nameBytes.length), u16(0), u16(0), u16(0), u16(0),
+        u32(0), u32(offset)
+      ));
+      central.push(nameBytes);
+
+      offset += local.length + nameBytes.length + data.length;
+    });
+
+    var centralParts = [], centralSize = 0;
+    central.forEach(function (c) {
+      var arr = c instanceof Uint8Array ? c : new Uint8Array(c);
+      centralParts.push(arr);
+      centralSize += arr.length;
+    });
+
+    var eocd = new Uint8Array([].concat(
+      u32(0x06054b50), u16(0), u16(0),
+      u16(entries.length), u16(entries.length),
+      u32(centralSize), u32(offset), u16(0)
+    ));
+
+    return new Blob(parts.concat(centralParts, [eocd]), { type: 'application/zip' });
+  }
+
+  window.NL.zip = {
+    crc32: zipCrc32,
+    build: zipBuild,
+    uniqueName: zipUniqueName,
+    utf8: zipUtf8,
+    dosStamp: zipDosStamp
   };
 
 })();

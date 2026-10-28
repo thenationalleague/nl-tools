@@ -109,6 +109,9 @@ export function freshCanon() {
     Date, Math, JSON, Object, Array, String, Number, Boolean, RegExp, Error,
     Promise, parseInt, parseFloat, isNaN, isFinite,
     encodeURIComponent, decodeURIComponent,
+    /* NL.zip writes names through TextEncoder and returns a Blob; both are
+       Node globals, not JS intrinsics, so the context needs them handed in. */
+    TextEncoder, Blob,
     document: {
       addEventListener() {}, removeEventListener() {},
       createElement: stubEl, getElementById() { return null; },

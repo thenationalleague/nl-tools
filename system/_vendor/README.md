@@ -1,9 +1,11 @@
 # Vendored viewer libraries
 
 Third-party, minified, committed as-is so the repo stays build-free and the
-library page never loads code from a CDN at runtime. Loaded LAZILY by
-`/programme/index.html` — only when someone first previews a Word document,
-never on page load.
+library pages never load code from a CDN at runtime. Loaded LAZILY by
+`NL.files.renderDocx` in `system/nl-utils.js` — only when someone first
+previews a Word document, never on page load. Callers: Programme Packs and the
+Document Library. (These lived at `programme/_vendor/` until 28/10/2026, when
+the Word preview moved into canon.)
 
 | File | Package | Version | Licence | sha256 |
 |---|---|---|---|---|
@@ -17,6 +19,6 @@ table with the new sha256. Do not edit the files themselves.
 Why these exist: a .docx can only be previewed by rendering it. The zero-effort
 routes (Microsoft's or Google's embedded viewers) work by handing the file's
 URL to a third party to fetch — shipping a club's material to someone else for
-a convenience, which /programme/ explicitly refuses to do. docx-preview
+a convenience, which the libraries explicitly refuse to do. docx-preview
 renders the document in the viewer's own browser; the bytes never leave
 Firebase Storage. JSZip is its dependency (a .docx is a zip).
