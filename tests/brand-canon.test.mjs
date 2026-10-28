@@ -998,6 +998,21 @@ test('the sprite carries a shop glyph, filled to pair with the website globe', (
   }
 });
 
+/* ── icon-list / icon-grid (28/10/2026) ───────────────────────────────────
+   The view switch for anything shown as either rows or tiles. The Document
+   Library's switch said "List" and "Thumbnails" in words; every file manager
+   uses these two pictures for it. */
+test('the sprite carries list and grid, stroked like the UI set, and the Style Guide shows them', () => {
+  const sprite = readFileSync(join(REPO, 'assets/icons/sprites.svg'), 'utf8');
+  const sg = readFileSync(join(REPO, 'style-guide/index.html'), 'utf8');
+  for (const n of ['list', 'grid']) {
+    const m = new RegExp(`<symbol id="icon-${n}"[\\s\\S]*?</symbol>`).exec(sprite);
+    assert.ok(m, `#icon-${n} is in the sprite`);
+    assert.ok(m[0].includes('stroke="currentColor"') && m[0].includes('fill="none"'), `${n} is stroked`);
+    assert.ok(sg.includes(`<code>icon-${n}</code>`), `the Style Guide lists icon-${n}`);
+  }
+});
+
 test('the sprite carries a printer glyph, stroked like the UI set', () => {
   const sprite = readFileSync(join(REPO, 'assets/icons/sprites.svg'), 'utf8');
   const m = /<symbol id="icon-print"[\s\S]*?<\/symbol>/.exec(sprite);

@@ -1,5 +1,11 @@
 /*
   Document Library — the library browser, shared by both pages
+  Version: v1.1 (28/10/2026) — one head, two lines: the breadcrumb is the title
+           (so "Document Library" appears once, as the top of the path) with
+           search and the view switch beside it, and the actions on the line
+           below. The document count and the separate bar above are gone.
+           List / Thumbnails are the sprite's list and grid icons. Search
+           just says Search.
   Version: v1.0 (28/10/2026) — initial build.
   File: /document-library/_library.js
 
@@ -235,9 +241,7 @@
       closeMenu();
       var here = view.folderId;
       var searching = !!view.q.trim();
-      var html = bar(here, searching);
-
-      html += '<div class="fold">' + head(here, searching) + '<div class="fold__body">';
+      var html = '<div class="fold">' + head(here, searching) + '<div class="fold__body">';
       if (writable && !searching) {
         html += '<div class="drop" data-drop>Drop files or folders here, or ' +
           '<button class="dl-link" type="button" data-act="upload">choose files</button>' +
@@ -278,59 +282,60 @@
       }
     }
 
-    function bar(here, searching) {
-      var crumbs = '<nav class="crumb" aria-label="Folder path">';
-      var path = trail(here);
-      if (searching) {
-        crumbs += '<span class="crumb__here">Search results</span>';
-      } else if (!path.length) {
-        crumbs += '<span class="crumb__here">Document Library</span>';
-      } else {
-        crumbs += '<button class="crumb__link" type="button" data-crumb="">Document Library</button>';
-        path.forEach(function (f, i) {
-          crumbs += '<span class="crumb__sep">›</span>';
-          crumbs += i === path.length - 1
-            ? '<span class="crumb__here">' + esc(f.name) + '</span>'
-            : '<button class="crumb__link" type="button" data-crumb="' + esc(f.id) + '">' + esc(f.name) + '</button>';
-        });
-      }
-      crumbs += '</nav>';
-      return '<div class="dl-bar">' + crumbs +
-        '<div class="dl-bar__tools">' +
-          '<input class="toolbar__search dl-search" type="search" data-q placeholder="Search all documents" ' +
-            'aria-label="Search all documents" value="' + esc(view.q) + '">' +
-          '<div class="chip-group" role="group" aria-label="View">' +
-            '<button type="button" class="chip' + (view.mode === 'list' ? ' active' : '') + '" data-mode="list" aria-pressed="' + (view.mode === 'list') + '">List</button>' +
-            '<button type="button" class="chip' + (view.mode === 'grid' ? ' active' : '') + '" data-mode="grid" aria-pressed="' + (view.mode === 'grid') + '">Thumbnails</button>' +
-          '</div>' +
-        '</div></div>';
-    }
-
+    /* One head, two lines. The first says where you are — the breadcrumb IS
+       the title, so "Document Library" appears once, as the top of the path —
+       with search and the view switch beside it. The second is what you can
+       do here. No count: a folder shows you what is in it. */
     function head(here, searching) {
       var f = folderById(here);
-      var name = searching ? 'Search results' : (f ? f.name : 'Document Library');
+      var path = trail(here);
+      var crumbs = '<h2 class="fold__path"><nav class="crumb" aria-label="Folder path">';
+      var root = 'Document Library';
+      if (searching) {
+        crumbs += '<button class="crumb__link" type="button" data-crumb="">' + root + '</button>' +
+          '<span class="crumb__sep">›</span><span class="crumb__here">Search results</span>';
+      } else if (!path.length) {
+        crumbs += '<span class="crumb__here">' + root + '</span>';
+      } else {
+        crumbs += '<button class="crumb__link" type="button" data-crumb="">' + root + '</button>';
+        path.forEach(function (p, i) {
+          crumbs += '<span class="crumb__sep">›</span>';
+          crumbs += i === path.length - 1
+            ? '<span class="crumb__here">' + esc(p.name) + '</span>'
+            : '<button class="crumb__link" type="button" data-crumb="' + esc(p.id) + '">' + esc(p.name) + '</button>';
+        });
+      }
+      crumbs += '</nav></h2>';
+
+      var viewBtn = function (mode, icon, label) {
+        var on = view.mode === mode;
+        return '<button type="button" class="chip dl-view' + (on ? ' active' : '') + '" data-mode="' + mode + '"' +
+          ' aria-pressed="' + on + '" aria-label="' + label + '" title="' + label + '">' + iconHtml(icon) + '</button>';
+      };
+      var tools = '<div class="fold__tools">' +
+        '<input class="toolbar__search dl-search" type="search" data-q placeholder="Search" ' +
+          'aria-label="Search every folder" value="' + esc(view.q) + '">' +
+        '<div class="chip-group" role="group" aria-label="View">' +
+          viewBtn('list', 'list', 'List') + viewBtn('grid', 'grid', 'Thumbnails') +
+        '</div></div>';
+
       var acts = '';
       if (writable && !searching) {
         acts += '<button class="btn btn--ghost btn--sm" type="button" data-act="newFolder">' + iconHtml('add') + ' New folder</button>';
         acts += '<button class="btn btn--ghost btn--sm" type="button" data-act="upload">' + iconHtml('upload') + ' Upload files</button>';
-        acts += '<button class="btn btn--ghost btn--sm" type="button" data-act="uploadDir">Upload a folder</button>';
+        acts += '<button class="btn btn--ghost btn--sm" type="button" data-act="uploadDir">' + iconHtml('upload') + ' Upload folder</button>';
         if (f) {
-          acts += '<button class="btn btn--ghost btn--sm" type="button" data-act="renameHere">Rename</button>';
-          acts += '<button class="btn btn--ghost btn--sm" type="button" data-act="deleteHere">Delete</button>';
+          acts += '<button class="btn btn--ghost btn--sm" type="button" data-act="renameHere">' + iconHtml('edit') + ' Rename</button>';
+          acts += '<button class="btn btn--ghost btn--sm" type="button" data-act="deleteHere">' + iconHtml('delete') + ' Delete</button>';
         }
       }
-      var tail = '';
-      if (!searching) {
-        var n = collect(here, '').length;
-        tail = '<div class="fold__tail"><span class="fold__note">' + plural(n, 'document') + '</span>' +
-          (n ? '<button class="btn btn--primary btn--sm" type="button" data-act="zipHere">' +
-            iconHtml('download') + ' Download ' + (f ? 'folder' : 'everything') + '</button>' : '') +
-          '</div>';
+      if (!searching && collect(here, '').length) {
+        acts += '<button class="btn btn--primary btn--sm fold__dl" type="button" data-act="zipHere">' +
+          iconHtml('download') + ' Download ' + (f ? 'folder' : 'all') + '</button>';
       }
-      return '<div class="fold__head"><span class="fold__icon" aria-hidden="true">' +
-        (searching ? '🔎' : (f ? '📁' : '📚')) + '</span>' +
-        '<h2 class="fold__name">' + esc(name) + '</h2>' +
-        (acts ? '<div class="fold__acts">' + acts + '</div>' : '') + tail + '</div>';
+
+      return '<div class="fold__head"><div class="fold__top">' + crumbs + tools + '</div>' +
+        (acts ? '<div class="fold__acts">' + acts + '</div>' : '') + '</div>';
     }
 
     function selBar(folders, files) {
