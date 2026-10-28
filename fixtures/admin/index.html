@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixture Management
-  Version: v1.6 (28/10/2026)
+  Version: v1.7 (28/10/2026)
   File: /fixtures/admin/index.html
 
   The League's master fixture record: every game in every competition, with
@@ -9,6 +9,9 @@
   behind it, is system/fixture-management-plan.md.
 
   CHANGELOG
+    v1.7 (28/10/2026) — Import refuses a sheet whose games fall outside the
+      selected season (more than one in ten), so last season's sheet can no
+      longer replace this season's.
     v1.6 (28/10/2026) — Play-offs sit in their division (National, North,
       South) marked PO before the round, not in a competition of their own;
       a play-off tie is added as "North play-off" and so on. Attendance
@@ -108,6 +111,11 @@
     var NL_TOOL_KEY = 'ops-fixture-management';
 
     window.NL_CHANGELOG = [
+      {
+        date: '28/10/2026',
+        version: 'v1.7',
+        items: ['Import stops if the sheet belongs to a different season from the one selected.']
+      },
       {
         date: '28/10/2026',
         version: 'v1.6',
@@ -1157,6 +1165,22 @@
           parseDate: NL.parseDate
         });
         if (result.error) { out.innerHTML = '<div class="banner banner--error">' + esc(result.error) + '</div>'; result = null; return; }
+        /* A sheet for the wrong season replaces the right one wholesale
+           (28/10/2026: last season's sheet over this season's). A season runs
+           1 July to 30 June; most of the games must sit inside it. */
+        var y = parseInt(S.season, 10), lo = y + '-07-01', hi = (y + 1) + '-07-01', inside = 0, dated = 0;
+        Object.keys(result.fixtures).forEach(function (k) {
+          var r = result.fixtures[k], d = r.date || (r.attempts && r.attempts.length ? r.attempts[0].date : null);
+          if (!d) return;
+          dated++;
+          if (d >= lo && d < hi) inside++;
+        });
+        if (dated && inside < dated * 0.9) {
+          out.innerHTML = '<div class="banner banner--error"><strong>This sheet is not ' + esc(NL.season.label(S.meta, S.season)) +
+            '.</strong> ' + (dated - inside) + ' of its ' + dated + ' games fall outside that season. Pick the right season first.</div>';
+          result = null;
+          return;
+        }
         var keyed = null;
         if (archive) {
           keyed = F.keyToAttendance(result.fixtures, archive);
