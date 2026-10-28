@@ -213,7 +213,9 @@ Next, in order (re-ordered 28/10/2026):
      copied fixture list cleared. Not before: switched off first, Attendance
      would stop seeing new ties and kick-off changes.
 2. Season calendar file + club-distances file (data only).
-3. Broadcast and AMI tabs; review-broadcast list.
+3. ~~Broadcast and AMI tabs; review-broadcast list.~~ Built 28/10/2026 as one
+   Broadcast tab (DAZN and AMI together, at Richard's ask); Settings tab holds
+   Results, Add cup tie and the imports. Article 48 check comes with step 4.
 4. Rearrangements tab with the date finder and the canon month calendar.
 5. DAZN Viewership onto the record (availability and moves from Broadcast,
    not the workbook).
