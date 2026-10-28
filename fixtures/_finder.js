@@ -1,8 +1,14 @@
 /* =============================================================================
    NL Tools — Fixture Management: the rearrangement date finder
    File: /fixtures/_finder.js
-   Version: v1.2 (28/10/2026)
+   Version: v1.3 (28/10/2026)
    CHANGELOG
+     v1.3 (28/10/2026) — From the ops team's rules: a game two days either
+       side is "within 48h"; two away games in a row each over 200 miles
+       round trip are flagged (fixed; opts.longTrip is for tests); international
+       windows (calendar.internationalWindows) are flagged. Friday and
+       Sunday join Monday and Thursday as switches. A run flag lists its
+       games (flag.items) so the reader sees how far apart they are.
      v1.2 (28/10/2026) — Wednesday is a slot as well as Tuesday, and Monday
        joins Thursday behind a switch (Richard, 28/10/2026). Every slot's
        window is the day either side.
@@ -22,9 +28,12 @@
                  rounds     assets/data/rounds-2026-27.json,
                  distances  assets/data/club-distances.json,
                  today      'YYYY-MM-DD' }
-     opts      { mondays: bool, thursdays: bool }
+     opts      { mondays, thursdays, fridays, sundays: bool,
+                 longTrip: round-trip miles, default 200 (tests only; the
+                 page uses the default, Richard 28/10/2026) }
    OUTPUT
-     { slots: [{ date, day, ko, within35, flags: [{ level, text }], weight }],
+     { slots: [{ date, day, ko, within35, flags: [{ level, text, items? }], weight }],
+     items: [{ date, text }], the games behind a run or long-trip flag.
        from, to, original }
      level 'red' | 'amber' | 'info'. Slots within 35 days of the original
      date, before or after it, come first; then cleanest first (fewest and
@@ -32,8 +41,8 @@
      window's ends.
 
    WHAT A SLOT IS
-     A Saturday, Tuesday or Wednesday, with Monday and Thursday each behind
-     a switch. A slot is taken out only when it cannot be played: either
+     A Saturday, Tuesday or Wednesday, with Monday, Thursday, Friday and
+     Sunday each behind a switch. A slot is taken out only when it cannot be played: either
      club already has a game the day before, the day itself or the day
      after (its window), it is on or after the final matchday, or it is in
      calendar.noRearrange.
@@ -44,6 +53,7 @@
 
   var DAY = 864e5;
   var WINDOW = 35;
+  var LONG_TRIP = 200;   /* round-trip miles: ops team's suggested limit */
   var DIVISION_LABEL = { national: 'National', north: 'North', south: 'South' };
   var LEAGUE = { national: true, north: true, south: true };
 
@@ -181,7 +191,8 @@
     for (var d = from; d <= to; d = add(d, 1)) {
       var w = dow(d);
       var day = w === 6 ? 'Sat' : w === 2 ? 'Tue' : w === 3 ? 'Wed' :
-        (w === 1 && opts.mondays) ? 'Mon' : (w === 4 && opts.thursdays) ? 'Thu' : null;
+        (w === 1 && opts.mondays) ? 'Mon' : (w === 4 && opts.thursdays) ? 'Thu' :
+        (w === 5 && opts.fridays) ? 'Fri' : (w === 0 && opts.sundays) ? 'Sun' : null;
       if (!day || no[d]) continue;
       var win = windowOf(d);
       var clash = dated.some(function (r) { return win.indexOf(r.date) !== -1; });
@@ -193,12 +204,19 @@
         var mine = dated.filter(function (r) { return plays(r, club); });
         var nearest = mine.reduce(function (m, r) { var g = gap(r.date, d); return g < m ? g : m; }, 99);
         if (nearest < 2) tooClose = true;
-        else if (nearest === 2) flags.push({ level: 'amber', text: tags[club] + ' 2 days’ rest' });
+        else if (nearest === 2) flags.push({ level: 'amber', text: tags[club] + ' within 48h' });
       });
       if (tooClose) continue;
 
       if (day === 'Thu') flags.push({ level: 'info', text: 'Thursday' });
       if (day === 'Mon') flags.push({ level: 'info', text: 'Monday' });
+      if (day === 'Fri') flags.push({ level: 'info', text: 'Friday' });
+      if (day === 'Sun') flags.push({ level: 'info', text: 'Sunday' });
+
+      /* International windows: a soft flag; a few clubs lose players. */
+      (cal.internationalWindows || []).forEach(function (iw) {
+        if (d >= iw.from && d <= iw.to) flags.push({ level: 'info', text: 'International window' });
+      });
 
       pencils.forEach(function (r) {
         if (win.indexOf(r.pencil.date) !== -1) {
@@ -232,7 +250,7 @@
         flags.push({ level: 'amber', text: 'Blocked hours at 15:00' });
       }
 
-      runFlags(game, d, dated, ctx.distances, flags);
+      runFlags(game, d, dated, ctx.distances, flags, opts.longTrip || LONG_TRIP);
 
       var within35 = !!original && gap(original, d) <= WINDOW;
       var weight = flags.reduce(function (s, f) { return s + (f.level === 'red' ? 10 : f.level === 'amber' ? 1 : 0); }, 0);
@@ -254,8 +272,13 @@
      (plan) — terse, the judging is the reader's; a cup opponent with no
      coordinates shows '?'. Neutral games break no run and
      extend none. */
-  function runFlags(game, d, dated, distances, flags) {
+  function runFlags(game, d, dated, distances, flags, longTrip) {
     var pairs = (distances && distances.pairs) || {};
+    function oneWay(r) {
+      var h = r.home && r.home.code, a = r.away && r.away.code;
+      var p = h && a ? pairs[h + '|' + a] : null;
+      return p ? p[0] : null;
+    }
     [['home', 'H'], ['away', 'A']].forEach(function (pair) {
       var club = nameOf(game[pair[0]]), who = tag(game[pair[0]]);
       var seq = dated.filter(function (r) { return plays(r, club) && !r.neutral; })
@@ -263,20 +286,33 @@
       seq.push({ date: d, side: pair[1], r: game, here: true });
       seq.sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
       var i = seq.findIndex(function (x) { return x.here; });
+      function item(x) {
+        var home = nameOf(x.r.home) === club, opp = home ? x.r.away : x.r.home, mi = home ? null : oneWay(x.r);
+        return { date: x.date, text: (x.here ? 'This game' : nameOf(opp)) + ' (' + (home ? 'H' : 'A') + ')' +
+          (home ? '' : mi != null ? ' · ' + Math.round(mi * 2) + ' mi round trip' : ' · miles unknown') };
+      }
       var lo = i, hi = i;
       while (lo > 0 && seq[lo - 1].side === pair[1]) lo--;
       while (hi < seq.length - 1 && seq[hi + 1].side === pair[1]) hi++;
       var run = hi - lo + 1;
-      if (run < 3) return;
-      var text = who + ' ' + run + ' ' + (pair[1] === 'H' ? 'home' : 'away') + ' in a row';
-      if (pair[1] === 'A') {
-        var trips = seq.slice(lo, hi + 1).map(function (x) {
-          var h = x.r.home && x.r.home.code, a = x.r.away && x.r.away.code;
-          return trip(h && a ? pairs[h + '|' + a] : null);
-        });
-        text += ': ' + trips.join(' · ');
+      if (run >= 3) {
+        flags.push({ level: run >= 4 ? 'red' : 'amber',
+          text: who + ' ' + run + ' ' + (pair[1] === 'H' ? 'home' : 'away') + ' in a row',
+          items: seq.slice(lo, hi + 1).map(item) });
       }
-      flags.push({ level: run >= 4 ? 'red' : 'amber', text: text });
+      /* Two away games in a row, each a round trip over the limit (ops
+         team, 28/10/2026). Only the travelling club can have one. */
+      if (pair[1] === 'A') {
+        var here = oneWay(game);
+        if (here == null || here * 2 <= longTrip) return;
+        [seq[i - 1], seq[i + 1]].forEach(function (nb) {
+          if (!nb || nb.side !== 'A') return;
+          var mi = oneWay(nb.r);
+          if (mi == null || mi * 2 <= longTrip) return;
+          var two = nb.date < d ? [nb, seq[i]] : [seq[i], nb];
+          flags.push({ level: 'amber', text: who + ' 2 long trips in a row', items: two.map(item) });
+        });
+      }
     });
   }
 

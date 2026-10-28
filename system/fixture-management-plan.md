@@ -129,8 +129,8 @@ the League schedule PDF), and the blocked-hours window and exemptions. Data,
 editable each season — the source dates are "subject to change".
 
 **Candidate slots.** Saturdays, Tuesdays and Wednesdays where both clubs are
-free in every competition (Wednesday added 28/10/2026). Mondays and Thursdays
-each behind an off-by-default switch. A slot is out when either club plays
+free in every competition (Wednesday added 28/10/2026). Mondays, Thursdays,
+Fridays and Sundays each behind an off-by-default switch. A slot is out when either club plays
 the day before, the day itself or the day after. Easter: Good Friday + Easter Monday, never Easter Saturday. **Last
 usable slot is the midweek before the final matchday** — every league game
 must be played before MD46 (Tue 20/04/2027, or Thu 22/04 with the switch).
@@ -150,7 +150,11 @@ must be played before MD46 (Tue 20/04/2027, or Thu 22/04 with the switch).
   date is a **soft flag**, and the past-dated tie sits at the top as a
   reminder.
 
-**Flags, never blocks** (except dates actually taken):
+**Flags, never blocks** (except dates actually taken). The ops team's rules
+(28/10/2026) all land here as flags: a game within 48 hours; three away in a
+row; two away in a row each over 200 miles round trip (fixed: no slider,
+Richard 28/10/2026); a cup round while still in; an international window
+(`internationalWindows` in the season calendar).
 - Possible cup date; replay Tuesday; Article 48 (above); Thursday.
 - **Home/away runs**, all competitions counted (staffing and cost do not care
   which): 3+ in a row is a flag, rising in severity. Never hidden — sometimes

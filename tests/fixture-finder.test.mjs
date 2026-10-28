@@ -99,7 +99,7 @@ test('cleanest first: a flagged slot sorts after an unflagged one inside the win
   /* Alpha play Thursday 05/11, so Tuesday 03/11 has two days' rest. */
   const res = run(game, [g(A, C, '2026-11-05')]);
   const s = on(res, '2026-11-03');
-  assert.ok(s.flags.some((f) => /2 days/.test(f.text)));
+  assert.ok(s.flags.some((f) => /within 48h/.test(f.text)));
   assert.ok(res.slots.indexOf(s) > res.slots.indexOf(on(res, '2026-11-10')));
 });
 
@@ -154,7 +154,11 @@ test('three away in a row is amber with each trip terse; four is red', () => {
   const three = on(run(game, [g(C, B, '2026-11-14'), g(D, B, '2026-11-21')], {}, { distances }), '2026-11-10');
   const f3 = three.flags.find((f) => /away in a row/.test(f.text));
   assert.equal(f3.level, 'amber');
-  assert.equal(f3.text, 'BET 3 away in a row: 186mi 3h10 · 40mi 0h55 · 12mi 0h25');
+  assert.equal(f3.text, 'BET 3 away in a row');
+  assert.deepEqual(JSON.parse(JSON.stringify(f3.items)), [
+    { date: '2026-11-10', text: 'This game (A) · 372 mi round trip' },
+    { date: '2026-11-14', text: 'Gamma City (A) · 80 mi round trip' },
+    { date: '2026-11-21', text: 'Delta Rovers (A) · 24 mi round trip' }]);
   const four = on(run(game, [g(C, B, '2026-11-14'), g(D, B, '2026-11-21'), g(C, B, '2026-11-28', { comp: 'fa-trophy' })], {}, { distances }), '2026-11-10');
   assert.equal(four.flags.find((f) => /away in a row/.test(f.text)).level, 'red');
 });
@@ -188,4 +192,33 @@ test('blocked hours: 15:00 overlaps, 12:30 and 17:30 do not, an exempt Saturday 
   assert.equal(X.overlapsBlocked(cal, '2026-10-31', '13:00'), true, '13:00 runs into 14:45');
   assert.equal(X.overlapsBlocked(cal, '2026-11-14', '15:00'), false);
   assert.equal(X.overlapsBlocked(cal, '2026-11-03', '15:00'), false, 'a Tuesday');
+});
+
+test('two away games in a row, each a round trip over the limit, are flagged; the limit can move', () => {
+  const game = postponed(A, B, '2026-10-24');
+  const distances = { pairs: { 'ALP|BET': [150, 170], 'GAM|BET': [120, 140], 'DEL|BET': [40, 50] } };
+  const recs = [g(C, B, '2026-11-14'), g(B, D, '2026-11-21')];
+  const s = on(run(game, recs, {}, { distances }), '2026-11-10');
+  const f = s.flags.find((x) => /long trips/.test(x.text));
+  assert.equal(f.text, 'BET 2 long trips in a row');
+  assert.deepEqual([...f.items.map((x) => x.date)], ['2026-11-10', '2026-11-14']);
+  assert.ok(!on(run(game, recs, { longTrip: 300 }, { distances }), '2026-11-10').flags.some((x) => /long trips/.test(x.text)));
+  /* A short trip next door is no long pair. */
+  const short = on(run(game, [g(D, B, '2026-11-14')], {}, { distances: { pairs: { 'ALP|BET': [150, 170], 'DEL|BET': [40, 50] } } }), '2026-11-10');
+  assert.ok(!short.flags.some((x) => /long trips/.test(x.text)));
+});
+
+test('an international window is a soft flag', () => {
+  const cal = { ...CAL, internationalWindows: [{ from: '2026-11-09', to: '2026-11-17' }] };
+  const game = postponed(A, B, '2026-10-24');
+  const res = X.slots(game, { fixtures: fx(game), calendar: cal, rounds: {}, distances: { pairs: {} }, today: '2026-10-28' }, {});
+  assert.ok(on(res, '2026-11-10').flags.some((f) => f.level === 'info' && f.text === 'International window'));
+  assert.ok(!on(res, '2026-11-07').flags.some((f) => f.text === 'International window'));
+});
+
+test('Fridays and Sundays are behind their switches', () => {
+  const game = postponed(A, B, '2026-10-24');
+  assert.equal(on(run(game, []), '2026-11-06'), undefined);
+  assert.equal(on(run(game, [], { fridays: true }), '2026-11-06').day, 'Fri');
+  assert.equal(on(run(game, [], { sundays: true }), '2026-11-08').day, 'Sun');
 });
