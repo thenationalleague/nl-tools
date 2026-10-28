@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Fixture Management
+  Version: v1.0 (28/10/2026)
+  File: /fixtures/admin/index.html
+
+  The League's master fixture record: every game in every competition, with
+  the dates each one has lost. Staff console. The plan, and every decision
+  behind it, is system/fixture-management-plan.md.
+
+  CHANGELOG
+    v1.0 (28/10/2026) — First build: the Fixtures tab. Imports the working
+      workbook once (Fixtures + Rearrangements tabs, pasted), lists every
+      game with filters for competition, club and what needs attention,
+      adds and edits cup ties (NL Cup knockouts, play-offs, FA Cup, FA
+      Trophy), takes Opta IDs and FA results. Rearrangements, Broadcast and
+      AMI arrive as their own tabs in later PRs.
+
+  Storage (RTDB):
+    app-data/ops-fixture-management/seasons/<season>/fixtures/<key>
+        the full record — staff only (fixtures/_core.js has the shape)
+    app-data/ops-fixture-management/seasons/<season>/public/<key>
+        the projection every signed-in user may read: current date and
+        kick-off, teams, Worldwide/Overseas only, nothing awaiting a date
+    app-data/ops-fixture-management/seasons/<season>/meta
+        { importedAt, importedBy, counts }
+    Both fixture nodes are written in one update, so they cannot disagree.
+
+  Access (auth-guard registry — see system/auth-guard.js):
+    toolLevel admin → edit and import. access → read only. Club roles are
+    off until the public page ships.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fixture Management — NL Tools</title>
+  <!-- Favicons. Static, not injected: nl-topbar.js adds these too, but a
+       standalone page never loads it, and an icon that arrives with the JS
+       leaves the tab blank until it does. /favicon.ico at the root is the
+       backstop every browser asks for without being told. -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+
+  <!-- Brand stylesheet (lint canonical: ?v=69) -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=69">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'Fixture Management',
+      toolKey: 'ops-fixture-management'
+    };
+    var NL_TOOL_KEY = 'ops-fixture-management';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '28/10/2026',
+        version: 'v1.0',
+        items: [
+          'Fixtures tab: one-off workbook import, every game with filters, cup ties added and edited by hand, Opta IDs and FA results.'
+        ]
+      }
+    ];
+
+    /* auth-guard fires this once the session is verified + pageWrap is
+       revealed. Boot the main app from here so RTDB reads happen with a
+       live auth token. Do NOT read RTDB before this fires. */
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts (lint canonical: ?v=49 / ?v=1 / ?v=10 / ?v=17) -->
+  <script src="/system/nl-utils.js?v=49"></script>
+  <!-- GA4, one property for all of nl.tools. Cookieless, so no consent
+       banner on any page; page views by path, no identity. Tool events go
+       through NL.track(). See system/nl-analytics.js. -->
+  <script src="/system/nl-analytics.js?v=1"></script>
+  <script src="/system/nl-topbar.js?v=10"></script>
+  <script src="/system/auth-guard.js?v=17"></script>
+
+  <!-- Tool data layer (pure; tested in tests/fixture-management.test.mjs) -->
+  <script src="/fixtures/_core.js?v=1"></script>
+
+<style>
+  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
+     style.display = 'block'. Don't clear with '' — would re-trigger the
+     brand rule and re-hide the page. */
+
+  .fm-card { cursor: pointer; }
+  .fm-card.is-on { box-shadow: var(--focus-ring) !important; }
+  .fm-picker { min-width: 260px; }
+
+  .fm-day td { background: var(--off-white) !important; font-weight: 800; font-variation-settings: 'wght' 800; color: var(--navy); }
+  .fm-row { cursor: pointer; }
+  .fm-team { display: inline-flex; align-items: center; gap: 8px; }
+  .fm-team img { width: 22px; height: 22px; object-fit: contain; }
+  .fm-ko { font-variant-numeric: tabular-nums; }
+  .fm-flags { display: flex; gap: 4px; flex-wrap: wrap; }
+
+  .fm-paste { width: 100%; min-height: 120px; font-family: var(--font-mono); font-size: var(--text-xs); }
+  .fm-history { margin: 0; padding-left: 18px; font-size: var(--text-sm); }
+  .fm-gap { margin-top: 28px; }
+  .fm-history li { margin-bottom: 4px; }
+  .fm-problems { max-height: 260px; overflow: auto; margin: 8px 0 0; padding-left: 18px; font-size: var(--text-sm); }
+</style>
+</head>
+<body>
+
+<!-- Topbar — auto-rendered by /system/nl-topbar.js from window.NL_TOOL -->
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="page">
+
+    <div class="stats" id="fmStats"></div>
+
+    <div class="section-head">
+      <h2 id="fmSeason">Fixtures</h2>
+      <div id="fmActions" hidden>
+        <button class="btn btn--ghost btn--sm" type="button" id="fmImport">Import workbook</button>
+        <button class="btn btn--primary btn--sm" type="button" id="fmAdd">Add cup tie</button>
+      </div>
+    </div>
+
+    <div class="filter-bar">
+      <div class="chip-group" id="fmComps" role="group" aria-label="Competition"></div>
+      <div class="fm-picker" id="fmClub"></div>
+      <div class="chip-group" id="fmWhen" role="group" aria-label="Dates">
+        <button class="chip active" type="button" data-when="upcoming">Upcoming</button>
+        <button class="chip" type="button" data-when="all">All</button>
+      </div>
+    </div>
+
+    <div id="fmBody"></div>
+
+  </div>
+</div>
+
+<!-- Main app -->
+<script>
+(function () {
+  'use strict';
+
+  var F = window.FixturesCore;
+  var esc = NL.escHtml;
+  var BASE = 'app-data/ops-fixture-management/seasons/';
+  var SEED_URL = '/assets/data/fixtures-2026-27.json';
+
+  var S = {
+    session: null,
+    canEdit: false,
+    meta: null,
+    guests: [],
+    season: null,
+    fixtures: {},
+    comp: 'all',
+    club: null,
+    when: 'upcoming',
+    need: null,          /* 'awaiting' | 'noOpta' | 'cupDue' — a stat card filter */
+    picker: null
+  };
+
+  function today() { return F.ymdOf(new Date()); }
+  function ref(path) { return db.ref(BASE + S.season + (path ? '/' + path : '')); }
+
+  /* Firebase rejects undefined anywhere in a write; a JSON round trip drops it. */
+  function clean(o) { return JSON.parse(JSON.stringify(o)); }
+
+  function clubOf(name) {
+    if (!name) return null;
+    var c = NL.clubs.byName(name) || NL.clubs.guestByName(name);
+    return c ? { name: c.name, code: c.code || null } : null;
+  }
+
+  /* ── Boot ─────────────────────────────────────────────────────────── */
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function (session) {
+    S.session = session;
+    S.canEdit = session.toolLevel === 'admin';
+    document.getElementById('fmActions').hidden = !S.canEdit;
+    renderComps();
+    wireStatic();
+
+    NL.ensureAuth()
+      .then(function () { return Promise.all([NL.clubs.load(), NL.clubs.guests().catch(function () { return []; })]); })
+      .then(function (r) {
+        S.meta = r[0];
+        S.guests = r[1] || [];
+        S.season = NL.season.current(S.meta) || String(NL.season.fromDate());
+        document.getElementById('fmSeason').textContent = 'Fixtures ' + NL.season.label(S.meta, S.season);
+        S.picker = NL.clubPicker('#fmClub', {
+          mode: 'search', season: 'all', clearable: true, extraClubs: S.guests,
+          placeholder: 'Any club',
+          onSelect: function (sel) { S.club = sel ? sel.name : null; render(); }
+        });
+        ref('fixtures').on('value', function (snap) {
+          S.fixtures = snap.val() || {};
+          render();
+        }, function (err) {
+          document.getElementById('fmBody').innerHTML =
+            '<div class="banner banner--error">Could not read fixtures: ' + esc(err.message) + '</div>';
+        });
+      })
+      .catch(function (err) {
+        document.getElementById('fmBody').innerHTML =
+          '<div class="banner banner--error">Could not load club data: ' + esc(err.message) + '</div>';
+      });
+  };
+
+  function wireStatic() {
+    document.getElementById('fmImport').addEventListener('click', openImport);
+    document.getElementById('fmAdd').addEventListener('click', function () { openEdit(null); });
+    document.getElementById('fmWhen').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-when]');
+      if (!b) return;
+      S.when = b.getAttribute('data-when');
+      setActive('fmWhen', b);
+      render();
+    });
+    document.getElementById('fmComps').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-comp]');
+      if (!b) return;
+      S.comp = b.getAttribute('data-comp');
+      setActive('fmComps', b);
+      render();
+    });
+    document.getElementById('fmStats').addEventListener('click', function (e) {
+      var s = e.target.closest('[data-need]');
+      if (!s) return;
+      var n = s.getAttribute('data-need');
+      S.need = (S.need === n || n === 'all') ? null : n;
+      render();
+    });
+    document.getElementById('fmBody').addEventListener('click', function (e) {
+      var tr = e.target.closest('[data-key]');
+      if (tr) openEdit(S.fixtures[tr.getAttribute('data-key')] || null);
+    });
+  }
+
+  function setActive(groupId, btn) {
+    Array.prototype.forEach.call(document.getElementById(groupId).children, function (c) {
+      c.classList.toggle('active', c === btn);
+    });
+  }
+
+  function renderComps() {
+    var html = '<button class="chip active" type="button" data-comp="all">All</button>';
+    F.COMPS.forEach(function (c) {
+      html += '<button class="chip" type="button" data-comp="' + c.key + '">' + esc(c.label) + '</button>';
+    });
+    document.getElementById('fmComps').innerHTML = html;
+  }
+
+  /* ── List ─────────────────────────────────────────────────────────── */
+  function passes(r, t) {
+    if (S.comp !== 'all' && r.comp !== S.comp) return false;
+    if (S.club && r.home.name !== S.club && r.away.name !== S.club) return false;
+    if (S.need === 'awaiting' && !F.awaiting(r)) return false;
+    if (S.need === 'noOpta' && (r.optaID || F.COMP_BY_KEY[r.comp].fa)) return false;
+    if (S.need === 'cupDue' && !F.cupResultDue(r, t)) return false;
+    if (!S.need && S.when === 'upcoming' && r.date && r.date < t) return false;
+    return true;
+  }
+
+  function render() {
+    var t = today();
+    var all = Object.keys(S.fixtures).map(function (k) { return S.fixtures[k]; });
+    renderStats(F.counts(S.fixtures, t));
+
+    var body = document.getElementById('fmBody');
+    if (!all.length) {
+      body.innerHTML = '<div class="empty-state"><div class="empty-state__title">No fixtures for ' +
+        esc(NL.season.label(S.meta, S.season)) + ' yet</div>' +
+        (S.canEdit ? '<div class="empty-state__text">Import the workbook to start.</div>' : '') + '</div>';
+      return;
+    }
+
+    var list = all.filter(function (r) { return passes(r, t); });
+    var waiting = list.filter(F.awaiting);
+    var dated = list.filter(function (r) { return !F.awaiting(r); })
+      .sort(function (a, b) {
+        return a.date !== b.date ? (a.date < b.date ? -1 : 1)
+          : (a.ko || '') !== (b.ko || '') ? ((a.ko || '') < (b.ko || '') ? -1 : 1)
+          : a.home.name.localeCompare(b.home.name);
+      });
+
+    var html = '';
+    if (waiting.length) {
+      html += '<div class="section-head"><h2>Awaiting a date</h2></div>' + tableOf(waiting, true);
+    }
+    if (dated.length) {
+      if (waiting.length) html += '<div class="section-head fm-gap"><h2>Dated</h2></div>';
+      html += tableOf(dated, false);
+    }
+    if (!waiting.length && !dated.length) {
+      html = '<div class="empty-state"><div class="empty-state__title">Nothing matches</div></div>';
+    }
+    body.innerHTML = html;
+    NL.clubs.wireCrestImgs(body);
+  }
+
+  function renderStats(c) {
+    var cards = [
+      ['all', c.total, 'Fixtures'],
+      ['awaiting', c.awaiting, 'Awaiting a date'],
+      ['noOpta', c.noOpta, 'No Opta ID'],
+      ['cupDue', c.cupDue, 'FA results due']
+    ];
+    document.getElementById('fmStats').innerHTML = cards.map(function (x) {
+      return '<div class="stat fm-card' + (S.need === x[0] ? ' is-on' : '') + '" data-need="' + x[0] + '" role="button" tabindex="0">' +
+        '<div class="stat__num">' + x[1] + '</div><div class="stat__label">' + esc(x[2]) + '</div></div>';
+    }).join('');
+  }
+
+  function team(side) {
+    return '<span class="fm-team">' + NL.clubs.crestImgHtml(side.name, 'thumb') + esc(side.name) + '</span>';
+  }
+
+  function compPill(key) {
+    var c = F.COMP_BY_KEY[key];
+    return '<span class="comp-pill' + (c && c.pill ? ' comp-pill--' + c.pill : '') + '">' + esc(c ? c.label : key) + '</span>';
+  }
+
+  function flags(r, t) {
+    var out = [];
+    var lost = (r.attempts || []).length;
+    if (F.awaiting(r)) out.push('<span class="pill pill--postponed">' + esc(r.state === 'abandoned' ? 'Abandoned' : 'Postponed') + '</span>');
+    else if (lost) out.push('<span class="pill pill--info">Moved' + (lost > 1 ? ' ×' + lost : '') + '</span>');
+    if (!r.optaID && !F.COMP_BY_KEY[r.comp].fa) out.push('<span class="pill pill--pending">No Opta ID</span>');
+    if (F.cupResultDue(r, t)) out.push('<span class="pill pill--pending">Result due</span>');
+    return '<div class="fm-flags">' + out.join('') + '</div>';
+  }
+
+  function broadcastLabel(r) {
+    var a = F.AVAIL_BY_KEY[r.broadcast && r.broadcast.availability];
+    return a ? esc(a.label) : '';
+  }
+
+  function tableOf(rows, waiting) {
+    var t = today();
+    var html = '<div class="table-wrap"><table class="table table--compact"><thead><tr>' +
+      '<th>' + (waiting ? 'Lost date' : 'KO') + '</th><th>Comp</th><th>Rd</th><th>Home</th><th>Away</th>' +
+      '<th>Broadcast</th><th></th></tr></thead><tbody>';
+    var day = null;
+    rows.forEach(function (r) {
+      if (!waiting && r.date !== day) {
+        day = r.date;
+        html += '<tr class="fm-day"><td colspan="7">' + esc(NL.formatDate(r.date)) + '</td></tr>';
+      }
+      var last = waiting ? r.attempts[r.attempts.length - 1] : null;
+      html += '<tr class="fm-row" data-key="' + esc(r.key) + '">' +
+        '<td class="fm-ko">' + esc(waiting ? (last ? F.fmt(last.date) : '—') : (r.ko || '—')) + '</td>' +
+        '<td>' + compPill(r.comp) + '</td>' +
+        '<td>' + esc(r.round || '') + '</td>' +
+        '<td>' + team(r.home) + '</td>' +
+        '<td>' + team(r.away) + '</td>' +
+        '<td>' + broadcastLabel(r) + '</td>' +
+        '<td>' + flags(r, t) + '</td></tr>';
+    });
+    return html + '</tbody></table></div>';
+  }
+
+  /* ── Save ─────────────────────────────────────────────────────────── */
+  function save(rec) {
+    rec.updatedAt = new Date().toISOString();
+    var up = {};
+    up['fixtures/' + rec.key] = clean(rec);
+    up['public/' + rec.key] = F.publicView(rec) ? clean(F.publicView(rec)) : null;
+    return NL.ensureAuth().then(function () { return ref().update(up); });
+  }
+
+  /* ── Add / edit ──────────────────────────────────────────────────────
+     League fixtures come from the import and keep their teams and
+     competition. Cup ties are entered here. A changed date keeps the old
+     one as a lost date ('moved'); postponements belong to the
+     Rearrangements tab. */
+  var HAND = ['nl-cup', 'playoffs', 'fa-cup', 'fa-trophy'];
+
+  function openEdit(rec) {
+    var isNew = !rec;
+    var comp = rec ? F.COMP_BY_KEY[rec.comp] : F.COMP_BY_KEY['fa-cup'];
+    var fixedTeams = !isNew && (comp.league || rec.source === 'import');
+    var ro = !S.canEdit;
+    var dis = ro ? ' disabled' : '';
+    var t = today();
+
+    var wrap = document.createElement('div');
+    var compOpts = HAND.map(function (k) {
+      return '<option value="' + k + '"' + (k === comp.key ? ' selected' : '') + '>' + esc(F.COMP_BY_KEY[k].label) + '</option>';
+    }).join('');
+    var hist = rec && rec.attempts && rec.attempts.length
+      ? '<ol class="fm-history">' + rec.attempts.map(function (a) {
+          return '<li>' + esc(F.fmt(a.date) + (a.ko ? ' ' + a.ko : '')) + ' · ' + esc(a.outcome) +
+            (a.minute ? ' (' + a.minute + 'm)' : '') + (a.reason ? ' · ' + esc(a.reason) : '') + '</li>';
+        }).join('') + '</ol>'
+      : '';
+
+    wrap.innerHTML =
+      '<div class="form-grid">' +
+        '<div class="form-group"><label for="fmeComp">Competition</label>' +
+          (isNew ? '<select id="fmeComp">' + compOpts + '</select>'
+                 : '<div>' + compPill(rec.comp) + '</div>') + '</div>' +
+        '<div class="form-group"><label for="fmeRound">Round</label>' +
+          '<input id="fmeRound" type="text" value="' + esc(rec && rec.round || '') + '"' + dis + '></div>' +
+        '<div class="form-group"><label>Home</label><div id="fmeHome"></div></div>' +
+        '<div class="form-group"><label>Away</label><div id="fmeAway"></div></div>' +
+        '<div class="form-group"><label for="fmeDate">Date</label>' +
+          '<div class="datetime-row"><input id="fmeDate" type="date" value="' + esc(rec && rec.date || '') + '"' + dis + '>' +
+          '<input id="fmeKo" type="time" value="' + esc(rec && rec.ko || '15:00') + '"' + dis + '></div>' +
+          (rec && F.awaiting(rec) ? '<div class="form-hint">Awaiting a date. Set one here only if it is agreed.</div>' : '') + '</div>' +
+        '<div class="form-group" id="fmeOptaWrap"><label for="fmeOpta">Opta ID</label>' +
+          '<input id="fmeOpta" type="text" placeholder="g2660046" value="' + esc(rec && rec.optaID || '') + '"' + dis + '></div>' +
+        '<div class="form-group" id="fmeResultWrap"><label for="fmeWent">Went through</label>' +
+          '<select id="fmeWent"' + dis + '>' +
+            '<option value="">Not played yet</option>' +
+            '<option value="home">Home</option>' +
+            '<option value="away">Away</option>' +
+            '<option value="replay">Drawn: replay</option>' +
+          '</select></div>' +
+        '<div class="form-group" id="fmeScoreWrap"><label for="fmeScore">Score</label>' +
+          '<input id="fmeScore" type="text" placeholder="2-1" value="' + esc(rec && rec.score || '') + '"' + dis + '></div>' +
+        (hist ? '<div class="form-group span2"><label>Lost dates</label>' + hist + '</div>' : '') +
+      '</div>';
+
+    var homePick, awayPick;
+    function pickers() {
+      var picked = {};
+      ['home', 'away'].forEach(function (side) {
+        var mount = wrap.querySelector(side === 'home' ? '#fmeHome' : '#fmeAway');
+        var current = rec ? rec[side].name : null;
+        if (fixedTeams || ro) { mount.innerHTML = team(rec[side]); NL.clubs.wireCrestImgs(mount); return; }
+        var p = NL.clubPicker(mount, {
+          mode: 'search', season: 'all', extraClubs: S.guests, freetext: 'commit',
+          placeholder: 'Club', onSelect: function () {}
+        });
+        if (current) p.setValue(current);
+        picked[side] = p;
+      });
+      homePick = picked.home; awayPick = picked.away;
+    }
+
+    function syncComp() {
+      var key = isNew ? wrap.querySelector('#fmeComp').value : rec.comp;
+      var fa = F.COMP_BY_KEY[key].fa;
+      wrap.querySelector('#fmeOptaWrap').hidden = fa;
+      wrap.querySelector('#fmeResultWrap').hidden = !fa;
+      wrap.querySelector('#fmeScoreWrap').hidden = !fa;
+    }
+
+    var buttons = [{ label: ro ? 'Close' : 'Cancel', className: 'btn--ghost', onClick: function (m) { m.close(); } }];
+    if (!ro) {
+      buttons.push({ label: isNew ? 'Add tie' : 'Save', className: 'btn--primary', onClick: function (m) {
+        submit(rec, wrap, homePick, awayPick).then(function (ok) { if (ok) m.close(); });
+      }});
+    }
+    if (!ro && rec && rec.source === 'manual') {
+      buttons.unshift({ label: 'Delete', className: 'btn--danger', onClick: function (m) {
+        NL.confirm('Delete ' + rec.home.name + ' v ' + rec.away.name + '?', { title: 'Delete tie', confirmText: 'Delete', variant: 'danger' })
+          .then(function (yes) {
+            if (!yes) return;
+            var up = {}; up['fixtures/' + rec.key] = null; up['public/' + rec.key] = null;
+            NL.ensureAuth().then(function () { return ref().update(up); })
+              .then(function () { NL.toast('Deleted', 'success'); m.close(); })
+              .catch(function (e) { NL.toast('Delete failed: ' + e.message, 'error'); });
+          });
+      }});
+    }
+
+    NL.modal({
+      title: isNew ? 'Add cup tie' : rec.home.name + ' v ' + rec.away.name,
+      body: wrap,
+      width: 'wide',
+      footerSplit: !!(rec && rec.source === 'manual' && !ro),
+      buttons: buttons
+    });
+    pickers();
+    if (rec) wrap.querySelector('#fmeWent').value = rec.wentThrough || '';
+    if (isNew) wrap.querySelector('#fmeComp').addEventListener('change', syncComp);
+    syncComp();
+  }
+
+  function submit(rec, wrap, homePick, awayPick) {
+    var isNew = !rec;
+    var compKey = isNew ? wrap.querySelector('#fmeComp').value : rec.comp;
+    var comp = F.COMP_BY_KEY[compKey];
+    var homeName = homePick ? homePick.getValue() : rec.home.name;
+    var awayName = awayPick ? awayPick.getValue() : rec.away.name;
+    var date = wrap.querySelector('#fmeDate').value || null;
+    var ko = wrap.querySelector('#fmeKo').value || null;
+    var round = wrap.querySelector('#fmeRound').value.trim() || null;
+    var opta = wrap.querySelector('#fmeOpta').value.trim().toLowerCase() || null;
+
+    if (!homeName || !awayName) { NL.toast('Pick both clubs', 'error'); return Promise.resolve(false); }
+    if (homeName === awayName) { NL.toast('Home and away are the same club', 'error'); return Promise.resolve(false); }
+    if (opta && !/^g\d+$/.test(opta)) { NL.toast('An Opta ID looks like g2660046', 'error'); return Promise.resolve(false); }
+    if (isNew && !date) { NL.toast('A new tie needs a date', 'error'); return Promise.resolve(false); }
+    /* Our side of every tie comes from the roster — it is the side whose
+       dates get blocked (plan, Outside clubs). */
+    if (!clubOf(homeName) && !clubOf(awayName)) {
+      NL.toast('At least one side must be a League club', 'error'); return Promise.resolve(false);
+    }
+    if (opta && (!rec || rec.optaID !== opta)) {
+      var clash = Object.keys(S.fixtures).filter(function (k) { return S.fixtures[k].optaID === opta && (!rec || k !== rec.key); });
+      if (clash.length) { NL.toast('Opta ID already on another fixture', 'error'); return Promise.resolve(false); }
+    }
+
+    var next = rec ? clean(rec) : {
+      comp: compKey, attempts: [], source: 'manual', state: 'scheduled',
+      broadcast: { availability: comp.fa ? 'cup' : compKey === 'nl-cup' ? 'worldwide' : 'tbc', enhanced: false, daznMove: false, ami: false },
+      wentThrough: null, score: null
+    };
+    next.round = round;
+    next.home = clubOf(homeName) || { name: homeName.trim() };
+    next.away = clubOf(awayName) || { name: awayName.trim() };
+    if (!comp.fa) next.optaID = opta;
+
+    if (rec && rec.date && date && (rec.date !== date || rec.ko !== ko)) {
+      next.attempts = (next.attempts || []).concat([{ date: rec.date, ko: rec.ko, outcome: 'moved', reason: null,
+        noticeAt: new Date().toISOString(), rescheduledAt: new Date().toISOString(), minute: null }]);
+    }
+    if (date) { next.date = date; next.ko = ko; next.state = 'scheduled'; }
+    if (!next.original) next.original = { date: next.date, ko: next.ko };
+
+    if (comp.fa) {
+      next.wentThrough = wrap.querySelector('#fmeWent').value || null;
+      var sc = wrap.querySelector('#fmeScore').value.replace(/\s/g, '');
+      next.score = sc && /^\d+-\d+$/.test(sc) ? sc : null;
+    }
+
+    if (isNew) {
+      var key = opta || F.mintKey(compKey, round, next.home.name, next.away.name);
+      var n = 2, base = key;
+      while (S.fixtures[key]) key = base + '-' + (n++);
+      next.key = key;
+    }
+
+    return save(next)
+      .then(function () { NL.toast(isNew ? 'Tie added' : 'Saved', 'success'); return true; })
+      .catch(function (e) { NL.toast('Save failed: ' + e.message, 'error'); return false; });
+  }
+
+  /* ── Import ──────────────────────────────────────────────────────────
+     Once per season: the workbook becomes the record and the workbook is
+     frozen (plan, The record). Re-importing replaces every fixture, so it
+     says so first. */
+  function openImport() {
+    var wrap = document.createElement('div');
+    wrap.innerHTML =
+      '<div class="form-group"><label for="fmiFix">Fixtures tab</label>' +
+        '<textarea id="fmiFix" class="fm-paste" spellcheck="false" placeholder="Select all on the Fixtures tab, copy, paste here"></textarea></div>' +
+      '<div class="form-group"><label for="fmiRe">Rearrangements tab</label>' +
+        '<textarea id="fmiRe" class="fm-paste" spellcheck="false"></textarea></div>' +
+      '<div id="fmiOut"></div>';
+    var result = null;
+
+    var ctrl = NL.modal({
+      title: 'Import workbook',
+      body: wrap,
+      width: 'wide',
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (m) { m.close(); } },
+        { label: 'Check', className: 'btn--navy', onClick: function () { check(); } },
+        { label: 'Import', className: 'btn--primary', onClick: function (m) { commit(m); } }
+      ]
+    });
+
+    function check() {
+      var out = wrap.querySelector('#fmiOut');
+      out.innerHTML = '<div class="banner banner--info">Checking…</div>';
+      var seedP = S.season === '2026'
+        ? fetch(SEED_URL, { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; })
+        : Promise.resolve(null);
+      seedP.then(function (seed) {
+        result = F.build({
+          fixtures: wrap.querySelector('#fmiFix').value,
+          rearrangements: wrap.querySelector('#fmiRe').value.trim() || null,
+          seed: seed,
+          clubOf: clubOf,
+          parseDate: NL.parseDate
+        });
+        if (result.error) { out.innerHTML = '<div class="banner banner--error">' + esc(result.error) + '</div>'; result = null; return; }
+        var c = result.counts;
+        var by = F.COMPS.map(function (x) { return c.byComp[x.key] ? esc(x.label) + ' ' + c.byComp[x.key] : null; })
+          .filter(Boolean).join(' · ');
+        var html = '<div class="banner banner--info"><strong>' + c.total + ' fixtures.</strong> ' + by +
+          '. ' + c.awaiting + ' awaiting a date.' + (seed ? '' : ' No published schedule found, so original dates come from the history.') + '</div>';
+        if (result.problems.length) {
+          html += '<details class="disclosure"><summary>' + result.problems.length + ' to check after import' +
+            '<span class="disclosure__meta">none stop the import</span></summary><ul class="fm-problems">' +
+            result.problems.map(function (p) { return '<li>' + esc(p.text) + '</li>'; }).join('') + '</ul></details>';
+        }
+        out.innerHTML = html;
+      });
+    }
+
+    function commit(m) {
+      if (!result) { NL.toast('Check the paste first', 'error'); return; }
+      var existing = Object.keys(S.fixtures).length;
+      var go = existing
+        ? NL.confirm('This replaces all ' + existing + ' fixtures for ' + NL.season.label(S.meta, S.season) +
+            ', including anything changed since the last import.', { title: 'Replace fixtures', confirmText: 'Replace', variant: 'danger' })
+        : Promise.resolve(true);
+      go.then(function (yes) {
+        if (!yes) return;
+        var fx = {}, pub = {}, now = new Date().toISOString();
+        Object.keys(result.fixtures).forEach(function (k) {
+          var r = result.fixtures[k];
+          r.updatedAt = now;
+          fx[k] = clean(r);
+          var p = F.publicView(r);
+          if (p) pub[k] = clean(p);
+        });
+        var payload = {
+          fixtures: fx,
+          public: pub,
+          meta: { importedAt: now, importedBy: (S.session && S.session.email) || null, counts: clean(result.counts) }
+        };
+        NL.ensureAuth().then(function () { return ref().set(payload); })
+          .then(function () {
+            NL.writeAudit('fixtures_import', NL.season.label(S.meta, S.season) + ': ' + result.counts.total + ' fixtures');
+            NL.toast('Imported ' + result.counts.total + ' fixtures', 'success');
+            m.close();
+          })
+          .catch(function (e) { NL.toast('Import failed: ' + e.message, 'error'); });
+      });
+    }
+    return ctrl;
+  }
+
+  /* If auth-guard fired before this script loaded, replay the session. */
+  if (window._toolDeferredSession) {
+    window.TOOL.boot(window._toolDeferredSession);
+    delete window._toolDeferredSession;
+  }
+})();
+</script>
+
+</body>
+</html>

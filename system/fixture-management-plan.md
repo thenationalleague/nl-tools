@@ -21,9 +21,13 @@ One tool, two doors (the club-root + `/admin/` shape in
      "review broadcast" list. Division filter covers step 1 and step 2 picks.
   4. **AMI** — a tick box per UK-available game. Staff only, never public.
 
-Use a **new** toolKey (not `ops-fixtures`): the retired tool's data still sits
-under `app-data/ops-fixtures/`, and a new tool must not inherit or collide
-with it.
+The toolKey is **`ops-fixture-management`**, not `ops-fixtures`: the retired
+tool's data still sits under `app-data/ops-fixtures/`, and a new tool must not
+inherit or collide with it.
+
+Each tab ships as its own PR. The Fixtures tab (with the import) shipped
+first, in `fixtures/admin/` with its data layer in `fixtures/_core.js`; the
+Broadcast tab covers both step 1 and step 2 (North and South) picks.
 
 ## The record
 
@@ -158,7 +162,8 @@ pair, from the xlsx Pairings tab: 72 clubs, names all match
 `clubs-meta.json`, 5,111 of 5,112 directed pairs (missing: Yeovil Town home to
 Worthing — fill from the reverse, marked). Directions differ — keep both; a few
 differ by ~33 miles (Weston-super-Mare ↔ Eastleigh / Worthing) and stay as
-given. Open: confirm a row (Home, Away) is the away club's journey. Cup
+given. A row (Home, Away) is the away club's journey to the home ground
+(confirmed 28/10/2026). Cup
 opponents have no coordinates — their legs show as unknown, not zero. Broadcast
 Travel and Travel Planner are the other readers to move onto it.
 
