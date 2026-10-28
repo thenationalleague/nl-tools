@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixture Management
-  Version: v1.1 (28/10/2026)
+  Version: v1.2 (28/10/2026)
   File: /fixtures/admin/index.html
 
   The League's master fixture record: every game in every competition, with
@@ -9,6 +9,16 @@
   behind it, is system/fixture-management-plan.md.
 
   CHANGELOG
+    v1.2 (28/10/2026) — A fixture can be postponed or abandoned from its
+      dialog (reason, and the minute for an abandonment), and a mistaken
+      lost date removed. Results: imported from the workbook, edited in the
+      dialog (90 minutes, extra time, penalties), and filled a day at a time
+      from NLS or by pasting rows. The list reads from a centre line — home
+      name and crest right-aligned, score in the middle, away crest and name
+      left — in fixed columns, so every table lines up; each day runs
+      National, North, South, then the cups. Broadcast labels are coloured.
+      Crests come from assets/crests/manifest.json as well as the club
+      files, so EFL and other outside clubs with a crest show one.
     v1.1 (28/10/2026) — Crests only for clubs we hold one for, by crestName.
       Outside FA Cup/Trophy clubs drew a crest <img> that 404'd twice per row
       per render, uncached: a request storm that hit Pages rate limits. PL2
@@ -83,6 +93,16 @@
     window.NL_CHANGELOG = [
       {
         date: '28/10/2026',
+        version: 'v1.2',
+        items: [
+          'Postpone or abandon a fixture from its dialog, and remove a lost date entered by mistake.',
+          'Results: imported from the workbook, edited per game, and filled from NLS or a pasted day of rows.',
+          'Tables line up on a centre line with crests either side and the score in the middle; each day runs National, North, South, then the cups.',
+          'Broadcast labels are coloured, and EFL and other clubs with a crest file now show it.'
+        ]
+      },
+      {
+        date: '28/10/2026',
         version: 'v1.1',
         items: [
           'Crests load only for clubs with one, so FA Cup and Trophy lists no longer flood the server with failed requests.',
@@ -122,7 +142,7 @@
   <script src="/system/auth-guard.js?v=17"></script>
 
   <!-- Tool data layer (pure; tested in tests/fixture-management.test.mjs) -->
-  <script src="/fixtures/_core.js?v=1"></script>
+  <script src="/fixtures/_core.js?v=2"></script>
 
 <style>
   /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
@@ -133,12 +153,41 @@
   .fm-card.is-on { box-shadow: var(--focus-ring) !important; }
   .fm-picker { min-width: 260px; }
 
+  /* Fixed columns: every table on the page shares one colgroup, so the
+     centre line sits in the same place in all of them. */
+  .fm-table { table-layout: fixed; width: 100%; min-width: 1040px; }
+  .fm-table col.c-ko { width: 108px; }
+  .fm-table col.c-comp { width: 136px; }
+  .fm-table col.c-rd { width: 64px; }
+  .fm-table col.c-mid { width: 150px; }
+  .fm-table col.c-bc { width: 150px; }
+  .fm-table col.c-flag { width: 150px; }
+  .fm-table td { white-space: nowrap; }
   .fm-day td { background: var(--off-white) !important; font-weight: 800; font-variation-settings: 'wght' 800; color: var(--navy); }
   .fm-row { cursor: pointer; }
-  .fm-team { display: inline-flex; align-items: center; gap: 8px; }
+  .fm-team { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .fm-team--home { justify-content: flex-end; text-align: right; }
+  .fm-team span.fm-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .fm-team img, .fm-crest-none { width: 22px; height: 22px; object-fit: contain; flex: 0 0 22px; }
+  .fm-mid { text-align: center; font-variant-numeric: tabular-nums; font-weight: 800; font-variation-settings: 'wght' 800; }
+  .fm-mid--v { color: var(--text-muted); font-weight: 400; font-variation-settings: 'wght' 400; }
   .fm-ko { font-variant-numeric: tabular-nums; }
   .fm-flags { display: flex; gap: 4px; flex-wrap: wrap; }
+
+  /* Broadcast status, mapped onto the system hues: shown worldwide and
+     overseas read as "on"; TBC as a decision pending; the rest quiet. */
+  .fm-bc--worldwide    { background: var(--green-light);  color: var(--green); }
+  .fm-bc--overseas     { background: var(--blue-light);   color: var(--blue); }
+  .fm-bc--tbc          { background: var(--amber-light);  color: var(--amber-deep); }
+  .fm-bc--unavailable  { background: var(--off-white);    color: var(--text-muted); }
+  .fm-bc--not-selected { background: var(--white);        color: var(--text-muted); box-shadow: inset 0 0 0 1px var(--border); }
+  .fm-bc--cup          { background: var(--purple-light); color: var(--purple); }
+
+  .fm-score { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: center; }
+  .fm-score input { text-align: center; }
+  .fm-score .fm-dash { color: var(--text-muted); }
+  .fm-history li { display: flex; gap: 10px; align-items: baseline; }
+  .fm-section { margin: 18px 0 6px; }
 
   .fm-paste { width: 100%; min-height: 120px; font-family: var(--font-mono); font-size: var(--text-xs); }
   .fm-history { margin: 0; padding-left: 18px; font-size: var(--text-sm); }
@@ -161,6 +210,7 @@
       <h2 id="fmSeason">Fixtures</h2>
       <div id="fmActions" hidden>
         <button class="btn btn--ghost btn--sm" type="button" id="fmImport">Import workbook</button>
+        <button class="btn btn--navy btn--sm" type="button" id="fmResults">Results</button>
         <button class="btn btn--primary btn--sm" type="button" id="fmAdd">Add cup tie</button>
       </div>
     </div>
@@ -188,6 +238,8 @@
   var esc = NL.escHtml;
   var BASE = 'app-data/ops-fixture-management/seasons/';
   var SEED_URL = '/assets/data/fixtures-2026-27.json';
+  var REASONS_URL = '/assets/data/postponement-reasons.json';
+  var CRESTS_URL = '/assets/crests/manifest.json';
   /* Rows drawn at once. A season is ~1,900 games; drawing them all is
      ~3,800 crest images and a slow page for a list read from the top. */
   var PAGE = 200;
@@ -197,6 +249,8 @@
     canEdit: false,
     meta: null,
     guests: [],
+    crests: {},          /* name → true, from the crest manifest */
+    reasons: [],
     season: null,
     fixtures: {},
     comp: 'all',
@@ -209,6 +263,7 @@
 
   function today() { return F.ymdOf(new Date()); }
   function ref(path) { return db.ref(BASE + S.season + (path ? '/' + path : '')); }
+  function now() { return new Date().toISOString(); }
 
   /* Firebase rejects undefined anywhere in a write; a JSON round trip drops it. */
   function clean(o) { return JSON.parse(JSON.stringify(o)); }
@@ -217,6 +272,10 @@
     if (!name) return null;
     var c = NL.clubs.byName(name) || NL.clubs.guestByName(name);
     return c ? { name: c.name, code: c.code || null } : null;
+  }
+
+  function getJson(url) {
+    return fetch(url, { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
   }
 
   /* ── Boot ─────────────────────────────────────────────────────────── */
@@ -229,10 +288,19 @@
     wireStatic();
 
     NL.ensureAuth()
-      .then(function () { return Promise.all([NL.clubs.load(), NL.clubs.guests().catch(function () { return []; })]); })
+      .then(function () {
+        return Promise.all([
+          NL.clubs.load(),
+          NL.clubs.guests().catch(function () { return []; }),
+          getJson(CRESTS_URL),
+          getJson(REASONS_URL)
+        ]);
+      })
       .then(function (r) {
         S.meta = r[0];
         S.guests = r[1] || [];
+        ((r[2] && r[2].names) || []).forEach(function (n) { S.crests[n] = true; });
+        S.reasons = ((r[3] && r[3].reasons) || []).map(function (x) { return x.label; });
         S.season = NL.season.current(S.meta) || String(NL.season.fromDate());
         document.getElementById('fmSeason').textContent = 'Fixtures ' + NL.season.label(S.meta, S.season);
         S.picker = NL.clubPicker('#fmClub', {
@@ -256,6 +324,7 @@
 
   function wireStatic() {
     document.getElementById('fmImport').addEventListener('click', openImport);
+    document.getElementById('fmResults').addEventListener('click', openResults);
     document.getElementById('fmAdd').addEventListener('click', function () { openEdit(null); });
     document.getElementById('fmWhen').addEventListener('click', function (e) {
       var b = e.target.closest('[data-when]');
@@ -327,13 +396,11 @@
     }
 
     var list = all.filter(function (r) { return passes(r, t); });
-    var waiting = list.filter(F.awaiting);
-    var dated = list.filter(function (r) { return !F.awaiting(r); })
-      .sort(function (a, b) {
-        return a.date !== b.date ? (a.date < b.date ? -1 : 1)
-          : (a.ko || '') !== (b.ko || '') ? ((a.ko || '') < (b.ko || '') ? -1 : 1)
-          : a.home.name.localeCompare(b.home.name);
-      });
+    var waiting = list.filter(F.awaiting).sort(function (a, b) {
+      var x = lastLost(a), y = lastLost(b);
+      return x !== y ? (x < y ? -1 : 1) : F.compare(a, b);
+    });
+    var dated = list.filter(function (r) { return !F.awaiting(r); }).sort(F.compare);
 
     var html = '';
     if (waiting.length) {
@@ -354,6 +421,11 @@
     NL.clubs.wireCrestImgs(body);
   }
 
+  function lastLost(r) {
+    var a = r.attempts || [];
+    return a.length ? a[a.length - 1].date : '';
+  }
+
   function renderStats(c) {
     var cards = [
       ['all', c.total, 'Fixtures'],
@@ -367,26 +439,39 @@
     }).join('');
   }
 
-  /* A crest is only requested for a club we hold one for: the roster and
-     the cup guests, by crestName where it differs ("Fulham PL2" wears
-     Fulham's). An outside FA Cup or Trophy club has no file, and a crest
-     <img> for it 404s twice (thumb, then full) on every render — 404s are
-     not cached, so a list of FA ties was a request storm against Pages. */
+  /* A crest is requested only when we know the file exists: the roster
+     and cup guests by crestName ("Fulham PL2" wears Fulham's), then any
+     other club named in assets/crests/manifest.json — the EFL sides met in
+     the FA Cup, say. Never probe: a crest <img> for a club with no file
+     404s twice per row per render, uncached, and a list of FA ties did
+     that ~1,500 times and hit Pages rate limits (28/10/2026). */
   function crestOf(name) {
     var c = NL.clubs.byName(name) || NL.clubs.guestByName(name);
-    return c ? (c.crestName || c.name) : null;
+    if (c) return c.crestName || c.name;
+    return S.crests[name] ? name : null;
   }
 
-  function team(side) {
-    var crest = crestOf(side.name);
-    return '<span class="fm-team">' +
-      (crest ? NL.clubs.crestImgHtml(crest, 'thumb') : '<span class="fm-crest-none" aria-hidden="true"></span>') +
-      esc(side.name) + '</span>';
+  function crest(name) {
+    var c = crestOf(name);
+    return c ? NL.clubs.crestImgHtml(c, 'thumb') : '<span class="fm-crest-none" aria-hidden="true"></span>';
+  }
+
+  /* Home: name then crest, right-aligned to the centre line. Away: crest
+     then name, left-aligned from it. */
+  function team(side, home) {
+    var name = '<span class="fm-name">' + esc(side.name) + '</span>';
+    return '<div class="fm-team' + (home ? ' fm-team--home' : '') + '">' +
+      (home ? name + crest(side.name) : crest(side.name) + name) + '</div>';
   }
 
   function compPill(key) {
     var c = F.COMP_BY_KEY[key];
     return '<span class="comp-pill' + (c && c.pill ? ' comp-pill--' + c.pill : '') + '">' + esc(c ? c.label : key) + '</span>';
+  }
+
+  function broadcastPill(r) {
+    var a = F.AVAIL_BY_KEY[r.broadcast && r.broadcast.availability];
+    return a ? '<span class="pill fm-bc--' + a.key + '">' + esc(a.label) + '</span>' : '';
   }
 
   function flags(r, t) {
@@ -399,50 +484,61 @@
     return '<div class="fm-flags">' + out.join('') + '</div>';
   }
 
-  function broadcastLabel(r) {
-    var a = F.AVAIL_BY_KEY[r.broadcast && r.broadcast.availability];
-    return a ? esc(a.label) : '';
+  function middle(r, t) {
+    if (r.result) return '<td class="fm-mid">' + esc(F.resultText(r.result)) + '</td>';
+    return '<td class="fm-mid fm-mid--v">' + (r.date && r.date < t ? '–' : 'v') + '</td>';
   }
+
+  var COLS = '<colgroup><col class="c-ko"><col class="c-comp"><col class="c-rd"><col>' +
+    '<col class="c-mid"><col><col class="c-bc"><col class="c-flag"></colgroup>';
 
   function tableOf(rows, waiting) {
     var t = today();
-    var html = '<div class="table-wrap"><table class="table table--compact"><thead><tr>' +
-      '<th>' + (waiting ? 'Lost date' : 'KO') + '</th><th>Comp</th><th>Rd</th><th>Home</th><th>Away</th>' +
-      '<th>Broadcast</th><th></th></tr></thead><tbody>';
+    var html = '<div class="table-wrap"><table class="table table--compact fm-table">' + COLS + '<thead><tr>' +
+      '<th>' + (waiting ? 'Lost' : 'KO') + '</th><th>Comp</th><th>Rd</th><th class="ta-right">Home</th>' +
+      '<th class="ta-center"></th><th>Away</th><th>Broadcast</th><th></th></tr></thead><tbody>';
     var day = null;
     rows.forEach(function (r) {
       if (!waiting && r.date !== day) {
         day = r.date;
-        html += '<tr class="fm-day"><td colspan="7">' + esc(NL.formatDate(r.date)) + '</td></tr>';
+        html += '<tr class="fm-day"><td colspan="8">' + esc(NL.formatDate(r.date)) + '</td></tr>';
       }
       var last = waiting ? r.attempts[r.attempts.length - 1] : null;
       html += '<tr class="fm-row" data-key="' + esc(r.key) + '">' +
         '<td class="fm-ko">' + esc(waiting ? (last ? F.fmt(last.date) : '—') : (r.ko || '—')) + '</td>' +
         '<td>' + compPill(r.comp) + '</td>' +
         '<td>' + esc(r.round || '') + '</td>' +
-        '<td>' + team(r.home) + '</td>' +
-        '<td>' + team(r.away) + '</td>' +
-        '<td>' + broadcastLabel(r) + '</td>' +
+        '<td>' + team(r.home, true) + '</td>' +
+        middle(r, t) +
+        '<td>' + team(r.away, false) + '</td>' +
+        '<td>' + broadcastPill(r) + '</td>' +
         '<td>' + flags(r, t) + '</td></tr>';
     });
     return html + '</tbody></table></div>';
   }
 
   /* ── Save ─────────────────────────────────────────────────────────── */
-  function save(rec) {
-    rec.updatedAt = new Date().toISOString();
-    var up = {};
+  function patch(up, rec) {
+    rec.updatedAt = now();
     up['fixtures/' + rec.key] = clean(rec);
     up['public/' + rec.key] = F.publicView(rec) ? clean(F.publicView(rec)) : null;
+  }
+  function saveAll(recs) {
+    var up = {};
+    recs.forEach(function (r) { patch(up, r); });
     return NL.ensureAuth().then(function () { return ref().update(up); });
   }
+  function save(rec) { return saveAll([rec]); }
 
   /* ── Add / edit ──────────────────────────────────────────────────────
      League fixtures come from the import and keep their teams and
      competition. Cup ties are entered here. A changed date keeps the old
-     one as a lost date ('moved'); postponements belong to the
-     Rearrangements tab. */
+     one as a lost date ('moved'). */
   var HAND = ['nl-cup', 'playoffs', 'fa-cup', 'fa-trophy'];
+
+  function numIn(id, v, dis) {
+    return '<input id="' + id + '" type="number" min="0" inputmode="numeric" value="' + (v == null ? '' : v) + '"' + dis + '>';
+  }
 
   function openEdit(rec) {
     var isNew = !rec;
@@ -450,16 +546,17 @@
     var fixedTeams = !isNew && (comp.league || rec.source === 'import');
     var ro = !S.canEdit;
     var dis = ro ? ' disabled' : '';
-    var t = today();
+    var res = (rec && rec.result) || {};
 
     var wrap = document.createElement('div');
     var compOpts = HAND.map(function (k) {
       return '<option value="' + k + '"' + (k === comp.key ? ' selected' : '') + '>' + esc(F.COMP_BY_KEY[k].label) + '</option>';
     }).join('');
     var hist = rec && rec.attempts && rec.attempts.length
-      ? '<ol class="fm-history">' + rec.attempts.map(function (a) {
-          return '<li>' + esc(F.fmt(a.date) + (a.ko ? ' ' + a.ko : '')) + ' · ' + esc(a.outcome) +
-            (a.minute ? ' (' + a.minute + 'm)' : '') + (a.reason ? ' · ' + esc(a.reason) : '') + '</li>';
+      ? '<ol class="fm-history">' + rec.attempts.map(function (a, i) {
+          return '<li><span>' + esc(F.fmt(a.date) + (a.ko ? ' ' + a.ko : '')) + ' · ' + esc(a.outcome) +
+            (a.minute ? ' (' + a.minute + 'm)' : '') + (a.reason ? ' · ' + esc(a.reason) : '') + '</span>' +
+            (ro ? '' : '<button class="btn btn--ghost btn--sm" type="button" data-drop="' + i + '">Remove</button>') + '</li>';
         }).join('') + '</ol>'
       : '';
 
@@ -475,18 +572,22 @@
         '<div class="form-group"><label for="fmeDate">Date</label>' +
           '<div class="datetime-row"><input id="fmeDate" type="date" value="' + esc(rec && rec.date || '') + '"' + dis + '>' +
           '<input id="fmeKo" type="time" value="' + esc(rec && rec.ko || '15:00') + '"' + dis + '></div>' +
-          (rec && F.awaiting(rec) ? '<div class="form-hint">Awaiting a date. Set one here only if it is agreed.</div>' : '') + '</div>' +
+          (rec && F.awaiting(rec) ? '<div class="form-hint">Awaiting a date. Set one here once it is agreed.</div>' : '') + '</div>' +
         '<div class="form-group" id="fmeOptaWrap"><label for="fmeOpta">Opta ID</label>' +
           '<input id="fmeOpta" type="text" placeholder="g2660046" value="' + esc(rec && rec.optaID || '') + '"' + dis + '></div>' +
+        '<div class="form-group"><label>Score</label><div class="fm-score">' +
+          numIn('fmeH', res.h, dis) + '<span class="fm-dash">–</span>' + numIn('fmeA', res.a, dis) + '</div></div>' +
+        '<div class="form-group"><label>After extra time</label><div class="fm-score">' +
+          numIn('fmeEH', res.aet && res.aet.h, dis) + '<span class="fm-dash">–</span>' + numIn('fmeEA', res.aet && res.aet.a, dis) + '</div></div>' +
+        '<div class="form-group"><label>Penalties</label><div class="fm-score">' +
+          numIn('fmePH', res.pens && res.pens.h, dis) + '<span class="fm-dash">–</span>' + numIn('fmePA', res.pens && res.pens.a, dis) + '</div></div>' +
         '<div class="form-group" id="fmeResultWrap"><label for="fmeWent">Went through</label>' +
           '<select id="fmeWent"' + dis + '>' +
-            '<option value="">Not played yet</option>' +
+            '<option value="">From the score</option>' +
             '<option value="home">Home</option>' +
             '<option value="away">Away</option>' +
             '<option value="replay">Drawn: replay</option>' +
           '</select></div>' +
-        '<div class="form-group" id="fmeScoreWrap"><label for="fmeScore">Score</label>' +
-          '<input id="fmeScore" type="text" placeholder="2-1" value="' + esc(rec && rec.score || '') + '"' + dis + '></div>' +
         (hist ? '<div class="form-group span2"><label>Lost dates</label>' + hist + '</div>' : '') +
       '</div>';
 
@@ -496,7 +597,7 @@
       ['home', 'away'].forEach(function (side) {
         var mount = wrap.querySelector(side === 'home' ? '#fmeHome' : '#fmeAway');
         var current = rec ? rec[side].name : null;
-        if (fixedTeams || ro) { mount.innerHTML = team(rec[side]); NL.clubs.wireCrestImgs(mount); return; }
+        if (fixedTeams || ro) { mount.innerHTML = team(rec[side], false); NL.clubs.wireCrestImgs(mount); return; }
         var p = NL.clubPicker(mount, {
           mode: 'search', season: 'all', extraClubs: S.guests, freetext: 'commit',
           placeholder: 'Club', onSelect: function () {}
@@ -512,17 +613,12 @@
       var fa = F.COMP_BY_KEY[key].fa;
       wrap.querySelector('#fmeOptaWrap').hidden = fa;
       wrap.querySelector('#fmeResultWrap').hidden = !fa;
-      wrap.querySelector('#fmeScoreWrap').hidden = !fa;
     }
 
-    var buttons = [{ label: ro ? 'Close' : 'Cancel', className: 'btn--ghost', onClick: function (m) { m.close(); } }];
-    if (!ro) {
-      buttons.push({ label: isNew ? 'Add tie' : 'Save', className: 'btn--primary', onClick: function (m) {
-        submit(rec, wrap, homePick, awayPick).then(function (ok) { if (ok) m.close(); });
-      }});
-    }
+    var ctrl;
+    var buttons = [];
     if (!ro && rec && rec.source === 'manual') {
-      buttons.unshift({ label: 'Delete', className: 'btn--danger', onClick: function (m) {
+      buttons.push({ label: 'Delete', className: 'btn--danger', onClick: function (m) {
         NL.confirm('Delete ' + rec.home.name + ' v ' + rec.away.name + '?', { title: 'Delete tie', confirmText: 'Delete', variant: 'danger' })
           .then(function (yes) {
             if (!yes) return;
@@ -533,18 +629,94 @@
           });
       }});
     }
+    if (!ro && rec && rec.date) {
+      buttons.push({ label: 'Postpone', className: 'btn--ghost', onClick: function (m) { openLose(rec, 'postponed', m); } });
+      buttons.push({ label: 'Abandon', className: 'btn--ghost', onClick: function (m) { openLose(rec, 'abandoned', m); } });
+    }
+    buttons.push({ label: ro ? 'Close' : 'Cancel', className: 'btn--ghost', onClick: function (m) { m.close(); } });
+    if (!ro) {
+      buttons.push({ label: isNew ? 'Add tie' : 'Save', className: 'btn--primary', onClick: function (m) {
+        submit(rec, wrap, homePick, awayPick).then(function (ok) { if (ok) m.close(); });
+      }});
+    }
 
-    NL.modal({
+    ctrl = NL.modal({
       title: isNew ? 'Add cup tie' : rec.home.name + ' v ' + rec.away.name,
       body: wrap,
       width: 'wide',
-      footerSplit: !!(rec && rec.source === 'manual' && !ro),
       buttons: buttons
     });
     pickers();
     if (rec) wrap.querySelector('#fmeWent').value = rec.wentThrough || '';
     if (isNew) wrap.querySelector('#fmeComp').addEventListener('change', syncComp);
     syncComp();
+
+    wrap.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-drop]');
+      if (!b) return;
+      var i = +b.getAttribute('data-drop');
+      var a = rec.attempts[i];
+      NL.confirm('Remove the lost date ' + F.fmt(a.date) + ' (' + a.outcome + ')? Use this for a date entered by mistake; it is not logged as a change.',
+        { title: 'Remove lost date', confirmText: 'Remove', variant: 'danger' })
+        .then(function (yes) {
+          if (!yes) return;
+          save(F.dropAttempt(rec, i))
+            .then(function () { NL.toast('Lost date removed', 'success'); ctrl.close(); })
+            .catch(function (e2) { NL.toast('Save failed: ' + e2.message, 'error'); });
+        });
+    });
+  }
+
+  /* Postpone or abandon. The game drops out of the public view until it
+     has a new date; the reason and the moment it was called are kept. */
+  function openLose(rec, outcome, parent) {
+    var wrap = document.createElement('div');
+    var opts = S.reasons.map(function (r) { return '<option>' + esc(r) + '</option>'; }).join('');
+    wrap.innerHTML =
+      '<div class="form-group"><label for="fmlReason">Reason</label>' +
+        '<select id="fmlReason"><option value="">Choose</option>' + opts + '</select></div>' +
+      '<div class="form-group"><label for="fmlNote">Note</label><input id="fmlNote" type="text"></div>' +
+      (outcome === 'abandoned'
+        ? '<div class="form-group"><label for="fmlMin">Minute</label><input id="fmlMin" type="number" min="0" max="130" inputmode="numeric"></div>'
+        : '');
+    NL.modal({
+      title: (outcome === 'abandoned' ? 'Abandon ' : 'Postpone ') + rec.home.name + ' v ' + rec.away.name,
+      body: wrap,
+      size: 'sm',
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (m) { m.close(); } },
+        { label: outcome === 'abandoned' ? 'Abandon' : 'Postpone', className: 'btn--primary', onClick: function (m) {
+          var reason = wrap.querySelector('#fmlReason').value;
+          var note = wrap.querySelector('#fmlNote').value.trim();
+          if (!reason) { NL.toast('Choose a reason', 'error'); return; }
+          if (reason === 'Other' && !note) { NL.toast('Say what the other reason is', 'error'); return; }
+          var minEl = wrap.querySelector('#fmlMin');
+          var minute = minEl && minEl.value !== '' ? +minEl.value : null;
+          var next = F.loseDate(rec, { outcome: outcome, reason: note ? reason + ': ' + note : reason, minute: minute, at: now() });
+          save(next).then(function () {
+            NL.toast(outcome === 'abandoned' ? 'Abandoned' : 'Postponed', 'success');
+            m.close(); parent.close();
+          }).catch(function (e) { NL.toast('Save failed: ' + e.message, 'error'); });
+        }}
+      ]
+    });
+  }
+
+  function intOf(wrap, id) {
+    var v = wrap.querySelector('#' + id).value;
+    return v === '' ? null : Math.max(0, parseInt(v, 10));
+  }
+
+  function resultFromForm(wrap) {
+    var h = intOf(wrap, 'fmeH'), a = intOf(wrap, 'fmeA');
+    if (h == null && a == null) return { ok: true, result: null };
+    if (h == null || a == null) return { ok: false, msg: 'Enter both scores, or neither' };
+    var eh = intOf(wrap, 'fmeEH'), ea = intOf(wrap, 'fmeEA');
+    var ph = intOf(wrap, 'fmePH'), pa = intOf(wrap, 'fmePA');
+    if ((eh == null) !== (ea == null)) return { ok: false, msg: 'Extra time needs both scores' };
+    if ((ph == null) !== (pa == null)) return { ok: false, msg: 'Penalties need both scores' };
+    return { ok: true, result: { h: h, a: a, aet: eh != null ? { h: eh, a: ea } : null,
+      pens: ph != null ? { h: ph, a: pa } : null, source: 'manual' } };
   }
 
   function submit(rec, wrap, homePick, awayPick) {
@@ -557,42 +729,38 @@
     var ko = wrap.querySelector('#fmeKo').value || null;
     var round = wrap.querySelector('#fmeRound').value.trim() || null;
     var opta = wrap.querySelector('#fmeOpta').value.trim().toLowerCase() || null;
+    var res = resultFromForm(wrap);
 
-    if (!homeName || !awayName) { NL.toast('Pick both clubs', 'error'); return Promise.resolve(false); }
-    if (homeName === awayName) { NL.toast('Home and away are the same club', 'error'); return Promise.resolve(false); }
-    if (opta && !/^g\d+$/.test(opta)) { NL.toast('An Opta ID looks like g2660046', 'error'); return Promise.resolve(false); }
-    if (isNew && !date) { NL.toast('A new tie needs a date', 'error'); return Promise.resolve(false); }
+    function no(msg) { NL.toast(msg, 'error'); return Promise.resolve(false); }
+    if (!res.ok) return no(res.msg);
+    if (!homeName || !awayName) return no('Pick both clubs');
+    if (homeName === awayName) return no('Home and away are the same club');
+    if (opta && !/^g\d+$/.test(opta)) return no('An Opta ID looks like g2660046');
+    if (isNew && !date) return no('A new tie needs a date');
     /* Our side of every tie comes from the roster — it is the side whose
        dates get blocked (plan, Outside clubs). */
-    if (!clubOf(homeName) && !clubOf(awayName)) {
-      NL.toast('At least one side must be a League club', 'error'); return Promise.resolve(false);
-    }
+    if (!clubOf(homeName) && !clubOf(awayName)) return no('At least one side must be a League club');
     if (opta && (!rec || rec.optaID !== opta)) {
       var clash = Object.keys(S.fixtures).filter(function (k) { return S.fixtures[k].optaID === opta && (!rec || k !== rec.key); });
-      if (clash.length) { NL.toast('Opta ID already on another fixture', 'error'); return Promise.resolve(false); }
+      if (clash.length) return no('Opta ID already on another fixture');
     }
 
     var next = rec ? clean(rec) : {
-      comp: compKey, attempts: [], source: 'manual', state: 'scheduled',
+      comp: compKey, attempts: [], source: 'manual', state: 'scheduled', date: null, ko: null,
       broadcast: { availability: comp.fa ? 'cup' : compKey === 'nl-cup' ? 'worldwide' : 'tbc', enhanced: false, daznMove: false, ami: false },
-      wentThrough: null, score: null
+      wentThrough: null, result: null
     };
     next.round = round;
     next.home = clubOf(homeName) || { name: homeName.trim() };
     next.away = clubOf(awayName) || { name: awayName.trim() };
     if (!comp.fa) next.optaID = opta;
-
-    if (rec && rec.date && date && (rec.date !== date || rec.ko !== ko)) {
-      next.attempts = (next.attempts || []).concat([{ date: rec.date, ko: rec.ko, outcome: 'moved', reason: null,
-        noticeAt: new Date().toISOString(), rescheduledAt: new Date().toISOString(), minute: null }]);
-    }
-    if (date) { next.date = date; next.ko = ko; next.state = 'scheduled'; }
+    if (date) next = F.setDate(next, date, ko, now());
     if (!next.original) next.original = { date: next.date, ko: next.ko };
 
+    if (!res.result || !rec || !F.sameResult(res.result, rec.result)) next.result = res.result;
     if (comp.fa) {
-      next.wentThrough = wrap.querySelector('#fmeWent').value || null;
-      var sc = wrap.querySelector('#fmeScore').value.replace(/\s/g, '');
-      next.score = sc && /^\d+-\d+$/.test(sc) ? sc : null;
+      var w = wrap.querySelector('#fmeWent').value;
+      next.wentThrough = w || (next.result ? F.faWinner(next.result, null) : null);
     }
 
     if (isNew) {
@@ -605,6 +773,137 @@
     return save(next)
       .then(function () { NL.toast(isNew ? 'Tie added' : 'Saved', 'success'); return true; })
       .catch(function (e) { NL.toast('Save failed: ' + e.message, 'error'); return false; });
+  }
+
+  /* ── Results ─────────────────────────────────────────────────────────
+     A day at a time, two ways: from NLS for the competitions it carries,
+     or by pasting rows from the sheet (any columns with home, score, away).
+     A score already held that differs is shown and kept unless ticked. */
+  var NLS = 'https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2/matches/';
+  var NLS_COMPS = [89, 373, 372, 1275];
+
+  /* Canon candidate (28/10/2026): a season of NLS matches, paged, is also
+     fetched by dazn/admin/index.html (three leagues). The second copy is
+     the signal to promote one NL.* helper. */
+  function nlsSeason() {
+    return Promise.all(NLS_COMPS.map(function (comp) {
+      var all = [];
+      function page(n) {
+        var url = NLS + '?seasonID=' + encodeURIComponent(S.season) + '&competitionID=' + comp +
+          '&sort=kickOffDateUTC&page.number=' + n + '&page.size=100';
+        return fetch(url).then(function (r) {
+          if (!r.ok) throw new Error('NLS ' + comp + ': HTTP ' + r.status);
+          return r.json();
+        }).then(function (j) {
+          var data = j.data || [];
+          all = all.concat(data);
+          var total = j.meta && j.meta.totalCount;
+          if (data.length === 100 && (total == null || all.length < total)) return page(n + 1);
+          return all;
+        });
+      }
+      return page(1);
+    })).then(function (lists) { return [].concat.apply([], lists); });
+  }
+
+  var LONDON = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' });
+  function londonYmd(t) { return LONDON.format(new Date(t)); }
+
+  function openResults() {
+    var t = today();
+    var weekAgo = F.ymdOf(new Date(Date.now() - 7 * 864e5));
+    var wrap = document.createElement('div');
+    wrap.innerHTML =
+      '<h3 class="fm-section">From NLS</h3>' +
+      '<div class="form-grid">' +
+        '<div class="form-group"><label for="fmrFrom">From</label><input id="fmrFrom" type="date" value="' + weekAgo + '"></div>' +
+        '<div class="form-group"><label for="fmrTo">To</label><input id="fmrTo" type="date" value="' + t + '"></div>' +
+      '</div>' +
+      '<button class="btn btn--navy btn--sm" type="button" id="fmrFetch">Fetch</button>' +
+      '<h3 class="fm-section">Or paste rows</h3>' +
+      '<div class="form-group"><textarea id="fmrPaste" class="fm-paste" spellcheck="false" placeholder="Home, score, away on each row"></textarea></div>' +
+      '<button class="btn btn--navy btn--sm" type="button" id="fmrRead">Read</button>' +
+      '<div id="fmrOut" class="fm-gap"></div>';
+
+    var pending = null;      /* { rows: [match], kind } */
+
+    function show(matches, unmatched, opta) {
+      var add = matches.filter(function (m) { return m.result && !m.current; });
+      var same = matches.filter(function (m) { return m.result && m.current && !m.differs; });
+      var diff = matches.filter(function (m) { return m.differs; });
+      var fill = (opta || []).length;
+      pending = { matches: matches };
+      var html = '<div class="banner banner--info"><strong>' + add.length + ' new results</strong>' +
+        (fill ? ', ' + fill + ' Opta IDs to fill' : '') + '. ' + same.length + ' already held' +
+        (diff.length ? ', ' + diff.length + ' different.' : '.') + '</div>';
+      if (diff.length) {
+        html += '<label class="fm-gap"><input type="checkbox" id="fmrOver"> Replace the ' + diff.length + ' that differ</label>' +
+          '<ul class="fm-problems">' + diff.map(function (m) {
+            var r = S.fixtures[m.key];
+            return '<li>' + esc(r.home.name + ' v ' + r.away.name) + ': held ' + esc(F.resultText(m.current)) +
+              ', new ' + esc(F.resultText(m.result)) + '</li>';
+          }).join('') + '</ul>';
+      }
+      if (unmatched && unmatched.length) {
+        html += '<details class="disclosure"><summary>' + unmatched.length + ' rows not matched</summary><ul class="fm-problems">' +
+          unmatched.map(function (u) { return '<li>' + esc(u) + '</li>'; }).join('') + '</ul></details>';
+      }
+      wrap.querySelector('#fmrOut').innerHTML = html;
+    }
+
+    wrap.querySelector('#fmrFetch').addEventListener('click', function () {
+      var from = wrap.querySelector('#fmrFrom').value, to = wrap.querySelector('#fmrTo').value;
+      if (!from || !to || from > to) { NL.toast('Pick a date range', 'error'); return; }
+      wrap.querySelector('#fmrOut').innerHTML = '<div class="banner banner--info">Fetching from NLS…</div>';
+      nlsSeason().then(function (rows) {
+        /* Results inside the range; Opta IDs from the whole season, since an
+           unplayed game has one too. */
+        var res = F.nlsResults(rows).filter(function (n) {
+          var d = n.utc != null ? londonYmd(n.utc) : null;
+          if (!n.result) return true;
+          return d && d >= from && d <= to;
+        });
+        var m = F.matchNls(S.fixtures, res, londonYmd, function (id) { var c = NL.clubs.byOpta(id); return c ? c.name : null; });
+        show(m, null, m.filter(function (x) { return x.optaID; }));
+      }).catch(function (e) {
+        wrap.querySelector('#fmrOut').innerHTML = '<div class="banner banner--error">' + esc(e.message) + '</div>';
+      });
+    });
+
+    wrap.querySelector('#fmrRead').addEventListener('click', function () {
+      var out = F.resultsFromPaste(S.fixtures, wrap.querySelector('#fmrPaste').value, NL.parseDate);
+      show(out.matches, out.unmatched, null);
+    });
+
+    NL.modal({
+      title: 'Results',
+      body: wrap,
+      width: 'wide',
+      buttons: [
+        { label: 'Close', className: 'btn--ghost', onClick: function (m) { m.close(); } },
+        { label: 'Apply', className: 'btn--primary', onClick: function (m) {
+          if (!pending) { NL.toast('Fetch or read some results first', 'error'); return; }
+          var over = wrap.querySelector('#fmrOver');
+          var replace = over && over.checked;
+          var recs = [];
+          pending.matches.forEach(function (x) {
+            var r = S.fixtures[x.key];
+            if (!r) return;
+            var n = clean(r), changed = false;
+            if (x.optaID && !n.optaID) { n.optaID = x.optaID; changed = true; }
+            if (x.result && (!x.current || (x.differs && replace))) { n.result = x.result; changed = true; }
+            if (changed && F.COMP_BY_KEY[n.comp].fa && !n.wentThrough) n.wentThrough = F.faWinner(n.result, null);
+            if (changed) recs.push(n);
+          });
+          if (!recs.length) { NL.toast('Nothing to change', 'success'); return; }
+          saveAll(recs).then(function () {
+            NL.writeAudit('fixtures_results', recs.length + ' fixtures');
+            NL.toast(recs.length + ' fixtures updated', 'success');
+            m.close();
+          }).catch(function (e) { NL.toast('Save failed: ' + e.message, 'error'); });
+        }}
+      ]
+    });
   }
 
   /* ── Import ──────────────────────────────────────────────────────────
@@ -635,9 +934,7 @@
     function check() {
       var out = wrap.querySelector('#fmiOut');
       out.innerHTML = '<div class="banner banner--info">Checking…</div>';
-      var seedP = S.season === '2026'
-        ? fetch(SEED_URL, { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; })
-        : Promise.resolve(null);
+      var seedP = S.season === '2026' ? getJson(SEED_URL) : Promise.resolve(null);
       seedP.then(function (seed) {
         result = F.build({
           fixtures: wrap.querySelector('#fmiFix').value,
@@ -650,8 +947,10 @@
         var c = result.counts;
         var by = F.COMPS.map(function (x) { return c.byComp[x.key] ? esc(x.label) + ' ' + c.byComp[x.key] : null; })
           .filter(Boolean).join(' · ');
+        var withResult = Object.keys(result.fixtures).filter(function (k) { return result.fixtures[k].result; }).length;
         var html = '<div class="banner banner--info"><strong>' + c.total + ' fixtures.</strong> ' + by +
-          '. ' + c.awaiting + ' awaiting a date.' + (seed ? '' : ' No published schedule found, so original dates come from the history.') + '</div>';
+          '. ' + withResult + ' with results. ' + c.awaiting + ' awaiting a date.' +
+          (seed ? '' : ' No published schedule found, so original dates come from the history.') + '</div>';
         if (result.problems.length) {
           html += '<details class="disclosure"><summary>' + result.problems.length + ' to check after import' +
             '<span class="disclosure__meta">none stop the import</span></summary><ul class="fm-problems">' +
@@ -670,10 +969,10 @@
         : Promise.resolve(true);
       go.then(function (yes) {
         if (!yes) return;
-        var fx = {}, pub = {}, now = new Date().toISOString();
+        var fx = {}, pub = {}, stamp = now();
         Object.keys(result.fixtures).forEach(function (k) {
           var r = result.fixtures[k];
-          r.updatedAt = now;
+          r.updatedAt = stamp;
           fx[k] = clean(r);
           var p = F.publicView(r);
           if (p) pub[k] = clean(p);
@@ -681,7 +980,7 @@
         var payload = {
           fixtures: fx,
           public: pub,
-          meta: { importedAt: now, importedBy: (S.session && S.session.email) || null, counts: clean(result.counts) }
+          meta: { importedAt: stamp, importedBy: (S.session && S.session.email) || null, counts: clean(result.counts) }
         };
         NL.ensureAuth().then(function () { return ref().set(payload); })
           .then(function () {
