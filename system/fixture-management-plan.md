@@ -188,7 +188,11 @@ workbook, NLS or a paste, Opta IDs filled from NLS).
 
 Next, in order (re-ordered 28/10/2026):
 
-1. **Attendance onto the record.** Attendance figures are 100% club
+1. **Attendance onto the record.** *(Built 28/10/2026: the season switcher,
+   "Bring in from Attendance" for a past season, the crowd column, and
+   Attendance reading `public/` for any season the record holds. Left: run
+   the bring-in for 2025-26, watch a matchday or two, then retire
+   FixtureSync.)* Attendance figures are 100% club
    submissions, keyed by Opta match ID; only its fixture list comes from
    NLS, copied four times a day by `gas/FixtureSync.js` into
    `app-data/ops-attendance/fixtures`. That copy is now the weakest of

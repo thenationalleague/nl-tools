@@ -225,7 +225,7 @@ test('the public view shows only Worldwide or Overseas, and never AMI or the his
     lg({ Date: '08/08/2026', 'Home team': 'Beta United', 'Away team': 'Gamma City', OptaID: 'g3', Broadcast: 'TBC' })));
   const p1 = F.publicView(r.fixtures.g1);
   assert.equal(p1.broadcast, 'worldwide');
-  assert.deepEqual(Object.keys(p1).sort(), ['away', 'broadcast', 'comp', 'date', 'home', 'ko', 'optaID', 'result', 'round']);
+  assert.deepEqual(Object.keys(p1).sort(), ['away', 'broadcast', 'comp', 'date', 'home', 'ko', 'neutral', 'optaID', 'result', 'round', 'score', 'venue']);
   assert.equal(F.publicView(r.fixtures.g2).broadcast, null);
   assert.equal(F.publicView(r.fixtures.g3).broadcast, null);
 });
@@ -343,4 +343,54 @@ test('a day reads by competition, then kick-off', () => {
     lg({ Date: '28/10/2026', Time: '7pm', Competition: 'National', 'Home team': 'Delta Rovers', 'Away team': 'Alpha Town', OptaID: 'g3' })));
   const order = Object.values(r.fixtures).sort(F.compare).map((f) => f.key);
   assert.deepEqual(order, ['g3', 'g2', 'g1']);
+});
+
+/* Attendance archive records. Shapes from the code that writes them:
+   gas/FixtureSync.js fs_mapNlsFixtureToRecord_ (the NLS copy) and
+   attendance/index.html submitAddCupFixtureForm (by hand). Invented clubs. */
+const OPTA = { t1: { name: 'Alpha Town', code: 'ALP' }, t2: { name: 'Beta United', code: 'BET' },
+  t3: { name: 'Gamma City', code: 'GAM' } };
+const london = (t) => { const d = new Date(t + 3600e3); return { date: d.toISOString().slice(0, 10), ko: d.toISOString().slice(11, 16) }; };
+const att = (fixtures) => F.fromAttendance(fixtures, { clubByOpta: (id) => OPTA[id] || null, clubOf, london });
+
+test('a past season comes over from Attendance keyed by its match IDs, scores and neutral tags kept', () => {
+  const r = att({
+    g100: { competitionKey: 'nl', kickoffUTC: '2025-08-09 14:00:00', matchPeriod: 'FullTime',
+      homeTeamID: 't1', homeTeamName: 'Alpha Town', awayTeamID: 't2', awayTeamName: 'Beta United', homeScore: 2, awayScore: 1 },
+    manual_fa_cup_20251101_gammacity_v_nowhere: { competitionKey: 'fa-cup', kickoffUTC: '2025-11-01T15:00:00',
+      homeTeamID: 't3', homeTeamName: 'Gamma City', awayTeamName: 'Nowhere FC', homeScore: 0, awayScore: 1,
+      isNeutral: true, venueName: 'Somewhere Park' },
+  });
+  const l = r.fixtures.g100;
+  assert.equal(l.optaID, 'g100');
+  assert.equal(l.date, '2025-08-09');
+  assert.equal(l.ko, '15:00', 'NLS kick-offs are UTC, shown in UK time');
+  assert.equal(F.resultText(l.result), '2-1');
+  const c = r.fixtures.manual_fa_cup_20251101_gammacity_v_nowhere;
+  assert.equal(c.ko, '15:00', 'a hand-typed kick-off is already UK time');
+  assert.equal(c.optaID, null);
+  assert.equal(c.wentThrough, 'away');
+  assert.equal(c.neutral, true);
+  assert.equal(F.publicView(c).venue, 'Somewhere Park');
+  assert.deepEqual(JSON.parse(JSON.stringify(F.publicView(l).score)), { h: 2, a: 1 });
+});
+
+test('a league game after a club has played its whole league season is a play-off', () => {
+  /* Three clubs: a full league season is 2 × (3 − 1) = 4 games each. */
+  const g = (id, day, h, a) => [id, { competitionKey: 'nl', kickoffUTC: '2026-0' + day + ' 14:00:00', matchPeriod: 'FullTime',
+    homeTeamID: h, homeTeamName: OPTA[h].name, awayTeamID: a, awayTeamName: OPTA[a].name, homeScore: 1, awayScore: 0 }];
+  const r = att(Object.fromEntries([
+    g('g1', '1-01', 't1', 't2'), g('g2', '1-08', 't2', 't3'), g('g3', '1-15', 't3', 't1'),
+    g('g4', '1-22', 't2', 't1'), g('g5', '1-29', 't3', 't2'), g('g6', '2-05', 't1', 't3'),
+    g('g7', '5-01', 't1', 't2'),
+  ]));
+  assert.equal(r.fixtures.g6.comp, 'national');
+  assert.equal(r.fixtures.g7.comp, 'playoffs');
+});
+
+test('an Attendance game left postponed with no score comes over awaiting a date', () => {
+  const r = att({ g9: { competitionKey: 'south', kickoffUTC: '2026-01-10 15:00:00', matchPeriod: 'Postponed',
+    postponementReason: 'Frozen pitch', homeTeamID: 't1', homeTeamName: 'Alpha Town', awayTeamID: 't2', awayTeamName: 'Beta United' } });
+  assert.equal(r.fixtures.g9.date, null);
+  assert.equal(r.fixtures.g9.attempts[0].reason, 'Frozen pitch');
 });
