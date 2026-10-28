@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixture Management
-  Version: v1.0 (28/10/2026)
+  Version: v1.1 (28/10/2026)
   File: /fixtures/admin/index.html
 
   The League's master fixture record: every game in every competition, with
@@ -9,6 +9,11 @@
   behind it, is system/fixture-management-plan.md.
 
   CHANGELOG
+    v1.1 (28/10/2026) — Crests only for clubs we hold one for, by crestName.
+      Outside FA Cup/Trophy clubs drew a crest <img> that 404'd twice per row
+      per render, uncached: a request storm that hit Pages rate limits. PL2
+      guests were missing too (they wear their parent club's crest). The
+      list also draws 200 rows at a time.
     v1.0 (28/10/2026) — First build: the Fixtures tab. Imports the working
       workbook once (Fixtures + Rearrangements tabs, pasted), lists every
       game with filters for competition, club and what needs attention,
@@ -78,6 +83,14 @@
     window.NL_CHANGELOG = [
       {
         date: '28/10/2026',
+        version: 'v1.1',
+        items: [
+          'Crests load only for clubs with one, so FA Cup and Trophy lists no longer flood the server with failed requests.',
+          'The list shows 200 games at a time, with Show more.'
+        ]
+      },
+      {
+        date: '28/10/2026',
         version: 'v1.0',
         items: [
           'Fixtures tab: one-off workbook import, every game with filters, cup ties added and edited by hand, Opta IDs and FA results.'
@@ -123,7 +136,7 @@
   .fm-day td { background: var(--off-white) !important; font-weight: 800; font-variation-settings: 'wght' 800; color: var(--navy); }
   .fm-row { cursor: pointer; }
   .fm-team { display: inline-flex; align-items: center; gap: 8px; }
-  .fm-team img { width: 22px; height: 22px; object-fit: contain; }
+  .fm-team img, .fm-crest-none { width: 22px; height: 22px; object-fit: contain; flex: 0 0 22px; }
   .fm-ko { font-variant-numeric: tabular-nums; }
   .fm-flags { display: flex; gap: 4px; flex-wrap: wrap; }
 
@@ -175,6 +188,9 @@
   var esc = NL.escHtml;
   var BASE = 'app-data/ops-fixture-management/seasons/';
   var SEED_URL = '/assets/data/fixtures-2026-27.json';
+  /* Rows drawn at once. A season is ~1,900 games; drawing them all is
+     ~3,800 crest images and a slow page for a list read from the top. */
+  var PAGE = 200;
 
   var S = {
     session: null,
@@ -187,7 +203,8 @@
     club: null,
     when: 'upcoming',
     need: null,          /* 'awaiting' | 'noOpta' | 'cupDue' — a stat card filter */
-    picker: null
+    picker: null,
+    limit: PAGE
   };
 
   function today() { return F.ymdOf(new Date()); }
@@ -221,7 +238,7 @@
         S.picker = NL.clubPicker('#fmClub', {
           mode: 'search', season: 'all', clearable: true, extraClubs: S.guests,
           placeholder: 'Any club',
-          onSelect: function (sel) { S.club = sel ? sel.name : null; render(); }
+          onSelect: function (sel) { S.club = sel ? sel.name : null; S.limit = PAGE; render(); }
         });
         ref('fixtures').on('value', function (snap) {
           S.fixtures = snap.val() || {};
@@ -244,6 +261,7 @@
       var b = e.target.closest('[data-when]');
       if (!b) return;
       S.when = b.getAttribute('data-when');
+      S.limit = PAGE;
       setActive('fmWhen', b);
       render();
     });
@@ -251,6 +269,7 @@
       var b = e.target.closest('[data-comp]');
       if (!b) return;
       S.comp = b.getAttribute('data-comp');
+      S.limit = PAGE;
       setActive('fmComps', b);
       render();
     });
@@ -259,9 +278,11 @@
       if (!s) return;
       var n = s.getAttribute('data-need');
       S.need = (S.need === n || n === 'all') ? null : n;
+      S.limit = PAGE;
       render();
     });
     document.getElementById('fmBody').addEventListener('click', function (e) {
+      if (e.target.closest('[data-more]')) { S.limit += PAGE; render(); return; }
       var tr = e.target.closest('[data-key]');
       if (tr) openEdit(S.fixtures[tr.getAttribute('data-key')] || null);
     });
@@ -320,7 +341,11 @@
     }
     if (dated.length) {
       if (waiting.length) html += '<div class="section-head fm-gap"><h2>Dated</h2></div>';
-      html += tableOf(dated, false);
+      html += tableOf(dated.slice(0, S.limit), false);
+      if (dated.length > S.limit) {
+        html += '<div class="filter-bar fm-gap"><button class="btn btn--ghost btn--sm" type="button" data-more>' +
+          'Show ' + Math.min(PAGE, dated.length - S.limit) + ' more of ' + (dated.length - S.limit) + '</button></div>';
+      }
     }
     if (!waiting.length && !dated.length) {
       html = '<div class="empty-state"><div class="empty-state__title">Nothing matches</div></div>';
@@ -342,8 +367,21 @@
     }).join('');
   }
 
+  /* A crest is only requested for a club we hold one for: the roster and
+     the cup guests, by crestName where it differs ("Fulham PL2" wears
+     Fulham's). An outside FA Cup or Trophy club has no file, and a crest
+     <img> for it 404s twice (thumb, then full) on every render — 404s are
+     not cached, so a list of FA ties was a request storm against Pages. */
+  function crestOf(name) {
+    var c = NL.clubs.byName(name) || NL.clubs.guestByName(name);
+    return c ? (c.crestName || c.name) : null;
+  }
+
   function team(side) {
-    return '<span class="fm-team">' + NL.clubs.crestImgHtml(side.name, 'thumb') + esc(side.name) + '</span>';
+    var crest = crestOf(side.name);
+    return '<span class="fm-team">' +
+      (crest ? NL.clubs.crestImgHtml(crest, 'thumb') : '<span class="fm-crest-none" aria-hidden="true"></span>') +
+      esc(side.name) + '</span>';
   }
 
   function compPill(key) {
