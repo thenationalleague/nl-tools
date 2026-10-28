@@ -1,7 +1,7 @@
 /* ============================================================
    Fixtures & Results Graphic — the tool
    File: /graphics/fixtures-graphic/fixtures-app.js
-   Version: v2.3 (28/10/2026)
+   Version: v2.4 (31/10/2026)
 
    ONE TOOL, TWO DOORS. This file is the whole tool and both editions load
    it: /graphics/fixtures-graphic/ (behind a login) and
@@ -22,6 +22,9 @@
      "Edit by hand" holds the full editor for anything else.
 
    CHANGELOG
+     v2.4 31/10/2026  The panel never runs past the window: the games list
+                      takes the space left and scrolls on its own. The size
+                      switch reads 1:1 again, not "1:1 ONLY".
      v2.3 28/10/2026  Download one size or all three. Preview sizing moved to
                       _shared/preview-fit.js, which stops the page overrunning
                       a 1080p window by ~34px.
@@ -108,7 +111,7 @@
           '<div class="preview-head">' +
             '<span class="eyebrow">Preview</span>' +
             '<div class="seg" id="sizeSeg">' + FORMATS.map(function (f) {
-              return '<button type="button" class="size-btn" data-fmt="' + f + '">' + f.replace("x", ":") + ' only</button>';
+              return '<button type="button" class="size-btn" data-fmt="' + f + '">' + f.replace("x", ":") + '</button>';
             }).join("") + '</div>' +
           '</div>' +
           '<div class="stage-wrap" id="stageWrap"><div id="gfxHost"></div></div>' +
@@ -140,7 +143,7 @@
             '<div class="field"><label for="matchdayInput">Matchday or title</label>' +
               '<input type="text" id="matchdayInput" placeholder="13 — or GROUP STAGE – MATCHDAY 3"></div>' +
           '</div>' +
-          '<div class="card">' +
+          '<div class="card picks-card">' +
             '<div class="picks" id="picks"><div class="picks-empty">Loading games…</div></div>' +
           '</div>' +
           '<div class="dl">' +
