@@ -4,6 +4,12 @@
   assets/crests/thumbs/<name>.png    —  96px long edge  (lists, dropdowns, markers)
   assets/crests/medium/<name>.png    — 256px long edge  (graphics rows, panels)
   assets/divisions/medium/<name>.png — 256px long edge  (division/competition badge)
+  assets/crests/manifest.json        — the names a crest exists for
+
+The manifest exists so a page can ask "is there a crest for X?" without asking
+the server. Probing by URL 404s for every club with no file, 404s are not
+cached, and a list of FA Cup ties did that twice per row per render: 1,559
+requests, 1,460 failures, rate-limited by Pages (28/10/2026).
 
 Filenames are identical to the source (load-bearing: every consumer resolves an
 asset as `<base>/<encoded name>.png`, so a tier is just a folder prefix). Aspect
@@ -95,9 +101,29 @@ def build(srcdir: Path, tiers: dict, check: bool) -> bool:
     return any_stale
 
 
+def manifest(check: bool) -> bool:
+    """Write assets/crests/manifest.json; True if it was (or would be) stale."""
+    import json
+    src = ROOT / "assets" / "crests"
+    names = sorted(p.stem for p in src.glob("*.png"))
+    body = json.dumps({
+        "note": "Crest files in assets/crests/, by name. Written by scripts/build-crest-thumbs.py; do not edit by hand.",
+        "names": names,
+    }, indent=1, ensure_ascii=False) + "\n"
+    out = src / "manifest.json"
+    if out.exists() and out.read_text(encoding="utf-8") == body:
+        return False
+    if check:
+        print(f"stale: {out.relative_to(ROOT)}")
+    else:
+        out.write_text(body, encoding="utf-8")
+        print(f"wrote {out.relative_to(ROOT)} ({len(names)} names)")
+    return True
+
+
 def main() -> int:
     check = "--check" in sys.argv[1:]
-    any_stale = False
+    any_stale = manifest(check)
     for srcdir, tiers in TARGETS.items():
         if not srcdir.is_dir():
             print(f"no source dir at {srcdir}", file=sys.stderr)

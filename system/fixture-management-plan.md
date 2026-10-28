@@ -41,9 +41,16 @@ divergence is not a fault. There is no reconciliation queue.
   working sheet (Richard's xlsx: Fixtures + Rearrangements tabs). Nothing is
   live yet, so this is a hard cut-over, no parallel running. The xlsx is
   imported through the admin screen into RTDB — **never committed**.
-- **Results stay with NLS**, read-only. Official tables already come from
-  NLS's own table endpoint with deductions inside it (`fetch-table-baseline`).
-  The only result we hold is **who went through** in FA Cup / Trophy ties.
+- **Results are held in the record** (changed 28/10/2026 — the first plan
+  said NLS only). Richard wants every result logged and managed here: the
+  workbook's goals, extra time and penalties import, a day's results fill
+  from NLS (league and NL Cup) or a paste of rows, and any game can be edited
+  by hand. A score held that differs from NLS is shown, never overwritten
+  unless ticked. Official **tables** still come from NLS's own table
+  endpoint with deductions inside it (`fetch-table-baseline`); the record
+  does not build tables. FA ties also keep **who went through**, worked out
+  from the score (penalties, then extra time, then 90 minutes) because the
+  sheet's Result column records the 90 minutes only.
 - **Fixture → attempts.** One fixture (clubs, competition, Opta ID, original
   date) holds a list of dated attempts: planned, postponed, abandoned, played.
   Opta keeps one ID and overwrites an abandoned attempt when it is replayed, so

@@ -1,8 +1,19 @@
 /* =============================================================================
    NL Tools — Fixture Management: data layer
    File: /fixtures/_core.js
-   Version: v1.0 (28/10/2026)
+   Version: v1.1 (28/10/2026)
    CHANGELOG
+     v1.1 (28/10/2026) — Results: the sheet's goals, extra time and
+       penalties import as `result`; resultText formats them as the sheet
+       does ('0-0 (1-1 aet, 4-3 p)'); an FA tie's winner comes from the score
+       before the sheet's Result column, which says 'D Cup' for a replay won
+       in extra time. nlsResults/matchNls read an NLS season list (shape from
+       a live call, 28/10/2026) for the daily fill. loseDate / setDate /
+       dropAttempt for postponing, abandoning, rescheduling and correcting.
+       compare() orders a day by competition. The import no longer merges a
+       league pairing seen twice: a row whose teams are reversed (the return
+       fixture, per the published schedule) is turned round, anything else
+       is kept and reported.
      v1.0 (28/10/2026) — First build. Parses the working fixtures workbook
        (Fixtures + Rearrangements tabs, pasted from Excel), joins it to the
        originally published schedule, and builds one record per fixture with
@@ -46,7 +57,10 @@
                     never inferred (plan, Broadcast).
      wentThrough    'home' | 'away' | 'replay' | null, for FA Cup and FA
                     Trophy ties. 'replay' is a draw; the replay row decides.
-     score          optional, as typed ('2-4'), for those same ties.
+     result         { h, a, aet: {h,a}|null, pens: {h,a}|null, source } or
+                    null. h/a are the 90-minute score; aet the score after
+                    extra time; pens the shoot-out. source is 'import',
+                    'nls', 'paste' or 'manual'.
    ============================================================================= */
 (function (root) {
   'use strict';
@@ -187,6 +201,58 @@
     return null;
   }
 
+  /* ── Results ────────────────────────────────────────────────────────── */
+  function num(s) {
+    var t = String(s == null ? '' : s).trim();
+    return /^\d+$/.test(t) ? +t : null;
+  }
+
+  /* The sheet's goal columns → result, or null when there is no score. */
+  function resultOfRow(r, source) {
+    var h = num(r['goals h']), a = num(r['goals a']);
+    if (h == null || a == null) return null;
+    var eh = num(r['goals aet h']), ea = num(r['goals aet a']);
+    var ph = num(r['goals pens h']), pa = num(r['goals pens a']);
+    return {
+      h: h, a: a,
+      aet: eh != null && ea != null ? { h: eh, a: ea } : null,
+      pens: ph != null && pa != null ? { h: ph, a: pa } : null,
+      source: source || 'import'
+    };
+  }
+
+  /* '2-1', '3-3 (5-4 aet)', '0-0 (1-1 aet, 4-3 p)' — the sheet's own form. */
+  function resultText(res) {
+    if (!res) return '';
+    var x = [];
+    if (res.aet) x.push(res.aet.h + '-' + res.aet.a + ' aet');
+    if (res.pens) x.push(res.pens.h + '-' + res.pens.a + ' p');
+    return res.h + '-' + res.a + (x.length ? ' (' + x.join(', ') + ')' : '');
+  }
+
+  /* 'home' | 'away' | 'draw' | null. Penalties, then extra time, then 90. */
+  function winnerOf(res) {
+    if (!res) return null;
+    if (res.pens && res.pens.h !== res.pens.a) return res.pens.h > res.pens.a ? 'home' : 'away';
+    var f = res.aet || res;
+    return f.h > f.a ? 'home' : f.a > f.h ? 'away' : 'draw';
+  }
+
+  function sameResult(x, y) {
+    function k(r) { return r ? resultText(r) : ''; }
+    return k(x) === k(y);
+  }
+
+  /* An FA tie's winner: from the score when it settles it, else the sheet's
+     Result column. The column alone is wrong for replays decided in extra
+     time — it records the 90 minutes ('D Cup' for a 5-4 aet win). */
+  function faWinner(res, cell) {
+    var w = winnerOf(res);
+    if (w === 'home' || w === 'away') return w;
+    if (w === 'draw') return 'replay';
+    return wentThroughOf(cell);
+  }
+
   /* Minted key for a fixture with no Opta ID. Made once and never remade,
      so the parts only have to be unique on the day it is minted. */
   function slug(s) { return norm(s).replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); }
@@ -305,33 +371,51 @@
           daznMove: norm(r['dazn']) === 'dazn',
           ami: norm(r['ami']) === 'ami'
         },
-        wentThrough: comp.fa ? wentThroughOf(r['result h/d/a']) : null,
-        score: comp.fa && wentThroughOf(r['result h/d/a']) && /^\d+\s*-\s*\d+$/.test(r['score'] || '')
-          ? String(r['score']).replace(/\s/g, '') : null,
+        result: resultOfRow(r, 'import'),
+        wentThrough: null,
         source: 'import'
       };
+      if (comp.fa) rec.wentThrough = faWinner(rec.result, r['result h/d/a']);
       if (comp.league && !rec.optaID) problem('opta', line + ': no Opta ID');
       var pk = pairKey(comp.key, rec.home.name, rec.away.name);
       (byPair[pk] = byPair[pk] || []).push(rec);
     });
 
+    /* A league pairing meets once a season, so two rows for one pairing is
+       a mistake in the sheet — but never guess which. The case seen
+       (28/10/2026) is the return fixture entered the wrong way round, with
+       the first game's Opta ID copied down: when the published schedule has
+       the REVERSE pairing on that row's date, and the sheet has no row for
+       the reverse, the row is turned round and its borrowed ID dropped.
+       Anything else keeps both rows and says so. Merging them, as v1.0 did,
+       lost a game and invented a postponement for one already played. */
+    Object.keys(byPair).forEach(function (pk) {
+      var recs = byPair[pk];
+      if (recs.length < 2 || !COMP_BY_KEY[recs[0].comp].league) return;
+      recs.slice().forEach(function (rec) {
+        var rk = pairKey(rec.comp, rec.away.name, rec.home.name);
+        var seed = original[rk];
+        if (byPair[rk] || !seed || seed.date !== rec.date || byPair[pk].length < 2) return;
+        var label = COMP_BY_KEY[rec.comp].label;
+        var tmp = rec.home; rec.home = rec.away; rec.away = tmp;
+        if (rec.result) rec.result = { h: rec.result.a, a: rec.result.h, aet: null, pens: null, source: rec.result.source };
+        var borrowed = rec.optaID && byPair[pk].some(function (o) { return o !== rec && o.optaID === rec.optaID; });
+        if (borrowed) rec.optaID = null;
+        byPair[pk] = byPair[pk].filter(function (o) { return o !== rec; });
+        byPair[rk] = [rec];
+        problem('reversed', label + ' ' + rec.away.name + ' v ' + rec.home.name + ' on ' + fmt(rec.date) +
+          ': teams were the wrong way round; imported as ' + rec.home.name + ' v ' + rec.away.name +
+          (borrowed ? ', without the Opta ID it had copied from the other game' : '') + '.');
+      });
+      if (byPair[pk].length > 1) {
+        problem('duplicate', COMP_BY_KEY[recs[0].comp].label + ' ' + recs[0].home.name + ' v ' + recs[0].away.name +
+          ': ' + byPair[pk].length + ' rows for one pairing; all kept. Check them.');
+      }
+    });
+
     Object.keys(byPair).forEach(function (pk) {
       var recs = byPair[pk].sort(function (a, b) { return a.date < b.date ? -1 : 1; });
       var comp = COMP_BY_KEY[recs[0].comp];
-      /* League pairs meet once a season, so two rows are one fixture seen
-         twice — an earlier attempt the sheet kept as its own row. Cup pairs
-         can meet twice (a replay is a new fixture), so they are left alone. */
-      if (comp.league && recs.length > 1) {
-        var keep = recs[recs.length - 1];
-        recs.slice(0, -1).forEach(function (old) {
-          keep.attempts.push({ date: old.date, ko: old.ko, outcome: old.state === 'scheduled' ? 'postponed' : old.state,
-            reason: null, noticeAt: null, rescheduledAt: null, minute: null });
-          if (!keep.optaID) keep.optaID = old.optaID;
-          problem('duplicate', comp.label + ' ' + keep.home.name + ' v ' + keep.away.name +
-            ': two rows; ' + fmt(old.date) + ' kept as a lost date, ' + fmt(keep.date) + ' as current. Check it.');
-        });
-        recs = [keep];
-      }
       recs.forEach(function (rec) {
         var hist = (lost[pk] || []).filter(function (a) { return !a.used; });
         /* Each lost date this fixture has passed through. For a cup pair
@@ -394,6 +478,177 @@
     return { fixtures: out, problems: problems, counts: counts(out) };
   }
 
+  /* ── Changing a record ──────────────────────────────────────────────────
+     Each returns a new record; the caller saves it. `at` is an ISO stamp. */
+  function copy(o) { return JSON.parse(JSON.stringify(o)); }
+
+  /* Postpone or abandon: the date becomes a lost date and comes off the
+     record, so the game leaves the public view until it has a new one. */
+  function loseDate(rec, o) {
+    var n = copy(rec);
+    n.attempts = (n.attempts || []).concat([{
+      date: rec.date, ko: rec.ko || null, outcome: o.outcome, reason: o.reason || null,
+      noticeAt: o.at, rescheduledAt: null,
+      minute: o.outcome === 'abandoned' && o.minute != null ? +o.minute : null
+    }]);
+    n.date = null;
+    n.ko = null;
+    n.state = o.outcome;
+    n.result = null;
+    return n;
+  }
+
+  /* A date for a game. Awaiting one: stamps when it was rescheduled.
+     Already dated and changed: the old date is kept as 'moved'. */
+  function setDate(rec, date, ko, at) {
+    var n = copy(rec);
+    n.attempts = n.attempts || [];
+    if (!rec.date) {
+      var last = n.attempts[n.attempts.length - 1];
+      if (last && !last.rescheduledAt) last.rescheduledAt = at;
+    } else if (rec.date !== date || (rec.ko || null) !== (ko || null)) {
+      n.attempts.push({ date: rec.date, ko: rec.ko || null, outcome: 'moved', reason: null,
+        noticeAt: at, rescheduledAt: at, minute: null });
+    }
+    n.date = date;
+    n.ko = ko || null;
+    n.state = 'scheduled';
+    return n;
+  }
+
+  /* A lost date entered by mistake. Corrected in place, not logged — the
+     old tool's rule for a mis-keyed record. Removing the last one of a game
+     awaiting a date gives it back that date. */
+  function dropAttempt(rec, i) {
+    var n = copy(rec);
+    var gone = (n.attempts || []).splice(i, 1)[0];
+    if (gone && !n.date && i === n.attempts.length) {
+      n.date = gone.date; n.ko = gone.ko; n.state = 'scheduled';
+    }
+    return n;
+  }
+
+  /* ── NLS ────────────────────────────────────────────────────────────────
+     Shape from a live call to /v2/matches/?seasonID=2026&competitionID=1275
+     on 28/10/2026: data[].id 'g2678400'; attributes.kickOffDateUTC
+     '2026-08-18 18:00:00' (UTC, no zone marker); matchPeriod 'FullTime';
+     resultType 'NormalResult' | 'PenaltyShootout' | null;
+     homeTeam/awayTeam { teamID 't3360', name, score, penaltyScore }.
+     teamID is clubs-meta optaID for every member club. NLS gives no
+     extra-time split, so an NLS result never carries one. */
+  var NLS_COMP = { 89: 'national', 373: 'north', 372: 'south', 1275: 'nl-cup' };
+  var NLS_DONE = { fulltime: true, postmatch: true };
+
+  /* Every NLS match, played or not — an unplayed one still has the Opta
+     ID to fill. `result` is set only once the match is finished. */
+  function nlsResults(rows) {
+    var out = [];
+    (rows || []).forEach(function (m) {
+      var a = m && m.attributes;
+      if (!a || !a.homeTeam || !a.awayTeam) return;
+      var h = a.homeTeam.score, w = a.awayTeam.score;
+      var done = NLS_DONE[norm(a.matchPeriod)] && h != null && w != null;
+      var t = Date.parse(String(a.kickOffDateUTC || '').replace(' ', 'T') + 'Z');
+      var ph = a.homeTeam.penaltyScore, pw = a.awayTeam.penaltyScore;
+      out.push({
+        id: String(m.id), comp: NLS_COMP[a.competitionID] || null,
+        utc: isNaN(t) ? null : t,
+        homeID: a.homeTeam.teamID, awayID: a.awayTeam.teamID,
+        homeName: a.homeTeam.name, awayName: a.awayTeam.name,
+        result: done ? { h: +h, a: +w, aet: null,
+          pens: ph != null && pw != null ? { h: +ph, a: +pw } : null, source: 'nls' } : null
+      });
+    });
+    return out;
+  }
+
+  /* Pair NLS results with records: by Opta ID, else by competition, home
+     club and London date — a club plays once a day. ymdOfUtc turns the
+     UTC stamp into the London date; nameOfTeam(teamID) → our club name.
+     → [{ key, nls, optaID (to fill, or null), result, current, differs }] */
+  function matchNls(fixtures, results, ymdOfUtc, nameOfTeam) {
+    var byOpta = {}, byDay = {};
+    Object.keys(fixtures).forEach(function (k) {
+      var r = fixtures[k];
+      if (r.optaID) byOpta[r.optaID] = r;
+      if (r.date) byDay[r.comp + '|' + r.date + '|' + norm(r.home.name)] = r;
+    });
+    var out = [];
+    results.forEach(function (n) {
+      var rec = byOpta[n.id];
+      var fill = null;
+      if (!rec && n.utc != null) {
+        var home = nameOfTeam(n.homeID) || n.homeName;
+        rec = byDay[n.comp + '|' + ymdOfUtc(n.utc) + '|' + norm(home)];
+        if (rec && !rec.optaID) fill = n.id;
+        else if (rec && rec.optaID !== n.id) rec = null;
+      }
+      if (!rec || (!n.result && !fill)) return;
+      out.push({ key: rec.key, nls: n.id, optaID: fill, result: n.result, current: rec.result || null,
+        differs: !!n.result && !!rec.result && !sameResult(rec.result, n.result) });
+    });
+    return out;
+  }
+
+  /* '2-1', '1-1 (4-5 p)', '3-3 (5-4 aet)', '0-0 (1-1 aet, 4-3 p)' → result. */
+  var SCORE = /^(\d+)\s*-\s*(\d+)(?:\s*\(\s*(?:(\d+)\s*-\s*(\d+)\s*aet)?\s*,?\s*(?:(\d+)\s*-\s*(\d+)\s*p)?\s*\))?$/i;
+  function parseScore(s, source) {
+    var m = String(s == null ? '' : s).trim().match(SCORE);
+    if (!m) return null;
+    return { h: +m[1], a: +m[2],
+      aet: m[3] != null ? { h: +m[3], a: +m[4] } : null,
+      pens: m[5] != null ? { h: +m[5], a: +m[6] } : null,
+      source: source || 'paste' };
+  }
+
+  /* Results pasted a day at a time, in whatever columns the sheet shows:
+     any row with a score cell, the club either side of it, and a date
+     anywhere on the row if there is one. A row from the Fixtures tab
+     works, and so does "Home <tab> 2-1 <tab> Away".
+     → { matches: [{ key, result, current, differs }], unmatched: [text] } */
+  function resultsFromPaste(fixtures, text, parseDate) {
+    var byPair = {};
+    Object.keys(fixtures).forEach(function (k) {
+      var r = fixtures[k];
+      (byPair[norm(r.home.name) + '|' + norm(r.away.name)] = byPair[norm(r.home.name) + '|' + norm(r.away.name)] || []).push(r);
+    });
+    var matches = [], unmatched = [];
+    parseTsv(text).forEach(function (cells) {
+      var c = cells.map(function (x) { return String(x).trim(); });
+      var at = -1, res = null;
+      for (var i = 1; i < c.length - 1 && !res; i++) { res = parseScore(c[i]); if (res) at = i; }
+      if (!res) return;
+      var h = null, w = null, j;
+      for (j = at - 1; j >= 0 && !h; j--) if (c[j]) h = c[j];
+      for (j = at + 1; j < c.length && !w; j++) if (c[j]) w = c[j];
+      var day = null;
+      for (j = 0; j < c.length && !day; j++) {
+        if (!/\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{2}-\d{2}/.test(c[j])) continue;
+        var d = parseDate(c[j].split(' ')[0]);
+        if (d && !isNaN(d.getTime())) day = ymdOf(d);
+      }
+      var cands = (byPair[norm(h) + '|' + norm(w)] || []).filter(function (r) { return !day || r.date === day; });
+      if (cands.length !== 1) { unmatched.push(c.filter(Boolean).join(' · ')); return; }
+      var rec = cands[0];
+      matches.push({ key: rec.key, result: res, current: rec.result || null,
+        differs: !!rec.result && !sameResult(rec.result, res) });
+    });
+    return { matches: matches, unmatched: unmatched };
+  }
+
+  /* ── Order ──────────────────────────────────────────────────────────────
+     A day reads by competition (National, North, South, then the cups),
+     then kick-off, then home club. */
+  var COMP_ORDER = {};
+  COMPS.forEach(function (c, i) { COMP_ORDER[c.key] = i; });
+  function compare(a, b) {
+    if ((a.date || '') !== (b.date || '')) return (a.date || '') < (b.date || '') ? -1 : 1;
+    var c = (COMP_ORDER[a.comp] || 0) - (COMP_ORDER[b.comp] || 0);
+    if (c) return c;
+    if ((a.ko || '') !== (b.ko || '')) return (a.ko || '') < (b.ko || '') ? -1 : 1;
+    return a.home.name.localeCompare(b.home.name);
+  }
+
   function fmt(ymd) {
     if (!ymd) return '—';
     var p = ymd.split('-');
@@ -438,7 +693,8 @@
       home: rec.home,
       away: rec.away,
       optaID: rec.optaID || null,
-      broadcast: a && a.public ? a.key : null
+      broadcast: a && a.public ? a.key : null,
+      result: rec.result ? resultText(rec.result) : null
     };
   }
 
@@ -455,6 +711,20 @@
     awaiting: awaiting,
     cupResultDue: cupResultDue,
     publicView: publicView,
+    resultOfRow: resultOfRow,
+    resultText: resultText,
+    winnerOf: winnerOf,
+    faWinner: faWinner,
+    sameResult: sameResult,
+    loseDate: loseDate,
+    setDate: setDate,
+    dropAttempt: dropAttempt,
+    nlsResults: nlsResults,
+    matchNls: matchNls,
+    compare: compare,
+    parseScore: parseScore,
+    resultsFromPaste: resultsFromPaste,
+    table: table,
     fmt: fmt,
     ymdOf: ymdOf
   };

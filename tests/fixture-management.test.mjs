@@ -27,7 +27,8 @@ const CLUBS = {
 const clubOf = (n) => CLUBS[String(n).trim().toLowerCase()] || null;
 
 const HEAD = ['Date', 'Time', 'MD', 'Competition', 'Home team', 'Score', 'Away team', 'Broadcast',
-  'Production', 'DAZN', 'AMI', 'Match State', 'Result H/D/A', 'OptaID'];
+  'Production', 'DAZN', 'AMI', 'Match State', 'Goals H', 'Goals A', 'Goals AET H', 'Goals AET A',
+  'Goals pens H', 'Goals pens A', 'Result H/D/A', 'OptaID'];
 const row = (o) => HEAD.map((h) => o[h] ?? '').join('\t');
 const sheet = (...rows) => [
   'Top\tToday\tBottom\t\tLast updated',
@@ -137,27 +138,45 @@ test('postponed with no Rearrangements row still keeps the lost date, and says t
   assert.ok(r.problems.some((p) => p.kind === 'reason'));
 });
 
-test('two rows for one league pairing are one fixture: the earlier is a lost date', () => {
+test('a return fixture entered the wrong way round is turned round, not merged', () => {
+  /* The published schedule has the reverse pairing on the second row's date;
+     the sheet copied the first game's Opta ID down. v1.0 merged the two and
+     lost a game. */
+  const seed = { fixtures: [
+    ['15/08/2026', 'National', 'Alpha Town', 'Beta United', '15:00', 0],
+    ['19/12/2026', 'National', 'Beta United', 'Alpha Town', '15:00', 0],
+  ] };
+  const r = build(sheet(
+    lg({ Date: '15/08/2026', 'Home team': 'Alpha Town', 'Away team': 'Beta United', OptaID: 'g1', 'Goals H': '3', 'Goals A': '0' }),
+    lg({ Date: '19/12/2026', 'Home team': 'Alpha Town', 'Away team': 'Beta United', OptaID: 'g1' })), '', seed);
+  assert.equal(r.counts.total, 2);
+  assert.equal(r.fixtures.g1.date, '2026-08-15');
+  assert.equal(r.fixtures.g1.attempts.length, 0, 'the played game invents no postponement');
+  const back = Object.values(r.fixtures).find((f) => f.home.name === 'Beta United');
+  assert.equal(back.date, '2026-12-19');
+  assert.equal(back.optaID, null, 'the borrowed ID is dropped');
+  assert.ok(r.problems.some((p) => p.kind === 'reversed'));
+});
+
+test('two rows for one pairing that the schedule cannot explain are both kept', () => {
   const r = build(sheet(
     lg({ Date: '15/08/2026', 'Home team': 'Alpha Town', 'Away team': 'Beta United', OptaID: 'g1' }),
-    lg({ Date: '19/12/2026', 'Home team': 'Alpha Town', 'Away team': 'Beta United', OptaID: 'g1' })));
-  assert.equal(r.counts.total, 1);
-  assert.equal(r.fixtures.g1.date, '2026-12-19');
-  assert.equal(r.fixtures.g1.attempts[0].date, '2026-08-15');
+    lg({ Date: '22/08/2026', 'Home team': 'Alpha Town', 'Away team': 'Beta United', OptaID: 'g2' })));
+  assert.equal(r.counts.total, 2);
   assert.ok(r.problems.some((p) => p.kind === 'duplicate'));
 });
 
 test('FA ties: an outside club is kept by name, the result says who went through', () => {
   const r = build(sheet(
     { Date: '19/09/2026', Time: '3pm', MD: 'R2Q', Competition: 'FA Cup', 'Home team': 'Nowhere Athletic', Score: '2-4',
-      'Away team': 'Alpha Town', 'Result H/D/A': 'A Cup', OptaID: '#N/A' },
+      'Away team': 'Alpha Town', 'Goals H': '2', 'Goals A': '4', 'Result H/D/A': 'A Cup', OptaID: '#N/A' },
     { Date: '19/09/2026', Time: '3pm', MD: 'R2Q', Competition: 'FA Cup', 'Home team': 'Gamma City', Score: '2-2',
-      'Away team': 'Somewhere FC', 'Result H/D/A': 'D Cup' }));
+      'Away team': 'Somewhere FC', 'Goals H': '2', 'Goals A': '2', 'Result H/D/A': 'D Cup' }));
   const ties = Object.values(r.fixtures);
   const a = ties.find((t) => t.home.name === 'Nowhere Athletic');
   assert.deepEqual(JSON.parse(JSON.stringify(a.home)), { name: 'Nowhere Athletic' });
   assert.equal(a.wentThrough, 'away');
-  assert.equal(a.score, '2-4');
+  assert.equal(F.resultText(a.result), '2-4');
   assert.equal(a.broadcast.availability, 'cup');
   assert.equal(ties.find((t) => t.home.name === 'Gamma City').wentThrough, 'replay');
   assert.equal(r.problems.filter((p) => p.kind === 'club').length, 0, 'outside clubs are expected in FA ties');
@@ -206,7 +225,122 @@ test('the public view shows only Worldwide or Overseas, and never AMI or the his
     lg({ Date: '08/08/2026', 'Home team': 'Beta United', 'Away team': 'Gamma City', OptaID: 'g3', Broadcast: 'TBC' })));
   const p1 = F.publicView(r.fixtures.g1);
   assert.equal(p1.broadcast, 'worldwide');
-  assert.deepEqual(Object.keys(p1).sort(), ['away', 'broadcast', 'comp', 'date', 'home', 'ko', 'optaID', 'round']);
+  assert.deepEqual(Object.keys(p1).sort(), ['away', 'broadcast', 'comp', 'date', 'home', 'ko', 'optaID', 'result', 'round']);
   assert.equal(F.publicView(r.fixtures.g2).broadcast, null);
   assert.equal(F.publicView(r.fixtures.g3).broadcast, null);
+});
+
+test('results import with extra time and penalties, written the way the sheet writes them', () => {
+  const r = build(sheet({ Date: '22/09/2026', MD: 'R2QR', Competition: 'FA Cup', 'Home team': 'Gamma City', 'Away team': 'Somewhere FC',
+    'Goals H': '0', 'Goals A': '0', 'Goals AET H': '1', 'Goals AET A': '1', 'Goals pens H': '4', 'Goals pens A': '3', 'Result H/D/A': 'H pen Cup' }));
+  const t = Object.values(r.fixtures)[0];
+  assert.equal(F.resultText(t.result), '0-0 (1-1 aet, 4-3 p)');
+  assert.equal(t.wentThrough, 'home');
+});
+
+test('an FA replay won in extra time goes through, though the sheet says D Cup', () => {
+  /* The sheet's Result column records the 90 minutes: Dorking 3-3 (5-4 aet)
+     was 'D Cup' in the real workbook. */
+  const r = build(sheet({ Date: '22/09/2026', MD: 'R2QR', Competition: 'FA Cup', 'Home team': 'Gamma City', 'Away team': 'Somewhere FC',
+    'Goals H': '3', 'Goals A': '3', 'Goals AET H': '5', 'Goals AET A': '4', 'Result H/D/A': 'D Cup' }));
+  assert.equal(Object.values(r.fixtures)[0].wentThrough, 'home');
+});
+
+test('parseScore reads every form the sheet uses, and nothing else', () => {
+  const j = (x) => JSON.parse(JSON.stringify(x));
+  assert.deepEqual(j(F.parseScore('2-1')), { h: 2, a: 1, aet: null, pens: null, source: 'paste' });
+  assert.deepEqual(j(F.parseScore(' 1-1 (4-5 p) ')).pens, { h: 4, a: 5 });
+  assert.deepEqual(j(F.parseScore('3-3 (5-4 aet)')).aet, { h: 5, a: 4 });
+  const both = j(F.parseScore('0-0 (1-1 aet, 4-3 p)'));
+  assert.deepEqual([both.aet, both.pens], [{ h: 1, a: 1 }, { h: 4, a: 3 }]);
+  assert.equal(F.parseScore('16th vs 19th'), null);
+  assert.equal(F.parseScore('#N/A'), null);
+});
+
+test('a pasted day of results finds its fixtures, in the sheet\'s columns or a bare home/score/away', () => {
+  const r = build(sheet(
+    lg({ Date: '18/08/2026', 'Home team': 'Alpha Town', 'Away team': 'Beta United', OptaID: 'g1' }),
+    lg({ Date: '18/08/2026', 'Home team': 'Gamma City', 'Away team': 'Delta Rovers', OptaID: 'g2', 'Goals H': '1', 'Goals A': '0' })));
+  const out = F.resultsFromPaste(r.fixtures, [
+    '18/08/2026 19:00\tC4\tNational\tAlpha Town\t 5-2 \tBeta United',
+    'Gamma City\t2-0\tDelta Rovers',
+    'Nobody FC\t1-0\tNowhere',
+  ].join('\n'), NL.parseDate);
+  assert.equal(out.matches.length, 2);
+  assert.equal(F.resultText(out.matches[0].result), '5-2');
+  assert.equal(out.matches[1].differs, true, 'a different score already held is flagged, not silently taken');
+  assert.equal(out.unmatched.length, 1);
+});
+
+test('postponing takes the date off; a new date stamps the rescheduling', () => {
+  const r = build(sheet(lg({ Date: '07/11/2026', 'Home team': 'Alpha Town', 'Away team': 'Beta United', OptaID: 'g1' })));
+  const p = F.loseDate(r.fixtures.g1, { outcome: 'postponed', reason: 'Weather: Frozen', at: '2026-11-06T10:00:00.000Z' });
+  assert.equal(p.date, null);
+  assert.equal(p.state, 'postponed');
+  assert.equal(F.publicView(p), null);
+  assert.equal(r.fixtures.g1.date, '2026-11-07', 'the original record is not changed');
+  const s2 = F.setDate(p, '2026-12-01', '19:45', '2026-11-10T09:00:00.000Z');
+  assert.equal(s2.date, '2026-12-01');
+  assert.equal(s2.attempts.length, 1);
+  assert.equal(s2.attempts[0].rescheduledAt, '2026-11-10T09:00:00.000Z');
+  const moved = F.setDate(s2, '2026-12-02', '19:45', '2026-11-11T09:00:00.000Z');
+  assert.equal(moved.attempts[1].outcome, 'moved');
+});
+
+test('abandoning keeps the minute; removing a mistaken lost date gives the date back', () => {
+  const r = build(sheet(lg({ Date: '24/10/2026', 'Home team': 'Alpha Town', 'Away team': 'Beta United', OptaID: 'g1' })));
+  const a = F.loseDate(r.fixtures.g1, { outcome: 'abandoned', reason: 'Weather: Waterlogged', minute: 37, at: '2026-10-24T15:37:00.000Z' });
+  assert.equal(a.attempts[0].minute, 37);
+  const back = F.dropAttempt(a, 0);
+  assert.equal(back.date, '2026-10-24');
+  assert.equal(back.state, 'scheduled');
+  assert.equal(back.attempts.length, 0);
+});
+
+test('NLS results fill an empty score and an Opta ID, and flag a different score', () => {
+  /* NLS shape from a live call to /v2/matches/?seasonID=2026&competitionID=1275,
+     28/10/2026: attributes.kickOffDateUTC 'YYYY-MM-DD HH:MM:SS' (UTC),
+     matchPeriod 'FullTime', homeTeam/awayTeam { teamID, name, score,
+     penaltyScore }. */
+  const nls = [
+    { id: 'g9', attributes: { competitionID: 1275, kickOffDateUTC: '2026-08-18 18:00:00', matchPeriod: 'FullTime',
+      homeTeam: { teamID: 't1', name: 'Alpha Town', score: 1, penaltyScore: 4 },
+      awayTeam: { teamID: 't99', name: 'Somewhere PL2', score: 1, penaltyScore: 5 } } },
+    { id: 'g2', attributes: { competitionID: 89, kickOffDateUTC: '2026-08-08 14:00:00', matchPeriod: 'FullTime',
+      homeTeam: { teamID: 't3', name: 'Gamma City', score: 2, penaltyScore: null },
+      awayTeam: { teamID: 't4', name: 'Delta Rovers', score: 0, penaltyScore: null } } },
+    { id: 'g3', attributes: { competitionID: 89, kickOffDateUTC: '2026-11-07 15:00:00', matchPeriod: 'PreMatch',
+      homeTeam: { teamID: 't3', name: 'Gamma City', score: null }, awayTeam: { teamID: 't1', name: 'Alpha Town', score: null } } },
+  ];
+  const res = F.nlsResults(nls);
+  assert.equal(res.length, 3);
+  assert.equal(res.find((n) => n.id === 'g3').result, null, 'an unplayed game carries no result');
+  const r = build(sheet(
+    { Date: '18/08/2026', Time: '7pm', MD: 'A1', Competition: 'NL Cup', 'Home team': 'Alpha Town', 'Away team': 'Gamma City' },
+    lg({ Date: '08/08/2026', 'Home team': 'Gamma City', 'Away team': 'Delta Rovers', OptaID: 'g2', 'Goals H': '2', 'Goals A': '1' })));
+  const london = (t) => new Date(t + 3600e3).toISOString().slice(0, 10);
+  const m = F.matchNls(r.fixtures, res, london, (id) => ({ t1: 'Alpha Town' })[id] || null);
+  const cup = m.find((x) => x.nls === 'g9');
+  assert.equal(cup.optaID, 'g9');
+  assert.equal(F.resultText(cup.result), '1-1 (4-5 p)');
+  assert.equal(m.find((x) => x.nls === 'g2').differs, true);
+});
+
+test('an unplayed NLS game fills a missing Opta ID and nothing else', () => {
+  const nls = [{ id: 'g7', attributes: { competitionID: 89, kickOffDateUTC: '2026-12-19 15:00:00', matchPeriod: 'PreMatch',
+    homeTeam: { teamID: 't2', name: 'Beta United', score: null }, awayTeam: { teamID: 't1', name: 'Alpha Town', score: null } } }];
+  const r = build(sheet(lg({ Date: '19/12/2026', 'Home team': 'Beta United', 'Away team': 'Alpha Town' })));
+  const m = F.matchNls(r.fixtures, F.nlsResults(nls), (t) => new Date(t).toISOString().slice(0, 10), () => null);
+  assert.equal(m.length, 1);
+  assert.equal(m[0].optaID, 'g7');
+  assert.equal(m[0].result, null);
+});
+
+test('a day reads by competition, then kick-off', () => {
+  const r = build(sheet(
+    lg({ Date: '28/10/2026', Time: '7.45pm', Competition: 'South', 'Home team': 'Alpha Town', 'Away team': 'Beta United', OptaID: 'g1' }),
+    lg({ Date: '28/10/2026', Time: '7.45pm', Competition: 'National', 'Home team': 'Gamma City', 'Away team': 'Delta Rovers', OptaID: 'g2' }),
+    lg({ Date: '28/10/2026', Time: '7pm', Competition: 'National', 'Home team': 'Delta Rovers', 'Away team': 'Alpha Town', OptaID: 'g3' })));
+  const order = Object.values(r.fixtures).sort(F.compare).map((f) => f.key);
+  assert.deepEqual(order, ['g3', 'g2', 'g1']);
 });
