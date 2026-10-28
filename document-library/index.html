@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<!--
+  Document Library — the club page (standalone, club code)
+  Version: v1.0 (28/10/2026) — initial build.
+  File: /document-library/index.html
+
+  Where the League keeps documents for clubs. Every club sees the same
+  library — there is no per-club folder and no club filter. Clubs browse,
+  search, preview and download; only NL admins change anything, from
+  /document-library/admin/.
+
+  The door is the club code (NL.codeGate.viaFunction → app-data/club-codes →
+  functions/club-code.js), which mints a token carrying `club: '<KEY>'`. The
+  rules on app-data/ops-document-library/{folders,files} and on
+  document-library/** in Storage read that claim. This page enforces nothing
+  itself — `writable: false` only means no management controls are drawn.
+
+  A club's downloads are logged (audit/, action 'download') so the console's
+  Activity tab can answer "has anyone opened this". Previews are not.
+
+  It deliberately does NOT use auth-guard — that is for NL accounts, and this
+  page is entered by code. The browser is /document-library/_library.js,
+  shared with the console.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Document Library — The National League</title>
+  <!-- Favicons. Static, not injected: nl-topbar.js adds these too, but a
+       standalone page never loads it, and an icon that arrives with the JS
+       leaves the tab blank until it does. /favicon.ico at the root is the
+       backstop every browser asks for without being told. -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="/system/nl-brand.css?v=69">
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+  </script>
+  <script src="/system/nl-utils.js?v=50"></script>
+  <!-- GA4 for nl.tools — cookieless, no banner, no identity. See system/nl-analytics.js -->
+  <script src="/system/nl-analytics.js?v=1"></script>
+  <link rel="stylesheet" href="/document-library/_library.css?v=1">
+  <script src="/document-library/_library.js?v=1"></script>
+</head>
+<body>
+  <!-- White bar: no NL account is behind this page (nl-brand v2.51). -->
+  <header class="nl-idbar">
+    <img class="nl-idbar__crest" id="dlCrest" src="/assets/crests/National%20League%20rose.png"
+         alt="" width="42" height="42">
+    <div class="nl-idbar__id">
+      <div class="nl-idbar__title">Document Library</div>
+      <div class="nl-idbar__sub" id="dlWho">The National League</div>
+    </div>
+    <div class="nl-idbar__actions">
+      <button class="nl-idbar__btn" id="dlOut" type="button" hidden>Sign out</button>
+    </div>
+  </header>
+
+  <div class="gate" id="dlGate"></div>
+
+  <main class="dl-page" id="dlShell" hidden></main>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+
+  function start(session) {
+    var key = (session && session.role) || '';
+    var name = (session && session.name) || 'The National League';
+    $('dlGate').hidden = true;
+    $('dlShell').hidden = false;
+    $('dlOut').hidden = false;
+    $('dlWho').textContent = name;
+
+    /* The club's crest in the bar, from the claim. The League's own code
+       (and a staff '*') keep the rose. */
+    if (key && key !== 'NL' && key !== '*') {
+      NL.clubs.load().then(function () {
+        var c = NL.clubs.byCode(key);
+        if (!c) return;
+        var ck = c.crestName || c.name;
+        NL.clubs.wireCrestImg($('dlCrest'), ck, false);
+        $('dlCrest').src = NL.clubs.crestUrl(ck, 'thumb');
+      })['catch'](function () { /* keep the rose */ });
+    }
+
+    DocLib.create({
+      mount: $('dlShell'),
+      db: firebase.database(),
+      writable: false,
+      actor: key ? 'club:' + key : '',
+      who: name,
+      logDownloads: !!key
+    });
+  }
+
+  $('dlOut').addEventListener('click', function () {
+    NL.codeGate.signOut().then(function () { location.reload(); });
+  });
+
+  NL.codeGate.ensure({
+    mount: $('dlGate'),
+    title: 'Document Library',
+    sub: 'Enter your access code.',
+    numeric: false,
+    verify: NL.codeGate.viaFunction('app-data/club-codes', { tool: 'document-library' }),
+    claim: 'club'
+  }).then(start);
+})();
+</script>
+</body>
+</html>

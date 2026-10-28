@@ -22,6 +22,11 @@ NL_REPO=/path/to/nl-tools npx firebase emulators:exec --project demo-mdl \
   --only database,storage "node --test matchday-live-rules.mjs"
 ```
 
+`document-library-rules.mjs` runs the same way with `--only database,storage`.
+One thing it cannot show: the emulator treats a re-upload over an existing
+object as a create, so the md5Hash guard on Storage updates is unproven there
+(the note is in the file).
+
 The file name deliberately does not end `.test.mjs`, so the CI glob
 (`tests/*.test.mjs`) cannot pick it up and fail for want of an emulator.
 

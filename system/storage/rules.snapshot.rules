@@ -22,6 +22,7 @@
 //   uploads/**            brand-exposure source footage, transient — see block
 //   matchday-live/<ymd>/<contributorId>/  Matchday Live contributor clips
 //   save-of-the-month/<CODE>/<YYYY-MM>/  Save of the Month club clips, per-club
+//   document-library/**   League documents for every club, written by NL staff
 
 rules_version = '2';
 service firebase.storage {
@@ -287,6 +288,53 @@ service firebase.storage {
         && !request.resource.contentType.matches('.*javascript.*');
 
       allow delete: if request.auth != null && request.auth.token.pClub == '*';
+    }
+
+    // ── Document Library ──────────────────────────────────────────────────
+    // document-library/files/<fileId>.<ext>            the document
+    // document-library/_previews/<fileId>-<tier>.<ext> image thumb/medium
+    // Keyed on the fileId alone, never the folder or the name, so a move or a
+    // rename is an RTDB write and never re-uploads anything. The name a person
+    // sees reaches the download through Content-Disposition metadata, which
+    // the console rewrites on rename.
+    //
+    // Read: any club-code session (`club` claim, including the NL code and
+    // the staff '*') or any portal account. Every club reads every document;
+    // there is no per-club folder here.
+    //
+    // Write: portal accounts only (an email claim). Storage rules cannot read
+    // RTDB roles, so the admin gate lives where it can be enforced — the RTDB
+    // record under app-data/ops-document-library/files is admin-only, and an
+    // object nothing points at is listed nowhere. Same reasoning as the
+    // brand-exposure blocks above. Club sessions carry no email claim and
+    // cannot write at all.
+    //
+    // Bytes are never overwritten. Create needs an empty path, and update is
+    // allowed only when the bytes are unchanged (md5Hash equal) — which is
+    // exactly the metadata write a rename makes, and nothing else. A portal
+    // account that is not an admin therefore cannot replace a document clubs
+    // are reading. It could delete one, if it knew the path; the paths are
+    // push ids, readable only through the admin-gated or club-gated RTDB
+    // nodes. Accepted.
+    match /document-library/{allPaths=**} {
+      allow read: if request.auth != null
+        && (request.auth.token.club != null || request.auth.token.email != null);
+      allow create: if request.auth != null
+        && request.auth.token.email != null
+        && resource == null
+        && request.resource.size < 100 * 1024 * 1024
+        // What executes when a browser opens the download URL inline from
+        // the bucket's own origin — the Programme Packs block says why the
+        // list stops there.
+        && !request.resource.contentType.matches('text/html.*')
+        && !request.resource.contentType.matches('application/xhtml.*')
+        && !request.resource.contentType.matches('.*javascript.*')
+        && !request.resource.contentType.matches('image/svg.*');
+      allow update: if request.auth != null
+        && request.auth.token.email != null
+        && request.resource.md5Hash == resource.md5Hash
+        && request.resource.contentType == resource.contentType;
+      allow delete: if request.auth != null && request.auth.token.email != null;
     }
 
     match /{allPaths=**} {

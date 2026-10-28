@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Document Library (console)
+  Version: v1.0 (28/10/2026) — initial build.
+  File: /document-library/admin/index.html
+
+  Where NL admins manage the documents clubs read at /document-library/.
+  Three tabs:
+    Library   the same browser clubs see (/document-library/_library.js),
+              with upload, new folder, rename, move and remove drawn in
+    Bin       removed documents: restore, or delete for good
+    Activity  who uploaded, renamed, moved and removed what, and which
+              clubs downloaded what
+
+  A document's name is the same everywhere — on screen, on the saved file,
+  inside a zip — and a rename changes all three. See the header of
+  _library.js for how, and why the bytes never move.
+
+  Storage (RTDB):
+    app-data/ops-document-library/{folders,files,trash,audit}
+    tools/ops-document-library                     tool registration
+  Bytes (Storage): document-library/files/<fileId>.<ext>
+                   document-library/_previews/<fileId>-<tier>.<ext>
+
+  Access (auth-guard registry, tools/ops-document-library defaults):
+    superadmin + admin → admin. Everyone else → off; a per-user 'admin'
+    grant opens it to anyone else. The RTDB rules read the same two things
+    (role, or tools/ops-document-library === 'admin'), so a grant made in the
+    portal is a grant the database honours.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document Library — NL Tools</title>
+  <!-- Favicons. Static, not injected: nl-topbar.js adds these too, but a
+       standalone page never loads it, and an icon that arrives with the JS
+       leaves the tab blank until it does. /favicon.ico at the root is the
+       backstop every browser asks for without being told. -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+
+  <!-- Brand stylesheet (lint canonical: ?v=69) -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=69">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'Document Library',
+      toolKey: 'ops-document-library'
+    };
+    var NL_TOOL_KEY = 'ops-document-library';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '28/10/2026',
+        version: 'v1.0',
+        items: [
+          'New: a library of League documents for clubs. Clubs open it with ' +
+            'their access code; admins upload, organise and rename here.'
+        ]
+      }
+    ];
+
+    /* auth-guard fires this once the session is verified + pageWrap is
+       revealed. Do NOT read RTDB before this fires. */
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts -->
+  <script src="/system/nl-utils.js?v=50"></script>
+  <!-- GA4, one property for all of nl.tools. Cookieless, so no consent
+       banner on any page; page views by path, no identity. Tool events go
+       through NL.track(). See system/nl-analytics.js. -->
+  <script src="/system/nl-analytics.js?v=1"></script>
+  <script src="/system/nl-topbar.js?v=10"></script>
+  <script src="/system/auth-guard.js?v=17"></script>
+
+  <link rel="stylesheet" href="/document-library/_library.css?v=1">
+  <script src="/document-library/_library.js?v=1"></script>
+
+<style>
+  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
+     style.display = 'block'. Don't clear with '' — would re-trigger the
+     brand rule and re-hide the page. */
+  .dla-link { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    font-size: var(--text-sm); color: var(--text-muted); margin-bottom: 14px; }
+  .dla-link a { color: var(--navy); font-weight: 700; }
+  .dla-pane[hidden] { display: none; }
+  .dla-tail { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 10px; font-size: var(--text-sm); }
+  .dla-muted { color: var(--text-muted); }
+  .dla-acts { text-align: right !important; white-space: nowrap; }
+  .dla-btns { display: inline-flex; gap: 6px; }
+</style>
+</head>
+<body>
+
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="dl-page">
+    <div class="dla-link">
+      Clubs open it at <a id="dlaUrl" href="/document-library/" target="_blank" rel="noopener">nl.tools/document-library</a>
+      with their access code.
+      <button class="btn btn--ghost btn--sm" type="button" id="dlaCopy">Copy link</button>
+    </div>
+
+    <div class="tabs" role="tablist">
+      <button class="tab active" type="button" role="tab" data-tab="library" aria-selected="true">Library</button>
+      <button class="tab" type="button" role="tab" data-tab="bin" aria-selected="false">Bin</button>
+      <button class="tab" type="button" role="tab" data-tab="activity" aria-selected="false">Activity</button>
+    </div>
+
+    <section class="dla-pane" id="paneLibrary"></section>
+    <section class="dla-pane" id="paneBin" hidden></section>
+    <section class="dla-pane" id="paneActivity" hidden></section>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var ROOT = DocLib.ROOT;
+  var esc = function (s) { return NL.escHtml(s); };
+  var $ = function (id) { return document.getElementById(id); };
+  var lib = null, me = null;
+  var TRASH = {}, AUDIT = [];
+
+  function ref(path) { return firebase.database().ref(ROOT + (path ? '/' + path : '')); }
+  function TS() { return firebase.database.ServerValue.TIMESTAMP; }
+  function plural(n, w) { return n + ' ' + w + (n === 1 ? '' : 's'); }
+
+  function audit(action, detail) {
+    ref('audit').push({ ts: TS(), actor: 'staff:' + me.uid, who: me.name || me.email || '',
+      action: action, detail: String(detail || '').slice(0, 300) })
+      ['catch'](function (e) { console.warn('[doclib] audit', e); });
+  }
+
+  /* ── Tabs — a closed set of three ───────────────────────────────────── */
+  function showTab(name) {
+    Array.prototype.forEach.call(document.querySelectorAll('[data-tab]'), function (b) {
+      var on = b.getAttribute('data-tab') === name;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    $('paneLibrary').hidden = name !== 'library';
+    $('paneBin').hidden = name !== 'bin';
+    $('paneActivity').hidden = name !== 'activity';
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('[data-tab]'), function (b) {
+    b.onclick = function () { showTab(b.getAttribute('data-tab')); };
+  });
+
+  $('dlaCopy').onclick = function () {
+    NL.copy(location.origin + '/document-library/').then(function (ok) {
+      NL.toast(ok ? 'Link copied' : 'Could not copy', ok ? 'success' : 'error');
+    });
+  };
+
+  /* ── Bin ────────────────────────────────────────────────────────────── */
+
+  function binRows() {
+    return Object.keys(TRASH).map(function (id) { return Object.assign({ id: id }, TRASH[id]); })
+      .sort(function (a, b) { return (b.deletedAt || 0) - (a.deletedAt || 0); });
+  }
+
+  function renderBin() {
+    var rows = binRows();
+    var pane = $('paneBin');
+    if (!rows.length) {
+      pane.innerHTML = '<div class="empty-state"><div class="empty-state__icon">🗑️</div>' +
+        '<div class="empty-state__title">The Bin is empty</div></div>';
+      return;
+    }
+    var bytes = rows.reduce(function (t, r) { return t + (Number(r.size) || 0); }, 0);
+    pane.innerHTML =
+      '<div class="dla-tail"><span class="dla-muted" style="margin-right:auto;align-self:center">' +
+        plural(rows.length, 'document') + ', ' + esc(NL.files.humanSize(bytes)) + '</span>' +
+        '<button class="btn btn--danger btn--sm" type="button" id="binEmpty">Empty the Bin</button></div>' +
+      '<div class="table-wrap"><table class="table table--compact"><thead><tr>' +
+        '<th>Name</th><th>Was in</th><th>Removed</th><th class="dla-acts" aria-label="Actions"></th>' +
+      '</tr></thead><tbody>' + rows.map(function (r) {
+        var from = r.folderId && r.folderId !== DocLib.ROOT_FOLDER && lib.folderExists(r.folderId)
+          ? lib.pathLabel(r.folderId) : (r.folderId && r.folderId !== DocLib.ROOT_FOLDER ? 'A folder since deleted' : 'Document Library');
+        return '<tr><td>' + NL.files.kindIcon(NL.files.kind(r.contentType, r.name)) + ' ' + esc(r.name) +
+          ' <span class="dla-muted">' + esc(NL.files.humanSize(r.size)) + '</span></td>' +
+          '<td>' + esc(from) + '</td>' +
+          '<td title="' + esc(r.deletedAt ? NL.formatDateTime(r.deletedAt) : '') + '">' +
+            esc(r.deletedAt ? NL.timeAgo(r.deletedAt) : '') +
+            (r.deletedBy ? ' <span class="dla-muted">by ' + esc(r.deletedBy) + '</span>' : '') + '</td>' +
+          '<td class="dla-acts"><span class="dla-btns"><button class="btn btn--ghost btn--sm" type="button" data-restore="' + esc(r.id) + '">Restore</button>' +
+          '<button class="btn btn--ghost btn--sm" type="button" data-purge="' + esc(r.id) + '">Delete for good</button></span></td></tr>';
+      }).join('') + '</tbody></table></div>';
+
+    Array.prototype.forEach.call(pane.querySelectorAll('[data-restore]'), function (b) {
+      b.onclick = function () { restore(b.getAttribute('data-restore')); };
+    });
+    Array.prototype.forEach.call(pane.querySelectorAll('[data-purge]'), function (b) {
+      b.onclick = function () {
+        var r = TRASH[b.getAttribute('data-purge')];
+        NL.confirm('Delete “' + r.name + '” for good? It cannot be brought back.',
+          { title: 'Delete for good', confirmText: 'Delete', variant: 'danger' }).then(function (ok) {
+          if (ok) purge([b.getAttribute('data-purge')]);
+        });
+      };
+    });
+    $('binEmpty').onclick = function () {
+      NL.confirm('Delete all ' + plural(rows.length, 'document') + ' in the Bin for good? They cannot be brought back.',
+        { title: 'Empty the Bin', confirmText: 'Delete them all', variant: 'danger' }).then(function (ok) {
+        if (ok) purge(rows.map(function (r) { return r.id; }));
+      });
+    };
+  }
+
+  /* Back where it was if that folder still exists, otherwise the top. A name
+     taken there in the meantime is suffixed ("Report (2).pdf") — and the
+     stored file's download name follows, so the promise holds. */
+  function restore(id) {
+    var r = TRASH[id];
+    if (!r) return;
+    var folder = r.folderId && r.folderId !== DocLib.ROOT_FOLDER && lib.folderExists(r.folderId) ? r.folderId : null;
+    var name = NL.files.uniqueIn(r.name, lib.namesIn(folder));
+    var rec = Object.assign({}, r);
+    delete rec.id; delete rec.deletedAt; delete rec.deletedBy;
+    rec.folderId = folder || DocLib.ROOT_FOLDER;
+    rec.name = name;
+    var meta = name === r.name ? Promise.resolve()
+      : firebase.storage().ref(r.storagePath).updateMetadata({ contentDisposition: NL.files.contentDisposition(name) });
+    meta.then(function () {
+      var u = {};
+      u['files/' + id] = rec;
+      u['trash/' + id] = null;
+      return ref().update(u);
+    }).then(function () {
+      audit('restore', name + ' → ' + (folder ? lib.pathLabel(folder) : 'Document Library'));
+      NL.toast(name === r.name ? 'Restored' : 'Restored as “' + name + '”', 'success');
+    })['catch'](function (e) { NL.toast('Could not restore: ' + e.message, 'error'); });
+  }
+
+  /* Bytes first, then the record: a record whose bytes are gone is worse
+     than bytes whose record is gone, because the record is what shows. A
+     missing object counts as deleted — it may have gone in an earlier,
+     interrupted run. */
+  function purge(ids) {
+    var st = firebase.storage();
+    function del(path) {
+      if (!path) return Promise.resolve();
+      return st.ref(path).delete()['catch'](function (e) {
+        if (e && e.code === 'storage/object-not-found') return;
+        throw e;
+      });
+    }
+    var done = 0, failed = 0;
+    ids.reduce(function (chain, id) {
+      return chain.then(function () {
+        var r = TRASH[id];
+        if (!r) return;
+        return Promise.all([del(r.storagePath), del(r.thumbPath), del(r.mediumPath)])
+          .then(function () { return ref('trash/' + id).remove(); })
+          .then(function () { done++; audit('purge', r.name); })
+          ['catch'](function (e) { failed++; console.error('[doclib] purge', id, e); });
+      });
+    }, Promise.resolve()).then(function () {
+      if (done) NL.toast(plural(done, 'document') + ' deleted for good', 'success');
+      if (failed) NL.toast(plural(failed, 'document') + ' could not be deleted — try again', 'error');
+    });
+  }
+
+  /* ── Activity ───────────────────────────────────────────────────────── */
+
+  var ACTION = {
+    upload: 'Uploaded', 'upload-folder': 'Uploaded a folder', rename: 'Renamed', move: 'Moved',
+    remove: 'Removed', restore: 'Restored', purge: 'Deleted for good',
+    'folder-create': 'New folder', 'folder-rename': 'Renamed folder', 'folder-delete': 'Deleted folder',
+    download: 'Downloaded'
+  };
+
+  function renderActivity() {
+    var pane = $('paneActivity');
+    if (!AUDIT.length) {
+      pane.innerHTML = '<div class="empty-state"><div class="empty-state__icon">📋</div>' +
+        '<div class="empty-state__title">Nothing has happened yet</div></div>';
+      return;
+    }
+    pane.innerHTML = '<div class="table-wrap"><table class="table table--compact"><thead><tr>' +
+      '<th>When</th><th>Who</th><th>What</th><th>Detail</th></tr></thead><tbody>' +
+      AUDIT.map(function (a) {
+        var club = String(a.actor || '').indexOf('club:') === 0;
+        return '<tr><td title="' + esc(a.ts ? NL.formatDateTime(a.ts) : '') + '">' + esc(a.ts ? NL.timeAgo(a.ts) : '') + '</td>' +
+          '<td>' + esc(a.who || (club ? a.actor.slice(5) : 'Staff')) + (club ? ' <span class="pill pill--info">Club</span>' : '') + '</td>' +
+          '<td>' + esc(ACTION[a.action] || a.action || '') + '</td>' +
+          '<td>' + esc(a.detail || '') + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+
+  /* ── Boot ───────────────────────────────────────────────────────────── */
+
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function (session) {
+    me = session || {};
+    NL.ensureAuth().then(function () {
+      lib = DocLib.create({
+        mount: $('paneLibrary'),
+        db: firebase.database(),
+        storage: firebase.storage(),
+        writable: true,
+        onChange: function () { if (lib) renderBin(); },
+        actor: 'staff:' + me.uid,
+        who: me.name || me.email || ''
+      });
+      ref('trash').on('value', function (s) { TRASH = s.val() || {}; renderBin(); },
+        function (e) { $('paneBin').innerHTML = '<p class="dla-muted">Could not read the Bin: ' + esc(e.message) + '</p>'; });
+      ref('audit').orderByChild('ts').limitToLast(200).on('value', function (s) {
+        var v = s.val() || {};
+        AUDIT = Object.keys(v).map(function (k) { return v[k]; })
+          .sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
+        renderActivity();
+      }, function (e) { $('paneActivity').innerHTML = '<p class="dla-muted">Could not read the activity: ' + esc(e.message) + '</p>'; });
+    });
+  };
+
+  if (window._toolDeferredSession) {
+    window.TOOL.boot(window._toolDeferredSession);
+    delete window._toolDeferredSession;
+  }
+})();
+</script>
+</body>
+</html>
