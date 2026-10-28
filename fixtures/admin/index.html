@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixture Management
-  Version: v1.6 (28/10/2026)
+  Version: v1.8 (28/10/2026)
   File: /fixtures/admin/index.html
 
   The League's master fixture record: every game in every competition, with
@@ -9,6 +9,12 @@
   behind it, is system/fixture-management-plan.md.
 
   CHANGELOG
+    v1.8 (28/10/2026) — Import works out a sheet's season from its own dates
+      (1 July to 30 June) and imports into that season whatever is on screen,
+      leaving out and counting rows dated outside it — on 28/10/2026 last
+      season's sheet replaced this season's. A game's dialog takes its crowd
+      (total and away), saved as the Attendance submission for that match ID.
+      The import's list of crowds that differ from the sheet can be copied.
     v1.6 (28/10/2026) — Play-offs sit in their division (National, North,
       South) marked PO before the round, not in a competition of their own;
       a play-off tie is added as "North play-off" and so on. Attendance
@@ -108,6 +114,15 @@
     var NL_TOOL_KEY = 'ops-fixture-management';
 
     window.NL_CHANGELOG = [
+      {
+        date: '28/10/2026',
+        version: 'v1.8',
+        items: [
+          'Import works out the season from the sheet\u2019s dates and imports into that season, whichever one is on screen.',
+          'A game\u2019s crowd can be corrected in its dialog; it saves to Attendance.',
+          'The list of crowds that differ from the sheet has a Copy list button.'
+        ]
+      },
       {
         date: '28/10/2026',
         version: 'v1.6',
@@ -406,16 +421,20 @@
   function attPath(key, node) {
     return 'app-data/ops-attendance/' + (key === S.current ? '' : 'archive/' + key + '/') + node;
   }
+  function crowdsOf(subs) {
+    var out = {};
+    Object.keys(subs || {}).forEach(function (id) {
+      var x = subs[id] || {};
+      if (x.total != null) out[id] = { total: +x.total, away: x.awayRecorded !== false && x.away != null ? +x.away : null };
+    });
+    return out;
+  }
   function loadCrowds(key) {
     NL.ensureAuth()
       .then(function () { return db.ref(attPath(key, 'submissions')).once('value'); })
       .then(function (snap) {
         if (S.season !== key) return;
-        var subs = snap.val() || {};
-        Object.keys(subs).forEach(function (id) {
-          var x = subs[id] || {};
-          if (x.total != null) S.crowds[id] = { total: +x.total, away: x.awayRecorded !== false && x.away != null ? +x.away : null };
-        });
+        S.crowds = crowdsOf(snap.val());
         render();
       })
       .catch(function () { /* no crowds is not an error: the column stays empty */ });
@@ -689,6 +708,7 @@
     var res = (rec && rec.result) || {};
 
     var wrap = document.createElement('div');
+    if (rec) wrap.setAttribute('data-key', rec.key);
     var compOpts = HAND.map(function (h) {
       return '<option value="' + h.v + '"' + (h.v === 'fa-cup' ? ' selected' : '') + '>' + esc(h.label) + '</option>';
     }).join('');
@@ -728,6 +748,9 @@
             '<option value="away">Away</option>' +
             '<option value="replay">Drawn: replay</option>' +
           '</select></div>' +
+        (rec && rec.date ? '<div class="form-group"><label>Crowd</label><div class="fm-score">' +
+          numIn('fmeCrowd', S.crowds[rec.key] ? S.crowds[rec.key].total : null, dis) + '<span class="fm-dash">away</span>' +
+          numIn('fmeCrowdAway', S.crowds[rec.key] ? S.crowds[rec.key].away : null, dis) + '</div></div>' : '') +
         '<div class="form-group"><label><input id="fmeNeutral" type="checkbox"' + (rec && rec.neutral ? ' checked' : '') + dis +
           '> Neutral venue</label>' +
           '<input id="fmeVenue" type="text" placeholder="Venue" value="' + esc(rec && rec.venue || '') + '"' + dis + '></div>' +
@@ -845,6 +868,58 @@
     });
   }
 
+  /* A crowd typed in a game's dialog is saved where every crowd lives — the
+     Attendance tool's submission for that match ID — so there is still one
+     figure, not a copy. Shape as attendance/index.html submitAttendance
+     writes it. A past season's crowds sit in Attendance's archive, which
+     only a superadmin may write (the rules say so too). */
+  function crowdFromForm(wrap) {
+    var t = intOf(wrap, 'fmeCrowd'), a = intOf(wrap, 'fmeCrowdAway');
+    var key = wrap.getAttribute('data-key');
+    var held = S.crowds[key] || null;
+    if (t == null) return { ok: a == null, msg: 'Enter the total crowd, or leave both empty', change: false };
+    if (a != null && a > t) return { ok: false, msg: 'Away fans cannot exceed the total' };
+    var change = !held || held.total !== t || (held.away == null ? null : held.away) !== (a == null ? null : a);
+    return { ok: true, change: change, total: t, away: a };
+  }
+
+  function ukToUtc(ymd, hm) {
+    var p = ymd.split('-'), t = (hm || '15:00').split(':');
+    var guess = Date.UTC(+p[0], +p[1] - 1, +p[2], +t[0], +t[1]);
+    var d = new Date(guess);
+    var off = Date.parse(d.toLocaleString('en-US', { timeZone: 'Europe/London' })) - Date.parse(d.toLocaleString('en-US', { timeZone: 'UTC' }));
+    return new Date(guess - off).toISOString().slice(0, 19).replace('T', ' ');
+  }
+
+  var ATT_KEY = { national: 'nl', north: 'north', south: 'south', 'nl-cup': 'nl-cup', 'fa-cup': 'fa-cup', 'fa-trophy': 'fa-trophy' };
+
+  function saveCrowd(rec, c) {
+    var path = attPath(S.season, 'submissions/' + rec.key);
+    var stamp = Date.now(), who = S.session || {};
+    var held = S.crowds[rec.key];
+    var write = held
+      ? db.ref(path).update({ total: c.total, away: c.away, awayRecorded: c.away != null, lastEditedAt: stamp, lastEditedBy: who.uid || null })
+      : db.ref(path).set(clean({
+          matchID: rec.key,
+          clubKey: (NL.clubs.byName(rec.home.name) || {}).optaID || null,
+          clubName: rec.home.name,
+          competitionKey: ATT_KEY[rec.comp] || rec.comp,
+          kickoffUTC: ukToUtc(rec.date, rec.ko),
+          total: c.total,
+          away: c.away,
+          awayRecorded: c.away != null,
+          submittedBy: who.uid || null,
+          submittedByName: who.name || who.email || '',
+          submittedByRole: 'admin',
+          submittedAt: stamp
+        }));
+    return NL.ensureAuth().then(function () { return write; }).then(function () {
+      S.crowds[rec.key] = { total: c.total, away: c.away };
+      NL.writeAudit('fixtures_crowd', rec.home.name + ' v ' + rec.away.name + ' ' + rec.date + ': ' + c.total);
+      render();
+    });
+  }
+
   function intOf(wrap, id) {
     var v = wrap.querySelector('#' + id).value;
     return v === '' ? null : Math.max(0, parseInt(v, 10));
@@ -920,7 +995,11 @@
       next.key = key;
     }
 
+    var crowd = rec && rec.date ? crowdFromForm(wrap) : { ok: true, change: false };
+    if (!crowd.ok) return no(crowd.msg);
+
     return save(next)
+      .then(function () { return crowd.change ? saveCrowd(next, crowd) : null; })
       .then(function () { NL.toast(isNew ? 'Tie added' : 'Saved', 'success'); return true; })
       .catch(function (e) { NL.toast('Save failed: ' + e.message, 'error'); return false; });
   }
@@ -1135,28 +1214,63 @@
       ]
     });
 
+    /* The season a sheet belongs to comes from its own dates (1 July to
+       30 June), not from whichever season is on screen: on 28/10/2026 last
+       season's sheet, imported while this season was showing, replaced it.
+       Rows dated outside that season are left out and counted. */
+    function seasonOfDate(d) {
+      var y = +d.slice(0, 4), m = +d.slice(5, 7);
+      return String(m >= 7 ? y : y - 1);
+    }
+    function dateOf(r) { return r.date || (r.attempts && r.attempts.length ? r.attempts[0].date : null); }
+
     function check() {
       var out = wrap.querySelector('#fmiOut');
       out.innerHTML = '<div class="banner banner--info">Checking…</div>';
-      var past = S.season !== S.current;
-      var seedP = S.season === '2026' ? getJson(SEED_URL) : Promise.resolve(null);
+      var goBtn = wrap.closest('.modal') && wrap.closest('.modal').querySelector('.modal__footer .btn--primary');
+      if (goBtn) goBtn.textContent = 'Import';
+      var opts = {
+        fixtures: wrap.querySelector('#fmiFix').value,
+        rearrangements: wrap.querySelector('#fmiRe').value.trim() || null,
+        clubOf: clubOf,
+        divisionOf: function (name) { var c = NL.clubs.byName(name); return c ? c.division : null; },
+        parseDate: NL.parseDate
+      };
+      var first = F.build(opts);
+      if (first.error) { out.innerHTML = '<div class="banner banner--error">' + esc(first.error) + '</div>'; result = null; return; }
+      var tally = {};
+      Object.keys(first.fixtures).forEach(function (k) {
+        var d = dateOf(first.fixtures[k]);
+        if (d) tally[seasonOfDate(d)] = (tally[seasonOfDate(d)] || 0) + 1;
+      });
+      var season = Object.keys(tally).sort(function (x, y) { return tally[y] - tally[x]; })[0];
+      if (!season || NL.season.keys(S.meta).indexOf(season) === -1) {
+        out.innerHTML = '<div class="banner banner--error">This sheet’s games are in ' +
+          esc(season ? NL.season.label(S.meta, season) : 'no season') + ', which is not one this tool holds.</div>';
+        result = null;
+        return;
+      }
+      var past = season !== S.current;
+      var seedP = season === '2026' ? getJson(SEED_URL) : Promise.resolve(null);
       /* A past season is keyed to the Attendance archive so its crowds stay
          attached; the current one keeps its Opta IDs from the sheet. */
       var archP = past
-        ? NL.ensureAuth().then(function () { return db.ref(attPath(S.season, 'fixtures')).once('value'); })
+        ? NL.ensureAuth().then(function () { return db.ref(attPath(season, 'fixtures')).once('value'); })
             .then(function (snap) { return snap.val() || {}; })
         : Promise.resolve(null);
-      Promise.all([seedP, archP]).then(function (got) {
-        var seed = got[0], archive = got[1];
-        result = F.build({
-          fixtures: wrap.querySelector('#fmiFix').value,
-          rearrangements: wrap.querySelector('#fmiRe').value.trim() || null,
-          seed: seed,
-          clubOf: clubOf,
-          divisionOf: function (name) { var c = NL.clubs.byName(name); return c ? c.division : null; },
-          parseDate: NL.parseDate
+      var crowdP = NL.ensureAuth().then(function () { return db.ref(attPath(season, 'submissions')).once('value'); })
+        .then(function (snap) { return crowdsOf(snap.val()); }).catch(function () { return {}; });
+      Promise.all([seedP, archP, crowdP]).then(function (got) {
+        var seed = got[0], archive = got[1], crowds = got[2];
+        opts.seed = seed;
+        result = F.build(opts);
+        var outside = 0;
+        Object.keys(result.fixtures).forEach(function (k) {
+          var d = dateOf(result.fixtures[k]);
+          if (d && seasonOfDate(d) !== season) { delete result.fixtures[k]; outside++; }
         });
-        if (result.error) { out.innerHTML = '<div class="banner banner--error">' + esc(result.error) + '</div>'; result = null; return; }
+        result.season = season;
+        result.counts = F.counts(result.fixtures);
         var keyed = null;
         if (archive) {
           keyed = F.keyToAttendance(result.fixtures, archive);
@@ -1170,17 +1284,26 @@
         var by = F.COMPS.map(function (x) { return c.byComp[x.key] ? esc(x.label) + ' ' + c.byComp[x.key] : null; })
           .filter(Boolean).join(' · ');
         var withResult = Object.keys(result.fixtures).filter(function (k) { return result.fixtures[k].result; }).length;
-        var html = '<div class="banner banner--info"><strong>' + c.total + ' fixtures.</strong> ' + by +
+        var html = '<div class="banner ' + (season === S.season ? 'banner--info' : 'banner--amber') + '"><strong>' +
+          'This sheet is ' + esc(NL.season.label(S.meta, season)) + '</strong>: it imports into ' + esc(NL.season.label(S.meta, season)) +
+          (season === S.season ? '.' : ', not the season on screen.') +
+          (outside ? ' ' + outside + ' rows dated outside it are left out.' : '') + '</div>' +
+          '<div class="banner banner--info"><strong>' + c.total + ' fixtures.</strong> ' + by +
           (c.playoffs ? ' (' + c.playoffs + ' of them play-offs)' : '') +
           '. ' + withResult + ' with results. ' + c.awaiting + ' awaiting a date.' +
           (seed || past ? '' : ' No published schedule found, so original dates come from the history.') + '</div>';
-        if (keyed) html += attendanceCheck(keyed);
+        if (keyed) html += attendanceCheck(keyed, crowds);
         if (result.problems.length) {
           html += '<details class="disclosure"><summary>' + result.problems.length + ' to check after import' +
             '<span class="disclosure__meta">none stop the import</span></summary><ul class="fm-problems">' +
             result.problems.map(function (p) { return '<li>' + esc(p.text) + '</li>'; }).join('') + '</ul></details>';
         }
         out.innerHTML = html;
+        /* The button names the season the games go into. */
+        var go = wrap.closest('.modal') && wrap.closest('.modal').querySelector('.modal__footer .btn--primary');
+        if (go) go.textContent = 'Import into ' + NL.season.label(S.meta, season);
+        var cp = out.querySelector('[data-copy-apart]');
+        if (cp) cp.addEventListener('click', function () { NL.copy(cp.getAttribute('data-copy-apart')); });
       });
     }
 
@@ -1189,10 +1312,10 @@
        then crowds attached, and the sheet's crowd column checked against
        them (more than 10% apart is listed). Attendance's figure is the one
        kept. */
-    function attendanceCheck(k) {
+    function attendanceCheck(k, crowds) {
       var attached = 0, apart = [];
       Object.keys(k.fixtures).forEach(function (key) {
-        var r = k.fixtures[key], c = S.crowds[key];
+        var r = k.fixtures[key], c = crowds[key];
         if (!c) return;
         attached++;
         if (r.sheetCrowd != null && Math.abs(r.sheetCrowd - c.total) > 0.1 * Math.max(c.total, 1)) {
@@ -1211,19 +1334,25 @@
       if (apart.length) {
         h += '<details class="disclosure"><summary>' + apart.length + ' crowds differ from the sheet' +
           '<span class="disclosure__meta">Attendance\u2019s figure is kept</span></summary><ul class="fm-problems">' +
-          apart.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul></details>';
+          apart.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' +
+          '<button class="btn btn--ghost btn--sm" type="button" data-copy-apart="' + esc(apart.join('\n')) + '">Copy list</button></details>';
       }
       return h;
     }
 
     function commit(m) {
       if (!result) { NL.toast('Check the paste first', 'error'); return; }
-      var existing = Object.keys(S.fixtures).length;
-      var go = existing
-        ? NL.confirm('This replaces all ' + existing + ' fixtures for ' + NL.season.label(S.meta, S.season) +
-            ', including anything changed since the last import.', { title: 'Replace fixtures', confirmText: 'Replace', variant: 'danger' })
-        : Promise.resolve(true);
-      go.then(function (yes) {
+      var target = result.season;
+      var existingP = target === S.season
+        ? Promise.resolve(Object.keys(S.fixtures).length)
+        : NL.ensureAuth().then(function () { return db.ref(BASE + target + '/fixtures').once('value'); })
+            .then(function (snap) { return Object.keys(snap.val() || {}).length; });
+      existingP.then(function (existing) {
+        return existing
+          ? NL.confirm('This replaces all ' + existing + ' fixtures for ' + NL.season.label(S.meta, target) +
+              ', including anything changed since the last import.', { title: 'Replace fixtures', confirmText: 'Replace', variant: 'danger' })
+          : true;
+      }).then(function (yes) {
         if (!yes) return;
         var fx = {}, pub = {}, stamp = now();
         Object.keys(result.fixtures).forEach(function (k) {
@@ -1239,11 +1368,16 @@
           public: pub,
           meta: { importedAt: stamp, importedBy: (S.session && S.session.email) || null, counts: clean(result.counts) }
         };
-        NL.ensureAuth().then(function () { return ref().set(payload); })
+        NL.ensureAuth().then(function () { return db.ref(BASE + target).set(payload); })
           .then(function () {
-            NL.writeAudit('fixtures_import', NL.season.label(S.meta, S.season) + ': ' + result.counts.total + ' fixtures');
-            NL.toast('Imported ' + result.counts.total + ' fixtures', 'success');
+            NL.writeAudit('fixtures_import', NL.season.label(S.meta, target) + ': ' + result.counts.total + ' fixtures');
+            NL.toast('Imported ' + result.counts.total + ' fixtures into ' + NL.season.label(S.meta, target), 'success');
             m.close();
+            if (target !== S.season) {
+              var chip = document.querySelector('#fmSeasons [data-season="' + target + '"]');
+              if (chip) setActive('fmSeasons', chip);
+              openSeason(target);
+            }
           })
           .catch(function (e) { NL.toast('Import failed: ' + e.message, 'error'); });
       });
