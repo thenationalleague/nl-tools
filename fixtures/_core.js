@@ -1,8 +1,13 @@
 /* =============================================================================
    NL Tools — Fixture Management: data layer
    File: /fixtures/_core.js
-   Version: v1.3 (28/10/2026)
+   Version: v1.4 (28/10/2026)
    CHANGELOG
+     v1.4 (28/10/2026) — Play-offs belong to their division: a play-off is
+       a National, North or South record with playoff: true and its round
+       (QF/SF/F), not a competition of its own. 'North Playoffs' and the like
+       read that way; a bare 'Playoffs' takes the home club's division.
+       Play-offs never fold or merge with the same clubs' league games.
      v1.3 (28/10/2026) — A past season from its workbook, keyed to the
        Attendance archive (keyToAttendance), so its crowds stay attached:
        the 2025-26 sheet matched all 1,742 league, NL Cup and play-off games
@@ -50,8 +55,8 @@
                     once at entry and never changed. optaID is its own
                     nullable field, so adding one later orphans nothing.
      comp, round    'national' | 'north' | 'south' | 'nl-cup' | 'fa-cup' |
-                    'fa-trophy' | 'playoffs'; round is the sheet's MD ('16',
-                    'R2Q', 'QF').
+                    'fa-trophy'; round is the sheet's MD ('16', 'R2Q', 'QF').
+     playoff        true for a play-off, which keeps its division's comp.
      home, away     { name, code } for clubs in clubs-meta / cup-clubs-meta,
                     { name } for anyone else. The name is the join for a
                     crest added later.
@@ -88,10 +93,17 @@
     { key: 'south',     label: 'South',     sheet: ['south', 'national league south'],          pill: 'sou', league: true },
     { key: 'nl-cup',    label: 'NL Cup',    sheet: ['nl cup', 'national league cup'],           pill: 'nlc' },
     { key: 'fa-cup',    label: 'FA Cup',    sheet: ['fa cup'],                                  pill: 'fac', fa: true },
-    { key: 'fa-trophy', label: 'FA Trophy', sheet: ['fa trophy'],                               pill: 'fat', fa: true },
-    { key: 'playoffs',  label: 'Play-offs', sheet: ['playoffs', 'play-offs', 'play offs', 'national playoffs',
-                                                 'north playoffs', 'south playoffs'],          pill: null }
+    { key: 'fa-trophy', label: 'FA Trophy', sheet: ['fa trophy'],                               pill: 'fat', fa: true }
   ];
+  /* Sheet labels for a play-off. The division is in the label, or (a bare
+     'Playoffs') taken from the home club. */
+  var PLAYOFF_SHEET = {
+    'national playoffs': 'national', 'national play-offs': 'national',
+    'north playoffs': 'north', 'north play-offs': 'north',
+    'south playoffs': 'south', 'south play-offs': 'south',
+    'playoffs': '', 'play-offs': '', 'play offs': ''
+  };
+  var DIVISION_KEY = { 'National': 'national', 'North': 'north', 'South': 'south' };
   var COMP_BY_KEY = {};
   var COMP_BY_SHEET = {};
   COMPS.forEach(function (c) {
@@ -288,7 +300,7 @@
     return [comp, slug(round) || 'x', slug(home), slug(away)].join('-');
   }
 
-  function pairKey(comp, home, away) { return comp + '|' + norm(home) + '|' + norm(away); }
+  function pairKey(comp, home, away, playoff) { return comp + (playoff ? '+po' : '') + '|' + norm(home) + '|' + norm(away); }
 
   /* ── Build ──────────────────────────────────────────────────────────────
      opts:
@@ -298,6 +310,8 @@
                        league schedule as first published
        clubOf(name)    → { name, code } | null, member or guest club
        parseDate       NL.parseDate
+       divisionOf(name) → 'National'|'North'|'South'|null, for a bare
+                       'Playoffs' label
      → { fixtures: { key: record }, problems: [{ kind, text, key? }],
          counts } or { error } */
   function build(opts) {
@@ -374,7 +388,11 @@
     var out = {};
     var byPair = {};
     rows.forEach(function (r, i) {
-      var comp = COMP_BY_SHEET[norm(r['competition'])];
+      var label = norm(r['competition']);
+      var po = label in PLAYOFF_SHEET;
+      var comp = po
+        ? COMP_BY_KEY[PLAYOFF_SHEET[label] || DIVISION_KEY[(opts.divisionOf || function () { return null; })(r['home team'])] || 'national']
+        : COMP_BY_SHEET[label];
       var line = 'Row ' + (i + 1) + ' (' + (r['home team'] || '?') + ' v ' + (r['away team'] || '?') + ')';
       if (!comp) { problem('row', line + ': unknown competition "' + r['competition'] + '"'); return; }
       if (!r['home team'] || !r['away team']) { problem('row', line + ': missing a team'); return; }
@@ -385,6 +403,7 @@
       var rec = {
         optaID: optaOf(r['optaid']),
         comp: comp.key,
+        playoff: po || null,
         round: blankish(r['md']) ? null : String(r['md']).trim(),
         home: side(r['home team'], comp),
         away: side(r['away team'], comp),
@@ -406,7 +425,7 @@
       };
       if (comp.fa) rec.wentThrough = faWinner(rec.result, r['result h/d/a']);
       if (comp.league && !rec.optaID) problem('opta', line + ': no Opta ID');
-      var pk = pairKey(comp.key, rec.home.name, rec.away.name);
+      var pk = pairKey(comp.key, rec.home.name, rec.away.name, po);
       (byPair[pk] = byPair[pk] || []).push(rec);
     });
 
@@ -442,9 +461,9 @@
        lost a game and invented a postponement for one already played. */
     Object.keys(byPair).forEach(function (pk) {
       var recs = byPair[pk];
-      if (recs.length < 2 || !COMP_BY_KEY[recs[0].comp].league) return;
+      if (recs.length < 2 || !COMP_BY_KEY[recs[0].comp].league || recs[0].playoff) return;
       recs.slice().forEach(function (rec) {
-        var rk = pairKey(rec.comp, rec.away.name, rec.home.name);
+        var rk = pairKey(rec.comp, rec.away.name, rec.home.name, false);
         var seed = original[rk];
         if (byPair[rk] || !seed || seed.date !== rec.date || byPair[pk].length < 2) return;
         var label = COMP_BY_KEY[rec.comp].label;
@@ -468,7 +487,7 @@
       var recs = byPair[pk].sort(function (a, b) { return a.date < b.date ? -1 : 1; });
       var comp = COMP_BY_KEY[recs[0].comp];
       recs.forEach(function (rec) {
-        var hist = (lost[pk] || []).filter(function (a) { return !a.used; });
+        var hist = rec.playoff ? [] : (lost[pk] || []).filter(function (a) { return !a.used; });
         /* Each lost date this fixture has passed through. For a cup pair
            that met twice, only the dates up to this row's date. */
         hist.forEach(function (a) {
@@ -508,7 +527,7 @@
           rec.ko = null;
         }
 
-        var seed = original[pk];
+        var seed = rec.playoff ? null : original[pk];
         var first = rec.attempts[0];
         rec.original = seed || (first ? { date: first.date, ko: first.ko } : { date: rec.date, ko: rec.ko });
 
@@ -731,6 +750,7 @@
         key: x.id,
         optaID: /^g\d+$/.test(x.id) ? x.id : null,
         comp: comp.key,
+        playoff: null,
         round: null,
         home: side(f.homeTeamID, f.homeTeamName),
         away: side(f.awayTeamID, f.awayTeamName),
@@ -763,7 +783,7 @@
       games.forEach(function (r) { clubs[r.home.name] = 0; clubs[r.away.name] = 0; });
       var full = 2 * (Object.keys(clubs).length - 1);
       games.forEach(function (r) {
-        if (clubs[r.home.name] >= full || clubs[r.away.name] >= full) { r.comp = 'playoffs'; return; }
+        if (clubs[r.home.name] >= full || clubs[r.away.name] >= full) { r.playoff = true; return; }
         clubs[r.home.name]++; clubs[r.away.name]++;
       });
     });
@@ -832,6 +852,7 @@
     if ((a.date || '') !== (b.date || '')) return (a.date || '') < (b.date || '') ? -1 : 1;
     var c = (COMP_ORDER[a.comp] || 0) - (COMP_ORDER[b.comp] || 0);
     if (c) return c;
+    if (!!a.playoff !== !!b.playoff) return a.playoff ? 1 : -1;
     if ((a.ko || '') !== (b.ko || '')) return (a.ko || '') < (b.ko || '') ? -1 : 1;
     return a.home.name.localeCompare(b.home.name);
   }
@@ -854,11 +875,12 @@
 
   function counts(fixtures, todayYmd) {
     var t = todayYmd || '9999-12-31';
-    var o = { total: 0, awaiting: 0, noOpta: 0, cupDue: 0, byComp: {} };
+    var o = { total: 0, awaiting: 0, noOpta: 0, cupDue: 0, playoffs: 0, byComp: {} };
     Object.keys(fixtures).forEach(function (k) {
       var r = fixtures[k];
       o.total++;
       o.byComp[r.comp] = (o.byComp[r.comp] || 0) + 1;
+      if (r.playoff) o.playoffs++;
       if (awaiting(r)) o.awaiting++;
       if (!r.optaID && r.comp !== 'fa-cup' && r.comp !== 'fa-trophy') o.noOpta++;
       if (cupResultDue(r, t)) o.cupDue++;
@@ -874,6 +896,7 @@
     var a = AVAIL_BY_KEY[rec.broadcast && rec.broadcast.availability];
     return {
       comp: rec.comp,
+      playoff: rec.playoff || null,
       round: rec.round || null,
       date: rec.date,
       ko: rec.ko || null,

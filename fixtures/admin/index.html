@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixture Management
-  Version: v1.5 (28/10/2026)
+  Version: v1.6 (28/10/2026)
   File: /fixtures/admin/index.html
 
   The League's master fixture record: every game in every competition, with
@@ -9,6 +9,10 @@
   behind it, is system/fixture-management-plan.md.
 
   CHANGELOG
+    v1.6 (28/10/2026) — Play-offs sit in their division (National, North,
+      South) marked PO before the round, not in a competition of their own;
+      a play-off tie is added as "North play-off" and so on. Attendance
+      reads them as their division's games, as NLS files them.
     v1.5 (28/10/2026) — Import workbook on a past season: the sheet is
       keyed to the Attendance archive (fixtures/_core.js keyToAttendance),
       so every game keeps the ID its crowd is filed under — Opta IDs for
@@ -106,6 +110,11 @@
     window.NL_CHANGELOG = [
       {
         date: '28/10/2026',
+        version: 'v1.6',
+        items: ['Play-offs are listed under their own division, marked PO, rather than as a separate competition.']
+      },
+      {
+        date: '28/10/2026',
         version: 'v1.5',
         items: [
           'Last season can be imported from its workbook; every game keeps the ID its Attendance crowd is filed under.',
@@ -177,7 +186,7 @@
   <script src="/system/auth-guard.js?v=17"></script>
 
   <!-- Tool data layer (pure; tested in tests/fixture-management.test.mjs) -->
-  <script src="/fixtures/_core.js?v=4"></script>
+  <script src="/fixtures/_core.js?v=5"></script>
 
 <style>
   /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
@@ -628,7 +637,7 @@
       html += '<tr class="fm-row" data-key="' + esc(r.key) + '">' +
         '<td class="fm-ko">' + esc(waiting ? (last ? F.fmt(last.date) : '—') : (r.ko || '—')) + '</td>' +
         '<td>' + compPill(r.comp) + '</td>' +
-        '<td>' + esc(r.round || '') + '</td>' +
+        '<td>' + esc((r.playoff ? 'PO ' : '') + (r.round || '')) + '</td>' +
         '<td>' + team(r.home, true) + '</td>' +
         middle(r, t) +
         '<td>' + team(r.away, false) + '</td>' +
@@ -656,7 +665,16 @@
      League fixtures come from the import and keep their teams and
      competition. Cup ties are entered here. A changed date keeps the old
      one as a lost date ('moved'). */
-  var HAND = ['nl-cup', 'playoffs', 'fa-cup', 'fa-trophy'];
+  /* What can be added by hand. A play-off belongs to its division. */
+  var HAND = [
+    { v: 'nl-cup', comp: 'nl-cup', label: 'NL Cup' },
+    { v: 'national-po', comp: 'national', playoff: true, label: 'National play-off' },
+    { v: 'north-po', comp: 'north', playoff: true, label: 'North play-off' },
+    { v: 'south-po', comp: 'south', playoff: true, label: 'South play-off' },
+    { v: 'fa-cup', comp: 'fa-cup', label: 'FA Cup' },
+    { v: 'fa-trophy', comp: 'fa-trophy', label: 'FA Trophy' }
+  ];
+  function handOf(v) { return HAND.filter(function (h) { return h.v === v; })[0] || HAND[0]; }
 
   function numIn(id, v, dis) {
     return '<input id="' + id + '" type="number" min="0" inputmode="numeric" value="' + (v == null ? '' : v) + '"' + dis + '>';
@@ -671,8 +689,8 @@
     var res = (rec && rec.result) || {};
 
     var wrap = document.createElement('div');
-    var compOpts = HAND.map(function (k) {
-      return '<option value="' + k + '"' + (k === comp.key ? ' selected' : '') + '>' + esc(F.COMP_BY_KEY[k].label) + '</option>';
+    var compOpts = HAND.map(function (h) {
+      return '<option value="' + h.v + '"' + (h.v === 'fa-cup' ? ' selected' : '') + '>' + esc(h.label) + '</option>';
     }).join('');
     var hist = rec && rec.attempts && rec.attempts.length
       ? '<ol class="fm-history">' + rec.attempts.map(function (a, i) {
@@ -734,7 +752,7 @@
     }
 
     function syncComp() {
-      var key = isNew ? wrap.querySelector('#fmeComp').value : rec.comp;
+      var key = isNew ? handOf(wrap.querySelector('#fmeComp').value).comp : rec.comp;
       var fa = F.COMP_BY_KEY[key].fa;
       wrap.querySelector('#fmeOptaWrap').hidden = fa;
       wrap.querySelector('#fmeResultWrap').hidden = !fa;
@@ -846,7 +864,8 @@
 
   function submit(rec, wrap, homePick, awayPick) {
     var isNew = !rec;
-    var compKey = isNew ? wrap.querySelector('#fmeComp').value : rec.comp;
+    var hand = isNew ? handOf(wrap.querySelector('#fmeComp').value) : null;
+    var compKey = isNew ? hand.comp : rec.comp;
     var comp = F.COMP_BY_KEY[compKey];
     var homeName = homePick ? homePick.getValue() : rec.home.name;
     var awayName = awayPick ? awayPick.getValue() : rec.away.name;
@@ -871,7 +890,8 @@
     }
 
     var next = rec ? clean(rec) : {
-      comp: compKey, attempts: [], source: 'manual', state: 'scheduled', date: null, ko: null,
+      comp: compKey, playoff: hand && hand.playoff ? true : null,
+      attempts: [], source: 'manual', state: 'scheduled', date: null, ko: null,
       broadcast: { availability: comp.fa ? 'cup' : compKey === 'nl-cup' ? 'worldwide' : 'tbc', enhanced: false, daznMove: false, ami: false },
       wentThrough: null, result: null
     };
@@ -894,7 +914,7 @@
     }
 
     if (isNew) {
-      var key = opta || F.mintKey(compKey, round, next.home.name, next.away.name);
+      var key = opta || F.mintKey(compKey + (next.playoff ? '-po' : ''), round, next.home.name, next.away.name);
       var n = 2, base = key;
       while (S.fixtures[key]) key = base + '-' + (n++);
       next.key = key;
@@ -1133,6 +1153,7 @@
           rearrangements: wrap.querySelector('#fmiRe').value.trim() || null,
           seed: seed,
           clubOf: clubOf,
+          divisionOf: function (name) { var c = NL.clubs.byName(name); return c ? c.division : null; },
           parseDate: NL.parseDate
         });
         if (result.error) { out.innerHTML = '<div class="banner banner--error">' + esc(result.error) + '</div>'; result = null; return; }
@@ -1150,6 +1171,7 @@
           .filter(Boolean).join(' · ');
         var withResult = Object.keys(result.fixtures).filter(function (k) { return result.fixtures[k].result; }).length;
         var html = '<div class="banner banner--info"><strong>' + c.total + ' fixtures.</strong> ' + by +
+          (c.playoffs ? ' (' + c.playoffs + ' of them play-offs)' : '') +
           '. ' + withResult + ' with results. ' + c.awaiting + ' awaiting a date.' +
           (seed || past ? '' : ' No published schedule found, so original dates come from the history.') + '</div>';
         if (keyed) html += attendanceCheck(keyed);
