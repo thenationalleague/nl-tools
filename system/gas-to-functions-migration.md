@@ -233,9 +233,21 @@ Migrate to callables with native auth:
 > needed deleting, not planning around — the replacement had been live for
 > twelve days while the original kept its portal card and its routes.
 
-### Phase 5 — FixtureSync
-`gas/FixtureSync.js` (time-driven NLS → RTDB) → **Cloud Scheduler + a Function**.
-Self-contained; can move any time after Phase 1.
+### Phase 5 — FixtureSync: retire, do not migrate
+`gas/FixtureSync.js` (time-driven NLS → `app-data/ops-attendance/fixtures`)
+was to become Cloud Scheduler + a Function. **Changed 28/10/2026: it is
+deleted instead.** It exists only to give Attendance a list of games to
+submit against, and two better sources now exist: the NLS ingester
+(`functions/nls-ingester.js`, hourly, since August) and Fixture Management
+(`app-data/ops-fixture-management`, the League's own record, since
+28/10/2026). Rebuilding a third copy of the fixture list as a Function is
+wasted work.
+
+Order matters (`system/fixture-management-plan.md`, Build order 1): move
+Attendance onto the Fixture Management record first, check a matchday or two,
+then switch off the Apps Script trigger, delete the file, and clear the copied
+`app-data/ops-attendance/fixtures` node. Switched off first, Attendance stops
+seeing new ties and kick-off changes.
 
 ### Phase 6 — decommission the public GAS web app
 > Reachable sooner than this ordering implies. Once Phase 2's seven actions
@@ -258,8 +270,8 @@ Every `NL_GAS_URL` / `nlGasFetch` call becomes an `httpsCallable`. The interim
 calls and attaches the token, so swapping its body for `httpsCallable` later is
 a small, single-function change rather than editing every call site again.
 
-`FixtureSync` and the pipelines in `scripts/` are unaffected (they're already
-GitHub Actions / RTDB, not the web app).
+The pipelines in `scripts/` are unaffected (they're already GitHub Actions /
+RTDB, not the web app). `FixtureSync` retires on its own route (Phase 5).
 
 ---
 

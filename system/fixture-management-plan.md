@@ -183,12 +183,30 @@ Travel and Travel Planner are the other readers to move onto it.
 
 ## Build order
 
-1. Season calendar file + club-distances file (data only).
-2. Fixtures tab: import (baseline + sheet + rearrangements history), cup ties
-   by hand, the public `/fixtures/` view. Registry record + rules in the same
-   PR.
-3. Rearrangements tab with the date finder and the canon month calendar.
-4. Broadcast and AMI tabs; review-broadcast list.
-5. Move DAZN Viewership and Attendance onto the record (Attendance keeps its
-   own `app-data/ops-attendance/fixtures` today — converge it while nothing is
-   live).
+Done: the Fixtures tab (import, cup ties, postpone/abandon, results from the
+workbook, NLS or a paste, Opta IDs filled from NLS).
+
+Next, in order (re-ordered 28/10/2026):
+
+1. **Attendance onto the record.** Attendance figures are 100% club
+   submissions, keyed by Opta match ID; only its fixture list comes from
+   NLS, copied four times a day by `gas/FixtureSync.js` into
+   `app-data/ops-attendance/fixtures`. That copy is now the weakest of
+   three (FixtureSync, the NLS ingester, this record): it believes NLS
+   dates, never deletes, and runs on Apps Script. No 2026-27 attendance has
+   been submitted, so the switch is clean:
+   - Fixture Management gains a season switcher and last season (2025-26),
+     with its attendance joined by Opta ID — read, never copied, so a
+     figure lives in one place.
+   - Attendance reads its fixture list from this record (the `public/`
+     projection, readable by every signed-in user, clubs included), ready
+     for clubs to submit their own 2026-27 crowds.
+   - Then FixtureSync's trigger is switched off, the file deleted and its
+     copied fixture list cleared. Not before: switched off first, Attendance
+     would stop seeing new ties and kick-off changes.
+2. Season calendar file + club-distances file (data only).
+3. Broadcast and AMI tabs; review-broadcast list.
+4. Rearrangements tab with the date finder and the canon month calendar.
+5. DAZN Viewership onto the record (availability and moves from Broadcast,
+   not the workbook).
+6. The public `/fixtures/` page for clubs.
