@@ -222,3 +222,13 @@ test('Fridays and Sundays are behind their switches', () => {
   assert.equal(on(run(game, [], { fridays: true }), '2026-11-06').day, 'Fri');
   assert.equal(on(run(game, [], { sundays: true }), '2026-11-08').day, 'Sun');
 });
+
+test('every flag has a category, and a within-48h flag lists the nearby game with its kick-off', () => {
+  const game = postponed(A, B, '2026-10-24');
+  const cats = new Set([...X.CATS.map((c) => c.key)]);
+  const res = run(game, [g(A, C, '2026-11-05'), g(C, B, '2026-11-14'), g(D, B, '2026-11-21')], { thursdays: true, mondays: true });
+  res.slots.forEach((s) => s.flags.forEach((f) => assert.ok(cats.has(f.cat), 'no category: ' + f.text)));
+  const near = on(res, '2026-11-03').flags.find((f) => f.cat === 'proximity');
+  assert.equal(near.text, 'ALP within 48h');
+  assert.deepEqual(JSON.parse(JSON.stringify(near.items)), [{ date: '2026-11-05', text: 'Gamma City (H) · 15:00' }]);
+});
