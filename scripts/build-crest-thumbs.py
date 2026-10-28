@@ -14,7 +14,7 @@ requests, 1,460 failures, rate-limited by Pages (28/10/2026).
 Filenames are identical to the source (load-bearing: every consumer resolves an
 asset as `<base>/<encoded name>.png`, so a tier is just a folder prefix). Aspect
 ratio + transparency preserved. Full-res originals are untouched — the two-crest
-tools (match-graphic, single-fixture) still draw those at 300px+.
+tool (match-graphic) still draws those at 300px+.
 
 WHY: the graphics tools were pulling full-res art to draw it small. Crests
 average 524KB (largest 5.4MB), so a 24-row table fetched ~12.6MB to render them
