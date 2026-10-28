@@ -17,7 +17,9 @@
       within-48h flag naming the nearby game and kick-off. The pencil
       dialog shows the date on its own line and the date's flags, with its
       buttons on one line. Every lost date is listed, not just the latest.
-      More days closes on a click elsewhere.
+      More days closes on a click elsewhere. Kick-off is a 24-hour text
+      box ('1945' becomes 19:45), not the browser's time control, which
+      shows 12-hour on a machine set to US English.
     v2.3 (28/10/2026) — Rearrangements, fourth pass. Three columns (games
       waiting, calendar, best dates) at a fixed size, checked at 1920×1080
       and 1280×600 (CLAUDE.md, Two screens). The match as a big header:
@@ -170,7 +172,7 @@
         items: [
           'Rearrangements: flags grouped under headings, shown on hover and in the pencil dialog.',
           'The calendar names the month you are looking at; every lost date is listed.',
-          'More days closes when you click elsewhere.'
+          'More days closes when you click elsewhere; kick-off is always 24-hour.'
         ]
       },
       {
@@ -492,6 +494,7 @@
     background: var(--white); border: 1px solid var(--navy-100); border-left: 3px solid var(--navy); border-radius: var(--radius);
     box-shadow: var(--shadow-lg); pointer-events: none; font-size: var(--text-sm); }
   .fm-tip__date { font-weight: 800; font-variation-settings: 'wght' 800; color: var(--navy); }
+  .fm-ko-in { width: 110px; font-variant-numeric: tabular-nums; }
   .fm-choose__date { margin: 0 0 10px; font-size: var(--text-lg); font-weight: 800; font-variation-settings: 'wght' 800; color: var(--navy); }
   .fm-choose__flags { display: grid; gap: 8px; margin: 0 0 14px; padding: 10px 12px; background: var(--off-white); border-radius: var(--radius); }
   .fm-flag-items { display: grid; gap: 1px; padding-left: 12px; border-left: 2px solid var(--border); font-size: var(--text-xs); color: var(--text-muted); }
@@ -1551,10 +1554,21 @@
     wrap.innerHTML =
       '<p class="fm-choose__date">' + esc(day(date)) + '</p>' +
       (slot ? '<div class="fm-choose__flags">' + flagsHtml(slot.flags) + '</div>' : '') +
-      '<div class="form-group"><label for="fmcKo">Kick-off</label><input id="fmcKo" type="time" value="' + ko + '"></div>' +
+      '<div class="form-group"><label for="fmcKo">Kick-off</label>' +
+        '<input id="fmcKo" class="fm-ko-in" type="text" inputmode="numeric" maxlength="5" autocomplete="off" value="' + ko + '"></div>' +
       '<div id="fmcWarn"></div>';
+    /* A text box, not <input type="time">: the browser's time control shows
+       12-hour on any machine set to US English, and kick-offs are always
+       24-hour. Canon candidate (28/10/2026): eight pages use type="time". */
+    var koIn = wrap.querySelector('#fmcKo');
+    koIn.addEventListener('blur', function () { var t = hhmm(koIn.value); if (t) koIn.value = t; warn(); });
+    function koOf() {
+      var t = hhmm(koIn.value);
+      if (!t) { NL.toast('Kick-off as a 24-hour time, e.g. 15:00 or 19:45', 'error'); koIn.focus(); }
+      return t;
+    }
     function warn() {
-      var k = wrap.querySelector('#fmcKo').value;
+      var k = hhmm(koIn.value);
       wrap.querySelector('#fmcWarn').innerHTML = X.ukShown(rec) && X.overlapsBlocked(rrCal(), date, k)
         ? '<div class="banner banner--amber">Blocked hours: at ' + esc(k) + ' this game loses UK availability. 12:30 or 17:30 keeps it.</div>' : '';
     }
@@ -1566,7 +1580,8 @@
       buttons: [
         { label: 'Cancel', className: 'btn--ghost', onClick: function (m) { m.close(); } },
         { label: 'Pencil', className: 'btn--ghost', onClick: function (m) {
-          var k = wrap.querySelector('#fmcKo').value || null;
+          var k = koOf();
+          if (!k) return;
           article48(rec, date, k).then(function (ok) {
             if (!ok) return;
             save(X.pencil(rec, date, k, now())).then(function () {
@@ -1575,10 +1590,19 @@
           });
         }},
         { label: 'Confirm date', className: 'btn--primary', onClick: function (m) {
-          confirmDate(rec, date, wrap.querySelector('#fmcKo').value || null, m);
+          var k = koOf();
+          if (k) confirmDate(rec, date, k, m);
         }}
       ]
     });
+  }
+
+  /* '19:45', '1945', '19.45' or '930' → 'HH:MM', 24-hour; anything else null. */
+  function hhmm(v) {
+    var m = String(v || '').trim().match(/^(\d{1,2})[:.]?(\d{2})$/);
+    if (!m) return null;
+    var h = +m[1], mi = +m[2];
+    return h < 24 && mi < 60 ? ('0' + h).slice(-2) + ':' + m[2] : null;
   }
 
   function rrCal() {
