@@ -57,6 +57,13 @@ divergence is not a fault. There is no reconciliation queue.
   names already used, crest if one exists, no codes or colours. Name is the
   join, so a crest added later backfills every tie. Our side of a tie always
   comes from `NL.clubPicker`.
+  **Never probe for a crest.** Pages are only asked for crests of clubs in
+  `clubs-meta.json` / `cup-clubs-meta.json` (by `crestName`). Guessing a URL
+  for an outside club 404'd twice per row per render, uncached, and hit
+  GitHub Pages rate limits on 28/10/2026 (1,559 requests, 1,460 failures for
+  one FA Cup list). An outside club's crest therefore needs listing, not just
+  uploading — the lightest route is a name list beside the crests, decided
+  when the first one is added.
 - **Stored vs derived.** Of the sheet's 58 columns about 15 are data. Never
   store: Televised, Day, Midweek/Weekend, Match name/valid/type, score
   formats, goal totals, 3-letter codes, video filenames, the NLTV HTML.
