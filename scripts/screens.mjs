@@ -15,7 +15,7 @@
    admin on the tool), opens the page, clicks anything given with --click,
    and saves one PNG per screen:
 
-     desktop  1920×1080  (1920×1200 at 100%, less the browser's own bars)
+     desktop  1920×960   (a 16:9 1920×1080 screen at 100%, less the browser's bars)
      laptop   1280×600   (1920×1080 at 150%)
      phone    390×844
 
@@ -46,7 +46,7 @@ import { createRequire } from 'node:module';
 const REPO = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
 const SCREENS = [
-  { name: 'desktop', width: 1920, height: 1080, note: '1920×1200 at 100%' },
+  { name: 'desktop', width: 1920, height: 960, note: '1920×1080 at 100%' },
   { name: 'laptop', width: 1280, height: 600, note: '1920×1080 at 150%' },
   { name: 'phone', width: 390, height: 844, note: 'phone' }
 ];
