@@ -1,8 +1,11 @@
 /* =============================================================================
    NL Tools — Fixture Management: the rearrangement date finder
    File: /fixtures/_finder.js
-   Version: v1.1 (28/10/2026)
+   Version: v1.2 (28/10/2026)
    CHANGELOG
+     v1.2 (28/10/2026) — Wednesday is a slot as well as Tuesday, and Monday
+       joins Thursday behind a switch (Richard, 28/10/2026). Every slot's
+       window is the day either side.
      v1.1 (28/10/2026) — The 35-day window runs both ways from the original
        date, so a game postponed well ahead can be brought forward (Richard,
        28/10/2026). Flags name clubs by code and say less.
@@ -19,7 +22,7 @@
                  rounds     assets/data/rounds-2026-27.json,
                  distances  assets/data/club-distances.json,
                  today      'YYYY-MM-DD' }
-     opts      { thursdays: bool }
+     opts      { mondays: bool, thursdays: bool }
    OUTPUT
      { slots: [{ date, day, ko, within35, flags: [{ level, text }], weight }],
        from, to, original }
@@ -29,11 +32,11 @@
      window's ends.
 
    WHAT A SLOT IS
-     A Saturday or a Tuesday, with Thursday behind a switch. A slot is taken
-     out only when it cannot be played: either club already has a game in
-     its window (Fri-Sun for a Saturday, Mon-Wed for a Tuesday, the day
-     itself for a Thursday), it is on or after the final matchday, it is in
-     calendar.noRearrange, or a club would play twice inside two days.
+     A Saturday, Tuesday or Wednesday, with Monday and Thursday each behind
+     a switch. A slot is taken out only when it cannot be played: either
+     club already has a game the day before, the day itself or the day
+     after (its window), it is on or after the final matchday, or it is in
+     calendar.noRearrange.
      Everything else is a flag, never a block.
    ============================================================================= */
 (function (root) {
@@ -50,13 +53,8 @@
   function dow(d) { return new Date(t(d)).getUTCDay(); }
   function gap(a, b) { return Math.round(Math.abs(t(a) - t(b)) / DAY); }
 
-  /* The anchor's window: the days a game on them would clash with. */
-  function windowOf(d) {
-    var w = dow(d);
-    if (w === 6) return [add(d, -1), d, add(d, 1)];
-    if (w === 2) return [add(d, -1), d, add(d, 1)];
-    return [d];
-  }
+  /* A slot's window: the days a game on them would clash with. */
+  function windowOf(d) { return [add(d, -1), d, add(d, 1)]; }
 
   function nameOf(side) { return side && side.name; }
   /* A club in a flag: its code, which is short, or its name. */
@@ -182,7 +180,8 @@
     var out = [];
     for (var d = from; d <= to; d = add(d, 1)) {
       var w = dow(d);
-      var day = w === 6 ? 'Sat' : w === 2 ? 'Tue' : (w === 4 && opts.thursdays) ? 'Thu' : null;
+      var day = w === 6 ? 'Sat' : w === 2 ? 'Tue' : w === 3 ? 'Wed' :
+        (w === 1 && opts.mondays) ? 'Mon' : (w === 4 && opts.thursdays) ? 'Thu' : null;
       if (!day || no[d]) continue;
       var win = windowOf(d);
       var clash = dated.some(function (r) { return win.indexOf(r.date) !== -1; });
@@ -199,6 +198,7 @@
       if (tooClose) continue;
 
       if (day === 'Thu') flags.push({ level: 'info', text: 'Thursday' });
+      if (day === 'Mon') flags.push({ level: 'info', text: 'Monday' });
 
       pencils.forEach(function (r) {
         if (win.indexOf(r.pencil.date) !== -1) {
