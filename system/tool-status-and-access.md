@@ -82,6 +82,7 @@ so nothing is lost.
 | **Document Library** | `ops-document-library` | Manage | Off | Console for `/document-library/` (added 28/10/2026). Clubs read every document there by access code — one shared library, no club filter; only admins (or a per-user Manage grant) change anything. See `document-library/README.md` |
 | **Fan Widgets** | `ops-fan-widgets` | Off | Off | Superadmin only today |
 | **Content Plan** | `media-content-plan` | Use | Use | **Reads the admin level.** Media team plan and record what is published; editing needs a per-user Manage grant (the default is view-only for everyone else). Superadmin also gets Settings → Import for the one-off load of the old sheet |
+| **Local Media** | `media-local-media` | Manage | Off | The League's press list (added 29/10/2026). Clubs send their local media contacts through the open form at `/local-media/` (no login, no code; anonymous create-only write). The console at `/local-media/admin/` lists, filters, exports and edits them, and staff add contacts by hand. Admin-only by default because these are journalists' own contact details; grant League Staff per user. Use and Manage do the same: the whole console. Rules are the generated level rule plus "has a role", so an anonymous form user never qualifies |
 | **Brand Exposure** | `ops-brand-exposure` | Manage | Off | Commercial team only — grants are per-user, like Commercial Compliance. Holds match measurements produced by `scripts/board-exposure-match.py` on a laptop; the tool never sees video |
 
 Two tools carry a registry record but no row above: `ops-club-codes` and
@@ -104,6 +105,7 @@ portal session as well, and the address clubs hold never changes.
 | Handbook, Club Directory | **as they are for now; planned, not scheduled** (Richard, 15/10/2026): the full portal tool moves to `/admin/`; the Directory's code-gated `/editor/` (a stopgap for editors without a portal login) retires; `/reader/` retires into a redirect. `/public/` (open, noindex) is unaffected. What then sits at the root is open, and by the rule above it is the club's page. |
 | Responsibilities (`/view/`), UW Promo | kept as they are, by decision |
 | Document Library | follows it from the start (28/10/2026): `/document-library/` for clubs by access code, read-only; `/document-library/admin/` the console. |
+| Local Media | follows it from the start (29/10/2026): `/local-media/` is the clubs' page – an open form, no code – and `/local-media/admin/` the console. |
 | Commercial Compliance | follows it (15/10/2026): the root is the club page (club access code; own obligations; submit a note, link and files per period), `/admin/` the console, which approves or rejects. |
 
 A page that moves leaves a redirect stub at its old address; clubs hold

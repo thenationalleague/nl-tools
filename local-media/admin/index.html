@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<!--
+  NL Tools – Local Media (press list)
+  Version: v1.0 (29/10/2026)
+  File: /local-media/admin/index.html
+
+  CHANGELOG
+    v1.0 (29/10/2026) – First build. The League's press list: every local
+      media contact clubs have sent through /local-media/, plus contacts
+      staff add by hand (League-wide for national journalists), in one
+      table. Filter by club (several at once), division, step, type, status
+      and free text, all combined; export the view as CSV or copy its
+      emails. Each contact carries a status – New, Confirmation sent, Happy
+      to be contacted, Opted out – and can be edited or deleted.
+
+  Storage (RTDB):
+    app-data/media-local-media/submissions/<pushId>
+        { uid, at, club, clubKey, submitter: { name, email? },
+          contacts: { <pushId>: { name?, organisation, type, email, phone? } } }
+        Written once by the public form (anonymous auth, create-only).
+        Staff may edit or delete a contact in place.
+    app-data/media-local-media/status/<submissionId>/<contactId>
+        'new' | 'sent' | 'happy' | 'opted-out'   (absent = new)
+    app-data/media-local-media/manual/<pushId>
+        { club, clubKey ('' = League-wide), name?, organisation, type, email,
+          phone?, status?, addedBy: { uid, name }, at, updatedAt? }
+    tools/media-local-media                       tool registration
+  Types, statuses, flattening and filtering live in _shared.js (LM), tested
+  by tests/local-media.test.mjs.
+
+  Access (auth-guard registry): defaults give superadmin and League Admin the
+  tool and League Staff and clubs nothing, because these are journalists' own
+  contact details; grant others per person. The rules are the generated level
+  rule (scripts/rtdb-level-rule.mjs, Use or Manage) plus "has a role", so an
+  anonymous form user can never qualify. Use and Manage do the same here:
+  the whole console – read, status, add, edit, delete.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Local Media – NL Tools</title>
+  <!-- Favicons. Static, not injected: nl-topbar.js adds these too, but a
+       standalone page never loads it, and an icon that arrives with the JS
+       leaves the tab blank until it does. /favicon.ico at the root is the
+       backstop every browser asks for without being told. -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+
+  <!-- Brand stylesheet (lint canonical: ?v=69) -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=69">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync – auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'Local Media',
+      toolKey: 'media-local-media'
+    };
+    var NL_TOOL_KEY = 'media-local-media';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '29/10/2026',
+        version: 'v1.0',
+        items: [
+          'The League’s press list: every local media contact clubs send in, plus any you add yourself, in one table.',
+          'Filter by one or more clubs, division, step, type and status, or search; export the list or copy its emails.',
+          'Mark each contact New, Confirmation sent, Happy to be contacted or Opted out, and edit or delete any contact.'
+        ]
+      }
+    ];
+
+    /* auth-guard fires this once the session is verified + pageWrap is
+       revealed. Boot the main app from here so RTDB reads happen with a
+       live auth token. Do NOT read RTDB before this fires. */
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts (lint canonical: ?v=50 / ?v=1 / ?v=10 / ?v=17) -->
+  <script src="/system/nl-utils.js?v=50"></script>
+  <!-- GA4, one property for all of nl.tools. Cookieless, so no consent
+       banner on any page; page views by path, no identity. Tool events go
+       through NL.track(). See system/nl-analytics.js. -->
+  <script src="/system/nl-analytics.js?v=1"></script>
+  <script src="/system/nl-topbar.js?v=10"></script>
+  <script src="/system/auth-guard.js?v=17"></script>
+  <script src="/local-media/_shared.js?v=1"></script>
+
+<style>
+  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
+     style.display = 'block'. Don't clear with '' – would re-trigger the
+     brand rule and re-hide the page. */
+
+  .lm-count { font-size: var(--text-sm); color: var(--text-muted); }
+  .lm-head { display: flex; align-items: baseline; gap: 10px; }
+  /* The club filter: a picker that adds, and the clubs it has added. */
+  .lm-clubpick { width: 280px; max-width: 100%; }
+  .lm-chips { display: flex; gap: 6px; flex-wrap: wrap; margin: -8px 0 20px; }
+  .lm-chips:empty { display: none; }
+  .lm-club { display: flex; align-items: center; gap: 8px; }
+  .lm-club img { width: 22px; height: 22px; object-fit: contain; flex-shrink: 0; }
+  .lm-sub { display: block; font-size: var(--text-xs); color: var(--text-muted); }
+  /* An address may break before its @ or after a dot (a <wbr> there),
+     never mid-word. With the date under the sender rather than in a column of its
+     own, Status and the row actions fit the 1280px screen. */
+  .lm-sub.lm-date { white-space: nowrap; }
+  .lm-email { color: var(--navy); }
+  .lm-acts { display: flex; gap: 6px; justify-content: flex-end; }
+  .lm-span2 { grid-column: 1 / -1; }
+  .lm-field[aria-invalid="true"] { border-color: var(--red); }
+  .lm-err { margin-top: 6px; font-size: var(--text-xs); color: var(--red); font-weight: 700; font-variation-settings: 'wght' 700; }
+</style>
+</head>
+<body>
+
+<!-- Topbar – auto-rendered by /system/nl-topbar.js from window.NL_TOOL -->
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="page">
+
+    <section>
+      <div class="section-head">
+        <div class="lm-head"><h2>Contacts</h2><span class="lm-count" id="lmCount"></span></div>
+        <button type="button" class="btn btn--primary btn--sm" id="lmAddBtn">+ Add contact</button>
+      </div>
+
+      <div class="toolbar">
+        <div class="toolbar__left">
+          <input class="toolbar__search" id="lmQ" type="search" placeholder="Search" aria-label="Search contacts">
+          <div class="lm-clubpick" id="lmClubPick"></div>
+          <select class="toolbar__filter" id="lmDiv" aria-label="Division"></select>
+          <select class="toolbar__filter" id="lmStep" aria-label="Step"></select>
+          <select class="toolbar__filter" id="lmType" aria-label="Type"></select>
+          <select class="toolbar__filter" id="lmStatus" aria-label="Status"></select>
+        </div>
+        <div class="toolbar__right">
+          <button type="button" class="btn btn--ghost btn--sm" id="lmCsv">Export CSV</button>
+          <button type="button" class="btn btn--navy btn--sm" id="lmCopy">Copy emails</button>
+        </div>
+      </div>
+
+      <div class="lm-chips" id="lmChips"></div>
+
+      <div id="lmList"><div class="empty-state"><div class="spinner"></div></div></div>
+    </section>
+
+  </div>
+</div>
+
+<!-- Main app -->
+<script>
+(function () {
+  'use strict';
+
+  var BASE = 'app-data/media-local-media/';
+  var FORM_URL = 'https://nl.tools/local-media/';
+  var $ = function (id) { return document.getElementById(id); };
+  var TS = function () { return firebase.database.ServerValue.TIMESTAMP; };
+
+  var S = {
+    data: null,            /* the whole node, live */
+    rows: [],              /* LM.rows(data) */
+    view: [],              /* after filters */
+    divByCode: {},         /* clubKey → this season's division, from clubs-meta */
+    f: { clubs: [], division: '', step: '', type: '', status: '', q: '' }
+  };
+  var LEAGUE_CLUB = { name: LM.LEAGUE.name, code: LM.LEAGUE.key, crestName: 'National League rose' };
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function option(sel, value, text) {
+    var o = el('option', null, text);
+    o.value = value;
+    sel.appendChild(o);
+    return o;
+  }
+  function errMsg(e) { return (e && e.message) || 'unknown error'; }
+
+  /* ── filters ──────────────────────────────────────────────────────────── */
+
+  function fillSelect(id, anyText, list) {
+    var s = $(id);
+    option(s, '', anyText);
+    list.forEach(function (x) { option(s, x.key, x.label); });
+  }
+  fillSelect('lmDiv', 'All divisions', LM.DIVISIONS);
+  fillSelect('lmStep', 'All steps', [{ key: '1', label: 'Step 1' }, { key: '2', label: 'Step 2' }]);
+  fillSelect('lmType', 'All types', LM.TYPES);
+  fillSelect('lmStatus', 'All statuses', LM.STATUSES);
+
+  [['lmDiv', 'division'], ['lmStep', 'step'], ['lmType', 'type'], ['lmStatus', 'status']].forEach(function (p) {
+    $(p[0]).addEventListener('change', function () { S.f[p[1]] = this.value; render(); });
+  });
+  $('lmQ').addEventListener('input', function () { S.f.q = this.value; render(); });
+
+  /* Clubs are an open set, so not pills: the canon picker adds a club to
+     the filter and each added club shows as a removable pill. */
+  var clubFilter = NL.clubPicker('#lmClubPick', {
+    season: 'current',
+    divisions: ['National', 'North', 'South'],
+    extraClubs: [LEAGUE_CLUB],
+    placeholder: 'Filter by club…',
+    onSelect: function (sel) {
+      var c = sel && sel.club;
+      if (c && S.f.clubs.indexOf(c.code || '') < 0) S.f.clubs.push(c.code || '');
+      clubFilter.clear();
+      renderChips();
+      render();
+    }
+  });
+
+  function clubNameOf(key) {
+    if (!key) return LM.LEAGUE.name;
+    var c = NL.clubs.byCode(key);
+    return (c && c.name) || key;
+  }
+
+  function renderChips() {
+    var box = $('lmChips');
+    box.textContent = '';
+    S.f.clubs.forEach(function (key) {
+      var name = clubNameOf(key);
+      var b = el('button', 'filter-pill active', name + ' ×');
+      b.type = 'button';
+      b.setAttribute('aria-label', 'Remove ' + name + ' from the filter');
+      b.addEventListener('click', function () {
+        S.f.clubs = S.f.clubs.filter(function (k) { return k !== key; });
+        renderChips();
+        render();
+      });
+      box.appendChild(b);
+    });
+  }
+
+  /* ── the table ────────────────────────────────────────────────────────── */
+
+  function crest(row) {
+    var img = el('img');
+    img.alt = '';
+    img.loading = 'lazy';
+    var name = row.clubKey ? row.club : LEAGUE_CLUB.crestName;
+    NL.clubs.wireCrestImg(img, name, false);
+    img.src = NL.clubs.crestUrl(name, 'thumb');
+    return img;
+  }
+
+  function statusSelect(row) {
+    var s = el('select', 'nl-select');
+    s.setAttribute('aria-label', 'Status for ' + (row.name || row.organisation));
+    LM.STATUSES.forEach(function (x) { option(s, x.key, x.label); });
+    s.value = row.status;
+    s.addEventListener('change', function () {
+      var v = s.value;
+      var p = row.source === 'club'
+        ? db.ref(BASE + 'status/' + row.sid + '/' + row.cid).set(v)
+        : db.ref(BASE + 'manual/' + row.mid).update({ status: v, updatedAt: TS() });
+      p.then(function () { NL.toast(LM.statusLabel(v), 'success'); })
+        .catch(function (e) { s.value = row.status; NL.toast('Could not save: ' + errMsg(e), 'error'); });
+    });
+    return s;
+  }
+
+  function iconBtn(icon, label, onClick, cls) {
+    var b = el('button', 'btn btn--icon ' + (cls || 'btn--ghost'));
+    b.type = 'button';
+    b.setAttribute('aria-label', label);
+    b.appendChild(NL.icon(icon, 'sm'));
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  function td(tr, content, cls) {
+    var c = el('td', cls || null);
+    if (content == null) c.textContent = '';
+    else if (typeof content === 'string') c.textContent = content;
+    else c.appendChild(content);
+    tr.appendChild(c);
+    return c;
+  }
+
+  function emptyState() {
+    var box = el('div', 'empty-state');
+    box.appendChild(el('div', 'empty-state__title', 'No contacts yet'));
+    box.appendChild(el('div', 'empty-state__text', 'Clubs add theirs at ' + FORM_URL.replace('https://', '') + '.'));
+    var b = el('button', 'btn btn--ghost btn--sm', 'Copy the link');
+    b.type = 'button';
+    b.style.marginTop = '16px';
+    b.addEventListener('click', function () { NL.copy(FORM_URL, { ok: 'Link copied' }); });
+    box.appendChild(b);
+    return box;
+  }
+
+  function render() {
+    S.view = LM.filter(S.rows, S.f);
+    var all = S.rows.length, n = S.view.length;
+    $('lmCount').textContent = all ? (n === all ? String(all) : n + ' of ' + all) : '';
+    $('lmCsv').disabled = !n;
+    $('lmCopy').disabled = !n;
+
+    var list = $('lmList');
+    list.textContent = '';
+    if (!all) { list.appendChild(emptyState()); return; }
+
+    var wrap = el('div', 'table-wrap');
+    var table = el('table', 'table table--compact');
+    var thead = el('thead'), hr = el('tr');
+    ['Club', 'Name', 'Organisation', 'Type', 'Email', 'Phone', 'Submitted', 'Status', ''].forEach(function (h) {
+      hr.appendChild(el('th', null, h));
+    });
+    thead.appendChild(hr);
+    table.appendChild(thead);
+    var tb = el('tbody');
+
+    if (!n) {
+      var er = el('tr', 'empty-row'), ec = el('td', null, 'No contacts match these filters');
+      ec.colSpan = 9;
+      er.appendChild(ec);
+      tb.appendChild(er);
+    }
+
+    S.view.forEach(function (row) {
+      var tr = el('tr');
+      var club = el('span', 'lm-club');
+      club.appendChild(crest(row));
+      club.appendChild(document.createTextNode(row.club));
+      td(tr, club);
+      td(tr, row.name || '–');
+      td(tr, row.organisation);
+      td(tr, LM.typeLabel(row.type));
+      var em = el('a', 'lm-email');
+      em.href = 'mailto:' + row.email;
+      /* Break opportunities before each @ and after each dot, nowhere else. */
+      row.email.split(/(?=@)|(?<=\.)/).forEach(function (part, i) {
+        if (i) em.appendChild(el('wbr'));
+        em.appendChild(document.createTextNode(part));
+      });
+      td(tr, em);
+      td(tr, row.phone || '');
+      /* Who sent it and when. The sender's email is in the CSV and on
+         hover rather than a third line in every row. */
+      var w = el('span'), by = el('span', null, row.by || '–');
+      if (row.byEmail) by.title = row.byEmail;
+      w.appendChild(by);
+      w.appendChild(el('span', 'lm-sub lm-date',
+        (row.at ? NL.formatDateShort(row.at) : '–') + (row.source === 'staff' ? ' · staff' : '')));
+      td(tr, w);
+      td(tr, statusSelect(row));
+      var acts = el('div', 'lm-acts');
+      var label = row.name || row.organisation;
+      acts.appendChild(iconBtn('edit', 'Edit ' + label, function () { openEditor(row); }));
+      acts.appendChild(iconBtn('delete', 'Delete ' + label, function () { removeContact(row); }, 'btn--danger'));
+      td(tr, acts);
+      tb.appendChild(tr);
+    });
+
+    table.appendChild(tb);
+    wrap.appendChild(table);
+    list.appendChild(wrap);
+  }
+
+  /* ── export and copy ──────────────────────────────────────────────────── */
+
+  $('lmCsv').addEventListener('click', function () {
+    var day = new Date().toISOString().slice(0, 10);
+    NL.download('local-media-' + day + '.csv', NL.csv(LM.csvRows(S.view, NL.formatDateShort), { bom: true }), 'text/csv;charset=utf-8');
+  });
+
+  $('lmCopy').addEventListener('click', function () {
+    var r = LM.emails(S.view);
+    if (!r.list.length) { NL.toast(r.skipped ? 'Every contact here has opted out' : 'No emails to copy', 'error'); return; }
+    NL.copy(r.list.join('; '), {
+      ok: 'Copied ' + r.list.length + (r.list.length === 1 ? ' email' : ' emails') +
+        (r.skipped ? ' – ' + r.skipped + ' opted out left off' : '')
+    });
+  });
+
+  /* ── add and edit ─────────────────────────────────────────────────────── */
+
+  function formField(grid, key, labelText, opts) {
+    /* A club picker sits beside its .form-group, not in it: the canon
+       `.form-group input:focus` ring would land on the picker's own
+       borderless input, inside the ring its wrap already draws. */
+    var g = el('div', opts.mount ? 'lm-span2' : 'form-group' + (opts.span ? ' span2' : ''));
+    var l = el('label', null, labelText);
+    l.htmlFor = 'lmE_' + key;
+    if (opts.req) { l.appendChild(document.createTextNode(' ')); l.appendChild(el('span', 'req', '*')); }
+    if (opts.mount) { var lg = el('div', 'form-group'); lg.appendChild(l); g.appendChild(lg); }
+    else g.appendChild(l);
+    var input;
+    if (opts.mount) {
+      input = el('div');
+      input.id = 'lmE_' + key + '_mount';
+    } else if (opts.options) {
+      input = el('select', 'lm-field');
+      if (opts.blank) option(input, '', opts.blank);
+      opts.options.forEach(function (o) { option(input, o.key, o.label); });
+    } else {
+      input = el('input', 'lm-field');
+      input.type = opts.type || 'text';
+      if (opts.max) input.maxLength = opts.max;
+      if (opts.placeholder) input.placeholder = opts.placeholder;
+    }
+    if (!opts.mount) input.id = 'lmE_' + key;
+    g.appendChild(input);
+    var err = el('div', 'lm-err');
+    err.hidden = true;
+    g.appendChild(err);
+    if (opts.note) g.appendChild(el('div', 'form-hint', opts.note));
+    grid.appendChild(g);
+    return { input: input, err: err };
+  }
+
+  function setErr(f, msg) {
+    f.err.textContent = msg || '';
+    f.err.hidden = !msg;
+    var target = f.input.matches && f.input.matches('input, select') ? f.input : f.input.querySelector('input');
+    if (target) { if (msg) target.setAttribute('aria-invalid', 'true'); else target.removeAttribute('aria-invalid'); }
+  }
+
+  /* row omitted = a new contact, added by staff. */
+  function openEditor(row) {
+    var isNew = !row, fromClub = row && row.source === 'club';
+    var body = el('div'), grid = el('div', 'form-grid');
+    body.appendChild(grid);
+    var F = {};
+    F.club = formField(grid, 'club', 'Club', { req: true, mount: true, span: true,
+      note: fromClub ? 'Sent in by the club, so the club stays as it is.' : null });
+    F.name = formField(grid, 'name', 'Name', { max: LM.MAX.name, placeholder: 'Leave blank for a generic inbox' });
+    F.organisation = formField(grid, 'organisation', 'Organisation', { req: true, max: LM.MAX.organisation });
+    F.type = formField(grid, 'type', 'Type', { req: true, options: LM.TYPES, blank: 'Choose…' });
+    F.email = formField(grid, 'email', 'Email', { req: true, type: 'email', max: LM.MAX.email });
+    F.phone = formField(grid, 'phone', 'Phone', { type: 'tel', max: LM.MAX.phone });
+    F.status = formField(grid, 'status', 'Status', { options: LM.STATUSES });
+
+    var picked = row ? { name: row.club, code: row.clubKey } : null;
+    var picker = NL.clubPicker(F.club.input, {
+      season: 'current',
+      divisions: ['National', 'North', 'South'],
+      extraClubs: [LEAGUE_CLUB],
+      value: row ? (row.clubKey ? row.club : LM.LEAGUE.name) : null,
+      disabled: fromClub,
+      onSelect: function (sel) {
+        picked = sel && sel.club ? { name: sel.club.name, code: sel.club.code || '' } : null;
+        setErr(F.club, null);
+      }
+    });
+    var pickInput = F.club.input.querySelector('input');
+    if (pickInput) {
+      pickInput.id = 'lmE_club';
+      pickInput.addEventListener('input', function () { picked = null; });
+    }
+
+    if (row) {
+      F.name.input.value = row.name;
+      F.organisation.input.value = row.organisation;
+      F.type.input.value = row.type;
+      F.email.input.value = row.email;
+      F.phone.input.value = row.phone;
+    }
+    F.status.input.value = row ? row.status : 'new';
+    ['name', 'organisation', 'type', 'email', 'phone'].forEach(function (k) {
+      F[k].input.addEventListener(k === 'type' ? 'change' : 'input', function () { setErr(F[k], null); });
+    });
+
+    function save(ctrl) {
+      var c = {
+        name: F.name.input.value, organisation: F.organisation.input.value, type: F.type.input.value,
+        email: F.email.input.value, phone: F.phone.input.value
+      };
+      var errs = LM.contactErrors(c), bad = null;
+      ['name', 'organisation', 'type', 'email', 'phone'].forEach(function (k) {
+        setErr(F[k], errs[k] || null);
+        if (errs[k] && !bad) bad = F[k].input;
+      });
+      if (!fromClub) {
+        var typed = pickInput ? pickInput.value.trim() : '';
+        if (!picked || typed !== picked.name) { setErr(F.club, 'Choose a club, or League-wide'); bad = bad || pickInput; }
+        else setErr(F.club, null);
+      }
+      if (bad) { bad.focus(); return; }
+
+      var clean = LM.cleanContact(c), status = F.status.input.value, p;
+      if (fromClub) {
+        var up = {};
+        up['submissions/' + row.sid + '/contacts/' + row.cid] = clean;
+        up['status/' + row.sid + '/' + row.cid] = status;
+        p = db.ref(BASE).update(up);
+      } else {
+        var rec = {
+          club: picked.code ? picked.name : LM.LEAGUE.name,
+          clubKey: picked.code || '',
+          name: clean.name || null,
+          organisation: clean.organisation,
+          type: clean.type,
+          email: clean.email,
+          phone: clean.phone || null,
+          status: status
+        };
+        if (isNew) {
+          var s = NL.session || {};
+          rec.addedBy = { uid: s.uid || '', name: s.name || s.email || '' };
+          rec.at = TS();
+          delete rec.name; delete rec.phone;
+          if (clean.name) rec.name = clean.name;
+          if (clean.phone) rec.phone = clean.phone;
+          p = db.ref(BASE + 'manual').push(rec);
+        } else {
+          rec.updatedAt = TS();
+          p = db.ref(BASE + 'manual/' + row.mid).update(rec);
+        }
+      }
+      p.then(function () {
+        ctrl.close(true);
+        NL.toast(isNew ? 'Contact added' : 'Saved', 'success');
+      }).catch(function (e) { NL.toast('Could not save: ' + errMsg(e), 'error'); });
+    }
+
+    NL.modal({
+      title: isNew ? 'Add contact' : 'Edit contact',
+      body: body,
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (ctrl) { ctrl.close(false); } },
+        { label: isNew ? 'Add' : 'Save', className: 'btn--primary', onClick: save }
+      ],
+      onClose: function () { picker.destroy(); }
+    });
+    setTimeout(function () { (isNew && pickInput ? pickInput : F.organisation.input).focus(); }, 40);
+  }
+
+  $('lmAddBtn').addEventListener('click', function () { openEditor(null); });
+
+  /* ── delete ───────────────────────────────────────────────────────────── */
+
+  function removeContact(row) {
+    var label = [row.name, row.organisation].filter(Boolean).join(', ');
+    NL.confirm(label + ' comes off the press list for good.', {
+      title: 'Delete contact', confirmText: 'Delete', variant: 'danger'
+    }).then(function (ok) {
+      if (!ok) return;
+      var up = {};
+      if (row.source === 'club') {
+        var sub = S.data && S.data.submissions && S.data.submissions[row.sid];
+        var others = sub && sub.contacts ? Object.keys(sub.contacts).filter(function (k) { return k !== row.cid; }) : [];
+        /* A submission must hold at least one contact (the rules say so),
+           so the last one takes its submission with it. */
+        if (others.length) {
+          up['submissions/' + row.sid + '/contacts/' + row.cid] = null;
+          up['status/' + row.sid + '/' + row.cid] = null;
+        } else {
+          up['submissions/' + row.sid] = null;
+          up['status/' + row.sid] = null;
+        }
+      } else {
+        up['manual/' + row.mid] = null;
+      }
+      return db.ref(BASE).update(up).then(function () { NL.toast('Deleted', 'success'); });
+    }).catch(function (e) { NL.toast('Could not delete: ' + errMsg(e), 'error'); });
+  }
+
+  /* ── boot ─────────────────────────────────────────────────────────────── */
+
+  function rebuild() {
+    S.rows = LM.rows(S.data, function (code) { return S.divByCode[code] || null; });
+    render();
+  }
+
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function () {
+    var clubsReady = NL.clubs.forSeason().then(function (list) {
+      list.forEach(function (c) { if (c.code) S.divByCode[c.code] = c.division; });
+    }).catch(function () { /* no clubs-meta: the division and step filters find nothing */ });
+
+    NL.ensureAuth().then(function () {
+      return clubsReady;
+    }).then(function () {
+      db.ref(BASE).on('value', function (snap) {
+        S.data = snap.val() || {};
+        rebuild();
+      }, function (e) {
+        $('lmList').textContent = '';
+        var b = el('div', 'banner banner--error', 'Could not load contacts: ' + errMsg(e));
+        $('lmList').appendChild(b);
+      });
+    }).catch(function (e) { NL.toast('Could not load: ' + errMsg(e), 'error'); });
+  };
+
+  /* If auth-guard fired before this script loaded, replay the session. */
+  if (window._toolDeferredSession) {
+    window.TOOL.boot(window._toolDeferredSession);
+    delete window._toolDeferredSession;
+  }
+})();
+</script>
+
+</body>
+</html>

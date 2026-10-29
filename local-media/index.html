@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<!--
+  NL Tools – Local Media (public form)
+  Version: v1.0 (29/10/2026)
+  File: /local-media/index.html
+
+  CHANGELOG
+    v1.0 (29/10/2026) – First build. A club tells the League who its local
+      media are: newspapers, online news, radio, TV, podcasts, fanzines, fan
+      sites and blogs, influencers and content creators. One link goes to all
+      72 clubs. The club, the sender's name (email optional), then as many
+      contacts as they like: organisation, type and email required; name
+      optional, because a contact may be a desk or newsroom inbox; phone
+      optional. Sending again is one button, for a club that comes back with
+      more.
+
+  NO AUTH-GUARD, NO ACCOUNT. auth-guard gates NL accounts; this page asks
+  nobody who they are. To write at all it needs a Firebase Auth uid, so on
+  Send it signs in anonymously (as NL.codeGate does) – or, if the browser is
+  already signed in to nl.tools, uses that session rather than replacing it.
+
+  Storage (RTDB), one push per Send:
+    app-data/media-local-media/submissions/<pushId>
+      { uid, at, club, clubKey, submitter: { name, email? },
+        contacts: { <pushId>: { name?, organisation, type, email, phone? } } }
+  The rules (system/rtdb/rules.snapshot.json) let a signed-in uid CREATE a
+  submission carrying its own uid and nothing else: no read, no overwrite, no
+  delete, no other node, every field shaped and length-capped. The console
+  at /local-media/admin/ reads it.
+
+  Types, the caps and validation live in _shared.js (LM), tested by
+  tests/local-media.test.mjs.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Local Media – The National League</title>
+  <!-- Favicons. Static, not injected: nl-topbar.js adds these too, but a
+       standalone page never loads it, and an icon that arrives with the JS
+       leaves the tab blank until it does. /favicon.ico at the root is the
+       backstop every browser asks for without being told. -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+
+  <link rel="stylesheet" href="/system/nl-brand.css?v=69">
+
+  <!-- Firebase 10.12.0 SDK (compat). Auth is here for the anonymous sign-in
+       a write needs; nothing on this page reads the database. -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+  <script src="/system/nl-utils.js?v=50"></script>
+  <!-- GA4 for nl.tools – cookieless, no banner, no identity. See system/nl-analytics.js -->
+  <script src="/system/nl-analytics.js?v=1"></script>
+  <script src="/local-media/_shared.js?v=1"></script>
+
+  <style>
+    /* One column of form, centred: a long line of inputs is hard to scan. */
+    .lm-wrap { max-width: 880px; margin: 0 auto; }
+    .lm-wrap section + section { margin-top: 32px; }
+    .lm-row {
+      border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 14px 16px 16px; background: var(--white);
+    }
+    .lm-row + .lm-row { margin-top: 12px; }
+    .lm-row__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+    .lm-add { margin-top: 14px; }
+    .lm-span2 { grid-column: 1 / -1; }
+    .lm-foot {
+      display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+      margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--border);
+    }
+    .lm-note { flex: 1 1 280px; margin: 0; font-size: var(--text-sm); color: var(--text-muted); line-height: 1.5; }
+    /* Field errors. There is no canon error state for a form field yet; the
+       selectors outrank .form-group input by carrying a class and an
+       attribute, so the canon field styling is not overridden. */
+    .lm-field[aria-invalid="true"] { border-color: var(--red); }
+    .lm-err { margin-top: 6px; font-size: var(--text-xs); color: var(--red); font-weight: 700; font-variation-settings: 'wght' 700; }
+  </style>
+</head>
+<body>
+
+<!-- White bar: no NL account is behind this page (nl-brand v2.37, revised 18/08/2026). -->
+<header class="nl-idbar">
+  <img class="nl-idbar__crest" src="/assets/crests/National%20League%20rose.png" alt="" width="42" height="42">
+  <div class="nl-idbar__id">
+    <div class="nl-idbar__title">Local Media</div>
+    <div class="nl-idbar__sub">The National League</div>
+  </div>
+</header>
+
+<main class="main">
+  <div class="lm-wrap">
+
+    <form id="lmForm" novalidate>
+      <!-- No .form-panel: its overflow: hidden would clip the club list. -->
+      <section>
+        <div class="section-head"><h2>Your club</h2></div>
+        <div class="form-grid">
+          <!-- The picker sits beside its .form-group, not in it: the canon
+               `.form-group input:focus` ring would land on the picker's own
+               borderless input, inside the ring its wrap already draws. -->
+          <div class="lm-span2">
+            <div class="form-group"><label for="lmClubInput">Club <span class="req">*</span></label></div>
+            <div id="lmClub"></div>
+            <div class="lm-err" id="lmClubErr" hidden></div>
+          </div>
+          <div class="form-group">
+            <label for="lmName">Your name <span class="req">*</span></label>
+            <input class="lm-field" id="lmName" type="text" autocomplete="name" maxlength="120">
+            <div class="lm-err" id="lmNameErr" hidden></div>
+          </div>
+          <div class="form-group">
+            <label for="lmEmail">Your email</label>
+            <input class="lm-field" id="lmEmail" type="email" autocomplete="email" maxlength="254">
+            <div class="lm-err" id="lmEmailErr" hidden></div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head"><h2>Contacts</h2></div>
+        <div id="lmRows"></div>
+        <button type="button" class="btn btn--ghost btn--sm lm-add" id="lmAdd">+ Add another</button>
+      </section>
+
+      <div class="lm-foot">
+        <p class="lm-note">We’ll email each contact once to check they’re happy to join our press list, then only occasionally after that.</p>
+        <button type="submit" class="btn btn--primary" id="lmSend">Send</button>
+      </div>
+    </form>
+
+    <div class="success-screen" id="lmDone" hidden>
+      <div class="success-screen__icon">✅</div>
+      <h2>Thank you</h2>
+      <p id="lmDoneText"></p>
+      <button type="button" class="btn btn--primary" id="lmAgain">Add more contacts</button>
+    </div>
+
+  </div>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var BASE = 'app-data/media-local-media/';
+  var $ = function (id) { return document.getElementById(id); };
+  var rows = [];          /* [{ el, f: { name, organisation, type, email, phone }, err: {…} }] */
+  var club = null;        /* { name, code } once picked */
+  var seq = 0;
+
+  /* ── the club ─────────────────────────────────────────────────────────── */
+
+  /* The 72: this season's National, North and South. No free text – the
+     console filters by club, so a typed name would be a club nobody finds. */
+  NL.clubPicker('#lmClub', {
+    season: 'current',
+    divisions: ['National', 'North', 'South'],
+    onSelect: function (sel) {
+      club = (sel && sel.club) ? { name: sel.club.name, code: sel.club.code } : null;
+      showErr('lmClub', null);
+    }
+  });
+  var clubInput = document.querySelector('#lmClub input');
+  if (clubInput) {
+    clubInput.id = 'lmClubInput';
+    clubInput.addEventListener('input', function () { club = null; });
+  }
+
+  /* ── errors ───────────────────────────────────────────────────────────── */
+
+  function showErr(id, msg) {
+    var box = $(id + 'Err'), input = id === 'lmClub' ? clubInput : $(id);
+    if (box) { box.textContent = msg || ''; box.hidden = !msg; }
+    if (input) {
+      if (msg) input.setAttribute('aria-invalid', 'true'); else input.removeAttribute('aria-invalid');
+    }
+  }
+
+  /* ── contact rows ─────────────────────────────────────────────────────── */
+
+  function field(row, key, labelText, opts) {
+    var id = 'lmC' + row.n + '_' + key;
+    var g = document.createElement('div');
+    g.className = 'form-group';
+    var l = document.createElement('label');
+    l.htmlFor = id;
+    l.textContent = labelText;
+    if (opts.req) {
+      var r = document.createElement('span');
+      r.className = 'req'; r.textContent = '*';
+      l.appendChild(document.createTextNode(' '));
+      l.appendChild(r);
+    }
+    g.appendChild(l);
+    var input;
+    if (opts.options) {
+      input = document.createElement('select');
+      var blank = document.createElement('option');
+      blank.value = ''; blank.textContent = 'Choose…';
+      input.appendChild(blank);
+      opts.options.forEach(function (o) {
+        var op = document.createElement('option');
+        op.value = o.key; op.textContent = o.label;
+        input.appendChild(op);
+      });
+    } else {
+      input = document.createElement('input');
+      input.type = opts.type || 'text';
+      if (opts.max) input.maxLength = opts.max;
+      if (opts.placeholder) input.placeholder = opts.placeholder;
+      if (opts.autocomplete) input.autocomplete = opts.autocomplete;
+    }
+    input.className = 'lm-field';
+    input.id = id;
+    input.addEventListener(opts.options ? 'change' : 'input', function () { setRowErr(row, key, null); });
+    g.appendChild(input);
+    var err = document.createElement('div');
+    err.className = 'lm-err'; err.hidden = true;
+    g.appendChild(err);
+    row.f[key] = input;
+    row.err[key] = err;
+    return g;
+  }
+
+  function setRowErr(row, key, msg) {
+    var input = row.f[key], box = row.err[key];
+    box.textContent = msg || ''; box.hidden = !msg;
+    if (msg) input.setAttribute('aria-invalid', 'true'); else input.removeAttribute('aria-invalid');
+  }
+
+  function addRow() {
+    var row = { n: ++seq, f: {}, err: {} };
+    var el = document.createElement('div');
+    el.className = 'lm-row';
+    el.setAttribute('role', 'group');
+
+    var head = document.createElement('div');
+    head.className = 'lm-row__head';
+    var title = document.createElement('span');
+    title.className = 'text-label';
+    title.id = 'lmC' + row.n + '_title';
+    el.setAttribute('aria-labelledby', title.id);
+    head.appendChild(title);
+    var rm = document.createElement('button');
+    rm.type = 'button';
+    rm.className = 'btn btn--icon btn--ghost';
+    rm.appendChild(NL.icon('close', 'sm'));
+    rm.addEventListener('click', function () { removeRow(row); });
+    head.appendChild(rm);
+    el.appendChild(head);
+
+    var grid = document.createElement('div');
+    grid.className = 'form-grid';
+    grid.appendChild(field(row, 'name', 'Name', { max: LM.MAX.name, placeholder: 'Leave blank for a generic inbox' }));
+    grid.appendChild(field(row, 'organisation', 'Organisation', { req: true, max: LM.MAX.organisation }));
+    grid.appendChild(field(row, 'type', 'Type', { req: true, options: LM.TYPES }));
+    grid.appendChild(field(row, 'email', 'Email', { req: true, type: 'email', max: LM.MAX.email }));
+    grid.appendChild(field(row, 'phone', 'Phone', { type: 'tel', max: LM.MAX.phone }));
+    el.appendChild(grid);
+
+    row.el = el; row.title = title; row.rm = rm;
+    rows.push(row);
+    $('lmRows').appendChild(el);
+    renumber();
+    return row;
+  }
+
+  function removeRow(row) {
+    if (rows.length < 2) return;
+    var i = rows.indexOf(row);
+    rows.splice(i, 1);
+    row.el.parentNode.removeChild(row.el);
+    renumber();
+    var next = rows[Math.min(i, rows.length - 1)];
+    if (next) next.f.name.focus();
+  }
+
+  function renumber() {
+    rows.forEach(function (r, i) {
+      r.title.textContent = 'Contact ' + (i + 1);
+      r.rm.setAttribute('aria-label', 'Remove contact ' + (i + 1));
+      r.rm.disabled = rows.length < 2;
+    });
+  }
+
+  $('lmAdd').addEventListener('click', function () { addRow().f.name.focus(); });
+
+  /* ── send ─────────────────────────────────────────────────────────────── */
+
+  function read(row) {
+    return {
+      name: row.f.name.value, organisation: row.f.organisation.value, type: row.f.type.value,
+      email: row.f.email.value, phone: row.f.phone.value
+    };
+  }
+
+  /* Every problem marked at once, focus on the first. */
+  function validate() {
+    var first = null;
+    function mark(el) { if (!first) first = el; }
+
+    var cv = clubInput ? clubInput.value.trim() : '';
+    if (!club || cv !== club.name) { showErr('lmClub', 'Choose your club from the list'); mark(clubInput); }
+    else showErr('lmClub', null);
+
+    var nm = $('lmName').value.trim();
+    if (!nm) { showErr('lmName', 'Enter your name'); mark($('lmName')); }
+    else showErr('lmName', null);
+
+    var em = $('lmEmail').value.trim();
+    if (em && !LM.isEmail(em)) { showErr('lmEmail', 'Check the email address'); mark($('lmEmail')); }
+    else showErr('lmEmail', null);
+
+    rows.forEach(function (row) {
+      var e = LM.contactErrors(read(row));
+      ['name', 'organisation', 'type', 'email', 'phone'].forEach(function (k) {
+        setRowErr(row, k, e[k] || null);
+        if (e[k]) mark(row.f[k]);
+      });
+    });
+    if (first) first.focus();
+    return !first;
+  }
+
+  /* The signed-in user, once Auth has restored it (null if none). */
+  function currentUser() {
+    return new Promise(function (resolve) {
+      var off = firebase.auth().onAuthStateChanged(function (u) { off(); resolve(u || null); });
+    });
+  }
+
+  $('lmForm').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    if (!validate()) return;
+    var btn = $('lmSend');
+    btn.disabled = true; btn.textContent = 'Sending…';
+
+    var made = false;  /* true when this page made the anonymous user */
+    currentUser().then(function (u) {
+      if (u) return u;
+      made = true;
+      return firebase.auth().signInAnonymously().then(function (cred) { return cred.user; });
+    }).then(function (user) {
+      var contacts = {};
+      rows.forEach(function (row) { contacts[db.ref().push().key] = LM.cleanContact(read(row)); });
+      var submitter = { name: $('lmName').value.replace(/\s+/g, ' ').trim() };
+      var em = $('lmEmail').value.trim().toLowerCase();
+      if (em) submitter.email = em;
+      return db.ref(BASE + 'submissions').push({
+        uid: user.uid,
+        at: firebase.database.ServerValue.TIMESTAMP,
+        club: club.name,
+        clubKey: club.code,
+        submitter: submitter,
+        contacts: contacts
+      });
+    }).then(function () {
+      var n = rows.length;
+      $('lmDoneText').textContent = 'We’ve got ' + n + (n === 1 ? ' contact' : ' contacts') + ' for ' + club.name + '.';
+      $('lmForm').hidden = true;
+      $('lmDone').hidden = false;
+      window.scrollTo(0, 0);
+      /* Leave nothing behind: an anonymous session would otherwise sit on
+         the nl.tools origin. A real session is the person's own; keep it. */
+      if (made) firebase.auth().signOut()['catch'](function () {});
+    })['catch'](function (e) {
+      console.warn('[local-media] send failed', e && e.code, e && e.message);
+      NL.toast('That didn’t send. Please try again.', 'error');
+    }).then(function () {
+      btn.disabled = false; btn.textContent = 'Send';
+    });
+  });
+
+  /* Coming back with more: same club and sender, fresh contacts. */
+  $('lmAgain').addEventListener('click', function () {
+    rows.slice().forEach(function (r) { r.el.parentNode.removeChild(r.el); });
+    rows = [];
+    addRow();
+    $('lmDone').hidden = true;
+    $('lmForm').hidden = false;
+    rows[0].f.name.focus();
+  });
+
+  addRow();
+})();
+</script>
+
+</body>
+</html>

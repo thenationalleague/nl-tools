@@ -58,6 +58,7 @@ trade-off or verification task, no code fix required now.
 | `ops-attendance/submissions` + `archive` (`.read:"auth != null"`) | Any authenticated principal can read across clubs. | Review (low) |
 | nl-widgets `users`/`predictions`/`motm` per `$jwtId` (`.read:"auth != null"`) | A fan can read another fan's forename/initial/team/prediction if they know the jwtId. | Review (low, minor PII) |
 | `travel-planner` Google Maps key | Billable client key — abuse if unrestricted. | Review — verify referrer lock in GCP |
+| `media-local-media/submissions/$id` (anonymous create, 29/10/2026) | Nothing readable: no public `.read` anywhere in the block. Write is **create-only** – `!data.exists() && newData.exists()` with `uid === auth.uid`, so no overwrite or delete by the public, and no other node (`status`, `manual`) is writable by them. Every field shape- and length-capped (names, organisation, club ≤ 120; email ≤ 254 and `a@b.c` shaped; phone ≤ 40; `type` one of nine values; push-id keys; `$other: false` at every level). Form at `/local-media/`, console at `/local-media/admin/`. | Review (low) |
 
 ## The review items, in priority order
 
@@ -90,6 +91,16 @@ None is critical. Most are already-accepted trade-offs needing only a record.
    the nl-widgets per-`$jwtId` fan records. Cross-principal reads are possible
    given the child key. Minor PII at most; acceptable under the two-database
    split and unguessable ids. Recorded here so it's a conscious decision.
+
+7. **`media-local-media/submissions` is an anonymous create-only write.**
+   Anyone with the link – or anyone who reads the page source – can sign in
+   anonymously and push submissions. Each one is shape-capped, but the rules
+   cannot count, so there is no cap on the number of submissions or of
+   contacts in one, and no rate limit. What it buys an abuser is junk rows on
+   a staff-only list (staff delete them in the console), never a read. *Fix
+   shape if abused: a `rate/<uid>` node checked by the rule, or App Check on
+   the form.* Proven by `tests/emulator/local-media-rules.mjs` (run by hand)
+   and shape-checked in `tests/local-media.test.mjs` (npm test).
 
 ## Coverage gaps to close
 
