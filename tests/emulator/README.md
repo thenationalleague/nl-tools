@@ -62,3 +62,8 @@ checks so the page may call the emulator ports. Neither is a change to the pages
 
 `save-of-the-month-rules.mjs` covers `app-data/media-save-of-the-month`: database
 emulator only, so `--only database` and project `demo-sotm`.
+
+`local-media-rules.mjs` covers `app-data/media-local-media`: the public form's
+anonymous create-only write and every cap on it, no reads for anyone without
+the tool, and staff status, add, edit and delete. Database emulator only, so
+`--only database` and project `demo-lm`.
