@@ -120,8 +120,7 @@ the PR body should say so.** A PR that adds a function needs nothing.
 | Sync Apps Script | 04:40 daily | Pulls the live Apps Script project; commits on drift |
 | Daily table baseline | 01:00 daily | League table snapshot |
 | Season rollover | 02:00, 1 July | New season |
-| Build fixture feed cache | hourly, :17 | Fixture feed |
-| Render handbook PDF | hourly, :25 | Re-renders if stale |
+| Render handbook PDF | daily, 05:25 UTC | Re-renders if stale. Backup only: publishing starts it at once |
 | Build predictor leaderboard | every 15 min | Fan predictor standings |
 | Fixtures & results graphics | 4am UK (today-only matchday cards); 10am UK; every 15 min from midday UTC — and started by the `fixturesGraphicsAtFullTime` function five minutes after the last game of the day ends, because GitHub's timer runs late | Fixtures cards two days before each round, and at 4am on each day of a round that spans several days a card with only that day's games; results cards and league tables (Cup groups A–D in the group stage) as soon as a day's games are all full time. To Drive (media Shared Drive → Graphics → **Main**: per day, final cards only; **Extended**: every cut, per round) and Storage `graphics/fixtures/`. Round numbers from `assets/data/rounds-<season>.json` — a new one is needed each summer. Run workflow with **Dry run** ticked to test any date. |
 
