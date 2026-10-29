@@ -1,5 +1,12 @@
 # NL Tools — operations runbook
 
+> **Being rewritten (29/10/2026).** Parts of this are out of date while the
+> estate is decluttered. In particular, its lists of background jobs are
+> incomplete: there are 27 Cloud Functions, not the 15 named below. The
+> **Estate** tool (`/estate/`) is becoming the one place for what exists and
+> what runs where. This guide gets rewritten once, at the end, against the
+> finished estate.
+
 What this system is made of, where each part lives, how each part ships, and
 what to do when one of them misbehaves.
 
