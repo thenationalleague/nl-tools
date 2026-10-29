@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Document Library (console)
+  Version: v1.3 (29/10/2026) — Use and Manage. The portal now offers Off /
+           Use / Manage for this tool. Manage edits; Use browses, previews,
+           downloads and reads the Activity log, with no Bin. The RTDB rules
+           are generated from the same level the portal sets
+           (scripts/rtdb-level-rule.mjs) — v1.0 checked roles only, so two
+           staff given Use opened the page and were refused by the database.
   Version: v1.2 (28/10/2026) — loads _library.js v1.2 (the view switch's icons show).
   Version: v1.1 (28/10/2026) — the tidier head (_library v1.1). The "Clubs open it at…" line and Copy link are gone from the console.
   Version: v1.0 (28/10/2026) — initial build.
@@ -24,11 +30,11 @@
   Bytes (Storage): document-library/files/<fileId>.<ext>
                    document-library/_previews/<fileId>-<tier>.<ext>
 
-  Access (auth-guard registry, tools/ops-document-library defaults):
-    superadmin + admin → admin. Everyone else → off; a per-user 'admin'
-    grant opens it to anyone else. The RTDB rules read the same two things
-    (role, or tools/ops-document-library === 'admin'), so a grant made in the
-    portal is a grant the database honours.
+  Access: the portal's Off / Use / Manage for ops-document-library, or with
+    no per-person setting the registry default for the role (superadmin and
+    admin → Manage, everyone else → Off). Manage edits; Use views. The RTDB
+    rules are generated from the same inputs by scripts/rtdb-level-rule.mjs,
+    so a level set in the portal is the level the database honours.
 -->
 <html lang="en">
 <head>
@@ -77,6 +83,14 @@
     var NL_TOOL_KEY = 'ops-document-library';
 
     window.NL_CHANGELOG = [
+      {
+        date: '29/10/2026',
+        version: 'v1.3',
+        items: [
+          'Fixed: staff given access in the portal could open the library but ' +
+            'not see anything in it. Manage can now edit; Use can view and download.'
+        ]
+      },
       {
         date: '28/10/2026',
         version: 'v1.2',
@@ -332,17 +346,25 @@
   window.TOOL = window.TOOL || {};
   window.TOOL.boot = function (session) {
     me = session || {};
+    /* Manage edits; Use browses, previews, downloads and reads the Activity
+       log. session.toolLevel is auth-guard's resolved level — the portal's
+       switch, or the registry default for the role — and the RTDB rules read
+       the same two things (scripts/rtdb-level-rule.mjs), so what this page
+       offers is what the database allows. The Bin is housekeeping, so Use
+       does not see it. */
+    var manage = me.toolLevel === 'admin';
+    if (!manage) document.querySelector('[data-tab="bin"]').hidden = true;
     NL.ensureAuth().then(function () {
       lib = DocLib.create({
         mount: $('paneLibrary'),
         db: firebase.database(),
         storage: firebase.storage(),
-        writable: true,
-        onChange: function () { if (lib) renderBin(); },
+        writable: manage,
+        onChange: function () { if (lib && manage) renderBin(); },
         actor: 'staff:' + me.uid,
         who: me.name || me.email || ''
       });
-      ref('trash').on('value', function (s) { TRASH = s.val() || {}; renderBin(); },
+      if (manage) ref('trash').on('value', function (s) { TRASH = s.val() || {}; renderBin(); },
         function (e) { $('paneBin').innerHTML = '<p class="dla-muted">Could not read the Bin: ' + esc(e.message) + '</p>'; });
       ref('audit').orderByChild('ts').limitToLast(200).on('value', function (s) {
         var v = s.val() || {};
