@@ -113,6 +113,14 @@ await t('admin deletes it', remove(ref(db('ad'), B + 'manual/' + ID(60))), true)
 await t('staff (off) cannot add', set(ref(db('st'), B + 'manual/' + ID(62)), man), false);
 await t('club admin cannot add', set(ref(db('ca'), B + 'manual/' + ID(63)), man), false);
 
+/* The guard on top of the generated rule: levelRule reads a missing role as
+   'staff', and anonymous users have no role. Open League Staff's default
+   and check an anonymous user still sees nothing. */
+await seed('tools/media-local-media/defaults/staff', 'access');
+await t('staff default Use: staff without a grant now read', get(ref(db('st'), B)), true);
+await t('staff default Use: anonymous still cannot read', get(ref(anon, B)), false);
+await t('staff default Use: anonymous still cannot write status', set(ref(anon, B + 'status/' + ID(1) + '/' + ID(900)), 'happy'), false);
+
 await env.cleanup();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

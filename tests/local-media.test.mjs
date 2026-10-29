@@ -18,6 +18,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import vm from 'node:vm';
 import { REPO } from './load-canon.mjs';
+import { levelRule } from '../scripts/rtdb-level-rule.mjs';
 
 const read = (p) => readFileSync(join(REPO, p), 'utf8');
 const RULES = JSON.parse(read('system/rtdb/rules.snapshot.json'));
@@ -25,6 +26,7 @@ const R = RULES.rules['app-data']['media-local-media'];
 const REG = JSON.parse(read('system/rtdb/tools-registry.snapshot.json'))['media-local-media'];
 const PUB = read('local-media/index.html');
 const ADM = read('local-media/admin/index.html');
+const STAFF = levelRule('media-local-media', 'access') + " && root.child('users').child(auth.uid).child('role').exists()";
 const strip = (s) => s.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
 
 const sandbox = { console, Date, Math, JSON, Object, Array, String, Number, Boolean, RegExp, Error };
@@ -39,16 +41,20 @@ const keys = (list) => Array.from(list, (x) => x.key);
 test('nothing under media-local-media is world-readable', () => {
   assert.ok(R, 'the rules block exists');
   assert.ok(!/"\.read":\s*true/.test(JSON.stringify(R)), 'no .read: true anywhere in the block');
-  assert.match(R['.read'], /auth != null/);
-  assert.match(R['.read'], /=== 'superadmin'/);
-  /* Only league roles reach the tool-level test, so an anonymous form user
-     (no users/ record, no role) fails before any default is looked up. */
-  assert.match(R['.read'], /=== 'admin' \|\| root\.child\('users'\)\.child\(auth\.uid\)\.child\('role'\)\.val\(\) === 'staff'\)/);
-  assert.match(R['.read'], /child\('defaults'\)/, 'the registry default is the fallback');
   for (const node of ['submissions', 'status', 'manual']) {
     assert.equal(R[node]['.read'], undefined, `${node} has no read of its own`);
   }
   assert.equal(R['.write'], undefined, 'no blanket write over the whole node');
+});
+
+test('who reads and writes is the generated level rule, plus a role', () => {
+  /* Generated (CLAUDE.md): Use or Manage, from the same grant and registry
+     defaults the portal uses. The extra clause is this tool's: levelRule
+     reads a missing role as 'staff', and the public form makes anonymous
+     users with no role at all. Without it, setting League Staff's default
+     to Use would hand every anonymous visitor the press list. */
+  assert.equal(R['.read'], STAFF);
+  assert.match(STAFF, /&& root\.child\('users'\)\.child\(auth\.uid\)\.child\('role'\)\.exists\(\)$/);
 });
 
 test('the public can only create a submission, carrying its own uid', () => {
@@ -60,9 +66,9 @@ test('the public can only create a submission, carrying its own uid', () => {
   assert.match(pub, /newData\.child\('uid'\)\.val\(\) === auth\.uid/);
   assert.equal(R.submissions['.write'], undefined, 'no write on the list itself');
   /* The other half of the OR is the staff test, the same as the read. */
-  assert.ok(w.includes(R['.read']), 'staff edit and delete with the read test');
-  assert.equal(R.status['.write'], R['.read']);
-  assert.equal(R.manual['.write'], R['.read']);
+  assert.equal(w.slice(w.indexOf(') || (') + 6, -1), STAFF, 'staff edit and delete with the read test');
+  assert.equal(R.status['.write'], STAFF);
+  assert.equal(R.manual['.write'], STAFF);
 });
 
 test('every level of a submission refuses fields nobody designed', () => {
@@ -131,7 +137,9 @@ test('the registry record is admin-only by default', () => {
   assert.equal(REG.url, '/local-media/admin/');
   assert.equal(REG.label, 'Local Media');
   assert.deepEqual({ ...REG.defaults }, { superadmin: 'admin', admin: 'admin', staff: 'off', 'club-admin': 'off', 'club-staff': 'off' });
-  assert.deepEqual(REG.levels, ['off', 'access'], 'nothing reads an admin level');
+  /* The generated rule honours a Manage grant, so the portal must offer it
+     (tests/rules-follow-portal.test.mjs); Use and Manage do the same here. */
+  assert.deepEqual(REG.levels, ['off', 'access', 'admin']);
 });
 
 /* ------------------------------------------------------------ the pages */
