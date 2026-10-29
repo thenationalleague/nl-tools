@@ -6,7 +6,8 @@ One library for everyone. There is no per-club folder and no club filter.
 | Page | Who | Gets in via | Can do |
 |---|---|---|---|
 | `/document-library/` | **every club**, and anyone holding the League's own code | their access code (the one credential, `functions/club-code.js`) | Browse, search, preview and download everything. Change nothing |
-| `/document-library/admin/` | **NL admins** | portal login (auth-guard, `ops-document-library`) | Everything: upload files and whole folders, new folder, rename, move, remove to the Bin, restore, delete for good, and read the Activity log |
+| `/document-library/admin/` at **Manage** | admins and superadmins by default, anyone else set to Manage in the portal | portal login (auth-guard, `ops-document-library`) | Everything: upload files and whole folders, new folder, rename, move, remove to the Bin, restore, delete for good, and read the Activity log |
+| `/document-library/admin/` at **Use** | anyone set to Use in the portal | portal login | Browse, search, preview, download and read the Activity log. No Bin, no changes |
 
 ## The name on screen is the name on disk
 
@@ -43,13 +44,20 @@ RTDB `app-data/ops-document-library/`:
 
 | Node | Shape | Read | Write |
 |---|---|---|---|
-| `folders/<id>` | `{ name, parentId?, createdAt }` | club code, admin | admin |
-| `files/<id>` | `{ name, folderId, size, contentType, storagePath, url, uploadedAt, thumb*/medium*? }`; `folderId: '_root'` = top level | club code, admin | admin |
-| `trash/<id>` | the file record + `deletedAt`, `deletedBy` | admin | admin |
-| `audit/<id>` | `{ ts, actor, who, action, detail }` | admin | admin; a club may append its own `download` lines only |
+| `folders/<id>` | `{ name, parentId?, createdAt }` | club code, Use, Manage | Manage |
+| `files/<id>` | `{ name, folderId, size, contentType, storagePath, url, uploadedAt, thumb*/medium*? }`; `folderId: '_root'` = top level | club code, Use, Manage | Manage |
+| `trash/<id>` | the file record + `deletedAt`, `deletedBy` | Use, Manage | Manage |
+| `audit/<id>` | `{ ts, actor, who, action, detail }` | Use, Manage | Manage; a club may append its own `download` lines only |
 
-"Admin" is the role `admin` or `superadmin`, or a per-user `admin` grant on
-`ops-document-library`, the same test auth-guard makes.
+"Manage" and "Use" are the portal's levels for `ops-document-library`: a
+person's own setting if they have one, otherwise the registry default for
+their role, with superadmin always at Manage. The rules are **generated**
+from those same two places by `scripts/rtdb-level-rule.mjs`, never written
+by hand. Until 29/10/2026 they checked roles only, so two staff set to Use
+in the portal could open the page and were then refused by the database.
+`tests/emulator/level-rule.mjs` runs the generated rule against
+`NL.resolveToolLevel` over every grant shape, role and default the live data
+can hold, and they have to agree.
 
 Storage `document-library/**`: readable by a club-code session or any portal
 account. Writable by portal accounts only, because Storage rules can't read

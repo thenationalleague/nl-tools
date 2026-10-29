@@ -22,6 +22,11 @@ NL_REPO=/path/to/nl-tools npx firebase emulators:exec --project demo-mdl \
   --only database,storage "node --test matchday-live-rules.mjs"
 ```
 
+`level-rule.mjs` (`--only database`) runs `scripts/rtdb-level-rule.mjs`
+against `NL.resolveToolLevel` over every grant shape, role and registry
+default the live data can hold; the two must agree on every one. Run it
+whenever either changes.
+
 `document-library-rules.mjs` runs the same way with `--only database,storage`.
 One thing it cannot show: the emulator treats a re-upload over an existing
 object as a create, so the md5Hash guard on Storage updates is unproven there

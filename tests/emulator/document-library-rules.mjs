@@ -28,6 +28,13 @@ await env.withSecurityRulesDisabled(async (ctx) => {
   await set(ref(db, 'users/admin1'), { role: 'admin' });
   await set(ref(db, 'users/staff1'), { role: 'staff' });
   await set(ref(db, 'users/granted1'), { role: 'staff', tools: { 'ops-document-library': 'admin' } });
+  await set(ref(db, 'users/viewer1'), { role: 'staff', tools: { 'ops-document-library': 'access' } });
+  await set(ref(db, 'users/denied1'), { role: 'admin', tools: { 'ops-document-library': 'off' } });
+  /* The rules read the registry's defaults (scripts/rtdb-level-rule.mjs), so
+     the record has to be here, as it is live. Copied from the snapshot rather
+     than restated, so a change to the defaults is a change to this test. */
+  const reg = JSON.parse(readFileSync(join(REPO, 'system/rtdb/tools-registry.snapshot.json'), 'utf8'));
+  await set(ref(db, 'tools/ops-document-library'), reg['ops-document-library']);
   await set(ref(db, B + 'folders/-F1'), { name: 'Club Licensing', createdAt: 1 });
   await set(ref(db, B + 'files/-D1'), {
     name: 'Criteria.pdf', folderId: '-F1', storagePath: 'document-library/files/-D1.pdf',
@@ -39,6 +46,8 @@ await env.withSecurityRulesDisabled(async (ctx) => {
 const admin = env.authenticatedContext('admin1', { email: 'a@example.test' });
 const granted = env.authenticatedContext('granted1', { email: 'g@example.test' });
 const staff = env.authenticatedContext('staff1', { email: 's@example.test' });
+const viewer = env.authenticatedContext('viewer1', { email: 'v@example.test' });
+const denied = env.authenticatedContext('denied1', { email: 'd@example.test' });
 const club = env.authenticatedContext('cc-SOL', { club: 'SOL' });
 const nlCode = env.authenticatedContext('cc-NL', { club: 'NL' });
 const anon = env.authenticatedContext('anon1', {});
@@ -71,6 +80,14 @@ await t('club cannot read the activity log', get(ref(db(club), B + 'audit')), fa
 await t('anonymous (pre-code) session reads nothing', get(ref(db(anon), B + 'files')), false);
 await t('a staff account with no grant reads nothing', get(ref(db(staff), B + 'files')), false);
 await t('admin reads the bin', get(ref(db(admin), B + 'trash')), true);
+
+/* ── RTDB: the portal's Off / Use / Manage is what decides ─────────────── */
+await t('Use: a staff member reads the library', get(ref(db(viewer), B + 'files')), true);
+await t('Use: reads the activity log', get(ref(db(viewer), B + 'audit')), true);
+await t('Use: cannot add a file', set(ref(db(viewer), B + 'files/-V1'), file({ storagePath: 'document-library/files/-V1.pdf' })), false);
+await t('Use: cannot rename', set(ref(db(viewer), B + 'files/-D1/name'), 'x.pdf'), false);
+await t('Manage: a staff member writes', set(ref(db(granted), B + 'folders/-G1'), { name: 'Finance', createdAt: 3 }), true);
+await t('Off on an admin wins over the role default', get(ref(db(denied), B + 'files')), false);
 
 /* ── RTDB: writing ─────────────────────────────────────────────────────── */
 await t('admin adds a file record', set(ref(db(admin), B + 'files/-D2'), file()), true);
