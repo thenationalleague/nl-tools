@@ -22,7 +22,7 @@ const functionsSrc = readdirSync(join(REPO, 'functions'))
 
 const STATUSES = ['Core', 'Occasional', 'Dead', 'Not decided'];
 const LIFESPANS = ['Ongoing', 'One-off'];
-const KINDS = ['Tool', 'Website widget', 'Page', 'Background job', 'Claude skill'];
+const KINDS = ['Tool', 'Website widget', 'Page', 'Background job'];
 
 function toolKeyInPages(key) {
   const walk = (d) => readdirSync(join(REPO, d), { withFileTypes: true }).some((e) => {
@@ -59,7 +59,7 @@ test('estate.json uses only the agreed words', () => {
   const ids = est.extra.map((x) => x.id);
   assert.equal(new Set(ids).size, ids.length, 'extra ids are unique');
   for (const x of est.extra) {
-    assert.match(x.id, /^(gas|skill):/, x.id + ': extras are Apps Script or skills');
+    assert.match(x.id, /^gas:/, x.id + ': extras are Apps Script projects (skills are not listed)');
     assert.ok(KINDS.includes(x.kind), x.id + ': kind "' + x.kind + '"');
     assert.ok(x.name && x.runsOn, x.id + ': needs a name and runsOn');
   }
