@@ -1269,7 +1269,6 @@ const OLD_CONTROL_PAGES = new Set([
   'content-plan/index.html',
   'dazn/_view.js',
   'document-library/_library.js',
-  'estate/index.html',
   'fixtures/admin/index.html',
   'local-media/admin/index.html',
   'matchday-live/c/index.html',
