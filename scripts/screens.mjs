@@ -94,8 +94,9 @@ window.__db = window.__seed || {};
 function get(p){return p.split('/').filter(Boolean).reduce((o,k)=>o&&o[k],window.__db)}
 function put(p,v){const ks=p.split('/').filter(Boolean);let o=window.__db;ks.slice(0,-1).forEach(k=>{o[k]=o[k]||{};o=o[k]});
   if(v===null)delete o[ks[ks.length-1]];else o[ks[ks.length-1]]=JSON.parse(JSON.stringify(v))}
-const L=[];function fire(){L.forEach(([p,cb])=>cb({val:()=>get(p),exists:()=>get(p)!=null}))}
-function snap(p){return {val:()=>get(p),exists:()=>get(p)!=null}}
+const L=[];function fire(){L.forEach(([p,cb])=>cb(snap(p)))}
+function snap(p){return {key:p.split('/').pop(),val:()=>get(p),exists:()=>get(p)!=null,
+  forEach(cb){const v=get(p)||{};Object.keys(v).forEach(k=>cb(snap(p+'/'+k)))}}}
 window.firebase={apps:[1],initializeApp(){},app(){return{}},
   auth(){return{currentUser:{uid:'screens',email:'screens@example.invalid',getIdToken:()=>Promise.resolve('t')},
     onAuthStateChanged(cb){cb(this.currentUser);return()=>{}}}},
@@ -106,7 +107,7 @@ window.firebase={apps:[1],initializeApp(){},app(){return{}},
     update(o){Object.keys(o).forEach(k=>put(p+'/'+k,o[k]));fire();return Promise.resolve()},
     remove(){put(p,null);fire();return Promise.resolve()},
     push(v){const k='k'+Date.now()+Math.random().toString(36).slice(2,6);if(v!==undefined)put(p+'/'+k,v);fire();return Object.assign(Promise.resolve(),{key:k})},
-    orderByChild(){return this},limitToLast(){return this},equalTo(){return this},child(c){return window.firebase.database().ref(p+'/'+c)}
+    orderByChild(){return this},limitToLast(){return this},equalTo(){return this},orderByKey(){return this},startAt(){return this},endAt(){return this},child(c){return window.firebase.database().ref(p+'/'+c)}
   }}}}};`;
 
 const GUARD = `document.addEventListener('DOMContentLoaded',()=>{
