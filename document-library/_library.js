@@ -1,5 +1,7 @@
 /*
   Document Library — the library browser, shared by both pages
+  Version: v1.3 (30/10/2026) – the List / Thumbnails switch is a pair of canon
+           tabs (.tabs / .tab), off the old chip control (Declutter).
   Version: v1.2 (28/10/2026) — the view switch's icons load: the sprite is
            requested as sprites.svg?v=1.4, because a browser holding last
            week's sheet had no list or grid icon and drew an empty square.
@@ -319,13 +321,13 @@
 
       var viewBtn = function (mode, icon, label) {
         var on = view.mode === mode;
-        return '<button type="button" class="chip dl-view' + (on ? ' active' : '') + '" data-mode="' + mode + '"' +
-          ' aria-pressed="' + on + '" aria-label="' + label + '" title="' + label + '">' + iconHtml(icon) + '</button>';
+        return '<button type="button" class="tab dl-view' + (on ? ' active' : '') + '" role="tab" data-mode="' + mode + '"' +
+          ' aria-selected="' + on + '" aria-label="' + label + '" title="' + label + '">' + iconHtml(icon) + '</button>';
       };
       var tools = '<div class="fold__tools">' +
         '<input class="toolbar__search dl-search" type="search" data-q placeholder="Search" ' +
           'aria-label="Search every folder" value="' + esc(view.q) + '">' +
-        '<div class="chip-group" role="group" aria-label="View">' +
+        '<div class="tabs dl-views" role="tablist" aria-label="View">' +
           viewBtn('list', 'list', 'List') + viewBtn('grid', 'grid', 'Thumbnails') +
         '</div></div>';
 

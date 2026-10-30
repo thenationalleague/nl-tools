@@ -6,6 +6,12 @@
 <title>Clubs Meta — Reference</title>
 <!--
   club-directory / meta-reference.html
+  v2.3 – (30/10/2026) The filters are canon filter buttons (NL.filterButton,
+         nl-utils v1.47) in one .filter-btn-row: Division (any mix of the
+         three; nothing ticked = all) and Columns (the column groups; nothing
+         ticked = every group). Season is a .nl-select, because one season is
+         always chosen and the list can only grow. The segmented chips they
+         replace are being retired from the canon.
   v2.2 — Division pills are the canon .comp-pill (nl-brand v2.72) in the
          content plan's colours — National orange, North yellow, South blue —
          replacing the local .mr-div--* rules and v2.42's navy/amber/green.
@@ -19,7 +25,7 @@
          one of them collided: a local `.chip` overrode the canon `.chip` it
          was already loading, at a different size and weight. Now uses the
          canon throughout — .filter-bar/.filter-row/.filter-label,
-         .chip/.chip-group, .btn, .table-wrap, .empty-state, .page-header —
+         the canon segmented chips, .btn, .table-wrap, .empty-state, .page-header —
          and keeps aria-pressed alongside .active so the toggles stay
          announceable, which the canon class alone does not give.
          Behaviour is unchanged: same columns, same filters, same CSV.
@@ -80,10 +86,10 @@
 <script src="/system/nl-analytics.js?v=1"></script>
 <style>
   /* Only what the canon does not already provide. Everything with a canon
-     equivalent — the filter bar, chips, buttons, table shell, empty state,
-     page header — now uses it. A local `.chip` used to live here and, because
-     this <style> loads after nl-brand.css, it silently overrode the canon chip
-     at a different size and weight on a page that was already loading it. */
+     equivalent — the filter bar, filter buttons, buttons, table shell, empty
+     state, page header — now uses it. A local chip style used to live here
+     and, because this <style> loads after nl-brand.css, it silently overrode
+     the canon one at a different size and weight. */
 
   body { margin: 0; background: var(--white); }
   a { color: var(--navy); text-decoration: none; }
@@ -174,24 +180,10 @@
       <button class="btn btn--ghost btn--sm" id="reload">↻ Reload</button>
     </div>
 
-    <div class="filter-row" id="seasonRow">
-      <span class="filter-label">Season</span>
-      <div class="chip-group" id="seasonGroup"><!-- season chips injected here --></div>
-    </div>
-
-    <div class="filter-row">
-      <span class="filter-label">Division</span>
-      <div class="chip-group" id="divGroup">
-        <button class="chip active" data-div="all" aria-pressed="true">All</button>
-        <button class="chip" data-div="National" aria-pressed="false">National</button>
-        <button class="chip" data-div="North" aria-pressed="false">North</button>
-        <button class="chip" data-div="South" aria-pressed="false">South</button>
-      </div>
-    </div>
-
-    <div class="filter-row">
-      <span class="filter-label">Columns</span>
-      <div class="chip-group" id="colGroup"><!-- group toggles injected here --></div>
+    <div class="filter-btn-row">
+      <select class="nl-select" id="seasonSel" aria-label="Season" hidden></select>
+      <div id="divFilter"></div>
+      <div id="colFilter"></div>
     </div>
   </div>
 
@@ -237,7 +229,7 @@
   var NUMERIC = { 'capacity':1, 'capacity_seated':1, 'lat':1, 'lng':1 };
   var HEX = /^#?[0-9a-f]{3,8}$/i;
 
-  var state = { rows:[], cols:[], colGroup:{}, visible:{}, q:'', div:'all', sort:'name', dir:1,
+  var state = { rows:[], cols:[], colGroup:{}, visible:{}, q:'', div:[], sort:'name', dir:1,
                 season:null, seasons:{} };
   var groupOn = {};
   GROUPS.forEach(function(g){ groupOn[g.key] = g.on; });
@@ -335,7 +327,7 @@
   function filteredSorted(){
     var q = state.q.trim().toLowerCase();
     var rows = rowsForSeason().filter(function(r){
-      if (state.div !== 'all' && r.division !== state.div) return false;
+      if (state.div.length && state.div.indexOf(r.division) === -1) return false;
       if (!q) return true;
       for (var k in r){ if (String(r[k]==null?'':r[k]).toLowerCase().indexOf(q) !== -1) return true; }
       return false;
@@ -394,15 +386,18 @@
       + (state.version ? ' &nbsp;·&nbsp; clubs-meta <b>'+esc(state.version)+'</b>' : '');
   }
 
+  /* Which column groups show. Nothing ticked means every group, the
+     canon's "nothing chosen is no filter" – the old toggles could switch
+     every group off and leave the club name alone, which nobody wanted. */
   function buildGroupToggles(){
-    $('colGroup').querySelectorAll('.chip').forEach(function(n){ n.remove(); });
-    GROUPS.forEach(function(g){
-      if (g.key === 'identity') { /* identity always shown via individual cols; still allow toggle */ }
-      var b = document.createElement('button');
-      b.className = 'chip'; b.textContent = g.label;
-      setPressed(b, groupOn[g.key]);
-      b.onclick = function(){ groupOn[g.key] = !groupOn[g.key]; setPressed(b, groupOn[g.key]); render(); };
-      $('colGroup').appendChild(b);
+    NL.filterButton('#colFilter', {
+      label: 'Columns',
+      options: GROUPS.map(function(g){ return { value: g.key, label: g.label }; }),
+      value: GROUPS.filter(function(g){ return groupOn[g.key]; }).map(function(g){ return g.key; }),
+      onChange: function(v){
+        GROUPS.forEach(function(g){ groupOn[g.key] = !v.length || v.indexOf(g.key) > -1; });
+        render();
+      }
     });
   }
 
@@ -422,25 +417,18 @@
     return { current: keys[keys.length-1], list: list };
   }
 
+  /* One season is always chosen, so a select rather than a filter button,
+     whose "nothing chosen" would have no meaning here. */
   function buildSeasonToggles(){
-    var box = $('seasonGroup');
-    box.querySelectorAll('.chip').forEach(function(n){ n.remove(); });
+    var sel = $('seasonSel');
     var keys = Object.keys(state.seasons.list || {}).sort().reverse();
-    /* Hide the whole filter-row, not just the chip group — otherwise the
-       "Season" label sits there labelling nothing. */
-    if (!keys.length) { $('seasonRow').hidden = true; return; }
-    $('seasonRow').hidden = false;
-    keys.forEach(function(k){
-      var b = document.createElement('button');
-      b.className = 'chip'; b.textContent = state.seasons.list[k].label || k;
-      setPressed(b, state.season === k);
-      b.onclick = function(){
-        state.season = k;
-        box.querySelectorAll('.chip').forEach(function(c){ setPressed(c, c === b); });
-        render();
-      };
-      box.appendChild(b);
-    });
+    if (!keys.length) { sel.hidden = true; return; }
+    sel.hidden = false;
+    sel.innerHTML = keys.map(function(k){
+      return '<option value="'+esc(k)+'"'+(state.season === k ? ' selected' : '')+'>'+
+        esc(state.seasons.list[k].label || k)+'</option>';
+    }).join('');
+    sel.onchange = function(){ state.season = sel.value; render(); };
   }
 
   /* Header row + every column in canonical order, current filter and sort.
@@ -489,20 +477,11 @@
 
   // wire controls
   $('search').oninput = function(){ state.q = this.value; render(); };
-  /* Canon styles the selected chip off .active; aria-pressed is kept in step
-     so the control still announces its state to a screen reader, which the
-     class alone does not do. */
-  function setPressed(node, on){
-    node.classList.toggle('active', !!on);
-    node.setAttribute('aria-pressed', on ? 'true' : 'false');
-  }
-
-  $('divGroup').onclick = function(e){
-    var b = e.target.closest('.chip'); if(!b) return;
-    state.div = b.getAttribute('data-div');
-    $('divGroup').querySelectorAll('.chip').forEach(function(c){ setPressed(c, c === b); });
-    render();
-  };
+  NL.filterButton('#divFilter', {
+    label: 'Division',
+    options: ['National', 'North', 'South'].map(function(d){ return { value: d, label: d }; }),
+    onChange: function(v){ state.div = v; render(); }
+  });
   /* NL.clubs.load() memoises for the life of the page, so calling it again
      replays the first response — right for every other caller, useless for a
      Reload button. A full page reload is the honest way to get a genuinely

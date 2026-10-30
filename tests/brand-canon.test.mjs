@@ -1258,28 +1258,11 @@ test('tabs keep small capitals and scroll rather than wrap', () => {
    using them fails here: build it with NL.filterButton instead. (A two-way
    switch that is genuinely one tap, like "My club / All clubs", may keep a
    chip group until step 2 decides its home; add it here with a reason.) */
-const OLD_CONTROL_PAGES = new Set([
-  'attendance/index.html',
-  'brand-exposure/index.html',
-  'broadcast-selections/index.html',
-  'club-directory/editor/index.html',
-  'club-directory/index.html',
-  'club-directory/meta-reference.html',
-  'commercial-compliance/admin/index.html',
-  'content-plan/index.html',
-  'dazn/_view.js',
-  'document-library/_library.js',
-  'fixtures/admin/index.html',
-  'local-media/admin/index.html',
-  'matchday-live/c/index.html',
-  'matchday-live/index.html',
-  'portal/index.html',
-  'public/trust-cup/index.html',
-  'save-of-the-month/admin/index.html',
-  'social-output/index.html',
-  'uw-promo/admin/index.html',
-  'uw-promo/index.html'
-]);
+/* Empty since 30/10/2026: every page is off .chip-group, .chip and
+   .filter-pill (the Declutter sweep; Commercial Compliance's tick-sheet went
+   last, when it was parked). The canon classes can now be deleted; this test
+   keeps them from coming back meanwhile. */
+const OLD_CONTROL_PAGES = new Set([]);
 test('no new page uses .chip-group or .filter-pill', () => {
   const walk = (d, out = []) => {
     for (const e of readdirSync(join(REPO, d), { withFileTypes: true })) {
@@ -1293,7 +1276,7 @@ test('no new page uses .chip-group or .filter-pill', () => {
     return out;
   };
   const uses = walk('').filter((f) =>
-    /chip-group|filter-pill|class="chip[ "]|'chip('| )/.test(readFileSync(join(REPO, f), 'utf8')));
+    /chip-group|filter-pill|class="chip[ "']|'chip('| )/.test(readFileSync(join(REPO, f), 'utf8')));
   const fresh = uses.filter((f) => !OLD_CONTROL_PAGES.has(f));
   assert.deepEqual(fresh, [], 'use NL.filterButton instead of chips or filter pills:\n  ' + fresh.join('\n  '));
   const moved = [...OLD_CONTROL_PAGES].filter((f) => !uses.includes(f));

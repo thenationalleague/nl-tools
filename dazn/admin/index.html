@@ -1,10 +1,15 @@
 <!DOCTYPE html>
 <!--
   NL Tools — DAZN Viewership (staff)
-  Version: v41.0 (19/10/2026)
+  Version: v41.1 (30/10/2026)
   File: /dazn/admin/index.html
 
   CHANGELOG
+    v41.1 (30/10/2026) – Off the old chip controls (Declutter, _view v42.1).
+      League tab: Division is a canon filter button and takes more than one
+      division; it is drawn once and kept, so its list stays open while you
+      tick. The Total row names the divisions chosen. Club tab: UK
+      availability and Venue are filter buttons, By game / By month tabs.
     v41.0 (19/10/2026) — Cards: Avg viewing time replaces Best game; no division
       comparison. Season picker moves into the club view's slicer row; By game
       opens first; the views footnote is gone (_view v41.0).
@@ -158,6 +163,14 @@
     var NL_TOOL_KEY = 'media-dazn';
 
     window.NL_CHANGELOG = [
+      {
+        date: '30/10/2026',
+        version: 'v41.1',
+        items: [
+          'Filters are now buttons that open a short list. Division takes more than one at once.',
+          'By game and By month are now tabs.'
+        ]
+      },
       {
         date: '19/10/2026',
         version: 'v41.0',
@@ -326,7 +339,7 @@
 
   <link rel="stylesheet" href="/dazn/_view.css?v=13">
   <script src="/dazn/_data.js?v=6"></script>
-  <script src="/dazn/_view.js?v=19"></script>
+  <script src="/dazn/_view.js?v=20"></script>
 
 <style>
   /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
@@ -502,29 +515,41 @@
 
   function drawClubs() {
     var F = DAZNView.fmt;
-    var div = S.div || 'all';
-    var rows = seasonClubs().filter(function (r) { return div === 'all' || r.div === div; });
+    var div = S.div || [];
+    var inDiv = function (d) { return !div.length || div.indexOf(d) !== -1; };
+    var rows = seasonClubs().filter(function (r) { return inDiv(r.div); });
     var none = rows.filter(function (r) { return !r.has; }).length;
     /* The Total row counts each game ONCE. Each club's figure is the whole
        audience of its games, so the club rows add up to about twice the
        league: every game is in two clubs' rows. */
-    var games = D.values(S.data.matches).filter(function (m) { return div === 'all' || m.div === div; });
+    var games = D.values(S.data.matches).filter(function (m) { return inDiv(m.div); });
     var lg = D.summarise(games);
     var num = function (k) { return function (r) { return r.s ? r.s[k] : null; }; };
-    var label = div === 'all' ? 'League' : (D.DIV_LABEL[div] || div);
+    var label = !div.length ? 'League'
+      : div.map(function (d) { return D.DIV_LABEL[d] || d; }).join(' + ');
 
-    $('dzaBody').innerHTML =
-      '<div class="dz-dash">' +
-      '<div class="filter-bar dz-slicers">' +
-        DAZNView.slicer('Division', DAZNView.chips('div',
-          [['all', 'All'], ['National', 'National'], ['North', 'North'], ['South', 'South']], div)) +
-      '</div>' +
+    /* The Division filter is drawn once and kept, so ticking a second
+       division leaves its list open; only what it filters is redrawn.
+       loading() clears the body, and the next draw makes it again. */
+    if (!$('dzaDivFilter')) {
+      $('dzaBody').innerHTML =
+        '<div class="dz-dash">' +
+        '<div class="filter-bar dz-slicers"><div id="dzaDivFilter"></div></div>' +
+        '<div class="dz-dash" id="dzaLeague"></div>' +
+        '</div>';
+      NL.filterButton('#dzaDivFilter', {
+        label: 'Division', value: div,
+        options: ['National', 'North', 'South'].map(function (d) { return { value: d, label: d }; }),
+        onChange: function (v) { S.div = v; drawClubs(); }
+      });
+    }
+
+    $('dzaLeague').innerHTML =
       DAZNView.kpis(lg) +
       '<section class="form-panel dz-panel dz-panel--flush">' +
         '<div class="form-panel__head dz-panel__head"><span>Clubs</span>' +
           '<span>' + rows.length + ' clubs' + (none ? ' · ' + none + ' with no DAZN games' : '') + '</span></div>' +
-        '<div class="form-panel__body dz-panel__body" id="dzaClubs"></div></section>' +
-      '</div>';
+        '<div class="form-panel__body dz-panel__body" id="dzaClubs"></div></section>';
 
     DAZNView.grid($('dzaClubs'), {
       height: 460,
@@ -563,11 +588,6 @@
         '<td class="ta-right dz-sm-hide">' + F.n1(lg.avgMins) + '</td></tr>'
     });
   }
-
-  $('dzaBody').addEventListener('click', function (e) {
-    var chip = e.target.closest('.dz-slicers .chip[data-v]');
-    if (chip) { S.div = chip.getAttribute('data-v'); drawClubs(); }
-  });
 
   $('dzaBody').addEventListener('click', function (e) {
     var tr = e.target.closest('tr[data-code]');

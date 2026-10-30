@@ -1,9 +1,15 @@
 /* =============================================================================
    NL Tools — DAZN Viewership: one club's season, as a dashboard
    File: /dazn/_view.js
-   Version: v42.0 (19/10/2026)
+   Version: v42.1 (30/10/2026)
 
    CHANGELOG
+     v42.1 (30/10/2026) – Off the old chip controls (Declutter). UK
+       availability and Venue are canon filter buttons (NL.filterButton),
+       one choice at a time, as before. By game / By month is a pair of
+       canon tabs. chips() is gone
+       from the exports; filters() replaces it, mounting filter buttons into
+       the [data-fb] slots that slicerSlot() leaves.
      v42.0 (19/10/2026) — The Month slicer is the canon month picker
        (NL.monthPicker): only months with games are pickable, "All" clears
        it. Was a <select> of hand-formatted month names.
@@ -64,7 +70,7 @@
        views-by-month column chart beside the top games, then the games in
        a fixed-height table with a sticky header and a Total row. Clicking a
        month's column slices everything to that month, as a report would.
-       Built on canon components (.filter-bar, .chip-group, .nl-select,
+       Built on canon components (.filter-bar, segmented chips, .nl-select,
        .stats/.stat, .form-panel) and the brand pair for the UK / INT split:
        UK red, INT navy, the house order Attendance uses for home / away. The
        division comparison is a delta line under each KPI it applies to
@@ -78,8 +84,9 @@
    The club page (/dazn/) and the staff page (/dazn/admin/) both call this,
    so a club and the League see the same numbers drawn the same way.
 
-   CANON USED: .filter-bar / .filter-label / .chip-group / .nl-select
-   (slicers), .stats / .stat (KPIs), .form-panel + __head + __body (each
+   CANON USED: .filter-bar / .filter-label / NL.filterButton / .nl-select /
+   NL.monthPicker (slicers), .tabs / .tab (the chart switch),
+   .stats / .stat (KPIs), .form-panel + __head + __body (each
    visual), .ta-right, .form-hint, .empty-state, NL.clubs.crestImgHtml /
    wireCrestImgs, NL.escHtml, NL.formatDateShort, NL.icon.
    TOOL-LOCAL, AND WHY:
@@ -196,11 +203,41 @@
   }
 
   /* ---- Slicers ---------------------------------------------------------- */
-  function chips(key, opts, on) {
-    return '<div class="chip-group" role="group" data-f="' + key + '">' + opts.map(function (o) {
-      return '<button type="button" class="chip' + (o[0] === on ? ' active' : '') + '" data-v="' + o[0] + '"' +
-        ' aria-pressed="' + (o[0] === on) + '">' + esc(o[1]) + '</button>';
-    }).join('') + '</div>';
+  /* A filter button carries its own name ("Venue  Home"), so it takes no
+     title above it; it drops to the foot of the strip to line up with the
+     titled controls (Season, Month) beside it. */
+  function slicerSlot(key) {
+    return '<div class="dz-slicer" data-fb="' + key + '" style="align-self:flex-end"></div>';
+  }
+
+  /* Mount a filter button into each [data-fb] slot under host. specs:
+     { key: { label, options: [[value, label], ...], value } }, value 'all'
+     for nothing chosen. One choice at a time. onPick(key, value) gets
+     'all' back for a cleared filter. The strip is redrawn on every pick,
+     so focus is handed to the new button, not left on the old one. */
+  function filters(host, specs, onPick) {
+    Object.keys(specs).forEach(function (key) {
+      var slot = host.querySelector('[data-fb="' + key + '"]'), sp = specs[key];
+      if (!slot) return;
+      window.NL.filterButton(slot, {
+        label: sp.label, multiple: false,
+        options: sp.options.map(function (o) { return { value: o[0], label: o[1] }; }),
+        value: sp.value === 'all' ? null : sp.value,
+        onChange: function (v) {
+          onPick(key, v == null ? 'all' : v);
+          var t = host.querySelector('[data-fb="' + key + '"] .filter-btn__trigger');
+          if (t) t.focus();
+        }
+      });
+    });
+  }
+
+  function tabs(key, opts, on, aria) {
+    return '<div class="tabs" role="tablist" aria-label="' + esc(aria) + '" data-f="' + key + '" style="margin:0">' +
+      opts.map(function (o) {
+        return '<button type="button" class="tab' + (o[0] === on ? ' active' : '') + '" role="tab" data-v="' + o[0] + '"' +
+          ' aria-selected="' + (o[0] === on) + '">' + esc(o[1]) + '</button>';
+      }).join('') + '</div>';
   }
 
   function filtered(F) { return F.uk !== 'all' || F.venue !== 'all' || F.month !== 'all'; }
@@ -216,17 +253,23 @@
      club whose games were all shown in the UK gets no UK availability
      slicer, and a club with one game gets no venue slicer. The same rule
      the month list already followed (no month with no games). */
-  function slicers(months, F, has, seasonHtml) {
-    var venues = [['all', 'All']];
+  function venueOptions(has) {
+    var venues = [];
     if (has.home) venues.push(['home', 'Home']);
     if (has.away) venues.push(['away', 'Away']);
+    return venues;
+  }
+  var UK_OPTIONS = [['uk', 'Shown in UK'], ['intl', 'Not shown in UK']];
+
+  function slicers(months, F, has, seasonHtml) {
+    var venues = venueOptions(has);
     var ukSplits = has.uk && has.intl;
-    var venueSplits = (has.home ? 1 : 0) + (has.away ? 1 : 0) + (has.neutral ? 1 : 0) > 1 && venues.length > 2;
+    var venueSplits = (has.home ? 1 : 0) + (has.away ? 1 : 0) + (has.neutral ? 1 : 0) > 1 && venues.length > 1;
     /* Nothing to split by (a one-game club): no strip at all. */
     if (!seasonHtml && !ukSplits && !venueSplits && months.length < 2 && !filtered(F)) return '';
     return '<div class="filter-bar dz-slicers">' + (seasonHtml || '') +
-      (ukSplits ? slicer('UK availability', chips('uk', [['all', 'All'], ['uk', 'Shown in UK'], ['intl', 'Not shown in UK']], F.uk)) : '') +
-      (venueSplits ? slicer('Venue', chips('venue', venues, F.venue)) : '') +
+      (ukSplits ? slicerSlot('uk') : '') +
+      (venueSplits ? slicerSlot('venue') : '') +
       (months.length < 2 ? '' : slicer('Month', '<div data-month-pick></div>')) +
       (filtered(F) ? '<button type="button" class="btn btn--ghost btn--sm dz-slicers__clear" data-reset>Clear</button>' : '') +
     '</div>';
@@ -519,7 +562,7 @@
       '<div data-kpis></div>' +
       '<div class="dz-row">' +
         panel('Views by game', '<div data-chart></div>',
-          '<span class="dz-panel__tools">' + chips('chart', [['game', 'By game'], ['month', 'By month']], 'game') + legend() + '</span>',
+          '<span class="dz-panel__tools">' + tabs('chart', [['game', 'By game'], ['month', 'By month']], 'game', 'Chart') + legend() + '</span>',
           '', 'data-chart-title') +
         panel('Top games', '<div data-top></div>', '<span class="dz-panel__ctx" data-top-ctx></span>') +
       '</div>' +
@@ -546,6 +589,10 @@
 
     function draw() {
       q('[data-slicers]').innerHTML = slicers(months, F, has, seasonHtml);
+      filters(q('[data-slicers]'), {
+        uk: { label: 'UK availability', options: UK_OPTIONS, value: F.uk },
+        venue: { label: 'Venue', options: venueOptions(has), value: F.venue }
+      }, function (key, v) { F[key] = v; draw(); });
       var mp = q('[data-month-pick]');
       if (mp) window.NL.monthPicker(mp, {
         ariaLabel: 'Month', months: months, emptyLabel: 'All', value: F.month === 'all' ? null : F.month,
@@ -584,13 +631,11 @@
     }
 
     el.onclick = function (e) {
-      var chip = e.target.closest('.dz-slicers .chip[data-v]');
-      if (chip) { F[chip.parentNode.getAttribute('data-f')] = chip.getAttribute('data-v'); draw(); return; }
-      var sw = e.target.closest('[data-f="chart"] .chip[data-v]');
+      var sw = e.target.closest('[data-f="chart"] .tab[data-v]');
       if (sw) {
         view = sw.getAttribute('data-v');
-        Array.prototype.forEach.call(sw.parentNode.querySelectorAll('.chip'), function (c) {
-          var on = c === sw; c.classList.toggle('active', on); c.setAttribute('aria-pressed', String(on));
+        Array.prototype.forEach.call(sw.parentNode.querySelectorAll('.tab'), function (c) {
+          var on = c === sw; c.classList.toggle('active', on); c.setAttribute('aria-selected', String(on));
         });
         draw(); return;
       }
@@ -605,7 +650,8 @@
   }
 
   window.DAZNView = {
-    render: render, grid: grid, applyFilters: applyFilters, chips: chips, slicer: slicer, kpis: kpis,
+    render: render, grid: grid, applyFilters: applyFilters, slicer: slicer, slicerSlot: slicerSlot,
+    filters: filters, kpis: kpis,
     fmt: { n0: n0, n1: n1, compact: compact, ko: koLabel }
   };
 })();

@@ -1,8 +1,22 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Commercial Compliance
-  Version: v36.0 (15/10/2026)
+  Version: v36.2 (30/10/2026)
   File: /commercial-compliance/admin/index.html
+  v36.2 (30/10/2026): PARKED (Richard: work in progress, the idea is not
+    mapped out yet). Its registry record moved to tools-registry.parked.json,
+    so it is off the portal and superadmin-only; code and data are kept. The
+    tick-sheet's Outstanding / Compliant / Non-compliant buttons became one
+    select.nl-select per period, so .chip has no users left and can leave
+    canon. The state colours on those buttons went with them; the read-only
+    view still shows the state as a coloured pill.
+  v36.1 (30/10/2026): off the old chip controls (Declutter). The dashboard's
+    Needs attention / Full grid switch is a pair of tabs; the two division
+    filters (dashboard and Escalation, still independent) are NL.filterButton
+    and take more than one division at once. Nothing chosen = all divisions,
+    as before. Left on canon .chip: the tick-sheet's Outstanding / Compliant
+    / Non-compliant buttons (.cc-stateseg). They set a value with one click
+    and show it in its state colour, which a select would lose.
   v36.0 (15/10/2026): MOVED from /commercial-compliance/ to /admin/. The
     tool's own address is now the club page: a club enters its access code,
     sees its own obligations, and submits a period with a note, a link and
@@ -124,6 +138,22 @@
     var NL_TOOL_KEY = 'ops-commercial-compliance';
 
     window.NL_CHANGELOG = [
+      {
+        date: '30/10/2026',
+        version: 'v36.2',
+        items: [
+          'Parked: off the portal while the idea is worked out. Nothing has been deleted.',
+          'Each period\u2019s state is now set from a dropdown.'
+        ]
+      },
+      {
+        date: '30/10/2026',
+        version: 'v36.1',
+        items: [
+          'Division filters are now buttons that open a short list, and you can pick more than one division.',
+          'Needs attention and Full grid are now tabs.'
+        ]
+      },
       {
         date: '15/10/2026',
         version: 'v36.0',
@@ -247,12 +277,10 @@
   .cc-period__when { flex: 1 1 160px; min-width: 140px; }
   .cc-period__due { font-size: var(--text-xs); color: var(--text-muted); }
   .cc-period__due.is-overdue { color: var(--amber-deep, var(--amber)); font-variation-settings: 'wght' 700; }
-  .cc-stateseg { display: flex; gap: 2px; background: var(--off-white); border-radius: var(--radius); padding: 3px; }
-  /* State-coloured takes on the canon segmented chip: own modifier names,
-     same specificity as .chip.active, later in the cascade so they win. */
-  .cc-stateseg .active--clear  { background: var(--green); color: var(--white); }
-  .cc-stateseg .active--fail   { background: var(--red); color: var(--white); }
-  .cc-stateseg .active--out    { background: var(--navy); color: var(--white); }
+  /* The dashboard's view switch sits in the filter bar, so it drops the
+     tab bar's own bottom margin and sizes to its two tabs. */
+  .cc-viewtabs { margin-bottom: 0; flex: 0 1 auto; max-width: 100%; }
+  .cc-statesel { width: auto; min-width: 160px; }
   .cc-evidence { font-size: var(--text-xs); color: var(--text-muted); flex-basis: 100%; overflow-wrap: anywhere; }
   .cc-evidence a { color: var(--navy); }
   /* A club's submission inside the tick-sheet: the evidence plus the two
@@ -355,15 +383,12 @@
       </div>
 
       <div class="filter-bar">
-        <div class="chip-group" id="dashViewChips">
-          <button class="chip active" data-view="attention">Needs attention</button>
-          <button class="chip" data-view="grid">Full grid</button>
+        <div class="tabs cc-viewtabs" id="dashViewTabs" role="tablist" aria-label="Dashboard view">
+          <button type="button" class="tab active" role="tab" aria-selected="true" data-view="attention">Needs attention</button>
+          <button type="button" class="tab" role="tab" aria-selected="false" data-view="grid">Full grid</button>
         </div>
-        <div class="chip-group" id="divChips">
-          <button class="chip active" data-div="all">All divisions</button>
-          <button class="chip" data-div="National">National</button>
-          <button class="chip" data-div="North">North</button>
-          <button class="chip" data-div="South">South</button>
+        <div class="filter-btn-row">
+          <div id="divFilter"></div>
         </div>
         <select class="nl-select" id="obFilter"><option value="all">All assets</option></select>
         <span style="flex:1"></span>
@@ -450,11 +475,8 @@
         <button class="btn btn--ghost btn--sm" id="btnCopyAll">Copy full list</button>
       </div>
       <div class="filter-bar">
-        <div class="chip-group" id="escDivChips">
-          <button class="chip active" data-escdiv="all">All divisions</button>
-          <button class="chip" data-escdiv="National">National</button>
-          <button class="chip" data-escdiv="North">North</button>
-          <button class="chip" data-escdiv="South">South</button>
+        <div class="filter-btn-row">
+          <div id="escDivFilter"></div>
         </div>
         <span class="filter-label" id="escStats"></span>
       </div>
@@ -486,7 +508,7 @@
     seasonKey: null, seasonLabel: '',
     clubs: [],
     assets: {}, partners: {}, obligations: {}, status: {}, claims: {},
-    tab: 'dashboard', dashView: 'attention', fDivision: 'all', fAsset: 'all', fEscDiv: 'all',
+    tab: 'dashboard', dashView: 'attention', fDivision: [], fAsset: 'all', fEscDiv: [],
     loaded: { assets: false, partners: false, obligations: false, status: false, claims: false }
   };
 
@@ -601,7 +623,7 @@
   }
   function filteredClubs() {
     return STATE.clubs.filter(function (c) {
-      return STATE.fDivision === 'all' || c.division === STATE.fDivision;
+      return !STATE.fDivision.length || STATE.fDivision.indexOf(c.division) >= 0;
     });
   }
   function dueLabel(o) {
@@ -765,7 +787,7 @@
     document.getElementById('dashAttention').style.display = STATE.dashView === 'attention' ? '' : 'none';
     document.getElementById('dashGridWrap').style.display = STATE.dashView === 'grid' ? '' : 'none';
     var fRoll = allRoll.filter(function (r) {
-      return STATE.fDivision === 'all' || r.club.division === STATE.fDivision;
+      return !STATE.fDivision.length || STATE.fDivision.indexOf(r.club.division) >= 0;
     });
     if (STATE.dashView === 'grid') renderDashGrid(byAid, aids, live);
     else renderAttention(fRoll, aids);
@@ -955,12 +977,12 @@
      worst-first. Grouped per obligation because with weekly cadences a club
      can owe 10+ periods — a line per period is unusable; a chip per
      obligation with a count is not. Filtered by the escalation tab's OWN
-     division chips (the dashboard's must not silently thin this list). */
+     division filter (the dashboard's must not silently thin this list). */
   function escalationRows() {
     var t = today();
     var rows = [];
     STATE.clubs.forEach(function (club) {
-      if (STATE.fEscDiv !== 'all' && club.division !== STATE.fEscDiv) return;
+      if (STATE.fEscDiv.length && STATE.fEscDiv.indexOf(club.division) === -1) return;
       var groups = [], total = 0;
       liveObligations('clubs').forEach(function (o) {
         if (!CC.appliesTo(o, club.division, club.code)) return;
@@ -1575,11 +1597,10 @@
         var overdue = CC.isOverdue(p, t) && state === 'outstanding';
         var seg = '';
         if (STATE.canEdit) {
-          seg = '<div class="cc-stateseg">' +
-            '<button class="chip' + (state === 'outstanding' ? ' active--out active' : '') + '" data-set="outstanding" data-oid="' + esc(o.id) + '" data-period="' + esc(p.key) + '">Outstanding</button>' +
-            '<button class="chip' + (state === 'compliant' ? ' active--clear active' : '') + '" data-set="compliant" data-oid="' + esc(o.id) + '" data-period="' + esc(p.key) + '">Compliant</button>' +
-            '<button class="chip' + (state === 'non-compliant' ? ' active--fail active' : '') + '" data-set="non-compliant" data-oid="' + esc(o.id) + '" data-period="' + esc(p.key) + '">Non-compliant</button>' +
-            '</div>' +
+          seg = '<select class="nl-select cc-statesel" aria-label="State" data-set-state data-oid="' + esc(o.id) + '" data-period="' + esc(p.key) + '">' +
+            [['outstanding', 'Outstanding'], ['compliant', 'Compliant'], ['non-compliant', 'Non-compliant']].map(function (o2) {
+              return '<option value="' + o2[0] + '"' + (state === o2[0] ? ' selected' : '') + '>' + o2[1] + '</option>';
+            }).join('') + '</select>' +
             '<button class="btn btn--ghost btn--sm" data-evidence="' + esc(p.key) + '" data-oid="' + esc(o.id) + '">Evidence</button>';
         } else {
           var pill = state === 'compliant' ? 'pill--approved' : state === 'non-compliant' ? 'pill--rejected' : 'pill--pending';
@@ -1642,14 +1663,15 @@
         .catch(function (e2) { NL.toast('Failed: ' + e2.message, 'error'); });
     });
 
+    body.addEventListener('change', function (e) {
+      var sel = e.target.closest('[data-set-state]');
+      if (!sel) return;
+      setPeriodState(sel.getAttribute('data-oid'), sel.getAttribute('data-period'), club.code, sel.value, draw);
+    });
+
     body.addEventListener('click', function (e) {
       var tog = e.target.closest('[data-toggle-all]');
       if (tog) { var tid = tog.getAttribute('data-oid'); showAll[tid] = !showAll[tid]; draw(); return; }
-      var setBtn = e.target.closest('[data-set]');
-      if (setBtn) {
-        setPeriodState(setBtn.getAttribute('data-oid'), setBtn.getAttribute('data-period'), club.code, setBtn.getAttribute('data-set'), draw);
-        return;
-      }
       var evBtn = e.target.closest('[data-evidence]');
       if (evBtn) { openEvidenceModal(evBtn.getAttribute('data-oid'), evBtn.getAttribute('data-evidence'), club.code, draw); return; }
       var ap = e.target.closest('[data-approve]');
@@ -1745,7 +1767,7 @@
 
   function switchTab(name) {
     STATE.tab = name;
-    document.querySelectorAll('.tab').forEach(function (t) { t.classList.toggle('active', t.getAttribute('data-tab') === name); });
+    document.querySelectorAll('.tab[data-tab]').forEach(function (t) { t.classList.toggle('active', t.getAttribute('data-tab') === name); });
     document.getElementById('viewDashboard').style.display = name === 'dashboard' ? '' : 'none';
     document.getElementById('viewObligations').style.display = name === 'obligations' ? '' : 'none';
     document.getElementById('viewPartners').style.display = name === 'partners' ? '' : 'none';
@@ -1755,19 +1777,24 @@
   }
 
   function wireStatic() {
-    document.querySelectorAll('.tab').forEach(function (t) {
+    document.querySelectorAll('.tab[data-tab]').forEach(function (t) {
       t.addEventListener('click', function () { switchTab(t.getAttribute('data-tab')); });
     });
-    document.getElementById('divChips').addEventListener('click', function (e) {
-      var chip = e.target.closest('.chip'); if (!chip) return;
-      STATE.fDivision = chip.getAttribute('data-div');
-      document.querySelectorAll('#divChips .chip').forEach(function (c) { c.classList.toggle('active', c === chip); });
-      scheduleRender();
-    });
-    document.getElementById('dashViewChips').addEventListener('click', function (e) {
-      var chip = e.target.closest('.chip'); if (!chip) return;
-      STATE.dashView = chip.getAttribute('data-view');
-      document.querySelectorAll('#dashViewChips .chip').forEach(function (c) { c.classList.toggle('active', c === chip); });
+    /* Division is a closed set of three, but it narrows the list, so it is
+       a filter button; nothing chosen = every division. */
+    var DIVS = ['National', 'North', 'South'].map(function (d) { return { value: d, label: d }; });
+    NL.filterButton('#divFilter', { label: 'Division', options: DIVS,
+      onChange: function (v) { STATE.fDivision = v; scheduleRender(); } });
+    NL.filterButton('#escDivFilter', { label: 'Division', options: DIVS,
+      onChange: function (v) { STATE.fEscDiv = v; scheduleRender(); } });
+    document.getElementById('dashViewTabs').addEventListener('click', function (e) {
+      var tab = e.target.closest('.tab'); if (!tab) return;
+      STATE.dashView = tab.getAttribute('data-view');
+      document.querySelectorAll('#dashViewTabs .tab').forEach(function (c) {
+        var on = c === tab;
+        c.classList.toggle('active', on);
+        c.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
       scheduleRender();
     });
     document.getElementById('assetStrip').addEventListener('click', function (e) {
@@ -1826,12 +1853,6 @@
       var btn = e.target.closest('[data-review]'); if (!btn) return;
       var o = STATE.obligations[btn.getAttribute('data-review')], club = clubFor(btn.getAttribute('data-club'));
       if (o && club) openComplianceModal([o], club, club.name + ' — ' + o.title);
-    });
-    document.getElementById('escDivChips').addEventListener('click', function (e) {
-      var chip = e.target.closest('.chip'); if (!chip) return;
-      STATE.fEscDiv = chip.getAttribute('data-escdiv');
-      document.querySelectorAll('#escDivChips .chip').forEach(function (c) { c.classList.toggle('active', c === chip); });
-      scheduleRender();
     });
     document.getElementById('escTable').addEventListener('click', function (e) {
       var btn = e.target.closest('[data-esc-copy]'); if (!btn) return;
