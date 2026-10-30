@@ -213,7 +213,7 @@ Migrate to callables with native auth:
 > stays because the tool is coming back — it needs uncommenting, or better,
 > porting.
 
-- `claudio` (Claudio) → callable, key from Secret Manager, gated by native auth.
+- `claudio` (Claudio) → callable, key from Secret Manager, gated by native auth. *(Claudio retired 30/10/2026. New callables are blocked by org policy: see problem 2 in `system/retired/claudio.md`.)*
   Uncommenting the GAS line instead would restore the exposure.
 - **Delete `chaseEmail` entirely** — chase-hq was removed at brand sweep v2.19.
 
