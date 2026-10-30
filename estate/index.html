@@ -1,7 +1,16 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Estate
-  Version: v1.0 (30/10/2026)
+  Version: v1.1 (30/10/2026)
+
+  v1.1 (30/10/2026) — Colour back on the Everything tab, after Richard found
+  v1.0 "a lot less visually useful". Colour now means one thing per column:
+  who can open it uses the access colours the detail view has used since
+  v0.5 (purple superadmin, blue staff, green clubs, amber code or open);
+  status keeps its pills; where it runs is a quiet neutral tag. The detail
+  view's checks come back as red and amber warnings under the name, in
+  plain words, rolled up across a tool's pages, with a "Needs a look"
+  filter and count.
 
   v1.0 (30/10/2026) — Declutter: Estate becomes the main reference, in
   plain English. Three tabs:
@@ -166,6 +175,14 @@
     var NL_TOOL_KEY = 'ops-estate';
 
     window.NL_CHANGELOG = [
+      {
+        date: '30/10/2026',
+        version: 'v1.1',
+        items: [
+          'Everything tab: who can open each thing, and where it runs, are coloured tags again.',
+          'Warnings are back under each name (no database rules, out-of-date shared files, nothing links to it and so on), with a Needs a look filter.'
+        ]
+      },
       {
         date: '30/10/2026',
         version: 'v1.0',
@@ -441,6 +458,10 @@
   .est-cell { white-space: nowrap; }
   .est-statnote { display: block; color: var(--text-muted); font-size: var(--text-xs); line-height: 1.4; max-width: 40ch; margin-top: 3px; }
   .est-statnote:first-child { margin-top: 0; }
+  .est-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+  .est-tags--under { margin-top: 5px; }
+  /* Where it runs is a category, not a judgement, so it gets no hue. */
+  .est-pill--plain { background: var(--navy-50); color: var(--navy); }
 </style>
 </head>
 <body>
@@ -466,6 +487,7 @@
         <div id="fDoor"></div>
         <div id="fRuns"></div>
         <div id="fStatus"></div>
+        <div id="fWarn"></div>
       </div>
       <div class="table-wrap est-wrap" id="allTable"><div class="empty-state">Loading…</div></div>
       <p class="est-note" id="allNote"></p>
@@ -915,7 +937,24 @@
   var STATUSES = ['Core', 'Occasional', 'Dead', 'Not decided'];
   var STATUS_PILL = { 'Core': 'pill--approved', 'Occasional': 'pill--info', 'Dead': 'pill--rejected' };
 
-  var all = { rows: [], search: '', kind: [], door: [], runs: [], status: [], usage: null };
+  var all = { rows: [], search: '', kind: [], door: [], runs: [], status: [], warn: [], usage: null };
+
+  /* The detail view's checks, in plain words. Red stops something working
+     or leaves it open; amber is worth a look. */
+  var WARN = {
+    norules:      { label: 'No database rules',      pill: 'pill--rejected' },
+    openadmin:    { label: 'Admin page not locked',  pill: 'pill--rejected' },
+    codeadmin:    { label: 'Admin page on a code',   pill: 'pill--pending',
+                    title: 'The admin page is opened with a code rather than a login' },
+    ungated:      { label: 'Not actually locked',    pill: 'pill--rejected' },
+    canon:        { label: 'Old shared files',       pill: 'pill--pending' },
+    unregistered: { label: 'Not on the portal list', pill: 'pill--pending' },
+    orphan:       { label: 'Nothing links to it',    pill: 'pill--pending',
+                    title: 'No page in the repo links here. Fine if people reach it from emails, the website or a QR code' }
+  };
+  var WARN_ORDER = ['norules', 'openadmin', 'ungated', 'codeadmin', 'canon', 'unregistered', 'orphan'];
+  var DOOR_PILL = { 'Anyone': 'pill--soon', 'Club code': 'pill--pending', 'Clubs and League staff': 'pill--approved',
+                    'League staff': 'pill--info', 'Superadmin only': 'pill--postponed' };
 
   /* Which row a page belongs to. A page with no toolKey of its own joins the
      tool that owns its folder (dazn/ is the DAZN tool's club side); loose
@@ -963,6 +1002,21 @@
         .sort(function (a, b) { return DOOR_ORDER.indexOf(a) - DOOR_ORDER.indexOf(b); });
       var auto = [];
       if (main.registryState === 'parked') auto.push('Off the portal (parked)');
+      /* The portal has no registry record by design. */
+      var warns = uniq([].concat.apply([], ps.map(function (p) {
+        return flagsFor(p).map(function (f) {
+          /* An old admin address that only forwards on is not an open admin
+             page, and one behind a club code is locked, just not by login. */
+          if (f.key === 'openadmin') {
+            if (p.species === 'redirect') return null;
+            if (p.access && p.access.kind === 'code') return 'codeadmin';
+          }
+          /* Nothing ever links to a page-not-found page. */
+          if (f.key === 'orphan' && p.path === '404.html') return null;
+          return f.key;
+        });
+      }))).filter(function (k) { return !(k === 'unregistered' && id === 'tool:portal'); })
+        .sort(function (a, b) { return WARN_ORDER.indexOf(a) - WARN_ORDER.indexOf(b); });
       return {
         id: id,
         kind: isTool ? 'Tool' : isEmbed ? 'Website widget' : 'Page',
@@ -977,6 +1031,7 @@
         lifespan: it.lifespan || '',
         status: it.status || 'Not decided',
         note: [it.note].concat(auto).filter(Boolean).join('. '),
+        warns: warns,
         hay: ps.map(function (p) { return p.url; }).join(' ')
       };
     });
@@ -1070,6 +1125,7 @@
         lifespan: it.lifespan || '',
         status: it.status || 'Not decided',
         note: it.note || '',
+        warns: [],
         hay: j.file
       };
     });
@@ -1080,7 +1136,7 @@
       return {
         id: x.id, kind: x.kind, name: x.name, does: x.does || '', url: x.url || '',
         sub: '', subTitle: '', doors: [], runsOn: x.runsOn || '', when: x.use || '',
-        lifespan: x.lifespan || '', status: x.status || 'Not decided', note: x.note || '', hay: ''
+        lifespan: x.lifespan || '', status: x.status || 'Not decided', note: x.note || '', warns: [], hay: ''
       };
     });
   }
@@ -1126,8 +1182,10 @@
     if (all.door.length && !r.doors.some(function (d) { return all.door.indexOf(d) !== -1; })) return false;
     if (all.runs.length && all.runs.indexOf(r.runsOn) === -1) return false;
     if (all.status.length && all.status.indexOf(r.status) === -1) return false;
+    if (all.warn.length && !r.warns.some(function (w) { return all.warn.indexOf(w) !== -1; })) return false;
     if (all.search) {
       var hay = [r.name, r.does, r.note, r.url, r.id, r.runsOn, r.when, r.hay].concat(r.doors)
+        .concat(r.warns.map(function (w) { return WARN[w].label; }))
         .filter(Boolean).join(' ').toLowerCase();
       if (hay.indexOf(all.search) === -1) return false;
     }
@@ -1145,9 +1203,15 @@
       '<td>' + name +
         (r.does ? '<span class="est-does">' + NL.escHtml(r.does) + '</span>' : '') +
         (r.sub ? '<span class="est-sub est-muted" title="' + NL.escHtml(r.subTitle) + '">' + NL.escHtml(r.sub) + '</span>' : '') +
+        (r.warns.length ? '<div class="est-tags est-tags--under">' + r.warns.map(function (w) {
+          return '<span class="pill ' + WARN[w].pill + '"' +
+            (WARN[w].title ? ' title="' + NL.escHtml(WARN[w].title) + '"' : '') + '>' + NL.escHtml(WARN[w].label) + '</span>';
+        }).join('') + '</div>' : '') +
       '</td>' +
-      '<td>' + (r.doors.length ? r.doors.map(NL.escHtml).join('<br>') : '<span class="est-muted">—</span>') + '</td>' +
-      '<td class="est-cell">' + NL.escHtml(r.runsOn || '—') + '</td>' +
+      '<td>' + (r.doors.length ? '<div class="est-tags">' + r.doors.map(function (d) {
+          return '<span class="pill ' + (DOOR_PILL[d] || 'est-pill--plain') + '">' + NL.escHtml(d) + '</span>';
+        }).join('') + '</div>' : '<span class="est-muted">—</span>') + '</td>' +
+      '<td>' + (r.runsOn ? '<span class="pill est-pill--plain">' + NL.escHtml(r.runsOn) + '</span>' : '<span class="est-muted">—</span>') + '</td>' +
       '<td>' + useCell(r) + '</td>' +
       '<td class="est-cell">' + (r.lifespan ? NL.escHtml(r.lifespan) : '<span class="est-muted">—</span>') + '</td>' +
       '<td>' + status + (r.note ? '<span class="est-statnote">' + NL.escHtml(r.note) + '</span>' : '') + '</td>' +
@@ -1195,10 +1259,12 @@
     all.rows.sort(function (a, b) { return a.name.localeCompare(b.name, 'en-GB', { sensitivity: 'base' }); });
 
     var kinds = countBy(function (r) { return r.kind; });
+    var needLook = all.rows.filter(function (r) { return r.warns.length; }).length;
     document.getElementById('allStats').innerHTML = KINDS.map(function (k) {
       return '<div class="stat"><div class="stat__num">' + (kinds[k] || 0) + '</div>' +
              '<div class="stat__label">' + NL.escHtml(KIND_PLURAL[k]) + '</div></div>';
-    }).join('');
+    }).join('') + '<div class="stat"><div class="stat__num">' + needLook + '</div>' +
+      '<div class="stat__label">Need a look</div></div>';
 
     NL.filterButton('#fKind', { label: 'What it is', options: opts(KINDS, kinds),
       onChange: function (v) { all.kind = v; renderAll(); } });
@@ -1208,6 +1274,12 @@
       onChange: function (v) { all.runs = v; renderAll(); } });
     NL.filterButton('#fStatus', { label: 'Status', options: opts(STATUSES, countBy(function (r) { return r.status; })),
       onChange: function (v) { all.status = v; renderAll(); } });
+    var wc = countBy(function (r) { return r.warns; });
+    NL.filterButton('#fWarn', { label: 'Needs a look', allLabel: 'Any',
+      options: WARN_ORDER.filter(function (k) { return wc[k]; }).map(function (k) {
+        return { value: k, label: WARN[k].label, count: wc[k] };
+      }),
+      onChange: function (v) { all.warn = v; renderAll(); } });
 
     var search = document.getElementById('allSearch');
     search.addEventListener('input', function () {
