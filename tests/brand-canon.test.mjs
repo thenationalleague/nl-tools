@@ -8,7 +8,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 import { NL, REPO } from './load-canon.mjs';
@@ -1247,4 +1247,67 @@ test('tabs keep small capitals and scroll rather than wrap', () => {
   assert.doesNotMatch(ruleBody('.chip'), /text-transform:\s*uppercase/, 'choices stay sentence case');
   assert.match(ruleBody('.tabs'), /overflow-x:\s*auto/, 'too many tabs scroll sideways');
   assert.match(ruleBody('.tab'), /white-space:\s*nowrap/, 'a tab label never wraps');
+});
+
+
+/* ── Fewer components: no NEW page uses the chips or filter pills ──────────
+   NL.filterButton (brand v2.74) replaces .chip-group/.chip and .filter-pill
+   for filtering. The pages below still use the old two and move over page by
+   page; each one that moves comes off this list, and when it is empty the
+   old components are deleted from nl-brand.css. A page not on the list
+   using them fails here: build it with NL.filterButton instead. (A two-way
+   switch that is genuinely one tap, like "My club / All clubs", may keep a
+   chip group until step 2 decides its home; add it here with a reason.) */
+const OLD_CONTROL_PAGES = new Set([
+  'attendance/index.html',
+  'brand-exposure/index.html',
+  'broadcast-selections/index.html',
+  'club-directory/editor/index.html',
+  'club-directory/index.html',
+  'club-directory/meta-reference.html',
+  'commercial-compliance/admin/index.html',
+  'content-plan/index.html',
+  'dazn/_view.js',
+  'document-library/_library.js',
+  'estate/index.html',
+  'fixtures/admin/index.html',
+  'local-media/admin/index.html',
+  'matchday-live/c/index.html',
+  'matchday-live/index.html',
+  'portal/index.html',
+  'public/trust-cup/index.html',
+  'save-of-the-month/admin/index.html',
+  'social-output/index.html',
+  'uw-promo/admin/index.html',
+  'uw-promo/index.html'
+]);
+test('no new page uses .chip-group or .filter-pill', () => {
+  const walk = (d, out = []) => {
+    for (const e of readdirSync(join(REPO, d), { withFileTypes: true })) {
+      if (e.name.startsWith('.') || e.name === 'node_modules') continue;
+      const p = d ? d + '/' + e.name : e.name;
+      if (e.isDirectory()) {
+        if (['system', 'style-guide', 'embeds', 'tests', 'scripts', 'functions', 'gas'].includes(p)) continue;
+        walk(p, out);
+      } else if (/\.(html|js)$/.test(e.name)) out.push(p);
+    }
+    return out;
+  };
+  const uses = walk('').filter((f) =>
+    /chip-group|filter-pill|class="chip[ "]|'chip('| )/.test(readFileSync(join(REPO, f), 'utf8')));
+  const fresh = uses.filter((f) => !OLD_CONTROL_PAGES.has(f));
+  assert.deepEqual(fresh, [], 'use NL.filterButton instead of chips or filter pills:\n  ' + fresh.join('\n  '));
+  const moved = [...OLD_CONTROL_PAGES].filter((f) => !uses.includes(f));
+  assert.deepEqual(moved, [], 'these pages no longer use the old controls; take them off OLD_CONTROL_PAGES:\n  ' + moved.join('\n  '));
+});
+
+test('NL.filterButton exists, and the Style Guide demonstrates it', () => {
+  assert.equal(typeof NL.filterButton, 'function');
+  assert.equal(typeof NL.filterButton.summarise, 'function');
+  for (const sel of ['.filter-btn__trigger', '.filter-btn__clear', '.filter-btn__opt']) {
+    assert.ok(rules.includes('\n' + sel + ' {'), sel + ' is styled in nl-brand.css');
+  }
+  assert.match(ruleBody('.filter-btn__trigger'), /min-height:\s*var\(--control-h\)/, 'same height as every control');
+  const sg = readFileSync(join(REPO, 'style-guide/index.html'), 'utf8');
+  assert.match(sg, /NL\.filterButton\(/, 'the Style Guide shows the filter button');
 });

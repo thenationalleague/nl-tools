@@ -1,7 +1,17 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.46 (28/10/2026)
+   Version: v1.47 (30/10/2026)
+
+   v1.47 — NL.filterButton(mount, opts): the brand filter button (nl-brand
+   v2.74 .filter-btn; cache-bust nl-utils ?v=50 -> ?v=51, nl-brand ?v=70 ->
+   ?v=71). A compact button showing a filter's name and what is chosen,
+   opening a short list with ticks and counts; several choices or one;
+   search on long lists; a bottom sheet on phones. Decided in the Declutter
+   (30/10/2026) to replace .chip-group and .filter-pill for filtering: one
+   component instead of two. Tools move to it page by page; the old two are
+   deleted once none is left. NL.filterButton.summarise is the pure part,
+   tested in tests/canon.test.mjs.
 
    v1.46 — NL.files and NL.zip: the file-library helpers, promoted on their
    second use (cache-bust ?v=49 -> ?v=50, nl-brand unchanged). Programme
@@ -825,6 +835,224 @@
     };
     drawTrigger();
     return ctrl;
+  };
+
+  /* ===================================================================
+     NL.filterButton(mount, opts) — the brand filter button (v1.47,
+     nl-brand v2.74 .filter-btn). One compact button per filter: its name
+     and what is chosen ("Status: Dead"). It opens a short list with ticks
+     and counts. Replaces .chip-group and .filter-pill for filtering
+     (Declutter, 30/10/2026): one component instead of two, the same on
+     every page, and it stays tidy however many options a filter has.
+
+       NL.filterButton(mount, {
+         label:     'Status',              the filter's name, always shown
+         options:   [{ value, label, count }],
+                                           count is optional; shown on the
+                                           right of the row when given
+         multiple:  true,                  several at once (default). false
+                                           = pick one; choosing closes it
+         value:     ['dead'] | 'dead' | null,
+         allLabel:  'All',                 shown when nothing is chosen
+         search:    'auto',                true / false / 'auto' (= more
+                                           than 8 options)
+         id, ariaLabel,
+         onChange(value)                   array when multiple, value or
+                                           null when single. Fired on a
+                                           user's choice only.
+       })
+       → { el, get(), set(value), setOptions(options), open(), close() }
+
+     set() never fires onChange: the caller already knows what it set.
+     Nothing chosen means "no filter", never "show nothing".
+
+     On a phone (max-width 600px) the list rises from the bottom of the
+     screen as a sheet, so it is never half off the edge. Keyboard: Enter,
+     Space or ↓ opens; ↑ ↓ move; Space or Enter ticks; Escape closes and
+     returns focus to the button. A tap or click outside closes it. */
+  window.NL.filterButton = function(mount, opts) {
+    opts = opts || {};
+    var host = (typeof mount === 'string') ? document.querySelector(mount) : mount;
+    if (!host) throw new Error('NL.filterButton: mount not found');
+    var esc = window.NL.escHtml;
+    var multiple = opts.multiple !== false;
+    var S = { options: (opts.options || []).slice(), sel: [], q: '' };
+
+    function norm(v) {
+      if (v == null || v === '') return [];
+      return Array.isArray(v) ? v.map(String) : [String(v)];
+    }
+    S.sel = norm(opts.value);
+    if (!multiple && S.sel.length > 1) S.sel = S.sel.slice(0, 1);
+
+    var root = document.createElement('div');
+    root.className = 'filter-btn';
+    var uid = 'nlfb' + (++window.NL.filterButton._seq);
+    root.innerHTML =
+      '<button type="button" class="filter-btn__trigger" aria-haspopup="listbox" aria-expanded="false"' +
+        (opts.id ? ' id="' + esc(opts.id) + '"' : '') + '>' +
+        '<span class="filter-btn__label"></span>' +
+        '<span class="filter-btn__value"></span>' +
+        '<svg class="filter-btn__chev" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+      '</button>' +
+      '<button type="button" class="filter-btn__clear" hidden></button>' +
+      '<div class="filter-btn__scrim"></div>' +
+      '<div class="filter-btn__pop" role="dialog">' +
+        '<div class="filter-btn__head"><span class="filter-btn__title"></span>' +
+          '<button type="button" class="filter-btn__done">Done</button></div>' +
+        '<input type="search" class="filter-btn__search" autocomplete="off" hidden>' +
+        '<ul class="filter-btn__list" role="listbox" id="' + uid + '-list"' +
+          (multiple ? ' aria-multiselectable="true"' : '') + '></ul>' +
+        '<div class="filter-btn__foot"><button type="button" class="btn btn--ghost btn--sm filter-btn__reset">Clear</button></div>' +
+      '</div>';
+    host.innerHTML = '';
+    host.appendChild(root);
+
+    var trig = root.querySelector('.filter-btn__trigger');
+    var clearBtn = root.querySelector('.filter-btn__clear');
+    var pop = root.querySelector('.filter-btn__pop');
+    var list = root.querySelector('.filter-btn__list');
+    var search = root.querySelector('.filter-btn__search');
+    var label = opts.label || '';
+    root.querySelector('.filter-btn__label').textContent = label;
+    root.querySelector('.filter-btn__title').textContent = label;
+    pop.setAttribute('aria-label', opts.ariaLabel || label || 'Filter');
+    clearBtn.setAttribute('aria-label', 'Clear ' + (label || 'filter'));
+    clearBtn.innerHTML = '<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+    search.setAttribute('aria-label', 'Search ' + (label || 'options'));
+    search.setAttribute('placeholder', 'Search');
+
+    function showSearch() {
+      var s = opts.search == null ? 'auto' : opts.search;
+      return s === 'auto' ? S.options.length > 8 : !!s;
+    }
+    function isSmall() { return window.matchMedia && window.matchMedia('(max-width: 600px)').matches; }
+
+    function drawTrigger() {
+      var txt = window.NL.filterButton.summarise(S.sel, S.options, opts.allLabel);
+      root.querySelector('.filter-btn__value').textContent = txt;
+      var on = S.sel.length > 0;
+      root.classList.toggle('is-active', on);
+      clearBtn.hidden = !on;
+      trig.setAttribute('aria-label', (label ? label + ': ' : '') + txt);
+    }
+    function drawList() {
+      var q = S.q.trim().toLowerCase(), html = '';
+      S.options.forEach(function (o, i) {
+        var lab = o.label == null ? String(o.value) : String(o.label);
+        if (q && lab.toLowerCase().indexOf(q) === -1) return;
+        var on = S.sel.indexOf(String(o.value)) >= 0;
+        html += '<li role="option" tabindex="-1" class="filter-btn__opt' + (on ? ' is-on' : '') + '"' +
+          ' aria-selected="' + on + '" data-i="' + i + '">' +
+          '<span class="filter-btn__tick" aria-hidden="true"></span>' +
+          '<span class="filter-btn__opt-label">' + esc(lab) + '</span>' +
+          (o.count != null ? '<span class="filter-btn__count">' + esc(String(o.count)) + '</span>' : '') +
+          '</li>';
+      });
+      list.innerHTML = html || '<li class="filter-btn__none">No matches</li>';
+      search.hidden = !showSearch();
+    }
+    function emit() {
+      if (opts.onChange) opts.onChange(multiple ? S.sel.slice() : (S.sel[0] == null ? null : S.sel[0]));
+    }
+    function toggle(i) {
+      var v = String(S.options[i].value), at = S.sel.indexOf(v);
+      if (multiple) { if (at >= 0) S.sel.splice(at, 1); else S.sel.push(v); }
+      else S.sel = at >= 0 ? [] : [v];
+      drawTrigger(); drawList(); emit();
+      if (!multiple) { ctrl.close(); trig.focus(); }
+      else { var li = list.querySelector('[data-i="' + i + '"]'); if (li) li.focus(); }
+    }
+    function place() {
+      if (isSmall()) { pop.style.top = ''; pop.style.left = ''; return; }
+      var r = trig.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
+      var vw = document.documentElement.clientWidth, vh = window.innerHeight;
+      var top = (r.bottom + 4 + h > vh && r.top - 4 - h >= 0) ? r.top - 4 - h : r.bottom + 4;
+      pop.style.top = Math.round(top) + 'px';
+      pop.style.left = Math.round(Math.max(8, Math.min(r.left, vw - w - 8))) + 'px';
+    }
+    function opts_() { return Array.prototype.slice.call(list.querySelectorAll('.filter-btn__opt')); }
+    function onDoc(e) { if (!root.contains(e.target) || e.target.classList.contains('filter-btn__scrim')) ctrl.close(); }
+    function onKey(e) {
+      if (e.key === 'Escape') { e.preventDefault(); ctrl.close(); trig.focus(); return; }
+      if (e.key === 'Tab') { ctrl.close(); return; }
+      var items = opts_(), cur = items.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        var n = cur + (e.key === 'ArrowDown' ? 1 : -1);
+        if (cur === -1) n = e.key === 'ArrowDown' ? 0 : items.length - 1;
+        if (items[n]) items[n].focus(); else if (n < 0 && !search.hidden) search.focus();
+      } else if ((e.key === ' ' || e.key === 'Enter') && cur >= 0) {
+        e.preventDefault(); toggle(+items[cur].getAttribute('data-i'));
+      }
+    }
+
+    trig.addEventListener('click', function () { root.classList.contains('is-open') ? ctrl.close() : ctrl.open(); });
+    trig.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowDown' && !root.classList.contains('is-open')) { e.preventDefault(); ctrl.open(); }
+    });
+    clearBtn.addEventListener('click', function () { S.sel = []; drawTrigger(); drawList(); emit(); trig.focus(); });
+    list.addEventListener('click', function (e) {
+      var li = e.target.closest('.filter-btn__opt'); if (li) toggle(+li.getAttribute('data-i'));
+    });
+    search.addEventListener('input', function () { S.q = search.value; drawList(); });
+    root.querySelector('.filter-btn__reset').addEventListener('click', function () {
+      S.sel = []; drawTrigger(); drawList(); emit();
+    });
+    root.querySelector('.filter-btn__done').addEventListener('click', function () { ctrl.close(); trig.focus(); });
+
+    var ctrl = {
+      el: root,
+      get: function () { return multiple ? S.sel.slice() : (S.sel[0] == null ? null : S.sel[0]); },
+      set: function (v) { S.sel = norm(v); if (!multiple) S.sel = S.sel.slice(0, 1); drawTrigger(); drawList(); },
+      setOptions: function (o) {
+        S.options = (o || []).slice();
+        var known = S.options.map(function (x) { return String(x.value); });
+        S.sel = S.sel.filter(function (v) { return known.indexOf(v) >= 0; });
+        drawTrigger(); drawList();
+      },
+      open: function () {
+        S.q = ''; search.value = '';
+        drawList();
+        root.classList.add('is-open');
+        trig.setAttribute('aria-expanded', 'true');
+        place();
+        document.addEventListener('mousedown', onDoc);
+        document.addEventListener('touchstart', onDoc);
+        window.addEventListener('scroll', place, true);
+        window.addEventListener('resize', place);
+        root.addEventListener('keydown', onKey);
+        var f = !search.hidden && !isSmall() ? search : (list.querySelector('.filter-btn__opt.is-on') || list.querySelector('.filter-btn__opt'));
+        if (f) f.focus();
+      },
+      close: function () {
+        root.classList.remove('is-open');
+        trig.setAttribute('aria-expanded', 'false');
+        document.removeEventListener('mousedown', onDoc);
+        document.removeEventListener('touchstart', onDoc);
+        window.removeEventListener('scroll', place, true);
+        window.removeEventListener('resize', place);
+        root.removeEventListener('keydown', onKey);
+      }
+    };
+    drawTrigger();
+    drawList();
+    return ctrl;
+  };
+  window.NL.filterButton._seq = 0;
+
+  /* What the button says it holds. Pure, so it is tested without a DOM:
+     nothing → allLabel ('All'); one → its label; two → both, comma-joined;
+     three or more → 'N selected'. Values the options no longer list are
+     ignored, so a stale value never shows as a blank. */
+  window.NL.filterButton.summarise = function (values, options, allLabel) {
+    var byVal = {};
+    (options || []).forEach(function (o) { byVal[String(o.value)] = o.label == null ? String(o.value) : String(o.label); });
+    var picked = (values || []).map(String).filter(function (v) { return byVal.hasOwnProperty(v); });
+    if (!picked.length) return allLabel || 'All';
+    if (picked.length === 1) return byVal[picked[0]];
+    if (picked.length === 2) return byVal[picked[0]] + ', ' + byVal[picked[1]];
+    return picked.length + ' selected';
   };
 
   /* Short format, e.g. '17 Apr 2026' */

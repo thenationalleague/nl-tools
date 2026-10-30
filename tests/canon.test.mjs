@@ -687,3 +687,18 @@ test('clubs.byCode finds by code, case-blind, and answers null for the unknown',
     assert.equal(NL.clubs.byCode(c.code), c, `${c.code} → ${c.name}`);
   }
 });
+
+
+/* ── NL.filterButton.summarise: what the filter button says it holds ─────── */
+test('NL.filterButton.summarise: nothing, one, two, many', () => {
+  const opts = [{ value: 'core', label: 'Core' }, { value: 'occ', label: 'Occasional' },
+                { value: 'dead', label: 'Dead' }, { value: 'nd', label: 'Not decided' }];
+  const s = NL.filterButton.summarise;
+  assert.equal(s([], opts), 'All', 'nothing chosen reads All');
+  assert.equal(s([], opts, 'Any status'), 'Any status', 'allLabel is used when given');
+  assert.equal(s(['dead'], opts), 'Dead');
+  assert.equal(s(['core', 'dead'], opts), 'Core, Dead');
+  assert.equal(s(['core', 'dead', 'nd'], opts), '3 selected');
+  assert.equal(s(['gone'], opts), 'All', 'a value no option lists is ignored, never a blank');
+  assert.equal(s([3], [{ value: 3 }]), '3', 'values compare as strings; a missing label falls back to the value');
+});
