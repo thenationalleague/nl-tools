@@ -160,13 +160,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add gas/
-          if git diff --cached --quiet; then
-            echo "Apps Script matches the repo — no drift."
-            exit 0
-          fi
-          echo "DRIFT: the live Apps Script project differs from gas/."
-          git diff --cached --stat
 
           gas_fingerprint() {
             ( cd "$1" 2>/dev/null || exit 0
@@ -177,12 +170,27 @@ jobs:
           }
 
           # deploy-gas.yml reads this to answer "what do we believe is running?".
-          # A pull makes gas/ equal live, so record that here too — otherwise the
-          # next deploy checks against a state this sync has already replaced.
+          # A pull makes gas/ equal live, so record it on EVERY run, not only on
+          # drift (30/10/2026). It used to be written only when files changed, so
+          # when live and gas/ matched but the record was stale, nothing fixed
+          # the record and the publish refused to run.
           gas_fingerprint gas > gas/.deployed
-          git add gas/.deployed
 
-          git commit -m "chore: sync Apps Script from the live project"
+          git add gas/
+          if git diff --cached --quiet; then
+            echo "Apps Script matches the repo — no drift."
+            exit 0
+          fi
+          if git diff --cached --quiet -- . ':(exclude)gas/.deployed'; then
+            echo "Live matches gas/; only the recorded fingerprint was stale. Updating it."
+            MSG="chore: record the live Apps Script fingerprint"
+          else
+            echo "DRIFT: the live Apps Script project differs from gas/."
+            MSG="chore: sync Apps Script from the live project"
+          fi
+          git diff --cached --stat
+
+          git commit -m "$MSG"
           for i in 1 2 3; do
             if git push; then exit 0; fi
             git fetch origin main && git rebase origin/main || exit 1
