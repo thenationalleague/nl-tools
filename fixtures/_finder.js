@@ -1,8 +1,12 @@
 /* =============================================================================
    NL Tools — Fixture Management: the rearrangement date finder
    File: /fixtures/_finder.js
-   Version: v1.6 (28/10/2026)
+   Version: v1.7 (30/10/2026)
    CHANGELOG
+     v1.7 (30/10/2026) — A slot more than 35 days from the original date
+       carries an amber flag saying how far ("42 days from the original
+       date"), listed first, so it is never shown green and free (Richard,
+       30/10/2026). It used to be marked only by fading on the calendar.
      v1.6 (28/10/2026) — A game holds a shortlist of up to three pencils
        (rec.pencils; the single rec.pencil still reads). A date can be
        ruled out, hard: for one game (rec.ruledOut) or, season-wide, for a
@@ -68,6 +72,7 @@
   var DAY = 864e5;
   /* Flag categories, in the order the page shows them. */
   var CATS = [
+    { key: 'window', label: '35-day window' },
     { key: 'run', label: 'Consecutive games' },
     { key: 'proximity', label: 'Match proximity' },
     { key: 'cup', label: 'Cup rounds' },
@@ -322,6 +327,10 @@
       runFlags(game, d, dated, ctx.distances, flags, opts.longTrip || LONG_TRIP);
 
       var within35 = !!original && gap(original, d) <= WINDOW;
+      /* Outside the window: a flag, and the first one listed. */
+      if (original && !within35) {
+        flags.unshift({ level: 'amber', cat: 'window', text: gap(original, d) + ' days from the original date' });
+      }
       var weight = flags.reduce(function (s, f) { return s + (f.level === 'red' ? 10 : f.level === 'amber' ? 1 : 0); }, 0);
       out.push({ date: d, day: day, ko: day === 'Sat' ? '15:00' : '19:45', within35: within35, flags: flags, weight: weight });
     }
