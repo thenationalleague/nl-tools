@@ -276,7 +276,7 @@ He has **no CLI access**. Everything ships from a browser.
 |---|---|
 | Pages, readers, gate UI | merge to `main` — no build step |
 | The auth function | automatic on merge — but note `deploy-functions.yml` deploys **all** functions, not just the new one |
-| RTDB rules | Actions → **Deploy RTDB rules**, type `publish` |
+| RTDB rules | Actions → **Button · Publish database rules**, type `publish` |
 | Storage rules (if the PDF moves) | Actions → **Deploy storage rules**, type `publish` |
 | The 72 codes | written to config in the console — never in a PR, never in this repo |
 

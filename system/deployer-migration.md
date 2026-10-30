@@ -52,7 +52,7 @@ work**. Nothing is removed until the replacement is proven.
    `801354670005`. **From this moment both accounts work.**
 4. **Change the `GCP_SERVICE_ACCOUNT` repository secret** to the new email.
 5. **Prove it with a run that cannot do damage:**
-   **Actions → Deploy tools registry → `report` mode.** That exercises the full
+   **Actions → Auto · Publish portal tool list → `report` mode.** That exercises the full
    authentication path and writes nothing at all. If it passes, the new
    identity works.
 6. **Then** exercise each real deploy once, watching for a permission error —

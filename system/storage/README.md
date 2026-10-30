@@ -6,7 +6,7 @@ snapshot someone remembered to update.
 
 | File | What it is | How it gets live |
 |---|---|---|
-| `rules.snapshot.rules` | The full Storage security rules. Key idiom: `request.auth.token.email != null` separates real portal accounts from the anonymous capability sessions (programme, formerly footage), which carry no email claim. | Actions → **Deploy Storage rules** → type `publish` |
+| `rules.snapshot.rules` | The full Storage security rules. Key idiom: `request.auth.token.email != null` separates real portal accounts from the anonymous capability sessions (programme, formerly footage), which carry no email claim. | Actions → **Button · Publish file storage rules** → type `publish` |
 | `cors.json` | Bucket CORS. Needed whenever a page reads bytes into itself rather than handing the browser a link — the programme zip download, and the website-archive index fetch. A plain single-file download is unaffected. | Not settable in any console UI, and not deployable through the Firebase CLI either. Cloud Shell: `gcloud storage buckets update gs://nl-tools.firebasestorage.app --cors-file=system/storage/cors.json` |
 
 The deploy checks what the rules *grant* before publishing, not just that they
@@ -35,7 +35,7 @@ deleting the other two was tidying up after it.
 
 | Prefix | Written by | Read by |
 |---|---|---|
-| `data/` | the Rebuild article index Action, through a service account | website-archive (`articles-index.json`) |
+| `data/` | the Timer · Website article stats Action, through a service account | website-archive (`articles-index.json`) |
 | `programme/<CODE>/` | clubs and NL admins, through the tool | the same tool, across all 73 folders |
 | `newsletter/library/` | staff, through the newsletter tool | the same tool |
 | `footage/national-league-cup/` | nothing — the tool was retired 15/08/2026 | nothing |

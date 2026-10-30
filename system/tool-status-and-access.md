@@ -50,7 +50,7 @@ approver but not a League Admin" is a real job).
 
 `system/rtdb/tools-registry.snapshot.json` **is** the `tools/` node. Changing a
 record means editing that file in a PR, then running **Actions →
-Deploy tools registry**. Run it in `report` mode first — it diffs live against
+Auto · Publish portal tool list**. Run it in `report` mode first — it diffs live against
 the snapshot and writes nothing. `publish` replaces the whole node, so a record
 that exists only in live is a deletion and publish refuses unless
 `allow_deletions` is ticked.
@@ -200,5 +200,5 @@ Lieu's org-chart approval routing.
 2. Move its record from `tools-registry.parked.json` →
    `tools-registry.snapshot.json` (it already carries `audience` + `defaults`;
    add `levels` unless the tool genuinely reads the admin level).
-3. Run **Actions → Deploy tools registry** in `report` mode, check the diff
+3. Run **Actions → Auto · Publish portal tool list** in `report` mode, check the diff
    shows only that record being created, then `publish`.

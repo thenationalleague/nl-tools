@@ -468,7 +468,7 @@ Two layers:
 
 ## Go-live checklist (browser only — nothing needs a terminal)
 
-1. **Deploy RTDB rules** — Actions → *Deploy RTDB rules* → type `publish`.
+1. **Button · Publish database rules** — Actions → *Button · Publish database rules* → type `publish`.
    The workflow ships `system/rtdb/rules.snapshot.json`; nothing is ever
    pasted into the Firebase console.
 2. **Anonymous auth** must be enabled (Authentication → Sign-in method).

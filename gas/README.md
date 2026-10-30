@@ -2,7 +2,7 @@
 
 **This directory is the source of truth for the consolidated Apps Script
 project.** Edit the `.js` files here, open a PR, and ship them with the
-**Deploy Apps Script** workflow. Two workflows keep it honest:
+**Button · Publish Apps Script** workflow. Two workflows keep it honest:
 
 | Workflow | Direction | Trigger |
 |---|---|---|
@@ -14,7 +14,7 @@ compares live against `gas/.deployed` — a fingerprint of what we last put ther
 or last saw there, written by both workflows — not against your branch, so the
 repo being ahead is normal and expected.
 
-If it stops you, run Sync Apps Script and **read its diff before merging**: it
+If it stops you, run Timer · Back up Apps Script and **read its diff before merging**: it
 restores anything the repo has deliberately deleted that live still has.
 
 It also redeploys the **existing** Web App rather than minting a new one, using
@@ -117,7 +117,7 @@ the **Cup Footage** fixture importer read from.
 1. Edit the `.js` file here and open a PR. It reviews like any other diff.
 2. For a new action, add one `if (action === '…') return …(body);` line to
    `doPost` (or `doGet`) in `Code.js`.
-3. Merge, then **Actions → Deploy Apps Script → Run workflow → type `publish`**.
+3. Merge, then **Actions → Button · Publish Apps Script → Run workflow → type `publish`**.
 
 That is the whole loop, and none of it needs a terminal or the Apps Script
 editor. The run pushes every file in this directory and redeploys the existing

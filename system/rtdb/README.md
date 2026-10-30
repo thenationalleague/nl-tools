@@ -24,7 +24,7 @@ project ended up with three files each headed "source of truth". They are in
 ## The contract
 
 1. **Both rules files are deployed from this repo. They are not snapshots
-   any more — they are the rules.** The **Deploy RTDB rules** workflow
+   any more — they are the rules.** The **Button · Publish database rules** workflow
    publishes them (Actions tab → Run workflow → type `publish`), with a
    **target** box choosing `both`, `nl-tools` or `nl-widgets`. No terminal, no
    console paste, and the repo cannot drift from live because the repo *is*

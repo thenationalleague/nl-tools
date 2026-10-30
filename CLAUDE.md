@@ -231,7 +231,7 @@ here: a squashed branch's commits never become ancestors of `main`, so it
 reports every branch on the remote as unmerged, however long ago it landed.
 (This said "every one of 241 branches" until 28/08/2026; the prune tool below
 has since done its job and the remote is down to a couple of dozen. The point
-stands, the number was decoration.) Use **Actions → Prune merged branches**
+stands, the number was decoration.) Use **Actions → Button · Tidy old branches**
 instead — report mode first, then `delete` with `prune` typed in. It runs three
 tests and spares anything that fails all of them; the two lists beside it,
 `.github/branch-prune-allow.txt` and `.github/branch-prune-keep.txt`, record the
@@ -336,6 +336,16 @@ Two things worth knowing, because both have already caught someone out:
 - The rules workflow is deliberately **not** on push. Rules govern every tool,
   and landing an unrelated PR must not be able to lock 72 clubs out of their
   own data as a side effect of a merge.
+
+**Naming GitHub jobs** (decided 30/10/2026). Every workflow's display `name:`
+starts with how it runs, so the Actions list groups itself:
+`Auto ·` (runs on merge), `Button ·` (only when someone presses Run workflow),
+`Timer ·` (on a schedule), `Recovery ·` (restore routes, rarely run). Then a
+plain description of the job: `Timer · Handbook PDF backup`, not
+`Render handbook PDF (v1.5)`. No times, versions or jargon in the name; the run
+page shows when it ran. **Never rename the `.yml` file to match.** Two Cloud
+Functions start workflows by file name (`fixtures-graphics.yml`,
+`render-handbook-pdf.yml`), and a renamed file breaks them silently.
 
 So: a PR that adds a function needs no follow-up, a PR that changes rules needs
 one button press, and neither needs a machine. Say which in the PR body.

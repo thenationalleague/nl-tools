@@ -41,7 +41,7 @@ v1.0 §8 gives three instructions. All three are wrong for this repository.
 | v1.0 said | Actually |
 |---|---|
 | "read `/tools/judgements/index.html` as the canonical reference tool" | **No.** `CLAUDE.md` has a section headed *"Derive from the canon, never from a sibling tool"*. Three tools were retired in August and each left dangling references in tools that survived. Scaffold from `system/_template/` via the `/new-tool` skill. Judgements is a fine worked example; it is not the reference. |
-| "Current RTDB rules (paste from Firebase console)" | **No.** `system/rtdb/rules.snapshot.json` **is** the deployed rules document. It ships from this repo via Actions → Deploy RTDB rules. Edit that file in the PR. Never paste rules from the console. |
+| "Current RTDB rules (paste from Firebase console)" | **No.** `system/rtdb/rules.snapshot.json` **is** the deployed rules document. It ships from this repo via Actions → Button · Publish database rules. Edit that file in the PR. Never paste rules from the console. |
 | "no hardcoded brand values" (correct, but incomplete) | Also: no hardcoded font sizes. Every size is a `--text-*` token. `--text-xs` is for kickers and fine print only; body text, labels, hints and buttons are `--text-sm`. Two tests enforce the 12px floor. |
 
 Also stale: v1.0 says "Brand/UI detail intentionally light — this spec goes
@@ -309,7 +309,7 @@ portal, not a design decision in this tool.
 ### 4.4 Registry and rules — two follow-ups the scaffold does NOT do
 
 1. **`tools/<toolKey>` record** in `system/rtdb/tools-registry.snapshot.json`.
-   That file **is** the registry; it deploys via Actions → Deploy tools registry
+   That file **is** the registry; it deploys via Actions → Auto · Publish portal tool list
    (report mode first). Without a record the page is superadmin-only and
    invisible on the portal.
    - `audience: "club"` — clubs need it.
@@ -342,8 +342,8 @@ He has **no CLI access**. Everything ships through GitHub Actions from a browser
 | What | How |
 |---|---|
 | The tool's HTML/CSS/JS | merge to `main` — GitHub Pages, no build step |
-| RTDB rules | Actions → **Deploy RTDB rules**, type `publish` |
-| `tools/` registry | Actions → **Deploy tools registry** — `report` first, then `publish` |
+| RTDB rules | Actions → **Button · Publish database rules**, type `publish` |
+| `tools/` registry | Actions → **Auto · Publish portal tool list** — `report` first, then `publish` |
 | Apps Script | Actions → **Deploy GAS**, type `publish` |
 
 Say in the PR body which of these the change needs. A PR that changes rules
