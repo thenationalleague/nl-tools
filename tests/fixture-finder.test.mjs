@@ -116,11 +116,27 @@ test('a club possibly still in the FA Cup has the round flagged; one beaten is n
   assert.ok(!texts.some((t) => /^ALP in/.test(t)));
 });
 
+test('a slot outside the 35 days is flagged first and never clean; one inside is not flagged for it', () => {
+  const game = postponed(A, B, '2026-09-12');
+  const res = run(game, [], {}, { today: '2026-09-13' });
+  const out = res.slots.find((x) => !x.within35);
+  assert.ok(out, 'there is a slot outside the window');
+  assert.equal(out.flags[0].cat, 'window', 'listed first');
+  /* With another flag on the day it still comes first. */
+  const busy = on(run(game, [g(C, D, null, { comp: 'fa-cup', round: 'R1' })], {}, { today: '2026-11-01' }), '2026-11-07');
+  assert.ok(busy.flags.length > 1);
+  assert.equal(busy.flags[0].cat, 'window', 'first, ahead of the cup flag');
+  assert.equal(out.flags[0].level, 'amber', 'so never green');
+  assert.match(out.flags[0].text, /^\d+ days from the original date$/);
+  assert.ok(res.slots.filter((x) => x.within35).every((x) => !x.flags.some((f) => f.cat === 'window')));
+});
+
 test('a round drawn without a club means it is out; a round before its division enters means nothing', () => {
   const game = postponed(A, B, '2026-09-12');
   const drawn = [g(C, D, null, { comp: 'fa-cup', round: 'R1' })];
   const r1 = on(run(game, drawn, {}, { today: '2026-11-01' }), '2026-11-07');
-  assert.deepEqual([...r1.flags.map((f) => f.text)], ['FAC R1 Saturday, both out']);
+  /* 56 days out, so the window flag comes first (v1.7); the cup flag is the point here. */
+  assert.deepEqual([...r1.flags.filter((f) => f.cat !== 'window').map((f) => f.text)], ['FAC R1 Saturday, both out']);
   /* National clubs enter at 4Q: the 2Q replay Tuesday is no concern of theirs. */
   const q2 = on(run(game, [], {}, { today: '2026-09-13' }), '2026-09-22');
   assert.ok(!q2.flags.some((f) => /FAC/.test(f.text)));

@@ -176,7 +176,9 @@ Richard 28/10/2026); a cup round while still in; an international window
 (fewest flags), date order within. 35-day window counts from the **original
 fixture date**, **both ways** (changed 28/10/2026: a game postponed well
 ahead can be brought forward); slots beyond it show under a divider, not
-hidden, and fade on the calendar.
+hidden. Outside the window is a flag on the slot, listed first, so such a
+slot is never green (changed 30/10/2026: they used to fade on the calendar;
+the window is a flag, not a reason to make the day harder to read).
 
 **Display.** *(Changed 28/10/2026.)* One calendar, Mon–Sun, each day split:
 the home club's game in the top half, the away club's below; a continuous run
