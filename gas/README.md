@@ -55,8 +55,6 @@ files if a diff is ever needed.
 | `Emails.js` | 138 | HTML email templates used by the above. |
 | `Vacancies.js` | 244 | Vacancy submission verification + notification email. |
 | `FixtureSync.js` | 428 | Time-driven NLS → RTDB fixture sync (see below). |
-| `ClaudioChat.js` | 3,275 | Anthropic API proxy with tool-use, for Claudio. |
-| `ClaudioStats.js` | 3,169 | Historical NL statistics engine behind Claudio's tools. |
 | `Tests.js` | 46 | Manual test functions, run from the editor. Never web-facing. |
 | `appsscript.json` | — | The manifest. A change to scopes or runtime is exactly the drift worth seeing. |
 
@@ -64,11 +62,12 @@ Five pages still call this backend through `NL.endpoints.gas`, including the
 login page. Programme Packs was the sixth until it was retired on 15/08/2026,
 superseded by `/programme/` on Firebase Storage — which took the 17 `pp_*`
 routes, the Drive browser and **the last Google Drive dependency in the
-project** with it. Two dispatch lines are commented out rather than deleted —
-`chaseEmail` and `claudio` — because both forward to Anthropic with a key from
-Script Properties, from a web app that is public by construction. While the
-tools in front of them are off the portal they are cost-abuse surface and
-nothing else. It is a live backend, not a residue — see
+project** with it. The AI proxies are gone: `chaseEmail` with Chase HQ
+(15/08/2026) and `claudio` with Claudio (30/10/2026, `ClaudioChat.js` and
+`ClaudioStats.js` deleted). Their Anthropic keys may still sit in Script
+Properties (`ANTHROPIC_KEY`, `CLAUDIO_ANTHROPIC_KEY`,
+`MEETING_NOTES_ANTHROPIC_KEY`). Nothing reads them now, so delete them and
+revoke them at Anthropic. It is a live backend, not a residue — see
 [`../system/gas-to-functions-migration.md`](../system/gas-to-functions-migration.md)
 for where it is going.
 
