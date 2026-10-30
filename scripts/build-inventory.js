@@ -390,6 +390,78 @@ function gitFacts(relPath) {
 
 /* ── main ────────────────────────────────────────────────────────────────── */
 
+
+/* ── background jobs ─────────────────────────────────────────────────────
+   Added 30/10/2026 (Declutter): the Estate tool is the one place that lists
+   everything that exists, and pages are only part of it. The Cloud Functions
+   and GitHub workflows are read from the repo here, so the list can never
+   fall behind the code. Apps Script projects outside gas/ and Claude skills
+   live outside this repo, so they are kept by hand in system/estate.json. */
+
+const TRIGGERS = {
+  onSchedule: 'timer', onCall: 'called by a page', onRequest: 'web address',
+  onValueCreated: 'database change', onValueWritten: 'database change',
+  onValueDeleted: 'database change', onValueUpdated: 'database change',
+  makeTrigger: 'database change'
+};
+
+function scanFunctions() {
+  const dir = path.join(REPO, 'functions');
+  if (!fs.existsSync(dir)) return [];
+  const out = [];
+  for (const f of fs.readdirSync(dir).filter((n) => n.endsWith('.js') && n !== 'index.js').sort()) {
+    const src = fs.readFileSync(path.join(dir, f), 'utf8');
+    const re = /^exports\.([A-Za-z0-9]+)\s*=\s*([A-Za-z]+)\(/gm;
+    let m;
+    while ((m = re.exec(src))) {
+      const [, name, call] = m;
+      if (name.startsWith('_') || !TRIGGERS[call]) continue;
+      let schedule = null;
+      let timeZone = null;
+      if (call === 'onSchedule') {
+        const near = src.slice(m.index, m.index + 600);
+        /* The options object runs to its first closing brace: they are flat,
+           and stopping there keeps the next function's options out. */
+        const own = near.slice(0, near.indexOf('}') + 1);
+        let sm = /schedule:\s*["'`]([^"'`]+)["'`]/.exec(own);
+        let scope = own;
+        /* onSchedule(SCHED_OPTS, …): the schedule sits in a named options
+           object declared elsewhere in the same file. */
+        const arg = /^onSchedule\(\s*([A-Z_][A-Z0-9_]*)\s*,/.exec(near.slice(near.indexOf('onSchedule(')));
+        if (!sm && arg) {
+          const decl = new RegExp('const\\s+' + arg[1] + '\\s*=\\s*\\{[\\s\\S]*?schedule:\\s*["\'`]([^"\'`]+)["\'`]').exec(src);
+          if (decl) {
+            sm = decl;
+            scope = src.slice(decl.index, src.indexOf('}', decl.index) + 1);
+          }
+        }
+        schedule = sm ? sm[1] : null;
+        /* Recorded only when the code says. Left out, the time zone is the
+           platform default, which the page does not guess at. */
+        const tz = /timeZone:\s*["'`]([^"'`]+)["'`]/.exec(scope);
+        if (tz) timeZone = tz[1];
+      }
+      out.push({ id: 'fn:' + name, kind: 'function', name, file: 'functions/' + f,
+                 trigger: TRIGGERS[call], schedule, timeZone });
+    }
+  }
+  return out;
+}
+
+function scanWorkflows() {
+  const dir = path.join(REPO, '.github/workflows');
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir).filter((n) => /\.ya?ml$/.test(n)).sort().map((f) => {
+    const src = fs.readFileSync(path.join(dir, f), 'utf8');
+    const name = (/^name:\s*(.+)$/m.exec(src) || [])[1] || f;
+    const on = /^on:\s*\n((?:[ \t]+.*\n|\s*\n)+)/m.exec(src);
+    const keys = on ? (on[1].match(/^  ([a-z_]+):/gm) || []).map((k) => k.trim().replace(':', '')) : [];
+    const crons = (src.match(/cron:\s*['"]([^'"]+)['"]/g) || []).map((c) => /['"]([^'"]+)['"]/.exec(c)[1]);
+    return { id: 'gh:' + f, kind: 'workflow', name: name.replace(/^['"]|['"]$/g, '').trim(),
+             file: '.github/workflows/' + f, triggers: keys, schedule: crons };
+  });
+}
+
 function main() {
   if (!process.argv.includes('--allow-shallow')) assertFullHistory();
 
@@ -700,7 +772,8 @@ function main() {
     },
     orphanRecords,
     ungatedRegistered,
-    pages
+    pages,
+    jobs: scanFunctions().concat(scanWorkflows())
   };
 
   fs.mkdirSync(path.dirname(OUT), { recursive: true });
@@ -711,6 +784,7 @@ function main() {
   console.log(`  species: ${Object.entries(c.bySpecies).map(([k, v]) => `${k} ${v}`).join(', ')}`);
   console.log(`  ${c.parkedTools} parked tool(s); ${c.unregisteredTools} in neither registry file`);
   console.log(`  ${c.noInbound} page(s) with no inbound repo link`);
+  console.log(`  ${inventory.jobs.length} background job(s): functions and GitHub workflows`);
   if (orphanRecords.length) {
     console.log(`  ${orphanRecords.length} registry record(s) pointing at a missing page`);
   }

@@ -1,7 +1,32 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Estate
-  Version: v0.9 (29/10/2026)
+  Version: v1.0 (30/10/2026)
+
+  v1.0 (30/10/2026) — Declutter: Estate becomes the main reference, in
+  plain English. Three tabs:
+    Everything        one row per thing we run: every tool (its admin,
+                      reader and club pages folded into the one row), every
+                      website widget and loose page, every cloud job and
+                      GitHub job (scanned from the repo by
+                      scripts/build-inventory.js), and the Apps Script
+                      projects and Claude skills that live outside the repo
+                      (kept by hand in /system/estate.json). Says what each
+                      does, who can open it, where it runs, how much it is
+                      used or when it runs, and Richard's status and note.
+    Pages in detail   the old technical table, unchanged apart from its
+                      filters.
+    Plans and records the meta shelf and document library.
+  First page on NL.filterButton (nl-utils v1.47): the chip groups are gone
+  from the detail view too, so this page is off the brand-canon test's
+  OLD_CONTROL_PAGES list.
+  Usage is opens by signed-in people over the last 90 days, summed from
+  app-data/ops-data/daily (written nightly by functions/usage-rollup.js;
+  counts only, no names). Visits made with a club code are not counted
+  there yet, so pages reached that way show only their staff side.
+  Why estate.json is fetched by the page rather than folded into the
+  generated inventory: a status or note edited there shows as soon as the
+  merge is live, without waiting for the inventory job.
 
   v0.9 (29/10/2026) — Declutter: brand-dev/ deleted, so its Brand Dev
   link is gone from the reference list and the Sandbox note says so.
@@ -142,6 +167,15 @@
 
     window.NL_CHANGELOG = [
       {
+        date: '30/10/2026',
+        version: 'v1.0',
+        items: [
+          'New Everything tab: every tool, website widget, page, background job and Claude skill in one plain-English list, with who can open it, where it runs, how much it is used and its status.',
+          'The old table is now the Pages in detail tab, and the plans and records have a tab of their own.',
+          'Filters are now buttons that open a short list, in place of the rows of pills.'
+        ]
+      },
+      {
         date: '29/10/2026',
         version: 'v0.9',
         items: [
@@ -240,8 +274,10 @@
   .est-search {
     flex: 1 1 260px;
     min-width: 200px;
-    padding: 8px 12px;
-    border: 1px solid var(--border);
+    min-height: var(--control-h);
+    box-sizing: border-box;
+    padding: 0 12px;
+    border: 1px solid var(--navy-200);
     border-radius: var(--radius-sm);
     font: inherit;
     font-size: var(--text-sm);
@@ -392,6 +428,19 @@
   }
 
   .est-note { font-size: var(--text-xs); color: var(--text-muted); margin-top: 18px; line-height: 1.5; }
+
+  /* Everything tab. The row's name and what it does share a cell, as do the
+     status and its note, so the table is six columns and reads on the
+     1280-wide screen without its words being squeezed to a few per line. */
+  .est-filters { margin-bottom: 14px; }
+  .est-all td:first-child { min-width: 260px; }
+  .est-name { font-variation-settings: 'wght' 700; color: var(--navy); text-decoration: none; }
+  a.est-name:hover { text-decoration: underline; }
+  .est-does { display: block; max-width: 52ch; line-height: 1.4; margin-top: 2px; }
+  .est-sub { display: block; margin-top: 3px; }
+  .est-cell { white-space: nowrap; }
+  .est-statnote { display: block; color: var(--text-muted); font-size: var(--text-xs); line-height: 1.4; max-width: 40ch; margin-top: 3px; }
+  .est-statnote:first-child { margin-top: 0; }
 </style>
 </head>
 <body>
@@ -402,40 +451,51 @@
 <div id="pageWrap">
   <div class="page">
 
-    <div class="stats" id="estStats"></div>
-
-    <div class="filter-bar filter-bar--stacked">
-      <div class="filter-row">
-        <input type="search" class="est-search" id="estSearch"
-               placeholder="Search path, title, description or RTDB key" aria-label="Search the estate">
-        <button class="btn btn--ghost btn--sm" id="estCopy">Copy paths</button>
-      </div>
-      <div class="filter-row">
-        <span class="filter-label">Role</span>
-        <div class="chip-group" id="estRoles"></div>
-      </div>
-      <div class="filter-row">
-        <span class="filter-label">Flags</span>
-        <div class="chip-group" id="estFlags"></div>
-      </div>
+    <!-- A closed set of three places in the tool, so tabs. -->
+    <div class="tabs" role="tablist" id="estTabs">
+      <button type="button" class="tab active" role="tab" aria-selected="true" data-view="all">Everything</button>
+      <button type="button" class="tab" role="tab" aria-selected="false" data-view="tech">Pages in detail</button>
+      <button type="button" class="tab" role="tab" aria-selected="false" data-view="meta">Plans and records</button>
     </div>
 
-    <div class="table-wrap est-wrap" id="estTools"></div>
-    <div id="estFamilies"></div>
+    <section id="viewAll" role="tabpanel">
+      <div class="stats" id="allStats"></div>
+      <div class="filter-btn-row est-filters">
+        <input type="search" class="est-search" id="allSearch" placeholder="Search" aria-label="Search everything">
+        <div id="fKind"></div>
+        <div id="fDoor"></div>
+        <div id="fRuns"></div>
+        <div id="fStatus"></div>
+      </div>
+      <div class="table-wrap est-wrap" id="allTable"><div class="empty-state">Loading…</div></div>
+      <p class="est-note" id="allNote"></p>
+    </section>
+
+    <section id="viewTech" role="tabpanel" hidden>
+      <div class="stats" id="estStats"></div>
+      <div class="filter-btn-row est-filters">
+        <input type="search" class="est-search" id="estSearch"
+               placeholder="Search path, title, description or RTDB key" aria-label="Search the pages">
+        <div id="estRoles"></div>
+        <div id="estFlags"></div>
+        <button class="btn btn--ghost btn--sm" id="estCopy">Copy paths</button>
+      </div>
+      <div class="table-wrap est-wrap" id="estTools"></div>
+      <div id="estFamilies"></div>
+      <p class="est-note" id="estNote"></p>
+    </section>
 
     <!-- The master layer. Curated, not generated: the inventory knows pages,
          but which page is meta-tooling and what each document DECIDES is
          editorial knowledge, and the whole point of this shelf is that it is
          findable — CLAUDE.md carried the line "these exist and are not linked
          from anywhere a session would find them" for a month before this. -->
-    <section class="est-meta">
-      <h2 class="est-meta__h">Meta — tools about the estate</h2>
+    <section id="viewMeta" role="tabpanel" hidden>
+      <h2 class="est-meta__h">Tools about the estate</h2>
       <div class="est-meta__grid" id="estMetaTools"></div>
-      <h2 class="est-meta__h">Library — plans, decisions and records</h2>
+      <h2 class="est-meta__h">Plans, decisions and records</h2>
       <div class="est-meta__list" id="estLibrary"></div>
     </section>
-
-    <p class="est-note" id="estNote"></p>
 
   </div>
 </div>
@@ -488,7 +548,7 @@
     { key: 'auth-guard', letter: 'G', name: 'auth-guard.js' }
   ];
 
-  var state = { data: null, search: '', role: null, flag: null };
+  var state = { data: null, search: '', role: [], flag: [] };
 
   /* ── flags ─────────────────────────────────────────────────────────────── */
 
@@ -524,9 +584,9 @@
   }
 
   function matches(page) {
-    if (state.role && page.role !== state.role) return false;
-    if (state.flag) {
-      if (!flagsFor(page).some(function (f) { return f.key === state.flag; })) return false;
+    if (state.role.length && state.role.indexOf(page.role) === -1) return false;
+    if (state.flag.length) {
+      if (!flagsFor(page).some(function (f) { return state.flag.indexOf(f.key) !== -1; })) return false;
     }
     if (state.search) {
       var hay = [page.url, page.path, page.title, page.summary, page.toolKey]
@@ -703,37 +763,40 @@
     }).join('');
   }
 
-  function renderChips() {
+  /* Counts are over the whole estate and never change while the page is
+     open, so the two buttons are made once. A flag with no pages is left
+     out rather than offered with a zero. */
+  function makeTechFilters() {
     var tools = state.data.pages.filter(function (p) { return p.family === 'tool'; });
-
     var counts = {};
     tools.forEach(function (p) { counts[p.role] = (counts[p.role] || 0) + 1; });
-    var rc = ['<button class="chip' + (state.role ? '' : ' active') + '" data-role="">All</button>'];
-    ROLES.forEach(function (r) {
-      if (!counts[r.key]) return;
-      rc.push('<button class="chip' + (state.role === r.key ? ' active' : '') +
-              '" data-role="' + r.key + '">' + NL.escHtml(r.label) + ' ' + counts[r.key] + '</button>');
+    NL.filterButton('#estRoles', {
+      label: 'Role',
+      options: ROLES.filter(function (r) { return counts[r.key]; }).map(function (r) {
+        return { value: r.key, label: r.label, count: counts[r.key] };
+      }),
+      onChange: function (v) { state.role = v; renderTables(); }
     });
-    document.getElementById('estRoles').innerHTML = rc.join('');
 
     var fc = {};
     state.data.pages.forEach(function (p) {
       flagsFor(p).forEach(function (f) { fc[f.key] = (fc[f.key] || 0) + 1; });
     });
-    var fl = ['<button class="chip' + (state.flag ? '' : ' active') + '" data-flag="">Any</button>'];
-    [
-      { key: 'norules',      label: 'No RTDB rules' },
-      { key: 'openadmin',    label: 'Admin, no auth-guard' },
-      { key: 'ungated',      label: 'Gated in name only' },
-      { key: 'canon',        label: 'Canon drift' },
-      { key: 'unregistered', label: 'Unaccounted for' },
-      { key: 'orphan',       label: 'No inbound link' }
-    ].forEach(function (f) {
-      if (!fc[f.key]) return;
-      fl.push('<button class="chip' + (state.flag === f.key ? ' active' : '') +
-              '" data-flag="' + f.key + '">' + NL.escHtml(f.label) + ' ' + fc[f.key] + '</button>');
+    NL.filterButton('#estFlags', {
+      label: 'Flags',
+      allLabel: 'Any',
+      options: [
+        { key: 'norules',      label: 'No RTDB rules' },
+        { key: 'openadmin',    label: 'Admin, no auth-guard' },
+        { key: 'ungated',      label: 'Gated in name only' },
+        { key: 'canon',        label: 'Canon drift' },
+        { key: 'unregistered', label: 'Unaccounted for' },
+        { key: 'orphan',       label: 'No inbound link' }
+      ].filter(function (f) { return fc[f.key]; }).map(function (f) {
+        return { value: f.key, label: f.label, count: fc[f.key] };
+      }),
+      onChange: function (v) { state.flag = v; renderTables(); }
     });
-    document.getElementById('estFlags').innerHTML = fl.join('');
   }
 
   function renderTables() {
@@ -779,6 +842,11 @@
       note: 'The working contract every Claude session reads first. The closest thing to a constitution.' }
   ];
   var LIBRARY = [
+    { p: 'system/RUNBOOK.md',                   d: 'How the system is run from a browser. Being rewritten in the Declutter.' },
+    { p: 'system/estate.json',                  d: 'The hand-kept half of this page: names, statuses and notes, plus Apps Script and Claude skills.' },
+    { p: 'system/fixture-management-plan.md',   d: 'The master fixtures record and its date finder, broadcast and AMI parts.' },
+    { p: 'system/guest-pass-plan.md',           d: 'Scoping, not built: a code for outsiders that opens a set list of tools.' },
+    { p: 'system/deployer-migration.md',        d: 'Parked: the one account every deploy uses, and how to split it safely.' },
     { p: 'system/CONSOLIDATION.md',             d: 'The master plan — every tool draws from one shared place. Seven workstreams.' },
     { p: 'system/tool-status-and-access.md',    d: 'Which tools are live, parked or retired, and the per-role access model for each.' },
     { p: 'system/retired/README.md',            d: 'Every retired tool’s post-mortem — read before proposing to build anything that existed once.' },
@@ -805,7 +873,6 @@
 
   function render() {
     renderStats();
-    renderChips();
     renderTables();
     renderNote();
   }
@@ -813,19 +880,7 @@
   /* ── events ────────────────────────────────────────────────────────────── */
 
   function wire() {
-    document.getElementById('estRoles').addEventListener('click', function (e) {
-      var btn = e.target.closest('[data-role]');
-      if (!btn) return;
-      state.role = btn.getAttribute('data-role') || null;
-      render();
-    });
-
-    document.getElementById('estFlags').addEventListener('click', function (e) {
-      var btn = e.target.closest('[data-flag]');
-      if (!btn) return;
-      state.flag = btn.getAttribute('data-flag') || null;
-      render();
-    });
+    makeTechFilters();
 
     var search = document.getElementById('estSearch');
     search.addEventListener('input', function () {
@@ -840,17 +895,381 @@
     });
   }
 
+  /* ── Everything tab ─────────────────────────────────────────────────────
+     One row per thing we run. Pages come from the generated inventory and are
+     folded into one row per tool (a tool's admin, reader and club pages are
+     the same tool to the person deciding whether it earns its place). Cloud
+     and GitHub jobs come from the same scan. /system/estate.json adds the
+     plain names, status and notes, plus what lives outside the repo. */
+
+  var ESTATE_URL = '/system/estate.json';
+  var REPO_URL = 'https://github.com/thenationalleague/nl-tools';
+  var USAGE_DAYS = 90;
+
+  var KINDS = ['Tool', 'Website widget', 'Page', 'Background job', 'Claude skill'];
+  var KIND_PLURAL = { 'Tool': 'Tools', 'Website widget': 'Website widgets', 'Page': 'Other pages',
+                      'Background job': 'Background jobs', 'Claude skill': 'Claude skills' };
+  var DOORS = { open: 'Anyone', code: 'Club code', club: 'Clubs and League staff',
+                staff: 'League staff', superadmin: 'Superadmin only' };
+  var DOOR_ORDER = ['Anyone', 'Club code', 'Clubs and League staff', 'League staff', 'Superadmin only'];
+  var STATUSES = ['Core', 'Occasional', 'Dead', 'Not decided'];
+  var STATUS_PILL = { 'Core': 'pill--approved', 'Occasional': 'pill--info', 'Dead': 'pill--rejected' };
+
+  var all = { rows: [], search: '', kind: [], door: [], runs: [], status: [], usage: null };
+
+  /* Which row a page belongs to. A page with no toolKey of its own joins the
+     tool that owns its folder (dazn/ is the DAZN tool's club side); loose
+     pages are a row each, keyed the way estate.json names them. */
+  function rowIdFor(p, folderTool) {
+    if (p.toolKey) return 'tool:' + p.toolKey;
+    if (folderTool[p.group]) return 'tool:' + folderTool[p.group];
+    if (!p.group || p.group === 'embeds') return 'page:' + p.path;
+    if (p.group === 'public' || p.group === 'assets') return 'page:' + p.dir;
+    return 'page:' + p.group;
+  }
+
+  function uniq(list) {
+    return list.filter(function (v, i) { return v && list.indexOf(v) === i; });
+  }
+
+  function pageRows(pages, items) {
+    var keys = {};
+    pages.forEach(function (p) { if (p.toolKey) (keys[p.group] = keys[p.group] || {})[p.toolKey] = 1; });
+    var folderTool = {};
+    Object.keys(keys).forEach(function (g) {
+      var k = Object.keys(keys[g]);
+      if (k.length === 1) folderTool[g] = k[0];
+    });
+
+    var byId = {}, order = [];
+    pages.forEach(function (p) {
+      var id = rowIdFor(p, folderTool);
+      if (!byId[id]) { byId[id] = []; order.push(id); }
+      byId[id].push(p);
+    });
+
+    return order.map(function (id) {
+      var ps = byId[id];
+      var main = ps.filter(function (p) { return p.toolKey && p.role === 'main'; })[0] ||
+                 ps.filter(function (p) { return p.toolKey; })[0] ||
+                 ps.filter(function (p) { return p.role === 'main'; })[0] || ps[0];
+      var it = items[id] || {};
+      var isTool = id.indexOf('tool:') === 0;
+      var isEmbed = main.species === 'embed';
+      /* A redirect is a forwarding address, not a way in: it would add
+         "Anyone" to a staff tool that has an old public URL. */
+      var real = ps.filter(function (p) { return p.species !== 'redirect'; });
+      var doors = uniq((real.length ? real : ps).map(function (p) { return DOORS[p.access && p.access.kind]; }))
+        .sort(function (a, b) { return DOOR_ORDER.indexOf(a) - DOOR_ORDER.indexOf(b); });
+      var auto = [];
+      if (main.registryState === 'parked') auto.push('Off the portal (parked)');
+      return {
+        id: id,
+        kind: isTool ? 'Tool' : isEmbed ? 'Website widget' : 'Page',
+        name: it.name || (main.registry && main.registry.label) || main.title || main.path,
+        does: it.does || (main.registry && main.registry.description) || '',
+        url: (isTool && main.registry && main.registry.url) || main.url,
+        sub: ps.length > 1 ? ps.length + ' pages' : '',
+        subTitle: ps.map(function (p) { return p.url; }).join('\n'),
+        doors: doors,
+        runsOn: isEmbed ? 'NL website' : 'nl.tools',
+        toolKey: isTool ? id.slice(5) : null,
+        lifespan: it.lifespan || '',
+        status: it.status || 'Not decided',
+        note: [it.note].concat(auto).filter(Boolean).join('. '),
+        hay: ps.map(function (p) { return p.url; }).join(' ')
+      };
+    });
+  }
+
+  /* ── schedules in words ─────────────────────────────────────────────── */
+
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+                'August', 'September', 'October', 'November', 'December'];
+
+  /* The cron shapes this repo actually uses, in words. Anything else is
+     shown as written rather than guessed at. */
+  function cronText(c) {
+    var f = c.trim().split(/\s+/);
+    if (f.length !== 5) return c;
+    var m = f[0], h = f[1], dom = f[2], mon = f[3], dow = f[4];
+    if (dow !== '*') return c;
+    var hours = /^\d+-\d+$/.test(h) ? ', ' + pad(+h.split('-')[0]) + ':00–' + pad(+h.split('-')[1]) + ':59' : '';
+    if (dom === '*' && mon === '*') {
+      if (m === '*' && h === '*') return 'Every minute';
+      var step = /^\*\/(\d+)$/.exec(m);
+      if (step && (h === '*' || hours)) return 'Every ' + step[1] + ' minutes' + hours;
+      if (/^\d+(,\d+)+$/.test(m) && (h === '*' || hours)) {
+        var ms = m.split(',').map(Number), gap = 60 / ms.length;
+        var even = ms.every(function (v, i) { return i === 0 || v - ms[i - 1] === gap; });
+        if (even) return 'Every ' + gap + ' minutes' + hours;
+      }
+      if (/^\d+$/.test(m) && h === '*') return 'Hourly';
+      if (/^\d+$/.test(m) && /^\d+(,\d+)*$/.test(h)) {
+        return 'Daily ' + h.split(',').map(function (x) { return pad(+x) + ':' + pad(+m); }).join(' and ');
+      }
+      return c;
+    }
+    if (/^\d+$/.test(dom) && /^\d+$/.test(mon) && /^\d+$/.test(m) && /^\d+$/.test(h)) {
+      return dom + ' ' + MONTHS[+mon - 1] + ' ' + pad(+h) + ':' + pad(+m);
+    }
+    return c;
+  }
+
+  /* Firebase's own shorthand ("every 1 minutes", "every day 03:20"). */
+  function fnScheduleText(s) {
+    var e = /^every (\d+) (minute|hour)s?$/.exec(s);
+    if (e) return e[1] === '1' ? (e[2] === 'minute' ? 'Every minute' : 'Hourly') : 'Every ' + e[1] + ' ' + e[2] + 's';
+    var d = /^every day (\d\d:\d\d)$/.exec(s);
+    if (d) return 'Daily ' + d[1];
+    return cronText(s);
+  }
+
+  function zone(tz) {
+    if (tz === 'Europe/London') return ' UK time';
+    if (tz === 'Etc/UTC' || tz === 'UTC') return ' UTC';
+    return '';
+  }
+
+  var FN_WHEN = { 'called by a page': 'When a page asks', 'database change': 'When its data changes',
+                  'web address': 'When its address is called' };
+
+  function jobRows(jobs, items) {
+    return jobs.map(function (j) {
+      var it = items[j.id] || {};
+      var isFn = j.kind === 'function';
+      var when;
+      if (isFn) {
+        when = j.trigger === 'timer' && j.schedule
+          ? fnScheduleText(j.schedule) + (/\d\d:\d\d|:00/.test(fnScheduleText(j.schedule)) ? zone(j.timeZone) : '')
+          : (FN_WHEN[j.trigger] || j.trigger);
+      } else {
+        /* GitHub runs every timer on UTC. */
+        var parts = (j.schedule || []).map(function (c) {
+          var t = cronText(c);
+          return t + (/\d\d:\d\d/.test(t) ? ' UTC' : '');
+        });
+        var tr = j.triggers || [];
+        if (tr.indexOf('push') !== -1) parts.push('On merge');
+        if (tr.indexOf('pull_request') !== -1) parts.push('On each pull request');
+        if (tr.indexOf('repository_dispatch') !== -1) parts.push('Started by a cloud job');
+        if (!parts.length && tr.indexOf('workflow_dispatch') !== -1) parts.push('By button');
+        when = parts.join('; ');
+      }
+      return {
+        id: j.id,
+        kind: 'Background job',
+        name: it.name || j.name,
+        does: it.does || '',
+        url: isFn ? REPO_URL + '/blob/main/' + j.file : REPO_URL + '/actions/workflows/' + j.file.split('/').pop(),
+        sub: '', subTitle: '',
+        doors: [],
+        runsOn: isFn ? 'Google cloud' : 'GitHub',
+        when: when,
+        lifespan: it.lifespan || '',
+        status: it.status || 'Not decided',
+        note: it.note || '',
+        hay: j.file
+      };
+    });
+  }
+
+  function extraRows(extra) {
+    return (extra || []).map(function (x) {
+      return {
+        id: x.id, kind: x.kind, name: x.name, does: x.does || '', url: x.url || '',
+        sub: '', subTitle: '', doors: [], runsOn: x.runsOn || '', when: x.use || '',
+        lifespan: x.lifespan || '', status: x.status || 'Not decided', note: x.note || '', hay: ''
+      };
+    });
+  }
+
+  /* ── usage ──────────────────────────────────────────────────────────── */
+
+  /* Opens per tool over the last 90 days, from the nightly counters. Days
+     there are UTC dates, so the cut-off is too. */
+  function readUsage() {
+    var from = new Date(Date.now() - USAGE_DAYS * 864e5).toISOString().slice(0, 10);
+    return db.ref('app-data/ops-data/daily').orderByKey().startAt(from).once('value').then(function (snap) {
+      var out = {};
+      snap.forEach(function (day) {
+        var d = day.key;
+        day.forEach(function (t) {
+          var v = t.val() || {}, o = out[t.key] = out[t.key] || { opens: 0, last: null };
+          o.opens += v.opens || 0;
+          if (v.opens && (!o.last || d > o.last)) o.last = d;
+        });
+      });
+      return out;
+    });
+  }
+
+  function useCell(r) {
+    if (r.kind === 'Background job' || r.kind === 'Claude skill') {
+      return r.when ? NL.escHtml(r.when) : '<span class="est-muted">—</span>';
+    }
+    if (!r.toolKey) {
+      return '<span class="est-muted" title="Only opens by signed-in people are counted">Not counted</span>';
+    }
+    if (!all.usage) return '<span class="est-muted">—</span>';
+    var u = all.usage[r.toolKey];
+    if (!u || !u.opens) return 'Not opened';
+    return '<span class="est-cell">' + u.opens.toLocaleString('en-GB') + (u.opens === 1 ? ' open' : ' opens') + '</span>' +
+      '<span class="est-sub est-muted">last ' + NL.escHtml(NL.formatDate(u.last)) + '</span>';
+  }
+
+  /* ── table ──────────────────────────────────────────────────────────── */
+
+  function allMatches(r) {
+    if (all.kind.length && all.kind.indexOf(r.kind) === -1) return false;
+    if (all.door.length && !r.doors.some(function (d) { return all.door.indexOf(d) !== -1; })) return false;
+    if (all.runs.length && all.runs.indexOf(r.runsOn) === -1) return false;
+    if (all.status.length && all.status.indexOf(r.status) === -1) return false;
+    if (all.search) {
+      var hay = [r.name, r.does, r.note, r.url, r.id, r.runsOn, r.when, r.hay].concat(r.doors)
+        .filter(Boolean).join(' ').toLowerCase();
+      if (hay.indexOf(all.search) === -1) return false;
+    }
+    return true;
+  }
+
+  function allRowHtml(r) {
+    var name = r.url
+      ? '<a class="est-name" href="' + NL.escHtml(r.url) + '" target="_blank" rel="noopener">' + NL.escHtml(r.name) + '</a>'
+      : '<span class="est-name">' + NL.escHtml(r.name) + '</span>';
+    var status = STATUS_PILL[r.status]
+      ? '<span class="pill ' + STATUS_PILL[r.status] + '">' + NL.escHtml(r.status) + '</span>'
+      : '<span class="est-muted">' + NL.escHtml(r.status) + '</span>';
+    return '<tr>' +
+      '<td>' + name +
+        (r.does ? '<span class="est-does">' + NL.escHtml(r.does) + '</span>' : '') +
+        (r.sub ? '<span class="est-sub est-muted" title="' + NL.escHtml(r.subTitle) + '">' + NL.escHtml(r.sub) + '</span>' : '') +
+      '</td>' +
+      '<td>' + (r.doors.length ? r.doors.map(NL.escHtml).join('<br>') : '<span class="est-muted">—</span>') + '</td>' +
+      '<td class="est-cell">' + NL.escHtml(r.runsOn || '—') + '</td>' +
+      '<td>' + useCell(r) + '</td>' +
+      '<td class="est-cell">' + (r.lifespan ? NL.escHtml(r.lifespan) : '<span class="est-muted">—</span>') + '</td>' +
+      '<td>' + status + (r.note ? '<span class="est-statnote">' + NL.escHtml(r.note) + '</span>' : '') + '</td>' +
+      '</tr>';
+  }
+
+  var ALL_HEAD = '<thead><tr><th>Name and what it does</th><th>Who can open it</th><th>Runs on</th>' +
+    '<th title="Tools: opens by signed-in people in the last 90 days. Jobs: when they run.">Use, or when it runs</th>' +
+    '<th>Lifespan</th><th>Status</th></tr></thead>';
+
+  function renderAll() {
+    var rows = all.rows.filter(allMatches);
+    var el = document.getElementById('allTable');
+    if (!rows.length) { el.innerHTML = '<div class="empty-state">Nothing matches.</div>'; return; }
+    var body = '';
+    KINDS.forEach(function (k) {
+      var group = rows.filter(function (r) { return r.kind === k; });
+      if (!group.length) return;
+      body += '<tbody><tr class="est-grouprow"><td colspan="6">' + NL.escHtml(KIND_PLURAL[k]) +
+        ' <span>' + group.length + '</span></td></tr>' + group.map(allRowHtml).join('') + '</tbody>';
+    });
+    el.innerHTML = '<table class="est-table est-all">' + ALL_HEAD + body + '</table>';
+  }
+
+  function countBy(fn) {
+    var c = {};
+    all.rows.forEach(function (r) { [].concat(fn(r)).forEach(function (v) { if (v) c[v] = (c[v] || 0) + 1; }); });
+    return c;
+  }
+
+  function opts(order, counts) {
+    var keys = order.filter(function (k) { return counts[k]; })
+      .concat(Object.keys(counts).filter(function (k) { return order.indexOf(k) === -1; }).sort());
+    return keys.map(function (k) { return { value: k, label: k, count: counts[k] }; });
+  }
+
+  function setupAll(inv, est) {
+    var items = (est && est.items) || {};
+    all.rows = pageRows(inv.pages, items)
+      .concat(jobRows(inv.jobs || [], items))
+      .concat(extraRows(est && est.extra));
+    all.rows.forEach(function (r) {
+      if (KINDS.indexOf(r.kind) === -1) r.kind = 'Page';
+    });
+    all.rows.sort(function (a, b) { return a.name.localeCompare(b.name, 'en-GB', { sensitivity: 'base' }); });
+
+    var kinds = countBy(function (r) { return r.kind; });
+    document.getElementById('allStats').innerHTML = KINDS.map(function (k) {
+      return '<div class="stat"><div class="stat__num">' + (kinds[k] || 0) + '</div>' +
+             '<div class="stat__label">' + NL.escHtml(KIND_PLURAL[k]) + '</div></div>';
+    }).join('');
+
+    NL.filterButton('#fKind', { label: 'What it is', options: opts(KINDS, kinds),
+      onChange: function (v) { all.kind = v; renderAll(); } });
+    NL.filterButton('#fDoor', { label: 'Who can open it', options: opts(DOOR_ORDER, countBy(function (r) { return r.doors; })),
+      onChange: function (v) { all.door = v; renderAll(); } });
+    NL.filterButton('#fRuns', { label: 'Runs on', options: opts(['nl.tools', 'NL website', 'Google cloud', 'GitHub'], countBy(function (r) { return r.runsOn; })),
+      onChange: function (v) { all.runs = v; renderAll(); } });
+    NL.filterButton('#fStatus', { label: 'Status', options: opts(STATUSES, countBy(function (r) { return r.status; })),
+      onChange: function (v) { all.status = v; renderAll(); } });
+
+    var search = document.getElementById('allSearch');
+    search.addEventListener('input', function () {
+      all.search = search.value.trim().toLowerCase();
+      renderAll();
+    });
+
+    document.getElementById('allNote').textContent =
+      'Pages and jobs are read from the repo (list updated ' + NL.formatDateTime(inv.generated) + '). ' +
+      'Names, statuses and notes, and the Apps Script projects and Claude skills, are kept by hand in system/estate.json. ' +
+      'Use counts opens by signed-in people over the last ' + USAGE_DAYS + ' days; visits made with a club code are not counted yet.';
+    renderAll();
+  }
+
+  /* ── tabs ───────────────────────────────────────────────────────────── */
+
+  var VIEWS = { all: 'viewAll', tech: 'viewTech', meta: 'viewMeta' };
+
+  function wireTabs() {
+    var tabs = document.getElementById('estTabs');
+    tabs.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-view]');
+      if (!btn) return;
+      var view = btn.getAttribute('data-view');
+      Array.prototype.forEach.call(tabs.querySelectorAll('.tab'), function (t) {
+        var on = t === btn;
+        t.classList.toggle('active', on);
+        t.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      Object.keys(VIEWS).forEach(function (k) {
+        document.getElementById(VIEWS[k]).hidden = k !== view;
+      });
+    });
+  }
+
   /* ── boot ──────────────────────────────────────────────────────────────── */
 
   window.TOOL = window.TOOL || {};
   window.TOOL.boot = function () {
     renderMeta();   /* static shelf — renders even if the inventory fetch fails */
-    fetch(INVENTORY_URL, { cache: 'no-cache' })
-      .then(function (r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
+    wireTabs();
+    var getJson = function (url) {
+      return fetch(url, { cache: 'no-cache' }).then(function (r) {
+        if (!r.ok) throw new Error(url + ' HTTP ' + r.status);
         return r.json();
-      })
-      .then(function (data) {
+      });
+    };
+    /* The hand-kept file and the usage counters only add detail: if either
+       fails, the list still shows, and the note says what is missing. */
+    var est = getJson(ESTATE_URL).catch(function (err) {
+      console.error('[estate] estate.json load failed', err);
+      return null;
+    });
+    /* A thrown error (not just a rejected read) must not stop the list. */
+    var usage = new Promise(function (ok) { ok(readUsage()); }).catch(function (err) {
+      console.error('[estate] usage read failed', err);
+      return null;
+    });
+
+    Promise.all([getJson(INVENTORY_URL), est, usage])
+      .then(function (res) {
+        var data = res[0];
         var ungated = {};
         (data.ungatedRegistered || []).forEach(function (r) { ungated[r.url] = true; });
         data.pages.forEach(function (p) { p.ungatedButRegistered = Boolean(ungated[p.url]); });
@@ -858,12 +1277,18 @@
         state.data = data;
         wire();
         render();
+
+        all.usage = res[2];
+        setupAll(data, res[1]);
+        if (!res[1]) NL.toast('Could not load the names and statuses (system/estate.json)', 'error');
+        if (!res[2]) NL.toast('Could not load the use counts', 'error');
       })
       .catch(function (err) {
         console.error('[estate] inventory load failed', err);
-        document.getElementById('estTools').innerHTML =
-          '<div class="empty-state">Could not load the inventory. ' +
-          'It is built by the build-inventory workflow on push to main.</div>';
+        var msg = '<div class="empty-state">Could not load the list. ' +
+          'It is built by the Update the Estate list job on every merge.</div>';
+        document.getElementById('allTable').innerHTML = msg;
+        document.getElementById('estTools').innerHTML = msg;
       });
   };
 
