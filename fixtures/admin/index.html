@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixture Management
-  Version: v2.7 (28/10/2026)
+  Version: v2.8 (30/10/2026)
   File: /fixtures/admin/index.html
 
   The League's master fixture record: every game in every competition, with
@@ -9,6 +9,12 @@
   behind it, is system/fixture-management-plan.md.
 
   CHANGELOG
+    v2.8 (30/10/2026) – Declutter: the filters are buttons that open a
+      short list (NL.filterButton) – Competition on the Fixtures tab, and
+      Competition, Status and Dates on Broadcast. Several competitions or
+      statuses can be picked at once, each with its count; nothing picked
+      means all. Fixtures / Results and Awaiting a date / Move a fixture
+      are tabs, as they switch what the page shows.
     v2.7 (28/10/2026) — Rearrangements: Move a fixture, beside Awaiting a
       date, finds a new date for a game that still has one, chosen by home
       club then away club; its 35 days count from its current date and
@@ -191,6 +197,14 @@
     var NL_TOOL_KEY = 'ops-fixture-management';
 
     window.NL_CHANGELOG = [
+      {
+        date: '30/10/2026',
+        version: 'v2.8',
+        items: [
+          'Filters are now buttons that open a short list. Pick several competitions or statuses at once.',
+          'Fixtures / Results and Awaiting a date / Move a fixture are tabs.'
+        ]
+      },
       {
         date: '28/10/2026',
         version: 'v2.7',
@@ -439,6 +453,7 @@
   /* The games awaiting a date: a dropdown, so the calendar has the width. */
   .fm-rr-pick { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; min-width: 0; }
   .fm-rr-modes { margin: 0; }
+  .fm-when { margin: 0; }
   .fm-rr-pick .fm-picker { min-width: 220px; }
   .fm-rr-v { color: var(--text-muted); }
   .fm-pen { display: inline-flex; gap: 4px; align-items: center; font-size: var(--text-sm); color: var(--text-muted); }
@@ -670,12 +685,12 @@
     <section data-panel="fixtures">
       <div class="stats" id="fmStats"></div>
       <div class="filter-bar">
-        <div class="chip-group" id="fmComps" role="group" aria-label="Competition"></div>
-        <div class="fm-picker" id="fmClub"></div>
-        <div class="chip-group" id="fmWhen" role="group" aria-label="Dates">
-          <button class="chip active" type="button" data-when="fixtures">Fixtures</button>
-          <button class="chip" type="button" data-when="results">Results</button>
+        <div class="tabs fm-when" id="fmWhen" role="tablist" aria-label="Dates">
+          <button class="tab active" type="button" role="tab" aria-selected="true" data-when="fixtures">Fixtures</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" data-when="results">Results</button>
         </div>
+        <div id="fmComps"></div>
+        <div class="fm-picker" id="fmClub"></div>
       </div>
       <div id="fmBody"></div>
     </section>
@@ -686,12 +701,9 @@
 
     <section data-panel="broadcast" hidden>
       <div class="filter-bar">
-        <div class="chip-group" id="fmBcComps" role="group" aria-label="Competition"></div>
-        <div class="chip-group" id="fmBcStatus" role="group" aria-label="Status"></div>
-        <div class="chip-group" id="fmBcWhen" role="group" aria-label="Dates">
-          <button class="chip active" type="button" data-when="upcoming">Upcoming</button>
-          <button class="chip" type="button" data-when="all">All</button>
-        </div>
+        <div id="fmBcComps"></div>
+        <div id="fmBcStatus"></div>
+        <div id="fmBcWhen"></div>
       </div>
       <p class="fm-bc-tally" id="fmBcTally"></p>
       <div id="fmBcBody"></div>
@@ -745,14 +757,15 @@
     reasons: [],
     season: null,
     fixtures: {},
-    comp: 'all',
+    comp: [],            /* competition keys; empty = every competition */
+    compBtn: null,       /* the Competition filter button */
     club: null,
     when: 'fixtures',    /* 'fixtures' (today on) | 'results' (played); a past season is results only */
     need: null,          /* 'awaiting' | 'noOpta' | 'cupDue' — a stat card filter */
     picker: null,
     limit: PAGE,
     tab: 'fixtures',
-    bc: { comp: 'all', status: 'all', when: 'upcoming', limit: PAGE },
+    bc: { comp: [], status: [], when: 'upcoming', limit: PAGE, btns: null },
     rr: { mode: 'waiting', moveHome: null, moveAway: null, moveKey: null, key: null, mondays: false, thursdays: false, fridays: false, sundays: false, moreOpen: false, anchor: null, scroll: null, drawn: null, slot: null, data: {} },
     current: null,       /* the current season key */
     listen: null,        /* the live fixtures ref for the viewed season */
@@ -841,7 +854,11 @@
     S.when = past ? 'results' : 'fixtures';
     var when = document.getElementById('fmWhen');
     when.hidden = past;
-    Array.prototype.forEach.call(when.children, function (c) { c.classList.toggle('active', c.getAttribute('data-when') === S.when); });
+    Array.prototype.forEach.call(when.children, function (c) {
+      var on = c.getAttribute('data-when') === S.when;
+      c.classList.toggle('active', on);
+      c.setAttribute('aria-selected', String(on));
+    });
     document.getElementById('fmAddRow').hidden = past;
     loadCrowds(key);
     if (S.unavRef) S.unavRef.off();
@@ -928,14 +945,7 @@
       S.when = b.getAttribute('data-when');
       S.limit = PAGE;
       setActive('fmWhen', b);
-      render();
-    });
-    document.getElementById('fmComps').addEventListener('click', function (e) {
-      var b = e.target.closest('[data-comp]');
-      if (!b) return;
-      S.comp = b.getAttribute('data-comp');
-      S.limit = PAGE;
-      setActive('fmComps', b);
+      b.parentNode.querySelectorAll('[data-when]').forEach(function (c) { c.setAttribute('aria-selected', String(c === b)); });
       render();
     });
     document.getElementById('fmStats').addEventListener('click', function (e) {
@@ -959,17 +969,24 @@
     });
   }
 
+  /* Competition filter: several at once, nothing chosen = all of them.
+     Counts are the season's games in each, refreshed on every render. */
+  function compOptions(keys, recs) {
+    var n = {};
+    recs.forEach(function (r) { n[r.comp] = (n[r.comp] || 0) + 1; });
+    return keys.map(function (k) { return { value: k, label: F.COMP_BY_KEY[k].label, count: num(n[k] || 0) }; });
+  }
   function renderComps() {
-    var html = '<button class="chip active" type="button" data-comp="all">All</button>';
-    F.COMPS.forEach(function (c) {
-      html += '<button class="chip" type="button" data-comp="' + c.key + '">' + esc(c.label) + '</button>';
+    S.compBtn = NL.filterButton('#fmComps', {
+      label: 'Competition',
+      options: compOptions(F.COMPS.map(function (c) { return c.key; }), []),
+      onChange: function (v) { S.comp = v; S.limit = PAGE; render(); }
     });
-    document.getElementById('fmComps').innerHTML = html;
   }
 
   /* ── List ─────────────────────────────────────────────────────────── */
   function passes(r, t) {
-    if (S.comp !== 'all' && r.comp !== S.comp) return false;
+    if (S.comp.length && S.comp.indexOf(r.comp) === -1) return false;
     if (S.club && r.home.name !== S.club && r.away.name !== S.club) return false;
     if (S.need === 'awaiting' && !F.awaiting(r)) return false;
     if (S.need === 'noOpta' && (r.optaID || F.COMP_BY_KEY[r.comp].fa)) return false;
@@ -988,6 +1005,7 @@
     var t = today();
     var all = Object.keys(S.fixtures).map(function (k) { return S.fixtures[k]; });
     renderStats(F.counts(S.fixtures, t));
+    S.compBtn.setOptions(compOptions(F.COMPS.map(function (c) { return c.key; }), all));
 
     var body = document.getElementById('fmBody');
     if (!all.length) {
@@ -1148,28 +1166,20 @@
      is flagged for review until confirmed here. FA ties are not ours to
      show, so they are not listed. */
   var BC_COMPS = ['national', 'north', 'south', 'nl-cup'];
-  var BC_STATUS = [['all', 'All'], ['tbc', 'TBC'], ['worldwide', 'Worldwide'], ['overseas', 'Overseas'],
+  var BC_STATUS = [['tbc', 'TBC'], ['worldwide', 'Worldwide'], ['overseas', 'Overseas'],
     ['not-selected', 'Not selected'], ['unavailable', 'Unavailable'], ['review', 'Review']];
 
   function wireBroadcast() {
-    var comps = document.getElementById('fmBcComps');
-    comps.innerHTML = '<button class="chip active" type="button" data-v="all">All</button>' + BC_COMPS.map(function (k) {
-      return '<button class="chip" type="button" data-v="' + k + '">' + esc(F.COMP_BY_KEY[k].label) + '</button>';
-    }).join('');
-    var status = document.getElementById('fmBcStatus');
-    status.innerHTML = BC_STATUS.map(function (x, i) {
-      return '<button class="chip' + (i ? '' : ' active') + '" type="button" data-v="' + x[0] + '">' + esc(x[1]) + '</button>';
-    }).join('');
-    [['fmBcComps', 'comp'], ['fmBcStatus', 'status'], ['fmBcWhen', 'when']].forEach(function (g) {
-      document.getElementById(g[0]).addEventListener('click', function (e) {
-        var b = e.target.closest('[data-v],[data-when]');
-        if (!b) return;
-        S.bc[g[1]] = b.getAttribute('data-v') || b.getAttribute('data-when');
-        S.bc.limit = PAGE;
-        setActive(g[0], b);
-        renderBroadcast();
-      });
-    });
+    /* Competition and Status: several at once, nothing chosen = all.
+       Dates: Upcoming by default; cleared, it shows every date. */
+    function changed(field) {
+      return function (v) { S.bc[field] = field === 'when' ? (v || 'all') : v; S.bc.limit = PAGE; renderBroadcast(); };
+    }
+    S.bc.btns = {
+      comp: NL.filterButton('#fmBcComps', { label: 'Competition', options: compOptions(BC_COMPS, []), onChange: changed('comp') }),
+      status: NL.filterButton('#fmBcStatus', { label: 'Status', options: [], onChange: changed('status') }),
+      when: NL.filterButton('#fmBcWhen', { label: 'Dates', multiple: false, value: 'upcoming', options: [], onChange: changed('when') })
+    };
     var body = document.getElementById('fmBcBody');
     body.addEventListener('change', function (e) {
       var tr = e.target.closest('[data-key]');
@@ -1206,13 +1216,29 @@
     document.getElementById('fmBcTally').innerHTML = 'Moved by DAZN <strong>' + moves + ' / ' + F.DAZN_MOVES + '</strong> · AMI <strong>' +
       ami + '</strong>' + (review ? ' · <strong>' + review + '</strong> to review' : '');
 
-    var list = all.filter(function (r) {
+    /* A game matches a status by its availability, or by Review when it is
+       waiting on one. A game to review shows whatever its date. */
+    function statusHit(r) {
       var b = r.broadcast || {};
-      if (!r.date) return false;
-      if (f.comp !== 'all' && r.comp !== f.comp) return false;
-      if (f.status === 'review') { if (!b.review) return false; }
-      else if (f.status !== 'all' && b.availability !== f.status) return false;
-      if (f.when === 'upcoming' && f.status !== 'review' && r.date < t) return false;
+      return f.status.indexOf(b.availability) !== -1 || (f.status.indexOf('review') !== -1 && !!b.review);
+    }
+    var dated = all.filter(function (r) { return r.date; });
+    var upcoming = dated.filter(function (r) { return r.date >= t; }).length;
+    var sc = {};
+    dated.forEach(function (r) {
+      var b = r.broadcast || {};
+      if (b.availability) sc[b.availability] = (sc[b.availability] || 0) + 1;
+      if (b.review) sc.review = (sc.review || 0) + 1;
+    });
+    f.btns.comp.setOptions(compOptions(BC_COMPS, dated));
+    f.btns.status.setOptions(BC_STATUS.map(function (x) { return { value: x[0], label: x[1], count: num(sc[x[0]] || 0) }; }));
+    f.btns.when.setOptions([{ value: 'upcoming', label: 'Upcoming', count: num(upcoming) }]);
+
+    var list = dated.filter(function (r) {
+      var b = r.broadcast || {};
+      if (f.comp.length && f.comp.indexOf(r.comp) === -1) return false;
+      if (f.status.length && !statusHit(r)) return false;
+      if (f.when === 'upcoming' && r.date < t && !(f.status.indexOf('review') !== -1 && b.review)) return false;
       return true;
     }).sort(F.compare);
 
@@ -1412,9 +1438,12 @@
   /* Two jobs, a closed set: games that have lost their date, and any
      fixture that has one but needs to move. */
   function modeBar(waiting) {
-    return '<div class="chip-group fm-rr-modes" role="group" aria-label="Rearrange">' +
-      '<button class="chip' + (S.rr.mode === 'waiting' ? ' active' : '') + '" type="button" data-rr-mode="waiting">Awaiting a date (' + num(waiting) + ')</button>' +
-      '<button class="chip' + (S.rr.mode === 'move' ? ' active' : '') + '" type="button" data-rr-mode="move">Move a fixture</button></div>';
+    function tab(mode, text) {
+      var on = S.rr.mode === mode;
+      return '<button class="tab' + (on ? ' active' : '') + '" type="button" role="tab" aria-selected="' + on + '" data-rr-mode="' + mode + '">' + text + '</button>';
+    }
+    return '<div class="tabs fm-rr-modes" role="tablist" aria-label="Rearrange">' +
+      tab('waiting', 'Awaiting a date (' + num(waiting) + ')') + tab('move', 'Move a fixture') + '</div>';
   }
 
   /* Move a fixture: the home club, the away club, then which of their

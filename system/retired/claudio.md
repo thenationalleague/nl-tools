@@ -92,11 +92,12 @@ Each one became a prompt rule above. Mark got `getStaff` because of the first.
 
 ## What stays behind
 
-**RTDB data: deleted 30/10/2026** from the Firebase console, along with Holiday & Lieu's. Richard was offered an export first; any copy is his, outside the repo.
-- `app-data/staff-claudio/`: every user's chat history (title, persona, timestamps, messages) and an unused usage branch.
-- `claudio/usage/<uid>/<yyyy-mm-dd>` at the database root: the real daily counts, costs and token figures, written by Apps Script with the legacy secret. No rules entry ever covered it.
+**RTDB data, not deleted.** Export or delete it from the Firebase console.
+- `app-data/staff-claudio/conversations/<uid>/<conversationId>`: every user's chat history (title, persona, timestamps, messages). It may include HR questions, so treat it as personal data.
+- `app-data/staff-claudio/usage/<uid>/...`: read by the page and never written by anything, so probably empty.
+- `claudio/usage/<uid>/<yyyy-mm-dd>` **at the database root**: the real daily counts, costs and token figures, written by Apps Script with the legacy secret. No rules entry covers it, so only the console can reach it.
 
-**Rules: removed 30/10/2026,** after the data. The `app-data/staff-claudio` block is gone from `system/rtdb/rules.snapshot.json` and leaves the live database at the next **Button · Publish database rules** run. Its role check was written by hand; a rebuild should generate it with `scripts/rtdb-level-rule.mjs`.
+**Rules.** The `app-data/staff-claudio` block stays in the deployed rules until the next **Button · Publish database rules** run. It gives conversations owner read/write for superadmin, admin and staff roles, and usage owner read with no writes. The role check was written by hand; a rebuild should generate it with `scripts/rtdb-level-rule.mjs`.
 
 **Apps Script.**
 - **The two files stay in the live project until someone runs Button · Publish Apps Script.** Until then they are unreachable, because the dispatch line is gone from `gas/Code.js`.

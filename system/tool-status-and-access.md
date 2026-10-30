@@ -85,8 +85,8 @@ so nothing is lost.
 | **Local Media** | `media-local-media` | Manage | Off | The League's press list (added 29/10/2026). Clubs send their local media contacts through the open form at `/local-media/` (no login, no code; anonymous create-only write). The console at `/local-media/admin/` lists, filters, exports and edits them, and staff add contacts by hand. Admin-only by default because these are journalists' own contact details; grant League Staff per user. Use and Manage do the same: the whole console. Rules are the generated level rule plus "has a role", so an anonymous form user never qualifies |
 | **Brand Exposure** | `ops-brand-exposure` | Manage | Off | Commercial team only — grants are per-user, like Commercial Compliance. Holds match measurements produced by `scripts/board-exposure-match.py` on a laptop; the tool never sees video |
 
-Two tools carry a registry record but no row above: `ops-club-codes` and
-`ops-commercial-compliance`. Noticed 27/08/2026 while adding Brand Exposure and
+Two tools carried a registry record but no row above: `ops-club-codes` and
+`ops-commercial-compliance` (parked 30/10/2026). Noticed 27/08/2026 while adding Brand Exposure and
 left rather than guessed at — their access models need reading off the tools
 themselves, not inferred from the registry defaults.
 
@@ -156,11 +156,12 @@ replacement and the page no longer makes it. Cookieless, no banner, no
 identity — and Google Signals must stay off, because which topic somebody
 opened is special-category health data under UK GDPR Art. 9.
 
-## Parked — 1
+## Parked — 2
 
 | Tool | Key | Audience | What's needed |
 |---|---|---|---|
 | **Transfer Centre** | `media-transfer-centre` | club | Prototype functions; needs bringing on-brand. Sheet backend dropped — see `system/retired/live-blog-and-transfer-centre.md` |
+| **Commercial Compliance** | `ops-commercial-compliance` | staff | Parked 30/10/2026 in the Declutter: work in progress, and the idea (what clubs owe partners, and how it is checked) is not mapped out yet. Code, data and rules kept. The club page at `/commercial-compliance/` still opens with a club code, but nothing links to it. Bring back with the checklist below once the idea is settled |
 
 ## Retired
 

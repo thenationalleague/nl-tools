@@ -2,7 +2,13 @@
 <!--
   NL Tools — Broadcast selections (public standalone page)
   File: /broadcast-selections/index.html
-  v3.11 (07/09/2026)
+  v3.26 (30/10/2026)
+
+  v3.26 (30/10/2026) – Declutter: the league filter is a button that
+  opens a short list (NL.filterButton), with each league's count of
+  picked games. Several leagues can be shown at once; nothing picked
+  means all of them, as "All leagues" did. The choice is still
+  remembered on this device.
 
   v3.25 (08/09/2026) — Chart audit: Gates landing fills its card with
   true-size text, its 1× line is labelled, panel subtitles get a
@@ -298,7 +304,7 @@
   v1.2 (04/09/2026) — Full canon furniture: the real nl-topbar carries the
   title (rendered sessionless via NL.renderTopbar(null); the profile
   cluster is hidden — canon candidate: nl-topbar wants a public option),
-  the league switcher is a canon .chip-group, the mode switcher canon
+  the league switcher is a canon segmented control, the mode switcher canon
   .tabs, tables sit in canon .table-wrap, and every font size is on the
   --text-* scale with weights carrying font-variation-settings; radii,
   tracking and focus rings from brand tokens. The bespoke masthead is
@@ -354,6 +360,7 @@
   <script>
     window.NL_TOOL = { title: "Broadcast Travel", toolKey: "pub-broadcast-selections", kicker: "The National League", isPortal: true };
     window.NL_CHANGELOG = [
+      { version: "v3.26", date: "30/10/2026", changes: ["The league filter is now a button that opens a short list. Pick one league or several."] },
       { version: "v3.25", date: "08/09/2026", changes: ["Gates landing chart fills its card, its 1× line is named, and side-by-side panels start level"] },
       { version: "v3.24", date: "08/09/2026", changes: ["Distances y-axis labels no longer touch the axis name — the margin now fits the widest label"] },
       { version: "v3.23", date: "07/09/2026", changes: ["Distances chart tidied: centred title, controls under the chart, vertical y name, centred x name, labels sitting in their pills, lit chips keep their colour dot"] },
@@ -435,14 +442,11 @@
   @media (max-width: 520px) { #bselWho { display: none; } }
   header h1 { font-size: var(--text-lg); font-weight: 900; font-variation-settings: 'wght' 900; letter-spacing: -0.02em; margin: 0 0 14px; text-wrap: balance; }
 
-  #divbar { flex-wrap: wrap; margin-bottom: 8px; }
-  #divbar[hidden] { display: none; }
-  #divbar > button { display: inline-flex; align-items: center; gap: 6px; }
-  #divbar .plg { height: 15px; width: auto; }
+  #divbar { margin-bottom: 8px; }
   .avgs td .dlg { height: 15px; width: auto; vertical-align: -2px; margin-right: 7px; }
-  #divbar > button:focus-visible, .gwbar button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .gwbar button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
-  /* Weekend strip: a justified one-off, not a .chip-group — an unbounded,
+  /* Weekend strip: a justified one-off, not a filter button — an unbounded,
      scrolling set of dated pills carrying counts. Sizes from the scale. */
   .gwbar { display: flex; gap: 6px; margin: 0 0 10px; flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
   .gwbar button {
@@ -766,7 +770,7 @@
     <div id="rqWrap" hidden><div class="table-wrap"><table id="rqTable"></table></div><div id="rqStrip"></div></div>
     <div id="distWrap" hidden><div id="distChart"></div><div class="table-wrap"><table id="distTable"></table></div></div>
   </div>
-  <div class="chip-group" id="divbar" role="group" aria-label="League shown on the map and cards"></div>
+  <div class="filter-btn-row" id="divbar"></div>
   <div class="gwbar" id="gwbar" role="tablist" aria-label="Weekend"></div>
   <div id="upbar">
     <button id="upTog" type="button" aria-pressed="false">Show unpicked games</button>
@@ -923,7 +927,7 @@ function setSeason(k) {
   buildGateStats();
 }
 
-let divSel = "ALL", weIdx = null, activeFx = -1, mode = "season", showUp = false;
+let divSel = [], weIdx = null, activeFx = -1, mode = "season", showUp = false;
 /* Distances tab: raw miles or multiples of each division's own baseline
    ("our teams are more spread out" priced in); lit area fills persist. */
 let distMode = "mi";
@@ -961,8 +965,11 @@ const CREST_ALIAS = { "Bournemouth": "AFC Bournemouth" };
 const crest = (n, div) => CREST_BASE
   ? '<img class="dlg" src="' + CREST_BASE + encodeURIComponent(CREST_ALIAS[n] || n) + '.png" alt="" onerror="this.onerror=null;this.style.display=\'none\'">'
   : dlogo(div, "dlg");
-try { divSel = localStorage.getItem("tbf-div") || "ALL"; } catch (e) {}
-if (divSel !== "ALL" && !DIVS[divSel]) divSel = "ALL";
+/* Leagues shown: none chosen = all. Stored comma-joined; the old single
+   value (or "ALL") reads the same way. */
+try { divSel = (localStorage.getItem("tbf-div") || "").split(","); } catch (e) {}
+divSel = divSel.filter(k => DIVS[k]);
+const inDivs = d => !divSel.length || divSel.includes(d);
 try { weIdx = localStorage.getItem("tbf-we"); } catch (e) {}
 try { showUp = localStorage.getItem("tbf-up") === "1"; } catch (e) {}
 try { ["tbf-from", "tbf-to", "tbf-divs", "tbf-fr"].forEach(k => localStorage.removeItem(k)); } catch (e) {}
@@ -973,12 +980,12 @@ setSeason(SEASON_KEY);
    L1, L2, NL — each block in kick-off order (stable sort keeps it). */
 const DIVORDER = { PL: 0, CH: 1, L1: 2, L2: 3, NL: 4 };
 const shownFx = we => {
-  const fx = FX.filter(f => f.we === we && (divSel === "ALL" || f.div === divSel));
-  return divSel === "ALL" ? fx.sort((a, b) => DIVORDER[a.div] - DIVORDER[b.div]) : fx;
+  const fx = FX.filter(f => f.we === we && inDivs(f.div));
+  return divSel.length !== 1 ? fx.sort((a, b) => DIVORDER[a.div] - DIVORDER[b.div]) : fx;
 };
 const shownUp = we => {
-  const fx = UPX.filter(f => f.we === we && (divSel === "ALL" || f.div === divSel));
-  return divSel === "ALL" ? fx.sort((a, b) => DIVORDER[a.div] - DIVORDER[b.div]) : fx;
+  const fx = UPX.filter(f => f.we === we && inDivs(f.div));
+  return divSel.length !== 1 ? fx.sort((a, b) => DIVORDER[a.div] - DIVORDER[b.div]) : fx;
 };
 
 /* Projection + coastline (identical to v1) */
@@ -1026,20 +1033,19 @@ const markerLayer = el("g", {});
 
 /* Bars */
 const divbar = document.getElementById("divbar");
-[["ALL", "All leagues"], ...Object.entries(DIVS)].forEach(([k, label]) => {
-  const b = document.createElement("button");
-  b.className = "chip";
-  b.innerHTML = (k === "ALL" ? "" : dlogo(k, "plg")) + label;
-  b.addEventListener("click", () => {
-    if (divSel === k) return;
-    divSel = k;
-    try { localStorage.setItem("tbf-div", k); } catch (e) {}
+/* Counts are the season's picked games in each league. */
+const divOptions = () => Object.entries(DIVS).map(([k, label]) =>
+  ({ value: k, label, count: FX.filter(f => f.div === k).length }));
+const divBtn = NL.filterButton(divbar, {
+  label: "League", allLabel: "All", ariaLabel: "League shown on the map and cards",
+  options: divOptions(), value: divSel,
+  onChange: v => {
+    divSel = v;
+    try { divSel.length ? localStorage.setItem("tbf-div", divSel.join(",")) : localStorage.removeItem("tbf-div"); } catch (e) {}
     /* Switching league changes the lens, never the date — the selected
        weekend carries across. */
     activeFx = -1; render();
-  });
-  b.dataset.k = k;
-  divbar.appendChild(b);
+  }
 });
 const gwbar = document.getElementById("gwbar");
 /* Drag-to-scroll on the weekend strip (mouse; touch scrolls natively). */
@@ -1696,7 +1702,7 @@ function renderClubTable() {
   const agg = {};
   for (const name in CLUBS) {
     const c = CLUBS[name];
-    if (divSel === "ALL" || c.div === divSel)
+    if (inDivs(c.div))
       agg[name] = { name, div: c.div, moved: 0, away: 0, trips: [],
         a_fri: 0, a_satE: 0, a_satL: 0, a_sun: 0, a_mon: 0,
         h_fri: 0, h_satE: 0, h_satL: 0, h_sun: 0, h_mon: 0 };
@@ -1785,7 +1791,7 @@ function renderClubTable() {
 }
 
 function render() {
-  [...divbar.children].forEach(b => { const on = b.dataset.k === divSel; b.setAttribute("aria-pressed", String(on)); b.classList.toggle("active", on); });
+  divBtn.setOptions(divOptions());
 
   const weekends = allWeekends;
   if (!weekends.includes(weIdx)) {
@@ -1820,7 +1826,7 @@ function render() {
      Home = games at their ground, Both = the lot. */
   const lensGames = list => list.filter(f =>
     clubHA === "away" ? f.a === clubLens : (f.h === clubLens || f.a === clubLens));
-  const inDiv = f => divSel === "ALL" || f.div === divSel;
+  const inDiv = f => inDivs(f.div);
   let fx;
   if (mode === "week") fx = shownFx(weIdx).concat(showUp ? shownUp(weIdx) : []);
   else if (mode === "club" && clubLens) fx = lensGames(FX).concat(showUp ? lensGames(UPX) : []);

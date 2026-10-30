@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Social Output
-  Version: v1.3 (19/10/2026)
+  Version: v1.4 (30/10/2026)
   File: /social-output/index.html
 
   Month-by-month record of what the league's social channels put out — own
@@ -26,6 +26,9 @@
   Logic with no DOM lives in _data.js (tested: tests/social-output.test.mjs).
 
   Changelog
+    v1.4 (30/10/2026) – Cadence channel filter is an NL.filterButton:
+                        several channels at once, nothing ticked = all.
+                        Offers only channels with posts that month, as before.
     v1.3 (19/10/2026) — Month chosen with the canon month picker
                         (NL.monthPicker), with ‹ › to step a month.
     v1.2 (16/10/2026) — Gap flags count what is already stored, so a month
@@ -94,6 +97,11 @@
     var NL_TOOL_KEY = 'media-social-output';
 
     window.NL_CHANGELOG = [
+      {
+        date: '30/10/2026',
+        version: 'v1.4',
+        items: ['The Cadence channel filter is now a button that opens a short list, and you can pick more than one channel.']
+      },
       {
         date: '19/10/2026',
         version: 'v1.3',
@@ -181,6 +189,7 @@
   .so-headline { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
   .so-headline h2 { font-size: var(--text-lg); color: var(--navy); }
 
+  .so-filters { margin-bottom: 20px; }
   /* Legend */
   .so-legend { display: flex; gap: 16px; font-size: var(--text-sm); margin-bottom: 10px; }
   .so-legend span { display: inline-flex; align-items: center; gap: 6px; }
@@ -319,7 +328,7 @@
     cache: {},          /* 'channel|yyyy-mm' -> { postKey: record } */
     status: {},         /* yyyy-mm -> { channel: info } */
     rules: null,        /* { channel: [rule] } as saved; null until read */
-    cadenceChannel: 'all',
+    cadenceChannel: [],     // channel keys ticked on Cadence; empty = all
     filters: { channel: '', kind: '', category: '', own: '', from: '', to: '', q: '' },
     shown: PAGE_SIZE,
     pending: null       /* import awaiting confirmation */
@@ -570,77 +579,85 @@
     return loadAll(month).then(function (all) {
       view.innerHTML = '';
       var withData = SD.CHANNELS.filter(function (c) { return Object.keys(all[c.key]).length; });
-      if (state.cadenceChannel !== 'all' && !all[state.cadenceChannel]) state.cadenceChannel = 'all';
+      var keys = withData.map(function (c) { return c.key; });
+      state.cadenceChannel = state.cadenceChannel.filter(function (k) { return keys.indexOf(k) >= 0; });
 
-      var chips = el('div', { className: 'chip-group', role: 'group', 'aria-label': 'Channel' });
-      [{ key: 'all', label: 'All channels' }].concat(withData).forEach(function (c) {
-        chips.appendChild(el('button', {
-          className: 'chip' + (state.cadenceChannel === c.key ? ' active' : ''), type: 'button', text: c.label,
-          'aria-pressed': state.cadenceChannel === c.key ? 'true' : 'false',
-          onclick: function () { state.cadenceChannel = c.key; render(); }
-        }));
+      var mount = el('div');
+      view.appendChild(el('div', { className: 'filter-btn-row so-filters' }, [mount]));
+      NL.filterButton(mount, {
+        label: 'Channel',
+        options: withData.map(function (c) { return { value: c.key, label: c.label }; }),
+        value: state.cadenceChannel,
+        onChange: function (v) { state.cadenceChannel = v; draw(); }
       });
-      view.appendChild(el('div', { className: 'toolbar' }, [el('div', { className: 'toolbar__left' }, [chips])]));
+      // Only the chart redraws on a tick, so the list stays open for the next.
+      var body = el('div');
+      view.appendChild(body);
+      draw();
 
-      var posts = [];
-      SD.CHANNELS.forEach(function (c) {
-        if (state.cadenceChannel === 'all' || state.cadenceChannel === c.key) posts = posts.concat(list(all[c.key]));
-      });
-      if (!posts.length) {
-        view.appendChild(el('div', { className: 'empty-state' }, [el('div', { className: 'empty-state__title', text: 'Nothing imported for ' + SD.monthLabel(month) })]));
-        return;
-      }
+      function draw() {
+        body.innerHTML = '';
+        var picked = state.cadenceChannel;
+        var posts = [];
+        SD.CHANNELS.forEach(function (c) {
+          if (!picked.length || picked.indexOf(c.key) >= 0) posts = posts.concat(list(all[c.key]));
+        });
+        if (!posts.length) {
+          body.appendChild(el('div', { className: 'empty-state' }, [el('div', { className: 'empty-state__title', text: 'Nothing imported for ' + SD.monthLabel(month) })]));
+          return;
+        }
 
-      var daily = SD.dailyCounts(posts, month);
-      var days = daily.days;
-      var max = niceMax(Math.max.apply(null, days.map(function (d) { return Math.max(d.own, d.reshare); })));
-      var cols = 'repeat(' + days.length + ', minmax(0, 1fr))';
+        var daily = SD.dailyCounts(posts, month);
+        var days = daily.days;
+        var max = niceMax(Math.max.apply(null, days.map(function (d) { return Math.max(d.own, d.reshare); })));
+        var cols = 'repeat(' + days.length + ', minmax(0, 1fr))';
 
-      view.appendChild(el('div', { className: 'section-head' }, [el('h2', { text: 'Posts per day' })]));
-      view.appendChild(el('div', { className: 'so-legend' }, [
-        el('span', null, [el('i', { className: 'so-swatch so-swatch--own' }), 'Own posts']),
-        el('span', null, [el('i', { className: 'so-swatch so-swatch--reshare' }), 'Reshares'])
-      ]));
-
-      var plot = el('div', { className: 'so-plot', style: 'grid-template-columns:' + cols });
-      [0, max / 2, max].forEach(function (v) {
-        plot.appendChild(el('div', { className: 'so-grid', style: 'bottom:' + (v / max * 100) + '%' }, [el('span', { text: fmt(v) })]));
-      });
-      days.forEach(function (d) {
-        var col = el('div', { className: 'so-day' }, [
-          el('div', { className: 'so-col so-col--own', style: 'height:' + (d.own / max * 100) + '%' }),
-          el('div', { className: 'so-col so-col--reshare', style: 'height:' + (d.reshare / max * 100) + '%' })
-        ]);
-        hoverable(col, DOW[d.dow] + ' ' + d.date.slice(8, 10) + '/' + d.date.slice(5, 7) + ': ' + d.own + ' own, ' + d.reshare + ' reshares');
-        plot.appendChild(col);
-      });
-      var xl = el('div', { className: 'so-xlabels', style: 'grid-template-columns:' + cols });
-      days.forEach(function (d) {
-        xl.appendChild(el('span', { className: d.dow === 6 ? 'is-sat' : '', text: String(d.day) }));
-      });
-      view.appendChild(el('div', { className: 'so-chart' }, [plot, xl]));
-      view.appendChild(el('p', { className: 'so-muted' }, [
-        'Saturdays in bold.' + (daily.undated ? ' ' + daily.undated + ' reshare' + (daily.undated === 1 ? '' : 's') +
-          ' of posts made before ' + SD.monthLabel(month) + ' are counted in the month but not on a day.' : '')
-      ]));
-
-      var tb = el('tbody');
-      days.forEach(function (d) {
-        tb.appendChild(el('tr', null, [
-          el('td', { text: DOW[d.dow] + ' ' + d.date.slice(8, 10) + '/' + d.date.slice(5, 7) + '/' + d.date.slice(0, 4) }),
-          el('td', { className: 'ta-right', text: String(d.own) }),
-          el('td', { className: 'ta-right', text: String(d.reshare) })
+        body.appendChild(el('div', { className: 'section-head' }, [el('h2', { text: 'Posts per day' })]));
+        body.appendChild(el('div', { className: 'so-legend' }, [
+          el('span', null, [el('i', { className: 'so-swatch so-swatch--own' }), 'Own posts']),
+          el('span', null, [el('i', { className: 'so-swatch so-swatch--reshare' }), 'Reshares'])
         ]));
-      });
-      view.appendChild(el('details', { className: 'disclosure', style: 'margin-bottom:24px' }, [
-        el('summary', { className: 'so-summary', text: 'As a table' }),
-        el('div', { className: 'table-wrap' }, [el('table', { className: 'table table--compact' }, [
-          el('thead', null, [el('tr', null, [el('th', { text: 'Day' }), el('th', { className: 'ta-right', text: 'Own' }), el('th', { className: 'ta-right', text: 'Reshares' })])]),
-          tb
-        ])])
-      ]));
 
-      renderHeatmap(view, posts, month);
+        var plot = el('div', { className: 'so-plot', style: 'grid-template-columns:' + cols });
+        [0, max / 2, max].forEach(function (v) {
+          plot.appendChild(el('div', { className: 'so-grid', style: 'bottom:' + (v / max * 100) + '%' }, [el('span', { text: fmt(v) })]));
+        });
+        days.forEach(function (d) {
+          var col = el('div', { className: 'so-day' }, [
+            el('div', { className: 'so-col so-col--own', style: 'height:' + (d.own / max * 100) + '%' }),
+            el('div', { className: 'so-col so-col--reshare', style: 'height:' + (d.reshare / max * 100) + '%' })
+          ]);
+          hoverable(col, DOW[d.dow] + ' ' + d.date.slice(8, 10) + '/' + d.date.slice(5, 7) + ': ' + d.own + ' own, ' + d.reshare + ' reshares');
+          plot.appendChild(col);
+        });
+        var xl = el('div', { className: 'so-xlabels', style: 'grid-template-columns:' + cols });
+        days.forEach(function (d) {
+          xl.appendChild(el('span', { className: d.dow === 6 ? 'is-sat' : '', text: String(d.day) }));
+        });
+        body.appendChild(el('div', { className: 'so-chart' }, [plot, xl]));
+        body.appendChild(el('p', { className: 'so-muted' }, [
+          'Saturdays in bold.' + (daily.undated ? ' ' + daily.undated + ' reshare' + (daily.undated === 1 ? '' : 's') +
+            ' of posts made before ' + SD.monthLabel(month) + ' are counted in the month but not on a day.' : '')
+        ]));
+
+        var tb = el('tbody');
+        days.forEach(function (d) {
+          tb.appendChild(el('tr', null, [
+            el('td', { text: DOW[d.dow] + ' ' + d.date.slice(8, 10) + '/' + d.date.slice(5, 7) + '/' + d.date.slice(0, 4) }),
+            el('td', { className: 'ta-right', text: String(d.own) }),
+            el('td', { className: 'ta-right', text: String(d.reshare) })
+          ]));
+        });
+        body.appendChild(el('details', { className: 'disclosure', style: 'margin-bottom:24px' }, [
+          el('summary', { className: 'so-summary', text: 'As a table' }),
+          el('div', { className: 'table-wrap' }, [el('table', { className: 'table table--compact' }, [
+            el('thead', null, [el('tr', null, [el('th', { text: 'Day' }), el('th', { className: 'ta-right', text: 'Own' }), el('th', { className: 'ta-right', text: 'Reshares' })])]),
+            tb
+          ])])
+        ]));
+
+        renderHeatmap(body, posts, month);
+      }
     });
   }
 

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Content Plan
-  Version: v3.6 (28/10/2026)
+  Version: v3.7 (30/10/2026)
   File: /content-plan/index.html
 
   Plans and records everything the media team publishes: website stories,
@@ -214,6 +214,9 @@
     v3.6 (28/10/2026) – Phone Week banners are solid (navy; darker navy at the
                         weekend; brand red for today) with white text, because the
                         pale ones blended into the page background.
+    v3.7 (30/10/2026) – Off the old chip controls (Declutter). Week / Month / List
+                        and Ideas' Open / Archived are canon tabs; Today and the
+                        arrows are plain buttons beside them. Same behaviour.
 -->
 <html lang="en">
 <head>
@@ -261,6 +264,13 @@
     var NL_TOOL_KEY = 'media-content-plan';
 
     window.NL_CHANGELOG = [
+      {
+        date: '30 October 2026',
+        version: 'v3.7',
+        items: [
+          'Week, Month and List (and Open and Archived on Ideas) are now tabs.'
+        ]
+      },
       {
         date: '28 October 2026',
         version: 'v3.6',
@@ -357,10 +367,11 @@
   }
 
   .cp-period { font-size: var(--text-md); font-variation-settings: 'wght' 800; color: var(--navy); white-space: nowrap; }
-  /* Toolbar: two segmented groups and two buttons, one height. */
+  /* Toolbar: Today and the arrows, the dates, the view tabs, Settings and Add. */
   #cpBar { margin-bottom: 12px; }
-  /* One control height (38px) across the groups, the Filters and Settings buttons and search. */
-  .cp-nav, .cp-modes { flex: none; background: var(--white); border: 1px solid var(--border); padding: 2px; height: 38px; box-sizing: border-box; }
+  .cp-nav { display: flex; gap: 4px; flex: none; }
+  .cp-viewtabs { margin-bottom: 0; flex: none; }
+  /* One control height (38px) across the Today/arrow, Filters and Settings buttons and search. */
   .cp-ctl { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 38px; min-width: 38px; padding: 0 12px; box-sizing: border-box;
     background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); font-family: var(--font); font-size: var(--text-sm);
     font-variation-settings: 'wght' 700; color: var(--navy); cursor: pointer; flex: none; }
@@ -368,10 +379,6 @@
   .cp-ctl:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   .cp-ctl--icon { padding: 0; }
   #cpFilters .cp-search { height: 38px; box-sizing: border-box; }
-  .cp-seg { display: inline-flex; align-items: center; justify-content: center; min-width: 34px; }
-  .cp-nav > .cp-seg { color: var(--navy); }
-  .cp-seg:not(.active):hover { background: var(--white); }
-  .cp-seg:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   .cp-addbtn { gap: 4px; }
   /* Filters row: search and one Filters button; the selects live in a panel.
      Canon candidate (28/10/2026): a search + "Filters (n)" toggle + Clear,
@@ -686,7 +693,7 @@
     /* Toolbar on a phone: dates on the first line, views stretch across the second. */
     .cp-bar-right { width: 100%; flex-wrap: nowrap; }
     .cp-modes { flex: 1 1 auto; }
-    .cp-modes > .cp-seg { flex: 1 1 0; }
+    .cp-mode { flex: 1 1 0; }
     /* Each day is its own card under a banner: date, pills beside it, buttons
        at the end; today's banner is in brand red so it stands out. */
     .cp-cal.cp-sheet { background: none; border: none; display: grid; gap: 10px; }
@@ -1476,8 +1483,9 @@
   }
 
   /* ── Top bar (period nav / list range / actions) ───────────────────── */
-  /* The toolbar: one row of navigation and actions. Every control is either a
-     segmented group (.chip-group) or one plain button, so they read as a set.
+  /* The toolbar: one row of navigation and actions. The views (Week / Month
+     / List, or Open / Archived on Ideas) are canon .tabs; Today and the
+     arrows are plain .cp-ctl buttons, one height with Settings.
      Filters, colour and the List tools live in a panel behind "Filters". */
   function periodLabel() {
     var y = new Date().getFullYear();
@@ -1489,12 +1497,23 @@
       : a.getDate() + ' ' + m(a) + ' – ' + b.getDate() + ' ' + m(b);
     return b.getFullYear() !== y ? t + ' ' + b.getFullYear() : t;
   }
-  function segButton(label, active, onClick, aria) {
-    var b = el('button', 'chip cp-seg' + (active ? ' active' : ''), label); b.type = 'button';
+  function navButton(label, onClick, aria) {
+    var b = el('button', 'cp-ctl' + (label ? '' : ' cp-ctl--icon'), label); b.type = 'button';
     if (aria) b.setAttribute('aria-label', aria);
-    if (active != null) b.setAttribute('aria-pressed', active ? 'true' : 'false');
     b.addEventListener('click', onClick);
     return b;
+  }
+  function tabButton(label, active, onClick, cls) {
+    var b = el('button', 'tab' + (cls ? ' ' + cls : '') + (active ? ' active' : ''), label); b.type = 'button';
+    b.setAttribute('role', 'tab');
+    b.setAttribute('aria-selected', active ? 'true' : 'false');
+    b.addEventListener('click', onClick);
+    return b;
+  }
+  function tabBar(cls, aria) {
+    var t = el('div', 'tabs cp-viewtabs' + (cls ? ' ' + cls : ''));
+    t.setAttribute('role', 'tablist'); t.setAttribute('aria-label', aria);
+    return t;
   }
   function renderBar() {
     var bar = document.getElementById('cpBar');
@@ -1502,27 +1521,27 @@
     var left = el('div', 'toolbar__left'), right = el('div', 'toolbar__right cp-bar-right');
     if (S.view === 'calendar') {
       var unit = S.mode === 'week' ? 'week' : 'month';
-      var nav = el('div', 'chip-group cp-nav');
-      var prev = segButton('', null, function () { step(-1); }, 'Previous ' + unit); prev.appendChild(icon('back'));
-      var today = segButton('Today', null, function () {
+      var nav = el('div', 'cp-nav');
+      var prev = navButton('', function () { step(-1); }, 'Previous ' + unit); prev.appendChild(icon('back'));
+      var today = navButton('Today', function () {
         S.cursor = new Date(); S.monthSel = null;
         if (endless()) goTo(todayYmd()); else { listen(); renderBar(); }
       });
-      var next = segButton('', null, function () { step(1); }, 'Next ' + unit); next.appendChild(icon('forward'));
-      [prev, today, next].forEach(function (x) { x.removeAttribute('aria-pressed'); nav.appendChild(x); });
+      var next = navButton('', function () { step(1); }, 'Next ' + unit); next.appendChild(icon('forward'));
+      [prev, today, next].forEach(function (x) { nav.appendChild(x); });
       left.appendChild(nav);
       var pl = periodLabel();
       if (pl) left.appendChild(el('span', 'cp-period', pl));
 
-      var modes = el('div', 'chip-group cp-modes');
+      var modes = tabBar('cp-modes', 'Calendar view');
       [['week', 'Week'], ['month', 'Month'], ['list', 'List']].forEach(function (m) {
-        modes.appendChild(segButton(m[1], S.mode === m[0], function () { setMode(m[0]); }));
+        modes.appendChild(tabButton(m[1], S.mode === m[0], function () { setMode(m[0]); }, 'cp-mode'));
       });
       right.appendChild(modes);
     } else if (S.view === 'ideas') {
-      var arch = el('div', 'chip-group');
+      var arch = tabBar(null, 'Ideas');
       [[false, 'Open'], [true, 'Archived']].forEach(function (m) {
-        arch.appendChild(segButton(m[1], S.showArchived === m[0], function () {
+        arch.appendChild(tabButton(m[1], S.showArchived === m[0], function () {
           if (S.showArchived === m[0]) return; S.showArchived = m[0]; renderBar(); render();
         }));
       });

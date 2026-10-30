@@ -99,11 +99,22 @@ Recorded so the data can be exported or migrated without reverse-engineering it.
 
 ## What stays behind
 
-**Leave data: deleted 30/10/2026.** `app-data/staff-holiday-lieu/` held test entries only (dummy data, confirmed by Richard), not real leave records. It was deleted from the Firebase console on 30/10/2026 without an export.
+**Leave data in the database.** Under `app-data/staff-holiday-lieu/`:
+- `entries`, `requests` and `lieu-earned` hold staff leave and lieu records. This is personal data.
+- `bank-holidays` and `shared-notes` hold League-wide data.
 
-**The rules block: removed 30/10/2026,** after the data, from `system/rtdb/rules.snapshot.json`. It leaves the live database at the next **Button · Publish database rules** run.
+None of it is in the repo, and it is the owner's to export or delete from the Firebase console.
 
-**Fields on the shared `users/{uid}` records.** `workSettings`, `lineManagerUid`, `approverUids` and the older `approverUid` stay on each person's record, which every League-role account can read. Nothing else reads them now. **Still to remove** (the leave data went on 30/10/2026): they are on live `users/` records, so it is a console job, one person at a time, or a one-off script run by an admin.
+**The rules block.** The `staff-holiday-lieu` rules stay in `system/rtdb/rules.snapshot.json` until the next rules deploy. The data and its rule should leave together, never the rule first. Those rules are not admin-only:
+
+| Node | Who can read | Who can write |
+|---|---|---|
+| `entries`, `requests`, `bank-holidays`, `shared-notes` | any signed-in staff, admin or superadmin account | owner or admin (bank holidays: superadmin; shared notes: admin) |
+| `lieu-earned` | whole node admin-only; each person's own records readable by them | owner or admin |
+
+If the data is kept beyond the next rules deploy, that deploy should make the reads admin-only.
+
+**Fields on the shared `users/{uid}` records.** `workSettings`, `lineManagerUid`, `approverUids` and the older `approverUid` stay on each person's record, which every League-role account can read. Nothing else reads them now. Remove them when the leave data goes.
 
 **Audit log.** Writes made through the tool were recorded under `admin/audit` (`holiday-lieu_changed`), and those entries stay.
 
