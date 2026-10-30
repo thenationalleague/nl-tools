@@ -41,7 +41,7 @@ site. It runs in the `nl-tools` Firebase project (Blaze), region `europe-west2`.
 
 Deployment is automated by `.github/workflows/deploy-functions.yml`, which
 reuses the same Workload Identity Federation auth as the GA pipeline. It runs on
-any push that changes `functions/**`, or on demand (**Actions → Deploy Cloud Functions → Run workflow**).
+any push that changes `functions/**`, or on demand (**Actions → Auto · Publish cloud jobs → Run workflow**).
 
 **One-time setup** (Google Cloud console, no terminal), so the deploy identity is
 allowed to deploy:
@@ -81,7 +81,7 @@ allowed to deploy:
    SA holds no Firebase roles, so RTDB drops its connection and `createCustomToken`
    would fail. Note the function runs in **europe-west1** — an RTDB trigger must
    sit in the database's region, not the `europe-west2` default the rest use.
-4. **Run it** — Actions tab → *Deploy Cloud Functions* → **Run workflow**.
+4. **Run it** — Actions tab → *Auto · Publish cloud jobs* → **Run workflow**.
 
 ### Required roles, by function
 
@@ -174,7 +174,7 @@ only by server-side identities (the NL Data MCP) until a staff tool needs it.
 
 When a score has goals the feed names no scorer for — find them with the NL
 Data connector, `get_results(missingScorers: true)` — name the scorer with
-**Actions → NLS goal correction → Run workflow**. One line per goal:
+**Actions → Button · Fix a missing goalscorer → Run workflow**. One line per goal:
 `<matchID> <playerID> <teamID of the scorer's club> <minute> <goal|penalty|og>`.
 IDs only, never names: run inputs on this public repo are visible. The same
 Action fixes a team sheet (v0.6.1): `<matchID> <playerID> <teamID> start|bench`
@@ -199,7 +199,7 @@ applying by itself. Run the Action with `remove` to take one back out.
 2. **Cloud Scheduler API** must be enabled on `nl-tools` (console → *APIs &
    Services*). The deploy creates the two jobs; it cannot enable the API.
 3. **RTDB rules on nl-widgets.** `system/rtdb/nl-widgets.rules.snapshot.json` carries the
-   `nls/` block and ships through **Actions → Deploy RTDB rules** (choose
+   `nls/` block and ships through **Actions → Button · Publish database rules** (choose
    target `nl-widgets` or `both`, type `publish`) — the file in git IS the
    rules, exactly as on nl-tools. (This item said "no rules deploy workflow —
    paste into the console by hand" until 19/08/2026, long after the workflow

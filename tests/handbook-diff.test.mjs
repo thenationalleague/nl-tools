@@ -444,7 +444,7 @@ test('a denied read never reports itself as "nothing published"', () => {
      first one has to name its own cause — the rules workflow — because
      that is the fix. */
   assert.match(CODE, /PUB\.error\s*\n?\s*\? 'Could not read the published edition/);
-  assert.match(CODE, /Deploy RTDB rules/,
+  assert.match(CODE, /Button · Publish database rules/,
     'the message names the thing that fixes it');
   assert.match(CODE, /if \(PUB\.error \|\| !PUB\.id\) return/,
     'and it does not then list every clause as new');

@@ -61,7 +61,7 @@ Three categories, and knowing which one you are in tells you what a merge does.
   it is live.
 - **Cloud Functions** — `deploy-functions.yml` runs automatically on any push
   to `main` touching `functions/**` or `firebase.json`.
-- **The `tools/` registry** (since 20/10/2026) — **Deploy tools registry** runs
+- **The `tools/` registry** (since 20/10/2026) — **Auto · Publish portal tool list** runs
   automatically on any push to `main` that changes
   `system/rtdb/tools-registry.snapshot.json`. It writes only the records that
   push changed, plus any missing from live; it never deletes. It then re-reads
@@ -85,13 +85,13 @@ effect of a merge.
 
 | What | Actions → workflow | You must type |
 |---|---|---|
-| RTDB rules (both databases) | **Deploy RTDB rules** | choose target (`both` / `nl-tools` / `nl-widgets`), type `publish` |
-| Storage rules | **Deploy Storage rules** | `publish` |
-| `tools/` registry (by hand) | **Deploy tools registry** | `report` writes nothing; `publish` + type `publish` replaces the whole node. Changes ship on merge without this — see above |
-| Apps Script | **Deploy Apps Script** | `publish` |
-| Brand Exposure scan container | **Deploy scan job** | `publish` |
+| RTDB rules (both databases) | **Button · Publish database rules** | choose target (`both` / `nl-tools` / `nl-widgets`), type `publish` |
+| Storage rules | **Button · Publish file storage rules** | `publish` |
+| `tools/` registry (by hand) | **Auto · Publish portal tool list** | `report` writes nothing; `publish` + type `publish` replaces the whole node. Changes ship on merge without this — see above |
+| Apps Script | **Button · Publish Apps Script** | `publish` |
+| Brand Exposure scan container | **Button · Publish Brand Exposure measurer** | `publish` |
 
-**Deploy scan job** is manual for a stronger reason than the rest. That
+**Button · Publish Brand Exposure measurer** is manual for a stronger reason than the rest. That
 container **is** the measurement: a rebuild can move every number Brand Exposure
 reports, not because anything in this repo changed but because a base image or a
 pinned wheel moved underneath it. It must never happen as a side effect of
@@ -116,16 +116,16 @@ the PR body should say so.** A PR that adds a function needs nothing.
 
 | Workflow | When | What it does |
 |---|---|---|
-| Rebuild article index | 03:00 daily | GA metrics + GA hourly + article index; pulls the four feeds out of Firebase Storage, rebuilds, puts them back. Commits nothing. |
-| Sync Apps Script | 04:40 daily | Pulls the live Apps Script project; commits on drift |
-| Daily table baseline | 01:00 daily | League table snapshot |
-| Season rollover | 02:00, 1 July | New season |
-| Render handbook PDF | daily, 05:25 UTC | Re-renders if stale. Backup only: publishing starts it at once |
-| Build predictor leaderboard | every 15 min | Fan predictor standings |
-| Fixtures & results graphics | 4am UK (today-only matchday cards); 10am UK; every 15 min from midday UTC — and started by the `fixturesGraphicsAtFullTime` function five minutes after the last game of the day ends, because GitHub's timer runs late | Fixtures cards two days before each round, and at 4am on each day of a round that spans several days a card with only that day's games; results cards and league tables (Cup groups A–D in the group stage) as soon as a day's games are all full time. To Drive (media Shared Drive → Graphics → **Main**: per day, final cards only; **Extended**: every cut, per round) and Storage `graphics/fixtures/`. Round numbers from `assets/data/rounds-<season>.json` — a new one is needed each summer. Run workflow with **Dry run** ticked to test any date. |
+| Timer · Website article stats | 03:00 daily | GA metrics + GA hourly + article index; pulls the four feeds out of Firebase Storage, rebuilds, puts them back. Commits nothing. |
+| Timer · Back up Apps Script | 04:40 daily | Pulls the live Apps Script project; commits on drift |
+| Timer · League table snapshot | 01:00 daily | League table snapshot |
+| Timer · New season | 02:00, 1 July | New season |
+| Timer · Handbook PDF backup | daily, 05:25 UTC | Re-renders if stale. Backup only: publishing starts it at once |
+| Timer · Predictor leaderboard | every 15 min | Fan predictor standings |
+| Timer · Fixtures and results graphics | 4am UK (today-only matchday cards); 10am UK; every 15 min from midday UTC — and started by the `fixturesGraphicsAtFullTime` function five minutes after the last game of the day ends, because GitHub's timer runs late | Fixtures cards two days before each round, and at 4am on each day of a round that spans several days a card with only that day's games; results cards and league tables (Cup groups A–D in the group stage) as soon as a day's games are all full time. To Drive (media Shared Drive → Graphics → **Main**: per day, final cards only; **Extended**: every cut, per round) and Storage `graphics/fixtures/`. Round numbers from `assets/data/rounds-<season>.json` — a new one is needed each summer. Run workflow with **Dry run** ticked to test any date. |
 
 Plus the ones that run on push and keep generated artefacts current:
-**Build embed bundles** (`embeds/**`), **Build estate inventory**, **Build
+**Auto · Build website widget bundles** (`embeds/**`), **Auto · Update the Estate list**, **Build
 image asset tiers** (crest thumbnails), and **canon-checks** — the test suite
 and lint that gate every PR.
 
@@ -155,7 +155,7 @@ That last point has a consequence worth knowing: `git branch --merged` is
 worthless here, because a squashed branch's commits never become ancestors of
 `main`. It reports essentially every branch as unmerged.
 
-**Use Actions → Prune merged branches instead.** Run it in `report` mode
+**Use Actions → Button · Tidy old branches instead.** Run it in `report` mode
 first, then `delete` with `prune` typed in. It runs three tests and spares
 anything that fails all of them. The two hand-checked exception lists live
 beside it: `.github/branch-prune-allow.txt` and `.github/branch-prune-keep.txt`.
@@ -180,7 +180,7 @@ and both are files in this repo:
    skips every access check.
 
 2. **RTDB rules for `app-data/<toolKey>/...`** — edit
-   `system/rtdb/rules.snapshot.json`, then run **Deploy RTDB rules**.
+   `system/rtdb/rules.snapshot.json`, then run **Button · Publish database rules**.
 
 `toolKey` is `<category>-<slug>` where category is `staff`, `ops` or `media`.
 The same key indexes the registry record, the tool's data under
@@ -214,7 +214,7 @@ The read raced the auth token. Wrap it in `NL.ensureAuth().then(...)`, and
 never read RTDB before `nlAuthReady` fires.
 
 **The tools registry looks wrong in live.**
-Run **Deploy tools registry** in `report` mode. It diffs live against the
+Run **Auto · Publish portal tool list** in `report` mode. It diffs live against the
 snapshot and writes nothing. That beats exporting the node and comparing by
 hand, and it is the right first move whenever drift is suspected.
 
@@ -238,7 +238,7 @@ not serve hours past its retention window — so the job fails rather than
 proceeding if the bucket copy is missing. That refusal is deliberate; it is the
 job protecting the archive, not a bug.
 
-Recovery: **Actions → Seed the data bucket from git history**, type `seed`. It
+Recovery: **Actions → Recovery · Restore website stats files**, type `seed`. It
 restores the feeds from the last copy git ever held. That only works while the
 history still carries the files, so a future history rewrite retires this
 workflow with it. Details in `system/storage/README.md`.

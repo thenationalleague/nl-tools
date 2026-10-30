@@ -218,5 +218,5 @@ Three things have to exist in the project, none of which this repo can create:
   `GCP_SCAN_JOB_SA` repository secret;
 - the reference tree under `brand-exposure/refs/`.
 
-Then **Actions → Deploy scan job → type `publish`** builds the image and creates
+Then **Actions → Button · Publish Brand Exposure measurer → type `publish`** builds the image and creates
 the job.

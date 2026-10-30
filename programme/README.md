@@ -283,7 +283,7 @@ Rules: `system/rtdb/rules.snapshot.json` (`app-data/media-programme`) and
    the project. Confirm the run is green.
 2. **Storage rules** — paste `system/storage/rules.snapshot.rules` into
    Firebase console → Storage → Rules
-3. **RTDB rules** — Actions → **Deploy RTDB rules** → Run workflow → type
+3. **RTDB rules** — Actions → **Button · Publish database rules** → Run workflow → type
    `publish`. It deploys `system/rtdb/rules.snapshot.json` in full; nothing is
    pasted.
 4. **Tool registry** — paste the `media-programme` entry from

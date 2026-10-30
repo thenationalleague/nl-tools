@@ -115,8 +115,8 @@ def _explain(e):
     denied = str(msg).lower()
     if e.code in (401, 403) or "permission_denied" in denied or "permission denied" in denied:
         return ("Refused. Usually the ingest key was revoked, or the rules have "
-                "not been deployed yet — Actions -> Deploy RTDB rules and "
-                "Deploy Storage rules, typing 'publish' in each.")
+                "not been deployed yet — Actions -> Button · Publish database rules and "
+                "Button · Publish file storage rules, typing 'publish' in each.")
     if "TOKEN_EXPIRED" in str(msg) or "INVALID_ID_TOKEN" in str(msg):
         return ("The upload token expired mid-flight. Re-run with --upload; "
                 "nothing was half-written that a re-run will not replace.")
