@@ -18,7 +18,7 @@ and the tool becomes usable by someone less confident with tech.
 
 | Note says | Code says (v3.6) | Consequence |
 |---|---|---|
-| Statuses are Due / Published | True — `STATUSES` is `planned` (labelled "Due") and `published`. But `'dropped'` is still handled in four places (chip, row, tick, list), with its own styling. | Dropped is **residue**, not a status. The status work must decide what any live `status: 'dropped'` items become (likely Draft, or delete), then remove the four branches. Sessions cannot read live data — ask Richard to check in the console whether any exist. |
+| Statuses are Due / Published | True — `STATUSES` is `planned` (labelled "Due") and `published`. But `'dropped'` is still handled in four places (chip, row, tick, list), with its own styling. | Dropped is **residue**, not a status. The status step reads any live `status: 'dropped'` item as Draft (so nothing disappears and nobody has to hunt for them), then removes the four branches. |
 | Add series (linked items) | One link already exists: `item.linkedItemId`, a single pointer, shown as a link icon and "Linked to" in the item window. | Series **extends** this; it is not new. Existing links migrate to two-item series. |
 | Multiple authors already work | True — `author`, `authorOther`, `coAuthors`. | Tiles only change how they are shown. |
 | Social graphics come out grey | True — v1.1 gave category-less social items their own slate group (`--cp-social`). | Fix is "every item has a main topic", which means making category required, with a default. |
@@ -171,8 +171,9 @@ Each step is its own PR. Steps 3 and 4 touch stored data and need the rules in
 
 ## Open questions
 
-- [ ] Are there any live items with `status: 'dropped'`, or any live ideas?
-      (Richard to check in the console; decides steps 3 and 6.)
+- [ ] Are there any live ideas worth keeping? (Check the Ideas tab before
+      step 6.) Live `status: 'dropped'` items need no check: the status step
+      reads any it finds as Draft, so none can vanish.
 - [ ] Is there a live "Commercial" category? If so, is Commercial a flag only
       (migrate the category into the flag) or both?
 - [ ] Task dot colour, and whether deadline and action tasks differ.
