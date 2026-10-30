@@ -1,7 +1,13 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Estate
-  Version: v1.2 (30/10/2026)
+  Version: v1.3 (30/10/2026)
+
+  v1.3 (30/10/2026) — Every row lists its addresses under the name: each
+  page of a tool with what it is (admin, reader, sub-page…) and, where a
+  tool has more than one way in, who can open that page. Jobs show their
+  file. Replaces the bare "5 pages" count (Richard: "the slugs not being
+  listed for pages isn't ideal").
 
   v1.2 (30/10/2026) — Claude skills taken off the list (Richard: "don't
   want my skills listed here"). Kinds are now tools, website widgets,
@@ -179,6 +185,11 @@
     var NL_TOOL_KEY = 'ops-estate';
 
     window.NL_CHANGELOG = [
+      {
+        date: '30/10/2026',
+        version: 'v1.3',
+        items: ['Each row now lists its addresses, including admin and reader pages, and who can open each one.']
+      },
       {
         date: '30/10/2026',
         version: 'v1.2',
@@ -464,6 +475,12 @@
   a.est-name:hover { text-decoration: underline; }
   .est-does { display: block; max-width: 52ch; line-height: 1.4; margin-top: 2px; }
   .est-sub { display: block; margin-top: 3px; }
+  /* A tool's addresses, front door first; the rest indented under it so
+     the shape (admin, reader, club pages) reads at a glance. */
+  .est-paths { margin-top: 4px; display: flex; flex-direction: column; gap: 1px; }
+  .est-path { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .est-path--nested { padding-left: 12px; }
+  .est-path .est-url { white-space: normal; word-break: break-all; }
   .est-cell { white-space: nowrap; }
   .est-statnote { display: block; color: var(--text-muted); font-size: var(--text-xs); line-height: 1.4; max-width: 40ch; margin-top: 3px; }
   .est-statnote:first-child { margin-top: 0; }
@@ -980,6 +997,25 @@
     return list.filter(function (v, i) { return v && list.indexOf(v) === i; });
   }
 
+  var PATH_ORDER = { main: 0, admin: 1, reader: 2, sub: 3, companion: 4, variant: 5 };
+
+  /* A row's pages, front door first. Each says what it is unless it is the
+     front door, and who can open it when the tool has more than one way in
+     (Programme Packs: clubs by code at /programme/, staff at /admin/). */
+  function pathsFor(ps, showDoor) {
+    var rank = function (p) { return p.role in PATH_ORDER ? PATH_ORDER[p.role] : 9; };
+    var sorted = ps.slice().sort(function (a, b) {
+      return (rank(a) - rank(b)) || a.url.localeCompare(b.url);
+    });
+    return sorted.map(function (p, i) {
+      var bits = [];
+      if (p.species === 'redirect') bits.push('forwards on');
+      else if (i > 0 && p.role !== 'main') bits.push((ROLE_LABEL[p.role] || p.role || '').toLowerCase());
+      if (showDoor && p.species !== 'redirect' && DOORS[p.access && p.access.kind]) bits.push(DOORS[p.access.kind]);
+      return { url: p.url, text: p.url, label: bits.filter(Boolean).join(' · '), nested: i > 0 };
+    });
+  }
+
   function pageRows(pages, items) {
     var keys = {};
     pages.forEach(function (p) { if (p.toolKey) (keys[p.group] = keys[p.group] || {})[p.toolKey] = 1; });
@@ -1032,8 +1068,7 @@
         name: it.name || (main.registry && main.registry.label) || main.title || main.path,
         does: it.does || (main.registry && main.registry.description) || '',
         url: (isTool && main.registry && main.registry.url) || main.url,
-        sub: ps.length > 1 ? ps.length + ' pages' : '',
-        subTitle: ps.map(function (p) { return p.url; }).join('\n'),
+        paths: pathsFor(ps, doors.length > 1),
         doors: doors,
         runsOn: isEmbed ? 'NL website' : 'nl.tools',
         toolKey: isTool ? id.slice(5) : null,
@@ -1127,7 +1162,9 @@
         name: it.name || j.name,
         does: it.does || '',
         url: isFn ? REPO_URL + '/blob/main/' + j.file : REPO_URL + '/actions/workflows/' + j.file.split('/').pop(),
-        sub: '', subTitle: '',
+        /* The name opens the run history; the file opens the code. */
+        paths: [{ url: REPO_URL + '/blob/main/' + j.file,
+                  text: j.file, label: '', nested: false }],
         doors: [],
         runsOn: isFn ? 'Google cloud' : 'GitHub',
         when: when,
@@ -1144,7 +1181,7 @@
     return (extra || []).map(function (x) {
       return {
         id: x.id, kind: x.kind, name: x.name, does: x.does || '', url: x.url || '',
-        sub: '', subTitle: '', doors: [], runsOn: x.runsOn || '', when: x.use || '',
+        paths: [], doors: [], runsOn: x.runsOn || '', when: x.use || '',
         lifespan: x.lifespan || '', status: x.status || 'Not decided', note: x.note || '', warns: [], hay: ''
       };
     });
@@ -1211,7 +1248,11 @@
     return '<tr>' +
       '<td>' + name +
         (r.does ? '<span class="est-does">' + NL.escHtml(r.does) + '</span>' : '') +
-        (r.sub ? '<span class="est-sub est-muted" title="' + NL.escHtml(r.subTitle) + '">' + NL.escHtml(r.sub) + '</span>' : '') +
+        (r.paths.length ? '<div class="est-paths">' + r.paths.map(function (pt) {
+          return '<div class="est-path' + (pt.nested ? ' est-path--nested' : '') + '">' +
+            '<a class="est-url" href="' + NL.escHtml(pt.url) + '" target="_blank" rel="noopener">' + NL.escHtml(pt.text) + '</a>' +
+            (pt.label ? '<span class="est-muted">' + NL.escHtml(pt.label) + '</span>' : '') + '</div>';
+        }).join('') + '</div>' : '') +
         (r.warns.length ? '<div class="est-tags est-tags--under">' + r.warns.map(function (w) {
           return '<span class="pill ' + WARN[w].pill + '"' +
             (WARN[w].title ? ' title="' + NL.escHtml(WARN[w].title) + '"' : '') + '>' + NL.escHtml(WARN[w].label) + '</span>';
