@@ -22,11 +22,11 @@ and the tool becomes usable by someone less confident with tech.
 | Add series (linked items) | One link already exists: `item.linkedItemId`, a single pointer, shown as a link icon and "Linked to" in the item window. | Series **extends** this; it is not new. Existing links migrate to two-item series. |
 | Multiple authors already work | True — `author`, `authorOther`, `coAuthors`. | Tiles only change how they are shown. |
 | Social graphics come out grey | True — v1.1 gave category-less social items their own slate group (`--cp-social`). | Fix is "every item has a main topic", which means making category required, with a default. |
-| Drop the Ideas tab | It is a live tab with its own data node, `ideas/{id}`, and rules. | Before removing the tab, export or schedule any live ideas; then remove the tab, the node and its rules in one PR. |
+| Drop the Ideas tab | It is a live tab with its own data node, `ideas/{id}`, and rules. | Remove the tab, the node and its rules in one PR. Richard checked the live ideas 30/10/2026: nothing to keep. |
 | Permissions: Media and Broadcast get Manage | There are no department-based defaults. Registry defaults are `staff: access`, `admin: access`; Manage is a per-person grant. Rules already split read (`access`) from write (`admin`). | **No change needed.** The model already fits; Media and Broadcast staff just need per-person Manage grants in the portal. |
 | Three-dot menu: build it in Content Plan only, promote if a second tool needs it | `programme/` already has a three-dot button **and** right-click opening the same menu, hand-rolled. `wellbeing-map/` has a right-click menu too. | Content Plan would be the second/third copy. By the promotion rule this is a **canon candidate now**: build it as an `NL.*` helper + `nl-brand.css` component and move Programme Packs onto it, rather than writing a third private copy. |
 | Website matching: "a published log already exists" | It does: `data/articles-index.json` in Firebase Storage, rebuilt daily by `rebuild-index.yml`, read by `website-archive/`. | Later phase can match against it directly. |
-| Commercial needs a flag | Nothing commercial exists in code. The default categories have none; whether live config has a "Commercial" category standing in for it is unknown. | Check live `config/categories` before deciding (open question below). |
+| Commercial needs a flag | Nothing commercial exists in code, and Richard confirmed 30/10/2026 there is no live Commercial category. | Flag only. Nothing to migrate. |
 
 ### What a tile shows today
 
@@ -45,9 +45,11 @@ Four questions per item, plus flags.
 | `home` — where it lives first | `website`, `social`, `email`, `press` | Press release is new. |
 | `format` — what it is | `article`, `video`, `graphic` | Only formats that fit the home are offered (website/press → article; social → video or graphic; email → none). |
 | `platforms` — where it's shared | Website, X, Facebook, Instagram, TikTok, LinkedIn, YouTube | Already exists. Limited by home: a social-first item never offers Website. |
-| `category` + `extraCategories` — topic | Config categories | One main category, required; optional extras. |
+| `competitions` — which competition(s) | National, North, South, NL Cup, FA Cup, FA Trophy | Optional, any number. See **Categories**. |
+| `topics` — what it's about | Config topics | At least one, any number; the first is the main one. See **Categories**. |
 
-Flags, on any item: `clubObligation` (exists) and `commercial` (new).
+Flags, on any item: `clubObligation` (exists) and `commercial` (new, flag
+only — decided 30/10/2026; there is no live Commercial category to migrate).
 
 Planned-versus-reactive is **not** a field. The website backfill answers it.
 
@@ -128,11 +130,57 @@ Check every tile change at both screen sizes (`node scripts/screens.mjs`).
   text, small coloured dot. A filter hides them.
 - **Repeating bundles** — later.
 
-## Categories and housekeeping
+## Categories (rethink, 30/10/2026)
 
-- **Merge categories** in Settings: pick two, move every item, then remove one.
-  Must also move items that list the old category in `extraCategories`.
-- Remove the Ideas tab (see corrections for the data).
+Richard, after checking live Settings: categories need rethinking. An item can
+be North **and** South **and** NL Cup; the list has unused entries and is
+missing some; and it needs better control. Picking two or more must be easy.
+
+The cause is that one list answers two questions. "National", "North", "FA
+Cup" say **which competition**; "Awards", "Statements", "Trust" say **what
+it's about**. A North awards story has to give up one of them. So, two fields,
+both multi-select:
+
+- **Competition** — a fixed set, not config: National, North, South, NL Cup
+  from `assets/data/competitions-meta.json` (the schema every other tool
+  reads), plus FA Cup and FA Trophy, which that schema does not hold (they are
+  not NL competitions; keep them tool-local unless a second tool needs them).
+  Colours: `--div-national`, `--div-north`, `--div-south` exist in canon. NL
+  Cup, FA Cup and FA Trophy have no tokens (today's categories use `--purple`,
+  `--primary`, `--navy-300`). A `--div-nlcup` belongs in canon, because the
+  match pills want it too. The two FA cups stay tool-local. Optional: plenty
+  of content is about no competition.
+- **Topic** — the editable list in Settings, minus the competition entries.
+  At least one; the first picked is the main topic.
+
+**Picking several** — one control per field: a row of toggle chips for
+competition (a closed set of six, so chips are allowed), and a searchable
+picker for topic (an open set, so not chips). Selected topics show as removable
+chips, the main one first; drag or "make main" changes which leads. No
+separate "main" and "extras" fields — that is two controls for one decision.
+
+**Tile colour** — topic colour for the fill (the main topic). Competition shows
+as a thin edge strip, split into segments when there are several, so "North
+and South" reads at a glance without a second fill. Replaces today's football
+categories doing double duty as colours.
+
+**Better control** (Settings → Topics):
+- Usage count beside each topic, so unused ones are obvious.
+- **Archive** instead of delete: hidden from the picker, kept on old items.
+- **Merge**: pick two, every item moves to one, the other is archived. Moves
+  the topic wherever it appears in an item's list, not only the main one.
+- Rename and reorder (reorder exists).
+
+**Migration** — today's competition-named categories (`national`, `north`,
+`south`, `nlcup`, `facup`, `fatrophy`) become competitions, with no topic set.
+Those items are flagged "needs a topic" rather than being given a guess.
+`football` becomes the topic "Match" (name to confirm). Every other category
+becomes a topic.
+
+## Housekeeping
+
+- Remove the Ideas tab, the `ideas/` node and its rules. Checked 30/10/2026:
+  nothing in it worth keeping.
 
 ## Build order
 
@@ -140,16 +188,17 @@ Tiles first (decided 30/10/2026): a visible quick win with no migration risk,
 and it tests whether the calmer tile is easier before the bigger change.
 
 1. **Tiles** — four-thing tile, initials circles, Club tag, day-note strip,
-   lane headers, Add item button change. Make category required with a default
+   lane headers, Add item button change. Make a topic required with a default
    so no tile is grey. No data shape change.
 2. **Three-dot menu + Duplicate** — promoted to canon; Programme Packs moved
    onto it in the same PR.
 3. **Status** — Draft / Scheduled / Published, overdue, live link, share
    states; clear the dropped residue.
-4. **Data model** — home / format / shares split, Commercial flag, extra
-   categories, migration of existing records, press release home.
-5. **Series and tasks** — replacing `linkedItemId`.
-6. **Housekeeping** — merge categories, remove Ideas.
+4. **Data model** — home / format / shares split, Commercial flag,
+   competition + topic split, migration of existing records, press release
+   home.
+5. **Topic controls** — usage counts, archive, merge; remove Ideas.
+6. **Series and tasks** — replacing `linkedItemId`.
 7. **Later** — website matching against `articles-index.json`, backfill,
    then social via the Social Output tool.
 
@@ -171,10 +220,14 @@ Each step is its own PR. Steps 3 and 4 touch stored data and need the rules in
 
 ## Open questions
 
-- [ ] Are there any live ideas worth keeping? (Check the Ideas tab before
-      step 6.) Live `status: 'dropped'` items need no check: the status step
-      reads any it finds as Draft, so none can vanish.
-- [ ] Is there a live "Commercial" category? If so, is Commercial a flag only
-      (migrate the category into the flag) or both?
+- [ ] Which topics are missing, and which live ones are unused (the usage
+      counts in step 5 will show the second).
+- [ ] What to call today's "Football" topic once competitions are separate
+      ("Match"?).
+- [ ] Competition and topic split: Claude's proposal, not yet agreed.
 - [ ] Task dot colour, and whether deadline and action tasks differ.
-- [ ] What default category a new social item gets once category is required.
+- [ ] What default topic a new social item gets once a topic is required.
+
+Answered 30/10/2026: no live ideas worth keeping; no live Commercial category,
+and Commercial is a flag only. Live `status: 'dropped'` items need no check:
+the status step reads any it finds as Draft.
