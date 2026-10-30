@@ -1,4 +1,4 @@
-# Content Plan — improvement plan (not built)
+# Content Plan — improvement plan (step 1 built)
 
 Drafted 30/10/2026 from Richard's "Content Plan – improvement ideas" note of the
 same date, then checked against `content-plan/index.html` v3.6. Where the note
@@ -187,7 +187,9 @@ becomes a topic.
 Tiles first (decided 30/10/2026): a visible quick win with no migration risk,
 and it tests whether the calmer tile is easier before the bigger change.
 
-1. **Tiles** — four-thing tile, initials circles, Club tag, day-note strip,
+1. **Tiles** — *built 30/10/2026, v3.8.* Week keeps the time on the tile's
+   top line (Week is in time order). List keeps its kind column and shows at
+   most two circles in its fixed column. Four-thing tile, initials circles, Club tag, day-note strip,
    lane headers, Add item button change. Make a topic required with a default
    so no tile is grey. No data shape change.
 2. **Three-dot menu + Duplicate** — promoted to canon; Programme Packs moved
