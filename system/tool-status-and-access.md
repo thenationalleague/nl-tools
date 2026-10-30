@@ -156,15 +156,17 @@ replacement and the page no longer makes it. Cookieless, no banner, no
 identity — and Google Signals must stay off, because which topic somebody
 opened is special-category health data under UK GDPR Art. 9.
 
-## Parked — 3
+## Parked — 1
 
 | Tool | Key | Audience | What's needed |
 |---|---|---|---|
-| **Claudio** | `staff-claudio` | league | AI helper; serious work before it is genuinely useful |
-| **Holiday & Lieu** | `staff-holiday-lieu` | league | Admin panel manages relationships, bank holidays, quotas. Non-admins see their own leave and approve for their reports — the org chart lives in the tool and works today |
 | **Transfer Centre** | `media-transfer-centre` | club | Prototype functions; needs bringing on-brand. Sheet backend dropped — see `system/retired/live-blog-and-transfer-centre.md` |
 
 ## Retired
+
+Retired 30/10/2026 in the Declutter, rebuild intended for both: Claudio and
+Holiday & Lieu (`system/retired/claudio.md`, `system/retired/holiday-lieu.md`).
+The site demo went the same day (`system/retired/site-demo.md`).
 
 Gone in the 15/08/2026 purge: Team of the Week dashboard (the Enterprise TOTW
 *graphic* lives on under Graphics & Media), Chase HQ, Meeting Notes, Tasks,

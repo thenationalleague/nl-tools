@@ -23,6 +23,9 @@ when someone asks for it, and when they do, this is where the thinking is.
 | [`club-contacts-and-signoff.md`](club-contacts-and-signoff.md) | 15/10/2026 | The summer 2026 collection and check that built the Club Directory. Submissions kept: the Directory editor reads them. Token links closed. |
 | [`single-fixture-and-top-scorers.md`](single-fixture-and-top-scorers.md) | 31/10/2026 | Two canvas graphics: one game on a card (Match Graphic does it in four sizes), and a hand-typed top-eight scorers card. Scorer totals must never be summed from NLS goal events. |
 | [`fixture-feed-cache.md`](fixture-feed-cache.md) | 29/10/2026 | Hourly GitHub job copying the season's fixtures into `feed/` on nl-widgets. Step 1 of a plan whose steps 2–3 never came; overtaken by the every-minute NLS import into `nls/`. Nothing ever read it. |
+| [`claudio.md`](claudio.md) | 30/10/2026 | AI assistant with five personas over Apps Script and Anthropic. Backend shut 15/08/2026 as an open proxy. **Rebuild intended**: the switchboard routing and prompt rules are the keepers. |
+| [`holiday-lieu.md`](holiday-lieu.md) | 30/10/2026 | Staff leave and lieu tracker, never launched. **Rebuild intended**: the business rules are recorded; the approver model and lieu ledger need redesigning. |
+| [`site-demo.md`](site-demo.md) | 30/10/2026 | Astro mock-up of the public website. Concept kept; current "shop front and stockroom" thinking recorded. |
 
 ## Why one place
 
