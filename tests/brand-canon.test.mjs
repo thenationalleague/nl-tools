@@ -1242,6 +1242,16 @@ test('red means where you are, navy means chosen', () => {
   assert.match(ruleBody('.filter-pill.active'), /background:\s*var\(--navy\)/, 'the active filter pill is navy');
 });
 
+test('a tab count is red on an idle tab and inverted on the active one', () => {
+  assert.match(ruleBody('.tab__count'), /background:\s*var\(--primary\)/, 'red disc on an idle tab');
+  assert.match(ruleBody('.tab__count'), /color:\s*var\(--white\)/, 'white figures on an idle tab');
+  assert.match(ruleBody('.tab.active .tab__count'), /background:\s*var\(--white\)/, 'white disc on the red active tab');
+  assert.match(ruleBody('.tab.active .tab__count'), /color:\s*var\(--primary\)/, 'red figures on the active tab');
+  assert.match(ruleBody('.tab__count[hidden]'), /display:\s*none/, 'hidden at zero');
+  const sg = readFileSync(join(REPO, 'style-guide/index.html'), 'utf8');
+  assert.match(sg, /class="tab__count"/, 'the Style Guide shows a tab count');
+});
+
 test('tabs keep small capitals and scroll rather than wrap', () => {
   assert.match(ruleBody('.tab'), /text-transform:\s*uppercase/, 'tabs keep their small capitals');
   assert.doesNotMatch(ruleBody('.chip'), /text-transform:\s*uppercase/, 'choices stay sentence case');
