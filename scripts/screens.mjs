@@ -157,14 +157,21 @@ async function main() {
     for (const sel of o.click) { await pg.click(sel); await pg.waitForTimeout(600); }
     const m = await pg.evaluate(() => ({
       down: document.documentElement.scrollHeight - innerHeight,
-      side: document.documentElement.scrollWidth - innerWidth
+      side: document.documentElement.scrollWidth - innerWidth,
+      /* A table that scrolls sideways inside its box passes the page check,
+         but its scroll bar sits at the bottom of the table, which on a long
+         list is screens away (Fixture Management, 30/10/2026). Reported,
+         not failed: on a phone it is often the right answer. */
+      inner: [...document.querySelectorAll('.table-wrap')]
+        .filter((w) => w.offsetParent && w.scrollWidth > w.clientWidth + 1).length
     }));
     const file = join(o.out, sc.name + '.png');
     await pg.screenshot({ path: file });
     const bad = m.side > 0 || errors.length;
     if (bad) failed = true;
     console.log((bad ? 'FAIL ' : 'ok   ') + sc.name.padEnd(8) + (sc.width + '×' + sc.height).padEnd(11) + sc.note.padEnd(20) +
-      'scrolls ' + Math.max(0, m.down) + 'px down' + (m.side > 0 ? ', ' + m.side + 'px off the side' : '') + '  ' + file);
+      'scrolls ' + Math.max(0, m.down) + 'px down' + (m.side > 0 ? ', ' + m.side + 'px off the side' : '') +
+      (m.inner ? ', ' + m.inner + ' table' + (m.inner === 1 ? '' : 's') + ' scrolling sideways' : '') + '  ' + file);
     errors.forEach((e) => console.log('       page error: ' + e));
     await pg.close();
   }
