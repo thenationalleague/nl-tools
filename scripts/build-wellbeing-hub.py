@@ -1509,7 +1509,7 @@ def _page(ed):
   <meta name="theme-color" content="{ed['accent']['fg'] if ed['accent'] else '#223b7c'}">
   <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
 
-  <link rel="stylesheet" href="/system/nl-brand.css?v=69">
+  <link rel="stylesheet" href="/system/nl-brand.css?v=70">
   <script src="/system/nl-utils.js?v=50"></script>
   <script src="/system/nl-analytics.js?v=1"></script>
 
@@ -2733,7 +2733,7 @@ def _poster(ed):
   <meta name="robots" content="noindex">
   <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
 
-  <link rel="stylesheet" href="/system/nl-brand.css?v=69">
+  <link rel="stylesheet" href="/system/nl-brand.css?v=70">
 
   <style>
   @page {{ size: A4 portrait; margin: 11mm; }}

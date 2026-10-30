@@ -1215,3 +1215,36 @@ test('the Style Guide shows the month picker live', () => {
   assert.match(sg, /NL\.monthPicker\('#sgMonth\d'/);
   assert.equal(typeof NL.monthPicker, 'function');
 });
+
+/* ── One style for every "choose something" control (brand v2.73) ───────────
+   Decided in the Declutter, 30/10/2026: tabs, chips, filter pills, the
+   standalone select and the club picker's box share one height, edge and
+   corner. Red marks where you are (a tab); navy marks what you've chosen. */
+
+test('--control-h is the one control height, taller on touch screens', () => {
+  assert.match(rules, /--control-h:\s*40px;/, '--control-h is defined');
+  assert.match(rules, /@media \(pointer: coarse\)\s*\{\s*:root\s*\{\s*--control-h:\s*44px;/,
+    'touch screens get 44px');
+});
+
+test('every choose-something control takes its height from --control-h', () => {
+  for (const sel of ['.tab', '.chip', '.filter-pill', '.nl-select', '.club-picker__wrap']) {
+    assert.match(ruleBody(sel), /min-height:\s*(calc\()?var\(--control-h\)/, `${sel} uses --control-h`);
+  }
+  for (const sel of ['.tabs', '.chip-group', '.filter-pill', '.nl-select', '.club-picker__wrap']) {
+    assert.match(ruleBody(sel), /border:\s*1px solid var\(--navy-200\)/, `${sel} shares the --navy-200 edge`);
+  }
+});
+
+test('red means where you are, navy means chosen', () => {
+  assert.match(ruleBody('.tab.active'), /background:\s*var\(--primary\)/, 'the active tab is red');
+  assert.match(ruleBody('.chip.active'), /background:\s*var\(--navy\)/, 'the active chip is navy');
+  assert.match(ruleBody('.filter-pill.active'), /background:\s*var\(--navy\)/, 'the active filter pill is navy');
+});
+
+test('tabs keep small capitals and scroll rather than wrap', () => {
+  assert.match(ruleBody('.tab'), /text-transform:\s*uppercase/, 'tabs keep their small capitals');
+  assert.doesNotMatch(ruleBody('.chip'), /text-transform:\s*uppercase/, 'choices stay sentence case');
+  assert.match(ruleBody('.tabs'), /overflow-x:\s*auto/, 'too many tabs scroll sideways');
+  assert.match(ruleBody('.tab'), /white-space:\s*nowrap/, 'a tab label never wraps');
+});
