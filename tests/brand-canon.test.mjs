@@ -108,6 +108,17 @@ test('.nl-idbar never claims the red ground reserved for a signed-in session', (
   }
 });
 
+/* #nlTopbar is position:sticky, and sticky only holds inside its parent's
+   box. A body fixed at one screen tall lets the bar scroll away a screen
+   down, silently, on every long page (fixed in v2.76 after two tools had
+   patched it locally). */
+test('the body is never fixed at one screen tall, so the sticky topbar holds', () => {
+  const fixed = /(^|\n)\s*(html\s*,\s*)?body\s*(,\s*html\s*)?\{[^}]*(^|[;{\s])height:\s*100(%|vh|dvh)/;
+  assert.doesNotMatch(rules, fixed, 'body must use min-height, not height');
+  assert.match(rules, /\nbody\s*\{[^}]*min-height:\s*100%/);
+  assert.match(ruleBody('#nlTopbar'), /position:\s*sticky/);
+});
+
 test('.topbar keeps the authenticated signature it is the only holder of', () => {
   const body = ruleBody('.topbar');
   assert.match(body, /background:\s*var\(--primary\)/);

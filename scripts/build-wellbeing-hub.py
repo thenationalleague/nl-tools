@@ -1136,7 +1136,7 @@ def _page(ed):
     return f'''<!DOCTYPE html>
 <!--
   NL Tools — Wellbeing Hub
-  Version: v1.19 (08/10/2026)
+  Version: v1.20 (31/10/2026)
   File: /wellbeing-hub/index.html
 
   A NON-GATED public page. No auth-guard, no nl-topbar, no Firebase, no RTDB —
@@ -1202,6 +1202,10 @@ def _page(ed):
   print sheet in search results is noise.
 
   CHANGELOG
+  v1.20 (31/10/2026) — The local `html, body {{ height: auto; min-height:
+    100% }}` override goes: canon fixed the rule itself (nl-brand v2.76), so
+    the sticky nav needs no workaround. Cache-bust ?v=72 -> ?v=73.
+
   v1.19 (08/10/2026) — noindex removed: this is the live Wellbeing Hub.
     /wellbeing/ was retired the same day — "wellbeing can be nuked; the hub
     version is now the correct one" — and is a redirect stub pointing here
@@ -1509,7 +1513,7 @@ def _page(ed):
   <meta name="theme-color" content="{ed['accent']['fg'] if ed['accent'] else '#223b7c'}">
   <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
 
-  <link rel="stylesheet" href="/system/nl-brand.css?v=72">
+  <link rel="stylesheet" href="/system/nl-brand.css?v=73">
   <script src="/system/nl-utils.js?v=51"></script>
   <script src="/system/nl-analytics.js?v=1"></script>
 
@@ -1564,20 +1568,6 @@ def _page(ed):
      you went up or down. Canon's reduced-motion block sets this back to auto
      with !important for anyone who has asked for less motion. */
   html {{ scroll-behavior: smooth; }}
-
-  /* Canon sets `html, body {{ height: 100% }}`. That makes the body box one
-     viewport tall however long the document is, and a position:sticky element
-     can only stick inside its containing block — so the nav below unstuck
-     itself at ~1100px and scrolled away. Measured, not guessed: navBottom
-     went 48, 48, then -208.
-
-     Overridden here rather than in canon. The rule is load-bearing for the
-     full-height gate screens and nobody has audited what else leans on it; a
-     lockstep change across 60 heads to fix one page's nav is the wrong trade.
-     Worth recording as a canon gotcha: any tool that wants a sticky direct
-     child of <body> will hit this and will not get an error, just a bar that
-     quietly stops sticking a screen and a half down. */
-  html, body {{ height: auto; min-height: 100%; }}
 
   body {{ background: var(--off-white); color: var(--text); margin: 0; }}
 
@@ -2733,7 +2723,7 @@ def _poster(ed):
   <meta name="robots" content="noindex">
   <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
 
-  <link rel="stylesheet" href="/system/nl-brand.css?v=72">
+  <link rel="stylesheet" href="/system/nl-brand.css?v=73">
 
   <style>
   @page {{ size: A4 portrait; margin: 11mm; }}
