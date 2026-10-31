@@ -76,7 +76,7 @@ the new fields. The week/month lanes stay driven by home.
 |---|---|---|
 | Draft | Planned, not done or scheduled | Normal |
 | Scheduled | Really scheduled for a set time | Normal + clock |
-| Published | Gone out | Faint diagonal cross-hatch, slightly faded, title readable, tick |
+| Published | Gone out | Faint diagonal cross-hatch, slightly faded, title readable, tick (*built early, v3.9*) |
 
 - `planned` maps to Draft. `published` stays. Dropped — see above.
 - The status control on the tile becomes a button that steps Draft → Scheduled
