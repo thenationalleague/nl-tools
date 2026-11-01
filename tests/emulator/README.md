@@ -56,6 +56,7 @@ checks so the page may call the emulator ports. Neither is a change to the pages
 | File | Covers |
 |---|---|
 | `matchday-live-rules.mjs` | `app-data/media-matchday-live` and Storage `matchday-live/**`: who reads what, the contributor's create-then-finish clip lifecycle, the 30-second pace and 20-a-day count, rotated and deactivated links refused at once, reviewer vs Manage, the 26-hour late window, test links. |
+| `accreditation-rules.mjs` | `app-data/media-accreditation` and Storage `accreditation/**`: the form's one update (application + pace + quota + outbox), under-18s club-only and awaiting a guardian, route-specific fields, the rolling five-a-day quota, closed until an agreement exists, agreement versions only going up by one, Manage vs Use vs clubs, create-only uploads in the session's own folder. Run with `--only database,storage`. |
 | `matchday-live-functions.cjs` | `functions/matchday-live.js` itself: the auth trigger grants, refuses a deactivated or malformed token and deletes the request; the sync skips the Cup, auto-matches within ±2 minutes, no-ops on an unchanged ingester run and writes only matches that moved; the 7-day backfill; retention purges a rejected clip after 7 days and drops a stuck upload. |
 | `matchday-live-capture.e2e.cjs` | The capture page in Chromium with a fake portrait camera. |
 | `matchday-live-feed.e2e.cjs` | The staff feed behind the real auth-guard. |
