@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Media Accreditation: staff console
+  Version: v1.0 (01/11/2026)
+  File: /accreditation/admin/index.html
+
+  Photographer licence applications from the public form at
+  /accreditation/application/, the agreement wording they sign, and the
+  emails waiting to go. Spec: system/media-accreditation-plan.md.
+
+  CHANGELOG
+    v1.0 (01/11/2026) – Slice 1. Three tabs:
+      Queue      this season's applications by stage (awaiting staff,
+                 awaiting club, awaiting guardian), each with the automatic
+                 checks from spec §6.1 and its photo and insurance schedule.
+                 Read-only: approve, decline and confirm-for-club are the
+                 next slice.
+      Agreements the licence agreement for each type, versioned. Saving makes
+                 a new version, which every later application signs; the
+                 public form stays closed until version 1 exists.
+      Outbox     the "received" email for each application, with copy
+                 buttons and Mark sent, until the email shim is live.
+
+  Storage (RTDB), all under app-data/media-accreditation/:
+    applications/<season>/<id>          written by the public form
+    config/agreements/<type>            { version, text, approvedBy, approvedAt }
+    config/agreementVersions/<type>/<v> every version ever saved, write-once
+    outbox/<id>                         { to, template, applicationId, season,
+                                          status queued|sent, createdAt,
+                                          sentAt?, sentBy? }
+    tools/media-accreditation           tool registration
+
+  Access: Manage (`admin`) only. The rules give the whole node to Manage and
+  nothing to Use, so this page says so to a Use holder rather than showing an
+  empty queue. Defaults: superadmin and League Admin Manage; everyone else
+  off. Club Admin gets Use when the club page ships.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Media Accreditation — NL Tools</title>
+  <!-- Favicons. Static, not injected: nl-topbar.js adds these too, but a
+       standalone page never loads it, and an icon that arrives with the JS
+       leaves the tab blank until it does. /favicon.ico at the root is the
+       backstop every browser asks for without being told. -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+
+  <!-- Brand stylesheet (lint canonical: ?v=73) -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=73">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'Media Accreditation',
+      toolKey: 'media-accreditation'
+    };
+    var NL_TOOL_KEY = 'media-accreditation';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '01/11/2026',
+        version: 'v1.0',
+        items: [
+          'Queue of photography licence applications by stage, with the automatic checks.',
+          'Agreements: versioned licence wording. The public form opens once version 1 is saved.',
+          'Outbox: the "received" email for each application, to copy and mark sent.'
+        ]
+      }
+    ];
+
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts (lint canonical: ?v=51 / ?v=1 / ?v=10 / ?v=17) -->
+  <script src="/system/nl-utils.js?v=51"></script>
+  <!-- GA4, one property for all of nl.tools. Cookieless, so no consent
+       banner on any page; page views by path, no identity. Tool events go
+       through NL.track(). See system/nl-analytics.js. -->
+  <script src="/system/nl-analytics.js?v=1"></script>
+  <script src="/system/nl-topbar.js?v=10"></script>
+  <script src="/system/auth-guard.js?v=17"></script>
+  <script src="/accreditation/_shared.js?v=1"></script>
+
+<style>
+  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
+     style.display = 'block'. Don't clear with '' — would re-trigger the
+     brand rule and re-hide the page. */
+  .ac-pane[hidden] { display: none; }
+  .ac-tabs { margin-bottom: 20px; }
+  /* The stage and sent/unsent tabs filter the pane; sized to their labels so
+     they read as a filter under the main tabs, not a second row of them. */
+  .ac-sub { margin-bottom: 16px; width: max-content; max-width: 100%; }
+
+  .ac-row { cursor: pointer; }
+  .ac-row:hover td { background: var(--navy-50); }
+  .ac-row:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--primary); }
+  .ac-muted { color: var(--text-muted); font-size: var(--text-sm); }
+
+  /* Application detail */
+  .ac-detail { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 20px; }
+  .ac-detail__photo { width: 120px; height: 155px; border-radius: var(--radius); background: var(--navy-50) center / cover no-repeat; border: 1px solid var(--border); }
+  .ac-dl { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 6px 12px; margin: 0; font-size: var(--text-sm); }
+  .ac-dl dt { color: var(--text-muted); }
+  .ac-dl dd { margin: 0; overflow-wrap: anywhere; }
+  .ac-h { font-size: var(--text-xs); font-weight: 800; font-variation-settings: 'wght' 800; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--text-muted); margin: 20px 0 8px; }
+  .ac-checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: var(--text-sm); }
+  .ac-checks li { display: grid; grid-template-columns: 140px auto minmax(0, 1fr); gap: 10px; align-items: baseline; }
+  .ac-people { display: flex; flex-wrap: wrap; gap: 12px; }
+  .ac-people figure { margin: 0; width: 90px; font-size: var(--text-xs); text-align: center; }
+  .ac-people .ac-detail__photo { width: 90px; height: 116px; }
+  @media (max-width: 600px) {
+    .ac-detail { grid-template-columns: 1fr; }
+    .ac-dl { grid-template-columns: 1fr; }
+    .ac-dl dt { margin-top: 6px; }
+    .ac-checks li { grid-template-columns: 1fr auto; }
+    .ac-checks li > :last-child { grid-column: 1 / -1; }
+  }
+
+  /* Agreements */
+  .ac-agree textarea { width: 100%; min-height: 360px; font-family: var(--font); font-size: var(--text-sm); line-height: 1.6; }
+  .ac-agree__foot { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+
+  /* Outbox */
+  .ac-mail { border: 1px solid var(--border); border-radius: var(--radius); background: var(--white); padding: 16px; }
+  .ac-mail + .ac-mail { margin-top: 12px; }
+  .ac-mail__head { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; margin-bottom: 8px; }
+  .ac-mail__subj { font-weight: 800; font-variation-settings: 'wght' 800; color: var(--navy); }
+  .ac-mail__body { white-space: pre-wrap; font-size: var(--text-sm); line-height: 1.5; margin: 0 0 12px; }
+  .ac-mail__acts { display: flex; gap: 8px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="page">
+
+    <div class="banner banner--amber" id="acNoManage" hidden>This console needs Manage on Media Accreditation. Ask a superadmin to change your access in the portal.</div>
+
+    <div id="acApp" hidden>
+      <div class="banner banner--info" id="acClosedBanner" hidden>The application form is closed until an agreement is saved in Agreements.</div>
+
+      <div class="tabs ac-tabs" role="tablist">
+        <button class="tab active" role="tab" data-pane="queue" aria-selected="true">Queue <span class="tab__count" id="acQueueCount" hidden></span></button>
+        <button class="tab" role="tab" data-pane="agreements" aria-selected="false">Agreements</button>
+        <button class="tab" role="tab" data-pane="outbox" aria-selected="false">Outbox <span class="tab__count" id="acOutboxCount" hidden></span></button>
+      </div>
+
+      <!-- ── Queue ─────────────────────────────────────────────── -->
+      <section class="ac-pane" id="pane-queue">
+        <div class="tabs ac-sub" id="acStages" role="tablist" aria-label="Stage"></div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>Applicant</th><th>Type</th><th>Club / company</th><th>Submitted</th><th>Checks</th></tr></thead>
+            <tbody id="acRows"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="acEmpty" hidden><div class="empty-state__text">Nothing at this stage.</div></div>
+      </section>
+
+      <!-- ── Agreements ────────────────────────────────────────── -->
+      <section class="ac-pane ac-agree" id="pane-agreements" hidden>
+        <div class="form-group">
+          <label for="acAgreeType">Licence type</label>
+          <select id="acAgreeType" class="nl-select"></select>
+        </div>
+        <p class="ac-muted" id="acAgreeMeta"></p>
+        <div class="form-group">
+          <label for="acAgreeText">Agreement text</label>
+          <textarea id="acAgreeText" maxlength="50000"></textarea>
+        </div>
+        <div class="ac-agree__foot">
+          <button class="btn btn--primary" id="acAgreeSave">Save as new version</button>
+          <span class="ac-muted">Applications signed before keep the version they signed.</span>
+        </div>
+        <div class="ac-h">Earlier versions</div>
+        <div id="acAgreeHistory" class="ac-muted"></div>
+      </section>
+
+      <!-- ── Outbox ────────────────────────────────────────────── -->
+      <section class="ac-pane" id="pane-outbox" hidden>
+        <div class="tabs ac-sub" id="acMailFilter" role="tablist" aria-label="Show">
+          <button class="tab active" role="tab" aria-selected="true" data-f="queued">To send</button>
+          <button class="tab" role="tab" aria-selected="false" data-f="sent">Sent</button>
+        </div>
+        <div id="acMail"></div>
+        <div class="empty-state" id="acMailEmpty" hidden><div class="empty-state__text">No emails here.</div></div>
+      </section>
+    </div>
+
+  </div>
+</div>
+
+<!-- Main app -->
+<script>
+(function () {
+  'use strict';
+
+  var ROOT = 'app-data/media-accreditation/';
+  var STAGES = ['awaiting-staff', 'awaiting-club', 'awaiting-guardian'];
+  var S = {
+    session: null,
+    season: null,
+    apps: {},           /* id → application, this season */
+    agreements: {},     /* type → current */
+    versions: {},       /* type → { v → record } */
+    outbox: {},
+    stage: 'awaiting-staff',
+    mailFilter: 'queued',
+    agreeType: 'photography'
+  };
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return NL.escHtml(s == null ? '' : String(s)); };
+
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function (session) {
+    S.session = session;
+    if (session.toolLevel !== 'admin') { $('acNoManage').hidden = false; return; }
+    $('acApp').hidden = false;
+    S.season = AC.seasonKey(NL.season.fromDate());
+    wireTabs();
+    wireStages();
+    wireAgreements();
+    wireOutbox();
+    NL.ensureAuth().then(listen);
+  };
+
+  function today() {
+    var d = new Date();
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  }
+
+  function listen() {
+    db.ref(ROOT + 'applications/' + S.season).on('value', function (snap) {
+      S.apps = {};
+      snap.forEach(function (c) { var a = c.val(); a.id = c.key; a.season = S.season; S.apps[c.key] = a; });
+      drawQueue();
+      drawOutbox();
+    }, failed);
+    db.ref(ROOT + 'config').on('value', function (snap) {
+      var c = snap.val() || {};
+      S.agreements = c.agreements || {};
+      S.versions = c.agreementVersions || {};
+      $('acClosedBanner').hidden = !!(S.agreements.photography && S.agreements.photography.version);
+      drawAgreement();
+    }, failed);
+    db.ref(ROOT + 'outbox').on('value', function (snap) {
+      S.outbox = {};
+      snap.forEach(function (c) { var m = c.val(); m.id = c.key; S.outbox[c.key] = m; });
+      drawOutbox();
+    }, failed);
+  }
+
+  function failed(e) {
+    console.warn('[accreditation] read failed', e && e.code, e && e.message);
+    NL.toast('Couldn’t load the queue. Refresh to try again.', 'error');
+  }
+
+  /* ── tabs ─────────────────────────────────────────────────────────── */
+  function wireTabs() {
+    document.querySelectorAll('.ac-tabs > .tab').forEach(function (t) {
+      t.addEventListener('click', function () {
+        document.querySelectorAll('.ac-tabs > .tab').forEach(function (x) {
+          var on = x === t;
+          x.classList.toggle('active', on);
+          x.setAttribute('aria-selected', on ? 'true' : 'false');
+          $('pane-' + x.dataset.pane).hidden = !on;
+        });
+      });
+    });
+  }
+
+  function select(group, b) {
+    group.querySelectorAll('.tab').forEach(function (x) {
+      x.classList.toggle('active', x === b);
+      x.setAttribute('aria-selected', x === b ? 'true' : 'false');
+    });
+  }
+
+  /* ── queue ────────────────────────────────────────────────────────── */
+  function wireStages() {
+    $('acStages').innerHTML = STAGES.map(function (k) {
+      return '<button class="tab' + (k === S.stage ? ' active' : '') + '" role="tab" aria-selected="' + (k === S.stage) + '" data-k="' + k + '">' +
+        esc(AC.statusLabel(k)) + ' <span class="tab__count" data-n="' + k + '" hidden></span></button>';
+    }).join('');
+    $('acStages').addEventListener('click', function (e) {
+      var b = e.target.closest('.tab');
+      if (!b) return;
+      S.stage = b.dataset.k;
+      select($('acStages'), b);
+      drawQueue();
+    });
+    $('acRows').addEventListener('click', function (e) {
+      var tr = e.target.closest('tr[data-id]');
+      if (tr) openApp(tr.dataset.id);
+    });
+    $('acRows').addEventListener('keydown', function (e) {
+      var tr = e.target.closest('tr[data-id]');
+      if (tr && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openApp(tr.dataset.id); }
+    });
+  }
+
+  function list() { return Object.keys(S.apps).map(function (k) { return S.apps[k]; }); }
+
+  function drawQueue() {
+    var all = list();
+    var today_ = today();
+    STAGES.forEach(function (k) {
+      var n = all.filter(function (a) { return a.status === k; }).length;
+      var el = $('acStages').querySelector('[data-n="' + k + '"]');
+      if (el) { el.textContent = n; el.hidden = !n; }
+    });
+    var waiting = all.filter(function (a) { return a.status === 'awaiting-staff'; }).length;
+    $('acQueueCount').textContent = waiting;
+    $('acQueueCount').hidden = !waiting;
+
+    var rows = all.filter(function (a) { return a.status === S.stage; })
+      .sort(function (a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
+    $('acEmpty').hidden = rows.length > 0;
+    $('acRows').innerHTML = rows.map(function (a) {
+      var flags = AC.flagCount(AC.checks(a, today_, all));
+      var where = a.route === 'club' ? a.club : (a.org && a.org.name) || '—';
+      return '<tr class="ac-row" tabindex="0" data-id="' + esc(a.id) + '">' +
+        '<td><strong>' + esc(a.person && a.person.name) + '</strong>' +
+          (a.under18 ? ' <span class="pill pill--pending">Under 18</span>' : '') + '</td>' +
+        '<td>' + esc(AC.orgLabel(a.orgType)) + '</td>' +
+        '<td>' + esc(where) + '</td>' +
+        '<td>' + esc(NL.formatDateShort(a.createdAt)) + '</td>' +
+        '<td>' + (flags ? '<span class="pill pill--rejected">' + flags + ' flag' + (flags === 1 ? '' : 's') + '</span>'
+                        : '<span class="pill pill--approved">Clear</span>') + '</td>' +
+      '</tr>';
+    }).join('');
+  }
+
+  /* Paths only ever become URLs here, for someone with Manage. */
+  function fileUrl(path) {
+    try {
+      return path ? firebase.storage().ref(path).getDownloadURL() : Promise.reject(new Error('none'));
+    } catch (e) { return Promise.reject(e); }
+  }
+
+  function dl(pairs) {
+    return '<dl class="ac-dl">' + pairs.filter(function (p) { return p[1] != null && p[1] !== ''; }).map(function (p) {
+      return '<dt>' + esc(p[0]) + '</dt><dd>' + (p[2] ? p[1] : esc(p[1])) + '</dd>';
+    }).join('') + '</dl>';
+  }
+
+  function openApp(id) {
+    var a = S.apps[id];
+    if (!a) return;
+    var p = a.person || {};
+    var checks = AC.checks(a, today(), list());
+    var html = '<div class="ac-detail"><div class="ac-detail__photo" id="acDetPhoto" role="img" aria-label="Photo"></div><div>' +
+      dl([
+        ['Reference', AC.reference(a.season, a.id)],
+        ['Stage', AC.statusLabel(a.status)],
+        ['Submitted', NL.formatDateTime(a.createdAt)],
+        ['Email', p.email], ['Phone', p.phone], ['Address', p.address],
+        ['Previous licence', a.previousLicence],
+        ['Under 18', a.under18 ? 'Yes – born ' + NL.formatDateShort(a.dob) : 'No']
+      ]) + '</div></div>';
+
+    if (a.under18 && a.guardian) {
+      html += '<div class="ac-h">Parent or guardian</div>' + dl([
+        ['Name', a.guardian.name], ['Email', a.guardian.email], ['Relationship', a.guardian.relationship]
+      ]);
+    }
+    html += '<div class="ac-h">Who they shoot for</div>' + dl([
+      ['Type', AC.orgLabel(a.orgType)],
+      ['Club', a.club], ['Paid or volunteer', a.paidOrVolunteer === 'paid' ? 'Paid' : a.paidOrVolunteer === 'volunteer' ? 'Volunteer' : null],
+      ['Company', a.org && a.org.name], ['Licence holder', a.org && a.org.holder]
+    ]);
+    var people = a.photographers ? Object.keys(a.photographers).map(function (k) { return a.photographers[k]; }) : [];
+    if (people.length) {
+      html += '<div class="ac-people">' + people.map(function (x, i) {
+        return '<figure><div class="ac-detail__photo" data-ph="' + i + '"></div>' + esc(x.name) + '</figure>';
+      }).join('') + '</div>';
+    }
+    if (a.insurance) {
+      var ins = a.insurance;
+      html += '<div class="ac-h">Insurance</div>' + dl([
+        ['Insurer', ins.insurer], ['Policy number', ins.policyNumber],
+        ['Limit', typeof ins.limit === 'number' ? '£' + ins.limit.toLocaleString('en-GB') : ''],
+        ['Dates', NL.formatDateShort(ins.start) + ' – ' + NL.formatDateShort(ins.expiry)],
+        ['Named insured', ins.namedInsured],
+        ['In their name', ins.inMyName ? 'Yes' : 'No – ' + (ins.explanation || '')],
+        ['Schedule', '<a href="#" id="acSchedLink">Open the schedule</a>', true]
+      ]);
+    }
+    var uses = AC.USES.filter(function (u) { return a.use && a.use.channels && a.use.channels[u.key]; })
+      .map(function (u) { return u.key === 'other' ? 'Other: ' + (a.use.otherText || '') : u.label; });
+    html += '<div class="ac-h">Use and declarations</div>' + dl([
+      ['Published in', uses.join(', ')],
+      ['Clubs covered', a.use && a.use.clubsCovered],
+      ['Refused before', a.declarations && a.declarations.refusedBefore ? 'Yes – ' + (a.declarations.refusedDetail || '') : 'No'],
+      ['Signed', a.signature ? a.signature.name + ', agreement v' + a.signature.agreementVersion + ', ' + NL.formatDateTime(a.signature.at) : '']
+    ]);
+    html += '<div class="ac-h">Checks</div><ul class="ac-checks">' + checks.map(function (c) {
+      return '<li><span>' + esc(c.label) + '</span>' +
+        (c.flag ? '<span class="pill pill--rejected">Flag</span>' : '<span class="pill pill--approved">OK</span>') +
+        '<span class="ac-muted">' + esc(c.detail) + '</span></li>';
+    }).join('') + '</ul>';
+
+    var m = NL.modal({ title: p.name || 'Application', width: 'wide', body: html,
+      buttons: [{ label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } }] });
+
+    var box = m.body.querySelector('#acDetPhoto');
+    fileUrl(a.photo).then(function (u) { box.style.backgroundImage = 'url("' + u + '")'; })['catch'](function () {});
+    people.forEach(function (x, i) {
+      var el = m.body.querySelector('[data-ph="' + i + '"]');
+      fileUrl(x.photo).then(function (u) { el.style.backgroundImage = 'url("' + u + '")'; })['catch'](function () {});
+    });
+    var link = m.body.querySelector('#acSchedLink');
+    if (link) link.addEventListener('click', function (e) {
+      e.preventDefault();
+      /* Open the tab inside the click so the browser allows it, then point
+         it at the URL once Storage answers. */
+      var w = window.open('', '_blank');
+      fileUrl(a.insurance.schedule).then(function (u) {
+        if (w) { w.opener = null; w.location = u; } else { window.location = u; }
+      })['catch'](function () {
+        if (w) w.close();
+        NL.toast('Couldn’t open the schedule.', 'error');
+      });
+    });
+  }
+
+  /* ── agreements ───────────────────────────────────────────────────── */
+  function wireAgreements() {
+    $('acAgreeType').innerHTML = AC.TYPES.filter(function (t) { return t.offered; }).map(function (t) {
+      return '<option value="' + t.key + '">' + esc(t.label) + '</option>';
+    }).join('');
+    $('acAgreeType').addEventListener('change', function () { S.agreeType = this.value; drawAgreement(true); });
+    $('acAgreeSave').addEventListener('click', saveAgreement);
+  }
+
+  var agreeDirty = false;
+  function drawAgreement(force) {
+    var cur = S.agreements[S.agreeType];
+    $('acAgreeMeta').textContent = cur
+      ? 'Version ' + cur.version + ', saved ' + NL.formatDateTime(cur.approvedAt) + ' by ' + ((cur.approvedBy && cur.approvedBy.name) || 'unknown') + '.'
+      : 'No version saved yet. The form is closed for this type.';
+    /* Never overwrite what someone is typing because another save landed. */
+    if (force || !agreeDirty) { $('acAgreeText').value = cur ? cur.text : ''; agreeDirty = false; }
+    var hist = S.versions[S.agreeType] || {};
+    var keys = Object.keys(hist).sort(function (a, b) { return Number(b) - Number(a); });
+    $('acAgreeHistory').innerHTML = keys.length ? keys.map(function (k) {
+      var h = hist[k];
+      return '<div>Version ' + esc(h.version) + ' – ' + esc(NL.formatDateTime(h.approvedAt)) + ', ' + esc((h.approvedBy && h.approvedBy.name) || '') +
+        ' <button class="btn btn--ghost btn--sm" data-v="' + esc(k) + '">View</button></div>';
+    }).join('') : 'None.';
+    $('acAgreeHistory').querySelectorAll('[data-v]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var h = hist[b.dataset.v];
+        NL.modal({ title: 'Version ' + h.version, width: 'wide',
+          body: '<div style="white-space:pre-wrap;font-size:var(--text-sm);line-height:1.6">' + esc(h.text) + '</div>',
+          buttons: [{ label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } }] });
+      });
+    });
+  }
+
+  function saveAgreement() {
+    var text = $('acAgreeText').value.replace(/\r\n/g, '\n').trim();
+    if (!text) { NL.toast('The agreement is empty.', 'error'); return; }
+    var cur = S.agreements[S.agreeType];
+    if (cur && cur.text === text) { NL.toast('No changes to save.', 'info'); return; }
+    var next = cur ? cur.version + 1 : 1;
+    NL.confirm('Save this as version ' + next + '? New applications will sign it from now on.', { title: 'Save agreement', confirmText: 'Save' })
+      .then(function (ok) {
+        if (!ok) return;
+        var rec = {
+          version: next, text: text,
+          approvedBy: { uid: firebase.auth().currentUser.uid, name: (S.session && (S.session.name || S.session.displayName)) || '' },
+          approvedAt: firebase.database.ServerValue.TIMESTAMP
+        };
+        var u = {};
+        u['config/agreements/' + S.agreeType] = rec;
+        u['config/agreementVersions/' + S.agreeType + '/' + next] = rec;
+        return db.ref(ROOT).update(u).then(function () {
+          agreeDirty = false;
+          NL.toast('Saved as version ' + next + '.', 'success');
+          NL.writeAudit('accreditation_agreement_saved', { type: S.agreeType, version: next });
+        });
+      })['catch'](function (e) {
+        console.warn('[accreditation] agreement save failed', e && e.code, e && e.message);
+        NL.toast('Couldn’t save. Someone else may have saved a version – refresh and try again.', 'error');
+      });
+  }
+  document.addEventListener('input', function (e) { if (e.target && e.target.id === 'acAgreeText') agreeDirty = true; });
+
+  /* ── outbox ───────────────────────────────────────────────────────── */
+  function wireOutbox() {
+    $('acMailFilter').addEventListener('click', function (e) {
+      var b = e.target.closest('.tab');
+      if (!b) return;
+      S.mailFilter = b.dataset.f;
+      select($('acMailFilter'), b);
+      drawOutbox();
+    });
+    $('acMail').addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-act]');
+      if (!b) return;
+      var m = S.outbox[b.dataset.id];
+      if (!m) return;
+      var mail = mailFor(m);
+      if (b.dataset.act === 'to') NL.copy(m.to, { ok: 'Address copied' });
+      if (b.dataset.act === 'subject') NL.copy(mail.subject, { ok: 'Subject copied' });
+      if (b.dataset.act === 'body') NL.copy(mail.body, { ok: 'Email copied' });
+      if (b.dataset.act === 'sent') markSent(m);
+    });
+  }
+
+  function mailFor(m) {
+    var a = (m.season === S.season && S.apps[m.applicationId]) || {};
+    return AC.email(m.template, {
+      name: a.person && a.person.name,
+      ref: AC.reference(m.season, m.applicationId),
+      season: m.season, status: a.status, club: a.club
+    }) || { subject: '', body: '' };
+  }
+
+  function drawOutbox() {
+    var all = Object.keys(S.outbox).map(function (k) { return S.outbox[k]; });
+    var queued = all.filter(function (m) { return m.status === 'queued'; }).length;
+    $('acOutboxCount').textContent = queued;
+    $('acOutboxCount').hidden = !queued;
+    var rows = all.filter(function (m) { return m.status === S.mailFilter; })
+      .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+    $('acMailEmpty').hidden = rows.length > 0;
+    $('acMail').innerHTML = rows.map(function (m) {
+      var mail = mailFor(m);
+      return '<article class="ac-mail">' +
+        '<div class="ac-mail__head"><span class="ac-mail__subj">' + esc(mail.subject) + '</span>' +
+          '<span class="ac-muted">to ' + esc(m.to) + ' · ' + esc(NL.timeAgo(m.createdAt)) +
+          (m.sentAt ? ' · sent ' + esc(NL.formatDateShort(m.sentAt)) + (m.sentBy && m.sentBy.name ? ' by ' + esc(m.sentBy.name) : '') : '') + '</span></div>' +
+        '<p class="ac-mail__body">' + esc(mail.body) + '</p>' +
+        '<div class="ac-mail__acts">' +
+          '<button class="btn btn--ghost btn--sm" data-act="to" data-id="' + esc(m.id) + '">Copy address</button>' +
+          '<button class="btn btn--ghost btn--sm" data-act="subject" data-id="' + esc(m.id) + '">Copy subject</button>' +
+          '<button class="btn btn--ghost btn--sm" data-act="body" data-id="' + esc(m.id) + '">Copy email</button>' +
+          (m.status === 'queued' ? '<button class="btn btn--navy btn--sm" data-act="sent" data-id="' + esc(m.id) + '">Mark sent</button>' : '') +
+        '</div></article>';
+    }).join('');
+  }
+
+  function markSent(m) {
+    db.ref(ROOT + 'outbox/' + m.id).update({
+      status: 'sent',
+      sentAt: firebase.database.ServerValue.TIMESTAMP,
+      sentBy: { uid: firebase.auth().currentUser.uid, name: (S.session && (S.session.name || S.session.displayName)) || '' }
+    }).then(function () { NL.toast('Marked sent.', 'success'); })['catch'](function (e) {
+      console.warn('[accreditation] mark sent failed', e && e.code, e && e.message);
+      NL.toast('Couldn’t update that email.', 'error');
+    });
+  }
+
+  if (window._toolDeferredSession) {
+    window.TOOL.boot(window._toolDeferredSession);
+    delete window._toolDeferredSession;
+  }
+})();
+</script>
+
+</body>
+</html>

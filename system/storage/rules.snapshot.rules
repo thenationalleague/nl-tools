@@ -23,6 +23,7 @@
 //   matchday-live/<ymd>/<contributorId>/  Matchday Live contributor clips
 //   save-of-the-month/<CODE>/<YYYY-MM>/  Save of the Month club clips, per-club
 //   document-library/**   League documents for every club, written by NL staff
+//   accreditation/<season>/<uid>/<applicationId>/  Media Accreditation application uploads
 
 rules_version = '2';
 service firebase.storage {
@@ -335,6 +336,41 @@ service firebase.storage {
         && request.resource.md5Hash == resource.md5Hash
         && request.resource.contentType == resource.contentType;
       allow delete: if request.auth != null && request.auth.token.email != null;
+    }
+
+    // accreditation/<season>/<uid>/<applicationId>/<file>
+    // Media Accreditation (/accreditation/application/). The public form signs
+    // in anonymously and uploads the applicant's photo, each named
+    // photographer's photo and the insurance schedule BEFORE it writes the
+    // application, so these are create-only under the session's own uid:
+    // nobody can drop a file in someone else's folder or replace one already
+    // sent. Photos are JPEG/PNG under 5MB; the schedule PDF/JPEG/PNG under
+    // 10MB (spec §15).
+    //
+    // Storage rules cannot read RTDB (as for Matchday Live), so an upload
+    // whose application was then refused leaves an orphan object with no
+    // record pointing at it. It never reaches the console. Accepted.
+    //
+    // Read: staff accounts (an email claim), as everywhere else in this file.
+    // The paths carry an anonymous uid and a push id, and are only ever
+    // listed in app-data/media-accreditation/applications, which only Manage
+    // can read. A club account also carries an email claim, so the path is
+    // the thing keeping insurance documents from it — the same trade as
+    // Matchday Live's clips. Revisit if a club page ever lists these paths.
+    match /accreditation/{season}/{uid}/{appId}/{file} {
+      allow read: if request.auth != null && request.auth.token.email != null;
+      allow create: if request.auth != null
+        && request.auth.uid == uid
+        && resource == null
+        && (
+          ((file.matches('photo[.](jpg|png)') || file.matches('photographer-[-_A-Za-z0-9]{20}[.](jpg|png)'))
+            && request.resource.size < 5 * 1024 * 1024
+            && request.resource.contentType.matches('image/(jpeg|png)'))
+          ||
+          (file.matches('insurance[.](pdf|jpg|png)')
+            && request.resource.size < 10 * 1024 * 1024
+            && request.resource.contentType.matches('application/pdf|image/(jpeg|png)'))
+        );
     }
 
     match /{allPaths=**} {
