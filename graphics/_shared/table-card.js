@@ -1,7 +1,7 @@
 /* ============================================================
    League Table Card — shared renderer
    File: /graphics/_shared/table-card.js
-   Version: v1.4 (03/11/2026)
+   Version: v1.5 (03/11/2026)
 
    Single source of truth for the league-table artwork. The League Table
    Graphic tool (/graphics/table-graphic/) and the scheduled batch
@@ -34,6 +34,10 @@
      title, FORMAT_H, COMPETITION_ID, CUP_ROUND, NLS_BASE
 
    CHANGELOG
+     v1.5 03/11/2026  Cup qualifiers: the navy block runs a little past 1st
+                      and 2nd, and a red QUALIFIED FOR THE QUARTER-FINALS
+                      tag sits on its bottom edge. Drawn only when rows are
+                      marked Q, so a group still in play shows neither.
      v1.4 03/11/2026  Cup group qualifiers (Q) draw as solid navy rows with
                       white type, not the pale band a league play-off place
                       uses. A Cup group in which every side has played its
@@ -80,6 +84,9 @@
      the group is over and its top two are through. 2026/27 has four group
      rounds (assets/data/rounds-2026-27.json). Change it if the format does. */
   var CUP_GROUP_GAMES = 4;
+  /* The tag under a finished group's qualifiers. Four groups of two make
+     eight, hence the quarter-finals; change it with the format. */
+  var CUP_QUALIFY_TAG = "QUALIFIED FOR THE QUARTER-FINALS";
 
   var ROSE_WHITE = "/assets/crests/National%20League%20rose%20white.png";
 
@@ -247,6 +254,19 @@
         statCells;
       rowsEl.appendChild(rowEl);
     });
+
+    /* Cup qualifiers read as one block: the first and last Q rows carry the
+       navy past their edges (styles.css), and the last one carries the tag. */
+    var qual = cup ? rowsEl.querySelectorAll(".row.is-qual") : [];
+    if (qual.length) {
+      var lastQ = qual[qual.length - 1];
+      qual[0].classList.add("qual-first");
+      lastQ.classList.add("qual-last");
+      var tag = document.createElement("div");
+      tag.className = "qual-tag";
+      tag.textContent = "\u25B2 " + CUP_QUALIFY_TAG;
+      lastQ.appendChild(tag);
+    }
 
     /* footer — sponsor logo, centred. A Cup group has none, and no footer:
        the rows take the space. */
@@ -429,13 +449,14 @@
   }
 
   root.NL_TABLE_CARD = {
-    VERSION: "v1.4",
+    VERSION: "v1.5",
     FORMAT_H: FORMAT_H,
     NLS_BASE: NLS_BASE,
     COMPETITION_ID: COMPETITION_ID,
     CUP_ROUND: CUP_ROUND,
     CUP_QUALIFY: CUP_QUALIFY,
     CUP_GROUP_GAMES: CUP_GROUP_GAMES,
+    CUP_QUALIFY_TAG: CUP_QUALIFY_TAG,
     DIV_NAME: DIV_NAME,
     render: render,
     toPng: toPng,
