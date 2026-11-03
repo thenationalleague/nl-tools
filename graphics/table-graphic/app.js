@@ -1,7 +1,7 @@
 /* ============================================================
    League Table Graphic — the tool
    File: /graphics/table-graphic/app.js
-   Version: v2.0 (28/10/2026)
+   Version: v2.2 (03/11/2026)
 
    The table itself is drawn by /graphics/_shared/table-card.js, the same
    renderer the scheduled batch uses; PNG export is
@@ -26,6 +26,8 @@
      paste box.
 
    CHANGELOG
+     v2.2 03/11/2026  A finished Cup group loads with its top two marked as
+                      qualified (table-card.js v1.4 does the marking).
      v2.0 28/10/2026  Rebuilt around the feed: the live table loads on its own
                       and the title fills in from the round dates. Table at an
                       earlier date, with deductions. Download one size or all
@@ -299,13 +301,15 @@
   }
 
   function applyTable(data) {
-    var rows = T.buildRows(data, NL.clubs);   /* the feed has no zones — see above */
+    var rows = T.buildRows(data, NL.clubs, { division: state.division });   /* no zones in the feed; a finished Cup group marks its top two */
 
     if (!rows.length) { setStatus("No table published yet.", 5000); return; }
 
     state.rows = rows;
     syncPasteFromRows(); buildGrid(); save(); render();
-    setStatus("Loaded " + rows.length + " clubs · marks are yours to set", 8000);
+    var qual = rows.some(function (r) { return r.flag === "Q"; });
+    setStatus("Loaded " + rows.length + " clubs · " +
+              (qual ? "group finished, top two marked as qualified" : "marks are yours to set"), 8000);
   }
 
   /* ---------------- zone marks ----------------
