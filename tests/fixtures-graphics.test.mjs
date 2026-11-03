@@ -108,6 +108,23 @@ test('table rows come out in position order, signed GD, U21 guests as PL2', () =
   assert.equal(T.title('final'), 'FINAL STANDINGS');
 });
 
+/* Same response shape as above; `played` checked against the live Cup
+   group tables on 03/11/2026 (league-tables?competitionID=1275&roundID=A–D),
+   when every side in all four groups stood on 4. */
+test('a finished Cup group arrives with its top two marked Q; a live one and a league do not', () => {
+  const win = {};
+  new Function('window', readFileSync(join(REPO, 'graphics/_shared/table-card.js'), 'utf8'))(win);
+  const T = win.NL_TABLE_CARD;
+  const clubs = { byOpta: () => null };
+  const group = (played) => ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].map((t, i) => ({ id: 't' + i,
+    attributes: { teamName: t, position: i + 1, played, points: 10 - i, goalDifference: 0 } }));
+  const flags = (rows) => rows.map(r => r.flag).join('');
+  assert.equal(flags(T.buildRows(group(T.CUP_GROUP_GAMES), clubs, { division: 'CupA' })), 'QQ------');
+  assert.equal(flags(T.buildRows(group(T.CUP_GROUP_GAMES - 1), clubs, { division: 'CupA' })), '--------');
+  assert.equal(flags(T.buildRows(group(T.CUP_GROUP_GAMES), clubs, { division: 'National' })), '--------');
+  assert.equal(flags(T.buildRows(group(T.CUP_GROUP_GAMES), clubs)), '--------');
+});
+
 /* Cup ties level after 90 go straight to penalties. NLS list endpoint:
    homeTeam/awayTeam.penaltyScore, null unless a shootout — live-confirmed in
    the nls-data-structure skill (g2634031, Hemel Hempstead 1-1

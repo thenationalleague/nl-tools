@@ -1,7 +1,7 @@
 /* ============================================================
    League Table Card — shared renderer
    File: /graphics/_shared/table-card.js
-   Version: v1.3 (28/10/2026)
+   Version: v1.4 (03/11/2026)
 
    Single source of truth for the league-table artwork. The League Table
    Graphic tool (/graphics/table-graphic/) and the scheduled batch
@@ -19,7 +19,10 @@
                  "13" → MATCHDAY 13, any other text prints as typed
                  ("GROUP STAGE – MATCHDAY 3")
        rows      [{ team, flag, p, w, d, l, f, a, gd, pts }]
-     buildRows(nlsLeagueTable, clubs) → rows (flags cleared: NLS has no zones)
+     buildRows(nlsLeagueTable, clubs[, { division }])
+                                 → rows. Flags arrive cleared (NLS has no
+                                   zones), except a finished Cup group: its
+                                   top two arrive as Q.
      rowsFromMatches(nlsMatches, clubs, deductions)
                                  → rows worked out from finished results, for a
                                    table at an earlier date. deductions =
@@ -31,6 +34,11 @@
      title, FORMAT_H, COMPETITION_ID, CUP_ROUND, NLS_BASE
 
    CHANGELOG
+     v1.4 03/11/2026  Cup group qualifiers (Q) draw as solid navy rows with
+                      white type, not the pale band a league play-off place
+                      uses. A Cup group in which every side has played its
+                      CUP_GROUP_GAMES arrives with its top two marked Q.
+                      League tables unchanged.
      v1.3 28/10/2026  No TIC Health logo on a Cup group table. A title that
                       isn't a number prints as typed. rowsFromMatches and
                       pointsFromMatches, for the tool's earlier-date table.
@@ -68,6 +76,10 @@
   var CUP_ROUND = { CupA: "A", CupB: "B", CupC: "C", CupD: "D" };
   /* Top two in each group go through. No relegation, no play-off ladder. */
   var CUP_QUALIFY = 2;
+  /* Group games per side. When every side in a group has played this many,
+     the group is over and its top two are through. 2026/27 has four group
+     rounds (assets/data/rounds-2026-27.json). Change it if the format does. */
+  var CUP_GROUP_GAMES = 4;
 
   var ROSE_WHITE = "/assets/crests/National%20League%20rose%20white.png";
 
@@ -210,7 +222,7 @@
       var rowEl = document.createElement("div");
       var cls = "row z-" + posZone(i + 1);
       if (flag === "C") cls += " is-champ";
-      else if (flag === "Q") cls += " is-po-sf";      /* qualified (cup) — same band as a confirmed semi-final place */
+      else if (flag === "Q") cls += " is-qual";       /* through to the Cup knockouts — solid navy row (v1.4) */
       else if (flag === "SF") cls += " is-po-sf";
       else if (flag === "QF") cls += " is-po-qf";
       else if (flag === "R") cls += " is-releg";
@@ -323,8 +335,8 @@
   }
   function numText(v) { return (v == null || v === "") ? "" : String(v); }
 
-  function buildRows(data, clubs) {
-    return (data || []).filter(function (r) {
+  function buildRows(data, clubs, opts) {
+    var rows = (data || []).filter(function (r) {
       var a = (r && r.attributes) || {};
       return r && r.id && (a.teamName || a.teamShortName) && a.position != null;
     }).sort(function (x, y) {
@@ -338,6 +350,18 @@
         f: numText(a.goalsFor), a: numText(a.goalsAgainst),
         gd: gdText(a.goalDifference), pts: numText(a.points)
       };
+    });
+    /* A finished Cup group is settled, so its qualifiers are a fact rather
+       than a call: mark them. A group still in play, and every league table,
+       arrives unmarked as before. */
+    if (opts && CUP_ROUND[opts.division] && groupFinished(rows)) {
+      rows.forEach(function (r, i) { if (i < CUP_QUALIFY) r.flag = "Q"; });
+    }
+    return rows;
+  }
+  function groupFinished(rows) {
+    return rows.length > CUP_QUALIFY && rows.every(function (r) {
+      return Number(r.p) === CUP_GROUP_GAMES;
     });
   }
 
@@ -405,12 +429,13 @@
   }
 
   root.NL_TABLE_CARD = {
-    VERSION: "v1.3",
+    VERSION: "v1.4",
     FORMAT_H: FORMAT_H,
     NLS_BASE: NLS_BASE,
     COMPETITION_ID: COMPETITION_ID,
     CUP_ROUND: CUP_ROUND,
     CUP_QUALIFY: CUP_QUALIFY,
+    CUP_GROUP_GAMES: CUP_GROUP_GAMES,
     DIV_NAME: DIV_NAME,
     render: render,
     toPng: toPng,
