@@ -227,12 +227,22 @@ test('two away games in a row, each a round trip over the limit, are flagged; th
   assert.ok(!short.flags.some((x) => /long trips/.test(x.text)));
 });
 
-test('an international window is a soft flag', () => {
+test('an international window flags only a club on the affected list, and hard', () => {
   const cal = { ...CAL, internationalWindows: [{ from: '2026-11-09', to: '2026-11-17' }] };
   const game = postponed(A, B, '2026-10-24');
-  const res = X.slots(game, { fixtures: fx(game), calendar: cal, rounds: {}, distances: { pairs: {} }, today: '2026-10-28' }, {});
-  assert.ok(on(res, '2026-11-10').flags.some((f) => f.level === 'info' && f.text === 'International window'));
-  assert.ok(!on(res, '2026-11-07').flags.some((f) => f.text === 'International window'));
+  const go = (intl) => X.slots(game, { fixtures: fx(game), calendar: cal, rounds: {}, distances: { pairs: {} }, today: '2026-10-28', intl }, {});
+  /* Nobody affected: no flag, though the window is there. */
+  assert.ok(!on(go(undefined), '2026-11-10').flags.some((f) => f.cat === 'international'));
+  /* Beta lose players: a red flag on window days only. */
+  const res = go({ clubs: ['Beta United'] });
+  const f = on(res, '2026-11-10').flags.find((x) => x.cat === 'international');
+  assert.equal(f.level, 'red');
+  assert.equal(f.text, 'BET in an international window');
+  assert.ok(!on(res, '2026-11-07').flags.some((x) => x.cat === 'international'));
+  /* Windows edited in Settings replace the calendar's: run to the Sunday. */
+  const moved = go({ clubs: ['Beta United'], windows: [{ from: '2026-11-09', to: '2026-11-22' }] });
+  assert.ok(on(moved, '2026-11-21').flags.some((x) => x.cat === 'international'));
+  assert.ok(!on(go({ clubs: ['Beta United'] }), '2026-11-21').flags.some((x) => x.cat === 'international'));
 });
 
 test('Fridays and Sundays are behind their switches', () => {

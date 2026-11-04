@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixture Management
-  Version: v3.5 (04/11/2026)
+  Version: v3.6 (04/11/2026)
   File: /fixtures/admin/index.html
 
   The League's master fixture record: every game in every competition, with
@@ -9,6 +9,11 @@
   behind it, is system/fixture-management-plan.md.
 
   CHANGELOG
+    v3.6 (04/11/2026) — Settings: International windows. Their dates are
+      edited here (they often run to the weekend), and a list of the clubs
+      that lose players to them. The globe still marks every window day;
+      only a game of a listed club is flagged, and red. Import workbook
+      shows only in an empty season, so it cannot overwrite one.
     v3.5 (04/11/2026) — Ruled-out days. The rule-out dialog has a card
       per club: the home club can't host or the away club can't travel,
       and either can't play at all (a County Cup tie, say); the date is
@@ -245,6 +250,14 @@
     window.NL_CHANGELOG = [
       {
         date: '04/11/2026',
+        version: 'v3.6',
+        items: [
+          'Settings: edit the international windows and list the clubs that lose players; only their games are flagged.',
+          'Import workbook only appears for an empty season.'
+        ]
+      },
+      {
+        date: '04/11/2026',
         version: 'v3.5',
         items: [
           'Rule a date out for either club, both, or a club that can\u2019t play at all that day.',
@@ -465,7 +478,7 @@
 
   <!-- Tool data layer (pure; tested in tests/fixture-management.test.mjs) -->
   <script src="/fixtures/_core.js?v=6"></script>
-  <script src="/fixtures/_finder.js?v=8"></script>
+  <script src="/fixtures/_finder.js?v=9"></script>
 
 <style>
   /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
@@ -595,6 +608,20 @@
   .fm-ro-filter { width: auto; min-width: 200px; }
   .fm-ro-past { font-size: var(--text-sm); color: var(--text-muted); }
   .fm-ro-table td { white-space: normal; }
+  .fm-intl { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+  @media (max-width: 900px) { .fm-intl { grid-template-columns: minmax(0, 1fr); } }
+  .fm-intl__col { display: grid; gap: 10px; align-content: start; justify-items: start; }
+  .fm-intl__dates { width: 100%; }
+  .fm-intl__h { margin: 0; font-size: var(--text-xs); text-transform: uppercase; letter-spacing: var(--tracking-wide); color: var(--text-muted); }
+  .fm-date-in { width: 130px; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius); font: inherit; font-size: var(--text-sm); background: var(--white); color: var(--text); }
+  .fm-date-in:focus { outline: none; box-shadow: var(--focus-ring); }
+  .fm-intl__clubs { display: flex; flex-wrap: wrap; gap: 6px; }
+  .fm-intl__club { display: inline-flex; gap: 6px; align-items: center; padding: 4px 6px 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-pill);
+    background: var(--white); font-size: var(--text-sm); font-weight: 700; color: var(--navy); }
+  .fm-intl__club img, .fm-intl__club .fm-crest-none { width: 18px; height: 18px; object-fit: contain; }
+  .fm-intl__x { border: 0; background: none; cursor: pointer; color: var(--text-muted); font-size: var(--text-md); line-height: 1; padding: 0 4px; }
+  .fm-intl__x:hover { color: var(--navy); }
+  #fmIntlPick { min-width: 260px; }
   .fm-choice { display: grid; gap: 8px; margin: 14px 0 12px; }
   .fm-choice__opt { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--white); }
   .fm-choice__opt.is-on { border-color: var(--navy); background: var(--navy-50); box-shadow: inset 3px 0 0 var(--navy); }
@@ -870,9 +897,9 @@
           <button class="btn btn--primary btn--sm fm-setting__btn" type="button" id="fmAdd">Add cup tie</button>
           <span>NL Cup knockouts, play-offs, FA Cup and FA Trophy.</span>
         </div>
-        <div class="fm-setting">
+        <div class="fm-setting" id="fmImportRow" hidden>
           <button class="btn btn--ghost btn--sm fm-setting__btn" type="button" id="fmImport">Import workbook</button>
-          <span>Replaces every fixture in the sheet’s season.</span>
+          <span>Brings in the season’s fixtures.</span>
         </div>
         <div class="fm-setting" id="fmFromAttRow" hidden>
           <button class="btn btn--ghost btn--sm fm-setting__btn" type="button" id="fmFromAtt">Bring in from Attendance</button>
@@ -881,6 +908,8 @@
       </div>
       <div class="section-head fm-gap"><h2>Ruled-out days</h2></div>
       <div id="fmRuled"></div>
+      <div class="section-head fm-gap"><h2>International windows</h2></div>
+      <div id="fmIntl"></div>
     </section>
 
   </div>
@@ -926,7 +955,9 @@
     listen: null,        /* the live fixtures ref for the viewed season */
     crowds: {},          /* matchID → { total, away } from Attendance */
     unavail: {},         /* id → { club, side, date, reason, at }: dates a club cannot host or travel */
-    unavRef: null
+    unavRef: null,
+    intl: {},            /* { windows: { id: { from, to } }, clubs: { id: name } } as edited in Settings */
+    intlRef: null
   };
 
   function today() { return F.ymdOf(new Date()); }
@@ -1028,6 +1059,14 @@
       if (S.tab === 'rearrange') renderRearrange();
       if (S.tab === 'settings') renderRuled();
     });
+    if (S.intlRef) S.intlRef.off();
+    S.intl = {};
+    S.intlRef = ref('intl');
+    S.intlRef.on('value', function (snap) {
+      S.intl = snap.val() || {};
+      if (S.tab === 'rearrange') renderRearrange();
+      if (S.tab === 'settings') renderIntl();
+    });
     S.listen = ref('fixtures');
     S.listen.on('value', function (snap) {
       S.fixtures = snap.val() || {};
@@ -1104,6 +1143,7 @@
     });
     wireRearrange();
     wireRuled();
+    wireIntl();
     document.getElementById('fmFromAtt').addEventListener('click', openFromAttendance);
     document.getElementById('fmImport').addEventListener('click', openImport);
     document.getElementById('fmResults').addEventListener('click', openResults);
@@ -1185,7 +1225,10 @@
   function render() {
     renderRrCount();
     if (S.tab === 'rearrange') { renderRearrange(); return; }
-    if (S.tab === 'settings') renderRuled();
+    /* Import only into an empty season: it replaces every fixture, so
+       once a season holds any, it is gone (Richard, 04/11/2026). */
+    document.getElementById('fmImportRow').hidden = !S.canEdit || Object.keys(S.fixtures).length > 0;
+    if (S.tab === 'settings') { renderRuled(); renderIntl(); }
     if (S.tab === 'settings') return;
     var t = today();
     var all = Object.keys(S.fixtures).map(function (k) { return S.fixtures[k]; });
@@ -1732,7 +1775,8 @@
     var unav = unavailList();
     var res = X.slots(rec, {
       fixtures: S.fixtures, calendar: data.calendar, rounds: data.rounds,
-      distances: data.distances, today: today(), unavailable: unav
+      distances: data.distances, today: today(), unavailable: unav,
+      intl: { windows: intlWindowsNow(data.calendar), clubs: intlClubsNow() }
     }, { anchor: moving && rec.date ? rec.date : null,
       mondays: S.rr.mondays, thursdays: S.rr.thursdays, fridays: S.rr.fridays, sundays: S.rr.sundays });
     S.rr.slots = res.slots;
@@ -1894,7 +1938,7 @@
       X.pencilsOf(r).forEach(function (p) { (byDay[p.date] = byDay[p.date] || []).push({ r: r, pencil: true }); });
     });
     var c = { rec: rec, res: res, slotOf: slotOf, cups: cups, byDay: byDay, focus: focus, t: today(), unav: unavailList(),
-      distances: data.distances, windows: data.calendar.internationalWindows || [] };
+      distances: data.distances, windows: intlWindowsNow(data.calendar) };
     /* From two weeks before the earlier of today and the original date, to
        the week of the last usable date. */
     var t = c.t, start = res.original && res.original < t ? res.original : t;
@@ -2337,6 +2381,117 @@
         S.roAddClub = null; renderRuled();
       })
       .catch(function (err) { NL.toast('Save failed: ' + err.message, 'error'); });
+  }
+
+  /* ── International windows ─────────────────────────────────────────
+     The windows' dates, edited here (they often run to the weekend, past
+     the official end), and the clubs that lose players to them. The globe
+     marks every window day; only a game of an affected club is flagged,
+     and hard (Richard, 04/11/2026). Until edited, the windows are the
+     season calendar's. */
+  function intlWindowsNow(cal) {
+    var w = S.intl && S.intl.windows;
+    if (w) return Object.keys(w).map(function (k) { return { id: k, from: w[k].from, to: w[k].to }; })
+      .filter(function (x) { return x.from && x.to; }).sort(function (a, b) { return a.from < b.from ? -1 : 1; });
+    return ((cal && cal.internationalWindows) || []).map(function (x) { return { from: x.from, to: x.to }; });
+  }
+  function intlClubsNow() {
+    var c = (S.intl && S.intl.clubs) || {};
+    return Object.keys(c).map(function (k) { return c[k]; }).sort();
+  }
+  function intlCal() {
+    var d = S.rr.data[NL.season.label(S.meta, S.season)];
+    return (d && d.calendar) || null;
+  }
+
+  function renderIntl() {
+    var box = document.getElementById('fmIntl');
+    if (!box) return;
+    var cal = intlCal();
+    if (!cal) { rrData(renderIntl); box.innerHTML = ''; return; }
+    var wins = intlWindowsNow(cal), clubs = (S.intl && S.intl.clubs) || {};
+    var ro = S.canEdit ? '' : ' disabled';
+    var html = '<div class="fm-intl"><div class="fm-intl__col"><h3 class="fm-intl__h">Dates</h3>' +
+      '<div class="table-wrap fm-intl__dates"><table class="table table--compact fm-ro-table"><thead><tr><th>From</th><th>To</th><th></th></tr></thead><tbody>' +
+      wins.map(function (w, i) {
+        return '<tr data-intl-row="' + i + '"><td><input type="text" class="fm-date-in" data-intl="from" value="' + F.fmt(w.from) + '" maxlength="10"' + ro + ' aria-label="From"></td>' +
+          '<td><input type="text" class="fm-date-in" data-intl="to" value="' + F.fmt(w.to) + '" maxlength="10"' + ro + ' aria-label="To"></td>' +
+          '<td class="ta-right">' + (S.canEdit ? '<button class="btn btn--ghost btn--sm" type="button" data-intl-del="' + i + '">Remove</button>' : '') + '</td></tr>';
+      }).join('') + '</tbody></table></div>' +
+      (S.canEdit ? '<button class="btn btn--ghost btn--sm" type="button" id="fmIntlAdd">Add a window</button>' : '') + '</div>' +
+      '<div class="fm-intl__col"><h3 class="fm-intl__h">Clubs that lose players</h3>' +
+      '<div class="fm-intl__clubs">' + (Object.keys(clubs).length ? Object.keys(clubs).sort(function (a, b) { return clubs[a].localeCompare(clubs[b]); }).map(function (k) {
+        return '<span class="fm-intl__club">' + crest(clubs[k]) + esc(clubs[k]) +
+          (S.canEdit ? '<button type="button" class="fm-intl__x" data-intl-club="' + esc(k) + '" aria-label="Remove ' + esc(clubs[k]) + '">×</button>' : '') + '</span>';
+      }).join('') : '<span class="fm-ro-past">None: no game is flagged for a window</span>') + '</div>' +
+      (S.canEdit ? '<div class="fm-picker" id="fmIntlPick"></div>' : '') + '</div></div>';
+    box.innerHTML = html;
+    NL.clubs.wireCrestImgs(box);
+    if (S.canEdit) {
+      NL.clubPicker('#fmIntlPick', {
+        mode: 'search', season: 'current', placeholder: 'Add a club',
+        onSelect: function (sel) {
+          if (!sel) return;
+          var have = Object.keys(clubs).some(function (k) { return clubs[k] === sel.name; });
+          if (have) { renderIntl(); return; }
+          NL.ensureAuth().then(function () { return ref('intl/clubs').push(sel.name); })
+            .catch(function (err) { NL.toast('Save failed: ' + err.message, 'error'); });
+        }
+      });
+    }
+  }
+
+  /* Writes the whole list of windows: the first edit turns the season
+     calendar's into the season's own. */
+  function saveWindows(wins) {
+    var out = {};
+    wins.forEach(function (w) { out[ref('intl/windows').push().key] = { from: w.from, to: w.to }; });
+    /* None left: an empty node would read as "use the calendar", so a
+       blank marker says the season has none. */
+    if (!wins.length) out = { none: { from: '', to: '' } };
+    return NL.ensureAuth().then(function () { return ref('intl/windows').set(out); });
+  }
+
+  function wireIntl() {
+    var box = document.getElementById('fmIntl');
+    box.addEventListener('change', function (e) {
+      var f = e.target.getAttribute && e.target.getAttribute('data-intl');
+      if (!f) return;
+      var i = +e.target.closest('[data-intl-row]').getAttribute('data-intl-row');
+      var y = ymdIn(e.target.value);
+      if (!y) { NL.toast('Date as dd/mm/yyyy', 'error'); renderIntl(); return; }
+      var wins = intlWindowsNow(intlCal());
+      wins[i][f] = y;
+      if (wins[i].to < wins[i].from) { NL.toast('The end must be on or after the start', 'error'); renderIntl(); return; }
+      saveWindows(wins).then(function () { NL.toast('Window saved', 'success'); })
+        .catch(function (err) { NL.toast('Save failed: ' + err.message, 'error'); });
+    });
+    box.addEventListener('click', function (e) {
+      var del = e.target.closest('[data-intl-del]');
+      if (del) {
+        var wins = intlWindowsNow(intlCal());
+        wins.splice(+del.getAttribute('data-intl-del'), 1);
+        saveWindows(wins).catch(function (err) { NL.toast('Save failed: ' + err.message, 'error'); });
+        return;
+      }
+      if (e.target.closest('#fmIntlAdd')) {
+        NL.prompt('Window dates, e.g. 08/03/2027 to 16/03/2027', { title: 'Add a window', confirmText: 'Add' }).then(function (v) {
+          if (v == null) return;
+          var m = String(v).split(/\s*(?:to|-|–)\s*/);
+          var from = ymdIn(m[0]), to = ymdIn(m[1]);
+          if (!from || !to || to < from) { NL.toast('Two dates, dd/mm/yyyy to dd/mm/yyyy', 'error'); return; }
+          saveWindows(intlWindowsNow(intlCal()).concat([{ from: from, to: to }]))
+            .then(function () { NL.toast('Window added', 'success'); })
+            .catch(function (err) { NL.toast('Save failed: ' + err.message, 'error'); });
+        });
+        return;
+      }
+      var x = e.target.closest('[data-intl-club]');
+      if (x) {
+        NL.ensureAuth().then(function () { return ref('intl/clubs/' + x.getAttribute('data-intl-club')).remove(); })
+          .catch(function (err) { NL.toast('Save failed: ' + err.message, 'error'); });
+      }
+    });
   }
 
   /* ── Save ─────────────────────────────────────────────────────────── */
