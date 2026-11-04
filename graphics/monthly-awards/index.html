@@ -1,0 +1,1245 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Monthly Awards Graphic (Graphics sub-tool)
+  Version: v1.6 (04/11/2026)
+  File: /graphics/monthly-awards/index.html
+
+  Nominee and winner cards for the monthly awards, 1080 × 1350. Load a
+  photo, click the player, pick the club, download the PNG.
+
+  The cut-out runs entirely in the browser – nothing is uploaded:
+    - Player finder: Segment Anything 2.1 tiny (Meta, Apache-2.0) through
+      transformers.js, from Hugging Face (onnx-community). One click finds
+      a whole person; Keep / Remove clicks refine it.
+    - Edges: ISNet (imgly background-removal-data 1.4.5, MIT), from imgly's
+      CDN with unpkg and jsDelivr as fallbacks. Re-run on a close crop
+      round the player once they are picked, for about twice the detail.
+  First use downloads about 150 MB; the browser caches it after that.
+
+  Storage: none. Access: toolKey 'staff-graphics', the Graphics gate.
+  Assets (same-origin, so the canvas can export them):
+    /assets/divisions/{National,North,South}.png   (official Enterprise lockups)
+    /assets/crests/…                               (via NL.clubs / NL.clubPicker)
+    /graphics/_shared/fonts/Carbona-*.otf          (local cuts for the canvas)
+
+  CHANGELOG
+    v1.6 (04/11/2026) — Joins NL Tools from the standalone builds (v1.0–v1.5,
+      08/10–04/11/2026). Step 2 splits into "Click a person" (Keep / Remove)
+      and "Brush by hand" (Paint away / Paint back). Award and month take a
+      side (left / right) and a layout (row / stacked) separately, so all
+      four combinations exist. Club picker, downloads, crests, fonts and
+      colours now come from the canon.
+    v1.5 — Division selector and official lockups; player in front of the
+      headline; award and month always on top; close-crop edge re-cut.
+    v1.4 — NOMINATED headline layout; Segment Anything player finder.
+    v1.3 — Cut-out strength slider; edits replayed so the slider keeps clicks.
+    v1.1–1.2 — Automatic cut-out; keep and drop clicks.
+    v1.0 — First build.
+-->
+<html lang="en-GB">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Monthly Awards Graphic — NL Tools</title>
+  <meta name="robots" content="noindex,nofollow">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+
+  <!-- Brand stylesheet (lint canonical: ?v=73) -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=73">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'Monthly Awards Graphic',
+      toolKey: 'staff-graphics'
+    };
+    var NL_TOOL_KEY = 'staff-graphics';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '04/11/2026',
+        version: 'v1.6',
+        items: [
+          'Nominee and winner cards for the monthly awards. Load a photo, click the player, pick the club, download.',
+          'One click on the player cuts out the whole person. Keep and Remove clicks fix anything it got wrong; the brush is for small touch-ups.',
+          'Headline (NOMINATED or WINNER), award and month, with the official lockup for the division.',
+          'The first photo takes about a minute while the cut-out models download. After that they are cached.'
+        ]
+      }
+    ];
+
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts (lint canonical: ?v=49 / ?v=1 / ?v=10 / ?v=17) -->
+  <script src="/system/nl-utils.js?v=51"></script>
+  <!-- GA4, one property for all of nl.tools. Cookieless, so no consent
+       banner on any page; page views by path, no identity. Tool events go
+       through NL.track(). See system/nl-analytics.js. -->
+  <script src="/system/nl-analytics.js?v=1"></script>
+  <script src="/system/nl-topbar.js?v=10"></script>
+  <script src="/system/auth-guard.js?v=17"></script>
+
+<style>
+  /* The canvas needs the LOCAL Carbona cuts, not the portal's variable font:
+     a canvas drawn before a font resolves falls back to sans-serif without
+     saying so. Registered under names nothing else uses. */
+  @font-face { font-family: 'MAGCarbonaRegular';   src: url('/graphics/_shared/fonts/Carbona-Regular.otf') format('opentype'); }
+  @font-face { font-family: 'MAGCarbonaBold';      src: url('/graphics/_shared/fonts/Carbona-Bold.otf') format('opentype'); }
+  @font-face { font-family: 'MAGCarbonaExtraBold'; src: url('/graphics/_shared/fonts/Carbona-ExtraBold.otf') format('opentype'); }
+
+  .mag-layout { display: grid; grid-template-columns: 320px minmax(0, 1.35fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 1100px) { .mag-layout { grid-template-columns: 1fr; } }
+
+  .mag-panel {
+    background: var(--white); border: 1px solid var(--border); border-radius: var(--radius-lg);
+    padding: 16px;
+  }
+  .mag-step { padding: 2px 0 16px; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
+  .mag-step:last-child { border-bottom: 0; margin-bottom: 0; padding-bottom: 0; }
+  .mag-step h2 {
+    display: flex; align-items: center; gap: 10px; margin: 2px 0 12px;
+    font-size: var(--text-base); font-weight: 800; font-variation-settings: 'wght' 800; color: var(--text);
+  }
+  .mag-step h2 .n {
+    width: 24px; height: 24px; border-radius: 50%; flex: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--navy); color: var(--white); font-size: var(--text-xs);
+  }
+  .mag-step.done h2 .n { background: var(--green); }
+  .mag-field { margin-bottom: 12px; }
+  .mag-hint { margin: 6px 0 0; line-height: 1.45; }
+  .mag-full { width: 100%; justify-content: center; }
+  /* Drawing-tool palette: canon buttons, navy for the tool in use.
+     Canon candidate (04/11/2026): a one-tap picker for modes, like Round Up's
+     .ru-fmt size picker; NL.filterButton is for filters and settings. */
+  .mag-tools { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .mag-tools--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .mag-tool { justify-content: center; padding-left: 6px; padding-right: 6px; }
+  .mag-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0 0; }
+  .mag-check { display: flex; gap: 8px; align-items: center; font-size: var(--text-sm); margin: 10px 0 0; cursor: pointer; }
+  .mag-ctl { display: grid; grid-template-columns: 108px 1fr 40px; align-items: center; gap: 8px; margin: 8px 0; font-size: var(--text-sm); }
+  .mag-ctl output { text-align: right; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .mag-ctl input[type="range"] { width: 100%; accent-color: var(--navy); }
+  .mag-range { width: 100%; accent-color: var(--navy); }
+  .mag-scale { display: flex; justify-content: space-between; font-size: var(--text-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .mag-more > summary { font-size: var(--text-sm); }
+  .mag-status {
+    font-size: var(--text-sm); line-height: 1.45; margin: 10px 0 0; padding: 9px 11px;
+    background: var(--off-white); border: 1px solid var(--border); border-radius: var(--radius);
+  }
+  .mag-status.err { background: var(--red-light); border-color: var(--red); color: var(--red); }
+  .mag-panel progress { width: 100%; height: 8px; accent-color: var(--primary); margin-top: 8px; }
+  .mag-panel input[type="color"] { width: 44px; height: 34px; padding: 2px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--white); }
+  .mag-more { margin-top: 12px; border: 1px solid var(--border); border-radius: var(--radius); }
+  .mag-more > div { padding: 4px 14px 14px; }
+  .hidden { display: none !important; }
+
+  .mag-pane {
+    display: flex; flex-direction: column; min-width: 0;
+    background: var(--white); border: 1px solid var(--border); border-radius: var(--radius-lg);
+    height: max(420px, calc(100vh - 150px)); position: sticky; top: 16px; overflow: hidden;
+  }
+  @media (max-width: 1100px) { .mag-pane { position: static; height: 70vh; } }
+  .mag-pane h3 {
+    margin: 0; padding: 10px 14px; border-bottom: 1px solid var(--border);
+    font-size: var(--text-xs); font-weight: 800; font-variation-settings: 'wght' 800;
+    letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted);
+  }
+  #editWrap { flex: 1; overflow: auto; position: relative; background: var(--navy-900); }
+  #editWrap.drag { outline: 3px dashed var(--primary); outline-offset: -6px; }
+  #editCanvas { display: block; touch-action: none; }
+  #empty {
+    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 10px; padding: 20px; text-align: center; color: var(--navy-200); font-size: var(--text-sm);
+  }
+  #empty strong { font-size: var(--text-md); color: var(--white); }
+  #prevWrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 14px; min-height: 0; background: var(--off-white); }
+  #preview { max-width: 100%; max-height: 100%; aspect-ratio: 1080 / 1350; box-shadow: var(--shadow); cursor: grab; touch-action: none; }
+  #preview.dragging { cursor: grabbing; }
+</style>
+</head>
+<body>
+
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="page">
+    <div class="mag-layout">
+    <aside class="mag-panel">
+
+      <section class="mag-step" id="step1">
+        <h2><span class="n">1</span>Load a photo</h2>
+        <label class="btn btn--navy mag-full" for="filePhoto">Choose photo</label>
+        <input type="file" id="filePhoto" accept="image/*" class="hidden">
+        <p class="form-hint mag-hint">Or drop it on the editor.</p>
+        <div class="mag-status" id="status" role="status" hidden></div>
+        <progress id="prog" class="hidden" max="1" value="0"></progress>
+      </section>
+
+      <section class="mag-step" id="step2">
+        <h2><span class="n">2</span>Click your player</h2>
+        <div class="form-group mag-field">
+          <label id="lblClick">Click a person</label>
+          <div class="mag-tools" role="group" aria-labelledby="lblClick">
+            <button type="button" class="btn btn--sm btn--navy mag-tool" data-tool="pick" aria-pressed="true">Keep (green)</button>
+            <button type="button" class="btn btn--sm btn--ghost mag-tool" data-tool="drop" aria-pressed="false">Remove (red)</button>
+          </div>
+          <p class="form-hint mag-hint">Each click works out a whole person. Start here.</p>
+        </div>
+        <div class="form-group mag-field">
+          <label id="lblBrush">Brush by hand</label>
+          <div class="mag-tools" role="group" aria-labelledby="lblBrush">
+            <button type="button" class="btn btn--sm btn--ghost mag-tool" data-tool="erase" aria-pressed="false">Paint away</button>
+            <button type="button" class="btn btn--sm btn--ghost mag-tool" data-tool="restore" aria-pressed="false">Paint back</button>
+          </div>
+          <p class="form-hint mag-hint">Changes only the pixels you paint over – for small bits the clicks can't fix.</p>
+        </div>
+        <p class="form-hint mag-hint" id="toolHint" style="font-weight:700;color:var(--text)">Click on your player. If part of them is missing (an arm, a hand), click that part too.</p>
+        <p class="form-hint mag-hint" id="samStatus" role="status"></p>
+        <div class="form-group mag-field" style="margin-top:12px">
+          <label for="strength">Cut-out strength</label>
+          <input type="range" class="mag-range" id="strength" min="0" max="100" value="50">
+          <div class="mag-scale"><span>Keeps more</span><output id="strengthO">50</output><span>Tighter</span></div>
+          <p class="form-hint mag-hint">Slide left if arms, hands or hair are being cut off; right if background is creeping in. Your clicks are kept.</p>
+        </div>
+        <div class="mag-ctl"><span>Brush size</span><input type="range" id="brush" min="4" max="300" value="40"><output id="brushO">40</output></div>
+        <div class="mag-row">
+          <button type="button" class="btn btn--ghost btn--sm" id="btnUndo" disabled>Undo</button>
+          <label class="mag-check" style="margin:0 0 0 auto"><input type="checkbox" id="viewCut"> Show cut-out only</label>
+        </div>
+
+        <details class="disclosure mag-more">
+          <summary>More cut-out options</summary>
+          <div>
+            <div class="mag-tools mag-tools--3" role="group" aria-label="More tools" style="margin-top:6px">
+              <button type="button" class="btn btn--sm btn--ghost mag-tool" data-tool="lassoKeep" aria-pressed="false">Lasso keep</button>
+              <button type="button" class="btn btn--sm btn--ghost mag-tool" data-tool="lassoCut" aria-pressed="false">Lasso remove</button>
+              <button type="button" class="btn btn--sm btn--ghost mag-tool" data-tool="pan" aria-pressed="false">Pan</button>
+            </div>
+            <div class="mag-ctl"><span>Zoom</span><input type="range" id="zoom" min="100" max="400" value="100"><output id="zoomO">100%</output></div>
+            <div class="mag-ctl"><span>Brush hardness</span><input type="range" id="hard" min="0" max="100" value="60"><output id="hardO">60</output></div>
+            <div class="mag-ctl"><span>Edge shrink</span><input type="range" id="shrink" min="0" max="8" value="1"><output>1</output></div>
+            <div class="mag-ctl"><span>Edge feather</span><input type="range" id="feather" min="0" max="10" value="1"><output>1</output></div>
+            <div class="mag-ctl"><span>Fade left</span><input type="range" id="fadeL" min="0" max="60" value="0"><output>0</output></div>
+            <div class="mag-ctl"><span>Fade right</span><input type="range" id="fadeR" min="0" max="60" value="0"><output>0</output></div>
+            <div class="mag-ctl"><span>Fade top</span><input type="range" id="fadeT" min="0" max="60" value="0"><output>0</output></div>
+            <div class="mag-ctl"><span>Fade bottom</span><input type="range" id="fadeB" min="0" max="60" value="30"><output>30</output></div>
+            <div class="mag-row">
+              <button type="button" class="btn btn--ghost btn--sm" id="btnRerun" disabled>Re-cut around player</button>
+              <button type="button" class="btn btn--ghost btn--sm" id="btnReset" disabled>Keep whole photo</button>
+            </div>
+            <div class="mag-row">
+              <button type="button" class="btn btn--ghost btn--sm" id="btnSaveCut" disabled>Download cut-out PNG</button>
+              <label class="btn btn--ghost btn--sm" for="fileCut">Load cut-out PNG</label>
+              <input type="file" id="fileCut" accept="image/png" class="hidden">
+            </div>
+          </div>
+        </details>
+      </section>
+
+      <section class="mag-step" id="step3">
+        <h2><span class="n">3</span>Make the graphic</h2>
+        <div class="form-group mag-field"><label for="tName">Player name</label><input type="text" id="tName" value=""></div>
+        <div class="form-group mag-field"><label>Club</label><div id="clubPick"></div></div>
+        <div class="form-group mag-field">
+                    <div id="divPick"></div>
+        </div>
+        <div class="form-group mag-field">
+          <label for="tHead">Headline</label><input type="text" id="tHead" value="NOMINATED">
+          <p class="form-hint mag-hint">WINNER for the announcement.</p>
+        </div>
+        <div class="form-group mag-field"><label for="tKicker">Award</label><input type="text" id="tKicker" value="PLAYER OF THE MONTH"></div>
+        <div class="form-group mag-field"><label for="tMonth">Month</label><input type="text" id="tMonth" value=""></div>
+        <label class="mag-check"><input type="checkbox" id="frontPlayer" checked> Player in front of headline</label>
+        <div class="form-group mag-field" style="margin-top:12px">
+          <div class="mag-row" style="margin:0"><div id="sidePick"></div><div id="stackPick"></div></div>
+        </div>
+        <div class="mag-ctl"><span>Player size</span><input type="range" id="pH" min="300" max="2200" value="1040"><output>1040</output></div>
+        <p class="form-hint mag-hint" style="margin-bottom:12px">Drag the player on the preview to move them.</p>
+        <button type="button" class="btn btn--primary mag-full" id="btnExport">Download PNG</button>
+
+        <details class="disclosure mag-more">
+          <summary>More graphic options</summary>
+          <div>
+            <div class="form-group mag-field" style="margin-top:6px"><label for="tClub">Club name on graphic</label><input type="text" id="tClub" value=""></div>
+            <div class="mag-row"><span style="font-size:var(--text-sm);flex:1">Accent colour</span><input type="color" id="accent" value="#fff700" aria-label="Accent colour"></div>
+            <label class="mag-check"><input type="checkbox" id="bgPhoto" checked> Background from photo (blurred)</label>
+            <div class="mag-ctl"><span>Bg brightness</span><input type="range" id="bgLight" min="0" max="100" value="45"><output>45</output></div>
+            <div class="mag-ctl"><span>Bg blur</span><input type="range" id="bgBlur" min="0" max="60" value="26"><output>26</output></div>
+            <div class="mag-ctl"><span>Left / right</span><input type="range" id="pX" min="-200" max="1280" value="540"><output>540</output></div>
+            <div class="mag-ctl"><span>Up / down</span><input type="range" id="pY" min="-600" max="1300" value="120"><output>120</output></div>
+            <div class="mag-row">
+              <label class="btn btn--ghost btn--sm" for="fileLock">Use a different lockup</label><input type="file" id="fileLock" accept="image/*" class="hidden">
+              <button type="button" class="btn btn--ghost btn--sm" id="btnClearLock" disabled>Remove lockup</button>
+            </div>
+            <div class="mag-row"><label class="btn btn--ghost btn--sm" for="fileCrest">Upload crest instead</label><input type="file" id="fileCrest" accept="image/*" class="hidden"></div>
+          </div>
+        </details>
+      </section>
+    </aside>
+
+    <div class="mag-pane" id="editPane">
+      <h3>Cut-out</h3>
+      <div id="editWrap">
+        <canvas id="editCanvas" width="10" height="10" aria-label="Photo and cut-out editor"></canvas>
+        <div id="empty"><strong>Drop a photo here</strong><span>Red shows what is being removed.</span></div>
+      </div>
+    </div>
+    <div class="mag-pane" id="prevPane">
+      <h3>Graphic · 1080 × 1350</h3>
+      <div id="prevWrap"><canvas id="preview" width="1080" height="1350" aria-label="Finished graphic preview"></canvas></div>
+    </div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+/* ------------------------------------------------------------------
+   Cut-out model: ISNet (imgly's "medium" build, ~88 MB, MIT licence),
+   run on ONNX Runtime Web. Tried in order until one source answers:
+   imgly's own CDN, then unpkg, then jsDelivr. jsDelivr is last
+   because it refuses npm packages over 150 MB, which this one is.
+------------------------------------------------------------------- */
+const ORT_SRC = [
+  'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.3/dist/',
+  'https://unpkg.com/onnxruntime-web@1.17.3/dist/',
+];
+const MODEL_SRC = [
+  'https://staticimgly.com/@imgly/background-removal-data/1.4.5/dist/',
+  'https://unpkg.com/@imgly/background-removal-data@1.4.5/dist/',
+  'https://cdn.jsdelivr.net/npm/@imgly/background-removal-data@1.4.5/dist/',
+];
+const MODEL_KEY = '/models/medium';
+/* Player finder: Segment Anything 2.1 tiny (Meta, Apache-2.0) via transformers.js.
+   Pinned to 4.3.1 – the newest release more than two weeks old. */
+const TJS_URL = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.1/dist/transformers.min.js';
+const SAM_ID = 'onnx-community/sam2.1-hiera-tiny-ONNX';
+/* Same-origin assets, so the canvas can export them. */
+const ROSE_URL = '/assets/crests/National%20League%20rose%20white.png';
+const LOCKUP_URL = (d) => '/assets/divisions/' + d + '.png';
+const MAX_EDGE = 3000;    // working-resolution cap: keeps brush and mask maths quick
+const W = 1080, H = 1350;
+/* Canvas text uses the exact Carbona cut, registered locally in <style>. */
+const CUT = { 400: 'MAGCarbonaRegular', 700: 'MAGCarbonaBold', 800: 'MAGCarbonaExtraBold' };
+/* Brand colours for the canvas, read from nl-brand.css so they track the canon. */
+const C = (() => {
+  const cs = getComputedStyle(document.documentElement), t = (n) => cs.getPropertyValue(n).trim();
+  const rgb = (hex) => { const n = parseInt(hex.replace('#', ''), 16); return [n >> 16, (n >> 8) & 255, n & 255]; };
+  const o = { primary: t('--primary'), navy: t('--navy'), navy400: t('--navy-400'), navy800: t('--navy-800'), navy900: t('--navy-900'), green: t('--green'), red: t('--red') };
+  o.primaryRgb = rgb(o.primary).join(','); o.shadowRgb = rgb(o.navy900).join(',');
+  o.dark = rgb(o.navy900); o.deep = rgb(o.navy800);
+  return o;
+})();
+
+const $ = (id) => document.getElementById(id);
+function status(t, err) { const s = $('status'); s.textContent = t; s.hidden = !t; s.classList.toggle('err', !!err); }
+
+const S = {
+  photo: null, mask: null, raw: null, pre: null, grad: null, ops: [], stroke: null, tool: 'pick',
+  cut: null, bg: null, crest: null, rose: null, lockup: null,
+  needPlace: true,
+  place: { h: 1040, cx: 540, top: 120 },
+  session: null,
+  rawFull: null, focusRect: null, matteQueue: Promise.resolve(),
+  strapSide: 'left', strapStack: 'row', div: 'National', lockups: {},
+  sam: null, samState: 'off', samMask: null, samZone: null, samCore: null, samJob: 0, samSeq: 0,
+};
+
+/* ---------------- helpers ---------------- */
+function mkCanvas(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+function loadImg(src, cors) {
+  return new Promise((res, rej) => {
+    const im = new Image(); if (cors) im.crossOrigin = 'anonymous';
+    im.onload = () => res(im); im.onerror = () => rej(new Error('Image failed: ' + src)); im.src = src;
+  });
+}
+function fileToImg(file) { return loadImg(URL.createObjectURL(file), false); }
+function loadScript(src) {
+  return new Promise((res, rej) => {
+    const s = document.createElement('script'); s.src = src; s.onload = res;
+    s.onerror = () => { s.remove(); rej(new Error('Script failed: ' + src)); };
+    document.head.appendChild(s);
+  });
+}
+const nextFrame = () => new Promise((r) => setTimeout(r, 30));
+function download(canvas, name) {
+  canvas.toBlob((b) => { if (b) NL.download(name, b, 'image/png'); else NL.toast('The PNG couldn\u2019t be made. Try again.', 'error'); }, 'image/png');
+}
+function slug(s) { return (s || 'graphic').trim().replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, ''); }
+function lum(hex) {
+  const n = parseInt(hex.slice(1), 16), f = (v) => (v /= 255) <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  return 0.2126 * f(n >> 16) + 0.7152 * f((n >> 8) & 255) + 0.0722 * f(n & 255);
+}
+function stepDone(id, on) { $(id).classList.toggle('done', on); }
+
+/* ---------------- mask alpha get/set ---------------- */
+function mctx() { return S.mask.getContext('2d', { willReadFrequently: true }); }
+function getAlpha() {
+  const { width: w, height: h } = S.mask, d = mctx().getImageData(0, 0, w, h).data, a = new Uint8Array(w * h);
+  for (let i = 0; i < a.length; i++) a[i] = d[i * 4 + 3];
+  return a;
+}
+function alphaToImageData(a, w, h) {
+  const id = new ImageData(w, h), d = id.data;
+  for (let i = 0; i < a.length; i++) { const j = i * 4; d[j] = d[j + 1] = d[j + 2] = 255; d[j + 3] = a[i]; }
+  return id;
+}
+function setAlpha(a) { mctx().putImageData(alphaToImageData(a, S.mask.width, S.mask.height), 0, 0); }
+function fillMask() { const m = mctx(); m.globalCompositeOperation = 'source-over'; m.fillStyle = '#fff'; m.fillRect(0, 0, S.mask.width, S.mask.height); }
+
+/* ---------------- automatic cut-out ---------------- */
+async function getOrt() {
+  if (window.ort) return window.ort;
+  for (const base of ORT_SRC) {
+    try {
+      await loadScript(base + 'ort.min.js');
+      ort.env.wasm.wasmPaths = base;
+      ort.env.wasm.numThreads = 1;   // multi-threading needs special server headers a local file can't have
+      return ort;
+    } catch (e) { console.warn(e); }
+  }
+  throw new Error('Could not load the cut-out engine from any CDN.');
+}
+async function fetchModel(onProgress) {
+  let lastErr = null;
+  for (const base of MODEL_SRC) {
+    try {
+      const r = await fetch(base + 'resources.json');
+      if (!r.ok) throw new Error(`${base} answered ${r.status}`);
+      const entry = (await r.json())[MODEL_KEY];
+      if (!entry) throw new Error('Model not listed at ' + base);
+      const total = entry.chunks[entry.chunks.length - 1].offsets[1];
+      let got = 0;
+      const parts = await Promise.all(entry.chunks.map(async (c) => {
+        const rr = await fetch(base + c.hash);
+        if (!rr.ok) throw new Error(`Model chunk ${rr.status}`);
+        const b = await rr.arrayBuffer();
+        if (b.byteLength !== c.offsets[1] - c.offsets[0]) throw new Error('Model chunk incomplete');
+        got += b.byteLength; onProgress(got, total);
+        return { c, b };
+      }));
+      const out = new Uint8Array(total);
+      for (const { c, b } of parts) out.set(new Uint8Array(b), c.offsets[0]);
+      return out;
+    } catch (e) { lastErr = e; console.warn('Model source failed:', base, e); }
+  }
+  throw lastErr || new Error('No model source answered.');
+}
+async function autoCut() {
+  if (!S.photo) return;
+  const prog = $('prog');
+  $('btnRerun').disabled = true;
+  try {
+    const ortLib = await getOrt();
+    if (!S.session) {
+      status('Downloading the cut-out model (first time only, about 90 MB)…');
+      prog.classList.remove('hidden'); prog.value = 0;
+      const bytes = await fetchModel((g, t) => { prog.max = t; prog.value = g; status(`Downloading the cut-out model (first time only)… ${Math.round(100 * g / t)}%`); });
+      status('Starting the model…'); await nextFrame();
+      S.session = await ortLib.InferenceSession.create(bytes, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
+    }
+    prog.classList.remove('hidden'); prog.removeAttribute('value');
+    status('Finding the people in the photo… (10–30 seconds)'); await nextFrame();
+    const full = await runMatte(S.photo, 0, 0, S.photo.width, S.photo.height);
+    S.rawFull = full; S.focusRect = null;
+    S.raw = full.slice();
+    S.needPlace = true; S.bg = null;
+    const picked = S.ops.some((op) => op.t === 'pick');
+    if (!picked) setTool('pick');
+    rebuild();
+    status(picked ? 'Edges refined.' : 'Cut-out ready. Click the player you want to keep.');
+    if (picked) focusCut();
+  } catch (e) {
+    console.error(e);
+    status('The automatic cut-out could not load (' + (e && e.message ? e.message : 'unknown error') + '). You can still use Lasso keep under More cut-out options.', true);
+  } finally { prog.classList.add('hidden'); $('btnRerun').disabled = !S.photo; }
+}
+/* Run the edge model on a region of the photo and return its alpha at the
+   region's own size. Runs are queued so two never share the model at once. */
+function runMatte(src, sx, sy, sw, sh) {
+  const job = S.matteQueue.then(async () => {
+    const ortLib = await getOrt();
+    const R = 1024, c = mkCanvas(R, R), x = c.getContext('2d', { willReadFrequently: true });
+    x.drawImage(src, sx, sy, sw, sh, 0, 0, R, R);
+    const d = x.getImageData(0, 0, R, R).data, n = R * R, f = new Float32Array(3 * n);
+    for (let i = 0, j = 0; j < n; i += 4, j++) { f[j] = (d[i] - 128) / 256; f[j + n] = (d[i + 1] - 128) / 256; f[j + 2 * n] = (d[i + 2] - 128) / 256; }
+    const out = await S.session.run({ [S.session.inputNames[0]]: new ortLib.Tensor('float32', f, [1, 3, R, R]) });
+    const m = out[S.session.outputNames[0]].data, a = new Uint8Array(n);
+    for (let i = 0; i < n; i++) a[i] = Math.max(0, Math.min(255, Math.round(m[i] * 255)));
+    const small = mkCanvas(R, R); small.getContext('2d').putImageData(alphaToImageData(a, R, R), 0, 0);
+    const big = mkCanvas(sw, sh), bc = big.getContext('2d', { willReadFrequently: true });
+    bc.imageSmoothingQuality = 'high'; bc.drawImage(small, 0, 0, sw, sh);
+    const bd = bc.getImageData(0, 0, sw, sh).data, res = new Uint8Array(sw * sh);
+    for (let i = 0; i < res.length; i++) res[i] = bd[i * 4 + 3];
+    return res;
+  });
+  S.matteQueue = job.catch(() => {});
+  return job;
+}
+/* The player's area: from the person mask if there is one, else the current cut-out. */
+function playerBox() {
+  const w = S.mask.width, h = S.mask.height;
+  let b = null;
+  if (S.samMask) b = bbox(S.samMask, w, h, 0);
+  if (!b) b = bbox(getAlpha(), w, h, 64);
+  return b;
+}
+/* Re-run the edge model on a close, roughly square crop round the player, so
+   it sees them at about twice the detail, then blend it into the full-photo
+   result with a soft border. */
+async function focusCut(force) {
+  if (!S.session || !S.rawFull || !S.photo) return;
+  const b = playerBox(); if (!b) return;
+  const w = S.mask.width, h = S.mask.height;
+  const pad = Math.round(0.08 * Math.max(b.x1 - b.x0, b.y1 - b.y0));
+  let x0 = Math.max(0, b.x0 - pad), y0 = Math.max(0, b.y0 - pad), x1 = Math.min(w, b.x1 + pad + 1), y1 = Math.min(h, b.y1 + pad + 1);
+  const r = S.focusRect;
+  if (!force && r && x0 >= r.x0 && y0 >= r.y0 && x1 <= r.x1 && y1 <= r.y1) return;   // already covered
+  const side = Math.min(Math.max(x1 - x0, y1 - y0), w, h), cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  const sw = Math.max(x1 - x0, Math.min(side, w)), sh = Math.max(y1 - y0, Math.min(side, h));
+  x0 = Math.round(Math.max(0, Math.min(w - sw, cx - sw / 2))); y0 = Math.round(Math.max(0, Math.min(h - sh, cy - sh / 2)));
+  const cw = Math.min(sw, w - x0), ch = Math.min(sh, h - y0);
+  if (cw * ch > 0.85 * w * h) return;   // the crop would be nearly the whole photo – no gain
+  const btn = $('btnRerun'); btn.disabled = true;
+  setSamStatus('Sharpening edges around the player…');
+  try {
+    const a = await runMatte(S.photo, x0, y0, cw, ch);
+    const raw = S.rawFull.slice(), fb = Math.max(8, Math.round(Math.min(cw, ch) / 40));
+    for (let y = 0; y < ch; y++) {
+      const ey = Math.min(y, ch - 1 - y);
+      for (let x = 0; x < cw; x++) {
+        const t = Math.min(1, Math.min(ey, Math.min(x, cw - 1 - x)) / fb), i = (y0 + y) * w + x0 + x;
+        raw[i] = Math.round(a[y * cw + x] * t + S.rawFull[i] * (1 - t));
+      }
+    }
+    S.raw = raw; S.focusRect = { x0, y0, x1: x0 + cw, y1: y0 + ch };
+    rebuild(true);
+    setSamStatus(S.samState === 'ready' ? 'Player finder ready. Edges sharpened.' : 'Edges sharpened.', 'ok');
+  } catch (e) {
+    console.error(e); setSamStatus('Could not sharpen the edges (' + (e && e.message ? e.message : 'error') + ').', 'err');
+  } finally { btn.disabled = !S.photo; }
+}
+$('btnRerun').addEventListener('click', () => (S.ops.some((op) => op.t === 'pick') && S.rawFull ? focusCut(true) : autoCut()));
+
+/* ---------------- photo loading ---------------- */
+function startEditor(w, h) {
+  const ec = $('editCanvas'); ec.width = w; ec.height = h;
+  S.ops = []; $('btnUndo').disabled = true;
+  $('empty').classList.add('hidden');
+  ['btnReset', 'btnSaveCut', 'btnRerun'].forEach((id) => $(id).disabled = false);
+  S.bg = null; S.needPlace = true; applyZoom(); rebuild(true);
+}
+async function loadPhoto(file) {
+  try {
+    const im = await fileToImg(file);
+    const k = Math.min(1, MAX_EDGE / Math.max(im.naturalWidth, im.naturalHeight));
+    const w = Math.round(im.naturalWidth * k), h = Math.round(im.naturalHeight * k);
+    S.photo = mkCanvas(w, h); S.photo.getContext('2d').drawImage(im, 0, 0, w, h);
+    S.mask = mkCanvas(w, h); fillMask(); S.raw = getAlpha(); S.grad = null;
+    S.samState = 'loading'; S.samMask = null; S.rawFull = null; S.focusRect = null; if (S.sam) S.sam.emb = null;
+    startEditor(w, h); stepDone('step1', true); scheduleProcess();
+    samEncode(); autoCut();
+  } catch (e) { status('Could not open that image.', true); console.error(e); }
+}
+$('filePhoto').addEventListener('change', (e) => e.target.files[0] && loadPhoto(e.target.files[0]));
+$('fileCut').addEventListener('change', async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  const im = await fileToImg(f), w = im.naturalWidth, h = im.naturalHeight;
+  S.photo = mkCanvas(w, h); S.photo.getContext('2d').drawImage(im, 0, 0);
+  S.mask = mkCanvas(w, h); fillMask();
+  const m = mctx(); m.globalCompositeOperation = 'destination-in'; m.drawImage(im, 0, 0); m.globalCompositeOperation = 'source-over';
+  S.raw = getAlpha(); S.grad = null; S.samState = 'off'; S.samMask = null; S.samJob++; setSamStatus('');
+  startEditor(w, h); stepDone('step1', true); stepDone('step2', true);
+  status('Cut-out loaded.'); scheduleProcess();
+});
+const ew = $('editWrap');
+['dragenter', 'dragover'].forEach((t) => ew.addEventListener(t, (e) => { e.preventDefault(); ew.classList.add('drag'); }));
+['dragleave', 'drop'].forEach((t) => ew.addEventListener(t, (e) => { e.preventDefault(); ew.classList.remove('drag'); }));
+ew.addEventListener('drop', (e) => { const f = e.dataTransfer.files[0]; if (f && f.type.startsWith('image/')) loadPhoto(f); });
+
+/* ---------------- editor view ---------------- */
+let zoom = 1, tint = null, lasso = [], hover = null;
+function applyZoom() {
+  if (!S.photo) return;
+  const ec = $('editCanvas');
+  const fit = Math.min((ew.clientWidth - 2) / S.photo.width, (ew.clientHeight - 2) / S.photo.height);
+  ec.style.width = Math.round(S.photo.width * fit * zoom) + 'px';
+  ec.style.height = Math.round(S.photo.height * fit * zoom) + 'px';
+  drawEditor();
+}
+window.addEventListener('resize', applyZoom);
+$('zoom').addEventListener('input', (e) => { zoom = e.target.value / 100; $('zoomO').textContent = e.target.value + '%'; applyZoom(); });
+function drawEditor() {
+  if (!S.photo) return;
+  const ec = $('editCanvas'), c = ec.getContext('2d'), w = ec.width, h = ec.height;
+  if (!tint || tint.width !== w || tint.height !== h) tint = mkCanvas(w, h);
+  const t = tint.getContext('2d');
+  c.clearRect(0, 0, w, h);
+  if ($('viewCut').checked) {
+    const s = Math.max(8, Math.round(w / 80));
+    for (let y = 0; y < h; y += s) for (let x = 0; x < w; x += s) { c.fillStyle = ((x / s + y / s) & 1) ? '#cfd3db' : '#eef0f4'; c.fillRect(x, y, s, s); }
+    t.globalCompositeOperation = 'copy'; t.drawImage(S.photo, 0, 0);
+    t.globalCompositeOperation = 'destination-in'; t.drawImage(S.mask, 0, 0); t.globalCompositeOperation = 'source-over';
+    c.drawImage(tint, 0, 0);
+  } else {
+    c.drawImage(S.photo, 0, 0);
+    t.globalCompositeOperation = 'copy'; t.fillStyle = `rgba(${C.primaryRgb},0.55)`; t.fillRect(0, 0, w, h);
+    t.globalCompositeOperation = 'destination-out'; t.drawImage(S.mask, 0, 0); t.globalCompositeOperation = 'source-over';
+    c.drawImage(tint, 0, 0);
+  }
+  const px = S.photo.width / ec.clientWidth;
+  for (const op of S.ops) {
+    if (op.t !== 'pick' && op.t !== 'drop') continue;
+    c.beginPath(); c.arc(op.p.x, op.p.y, 7 * px, 0, Math.PI * 2);
+    c.fillStyle = op.t === 'pick' ? C.green : C.red; c.fill();
+    c.lineWidth = 2.5 * px; c.strokeStyle = '#fff'; c.stroke();
+  }
+  if (lasso.length) {
+    c.lineWidth = 2 * px; c.strokeStyle = '#fff700'; c.setLineDash([8 * px, 6 * px]);
+    c.beginPath(); c.moveTo(lasso[0].x, lasso[0].y); lasso.slice(1).forEach((p) => c.lineTo(p.x, p.y));
+    if (hover) c.lineTo(hover.x, hover.y); c.stroke(); c.setLineDash([]);
+    c.fillStyle = '#fff700'; c.beginPath(); c.arc(lasso[0].x, lasso[0].y, 6 * px, 0, Math.PI * 2); c.fill();
+  } else if (hover && (S.tool === 'erase' || S.tool === 'restore')) {
+    c.lineWidth = 1.5 * px; c.strokeStyle = '#fff'; c.beginPath(); c.arc(hover.x, hover.y, brushR(), 0, Math.PI * 2); c.stroke();
+  }
+}
+$('viewCut').addEventListener('change', drawEditor);
+
+/* ---------------- tools ---------------- */
+const hints = {
+  pick: 'Click on your player. If part of them is missing (an arm, a hand), click that part too.',
+  drop: 'Click on anyone else still in the cut-out to remove them.',
+  erase: 'Paint over anything that should go. Change the brush size below.',
+  restore: 'Paint over parts of the player that were cut off to bring them back.',
+  lassoKeep: 'Click points around the player; click the first point (or press Enter) to finish. Esc cancels.',
+  lassoCut: 'Click points around an area to remove; click the first point (or press Enter) to finish.',
+  pan: 'Drag to move around when zoomed in.',
+};
+function setTool(t) {
+  S.tool = t; lasso = [];
+  document.querySelectorAll('[data-tool]').forEach((b) => { const on = b.dataset.tool === t; b.setAttribute('aria-pressed', String(on)); b.classList.toggle('btn--navy', on); b.classList.toggle('btn--ghost', !on); });
+  $('toolHint').textContent = hints[t];
+  $('editCanvas').style.cursor = t === 'pan' ? 'grab' : 'crosshair';
+  drawEditor();
+}
+document.querySelectorAll('[data-tool]').forEach((b) => b.addEventListener('click', () => setTool(b.dataset.tool)));
+function brushR() { return +$('brush').value * (S.photo ? Math.max(1, S.photo.width / 1600) : 1) / 2; }
+['brush', 'hard'].forEach((id) => $(id).addEventListener('input', (e) => { $(id + 'O').textContent = e.target.value; }));
+function toImg(e) {
+  const ec = $('editCanvas'), r = ec.getBoundingClientRect();
+  return { x: (e.clientX - r.left) * ec.width / r.width, y: (e.clientY - r.top) * ec.height / r.height };
+}
+/* ---------------- cut-out strength + edit history ----------------
+   The model gives each pixel a soft 0–255 "how sure am I this is a person"
+   score (S.raw). The strength slider turns that into the mask: left keeps
+   low-confidence areas such as arms, hands and hair; right keeps only what
+   the model is sure of. Every edit is stored as a step (S.ops) and replayed
+   on top, so moving the slider later never loses your clicks. */
+function strengthAlpha() {
+  const s = +$('strength').value / 100, c = 20 + s * 170, lo = Math.max(2, c - 40), hi = c + 40;
+  const a = new Uint8Array(S.raw.length);
+  for (let i = 0; i < a.length; i++) { const v = (S.raw[i] - lo) / (hi - lo); a[i] = v <= 0 ? 0 : v >= 1 ? 255 : Math.round(v * 255); }
+  return a;
+}
+function addOp(op) { S.ops.push(op); $('btnUndo').disabled = false; }
+
+/* ---------------- player finder (Segment Anything 2.1) ---------------- */
+function setSamStatus(t, kind) {
+  const el = $('samStatus'); el.textContent = t;
+  el.style.color = kind === 'ok' ? 'var(--green)' : kind === 'err' ? 'var(--red)' : '';
+}
+async function samEncode() {
+  const job = ++S.samJob;   // a newer photo makes an older run stand down
+  setSamStatus('Loading the player finder…');
+  try {
+    if (!S.sam) {
+      const T = await import(TJS_URL);
+      T.env.allowLocalModels = false;
+      const seen = {};
+      const progress_callback = (e) => {
+        if (e.status !== 'progress' || !e.total) return;
+        seen[e.file] = [e.loaded, e.total];
+        const [l, t] = Object.values(seen).reduce((acc, v) => [acc[0] + v[0], acc[1] + v[1]], [0, 0]);
+        setSamStatus(`Downloading the player finder (first time only)… ${Math.round(100 * l / t)}%`);
+      };
+      const [model, processor] = await Promise.all([
+        T.Sam2Model.from_pretrained(SAM_ID, { dtype: 'q8', device: 'wasm', progress_callback }),
+        T.Sam2Processor.from_pretrained(SAM_ID),   // named explicitly: AutoProcessor can return a generic class
+      ]);
+      S.sam = { T, model, processor };
+    }
+    if (job !== S.samJob) return;
+    setSamStatus('Player finder reading the photo…'); await nextFrame();
+    const blob = await new Promise((r) => S.photo.toBlob(r, 'image/jpeg', 0.95));
+    const image = await S.sam.T.RawImage.fromBlob(blob);
+    const inputs = await S.sam.processor(image);
+    const emb = await S.sam.model.get_image_embeddings(inputs);
+    if (job !== S.samJob) return;
+    S.sam.inputs = inputs; S.sam.emb = emb; S.samState = 'ready';
+    setSamStatus('Player finder ready.', 'ok');
+    if (S.ops.some((op) => op.t === 'pick')) { if (await samUpdate()) { S.needPlace = true; S.bg = null; rebuild(true); focusCut(); } }
+  } catch (e) {
+    console.error(e);
+    if (job !== S.samJob) return;
+    S.samState = 'failed';
+    setSamStatus('Player finder unavailable (' + (e && e.message ? e.message : 'error') + '). Using basic splitting: click Remove on anyone attached.', 'err');
+    rebuild(true);
+  }
+}
+/* Turn the green/red clicks into one person mask. SAM returns three candidate
+   masks; take the biggest of the confident ones, because the smaller
+   candidates tend to be just a shirt or a face. */
+async function samUpdate() {
+  const seq = ++S.samSeq;
+  const pts = S.ops.filter((op) => op.t === 'pick' || op.t === 'drop');
+  if (S.samState !== 'ready' || !pts.some((op) => op.t === 'pick')) { S.samMask = null; return true; }
+  const { processor, model, inputs, emb } = S.sam;
+  const ip = processor.image_processor || processor;   // point helpers live on the image processor
+  const input_points = ip.reshape_input_points([pts.map((op) => [op.p.x, op.p.y])], inputs.original_sizes, inputs.reshaped_input_sizes);
+  const input_labels = ip.add_input_labels([pts.map((op) => (op.t === 'pick' ? 1 : 0))], input_points);
+  const out = await model({ ...emb, input_points, input_labels });
+  const masks = (await processor.post_process_masks(out.pred_masks, inputs.original_sizes, inputs.reshaped_input_sizes))[0];
+  if (seq !== S.samSeq) return false;   // a newer click has already been sent
+  const dims = masks.dims, nm = dims[dims.length - 3], mh = dims[dims.length - 2], mw = dims[dims.length - 1], n = mh * mw, md = masks.data;
+  const iou = Array.from(out.iou_scores.data).slice(0, nm), best = Math.max(...iou);
+  let pick = 0, area = -1;
+  for (let k = 0; k < nm; k++) {
+    if (iou[k] < 0.5 * best) continue;
+    let sum = 0; for (let i = k * n; i < (k + 1) * n; i++) if (md[i]) sum++;
+    if (sum > area) { area = sum; pick = k; }
+  }
+  const m = new Uint8Array(n); for (let i = 0; i < n; i++) m[i] = md[pick * n + i] ? 1 : 0;
+  S.samMask = m; samPrep();
+  return true;
+}
+/* Soft zone around the person (so the edge model decides the exact outline)
+   and a solid core (so body parts the edge model was unsure of survive). */
+function samPrep() {
+  const w = S.mask.width, h = S.mask.height, m = S.samMask;
+  const grow = dilate(m, w, h, Math.max(3, Math.round(w / 250)));
+  const src = mkCanvas(w, h); src.getContext('2d').putImageData(alphaToImageData(grow.map((v) => v * 255), w, h), 0, 0);
+  const dst = mkCanvas(w, h), dc = dst.getContext('2d', { willReadFrequently: true });
+  dc.filter = `blur(${Math.max(1.5, w / 800)}px)`; dc.drawImage(src, 0, 0); dc.filter = 'none';
+  const z = dc.getImageData(0, 0, w, h).data, zone = new Uint8Array(w * h);
+  for (let i = 0; i < zone.length; i++) zone[i] = z[i * 4 + 3];
+  S.samZone = zone;
+  S.samCore = erode(m.map((v) => v * 255), w, h, Math.max(2, Math.round(w / 400)));
+}
+/* Replay: strength → paint/lasso steps → split by the green/red clicks →
+   paint steps again on top (so painted-back areas always survive). */
+function rebuild(quiet) {
+  if (!S.raw || !S.mask) return {};
+  const w = S.mask.width, h = S.mask.height;
+  setAlpha(strengthAlpha());
+  const seeds = [];
+  for (const op of S.ops) {
+    if (op.t === 'paint') { for (const p of op.pts) dab(p, op.erase, op.r, op.hard); }
+    else if (op.t === 'lasso') lassoFill(op.pts, op.keep);
+    else seeds.push({ i: Math.round(op.p.y) * w + Math.round(op.p.x), k: op.t === 'pick' ? 1 : 2 });
+  }
+  S.pre = getAlpha();
+  if (S.samMask && S.samState === 'ready' && seeds.some((sd) => sd.k === 1)) {
+    const a = S.pre.slice(), zone = S.samZone, core = S.samCore;
+    for (let i = 0; i < a.length; i++) a[i] = Math.round(Math.max(a[i], core[i]) * zone[i] / 255);
+    setAlpha(a);
+    for (const op of S.ops) if (op.t === 'paint') for (const p of op.pts) dab(p, op.erase, op.r, op.hard);
+    drawEditor(); scheduleProcess();
+    return { sam: true };
+  }
+  const live = seeds.filter((sd) => S.pre[sd.i] >= 64), info = { lost: live.length < seeds.length };
+  if (live.some((sd) => sd.k === 1)) {
+    const lab = segment(S.pre, live), a = S.pre.slice(), keep = new Uint8Array(a.length);
+    for (let i = 0; i < a.length; i++) keep[i] = lab[i] === 1 ? 1 : 0;
+    const grow = dilate(keep, w, h, Math.max(2, Math.round(w / 500)));   // keep the soft edge
+    for (let i = 0; i < a.length; i++) if (!grow[i] || lab[i] === 2) a[i] = 0;
+    setAlpha(a);
+    for (const op of S.ops) if (op.t === 'paint') for (const p of op.pts) dab(p, op.erase, op.r, op.hard);
+    info.touching = !live.some((sd) => sd.k === 2) && cleanedTouches(keep, w, h);
+  }
+  drawEditor(); scheduleProcess();
+  if (info.lost && !quiet) status('At this strength one of your clicks now lands outside the cut-out. Click that spot again, or ease the slider back.', true);
+  return info;
+}
+
+/* Edge map of the photo: splits prefer to fall where colours change. */
+const EDGE_WEIGHT = 2;
+function computeGrad() {
+  const w = S.photo.width, h = S.photo.height, c = mkCanvas(w, h), x = c.getContext('2d', { willReadFrequently: true });
+  x.filter = 'blur(1.5px)'; x.drawImage(S.photo, 0, 0); x.filter = 'none';
+  const d = x.getImageData(0, 0, w, h).data, G = new Uint8Array(w * h);
+  for (let y = 1; y < h - 1; y++) for (let xx = 1; xx < w - 1; xx++) {
+    const i = y * w + xx, l = (i - 1) * 4, r = (i + 1) * 4, u = (i - w) * 4, dn = (i + w) * 4;
+    const gx = Math.abs(d[r] - d[l]) + Math.abs(d[r + 1] - d[l + 1]) + Math.abs(d[r + 2] - d[l + 2]);
+    const gy = Math.abs(d[dn] - d[u]) + Math.abs(d[dn + 1] - d[u + 1]) + Math.abs(d[dn + 2] - d[u + 2]);
+    G[i] = Math.min(255, Math.hypot(gx, gy) / 4);
+  }
+  S.grad = G;
+}
+class MinHeap {
+  constructor(cap) { this.k = new Float32Array(cap); this.v = new Int32Array(cap); this.size = 0; }
+  push(v, k) {
+    if (this.size === this.k.length) {
+      const nk = new Float32Array(this.k.length * 2); nk.set(this.k); this.k = nk;
+      const nv = new Int32Array(this.v.length * 2); nv.set(this.v); this.v = nv;
+    }
+    let i = this.size++;
+    while (i > 0) { const p = (i - 1) >> 1; if (this.k[p] <= k) break; this.k[i] = this.k[p]; this.v[i] = this.v[p]; i = p; }
+    this.k[i] = k; this.v[i] = v;
+  }
+  pop() {
+    const top = this.v[0], k = this.k[--this.size], v = this.v[this.size], n = this.size;
+    let i = 0;
+    while (true) { let c = 2 * i + 1; if (c >= n) break; if (c + 1 < n && this.k[c + 1] < this.k[c]) c++; if (this.k[c] >= k) break; this.k[i] = this.k[c]; this.v[i] = this.v[c]; i = c; }
+    this.k[i] = k; this.v[i] = v; return top;
+  }
+}
+/* Grow out from every click at once through the cut-out shape; each pixel
+   goes to the click that reaches it most cheaply. Crossing a strong edge
+   costs more, so the split between two people lands on the edge between
+   them. Anything no click reaches is removed. */
+function segment(a, seeds) {
+  if (!S.grad) computeGrad();
+  const w = S.mask.width, n = a.length, G = S.grad;
+  const dist = new Float32Array(n).fill(Infinity), lab = new Uint8Array(n), done = new Uint8Array(n), heap = new MinHeap(n >> 2);
+  for (const sd of seeds) { dist[sd.i] = 0; lab[sd.i] = sd.k; heap.push(sd.i, 0); }
+  const visit = (j, d0, L) => {
+    if (done[j] || a[j] < 64) return;
+    const nd = d0 + 1 + EDGE_WEIGHT * G[j] / 50;
+    if (nd < dist[j]) { dist[j] = nd; lab[j] = L; heap.push(j, nd); }
+  };
+  while (heap.size) {
+    const i = heap.pop(); if (done[i]) continue; done[i] = 1;
+    const x = i % w, d0 = dist[i], L = lab[i];
+    if (x > 0) visit(i - 1, d0, L);
+    if (x < w - 1) visit(i + 1, d0, L);
+    if (i >= w) visit(i - w, d0, L);
+    if (i < n - w) visit(i + w, d0, L);
+  }
+  return lab;
+}
+let strTimer = null;
+$('strength').addEventListener('input', (e) => {
+  $('strengthO').textContent = e.target.value;
+  clearTimeout(strTimer); strTimer = setTimeout(rebuild, 120);
+});
+
+function dab(p, erase, r, hard) {
+  const m = mctx();
+  const g = m.createRadialGradient(p.x, p.y, r * hard * 0.98, p.x, p.y, r);
+  g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  m.globalCompositeOperation = erase ? 'destination-out' : 'source-over';
+  m.fillStyle = g; m.beginPath(); m.arc(p.x, p.y, r, 0, Math.PI * 2); m.fill();
+  m.globalCompositeOperation = 'source-over';
+}
+function lassoFill(pts, keep) {
+  const m = mctx();
+  m.globalCompositeOperation = keep ? 'destination-in' : 'destination-out';
+  m.fillStyle = '#fff'; m.beginPath(); m.moveTo(pts[0].x, pts[0].y);
+  pts.slice(1).forEach((p) => m.lineTo(p.x, p.y)); m.closePath(); m.fill();
+  m.globalCompositeOperation = 'source-over';
+}
+function applyLasso(keep) {
+  if (lasso.length < 3) { lasso = []; drawEditor(); return; }
+  const pts = lasso.slice(); lassoFill(pts, keep); addOp({ t: 'lasso', pts, keep });
+  if (keep) { S.needPlace = true; S.bg = null; }
+  lasso = []; drawEditor(); scheduleProcess();
+}
+
+/* rough check: is the kept shape much wider than one person? */
+function cleanedTouches(keep, w, h) {
+  const b = bbox(keep, w, h, 0); if (!b) return false;
+  return (b.x1 - b.x0) / (b.y1 - b.y0 + 1) > 0.75;
+}
+function onCut(p) {
+  if (!S.pre) return false;
+  const x = Math.round(p.x), y = Math.round(p.y);
+  return x >= 0 && y >= 0 && x < S.mask.width && y < S.mask.height && S.pre[y * S.mask.width + x] >= 64;
+}
+const samOn = () => S.samState === 'ready' || S.samState === 'loading';
+async function pickAt(p) {
+  if (!samOn() && !onCut(p)) { status('That spot isn\'t part of any person in the cut-out. Click on the player themselves, or slide Cut-out strength left.'); return; }
+  const first = !S.ops.some((op) => op.t === 'pick');
+  addOp({ t: 'pick', p: { x: p.x, y: p.y } });
+  S.needPlace = true; S.bg = null; stepDone('step2', true);
+  if (S.samState === 'loading') { drawEditor(); status('Got it – the player finder is still loading and will use your click when it\'s ready.'); return; }
+  if (S.samState === 'ready') {
+    setSamStatus('Finding the player…');
+    const fresh = await samUpdate(); setSamStatus('Player finder ready.', 'ok');
+    if (fresh) { rebuild(true); focusCut(); }
+    status('Kept. Something missing? Click it with Keep. Someone else still there? Click them with Remove.');
+    return;
+  }
+  const info = rebuild(true); scheduleProcess();
+  if (first && info.touching) { setTool('drop'); status('Kept. Other people are still attached – click each one with Remove.'); }
+  else status('Kept. Missing an arm or hand? Click it with Keep, or slide Cut-out strength left. Otherwise move on to step 3.');
+}
+async function dropAt(p) {
+  if (!S.ops.some((op) => op.t === 'pick')) { status('Click your player with Keep first.', true); return; }
+  if (!samOn() && !onCut(p)) { status('That spot is already removed. Click on the person you want to drop.'); return; }
+  addOp({ t: 'drop', p: { x: p.x, y: p.y } });
+  S.needPlace = true; S.bg = null;
+  if (S.samState === 'loading') { drawEditor(); status('Got it – the player finder will use your click when it\'s ready.'); return; }
+  if (S.samState === 'ready') {
+    setSamStatus('Finding the player…');
+    const fresh = await samUpdate(); setSamStatus('Player finder ready.', 'ok');
+    if (fresh) rebuild(true);
+    status('Removed. If part of your player went with them, click that part with Keep.');
+    return;
+  }
+  rebuild(true); scheduleProcess();
+  status('Removed. If part of your player went with them, choose Keep and click that part.');
+}
+function dilate(m, w, h, r) {
+  const t = new Uint8Array(m.length), o = new Uint8Array(m.length);
+  for (let y = 0; y < h; y++) { let run = -1e9; for (let x = 0; x < w; x++) { if (m[y * w + x]) run = x; if (x - run <= r) t[y * w + x] = 1; } run = 1e9; for (let x = w - 1; x >= 0; x--) { if (m[y * w + x]) run = x; if (run - x <= r) t[y * w + x] = 1; } }
+  for (let x = 0; x < w; x++) { let run = -1e9; for (let y = 0; y < h; y++) { if (t[y * w + x]) run = y; if (y - run <= r) o[y * w + x] = 1; } run = 1e9; for (let y = h - 1; y >= 0; y--) { if (t[y * w + x]) run = y; if (run - y <= r) o[y * w + x] = 1; } }
+  return o;
+}
+
+let painting = false, last = null, panning = null;
+const ec = $('editCanvas');
+ec.addEventListener('pointerdown', (e) => {
+  if (!S.photo) return;
+  const p = toImg(e);
+  if (S.tool === 'pan') { panning = { x: e.clientX, y: e.clientY, sl: ew.scrollLeft, st: ew.scrollTop }; ec.setPointerCapture(e.pointerId); return; }
+  if (S.tool === 'pick') { pickAt(p); return; }
+  if (S.tool === 'drop') { dropAt(p); return; }
+  if (S.tool === 'lassoKeep' || S.tool === 'lassoCut') {
+    if (lasso.length > 2) {
+      const f = lasso[0], close = 12 * S.photo.width / ec.clientWidth;
+      if (Math.hypot(p.x - f.x, p.y - f.y) < close) { applyLasso(S.tool === 'lassoKeep'); return; }
+    }
+    lasso.push(p); drawEditor(); return;
+  }
+  S.stroke = { t: 'paint', erase: S.tool === 'erase', r: brushR(), hard: +$('hard').value / 100, pts: [p] };
+  painting = true; last = p; dab(p, S.stroke.erase, S.stroke.r, S.stroke.hard); drawEditor();
+  ec.setPointerCapture(e.pointerId);
+});
+ec.addEventListener('pointermove', (e) => {
+  if (!S.photo) return;
+  if (panning) { ew.scrollLeft = panning.sl - (e.clientX - panning.x); ew.scrollTop = panning.st - (e.clientY - panning.y); return; }
+  const p = toImg(e); hover = p;
+  if (painting) {
+    const st = S.stroke, step = Math.max(1, st.r / 4), d = Math.hypot(p.x - last.x, p.y - last.y);
+    for (let t = step; t <= d; t += step) {
+      const q = { x: last.x + (p.x - last.x) * t / d, y: last.y + (p.y - last.y) * t / d };
+      st.pts.push(q); dab(q, st.erase, st.r, st.hard);
+    }
+    last = p;
+  }
+  drawEditor();
+});
+ec.addEventListener('pointerup', () => {
+  if (painting) { painting = false; addOp(S.stroke); S.stroke = null; scheduleProcess(); }
+  panning = null;
+});
+ec.addEventListener('pointerleave', () => { hover = null; drawEditor(); });
+ec.addEventListener('dblclick', () => { if (S.tool.startsWith('lasso')) applyLasso(S.tool === 'lassoKeep'); });
+window.addEventListener('keydown', (e) => {
+  if (e.target.matches('input[type=text]')) return;
+  if (e.key === 'Enter' && S.tool.startsWith('lasso')) applyLasso(S.tool === 'lassoKeep');
+  if (e.key === 'Escape') { lasso = []; drawEditor(); }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); }
+});
+async function undo() {
+  if (!S.ops.length) return;
+  const op = S.ops.pop(); $('btnUndo').disabled = !S.ops.length;
+  if (op.t !== 'paint') S.needPlace = true;
+  if ((op.t === 'pick' || op.t === 'drop') && S.samState === 'ready') { if (!(await samUpdate())) return; }
+  rebuild();
+}
+$('btnUndo').addEventListener('click', undo);
+$('btnReset').addEventListener('click', () => {
+  if (!S.mask) return;
+  S.raw = new Uint8Array(S.mask.width * S.mask.height).fill(255); S.rawFull = null; S.focusRect = null; S.ops = []; S.samMask = null; $('btnUndo').disabled = true;
+  S.needPlace = true; rebuild(); status('Whole photo kept. Use Lasso keep or Re-run auto cut-out.');
+});
+
+/* ---------------- refine: shrink, feather, fades → S.cut ---------------- */
+function bbox(a, w, h, th) {
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0; y < h; y++) { const o = y * w; for (let x = 0; x < w; x++) if (a[o + x] > th) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; y1 = y; } }
+  return x1 < 0 ? null : { x0, y0, x1, y1 };
+}
+function erode(a, w, h, r) {
+  const t = new Uint8Array(a.length), o = new Uint8Array(a.length);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let m = 255; for (let k = Math.max(0, x - r), e = Math.min(w - 1, x + r); k <= e; k++) { const v = a[y * w + k]; if (v < m) m = v; } t[y * w + x] = m; }
+  for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) { let m = 255; for (let k = Math.max(0, y - r), e = Math.min(h - 1, y + r); k <= e; k++) { const v = t[k * w + x]; if (v < m) m = v; } o[y * w + x] = m; }
+  return o;
+}
+let procTimer = null;
+function scheduleProcess() { clearTimeout(procTimer); procTimer = setTimeout(processCut, 60); }
+function processCut() {
+  if (!S.photo) { S.cut = null; render(); return; }
+  const W0 = S.mask.width, H0 = S.mask.height, full = getAlpha(), b = bbox(full, W0, H0, 8);
+  if (!b) { S.cut = null; render(); return; }
+  const shrink = +$('shrink').value, feather = +$('feather').value, pad = shrink + feather * 3 + 2;
+  const rx = Math.max(0, b.x0 - pad), ry = Math.max(0, b.y0 - pad);
+  const rw = Math.min(W0, b.x1 + pad + 1) - rx, rh = Math.min(H0, b.y1 + pad + 1) - ry;
+  let a = new Uint8Array(rw * rh);
+  for (let y = 0; y < rh; y++) a.set(full.subarray((ry + y) * W0 + rx, (ry + y) * W0 + rx + rw), y * rw);
+  if (shrink) a = erode(a, rw, rh, shrink);
+  if (feather) {
+    const src = mkCanvas(rw, rh); src.getContext('2d').putImageData(alphaToImageData(a, rw, rh), 0, 0);
+    const dst = mkCanvas(rw, rh), dc = dst.getContext('2d', { willReadFrequently: true });
+    dc.filter = `blur(${feather}px)`; dc.drawImage(src, 0, 0); dc.filter = 'none';
+    const d = dc.getImageData(0, 0, rw, rh).data; for (let i = 0; i < a.length; i++) a[i] = d[i * 4 + 3];
+  }
+  const bb = bbox(a, rw, rh, 8);
+  if (!bb) { S.cut = null; render(); return; }
+  const fl = +$('fadeL').value / 100, fr = +$('fadeR').value / 100, ft = +$('fadeT').value / 100, fb = +$('fadeB').value / 100;
+  if (fl || fr || ft || fb) {
+    const bw = bb.x1 - bb.x0 + 1, bh = bb.y1 - bb.y0 + 1, ease = (t) => Math.pow(Math.min(1, Math.max(0, t)), 1.3);
+    for (let y = 0; y < rh; y++) {
+      let fy = 1; if (ft) fy *= ease((y - bb.y0) / (ft * bh)); if (fb) fy *= ease((bb.y1 - y) / (fb * bh));
+      for (let x = 0; x < rw; x++) { let f = fy; if (fl) f *= ease((x - bb.x0) / (fl * bw)); if (fr) f *= ease((bb.x1 - x) / (fr * bw)); a[y * rw + x] = Math.round(a[y * rw + x] * f); }
+    }
+  }
+  const t2 = bbox(a, rw, rh, 3) || bb, cw = t2.x1 - t2.x0 + 1, ch = t2.y1 - t2.y0 + 1;
+  const al = mkCanvas(rw, rh); al.getContext('2d').putImageData(alphaToImageData(a, rw, rh), 0, 0);
+  const cut = mkCanvas(cw, ch), cc = cut.getContext('2d');
+  cc.drawImage(S.photo, rx + t2.x0, ry + t2.y0, cw, ch, 0, 0, cw, ch);
+  cc.globalCompositeOperation = 'destination-in'; cc.drawImage(al, t2.x0, t2.y0, cw, ch, 0, 0, cw, ch);
+  S.cut = { canvas: cut, ix: rx + t2.x0, iy: ry + t2.y0 };
+  if (S.needPlace) { defaultPlacement(); S.needPlace = false; }
+  if (!S.bg) buildBg();
+  render();
+}
+['shrink', 'feather', 'fadeL', 'fadeR', 'fadeT', 'fadeB'].forEach((id) => $(id).addEventListener('input', (e) => { e.target.nextElementSibling.textContent = e.target.value; scheduleProcess(); }));
+$('btnSaveCut').addEventListener('click', () => S.cut && download(S.cut.canvas, slug($('tName').value) + '_cutout.png'));
+
+/* ---------------- graphic: background ---------------- */
+function buildBg() {
+  const bg = mkCanvas(W, H), c = bg.getContext('2d', { willReadFrequently: true });
+  c.fillStyle = C.navy800; c.fillRect(0, 0, W, H);
+  if ($('bgPhoto').checked && S.photo) {
+    const pw = S.photo.width, ph = S.photo.height, k = Math.max(W / pw, H / ph);
+    const focus = S.cut ? (S.cut.ix + S.cut.canvas.width / 2) * k : pw * k / 2;
+    const ox = Math.min(0, Math.max(W - pw * k, W / 2 - focus)), blur = +$('bgBlur').value;
+    c.filter = `blur(${blur}px) grayscale(1)`;
+    c.drawImage(S.photo, ox - blur, (H - ph * k) / 2 - blur, pw * k + blur * 2, ph * k + blur * 2);
+    c.filter = 'none';
+    const id = c.getImageData(0, 0, W, H), d = id.data;
+    let mn = 255, mx = 0; for (let i = 0; i < d.length; i += 4) { if (d[i] < mn) mn = d[i]; if (d[i] > mx) mx = d[i]; }
+    const L = +$('bgLight').value / 100, dark = C.dark, light = [dark[0] + 60 * L, dark[1] + 100 * L, dark[2] + 190 * L], deep = C.deep;
+    for (let i = 0, p = 0; i < d.length; i += 4, p++) {
+      const y = Math.floor(p / W);
+      const g = Math.pow((d[i] - mn) / Math.max(1, mx - mn), 1.15);
+      const sink = Math.min(1, Math.max(0, (y / H - 0.55) / 0.4));   // settle into deep navy behind the text
+      const n = (Math.random() - 0.5) * 10;                          // light grain
+      for (let k2 = 0; k2 < 3; k2++) d[i + k2] = (dark[k2] + (light[k2] - dark[k2]) * g) * (1 - sink) + deep[k2] * sink + n;
+      d[i + 3] = 255;
+    }
+    c.putImageData(id, 0, 0);
+  }
+  S.bg = bg;
+}
+['bgLight', 'bgBlur'].forEach((id) => $(id).addEventListener('input', (e) => { e.target.nextElementSibling.textContent = e.target.value; bgSoon(); }));
+$('bgPhoto').addEventListener('change', bgSoon);
+let bgTimer = null;
+function bgSoon() { clearTimeout(bgTimer); bgTimer = setTimeout(() => { buildBg(); render(); }, 80); }
+
+/* ---------------- graphic: placement ---------------- */
+function defaultPlacement() {
+  const c = S.cut.canvas, ar = c.width / c.height;
+  const L = headLayout();
+  // same size either way; in front, lift them so the head breaks over the word
+  const h = Math.round(Math.min(H - 110 - (L.bottom + 8), 920 / ar));
+  const top = $('frontPlayer').checked ? L.base - Math.round(L.hs * 0.45) : L.bottom + 8;
+  S.place = { h, cx: 540, top };
+  syncPlaceInputs();
+}
+function syncPlaceInputs() {
+  [['pH', S.place.h], ['pX', S.place.cx], ['pY', S.place.top]].forEach(([id, v]) => { $(id).value = Math.round(v); $(id).nextElementSibling.textContent = Math.round(v); });
+}
+[['pH', 'h'], ['pX', 'cx'], ['pY', 'top']].forEach(([id, key]) => $(id).addEventListener('input', (e) => { S.place[key] = +e.target.value; e.target.nextElementSibling.textContent = e.target.value; render(); }));
+const pv = $('preview'); let drag = null;
+pv.addEventListener('pointerdown', (e) => { if (!S.cut) return; drag = { x: e.clientX, y: e.clientY, cx: S.place.cx, top: S.place.top, k: W / pv.getBoundingClientRect().width }; pv.classList.add('dragging'); pv.setPointerCapture(e.pointerId); });
+pv.addEventListener('pointermove', (e) => { if (!drag) return; S.place.cx = drag.cx + (e.clientX - drag.x) * drag.k; S.place.top = drag.top + (e.clientY - drag.y) * drag.k; syncPlaceInputs(); render(); });
+pv.addEventListener('pointerup', () => { drag = null; pv.classList.remove('dragging'); });
+
+/* ---------------- graphic: drawing ---------------- */
+function setFont(c, weight, size) { c.font = `${size}px "${CUT[weight >= 800 ? 800 : weight >= 600 ? 700 : 400]}", sans-serif`; }
+function spaced(c, em, size) { if ('letterSpacing' in c) c.letterSpacing = `${em * size}px`; }
+function fitSize(c, text, weight, max, width, em) { setFont(c, weight, max); spaced(c, em || 0, max); const w = c.measureText(text).width; return w > width ? Math.floor(max * width / w) : max; }
+function rr(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
+function drawContain(c, im, x, y, w, h) { const k = Math.min(w / im.width, h / im.height), dw = im.width * k, dh = im.height * k; c.drawImage(im, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh); }
+
+/* Headline block geometry, shared by render() and the default player placement. */
+function headLayout() {
+  const c = pv.getContext('2d');
+  const head = ($('tHead').value.trim() || 'NOMINATED').toUpperCase();
+  const hs = Math.min(210, fitSize(c, head, 800, 210, W - 128, -0.015));
+  const base = 70 + Math.round(hs * 0.74);
+  const award = $('tKicker').value.trim().toUpperCase(), month = $('tMonth').value.trim().toUpperCase();
+  const stacked = S.strapStack === 'stacked', right = S.strapSide === 'right';
+  let ss = 30, aw = 0, mw = 0;
+  for (;;) {   // shrink the strapline until it fits
+    setFont(c, 800, ss); spaced(c, 0.12, ss); aw = award ? c.measureText(award).width + 36 : 0;
+    setFont(c, 700, ss); spaced(c, 0.12, ss); mw = month ? c.measureText(month).width : 0;
+    const need = stacked ? Math.max(aw, mw) : aw + (award && month ? 22 : 0) + mw;
+    if (need <= W - 128 || ss <= 18) break;
+    ss--;
+  }
+  const pillTop = base + 28, pillH = Math.round(ss * 1.75);
+  const monthMid = stacked ? pillTop + (award ? pillH + 12 : 0) + Math.round(ss * 0.6) : pillTop + pillH / 2 + 1;
+  const bottom = stacked ? monthMid + Math.round(ss * 0.6) : pillTop + pillH;
+  return { head, hs, base, award, month, ss, aw, mw, pillTop, pillH, monthMid, stacked, right, bottom };
+}
+function drawPlayer(c) {
+  if (S.cut) {
+    const cv = S.cut.canvas, h = S.place.h, w = h * cv.width / cv.height;
+    c.imageSmoothingQuality = 'high'; c.drawImage(cv, S.place.cx - w / 2, S.place.top, w, h);
+  } else {
+    setFont(c, 600, 30); spaced(c, 0, 30); c.fillStyle = C.navy400; c.textAlign = 'center'; c.textBaseline = 'alphabetic';
+    c.fillText('Player cut-out appears here', W / 2, 700);
+  }
+}
+function render() {
+  const c = pv.getContext('2d');
+  c.save(); c.clearRect(0, 0, W, H);
+  if (S.bg) c.drawImage(S.bg, 0, 0); else { c.fillStyle = C.navy800; c.fillRect(0, 0, W, H); }
+  const accent = $('accent').value, L = headLayout(), front = $('frontPlayer').checked;
+
+  if (!front) drawPlayer(c);
+  // headline: NOMINATED (or WINNER)
+  c.textAlign = 'left'; c.textBaseline = 'alphabetic';
+  setFont(c, 800, L.hs); spaced(c, -0.015, L.hs);
+  c.shadowColor = `rgba(${C.shadowRgb},0.6)`; c.shadowBlur = 28; c.fillStyle = '#fff';
+  c.fillText(L.head, 64, L.base); c.shadowBlur = 0;
+  if (front) drawPlayer(c);
+  c.fillStyle = C.primary; c.fillRect(0, 0, W, 22); c.fillRect(0, H - 22, W, 22);
+
+  // award pill + month: always on top of everything
+  c.textBaseline = 'middle';
+  // where each piece starts: a row is one block (pill, gap, month); stacked lines align on their own
+  const gap = L.award && L.month ? 22 : 0, rowW = L.aw + gap + L.mw;
+  const pillX = L.stacked ? (L.right ? W - 64 - L.aw : 64) : (L.right ? W - 64 - rowW : 64);
+  const monthX = L.stacked ? (L.right ? W - 64 - L.mw : 64) : pillX + L.aw + gap;
+  if (L.award) {
+    setFont(c, 800, L.ss); spaced(c, 0.12, L.ss);
+    c.shadowColor = `rgba(${C.shadowRgb},0.45)`; c.shadowBlur = 18;
+    c.fillStyle = accent; rr(c, pillX, L.pillTop, L.aw, L.pillH, 4); c.fill(); c.shadowBlur = 0;
+    c.fillStyle = lum(accent) > 0.35 ? '#000' : '#fff'; c.textAlign = 'left';
+    c.fillText(L.award, pillX + 18, L.pillTop + L.pillH / 2 + 1);
+  }
+  if (L.month) {
+    setFont(c, 700, L.ss); spaced(c, 0.12, L.ss); c.fillStyle = '#fff';
+    c.shadowColor = `rgba(${C.shadowRgb},0.75)`; c.shadowBlur = 16;
+    c.textAlign = 'left'; c.fillText(L.month, monthX, L.monthMid);
+    c.shadowBlur = 0;
+  }
+
+  // bottom block: name, divider, club + competition lockup
+  const rowTop = H - 66 - 72, divider = rowTop - 26;
+  c.textAlign = 'left'; c.textBaseline = 'alphabetic'; c.fillStyle = '#fff';
+  const name = $('tName').value.trim(), ns = fitSize(c, name, 800, 116, W - 128, -0.025), nameBase = divider - 34 - Math.round(ns * 0.2);
+  setFont(c, 800, ns); spaced(c, -0.025, ns);
+  c.shadowColor = `rgba(${C.shadowRgb},0.6)`; c.shadowBlur = 24; c.fillText(name, 64, nameBase); c.shadowBlur = 0;
+  c.fillStyle = accent; c.fillRect(64, nameBase - Math.round(ns * 0.74) - 30, 96, 8);
+  c.fillStyle = C.navy; c.fillRect(64, divider, W - 128, 2);
+  if (S.crest) drawContain(c, S.crest, 64, rowTop, 72, 72);
+  const club = $('tClub').value.trim(), lock = S.lockup || S.lockups[S.div];
+  c.textBaseline = 'middle'; c.fillStyle = '#fff';
+  if (club) { const cs = fitSize(c, club, 600, 34, 520, 0); setFont(c, 600, cs); spaced(c, 0, cs); c.fillText(club, S.crest ? 154 : 64, rowTop + 37); }
+  if (lock) {
+    const lh = 116, lw = Math.min(280, lock.width * lh / lock.height);
+    drawContain(c, lock, W - 64 - lw, rowTop + 36 - lh / 2, lw, lh);
+  } else {   // lockup image unavailable: fall back to the rose and typed name
+    const l1 = 'ENTERPRISE', l2 = S.div === 'National' ? 'NATIONAL LEAGUE' : 'NATIONAL LEAGUE ' + S.div.toUpperCase();
+    setFont(c, 800, 17); spaced(c, 0.12, 17);
+    const tw = Math.max(c.measureText(l1).width, c.measureText(l2).width), x0 = W - 64 - tw - (S.rose ? 72 : 0);
+    if (S.rose) drawContain(c, S.rose, x0, rowTop + 7, 58, 58);
+    const tx = x0 + (S.rose ? 72 : 0); c.fillText(l1, tx, rowTop + 25); c.fillText(l2, tx, rowTop + 47);
+  }
+  c.restore();
+}
+['tName', 'tHead', 'tKicker', 'tMonth', 'tClub', 'accent'].forEach((id) => $(id).addEventListener('input', render));
+$('frontPlayer').addEventListener('change', render);
+const divPick = NL.filterButton('#divPick', {
+  label: 'Division', multiple: false, value: 'National', allLabel: 'National',
+  options: [{ value: 'National', label: 'National' }, { value: 'North', label: 'North' }, { value: 'South', label: 'South' }],
+  onChange: (v) => { S.div = v || 'National'; render(); },
+});
+function setDivision(d) { S.div = d; divPick.set(d); render(); }
+/* Settings use the canon filter button in single-choice mode. */
+NL.filterButton('#sidePick', {
+  label: 'Award', multiple: false, value: 'left', allLabel: 'Left',
+  options: [{ value: 'left', label: 'Left' }, { value: 'right', label: 'Right' }],
+  onChange: (v) => { S.strapSide = v || 'left'; render(); },
+});
+NL.filterButton('#stackPick', {
+  label: 'Layout', multiple: false, value: 'row', allLabel: 'In a row',
+  options: [{ value: 'row', label: 'In a row' }, { value: 'stacked', label: 'Stacked' }],
+  onChange: (v) => { S.strapStack = v || 'row'; render(); },
+});
+$('fileCrest').addEventListener('change', async (e) => { if (e.target.files[0]) { S.crest = await fileToImg(e.target.files[0]); render(); } });
+$('fileLock').addEventListener('change', async (e) => { if (e.target.files[0]) { S.lockup = await fileToImg(e.target.files[0]); $('btnClearLock').disabled = false; render(); } });
+$('btnClearLock').addEventListener('click', () => { S.lockup = null; $('btnClearLock').disabled = true; render(); });
+$('btnExport').addEventListener('click', () => { render(); download(pv, `${slug($('tKicker').value)}_${slug($('tMonth').value)}_${slug($('tName').value)}.png`); });
+
+/* Club chosen in NL.clubPicker: crest, name, division and accent colour follow it. */
+async function setClub(sel) {
+  if (!sel || !sel.name) { S.crest = null; $('tClub').value = ''; render(); return; }
+  $('tClub').value = sel.name;
+  const div = sel.division || (sel.club && sel.club.division);
+  if (['National', 'North', 'South'].includes(div)) setDivision(div);
+  const col = sel.club && sel.club.colors && sel.club.colors.primary;
+  if (col && /^#[0-9a-f]{6}$/i.test(col)) $('accent').value = col.toLowerCase();
+  try { S.crest = await loadImg(sel.crestUrl, true); } catch { S.crest = S.rose; }
+  render();
+}
+
+/* Boot once auth-guard has confirmed the session (see nlAuthReady in <head>). */
+let booted = false;
+window.TOOL = window.TOOL || {};
+window.TOOL.boot = async function () {
+  if (booted) return; booted = true;
+  const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1);   // awards are for the month just gone
+  $('tMonth').value = d.toLocaleString('en-GB', { month: 'long', year: 'numeric' }).toUpperCase();
+  try { await Promise.all([800, 700].map((w) => document.fonts.load(`40px "${CUT[w]}"`))); } catch {}
+  try { S.rose = await loadImg(ROSE_URL, true); } catch {}
+  await Promise.all(['National', 'North', 'South'].map(async (dv) => {
+    try { S.lockups[dv] = await loadImg(LOCKUP_URL(dv), true); } catch (e) { console.warn('[monthly-awards] lockup failed', dv, e); }
+  }));
+  try { NL.clubPicker('#clubPick', { mode: 'search', divisions: ['National', 'North', 'South'], onSelect: setClub }); }
+  catch (e) { console.error('[monthly-awards] club picker', e); }
+  render();
+};
+if (window._toolDeferredSession) { window.TOOL.boot(window._toolDeferredSession); delete window._toolDeferredSession; }
+</script>
+
+</body>
+</html>
