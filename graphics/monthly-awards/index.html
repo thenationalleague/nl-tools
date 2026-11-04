@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Monthly Awards Graphic (Graphics sub-tool)
-  Version: v1.6 (04/11/2026)
+  Version: v1.7 (04/11/2026)
   File: /graphics/monthly-awards/index.html
 
   Nominee and winner cards for the monthly awards, 1080 × 1350. Load a
@@ -23,6 +23,10 @@
     /graphics/_shared/fonts/Carbona-*.otf          (local cuts for the canvas)
 
   CHANGELOG
+    v1.7 (04/11/2026) — The bottom fade no longer ghosts the player. It was
+      30% of the cut-out's height by default, on every photo, so hands and
+      the ball dissolved into the background. Now it is 10%, and only set
+      when the photo actually crops the player at the bottom; otherwise 0.
     v1.6 (04/11/2026) — Joins NL Tools from the standalone builds (v1.0–v1.5,
       08/10–04/11/2026). Step 2 splits into "Click a person" (Keep / Remove)
       and "Brush by hand" (Paint away / Paint back). Award and month take a
@@ -79,6 +83,13 @@
     var NL_TOOL_KEY = 'staff-graphics';
 
     window.NL_CHANGELOG = [
+      {
+        date: '04/11/2026',
+        version: 'v1.7',
+        items: [
+          'Fixed: the bottom of the player faded into the background. The fade is now light, and only used when the photo cuts the player off at the bottom.'
+        ]
+      },
       {
         date: '04/11/2026',
         version: 'v1.6',
@@ -255,7 +266,7 @@
             <div class="mag-ctl"><span>Fade left</span><input type="range" id="fadeL" min="0" max="60" value="0"><output>0</output></div>
             <div class="mag-ctl"><span>Fade right</span><input type="range" id="fadeR" min="0" max="60" value="0"><output>0</output></div>
             <div class="mag-ctl"><span>Fade top</span><input type="range" id="fadeT" min="0" max="60" value="0"><output>0</output></div>
-            <div class="mag-ctl"><span>Fade bottom</span><input type="range" id="fadeB" min="0" max="60" value="30"><output>30</output></div>
+            <div class="mag-ctl"><span>Fade bottom</span><input type="range" id="fadeB" min="0" max="60" value="0"><output>0</output></div>
             <div class="mag-row">
               <button type="button" class="btn btn--ghost btn--sm" id="btnRerun" disabled>Re-cut around player</button>
               <button type="button" class="btn btn--ghost btn--sm" id="btnReset" disabled>Keep whole photo</button>
@@ -556,7 +567,7 @@ $('btnRerun').addEventListener('click', () => (S.ops.some((op) => op.t === 'pick
 /* ---------------- photo loading ---------------- */
 function startEditor(w, h) {
   const ec = $('editCanvas'); ec.width = w; ec.height = h;
-  S.ops = []; $('btnUndo').disabled = true;
+  S.ops = []; $('btnUndo').disabled = true; S.fadeSet = false;
   $('empty').classList.add('hidden');
   ['btnReset', 'btnSaveCut', 'btnRerun'].forEach((id) => $(id).disabled = false);
   S.bg = null; S.needPlace = true; applyZoom(); rebuild(true);
@@ -999,6 +1010,17 @@ function erode(a, w, h, r) {
   for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) { let m = 255; for (let k = Math.max(0, y - r), e = Math.min(h - 1, y + r); k <= e; k++) { const v = t[k * w + x]; if (v < m) m = v; } o[y * w + x] = m; }
   return o;
 }
+/* A bottom fade only earns its place where the photo itself crops the player
+   (a waist-up shot ends in a hard straight line). Anywhere else it just
+   ghosts hands, ball and kit, so set it per photo: light when cropped, off
+   when not. The slider stays the user's to change afterwards. */
+const FADE_CROPPED = 10;
+function autoFade(full, w, h) {
+  let n = 0; const row = (h - 2) * w;
+  for (let x = 0; x < w; x++) if (full[row + x] > 128) n++;
+  const v = n > w * 0.03 ? FADE_CROPPED : 0, el = $('fadeB');
+  el.value = v; el.nextElementSibling.textContent = v;
+}
 let procTimer = null;
 function scheduleProcess() { clearTimeout(procTimer); procTimer = setTimeout(processCut, 60); }
 function processCut() {
@@ -1019,6 +1041,7 @@ function processCut() {
   }
   const bb = bbox(a, rw, rh, 8);
   if (!bb) { S.cut = null; render(); return; }
+  if (S.needPlace && !S.fadeSet) autoFade(full, W0, H0);
   const fl = +$('fadeL').value / 100, fr = +$('fadeR').value / 100, ft = +$('fadeT').value / 100, fb = +$('fadeB').value / 100;
   if (fl || fr || ft || fb) {
     const bw = bb.x1 - bb.x0 + 1, bh = bb.y1 - bb.y0 + 1, ease = (t) => Math.pow(Math.min(1, Math.max(0, t)), 1.3);
@@ -1037,7 +1060,7 @@ function processCut() {
   if (!S.bg) buildBg();
   render();
 }
-['shrink', 'feather', 'fadeL', 'fadeR', 'fadeT', 'fadeB'].forEach((id) => $(id).addEventListener('input', (e) => { e.target.nextElementSibling.textContent = e.target.value; scheduleProcess(); }));
+['shrink', 'feather', 'fadeL', 'fadeR', 'fadeT', 'fadeB'].forEach((id) => $(id).addEventListener('input', (e) => { e.target.nextElementSibling.textContent = e.target.value; if (id === 'fadeB') S.fadeSet = true; scheduleProcess(); }));
 $('btnSaveCut').addEventListener('click', () => S.cut && download(S.cut.canvas, slug($('tName').value) + '_cutout.png'));
 
 /* ---------------- graphic: background ---------------- */
