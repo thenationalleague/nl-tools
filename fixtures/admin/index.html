@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixture Management
-  Version: v3.6 (04/11/2026)
+  Version: v3.7 (04/11/2026)
   File: /fixtures/admin/index.html
 
   The League's master fixture record: every game in every competition, with
@@ -9,6 +9,11 @@
   behind it, is system/fixture-management-plan.md.
 
   CHANGELOG
+    v3.7 (04/11/2026) — A date picker on every date box in Settings:
+      the month's days under the box, ‹ › between months, today outlined;
+      typing still works. Adding an international window is a row of two
+      picked dates, not a typed prompt, and an empty "to" box opens on its
+      "from" month.
     v3.6 (04/11/2026) — Settings: International windows. Their dates are
       edited here (they often run to the weekend), and a list of the clubs
       that lose players to them. The globe still marks every window day;
@@ -248,6 +253,13 @@
     var NL_TOOL_KEY = 'ops-fixture-management';
 
     window.NL_CHANGELOG = [
+      {
+        date: '04/11/2026',
+        version: 'v3.7',
+        items: [
+          'Dates in Settings are picked from a calendar; adding an international window is two picked dates.'
+        ]
+      },
       {
         date: '04/11/2026',
         version: 'v3.6',
@@ -622,6 +634,21 @@
   .fm-intl__x { border: 0; background: none; cursor: pointer; color: var(--text-muted); font-size: var(--text-md); line-height: 1; padding: 0 4px; }
   .fm-intl__x:hover { color: var(--navy); }
   #fmIntlPick { min-width: 260px; }
+  .fm-intl__add { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .fm-dp { position: fixed; z-index: 150; width: 256px; padding: 8px; background: var(--white);
+    border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+  .fm-dp__head { display: flex; align-items: center; justify-content: space-between; padding-bottom: 6px; margin-bottom: 6px; border-bottom: 1px solid var(--border); }
+  .fm-dp__title { font-size: var(--text-sm); font-weight: 700; font-variation-settings: 'wght' 700; color: var(--navy); }
+  .fm-dp__nav { width: 28px; height: 28px; border: 1px solid transparent; border-radius: var(--radius); background: none; color: var(--navy); cursor: pointer; font-size: var(--text-md); }
+  .fm-dp__nav:hover { background: var(--off-white); border-color: var(--navy-300); }
+  .fm-dp__grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+  .fm-dp__dow { text-align: center; font-size: var(--text-xs); color: var(--text-muted); padding: 2px 0 4px; }
+  .fm-dp__d { padding: 6px 0; border: 1px solid transparent; border-radius: var(--radius); background: none; font: inherit; font-size: var(--text-sm);
+    color: var(--text); cursor: pointer; font-variant-numeric: tabular-nums; }
+  .fm-dp__d:hover { background: var(--off-white); }
+  .fm-dp__d:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .fm-dp__d.is-now { border-color: var(--navy-300); }
+  .fm-dp__d.is-sel { background: var(--navy); color: var(--white); border-color: var(--navy); }
   .fm-choice { display: grid; gap: 8px; margin: 14px 0 12px; }
   .fm-choice__opt { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--white); }
   .fm-choice__opt.is-on { border-color: var(--navy); background: var(--navy-50); box-shadow: inset 3px 0 0 var(--navy); }
@@ -2291,8 +2318,8 @@
         '<div class="form-group fm-ro-f fm-ro-f--club"><label>Club</label><div class="fm-picker" id="fmRoClub"></div></div>' +
         '<div class="form-group fm-ro-f"><label for="fmRoSide">Ruled out</label><select class="nl-select" id="fmRoSide">' +
           ['home', 'away', 'any'].map(function (k) { return '<option value="' + k + '">' + RO_SIDE[k] + '</option>'; }).join('') + '</select></div>' +
-        '<div class="form-group fm-ro-f fm-ro-f--date"><label for="fmRoFrom">Date</label><input type="text" id="fmRoFrom" inputmode="numeric" placeholder="dd/mm/yyyy" maxlength="10"></div>' +
-        '<div class="form-group fm-ro-f fm-ro-f--date"><label for="fmRoTo">Until</label><input type="text" id="fmRoTo" inputmode="numeric" placeholder="optional" maxlength="10"></div>' +
+        '<div class="form-group fm-ro-f fm-ro-f--date"><label for="fmRoFrom">Date</label><input type="text" id="fmRoFrom" data-datepick inputmode="numeric" placeholder="dd/mm/yyyy" maxlength="10"></div>' +
+        '<div class="form-group fm-ro-f fm-ro-f--date"><label for="fmRoTo">Until</label><input type="text" id="fmRoTo" data-datepick data-datepick-after="fmRoFrom" inputmode="numeric" placeholder="optional" maxlength="10"></div>' +
         '<div class="form-group fm-ro-f fm-ro-f--why"><label for="fmRoWhy">Reason</label><input type="text" id="fmRoWhy" maxlength="120"></div>' +
         '<button class="btn btn--primary fm-ro-btn" type="button" id="fmRoAdd">Add</button></div>';
     }
@@ -2414,11 +2441,13 @@
     var html = '<div class="fm-intl"><div class="fm-intl__col"><h3 class="fm-intl__h">Dates</h3>' +
       '<div class="table-wrap fm-intl__dates"><table class="table table--compact fm-ro-table"><thead><tr><th>From</th><th>To</th><th></th></tr></thead><tbody>' +
       wins.map(function (w, i) {
-        return '<tr data-intl-row="' + i + '"><td><input type="text" class="fm-date-in" data-intl="from" value="' + F.fmt(w.from) + '" maxlength="10"' + ro + ' aria-label="From"></td>' +
-          '<td><input type="text" class="fm-date-in" data-intl="to" value="' + F.fmt(w.to) + '" maxlength="10"' + ro + ' aria-label="To"></td>' +
+        return '<tr data-intl-row="' + i + '"><td><input type="text" class="fm-date-in" data-datepick data-intl="from" value="' + F.fmt(w.from) + '" maxlength="10"' + ro + ' aria-label="From"></td>' +
+          '<td><input type="text" class="fm-date-in" data-datepick data-intl="to" value="' + F.fmt(w.to) + '" maxlength="10"' + ro + ' aria-label="To"></td>' +
           '<td class="ta-right">' + (S.canEdit ? '<button class="btn btn--ghost btn--sm" type="button" data-intl-del="' + i + '">Remove</button>' : '') + '</td></tr>';
       }).join('') + '</tbody></table></div>' +
-      (S.canEdit ? '<button class="btn btn--ghost btn--sm" type="button" id="fmIntlAdd">Add a window</button>' : '') + '</div>' +
+      (S.canEdit ? '<div class="fm-intl__add"><input type="text" class="fm-date-in" data-datepick id="fmIntlNewFrom" placeholder="From" maxlength="10" aria-label="New window from">' +
+        '<input type="text" class="fm-date-in" data-datepick id="fmIntlNewTo" data-datepick-after="fmIntlNewFrom" placeholder="To" maxlength="10" aria-label="New window to">' +
+        '<button class="btn btn--ghost btn--sm" type="button" id="fmIntlAdd">Add a window</button></div>' : '') + '</div>' +
       '<div class="fm-intl__col"><h3 class="fm-intl__h">Clubs that lose players</h3>' +
       '<div class="fm-intl__clubs">' + (Object.keys(clubs).length ? Object.keys(clubs).sort(function (a, b) { return clubs[a].localeCompare(clubs[b]); }).map(function (k) {
         return '<span class="fm-intl__club">' + crest(clubs[k]) + esc(clubs[k]) +
@@ -2475,15 +2504,12 @@
         return;
       }
       if (e.target.closest('#fmIntlAdd')) {
-        NL.prompt('Window dates, e.g. 08/03/2027 to 16/03/2027', { title: 'Add a window', confirmText: 'Add' }).then(function (v) {
-          if (v == null) return;
-          var m = String(v).split(/\s*(?:to|-|–)\s*/);
-          var from = ymdIn(m[0]), to = ymdIn(m[1]);
-          if (!from || !to || to < from) { NL.toast('Two dates, dd/mm/yyyy to dd/mm/yyyy', 'error'); return; }
-          saveWindows(intlWindowsNow(intlCal()).concat([{ from: from, to: to }]))
-            .then(function () { NL.toast('Window added', 'success'); })
-            .catch(function (err) { NL.toast('Save failed: ' + err.message, 'error'); });
-        });
+        var from = ymdIn(document.getElementById('fmIntlNewFrom').value), to = ymdIn(document.getElementById('fmIntlNewTo').value);
+        if (!from) { NL.toast('Choose the first day', 'error'); document.getElementById('fmIntlNewFrom').focus(); return; }
+        if (!to || to < from) { NL.toast('Choose the last day, on or after the first', 'error'); document.getElementById('fmIntlNewTo').focus(); return; }
+        saveWindows(intlWindowsNow(intlCal()).concat([{ from: from, to: to }]))
+          .then(function () { NL.toast('Window added', 'success'); })
+          .catch(function (err) { NL.toast('Save failed: ' + err.message, 'error'); });
         return;
       }
       var x = e.target.closest('[data-intl-club]');
@@ -2493,6 +2519,97 @@
       }
     });
   }
+
+  /* ── Date picker ─────────────────────────────────────────────────────
+     A month of days under any box marked data-datepick: ‹ › between
+     months, today outlined, the box's day filled navy; a click fills the
+     box as dd/mm/yyyy and fires its change. Typing still works.
+     Canon candidate (04/11/2026): NL.monthPicker picks months only, and
+     <input type="date"> shows the browser's own locale and widget. */
+  var DP = { el: null, input: null, ym: null };
+  var DP_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  function dpOpen(input) {
+    if (input.disabled || input.readOnly) return;
+    if (!DP.el) {
+      DP.el = document.createElement('div');
+      DP.el.className = 'fm-dp';
+      DP.el.setAttribute('role', 'dialog');
+      DP.el.setAttribute('aria-label', 'Choose a date');
+      document.body.appendChild(DP.el);
+      DP.el.addEventListener('mousedown', function (e) { e.preventDefault(); });
+      DP.el.addEventListener('click', function (e) {
+        /* Stop here: a redraw detaches the clicked button, and the page's
+           outside-click check would then close the picker. */
+        e.stopPropagation();
+        var nav = e.target.closest('[data-dp-nav]');
+        if (nav) { DP.ym = dpShift(DP.ym, +nav.getAttribute('data-dp-nav')); dpDraw(); return; }
+        var d = e.target.closest('[data-dp-day]');
+        if (d && DP.input) {
+          DP.input.value = F.fmt(d.getAttribute('data-dp-day'));
+          DP.input.dispatchEvent(new Event('input', { bubbles: true }));
+          DP.input.dispatchEvent(new Event('change', { bubbles: true }));
+          dpClose();
+        }
+      });
+    }
+    DP.input = input;
+    /* An empty "to" box opens on its "from" box's month. */
+    var after = input.getAttribute('data-datepick-after');
+    var held = ymdIn(input.value) || (after && document.getElementById(after) ? ymdIn(document.getElementById(after).value) : null);
+    DP.ym = (held || today()).slice(0, 7);
+    dpDraw();
+    DP.el.hidden = false;
+    dpPlace();
+  }
+  /* Under the box, or above it when there is no room below. */
+  function dpPlace() {
+    if (!DP.el || DP.el.hidden || !DP.input) return;
+    var r = DP.input.getBoundingClientRect();
+    if (r.bottom < 0 || r.top > window.innerHeight) { dpClose(); return; }
+    var w = DP.el.offsetWidth, h = DP.el.offsetHeight;
+    var top = r.bottom + 4 + h > window.innerHeight && r.top - h - 4 > 0 ? r.top - h - 4 : r.bottom + 4;
+    DP.el.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + 'px';
+    DP.el.style.top = top + 'px';
+  }
+  function dpClose() { if (DP.el) DP.el.hidden = true; DP.input = null; }
+  function dpShift(ym, n) {
+    var y = +ym.slice(0, 4), m = +ym.slice(5, 7) - 1 + n;
+    return new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 7);
+  }
+  function dpDraw() {
+    var ym = DP.ym, y = +ym.slice(0, 4), m = +ym.slice(5, 7) - 1;
+    var sel = DP.input ? ymdIn(DP.input.value) : null, t = today();
+    var pad = (new Date(Date.UTC(y, m, 1)).getUTCDay() + 6) % 7, days = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    var html = '<div class="fm-dp__head"><button type="button" class="fm-dp__nav" data-dp-nav="-1" aria-label="Previous month">‹</button>' +
+      '<span class="fm-dp__title">' + DP_MONTHS[m] + ' ' + y + '</span>' +
+      '<button type="button" class="fm-dp__nav" data-dp-nav="1" aria-label="Next month">›</button></div>' +
+      '<div class="fm-dp__grid">' + ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map(function (x) { return '<span class="fm-dp__dow">' + x + '</span>'; }).join('');
+    for (var i = 0; i < pad; i++) html += '<span></span>';
+    for (var dd = 1; dd <= days; dd++) {
+      var d = ym + '-' + ('0' + dd).slice(-2);
+      html += '<button type="button" class="fm-dp__d' + (d === sel ? ' is-sel' : '') + (d === t ? ' is-now' : '') + '" data-dp-day="' + d + '">' + dd + '</button>';
+    }
+    DP.el.innerHTML = html + '</div>';
+  }
+  document.addEventListener('focusin', function (e) {
+    var el = e.target.closest && e.target.closest('[data-datepick]');
+    if (el) dpOpen(el); else if (DP.el && !DP.el.contains(e.target)) dpClose();
+  });
+  document.addEventListener('click', function (e) {
+    var el = e.target.closest && e.target.closest('[data-datepick]');
+    if (el) { if (DP.input !== el) dpOpen(el); return; }
+    if (DP.el && !DP.el.hidden && !DP.el.contains(e.target)) dpClose();
+  });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') dpClose(); });
+  /* Typing a whole date moves the month to it. */
+  document.addEventListener('input', function (e) {
+    if (!DP.el || DP.el.hidden || e.target !== DP.input) return;
+    var y = ymdIn(e.target.value);
+    if (y) { DP.ym = y.slice(0, 7); dpDraw(); }
+  });
+  /* Scrolling keeps it with its box; it closes once the box is gone. */
+  window.addEventListener('scroll', dpPlace, true);
+  window.addEventListener('resize', dpPlace);
 
   /* ── Save ─────────────────────────────────────────────────────────── */
   function patch(up, rec) {
