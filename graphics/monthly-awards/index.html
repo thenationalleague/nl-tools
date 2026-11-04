@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Monthly Awards Graphic (Graphics sub-tool)
-  Version: v1.7 (04/11/2026)
+  Version: v1.8 (04/11/2026)
   File: /graphics/monthly-awards/index.html
 
   Nominee and winner cards for the monthly awards, 1080 × 1350. Load a
@@ -23,6 +23,13 @@
     /graphics/_shared/fonts/Carbona-*.otf          (local cuts for the canvas)
 
   CHANGELOG
+    v1.8 (04/11/2026) — With the player in front of the headline, the letters
+      no longer show through the hair: the cut-out is made solid wherever it
+      crosses the word, and left as it was everywhere else. Phones and narrow
+      windows: the cut-out and the graphic sit pinned under the topbar with a
+      Cut-out / Graphic switch and a Download button, and only the controls
+      scroll, so a swipe to scroll no longer lands on a canvas. Tapping the
+      empty editor opens the photo picker.
     v1.7 (04/11/2026) — The bottom fade no longer ghosts the player. It was
       30% of the cut-out's height by default, on every photo, so hands and
       the ball dissolved into the background. Now it is 10%, and only set
@@ -83,6 +90,14 @@
     var NL_TOOL_KEY = 'staff-graphics';
 
     window.NL_CHANGELOG = [
+      {
+        date: '04/11/2026',
+        version: 'v1.8',
+        items: [
+          'Fixed: with the player in front of the headline, the letters showed through their hair.',
+          'On a phone, the picture stays at the top with a Cut-out / Graphic switch and a Download button, and only the controls scroll.'
+        ]
+      },
       {
         date: '04/11/2026',
         version: 'v1.7',
@@ -190,7 +205,7 @@
   }
   #editWrap { flex: 1; overflow: auto; position: relative; background: var(--navy-900); }
   #editWrap.drag { outline: 3px dashed var(--primary); outline-offset: -6px; }
-  #editCanvas { display: block; touch-action: none; }
+  #editCanvas { display: block; margin: 0 auto; touch-action: none; }
   #empty {
     position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 10px; padding: 20px; text-align: center; color: var(--navy-200); font-size: var(--text-sm);
@@ -199,6 +214,32 @@
   #prevWrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 14px; min-height: 0; background: var(--off-white); }
   #preview { max-width: 100%; max-height: 100%; aspect-ratio: 1080 / 1350; box-shadow: var(--shadow); cursor: grab; touch-action: none; }
   #preview.dragging { cursor: grabbing; }
+  #empty { cursor: pointer; }
+
+  /* Phones and narrow windows: one column. The picture pins under the topbar
+     and only the controls scroll beneath it. Stacked full-height canvases
+     meant every swipe to scroll landed on a canvas, which paints or drags
+     instead of scrolling. */
+  .mag-stage { display: contents; }
+  .mag-stagebar { display: none; }
+  @media (max-width: 1100px) {
+    .mag-layout { display: flex; flex-direction: column; align-items: stretch; gap: 12px; }
+    .mag-stage {
+      display: block; order: -1; position: sticky; container-type: inline-size; top: var(--mag-top, 79px); z-index: 5;
+      background: var(--off-white); margin: -8px -4px 0; padding: 8px 4px 0;
+    }
+    .mag-stagebar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+    .mag-viewtabs { flex: 1; margin: 0; }
+    .mag-pane { position: static; height: 42dvh; }
+    /* the editor takes the photo's shape, up to the same cap, so a landscape
+       photo doesn't sit in a tall empty box */
+    #editPane { height: min(42dvh, calc(100cqw / var(--mag-photo-ar, 0.01))); }
+    .mag-stage.typing .mag-pane { height: 24dvh; }
+    .mag-pane h3 { display: none; }
+    .mag-stage[data-view="cut"] #prevPane, .mag-stage[data-view="graphic"] #editPane { display: none; }
+    #prevWrap { padding: 8px; }
+    .mag-panel { padding: 12px; }
+  }
 </style>
 </head>
 <body>
@@ -321,6 +362,14 @@
       </section>
     </aside>
 
+    <div class="mag-stage" id="stage" data-view="cut">
+    <div class="mag-stagebar">
+      <div class="tabs mag-viewtabs" role="tablist" aria-label="View">
+        <button type="button" class="tab active" role="tab" aria-selected="true" data-view="cut">Cut-out</button>
+        <button type="button" class="tab" role="tab" aria-selected="false" data-view="graphic">Graphic</button>
+      </div>
+      <button type="button" class="btn btn--primary btn--sm" id="btnExport2">Download</button>
+    </div>
     <div class="mag-pane" id="editPane">
       <h3>Cut-out</h3>
       <div id="editWrap">
@@ -331,6 +380,7 @@
     <div class="mag-pane" id="prevPane">
       <h3>Graphic · 1080 × 1350</h3>
       <div id="prevWrap"><canvas id="preview" width="1080" height="1350" aria-label="Finished graphic preview"></canvas></div>
+    </div>
     </div>
     </div>
   </div>
@@ -580,7 +630,7 @@ async function loadPhoto(file) {
     S.photo = mkCanvas(w, h); S.photo.getContext('2d').drawImage(im, 0, 0, w, h);
     S.mask = mkCanvas(w, h); fillMask(); S.raw = getAlpha(); S.grad = null;
     S.samState = 'loading'; S.samMask = null; S.rawFull = null; S.focusRect = null; if (S.sam) S.sam.emb = null;
-    startEditor(w, h); stepDone('step1', true); scheduleProcess();
+    startEditor(w, h); setView('cut'); stage.style.setProperty('--mag-photo-ar', (w / h).toFixed(3)); stepDone('step1', true); scheduleProcess();
     samEncode(); autoCut();
   } catch (e) { status('Could not open that image.', true); console.error(e); }
 }
@@ -1150,6 +1200,22 @@ function drawPlayer(c) {
     c.fillText('Player cut-out appears here', W / 2, 700);
   }
 }
+/* In front of the headline, soft matte edges (hair above all) let the white
+   letters show through, so the head looks faded. Where the player crosses
+   the word only, lay two more copies of the cut-out: alpha a becomes
+   1-(1-a)^3, so half-transparent hair reads solid. Elsewhere it is left
+   alone, or the extra copies would drag photo background in as a halo. */
+function shieldHead(c, L) {
+  if (!S.cut) return;
+  const o = mkCanvas(W, H), oc = o.getContext('2d');
+  drawPlayer(oc); drawPlayer(oc);
+  oc.globalCompositeOperation = 'destination-in';
+  oc.textAlign = 'left'; oc.textBaseline = 'alphabetic';
+  setFont(oc, 800, L.hs); spaced(oc, -0.015, L.hs);
+  oc.fillStyle = oc.strokeStyle = '#000'; oc.lineWidth = 8; oc.lineJoin = 'round';
+  oc.fillText(L.head, 64, L.base); oc.strokeText(L.head, 64, L.base);
+  c.drawImage(o, 0, 0);
+}
 function render() {
   const c = pv.getContext('2d');
   c.save(); c.clearRect(0, 0, W, H);
@@ -1162,7 +1228,7 @@ function render() {
   setFont(c, 800, L.hs); spaced(c, -0.015, L.hs);
   c.shadowColor = `rgba(${C.shadowRgb},0.6)`; c.shadowBlur = 28; c.fillStyle = '#fff';
   c.fillText(L.head, 64, L.base); c.shadowBlur = 0;
-  if (front) drawPlayer(c);
+  if (front) { drawPlayer(c); shieldHead(c, L); }
   c.fillStyle = C.primary; c.fillRect(0, 0, W, 22); c.fillRect(0, H - 22, W, 22);
 
   // award pill + month: always on top of everything
@@ -1231,6 +1297,27 @@ NL.filterButton('#stackPick', {
 $('fileCrest').addEventListener('change', async (e) => { if (e.target.files[0]) { S.crest = await fileToImg(e.target.files[0]); render(); } });
 $('fileLock').addEventListener('change', async (e) => { if (e.target.files[0]) { S.lockup = await fileToImg(e.target.files[0]); $('btnClearLock').disabled = false; render(); } });
 $('btnClearLock').addEventListener('click', () => { S.lockup = null; $('btnClearLock').disabled = true; render(); });
+/* Narrow screens: one view at a time in the pinned stage. */
+const stage = $('stage');
+function setView(v) {
+  if (stage.dataset.view === v) return;
+  stage.dataset.view = v;
+  stage.querySelectorAll('.tab').forEach((t) => { const on = t.dataset.view === v; t.classList.toggle('active', on); t.setAttribute('aria-selected', String(on)); });
+}
+stage.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => setView(t.dataset.view)));
+$('btnExport2').addEventListener('click', () => $('btnExport').click());
+document.querySelectorAll('[data-tool]').forEach((b) => b.addEventListener('click', () => setView('cut')));
+$('step3').addEventListener('focusin', () => setView('graphic'));
+$('step3').addEventListener('input', () => setView('graphic'));
+// keyboard up: shrink the stage so the field being typed in stays visible
+document.querySelector('.mag-panel').addEventListener('focusin', (e) => { if (e.target.matches('input[type="text"], input:not([type])')) stage.classList.add('typing'); });
+document.querySelector('.mag-panel').addEventListener('focusout', () => stage.classList.remove('typing'));
+// pin under the topbar, whatever height it renders at
+const tb = $('nlTopbar');
+new ResizeObserver(() => document.documentElement.style.setProperty('--mag-top', tb.offsetHeight + 'px')).observe(tb);
+// the editor refits whenever its box changes (view switch, keyboard, rotate)
+new ResizeObserver(() => applyZoom()).observe(ew);
+$('empty').addEventListener('click', () => $('filePhoto').click());
 $('btnExport').addEventListener('click', () => { render(); download(pv, `${slug($('tKicker').value)}_${slug($('tMonth').value)}_${slug($('tName').value)}.png`); });
 
 /* Club chosen in NL.clubPicker: crest, name, division and accent colour follow it. */
