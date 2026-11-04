@@ -571,12 +571,15 @@
   .fm-pen__full { font-size: var(--text-xs); color: var(--text-muted); }
   .fm-match__ruled { margin-top: 4px; }
   .fm-choice { display: grid; gap: 8px; margin: 14px 0 12px; }
-  .fm-choice__opt { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 2px 12px; align-items: start; padding: 12px 14px;
-    border: 1px solid var(--border); border-radius: var(--radius); background: var(--white); cursor: pointer; }
-  .fm-choice__opt:hover { border-color: var(--navy-300); }
-  .fm-choice__opt:has(input:checked) { border-color: var(--navy); background: var(--navy-50); box-shadow: inset 3px 0 0 var(--navy); }
-  .fm-choice__opt:has(input:focus-visible) { box-shadow: var(--focus-ring); }
-  .fm-choice__opt input { grid-row: span 2; width: 18px; height: 18px; margin: 1px 0 0; accent-color: var(--navy); }
+  .fm-choice__opt { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--white); }
+  .fm-choice__opt.is-on { border-color: var(--navy); background: var(--navy-50); box-shadow: inset 3px 0 0 var(--navy); }
+  .fm-choice__club { display: flex; gap: 8px; align-items: center; font-weight: 800; font-variation-settings: 'wght' 800; color: var(--navy);
+    text-transform: uppercase; letter-spacing: .03em; font-size: var(--text-sm); }
+  .fm-choice__club img, .fm-choice__club .fm-crest-none { width: 22px; height: 22px; object-fit: contain; }
+  .fm-choice__tick { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 0 12px; align-items: start; cursor: pointer; }
+  .fm-choice__tick:has(input:disabled) { cursor: default; opacity: .6; }
+  .fm-choice__tick:has(input:focus-visible) .fm-choice__title { text-decoration: underline; }
+  .fm-choice__tick input { grid-row: span 2; width: 18px; height: 18px; margin: 1px 0 0; accent-color: var(--navy); }
   .fm-choice__title { font-weight: 800; font-variation-settings: 'wght' 800; color: var(--navy); }
   .fm-choice__note { font-size: var(--text-sm); color: var(--text-muted); }
   .fm-choice__sum { margin: 0; padding: 10px 12px; border-radius: var(--radius); background: var(--off-white); font-size: var(--text-sm); color: var(--text); }
@@ -2054,16 +2057,21 @@
     });
   }
 
-  /* Rule a date out, with a reason. It is always out for this game. Tick
-     either club, or both, to rule the day out for that club's games all
-     season: the home club cannot host, the away club cannot travel. Said
+  /* Rule a date out, with a reason. It is always out for this game. Each
+     club can also be ruled out for that day all season: the home club
+     because it cannot host, the away club because it cannot travel, or
+     either because it cannot play at all (a County Cup tie, say). Said
      once, so the question is not asked again for the next postponement. */
-  /* One tick as a card: the box, a title and what it applies to.
-     Canon candidate (04/11/2026): the brand has no checkbox or choice
-     component, and .form-group stretches a bare box full width. */
-  function choice(value, title, note) {
-    return '<label class="fm-choice__opt"><input type="checkbox" name="froClub" value="' + value + '">' +
-      '<span class="fm-choice__title">' + esc(title) + '</span><span class="fm-choice__note">' + esc(note) + '</span></label>';
+  /* One club as a card, with its two ticks. Canon candidate (04/11/2026):
+     the brand has no checkbox or choice component, and .form-group
+     stretches a bare box full width. */
+  function clubChoice(side, club, narrow, narrowNote) {
+    function tick(v, title, note) {
+      return '<label class="fm-choice__tick"><input type="checkbox" name="froClub" value="' + side + '-' + v + '">' +
+        '<span class="fm-choice__title">' + esc(title) + '</span><span class="fm-choice__note">' + esc(note) + '</span></label>';
+    }
+    return '<div class="fm-choice__opt" data-side="' + side + '"><div class="fm-choice__club">' + crest(club) + esc(club) + '</div>' +
+      tick('one', narrow, narrowNote) + tick('all', 'Can’t play at all that day', 'Every game, home or away.') + '</div>';
   }
 
   function openRuleOut(rec, date) {
@@ -2072,22 +2080,34 @@
       '<p class="fm-choose__date">' + esc(day(date)) + '</p>' +
       '<div class="form-group"><label for="froWhy">Reason</label><input id="froWhy" type="text" maxlength="120"></div>' +
       '<div class="fm-choice" role="group" aria-label="Also rule out for">' +
-        choice('home', rec.home.name + ' can’t host that day', 'Every ' + rec.home.name + ' home game this season.') +
-        choice('away', rec.away.name + ' can’t travel that day', 'Every ' + rec.away.name + ' away game this season.') +
+        clubChoice('home', rec.home.name, 'Can’t host that day', 'Every home game this season.') +
+        clubChoice('away', rec.away.name, 'Can’t travel that day', 'Every away game this season.') +
       '</div>' +
       '<p class="fm-choice__sum" id="froSum"></p>';
-    /* What Rule out will do, said back before it is pressed. */
-    function sum() {
-      var t = Array.prototype.map.call(wrap.querySelectorAll('input[name="froClub"]:checked'), function (x) { return x.value; });
+    NL.clubs.wireCrestImgs(wrap);
+    /* Each club's ruling: null, its narrow side ('home' or 'away'), or
+       'any'. "Can't play at all" covers the narrow tick, so it ticks and
+       greys it. Said back before Rule out is pressed. */
+    function read() {
+      var out = {};
+      ['home', 'away'].forEach(function (side) {
+        var all = wrap.querySelector('input[value="' + side + '-all"]'), one = wrap.querySelector('input[value="' + side + '-one"]');
+        if (all.checked) { one.checked = true; one.disabled = true; } else one.disabled = false;
+        out[side] = all.checked ? 'any' : one.checked ? side : null;
+        wrap.querySelector('.fm-choice__opt[data-side="' + side + '"]').classList.toggle('is-on', !!out[side]);
+      });
       var parts = ['this game'];
-      if (t.indexOf('home') !== -1) parts.push('every ' + shortName(rec.home.name) + ' home game');
-      if (t.indexOf('away') !== -1) parts.push('every ' + shortName(rec.away.name) + ' away game');
+      [['home', rec.home], ['away', rec.away]].forEach(function (x) {
+        var v = out[x[0]], n = shortName(x[1].name);
+        if (v === 'any') parts.push('every ' + n + ' game');
+        else if (v) parts.push('every ' + n + (v === 'home' ? ' home' : ' away') + ' game');
+      });
       wrap.querySelector('#froSum').innerHTML = '<strong>Rules out ' + esc(day(date)) + ' for</strong> ' +
         esc(parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : 'this game only');
-      return t;
+      return out;
     }
-    wrap.addEventListener('change', sum);
-    sum();
+    wrap.addEventListener('change', read);
+    read();
     NL.modal({
       title: rec.home.name + ' v ' + rec.away.name,
       body: wrap,
@@ -2096,15 +2116,15 @@
         { label: 'Rule out', className: 'btn--primary', onClick: function (m) {
           var why = wrap.querySelector('#froWhy').value.trim();
           if (!why) { NL.toast('Give a reason', 'error'); wrap.querySelector('#froWhy').focus(); return; }
-          var ticked = sum();
-          /* A ticked club covers this game too; with none ticked, it is
+          var r = read();
+          var entries = [['home', rec.home.name], ['away', rec.away.name]].filter(function (x) { return r[x[0]]; })
+            .map(function (x) { return { club: x[1], side: r[x[0]], date: date, reason: why, at: now() }; });
+          /* A club ruled out covers this game too; with neither, it is
              ruled out for this game alone. A pencil on the date goes. */
-          var done = !ticked.length
+          var done = !entries.length
             ? save(X.ruleOut(rec, date, why, now()))
             : NL.ensureAuth().then(function () {
-                return Promise.all(ticked.map(function (side) {
-                  return ref('unavailable').push({ club: side === 'home' ? rec.home.name : rec.away.name, side: side, date: date, reason: why, at: now() });
-                }));
+                return Promise.all(entries.map(function (e) { return ref('unavailable').push(e); }));
               }).then(function () {
                 return X.pencilsOf(rec).some(function (p) { return p.date === date; }) ? save(X.unpencil(rec, date)) : null;
               });
