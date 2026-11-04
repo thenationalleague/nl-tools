@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixture Management
-  Version: v3.4 (30/10/2026)
+  Version: v3.5 (04/11/2026)
   File: /fixtures/admin/index.html
 
   The League's master fixture record: every game in every competition, with
@@ -9,6 +9,13 @@
   behind it, is system/fixture-management-plan.md.
 
   CHANGELOG
+    v3.5 (04/11/2026) — Ruled-out days. The rule-out dialog has a card
+      per club: the home club can't host or the away club can't travel,
+      and either can't play at all (a County Cup tie, say); the date is
+      always out for this game, and a line says what Rule out will do.
+      Settings gains a Ruled-out days list: every day ruled out this
+      season, by club, each removable, and an Add row to rule a club's day
+      (or a run of days) out before there is any postponement.
     v3.4 (30/10/2026) – Broadcast's "check this pick" icon uses the canon 20px
                         size (icon--md) instead of resizing canon .icon to 18px,
                         which the canon-override check rejected.
@@ -236,6 +243,14 @@
     var NL_TOOL_KEY = 'ops-fixture-management';
 
     window.NL_CHANGELOG = [
+      {
+        date: '04/11/2026',
+        version: 'v3.5',
+        items: [
+          'Rule a date out for either club, both, or a club that can\u2019t play at all that day.',
+          'Settings: Ruled-out days lists every one with Remove, and adds them ahead of any postponement.'
+        ]
+      },
       {
         date: '30/10/2026',
         version: 'v3.4',
@@ -570,6 +585,16 @@
   .fm-pen { display: inline-flex; gap: 4px; align-items: center; font-size: var(--text-sm); color: var(--text-muted); }
   .fm-pen__full { font-size: var(--text-xs); color: var(--text-muted); }
   .fm-match__ruled { margin-top: 4px; }
+  .fm-ro-add { display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: flex-end; margin: 0 0 12px; padding: 14px;
+    background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); }
+  .fm-ro-f { margin: 0; flex: 0 0 auto; min-width: 170px; }
+  .fm-ro-f--club { flex: 1 1 220px; }
+  .fm-ro-f--date { min-width: 0; width: 130px; }
+  .fm-ro-f--why { flex: 2 1 200px; }
+  .fm-ro-btn { flex: 0 0 auto; }
+  .fm-ro-filter { width: auto; min-width: 200px; }
+  .fm-ro-past { font-size: var(--text-sm); color: var(--text-muted); }
+  .fm-ro-table td { white-space: normal; }
   .fm-choice { display: grid; gap: 8px; margin: 14px 0 12px; }
   .fm-choice__opt { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--white); }
   .fm-choice__opt.is-on { border-color: var(--navy); background: var(--navy-50); box-shadow: inset 3px 0 0 var(--navy); }
@@ -854,6 +879,8 @@
           <span>A past season from Attendance’s own record, when there is no sheet.</span>
         </div>
       </div>
+      <div class="section-head fm-gap"><h2>Ruled-out days</h2></div>
+      <div id="fmRuled"></div>
     </section>
 
   </div>
@@ -996,7 +1023,11 @@
     if (S.unavRef) S.unavRef.off();
     S.unavail = {};
     S.unavRef = ref('unavailable');
-    S.unavRef.on('value', function (snap) { S.unavail = snap.val() || {}; if (S.tab === 'rearrange') renderRearrange(); });
+    S.unavRef.on('value', function (snap) {
+      S.unavail = snap.val() || {};
+      if (S.tab === 'rearrange') renderRearrange();
+      if (S.tab === 'settings') renderRuled();
+    });
     S.listen = ref('fixtures');
     S.listen.on('value', function (snap) {
       S.fixtures = snap.val() || {};
@@ -1072,6 +1103,7 @@
       if (e.target.value === '' && S.club) { S.club = null; S.limit = PAGE; render(); }
     });
     wireRearrange();
+    wireRuled();
     document.getElementById('fmFromAtt').addEventListener('click', openFromAttendance);
     document.getElementById('fmImport').addEventListener('click', openImport);
     document.getElementById('fmResults').addEventListener('click', openResults);
@@ -1153,6 +1185,7 @@
   function render() {
     renderRrCount();
     if (S.tab === 'rearrange') { renderRearrange(); return; }
+    if (S.tab === 'settings') renderRuled();
     if (S.tab === 'settings') return;
     var t = today();
     var all = Object.keys(S.fixtures).map(function (k) { return S.fixtures[k]; });
@@ -2171,6 +2204,139 @@
         if (modal) modal.close();
       }).catch(function (e) { NL.toast('Save failed: ' + e.message, 'error'); });
     });
+  }
+
+  /* ── Ruled-out days ──────────────────────────────────────────────────
+     Every day a club cannot host, travel or play, and every date ruled out
+     for one game, in one list: added ahead of any postponement (a County
+     Cup tie heard about early), and removed when it no longer holds. The
+     finder treats each as a hard block. */
+  var RO_SIDE = { home: 'Can’t host', away: 'Can’t travel', any: 'Can’t play at all' };
+  /* '14/11/2026' or '14/11/26' → 'YYYY-MM-DD'; null otherwise. */
+  function ymdIn(v) {
+    var t = String(v || '').trim().replace(/^(\d{1,2}\/\d{1,2}\/)(\d{2})$/, '$120$2');
+    var d = /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(t) ? NL.parseDate(t) : null;
+    return d ? F.ymdOf(d) : null;
+  }
+  function ruledRows() {
+    var rows = unavailList().map(function (u) {
+      return { id: u.id, date: u.date, club: u.club, what: RO_SIDE[u.side] || u.side, reason: u.reason };
+    });
+    Object.keys(S.fixtures).forEach(function (k) {
+      var r = S.fixtures[k];
+      (r.ruledOut || []).forEach(function (x) {
+        rows.push({ game: r.key, date: x.date, club: r.home.name + ' v ' + r.away.name, what: 'This game only', reason: x.reason });
+      });
+    });
+    return rows.sort(function (a, b) { return a.date !== b.date ? (a.date < b.date ? -1 : 1) : a.club.localeCompare(b.club); });
+  }
+
+  function renderRuled() {
+    var box = document.getElementById('fmRuled');
+    if (!box) return;
+    var t = today(), all = ruledRows();
+    var clubs = [];
+    all.forEach(function (r) { if (!r.game && clubs.indexOf(r.club) === -1) clubs.push(r.club); });
+    clubs.sort();
+    if (S.roClub && clubs.indexOf(S.roClub) === -1) S.roClub = null;
+    var rows = all.filter(function (r) { return r.date >= t && (!S.roClub || r.club === S.roClub || (r.game && r.club.indexOf(S.roClub) !== -1)); });
+    var past = all.filter(function (r) { return r.date < t; }).length;
+    var html = '';
+    if (S.canEdit) {
+      html += '<div class="fm-ro-add">' +
+        '<div class="form-group fm-ro-f fm-ro-f--club"><label>Club</label><div class="fm-picker" id="fmRoClub"></div></div>' +
+        '<div class="form-group fm-ro-f"><label for="fmRoSide">Ruled out</label><select class="nl-select" id="fmRoSide">' +
+          ['home', 'away', 'any'].map(function (k) { return '<option value="' + k + '">' + RO_SIDE[k] + '</option>'; }).join('') + '</select></div>' +
+        '<div class="form-group fm-ro-f fm-ro-f--date"><label for="fmRoFrom">Date</label><input type="text" id="fmRoFrom" inputmode="numeric" placeholder="dd/mm/yyyy" maxlength="10"></div>' +
+        '<div class="form-group fm-ro-f fm-ro-f--date"><label for="fmRoTo">Until</label><input type="text" id="fmRoTo" inputmode="numeric" placeholder="optional" maxlength="10"></div>' +
+        '<div class="form-group fm-ro-f fm-ro-f--why"><label for="fmRoWhy">Reason</label><input type="text" id="fmRoWhy" maxlength="120"></div>' +
+        '<button class="btn btn--primary fm-ro-btn" type="button" id="fmRoAdd">Add</button></div>';
+    }
+    html += '<div class="filter-bar"><select class="nl-select fm-ro-filter" id="fmRoFilter" aria-label="Club">' +
+      '<option value="">Every club</option>' + clubs.map(function (c) {
+        return '<option' + (c === S.roClub ? ' selected' : '') + '>' + esc(c) + '</option>';
+      }).join('') + '</select>' +
+      (past ? '<span class="fm-ro-past">' + num(past) + ' past day' + (past > 1 ? 's' : '') + ' not shown</span>' : '') + '</div>';
+    if (!rows.length) {
+      html += '<div class="empty-state"><div class="empty-state__title">No days ruled out' + (S.roClub ? ' for ' + esc(S.roClub) : '') + '</div></div>';
+    } else {
+      html += '<div class="table-wrap"><table class="table table--compact fm-ro-table"><thead><tr><th>Date</th><th>Club</th><th>Ruled out</th><th>Reason</th><th></th></tr></thead><tbody>' +
+        rows.map(function (r) {
+          return '<tr><td class="fm-ko">' + esc(day(r.date)) + '</td><td>' + (r.game ? esc(r.club) : '<div class="fm-team">' + crest(r.club) + '<span class="fm-name">' + esc(r.club) + '</span></div>') + '</td>' +
+            '<td>' + esc(r.what) + '</td><td>' + esc(r.reason || '') + '</td>' +
+            '<td class="ta-right">' + (S.canEdit ? '<button class="btn btn--ghost btn--sm" type="button" ' +
+              (r.game ? 'data-ro-game="' + esc(r.game) + '" data-ro-date="' + r.date + '"' : 'data-ro-id="' + esc(r.id) + '"') + '>Remove</button>' : '') + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    }
+    box.innerHTML = html;
+    NL.clubs.wireCrestImgs(box);
+    if (S.canEdit) {
+      NL.clubPicker('#fmRoClub', {
+        mode: 'search', season: 'current', placeholder: 'Club', value: S.roAddClub || null,
+        onSelect: function (sel) { S.roAddClub = sel ? sel.name : null; }
+      });
+    }
+  }
+
+  function wireRuled() {
+    var box = document.getElementById('fmRuled');
+    box.addEventListener('change', function (e) {
+      if (e.target.id === 'fmRoFilter') { S.roClub = e.target.value || null; renderRuled(); }
+    });
+    /* A date typed in any form tidies to dd/mm/yyyy on leaving the box. */
+    box.addEventListener('focusout', function (e) {
+      if (e.target.id !== 'fmRoFrom' && e.target.id !== 'fmRoTo') return;
+      var y = ymdIn(e.target.value);
+      if (y) e.target.value = F.fmt(y);
+    });
+    box.addEventListener('click', function (e) {
+      if (e.target.closest('#fmRoAdd')) { addRuled(); return; }
+      var b = e.target.closest('[data-ro-id],[data-ro-game]');
+      if (!b) return;
+      var id = b.getAttribute('data-ro-id'), game = b.getAttribute('data-ro-game'), d = b.getAttribute('data-ro-date');
+      var row = b.closest('tr');
+      NL.confirm('Remove ' + row.children[0].textContent + ' for ' + row.children[1].textContent + '? The date will be offered again.', {
+        title: 'Remove ruled-out day', confirmText: 'Remove', variant: 'danger'
+      }).then(function (ok) {
+        if (!ok) return;
+        var done;
+        if (id) done = NL.ensureAuth().then(function () { return ref('unavailable/' + id).remove(); });
+        else {
+          var g = JSON.parse(JSON.stringify(S.fixtures[game]));
+          g.ruledOut = (g.ruledOut || []).filter(function (x) { return x.date !== d; });
+          if (!g.ruledOut.length) delete g.ruledOut;
+          done = save(g);
+        }
+        done.then(function () { NL.toast('Removed', 'success'); renderRuled(); })
+          .catch(function (err) { NL.toast('Save failed: ' + err.message, 'error'); });
+      });
+    });
+  }
+
+  /* One entry a day: a run (pitch works, say) is that many days, so each
+     can be removed on its own. Capped at 62, two months. */
+  function addRuled() {
+    var club = S.roAddClub, side = document.getElementById('fmRoSide').value;
+    var from = ymdIn(document.getElementById('fmRoFrom').value);
+    var toRaw = document.getElementById('fmRoTo').value.trim(), to = toRaw ? ymdIn(toRaw) : from;
+    var why = document.getElementById('fmRoWhy').value.trim();
+    if (!club) { NL.toast('Choose a club', 'error'); return; }
+    if (!from) { NL.toast('Date as dd/mm/yyyy', 'error'); document.getElementById('fmRoFrom').focus(); return; }
+    if (!to || to < from) { NL.toast('Until must be a date on or after the first', 'error'); document.getElementById('fmRoTo').focus(); return; }
+    if (!why) { NL.toast('Give a reason', 'error'); document.getElementById('fmRoWhy').focus(); return; }
+    var days = [];
+    for (var d = from; d <= to && days.length < 62; d = new Date(Date.parse(d + 'T12:00:00Z') + 864e5).toISOString().slice(0, 10)) days.push(d);
+    var held = unavailList().filter(function (u) { return u.club === club && u.side === side; }).map(function (u) { return u.date; });
+    days = days.filter(function (x) { return held.indexOf(x) === -1; });
+    if (!days.length) { NL.toast('Already ruled out', 'error'); return; }
+    var up = {};
+    days.forEach(function (x) { up[ref('unavailable').push().key] = { club: club, side: side, date: x, reason: why, at: now() }; });
+    NL.ensureAuth().then(function () { return ref('unavailable').update(up); })
+      .then(function () {
+        NL.toast('Ruled out ' + (days.length > 1 ? num(days.length) + ' days' : day(days[0])), 'success');
+        S.roAddClub = null; renderRuled();
+      })
+      .catch(function (err) { NL.toast('Save failed: ' + err.message, 'error'); });
   }
 
   /* ── Save ─────────────────────────────────────────────────────────── */
