@@ -1,8 +1,13 @@
 /* =============================================================================
    NL Tools — Fixture Management: the rearrangement date finder
    File: /fixtures/_finder.js
-   Version: v1.7 (30/10/2026)
+   Version: v1.8 (04/11/2026)
    CHANGELOG
+     v1.8 (04/11/2026) — International windows flag only a game involving
+       a club on the affected list (ctx.intl.clubs), and hard (red): most
+       clubs lose nobody, the few that do lose players (Richard,
+       04/11/2026). The windows themselves come from ctx.intl.windows when
+       set, edited in Settings, and fall back to the season calendar's.
      v1.7 (30/10/2026) — A slot more than 35 days from the original date
        carries an amber flag saying how far ("42 days from the original
        date"), listed first, so it is never shown green and free (Richard,
@@ -44,7 +49,8 @@
                  rounds     assets/data/rounds-2026-27.json,
                  distances  assets/data/club-distances.json,
                  today      'YYYY-MM-DD',
-                 unavailable [{ club, side: 'home'|'away'|'any', date, reason }] }
+                 unavailable [{ club, side: 'home'|'away'|'any', date, reason }],
+                 intl       { windows: [{ from, to }], clubs: [name] } }
      opts      { anchor: 'YYYY-MM-DD', the date the 35 days count from,
                  mondays, thursdays, fridays, sundays: bool,
                  longTrip: round-trip miles, default 200 (tests only; the
@@ -91,6 +97,12 @@
   function add(d, n) { return ymd(t(d) + n * DAY); }
   function dow(d) { return new Date(t(d)).getUTCDay(); }
   function gap(a, b) { return Math.round(Math.abs(t(a) - t(b)) / DAY); }
+
+  /* The season's international windows: as edited in Settings, else the
+     season calendar's. */
+  function intlWindows(ctx) {
+    return (ctx.intl && ctx.intl.windows) || (ctx.calendar && ctx.calendar.internationalWindows) || [];
+  }
 
   /* A slot's window: the days a game on them would clash with. */
   function windowOf(d) { return [add(d, -1), d, add(d, 1)]; }
@@ -233,6 +245,7 @@
     var cal = ctx.calendar, fx = ctx.fixtures;
     var home = nameOf(game.home), away = nameOf(game.away);
     var tags = {}; tags[home] = tag(game.home); tags[away] = tag(game.away);
+    var intlClubs = (ctx.intl && ctx.intl.clubs) || [];
     var original = opts.anchor || (game.original && game.original.date) ||
       (game.attempts && game.attempts.length ? game.attempts[0].date : game.date);
 
@@ -284,10 +297,14 @@
       if (day === 'Fri') flags.push({ level: 'info', cat: 'day', text: 'Friday' });
       if (day === 'Sun') flags.push({ level: 'info', cat: 'day', text: 'Sunday' });
 
-      /* International windows: a soft flag; a few clubs lose players. */
-      (cal.internationalWindows || []).forEach(function (iw) {
-        if (d >= iw.from && d <= iw.to) flags.push({ level: 'info', cat: 'international', text: 'International window',
-          items: [{ date: iw.from, text: 'to ' + iw.to.slice(8) + '/' + iw.to.slice(5, 7) }] });
+      /* International windows: a flag only for a club that loses players
+         to them, and then a hard one. */
+      intlWindows(ctx).forEach(function (iw) {
+        if (d < iw.from || d > iw.to) return;
+        [home, away].filter(function (club) { return intlClubs.indexOf(club) !== -1; }).forEach(function (club) {
+          flags.push({ level: 'red', cat: 'international', text: tags[club] + ' in an international window',
+            items: [{ date: iw.from, text: 'to ' + iw.to.slice(8) + '/' + iw.to.slice(5, 7) }] });
+        });
       });
 
       pencils.forEach(function (x) {
@@ -483,6 +500,7 @@
 
   root.FixturesFinder = {
     CATS: CATS,
+    intlWindows: intlWindows,
     slots: slots,
     todo: todo,
     pencil: pencil,
