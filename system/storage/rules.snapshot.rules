@@ -23,6 +23,7 @@
 //   matchday-live/<ymd>/<contributorId>/  Matchday Live contributor clips
 //   save-of-the-month/<CODE>/<YYYY-MM>/  Save of the Month club clips, per-club
 //   document-library/**   League documents for every club, written by NL staff
+//   decks/<deckId>/       slide images for /decks/, staff accounts
 
 rules_version = '2';
 service firebase.storage {
@@ -334,6 +335,26 @@ service firebase.storage {
         && request.auth.token.email != null
         && request.resource.md5Hash == resource.md5Hash
         && request.resource.contentType == resource.contentType;
+      allow delete: if request.auth != null && request.auth.token.email != null;
+    }
+
+    // ── Decks — slide images ──────────────────────────────────────────────
+    // decks/<deckId>/<fileId>.<ext> — images placed on slides in /decks/,
+    // downscaled in the browser (long edge 2400px) before upload. Portal
+    // accounts only (an email claim). Storage rules cannot read RTDB, so the
+    // tool's access level is enforced where it can be: the deck record under
+    // app-data/staff-decks/decks is gated by the Decks grant, and an image no
+    // deck points at is listed nowhere. Same reasoning as the brand-exposure
+    // and document-library blocks. Create only into an empty path, raster
+    // images only, under 10MB; not SVG, which executes when its download URL
+    // is opened from the bucket's own origin.
+    match /decks/{deckId}/{file} {
+      allow read: if request.auth != null && request.auth.token.email != null;
+      allow create: if request.auth != null
+        && request.auth.token.email != null
+        && resource == null
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/(png|jpeg|webp|gif)');
       allow delete: if request.auth != null && request.auth.token.email != null;
     }
 

@@ -1,0 +1,1849 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Decks
+  Version: v32.0 (10/11/2026)
+  File: /decks/index.html
+
+  A deliberately limited presentation maker. You pick a slide type and fill
+  in fields with character limits; the layout, type, colours and positions
+  are fixed, so a deck cannot come out off-brand.
+
+  Slide types (a closed set): Title, Section, Statement, Points, Big
+  numbers, Image, Image and text, Before and after, Live tool, Close. Every
+  slide can carry speaker notes, shown only in present mode's notes view.
+
+  Storage (RTDB):
+    app-data/staff-decks/decks/<deckId>   { title, createdBy, createdAt,
+                                            updatedAt, updatedBy,
+                                            slides: [ { id, type, fields, notes } ] }
+    tools/staff-decks                     tool registration (label, defaults)
+  Storage (Firebase Storage):
+    decks/<deckId>/<fileId>.<ext>         slide images, downscaled in the
+                                          browser before upload
+
+  Access: the Decks grant (Off / Use / Manage) — Use is enough to make and
+  present decks. Rules let a person write only decks they created
+  (superadmin excepted). While the tool is work in progress the registry
+  default is superadmin only.
+
+  Changelog:
+    v32.0 — 10/11/2026 — Initial build: deck list, editor (thumbnails with
+            drag reorder, live preview, fields with counters, autosave),
+            present mode (fullscreen, clicker keys, notes strip), image
+            upload with client-side downscale.
+-->
+<html lang="en-GB">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Decks — NL Tools</title>
+  <!-- Favicons. Static, not injected: nl-topbar.js adds these too, but a
+       standalone page never loads it, and an icon that arrives with the JS
+       leaves the tab blank until it does. /favicon.ico at the root is the
+       backstop every browser asks for without being told. -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+
+  <!-- Brand stylesheet (lint canonical: ?v=73) -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=73">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'Decks',
+      toolKey: 'staff-decks'
+    };
+    var NL_TOOL_KEY = 'staff-decks';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '10/11/2026',
+        version: 'v32.0',
+        items: [
+          'Initial build: make, edit and present on-brand decks from ten fixed slide types.'
+        ]
+      }
+    ];
+
+    /* auth-guard fires this once the session is verified + pageWrap is
+       revealed. Boot the main app from here so RTDB reads happen with a
+       live auth token. Do NOT read RTDB before this fires. */
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts (lint canonical: ?v=49 / ?v=1 / ?v=10 / ?v=16) -->
+  <script src="/system/nl-utils.js?v=51"></script>
+  <!-- GA4, one property for all of nl.tools. Cookieless, so no consent
+       banner on any page; page views by path, no identity. Tool events go
+       through NL.track(). See system/nl-analytics.js. -->
+  <script src="/system/nl-analytics.js?v=1"></script>
+  <script src="/system/nl-topbar.js?v=10"></script>
+  <script src="/system/auth-guard.js?v=17"></script>
+
+<style>
+  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
+     style.display = 'block'. Don't clear with '' — would re-trigger the
+     brand rule and re-hide the page. */
+
+  /* Every class here is dk- prefixed so nothing redefines a canon class. */
+
+  [hidden] { display: none !important; }
+
+  /* ── Deck list ─────────────────────────────────────────────────────── */
+  .dk-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr));
+    gap: 24px;
+  }
+  .dk-card {
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: box-shadow var(--transition-fast);
+  }
+  .dk-card:hover { box-shadow: var(--shadow-lg); }
+  .dk-card__open {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+    text-align: left;
+    font-family: var(--font);
+  }
+  .dk-card__open:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .dk-card__blank { aspect-ratio: 16 / 9; background: var(--navy-100); }
+  .dk-card__body { padding: 14px 16px 6px; }
+  .dk-card__title {
+    font-size: var(--text-md);
+    font-weight: 800;
+    font-variation-settings: 'wght' 800;
+    color: var(--navy);
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+  }
+  .dk-card__meta { font-size: var(--text-sm); color: var(--text-muted); margin-top: 2px; }
+  .dk-card__acts { display: flex; gap: 8px; padding: 10px 16px 16px; margin-top: auto; flex-wrap: wrap; }
+
+  /* ── Editor ────────────────────────────────────────────────────────── */
+  .dk-editor {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - var(--dk-top, 64px));
+    min-height: 520px;
+  }
+  .dk-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: var(--white);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  .dk-bar__title {
+    flex: 1 1 260px;
+    min-width: 0;
+    font-family: var(--font);
+    font-size: var(--text-md) !important;
+    font-weight: 800;
+    font-variation-settings: 'wght' 800;
+    color: var(--navy);
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    padding: 6px 10px;
+    background: transparent;
+  }
+  .dk-bar__title:hover { border-color: var(--border); }
+  .dk-bar__title:focus { outline: none; border-color: var(--primary); box-shadow: var(--focus-ring); }
+  .dk-save { font-size: var(--text-sm); color: var(--text-muted); white-space: nowrap; }
+  .dk-save--err { color: var(--red); }
+
+  .dk-work {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 210px minmax(0, 1fr) 380px;
+  }
+
+  /* Thumbnails */
+  .dk-rail-list {
+    background: var(--white);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 14px 14px 20px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .dk-thumbs { display: flex; flex-direction: column; gap: 12px; }
+  .dk-thumb {
+    display: grid;
+    grid-template-columns: 20px 1fr;
+    gap: 6px;
+    align-items: start;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+    border-radius: var(--radius-sm);
+  }
+  .dk-thumb:focus-visible { outline: none; }
+  .dk-thumb:focus-visible .dk-thumb__frame { box-shadow: var(--focus-ring); }
+  .dk-thumb__n {
+    font-size: var(--text-xs);
+    font-weight: 800;
+    font-variation-settings: 'wght' 800;
+    color: var(--text-muted);
+    text-align: right;
+    padding-top: 2px;
+  }
+  .dk-thumb__frame {
+    border: 2px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    line-height: 0;
+  }
+  .dk-thumb.is-sel .dk-thumb__frame { border-color: var(--primary); }
+  .dk-thumb.is-sel .dk-thumb__n { color: var(--primary); }
+  .dk-thumb.is-drag { opacity: 0.55; cursor: grabbing; }
+  .dk-thumb__acts { grid-column: 2; display: none; gap: 12px; padding-top: 4px; }
+  .dk-thumb.is-sel .dk-thumb__acts { display: flex; }
+  .dk-thumb__act {
+    border: none;
+    background: none;
+    padding: 2px 0;
+    font-family: var(--font);
+    font-size: var(--text-xs);
+    font-weight: 800;
+    font-variation-settings: 'wght' 800;
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-wide);
+    color: var(--navy);
+    cursor: pointer;
+  }
+  .dk-thumb__act:hover { color: var(--primary); }
+  .dk-thumb__act--del { color: var(--red); }
+  .dk-add { width: 100%; justify-content: center; }
+
+  /* Stage */
+  .dk-stagewrap {
+    background: var(--navy-50);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 28px;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .dk-stage { box-shadow: var(--shadow-lg); }
+  .dk-stage__empty { text-align: center; }
+
+  /* Fields panel */
+  .dk-panel {
+    background: var(--white);
+    border-left: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 20px 22px 32px;
+  }
+  .dk-field { margin-bottom: 16px; }
+  .dk-panel textarea { min-height: 0 !important; resize: none !important; }
+  .dk-panel textarea.dk-notes { min-height: 140px !important; resize: vertical !important; }
+  .dk-count-over { color: var(--primary); }
+  .dk-hint-err { color: var(--red); }
+  .dk-divider { border: none; border-top: 1px solid var(--border); margin: 22px 0 18px; }
+
+  .dk-img {
+    display: grid;
+    grid-template-columns: 112px 1fr;
+    gap: 12px;
+    align-items: center;
+  }
+  .dk-img__prev {
+    aspect-ratio: 16 / 9;
+    background: var(--navy-50);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--navy-300);
+  }
+  .dk-img__prev img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .dk-img__acts { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  /* Add-slide picker */
+  .dk-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 16px; }
+  .dk-pick__opt {
+    border: 2px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--white);
+    padding: 0;
+    cursor: pointer;
+    overflow: hidden;
+    text-align: left;
+    font-family: var(--font);
+  }
+  .dk-pick__opt:hover, .dk-pick__opt:focus-visible { border-color: var(--navy); outline: none; }
+  .dk-pick__name {
+    display: block;
+    padding: 8px 10px;
+    font-size: var(--text-sm);
+    font-weight: 800;
+    font-variation-settings: 'wght' 800;
+    color: var(--navy);
+  }
+
+  @media (max-width: 1000px) {
+    .dk-editor { height: auto; }
+    .dk-work { grid-template-columns: 1fr; }
+    .dk-rail-list { border-right: none; border-bottom: 1px solid var(--border); flex-direction: row; overflow-x: auto; overflow-y: hidden; }
+    .dk-thumbs { flex-direction: row; }
+    .dk-thumb { width: 180px; flex: 0 0 auto; }
+    .dk-add { width: auto; align-self: flex-start; }
+    .dk-stagewrap { padding: 16px; }
+    .dk-panel { border-left: none; border-top: 1px solid var(--border); }
+  }
+
+  /* =====================================================================
+     THE SLIDE
+     One fixed League theme. Every size inside a slide is in cqw — a
+     percentage of the slide's own width — so the same markup renders
+     identically as a 180px thumbnail, the editor preview and a 4K
+     projector. That is why the type here is not on the --text-* scale:
+     those tokens grow with the browser viewport, and a slide must grow
+     with the slide. Same exemption the brand gives canvas output and
+     composer tools. Colours are tokens only.
+     ===================================================================== */
+  .dk-slide {
+    container-type: inline-size;
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    background: var(--dk-bg);
+    color: var(--dk-ink);
+    font-family: var(--font);
+    line-height: 1.1;
+    -webkit-font-smoothing: antialiased;
+  }
+  .dk-tone--navy  { --dk-bg: var(--navy);    --dk-ink: var(--white); --dk-dim: var(--navy-200);    --dk-line: var(--navy-400);    --dk-accent: var(--primary); }
+  .dk-tone--red   { --dk-bg: var(--primary); --dk-ink: var(--white); --dk-dim: var(--primary-100); --dk-line: var(--primary-400); --dk-accent: var(--white); }
+  .dk-tone--white { --dk-bg: var(--white);   --dk-ink: var(--navy);  --dk-dim: var(--navy-400);    --dk-line: var(--navy-100);    --dk-accent: var(--primary); }
+
+  .dk-big {
+    font-weight: 900;
+    font-variation-settings: 'wght' 900;
+    letter-spacing: -0.02em;
+    line-height: 1.02;
+    text-wrap: balance;
+    overflow-wrap: break-word;
+  }
+  .dk-ghost { opacity: 0.32; }
+
+  /* Section rail — hooked to the top edge. Every section in the deck; the
+     current one lit. The only section context a slide ever shows. */
+  .dk-rail {
+    position: absolute;
+    top: 0;
+    left: 5cqw;
+    right: 11cqw;
+    display: flex;
+    gap: 0.6cqw;
+    z-index: 2;
+  }
+  .dk-rail__item {
+    flex: 1 1 0;
+    min-width: 0;
+    border-top: 0.32cqw solid var(--dk-line);
+    padding-top: 0.75cqw;
+    font-size: 1.05cqw;
+    font-weight: 800;
+    font-variation-settings: 'wght' 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--dk-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .dk-rail__item.is-on { border-top-color: var(--dk-accent); color: var(--dk-ink); }
+
+  .dk-logo {
+    position: absolute;
+    top: 1.6cqw;
+    right: 2.6cqw;
+    height: 4.6cqw;
+    width: auto;
+    z-index: 3;
+  }
+  .dk-num {
+    position: absolute;
+    right: 2.6cqw;
+    bottom: 2cqw;
+    font-size: 1.1cqw;
+    font-weight: 800;
+    font-variation-settings: 'wght' 800;
+    color: var(--dk-dim);
+    z-index: 3;
+  }
+
+  /* Title — navy, red band */
+  .dk-s-title__head { position: absolute; left: 6cqw; right: 14cqw; bottom: 21cqw; }
+  .dk-s-title__band {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 14.6cqw;
+    background: var(--primary);
+    display: flex; align-items: center;
+    padding: 0 14cqw 0 6cqw;
+  }
+  .dk-s-title__sub { font-size: 2.4cqw; font-weight: 600; font-variation-settings: 'wght' 600; line-height: 1.25; color: var(--white); }
+
+  /* Section — red, giant ordinal */
+  .dk-s-section__ord {
+    position: absolute; right: -1.5cqw; bottom: -7cqw;
+    font-size: 34cqw; line-height: 1;
+    color: var(--primary-600);
+    font-weight: 900; font-variation-settings: 'wght' 900; letter-spacing: -0.04em;
+  }
+  .dk-s-section__head { position: absolute; left: 6cqw; right: 34cqw; top: 50%; transform: translateY(-50%); }
+  .dk-s-section__rule { width: 9cqw; height: 0.7cqw; background: var(--white); margin-top: 2.4cqw; }
+
+  /* Statement — white, red edge */
+  .dk-s-statement__edge { position: absolute; left: 0; top: 0; bottom: 0; width: 1.6cqw; background: var(--primary); }
+  .dk-s-statement__text { position: absolute; left: 9cqw; right: 12cqw; top: 50%; transform: translateY(-50%); color: var(--navy); }
+
+  /* Points — white over a navy band */
+  .dk-s-points__head { position: absolute; left: 6cqw; right: 14cqw; top: 8.5cqw; color: var(--navy); }
+  .dk-s-points__band {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 27cqw;
+    background: var(--navy);
+    padding: 4cqw 6cqw 0;
+    display: grid; gap: 3cqw;
+    align-content: start;
+  }
+  .dk-pt__n {
+    display: block;
+    font-size: 3cqw; line-height: 1;
+    font-weight: 900; font-variation-settings: 'wght' 900;
+    color: var(--primary-400);
+    padding-bottom: 1cqw;
+    border-bottom: 0.25cqw solid var(--navy-400);
+    margin-bottom: 1.3cqw;
+  }
+  .dk-pt__t { color: var(--white); font-weight: 600; font-variation-settings: 'wght' 600; line-height: 1.3; overflow-wrap: break-word; }
+  .dk-s-points .dk-num { color: var(--navy-200); }
+
+  /* Big numbers — navy */
+  .dk-s-numbers__row {
+    position: absolute; left: 6cqw; right: 6cqw; top: 50%; transform: translateY(-46%);
+    display: grid; gap: 4cqw;
+  }
+  .dk-bn__fig { font-variant-numeric: tabular-nums lining-nums; white-space: nowrap; overflow-wrap: anywhere; }
+  .dk-bn__rule { width: 6cqw; height: 0.6cqw; background: var(--primary); margin: 2cqw 0 1.6cqw; }
+  .dk-bn__lab { font-size: 1.9cqw; line-height: 1.3; color: var(--navy-200); font-weight: 600; font-variation-settings: 'wght' 600; }
+
+  /* Images */
+  .dk-imgbox { position: absolute; overflow: hidden; background: var(--navy-700); display: flex; align-items: center; justify-content: center; color: var(--navy-300); }
+  .dk-imgbox img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .dk-imgbox__glyph { display: flex; }
+  .dk-imgbox__glyph > svg { width: 6cqw; height: 6cqw; }
+  .dk-s-image .dk-imgbox { inset: 0; }
+  .dk-s-image__cap {
+    position: absolute; left: 0; bottom: 5cqw; max-width: 62cqw;
+    background: var(--navy);
+    padding: 1.6cqw 3cqw 1.6cqw 6cqw;
+    font-size: 2cqw; line-height: 1.3; font-weight: 700; font-variation-settings: 'wght' 700; color: var(--white);
+  }
+  .dk-s-image .dk-num { background: var(--navy); color: var(--white); padding: 0.4cqw 0.9cqw; bottom: 1.6cqw; }
+
+  .dk-s-imagetext .dk-imgbox { left: 0; top: 0; bottom: 0; width: 48cqw; }
+  .dk-s-imagetext .dk-rail { left: 53cqw; }
+  .dk-s-imagetext__copy { position: absolute; left: 53cqw; right: 6cqw; top: 50%; transform: translateY(-50%); color: var(--navy); }
+  .dk-s-imagetext__rule { width: 6cqw; height: 0.6cqw; background: var(--primary); margin: 2.2cqw 0 2.2cqw; }
+  .dk-it__list { list-style: none; display: grid; gap: 1.4cqw; }
+  .dk-it__list li { position: relative; padding-left: 2.2cqw; line-height: 1.3; font-weight: 600; font-variation-settings: 'wght' 600; overflow-wrap: break-word; }
+  .dk-it__list li::before { content: ''; position: absolute; left: 0; top: 0.42em; width: 0.9cqw; height: 0.9cqw; background: var(--primary); }
+
+  .dk-s-beforeafter__col { position: absolute; top: 8.5cqw; width: 41cqw; }
+  .dk-s-beforeafter__col .dk-imgbox { position: relative; width: 100%; height: 36cqw; }
+  .dk-ba__lab {
+    display: flex; align-items: center; gap: 1cqw;
+    margin-top: 1.6cqw;
+    font-size: 1.9cqw; font-weight: 900; font-variation-settings: 'wght' 900;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--white);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .dk-ba__lab::before { content: ''; flex: 0 0 auto; width: 1.2cqw; height: 1.2cqw; background: var(--primary); }
+
+  /* Live tool */
+  .dk-s-tool__frame {
+    position: absolute; left: 1.4cqw; right: 1.4cqw; top: 4.6cqw; bottom: 1.4cqw;
+    background: var(--white); border-radius: 0.5cqw; overflow: hidden;
+  }
+  .dk-s-tool__frame iframe { width: 100%; height: 100%; border: 0; display: block; background: var(--white); }
+  .dk-s-tool__fallback { position: absolute; inset: 0; background: var(--navy-700); display: flex; align-items: center; justify-content: center; color: var(--navy-200); font-size: 1.8cqw; font-weight: 700; font-variation-settings: 'wght' 700; }
+  .dk-s-tool__fallback img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .dk-s-tool__open {
+    position: absolute; right: 2.6cqw; bottom: 2.6cqw; z-index: 4;
+    background: var(--primary); color: var(--white);
+    font-size: 1.15cqw; font-weight: 900; font-variation-settings: 'wght' 900;
+    text-transform: uppercase; letter-spacing: 0.08em; text-decoration: none;
+    padding: 0.8cqw 1.6cqw; border-radius: 0.4cqw;
+  }
+  a.dk-s-tool__open:hover { background: var(--primary-600); }
+  .dk-s-tool .dk-num { display: none; }
+
+  /* Close — red, navy band */
+  .dk-s-close__head { position: absolute; left: 6cqw; right: 14cqw; top: 50%; transform: translateY(-60%); }
+  .dk-s-close__line { font-weight: 600; font-variation-settings: 'wght' 600; line-height: 1.3; color: var(--primary-100); margin-top: 2.4cqw; }
+  .dk-s-close__band { position: absolute; left: 0; right: 0; bottom: 0; height: 6.4cqw; background: var(--navy); }
+  .dk-s-close .dk-num { color: var(--navy-200); }
+
+  /* ── Present mode ──────────────────────────────────────────────────── */
+  .dk-present {
+    position: fixed; inset: 0; z-index: 1000;
+    background: var(--navy-900);
+    display: flex; flex-direction: column;
+  }
+  .dk-present.is-idle { cursor: none; }
+  .dk-present__stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+  .dk-present__notes {
+    flex: 0 0 auto; max-height: 26vh; overflow-y: auto;
+    background: var(--navy-800); color: var(--white);
+    border-top: 3px solid var(--primary);
+    padding: 14px 24px 18px;
+    display: grid; grid-template-columns: auto 1fr; gap: 24px;
+    font-size: var(--text-base); line-height: 1.5;
+    white-space: pre-wrap;
+  }
+  .dk-present__notes .dk-present__ctr { color: var(--navy-300); font-weight: 800; font-variation-settings: 'wght' 800; white-space: nowrap; }
+  .dk-present__flash {
+    position: absolute; right: 18px; bottom: 18px;
+    background: var(--navy-800); color: var(--white);
+    padding: 6px 12px; border-radius: var(--radius-pill);
+    font-size: var(--text-sm); font-weight: 800; font-variation-settings: 'wght' 800;
+    opacity: 0; transition: opacity var(--transition-base);
+    pointer-events: none;
+  }
+  .dk-present__flash.is-on { opacity: 1; }
+</style>
+</head>
+<body>
+
+<!-- Topbar — auto-rendered by /system/nl-topbar.js from window.NL_TOOL -->
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+
+  <!-- Deck list -->
+  <div class="page" id="dkListView">
+    <div class="section-head">
+      <h2>Your decks</h2>
+      <button type="button" class="btn btn--primary" id="dkNew">New deck</button>
+    </div>
+    <div id="dkListBody"><div class="empty-state"><span class="spinner"></span></div></div>
+  </div>
+
+  <!-- Editor -->
+  <div class="dk-editor" id="dkEditView" hidden>
+    <div class="dk-bar">
+      <button type="button" class="btn btn--ghost btn--sm" id="dkBack">Decks</button>
+      <input type="text" class="dk-bar__title" id="dkTitle" maxlength="80" aria-label="Deck title" autocomplete="off">
+      <span class="dk-save" id="dkSave" aria-live="polite"></span>
+      <button type="button" class="btn btn--ghost btn--sm" id="dkPresentHere">From this slide</button>
+      <button type="button" class="btn btn--primary btn--sm" id="dkPresent">Present</button>
+    </div>
+    <div class="dk-work">
+      <div class="dk-rail-list">
+        <div class="dk-thumbs" id="dkThumbs" role="listbox" aria-label="Slides"></div>
+        <button type="button" class="btn btn--navy btn--sm dk-add" id="dkAdd">Add slide</button>
+      </div>
+      <div class="dk-stagewrap" id="dkStageWrap">
+        <div class="dk-stage" id="dkStage"></div>
+      </div>
+      <div class="dk-panel" id="dkPanel"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Main app -->
+<script>
+(function () {
+  'use strict';
+
+  var ROOT = 'app-data/staff-decks/decks';
+  var ROSE_WHITE = '/assets/crests/National%20League%20rose%20white.png';
+  var ROSE_RED = (window.NL && NL.clubs && NL.clubs.ROSE) || '/assets/crests/National%20League%20rose.png';
+  var MAX_EDGE = 2400;            /* images: long edge, px */
+  var MAX_UPLOAD = 10 * 1024 * 1024;
+  var SAVE_DELAY = 900;
+  var DECK_TITLE_MAX = 80;
+
+  /* Autosave writes the whole deck every pause in typing. The audit hook
+     would log each one; deck_created / deck_deleted / deck_duplicated are
+     written by hand instead, so the audit says what happened rather than
+     that someone typed. */
+  if (window.NL && NL.AUDIT_AUTO && NL.AUDIT_AUTO.skipPatterns) {
+    NL.AUDIT_AUTO.skipPatterns.push(/^\/?app-data\/staff-decks(\/|$)/);
+  }
+
+  /* ── Slide types — the closed set ──────────────────────────────────── */
+  function F(k, label, max, o) { o = o || {}; return { kind: 'text', k: k, label: label, max: max, area: !!o.area, optional: !!o.optional }; }
+  function I(k, label) { return { kind: 'image', k: k, label: label }; }
+  function G(prefix, label, max, min, count) { return { kind: 'group', prefix: prefix, label: label, max: max, min: min, count: count }; }
+  function N(min, count) { return { kind: 'numbers', min: min, count: count }; }
+
+  var TYPES = {
+    title:       { label: 'Title',            tone: 'navy',  rail: false, num: false,
+                   fields: [F('title', 'Title', 60), F('subtitle', 'Subtitle', 80, { area: true })] },
+    section:     { label: 'Section',          tone: 'red',
+                   fields: [F('name', 'Section name', 40)] },
+    statement:   { label: 'Statement',        tone: 'white',
+                   fields: [F('text', 'Statement', 100, { area: true })] },
+    points:      { label: 'Points',           tone: 'white',
+                   fields: [F('heading', 'Heading', 60), G('p', 'Point', 70, 1, 4)] },
+    numbers:     { label: 'Big numbers',      tone: 'navy',
+                   fields: [N(1, 3)] },
+    image:       { label: 'Image',            tone: 'navy',  rail: false,
+                   fields: [I('img', 'Image'), F('caption', 'Caption', 80, { area: true, optional: true })] },
+    imagetext:   { label: 'Image and text',   tone: 'white',
+                   fields: [I('img', 'Image'), F('heading', 'Heading', 60), G('p', 'Point', 70, 0, 3)] },
+    beforeafter: { label: 'Before and after', tone: 'navy',
+                   fields: [I('imgA', 'Before image'), F('labelA', 'Before label', 30),
+                            I('imgB', 'After image'), F('labelB', 'After label', 30)] },
+    tool:        { label: 'Live tool',        tone: 'navy',
+                   fields: [{ kind: 'path', k: 'path', label: 'Tool path', max: 200 }, I('fallback', 'Fallback image')] },
+    close:       { label: 'Close',            tone: 'red',   rail: false,
+                   fields: [F('heading', 'Heading', 60), F('line', 'Line', 100, { area: true, optional: true })] }
+  };
+  var TYPE_ORDER = ['title', 'section', 'statement', 'points', 'numbers', 'image', 'imagetext', 'beforeafter', 'tool', 'close'];
+
+  /* What the Add slide picker shows each type with. True of the League,
+     never anyone's data. */
+  var SAMPLES = {
+    title:       { title: 'Season review', subtitle: 'The National League' },
+    section:     { name: 'Matchday' },
+    statement:   { text: 'Every club, every game, every week.' },
+    points:      { heading: 'Three divisions', p1: 'National League', p2: 'National League North', p3: 'National League South' },
+    numbers:     { n1: '72', l1: 'Clubs', n2: '3', l2: 'Divisions' },
+    image:       { caption: 'Full-bleed image' },
+    imagetext:   { heading: 'Image and text', p1: 'Up to three points', p2: 'Beside one image' },
+    beforeafter: { labelA: 'Before', labelB: 'After' },
+    tool:        { path: '/' },
+    close:       { heading: 'Thank you', line: 'Questions' }
+  };
+
+  /* ── Small helpers ─────────────────────────────────────────────────── */
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function $(id) { return document.getElementById(id); }
+  function rid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); }
+  function str(v) { return typeof v === 'string' ? v : ''; }
+  function clean(v) { return str(v).replace(/\s+/g, ' ').trim(); }
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  /* Pick a size from a short fixed ladder by text length. Content never
+     measures itself: the same text gets the same size at every scale. */
+  function fit(len, steps) {
+    for (var i = 0; i < steps.length; i++) if (len <= steps[i][0]) return steps[i][1];
+    return steps[steps.length - 1][1];
+  }
+  var FIT = {
+    titleTitle:   [[20, 7.2], [36, 5.8], [Infinity, 4.6]],
+    titleSub:     [[44, 2.4], [Infinity, 2.0]],
+    sectionName:  [[14, 8.4], [26, 6.4], [Infinity, 5.0]],
+    statement:    [[36, 5.8], [64, 4.8], [Infinity, 3.9]],
+    pointsHead:   [[30, 4.8], [Infinity, 3.8]],
+    itHead:       [[28, 3.6], [Infinity, 2.8]],
+    closeHead:    [[18, 7.2], [34, 5.6], [Infinity, 4.4]],
+    closeLine:    [[50, 2.4], [Infinity, 2.0]]
+  };
+
+  /* Same-origin nl.tools path, or null. Starts with one '/', no scheme,
+     no protocol-relative '//', no backslashes, no whitespace, and not this
+     tool (a deck inside a deck). */
+  function safePath(p) {
+    p = str(p).trim();
+    if (!/^\/(?!\/)[^\s\\]*$/.test(p) || p.length > 200) return null;
+    try {
+      var u = new URL(p, location.origin);
+      if (u.origin !== location.origin) return null;
+      if (/^\/decks(\/|$)/.test(u.pathname)) return null;
+      return u.pathname + u.search + u.hash;
+    } catch (e) { return null; }
+  }
+  function safeImg(u) {
+    u = str(u).trim();
+    return /^https:\/\/[^\s"'<>]+$/i.test(u) && u.length <= 2048 ? u : '';
+  }
+
+  function sectionsOf(slides) {
+    var out = [];
+    slides.forEach(function (s, i) {
+      if (s.type === 'section') out.push({ i: i, name: clean((s.fields || {}).name) });
+    });
+    return out;
+  }
+
+  /* ── Rendering one slide ───────────────────────────────────────────── */
+  /* ctx: { index, total, sections, ghost (show field names for empty
+     fields — the editor only), live (real iframe for a Live tool slide) } */
+  function textOr(ctx, value, label) {
+    var v = clean(value);
+    if (v) return { text: v, ghost: false };
+    if (ctx.ghost) return { text: label, ghost: true };
+    return null;
+  }
+  function bigText(cls, t, size) {
+    var e = el('div', 'dk-big ' + cls + (t.ghost ? ' dk-ghost' : ''), t.text);
+    e.style.fontSize = size + 'cqw';
+    return e;
+  }
+  function imageBox(url, ctx) {
+    var box = el('div', 'dk-imgbox');
+    var src = safeImg(url);
+    if (src) {
+      var img = el('img');
+      img.alt = '';
+      img.decoding = 'async';
+      img.src = src;
+      img.onerror = function () { this.onerror = null; this.remove(); };
+      box.appendChild(img);
+    } else if (ctx.ghost && window.NL && NL.icon) {
+      var glyph = el('span', 'dk-imgbox__glyph');
+      glyph.appendChild(NL.icon('image'));
+      box.appendChild(glyph);
+    }
+    return box;
+  }
+  function listOf(f, prefix, count) {
+    var out = [];
+    for (var i = 1; i <= count; i++) { var v = clean(f[prefix + i]); if (v) out.push(v); }
+    return out;
+  }
+
+  function renderSlide(slide, ctx) {
+    var type = TYPES[slide.type] ? slide.type : 'statement';
+    var def = TYPES[type];
+    var f = slide.fields || {};
+    var s = el('div', 'dk-slide dk-tone--' + def.tone + ' dk-s-' + type);
+    var t, size;
+
+    /* Section rail */
+    if (def.rail !== false && ctx.sections && ctx.sections.length) {
+      var cur = -1;
+      ctx.sections.forEach(function (sec, k) { if (sec.i <= ctx.index) cur = k; });
+      var rail = el('div', 'dk-rail');
+      ctx.sections.forEach(function (sec, k) {
+        var name = sec.name || (ctx.ghost ? 'Section' : '');
+        var it = el('div', 'dk-rail__item' + (k === cur ? ' is-on' : ''), name);
+        rail.appendChild(it);
+      });
+      s.appendChild(rail);
+    }
+
+    if (type === 'title') {
+      t = textOr(ctx, f.title, 'Title');
+      if (t) { var th = el('div', 'dk-s-title__head'); th.appendChild(bigText('', t, fit(t.text.length, FIT.titleTitle))); s.appendChild(th); }
+      var band = el('div', 'dk-s-title__band');
+      t = textOr(ctx, f.subtitle, 'Subtitle');
+      if (t) {
+        var sub = el('div', 'dk-s-title__sub' + (t.ghost ? ' dk-ghost' : ''), t.text);
+        sub.style.fontSize = fit(t.text.length, FIT.titleSub) + 'cqw';
+        band.appendChild(sub);
+      }
+      s.appendChild(band);
+
+    } else if (type === 'section') {
+      var ord = 1;
+      (ctx.sections || []).forEach(function (sec, k) { if (sec.i === ctx.index) ord = k + 1; });
+      s.appendChild(el('div', 'dk-s-section__ord', pad2(ord)));
+      t = textOr(ctx, f.name, 'Section name');
+      var sh = el('div', 'dk-s-section__head');
+      if (t) sh.appendChild(bigText('', t, fit(t.text.length, FIT.sectionName)));
+      sh.appendChild(el('div', 'dk-s-section__rule'));
+      s.appendChild(sh);
+
+    } else if (type === 'statement') {
+      s.appendChild(el('div', 'dk-s-statement__edge'));
+      t = textOr(ctx, f.text, 'Statement');
+      if (t) s.appendChild(bigText('dk-s-statement__text', t, fit(t.text.length, FIT.statement)));
+
+    } else if (type === 'points') {
+      t = textOr(ctx, f.heading, 'Heading');
+      if (t) s.appendChild(bigText('dk-s-points__head', t, fit(t.text.length, FIT.pointsHead)));
+      var pts = listOf(f, 'p', 4);
+      var ghostPts = false;
+      if (!pts.length && ctx.ghost) { pts = ['Point']; ghostPts = true; }
+      var pband = el('div', 'dk-s-points__band');
+      if (pts.length) {
+        pband.style.gridTemplateColumns = 'repeat(' + pts.length + ', minmax(0, 1fr))';
+        var longest = Math.max.apply(null, pts.map(function (p) { return p.length; }));
+        var psize = { 1: 3.0, 2: 2.6, 3: 2.3, 4: 2.0 }[pts.length] * (longest > 50 ? 0.9 : 1);
+        pts.forEach(function (p, k) {
+          var col = el('div', ghostPts ? 'dk-ghost' : '');
+          col.appendChild(el('span', 'dk-pt__n', pad2(k + 1)));
+          var pt = el('div', 'dk-pt__t', p);
+          pt.style.fontSize = psize.toFixed(2) + 'cqw';
+          col.appendChild(pt);
+          pband.appendChild(col);
+        });
+      }
+      s.appendChild(pband);
+
+    } else if (type === 'numbers') {
+      var items = [];
+      for (var i = 1; i <= 3; i++) {
+        var n = clean(f['n' + i]), l = clean(f['l' + i]);
+        if (n || l) items.push({ n: n, l: l });
+      }
+      var ghostN = false;
+      if (!items.length && ctx.ghost) { items = [{ n: '00', l: 'Label' }]; ghostN = true; }
+      if (items.length) {
+        var row = el('div', 'dk-s-numbers__row' + (ghostN ? ' dk-ghost' : ''));
+        row.style.gridTemplateColumns = 'repeat(' + items.length + ', minmax(0, 1fr))';
+        var maxLen = Math.max.apply(null, items.map(function (x) { return x.n.length; }));
+        var base = { 1: 16, 2: 12, 3: 9.5 }[items.length];
+        var fsize = base * (maxLen <= 4 ? 1 : maxLen <= 7 ? 0.6 : 0.45);
+        items.forEach(function (x) {
+          var col = el('div');
+          var fig = el('div', 'dk-big dk-bn__fig', x.n || (ctx.ghost ? '00' : ''));
+          if (!x.n && ctx.ghost) fig.classList.add('dk-ghost');
+          fig.style.fontSize = fsize.toFixed(2) + 'cqw';
+          col.appendChild(fig);
+          col.appendChild(el('div', 'dk-bn__rule'));
+          var lab = textOr(ctx, x.l, 'Label');
+          if (lab) col.appendChild(el('div', 'dk-bn__lab' + (lab.ghost ? ' dk-ghost' : ''), lab.text));
+          row.appendChild(col);
+        });
+        s.appendChild(row);
+      }
+
+    } else if (type === 'image') {
+      s.appendChild(imageBox(f.img, ctx));
+      t = textOr(ctx, f.caption, '');
+      if (t && t.text) s.appendChild(el('div', 'dk-s-image__cap', t.text));
+
+    } else if (type === 'imagetext') {
+      s.appendChild(imageBox(f.img, ctx));
+      var copy = el('div', 'dk-s-imagetext__copy');
+      t = textOr(ctx, f.heading, 'Heading');
+      if (t) copy.appendChild(bigText('', t, fit(t.text.length, FIT.itHead)));
+      var ipts = listOf(f, 'p', 3);
+      if (ipts.length || ctx.ghost) {
+        copy.appendChild(el('div', 'dk-s-imagetext__rule'));
+        var ul = el('ul', 'dk-it__list');
+        if (!ipts.length) { ul.classList.add('dk-ghost'); ipts = ['Point']; }
+        ipts.forEach(function (p) {
+          var li = el('li', '', p);
+          li.style.fontSize = (ipts.length <= 2 ? 2.1 : 1.9) + 'cqw';
+          ul.appendChild(li);
+        });
+        copy.appendChild(ul);
+      }
+      s.appendChild(copy);
+
+    } else if (type === 'beforeafter') {
+      [['imgA', 'labelA', 'Before', 7], ['imgB', 'labelB', 'After', 52]].forEach(function (c) {
+        var col = el('div', 'dk-s-beforeafter__col');
+        col.style.left = c[3] + 'cqw';
+        col.appendChild(imageBox(f[c[0]], ctx));
+        var lt = textOr(ctx, f[c[1]], c[2]);
+        if (lt) col.appendChild(el('div', 'dk-ba__lab' + (lt.ghost ? ' dk-ghost' : ''), lt.text));
+        s.appendChild(col);
+      });
+
+    } else if (type === 'tool') {
+      var path = safePath(f.path);
+      var frame = el('div', 'dk-s-tool__frame');
+      var fb = el('div', 'dk-s-tool__fallback');
+      var fbSrc = safeImg(f.fallback);
+      if (fbSrc) {
+        var fimg = el('img'); fimg.alt = ''; fimg.src = fbSrc;
+        fimg.onerror = function () { this.onerror = null; this.remove(); };
+        fb.appendChild(fimg);
+      } else {
+        fb.textContent = path || (ctx.ghost ? 'Tool path' : '');
+      }
+      frame.appendChild(fb);
+      if (path && ctx.live) mountFrame(frame, fb, path);
+      s.appendChild(frame);
+      if (path) {
+        var open;
+        if (ctx.live) {
+          open = el('a', 'dk-s-tool__open', 'Open');
+          open.href = path; open.target = '_blank'; open.rel = 'noopener';
+        } else {
+          open = el('span', 'dk-s-tool__open', 'Open');
+        }
+        s.appendChild(open);
+      }
+
+    } else if (type === 'close') {
+      var ch = el('div', 'dk-s-close__head');
+      t = textOr(ctx, f.heading, 'Heading');
+      if (t) ch.appendChild(bigText('', t, fit(t.text.length, FIT.closeHead)));
+      var ln = textOr(ctx, f.line, '');
+      if (ln && ln.text) {
+        var lne = el('div', 'dk-s-close__line', ln.text);
+        lne.style.fontSize = fit(ln.text.length, FIT.closeLine) + 'cqw';
+        ch.appendChild(lne);
+      }
+      s.appendChild(ch);
+      s.appendChild(el('div', 'dk-s-close__band'));
+    }
+
+    /* Rose, fixed corner. White on navy and red, red on white. */
+    var logo = el('img', 'dk-logo');
+    logo.alt = 'The National League';
+    if (def.tone === 'white') {
+      logo.src = ROSE_RED;
+      logo.onerror = function () { this.onerror = null; this.remove(); };
+    } else {
+      logo.src = ROSE_WHITE;
+      logo.onerror = function () { this.onerror = null; this.src = ROSE_RED; };
+    }
+    s.appendChild(logo);
+
+    if (def.num !== false) s.appendChild(el('span', 'dk-num', String(ctx.index + 1)));
+    return s;
+  }
+
+  /* A Live tool slide's iframe. Same origin, so a failed load is visible:
+     the 404 page's title, an unreadable document, or nothing within 12s
+     all show the fallback instead. Clicker keys pressed while the tool has
+     focus are passed back up, so the presenter is never stranded in it. */
+  function mountFrame(frame, fb, path) {
+    var ifr = el('iframe');
+    ifr.title = 'Live tool';
+    ifr.loading = 'eager';
+    ifr.src = path;
+    ifr.hidden = true;
+    var done = false;
+    function fail() { if (done) return; done = true; ifr.remove(); fb.hidden = false; }
+    var timer = setTimeout(fail, 12000);
+    ifr.addEventListener('load', function () {
+      if (done) return;
+      clearTimeout(timer);
+      try {
+        var d = ifr.contentDocument;
+        if (!d || /^Page not found/i.test(d.title || '')) { fail(); return; }
+        d.addEventListener('keydown', function (e) {
+          if (presenter && /^(PageUp|PageDown|Escape)$/.test(e.key)) { e.preventDefault(); presenter.key(e); }
+        });
+      } catch (e) { fail(); return; }
+      done = true;
+      ifr.hidden = false;
+      fb.hidden = true;
+    });
+    frame.appendChild(ifr);
+  }
+
+  /* ── Data ──────────────────────────────────────────────────────────── */
+  var uid = null;
+  var decks = {};          /* id → deck, the list view's copy */
+  var cur = null;          /* { id, deck, sel } while editing */
+  var saveTimer = null;
+  var saving = false;
+  var pendingSave = false;
+
+  function deckRef(id) { return db.ref(ROOT + '/' + id); }
+  function toSlides(v) {
+    if (!v) return [];
+    var arr = Array.isArray(v) ? v : Object.keys(v).sort(function (a, b) { return a - b; }).map(function (k) { return v[k]; });
+    var seen = {};
+    return arr.filter(function (s) { return s && TYPES[s.type]; }).map(function (s) {
+      /* The editor finds slides by id, so a repeated id gets a new one. */
+      var id = str(s.id);
+      if (!id || seen[id]) id = rid();
+      seen[id] = true;
+      return { id: id, type: s.type, fields: Object.assign({}, s.fields || {}), notes: str(s.notes) };
+    });
+  }
+  /* What goes to RTDB: empty fields and notes dropped. */
+  function forSave(slides) {
+    return slides.map(function (s) {
+      var o = { id: s.id, type: s.type };
+      var fl = {};
+      Object.keys(s.fields || {}).forEach(function (k) {
+        var v = str(s.fields[k]);
+        if (v.trim()) fl[k] = v;
+      });
+      if (Object.keys(fl).length) o.fields = fl;
+      if (str(s.notes).trim()) o.notes = s.notes;
+      return o;
+    });
+  }
+  var TS = function () { return firebase.database.ServerValue.TIMESTAMP; };
+
+  /* ── Deck list ─────────────────────────────────────────────────────── */
+  function loadList() {
+    var body = $('dkListBody');
+    return db.ref(ROOT).orderByChild('createdBy').equalTo(uid).once('value').then(function (snap) {
+      decks = {};
+      snap.forEach(function (c) {
+        var v = c.val() || {};
+        decks[c.key] = { title: str(v.title) || 'Untitled', createdBy: v.createdBy, createdAt: v.createdAt,
+                         updatedAt: v.updatedAt, slides: toSlides(v.slides) };
+      });
+      renderList();
+    }).catch(function (e) {
+      body.innerHTML = '';
+      var es = el('div', 'empty-state');
+      es.appendChild(el('div', 'empty-state__title', 'Couldn’t load your decks.'));
+      es.appendChild(el('div', 'empty-state__text', e && e.message ? e.message : ''));
+      body.appendChild(es);
+    });
+  }
+
+  function renderList() {
+    var body = $('dkListBody');
+    body.innerHTML = '';
+    var ids = Object.keys(decks).sort(function (a, b) { return (decks[b].updatedAt || 0) - (decks[a].updatedAt || 0); });
+    if (!ids.length) {
+      var es = el('div', 'empty-state');
+      es.appendChild(el('div', 'empty-state__title', 'No decks yet.'));
+      body.appendChild(es);
+      return;
+    }
+    var grid = el('div', 'dk-grid');
+    ids.forEach(function (id) {
+      var d = decks[id];
+      var card = el('article', 'dk-card');
+      var open = el('button', 'dk-card__open');
+      open.type = 'button';
+      open.setAttribute('aria-label', 'Open ' + d.title);
+      if (d.slides.length) {
+        open.appendChild(renderSlide(d.slides[0], { index: 0, total: d.slides.length, sections: sectionsOf(d.slides), ghost: false, live: false }));
+      } else {
+        open.appendChild(el('div', 'dk-card__blank'));
+      }
+      var cb = el('div', 'dk-card__body');
+      cb.appendChild(el('div', 'dk-card__title', d.title));
+      var n = d.slides.length;
+      cb.appendChild(el('div', 'dk-card__meta', n + (n === 1 ? ' slide' : ' slides') + ' · updated ' + NL.timeAgo(d.updatedAt)));
+      open.appendChild(cb);
+      open.addEventListener('click', function () { location.hash = id; });
+      card.appendChild(open);
+
+      var acts = el('div', 'dk-card__acts');
+      [['Rename', 'btn--ghost', renameDeck], ['Duplicate', 'btn--ghost', duplicateDeck], ['Delete', 'btn--danger', deleteDeck]]
+        .forEach(function (a) {
+          var b = el('button', 'btn btn--sm ' + a[1], a[0]);
+          b.type = 'button';
+          b.addEventListener('click', function () { a[2](id); });
+          acts.appendChild(b);
+        });
+      card.appendChild(acts);
+      grid.appendChild(card);
+    });
+    body.appendChild(grid);
+  }
+
+  function askTitle(title, current, confirmText) {
+    return NL.prompt('', { title: title, default: current || '', confirmText: confirmText }).then(function (v) {
+      if (v == null) return null;
+      v = clean(v).slice(0, DECK_TITLE_MAX);
+      if (!v) { NL.toast('A deck needs a title.', 'error'); return null; }
+      return v;
+    });
+  }
+
+  function newDeck() {
+    askTitle('New deck', '', 'Create').then(function (title) {
+      if (!title) return;
+      var id = db.ref(ROOT).push().key;
+      var rec = { title: title, createdBy: uid, createdAt: TS(), updatedAt: TS(), updatedBy: uid,
+                  slides: [{ id: rid(), type: 'title', fields: { title: title.slice(0, 60) } }] };
+      deckRef(id).set(rec).then(function () {
+        NL.writeAudit('deck_created', title);
+        location.hash = id;
+      }).catch(function (e) { NL.toast('Couldn’t create the deck: ' + (e.message || e), 'error'); });
+    });
+  }
+
+  function renameDeck(id) {
+    var d = decks[id];
+    askTitle('Rename deck', d.title, 'Rename').then(function (title) {
+      if (!title || title === d.title) return;
+      deckRef(id).update({ title: title, updatedAt: TS(), updatedBy: uid }).then(function () {
+        d.title = title; d.updatedAt = Date.now();
+        renderList();
+      }).catch(function (e) { NL.toast('Couldn’t rename: ' + (e.message || e), 'error'); });
+    });
+  }
+
+  function duplicateDeck(id) {
+    var d = decks[id];
+    var title = (d.title + ' (copy)').slice(0, DECK_TITLE_MAX);
+    var nid = db.ref(ROOT).push().key;
+    var slides = d.slides.map(function (s) { return { id: rid(), type: s.type, fields: s.fields, notes: s.notes }; });
+    var rec = { title: title, createdBy: uid, createdAt: TS(), updatedAt: TS(), updatedBy: uid, slides: forSave(slides) };
+    deckRef(nid).set(rec).then(function () {
+      NL.writeAudit('deck_duplicated', d.title);
+      NL.toast('Duplicated.');
+      return loadList();
+    }).catch(function (e) { NL.toast('Couldn’t duplicate: ' + (e.message || e), 'error'); });
+  }
+
+  function deleteDeck(id) {
+    var d = decks[id];
+    NL.confirm('Delete “' + d.title + '”? This can’t be undone.',
+               { title: 'Delete deck', confirmText: 'Delete', variant: 'danger' }).then(function (ok) {
+      if (!ok) return;
+      deckRef(id).remove().then(function () {
+        NL.writeAudit('deck_deleted', d.title);
+        delete decks[id];
+        renderList();
+      }).catch(function (e) { NL.toast('Couldn’t delete: ' + (e.message || e), 'error'); });
+    });
+  }
+
+  /* ── Editor ────────────────────────────────────────────────────────── */
+  function openDeck(id) {
+    return deckRef(id).once('value').then(function (snap) {
+      var v = snap.val();
+      if (!v) { NL.toast('That deck no longer exists.', 'error'); location.hash = ''; return; }
+      cur = { id: id, deck: { title: str(v.title) || 'Untitled', createdBy: v.createdBy, slides: toSlides(v.slides) }, sel: 0 };
+      $('dkTitle').value = cur.deck.title;
+      setSave('');
+      showView('edit');
+      renderThumbs();
+      selectSlide(0);
+    }).catch(function (e) {
+      NL.toast('Couldn’t open the deck: ' + (e.message || e), 'error');
+      location.hash = '';
+    });
+  }
+
+  function ctxFor(i, ghost, live) {
+    return { index: i, total: cur.deck.slides.length, sections: sectionsOf(cur.deck.slides), ghost: ghost, live: live };
+  }
+
+  function renderThumbs() {
+    var host = $('dkThumbs');
+    host.innerHTML = '';
+    cur.deck.slides.forEach(function (s, i) {
+      var th = el('div', 'dk-thumb' + (i === cur.sel ? ' is-sel' : ''));
+      th.tabIndex = 0;
+      th.setAttribute('role', 'option');
+      th.setAttribute('aria-selected', i === cur.sel ? 'true' : 'false');
+      th.setAttribute('aria-label', 'Slide ' + (i + 1) + ', ' + TYPES[s.type].label);
+      th.dataset.id = s.id;
+      th.appendChild(el('span', 'dk-thumb__n', String(i + 1)));
+      var fr = el('div', 'dk-thumb__frame');
+      fr.appendChild(renderSlide(s, ctxFor(i, true, false)));
+      th.appendChild(fr);
+      var acts = el('div', 'dk-thumb__acts');
+      var dup = el('button', 'dk-thumb__act', 'Duplicate'); dup.type = 'button';
+      dup.addEventListener('click', function (e) { e.stopPropagation(); duplicateSlide(i); });
+      var del = el('button', 'dk-thumb__act dk-thumb__act--del', 'Delete'); del.type = 'button';
+      del.addEventListener('click', function (e) { e.stopPropagation(); deleteSlide(i); });
+      acts.appendChild(dup); acts.appendChild(del);
+      th.appendChild(acts);
+      wireDrag(th);
+      th.addEventListener('keydown', function (e) { thumbKey(e, s.id); });
+      host.appendChild(th);
+    });
+  }
+
+  function indexOfId(id) {
+    for (var i = 0; i < cur.deck.slides.length; i++) if (cur.deck.slides[i].id === id) return i;
+    return -1;
+  }
+
+  function thumbKey(e, id) {
+    var i = indexOfId(id);
+    if (i < 0) return;
+    if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault();
+      var j = i + (e.key === 'ArrowUp' ? -1 : 1);
+      if (j < 0 || j >= cur.deck.slides.length) return;
+      var moved = cur.deck.slides.splice(i, 1)[0];
+      cur.deck.slides.splice(j, 0, moved);
+      cur.sel = j;
+      changed(true);
+      focusThumb(j);
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      var k = Math.max(0, Math.min(cur.deck.slides.length - 1, i + (e.key === 'ArrowUp' ? -1 : 1)));
+      selectSlide(k);
+      focusThumb(k);
+    } else if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault();
+      deleteSlide(i);
+    }
+  }
+  function focusThumb(i) {
+    var t = $('dkThumbs').children[i];
+    if (t) { t.focus(); t.scrollIntoView({ block: 'nearest' }); }
+  }
+
+  /* Drag to reorder. Pointer events rather than HTML5 draggable, for the
+     reason NL.sortable gives (no touch, no real lift). NL.sortable itself
+     renders text rows, not slide thumbnails, so it cannot host these.
+     Move and up are heard on the document, not by pointer capture:
+     moving the thumbnail in the DOM drops a capture mid-drag. */
+  function wireDrag(th) {
+    var start = null, dragging = false;
+    th.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0 || e.target.closest('button')) return;
+      start = { y: e.clientY, x: e.clientX, id: th.dataset.id };
+      dragging = false;
+      document.addEventListener('pointermove', move);
+      document.addEventListener('pointerup', end);
+      document.addEventListener('pointercancel', cancel);
+    });
+    function unlisten() {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', end);
+      document.removeEventListener('pointercancel', cancel);
+    }
+    function move(e) {
+      if (!start) return;
+      if (e.preventDefault) e.preventDefault();
+      var horiz = getComputedStyle($('dkThumbs')).flexDirection === 'row';
+      var d = horiz ? e.clientX - start.x : e.clientY - start.y;
+      if (!dragging) {
+        if (Math.abs(d) < 6) return;
+        dragging = true;
+        th.classList.add('is-drag');
+      }
+      var host = $('dkThumbs');
+      var others = Array.prototype.filter.call(host.children, function (c) { return c !== th; });
+      var before = null;
+      for (var k = 0; k < others.length; k++) {
+        var r = others[k].getBoundingClientRect();
+        var mid = horiz ? r.left + r.width / 2 : r.top + r.height / 2;
+        if ((horiz ? e.clientX : e.clientY) < mid) { before = others[k]; break; }
+      }
+      if (before !== th.nextSibling) host.insertBefore(th, before);
+    }
+    function end() {
+      unlisten();
+      if (!start) return;
+      var was = dragging;
+      start = null; dragging = false;
+      th.classList.remove('is-drag');
+      if (!was) { selectSlide(indexOfId(th.dataset.id)); return; }
+      var order = Array.prototype.map.call($('dkThumbs').children, function (c) { return c.dataset.id; });
+      var byId = {};
+      cur.deck.slides.forEach(function (s) { byId[s.id] = s; });
+      cur.deck.slides = order.map(function (id) { return byId[id]; });
+      cur.sel = Math.max(0, indexOfId(th.dataset.id));
+      changed(true);
+    }
+    function cancel() {
+      unlisten();
+      var was = dragging;
+      start = null; dragging = false; th.classList.remove('is-drag');
+      if (was) renderThumbs();
+    }
+  }
+
+  function selectSlide(i) {
+    var n = cur.deck.slides.length;
+    cur.sel = n ? Math.max(0, Math.min(n - 1, i)) : 0;
+    Array.prototype.forEach.call($('dkThumbs').children, function (t, k) {
+      t.classList.toggle('is-sel', k === cur.sel);
+      t.setAttribute('aria-selected', k === cur.sel ? 'true' : 'false');
+    });
+    renderStage();
+    renderPanel();
+  }
+
+  /* The centre preview. A Live tool slide waits for typing to pause, so
+     the iframe is not reloaded on every keystroke. */
+  var stageTimer = null;
+  function renderStage(fromTyping) {
+    clearTimeout(stageTimer);
+    var s = cur.deck.slides[cur.sel];
+    if (fromTyping && s && s.type === 'tool') { stageTimer = setTimeout(function () { renderStage(false); }, 700); return; }
+    var stage = $('dkStage');
+    stage.innerHTML = '';
+    if (!s) {
+      var es = el('div', 'empty-state dk-stage__empty');
+      es.appendChild(el('div', 'empty-state__title', 'No slides.'));
+      var b = el('button', 'btn btn--primary', 'Add slide'); b.type = 'button';
+      b.addEventListener('click', openPicker);
+      es.appendChild(b);
+      stage.appendChild(es);
+      stage.style.width = '';
+      stage.style.boxShadow = 'none';
+      return;
+    }
+    stage.style.boxShadow = '';
+    stage.appendChild(renderSlide(s, ctxFor(cur.sel, true, true)));
+    sizeStage();
+  }
+  function sizeStage() {
+    var wrap = $('dkStageWrap'), stage = $('dkStage');
+    if (!wrap || !stage.firstChild || !stage.firstChild.classList || !stage.firstChild.classList.contains('dk-slide')) return;
+    var cs = getComputedStyle(wrap);
+    var w = wrap.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    var h = wrap.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+    var narrow = window.matchMedia('(max-width: 1000px)').matches;
+    var width = narrow ? w : Math.min(w, h * 16 / 9);
+    stage.style.width = Math.max(200, Math.floor(width)) + 'px';
+  }
+  function refreshThumb(i) {
+    var t = $('dkThumbs').children[i];
+    if (!t) return;
+    var fr = t.querySelector('.dk-thumb__frame');
+    fr.innerHTML = '';
+    fr.appendChild(renderSlide(cur.deck.slides[i], ctxFor(i, true, false)));
+  }
+
+  /* ── Fields panel ──────────────────────────────────────────────────── */
+  function renderPanel() {
+    var panel = $('dkPanel');
+    panel.innerHTML = '';
+    var s = cur.deck.slides[cur.sel];
+    if (!s) return;
+    var def = TYPES[s.type];
+    var head = el('div', 'section-head');
+    head.appendChild(el('h2', '', def.label));
+    panel.appendChild(head);
+
+    def.fields.forEach(function (fd) {
+      if (fd.kind === 'text') panel.appendChild(textField(s, fd.k, fd.label + (fd.optional ? ' (optional)' : ''), fd.max, fd.area));
+      else if (fd.kind === 'image') panel.appendChild(imageField(s, fd.k, fd.label));
+      else if (fd.kind === 'path') panel.appendChild(pathField(s, fd));
+      else if (fd.kind === 'group') groupFields(panel, s, fd);
+      else if (fd.kind === 'numbers') numberFields(panel, s, fd);
+    });
+
+    panel.appendChild(el('hr', 'dk-divider'));
+    var ng = el('div', 'form-group dk-field');
+    var nid = 'dkNotes';
+    var nl = el('label', '', 'Speaker notes'); nl.htmlFor = nid;
+    var nt = el('textarea', 'dk-notes'); nt.id = nid;
+    nt.value = str(s.notes);
+    nt.addEventListener('input', function () { s.notes = nt.value; scheduleSave(); });
+    ng.appendChild(nl); ng.appendChild(nt);
+    panel.appendChild(ng);
+  }
+
+  var fieldSeq = 0;
+  function textField(s, k, label, max, area) {
+    var g = el('div', 'form-group dk-field');
+    var id = 'dkF' + (++fieldSeq);
+    var l = el('label', '', label); l.htmlFor = id;
+    var inp = el(area ? 'textarea' : 'input');
+    if (!area) inp.type = 'text';
+    if (area) inp.rows = 2;
+    inp.id = id;
+    inp.maxLength = max;
+    inp.autocomplete = 'off';
+    inp.value = str((s.fields || {})[k]);
+    var cnt = el('div', 'char-count');
+    function count() {
+      var n = inp.value.length;
+      cnt.textContent = n + '/' + max;
+      cnt.classList.toggle('dk-count-over', n >= max);
+    }
+    count();
+    /* Slide text is one line that wraps on the slide; Enter does nothing. */
+    inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') e.preventDefault(); });
+    inp.addEventListener('input', function () {
+      if (/\n/.test(inp.value)) inp.value = inp.value.replace(/\s*\n\s*/g, ' ');
+      if (inp.value.length > max) inp.value = inp.value.slice(0, max);
+      s.fields = s.fields || {};
+      s.fields[k] = inp.value;
+      count();
+      edited();
+    });
+    g.appendChild(l); g.appendChild(inp); g.appendChild(cnt);
+    return g;
+  }
+
+  /* Points: show the filled ones plus one empty, up to the type's limit. */
+  function groupFields(panel, s, fd) {
+    var f = s.fields || {};
+    var filled = 0;
+    for (var i = 1; i <= fd.count; i++) if (clean(f[fd.prefix + i])) filled = i;
+    var show = Math.min(fd.count, Math.max(fd.min || 1, filled + 1));
+    var wrap = el('div');
+    function add(i) {
+      var g = textField(s, fd.prefix + i, fd.label + ' ' + i, fd.max, false);
+      var inp = g.querySelector('input');
+      inp.addEventListener('input', function () {
+        if (i === wrap.children.length && i < fd.count && inp.value.trim()) add(i + 1);
+      });
+      wrap.appendChild(g);
+    }
+    for (var k = 1; k <= show; k++) add(k);
+    panel.appendChild(wrap);
+  }
+
+  function numberFields(panel, s, fd) {
+    var f = s.fields || {};
+    var filled = 0;
+    for (var i = 1; i <= fd.count; i++) if (clean(f['n' + i]) || clean(f['l' + i])) filled = i;
+    var show = Math.min(fd.count, Math.max(fd.min, filled + 1));
+    var wrap = el('div');
+    function add(i) {
+      var row = el('div', 'form-grid');
+      var a = textField(s, 'n' + i, 'Figure ' + i, 10, false);
+      var b = textField(s, 'l' + i, 'Label ' + i, 40, false);
+      row.appendChild(a); row.appendChild(b);
+      [a, b].forEach(function (g) {
+        g.querySelector('input').addEventListener('input', function () {
+          if (i === wrap.children.length && i < fd.count && (clean(s.fields['n' + i]) || clean(s.fields['l' + i]))) add(i + 1);
+        });
+      });
+      wrap.appendChild(row);
+    }
+    for (var k = 1; k <= show; k++) add(k);
+    panel.appendChild(wrap);
+  }
+
+  function pathField(s, fd) {
+    var g = textField(s, fd.k, fd.label, fd.max, false);
+    var inp = g.querySelector('input');
+    inp.placeholder = '/fixtures/admin/';
+    inp.spellcheck = false;
+    var hint = el('div', 'form-hint dk-hint-err');
+    function check() {
+      var v = inp.value.trim();
+      hint.textContent = v && !safePath(v) ? 'An nl.tools path starting with /, not this tool.' : '';
+    }
+    inp.addEventListener('input', check);
+    check();
+    g.appendChild(hint);
+    return g;
+  }
+
+  function imageField(s, k, label) {
+    var g = el('div', 'form-group dk-field');
+    g.appendChild(el('label', '', label));
+    var row = el('div', 'dk-img');
+    var prev = el('div', 'dk-img__prev');
+    var acts = el('div', 'dk-img__acts');
+    var file = el('input'); file.type = 'file'; file.accept = 'image/png,image/jpeg,image/webp,image/gif'; file.hidden = true;
+    var up = el('button', 'btn btn--navy btn--sm', 'Upload'); up.type = 'button';
+    var url = el('button', 'btn btn--ghost btn--sm', 'URL'); url.type = 'button';
+    var rm = el('button', 'btn btn--ghost btn--sm', 'Remove'); rm.type = 'button';
+
+    function paint() {
+      prev.innerHTML = '';
+      var src = safeImg((s.fields || {})[k]);
+      if (src) {
+        var im = el('img'); im.alt = ''; im.src = src;
+        im.onerror = function () { this.onerror = null; this.remove(); };
+        prev.appendChild(im);
+      } else {
+        prev.appendChild(NL.icon('image'));
+      }
+      rm.hidden = !src;
+    }
+    function set(v) {
+      s.fields = s.fields || {};
+      s.fields[k] = v;
+      paint();
+      edited();
+    }
+    up.addEventListener('click', function () { file.click(); });
+    file.addEventListener('change', function () {
+      var fl = file.files && file.files[0];
+      file.value = '';
+      if (!fl) return;
+      up.disabled = true; up.textContent = 'Uploading…';
+      uploadImage(fl).then(function (u) { set(u); })
+        .catch(function (e) { NL.toast(e.message || String(e), 'error'); })
+        .then(function () { up.disabled = false; up.textContent = 'Upload'; });
+    });
+    url.addEventListener('click', function () {
+      NL.prompt('', { title: 'Image URL', placeholder: 'https://', default: safeImg((s.fields || {})[k]), confirmText: 'Use' }).then(function (v) {
+        if (v == null) return;
+        v = v.trim();
+        if (!v) return;
+        if (!safeImg(v)) { NL.toast('Use an https:// image address.', 'error'); return; }
+        set(v);
+      });
+    });
+    rm.addEventListener('click', function () { set(''); });
+    paint();
+    acts.appendChild(up); acts.appendChild(url); acts.appendChild(rm);
+    row.appendChild(prev); row.appendChild(acts);
+    g.appendChild(row); g.appendChild(file);
+    return g;
+  }
+
+  /* ── Images ────────────────────────────────────────────────────────── */
+  /* Re-encoded in the browser before upload: long edge to MAX_EDGE, EXIF
+     orientation applied, and the metadata (GPS included) dropped with it.
+     WebP where the browser can write it, else JPEG, or PNG to keep alpha.
+     Canon candidate (10/11/2026): NL.files.previews already decodes and
+     encodes like this for its fixed tiers but keeps the encoder private;
+     a second caller wanting an arbitrary edge is the case for exposing it. */
+  var ALLOWED = { 'image/png': 1, 'image/jpeg': 1, 'image/webp': 1, 'image/gif': 1 };
+  var webpOk = null;
+  function canWebp() {
+    if (webpOk == null) {
+      try { var c = document.createElement('canvas'); c.width = c.height = 1; webpOk = c.toDataURL('image/webp').indexOf('data:image/webp') === 0; }
+      catch (e) { webpOk = false; }
+    }
+    return webpOk;
+  }
+  function decode(blob) {
+    if (typeof createImageBitmap === 'function') {
+      return createImageBitmap(blob, { imageOrientation: 'from-image' })
+        .catch(function () { return createImageBitmap(blob); })
+        .catch(function () { return decodeViaImg(blob); });
+    }
+    return decodeViaImg(blob);
+  }
+  function decodeViaImg(blob) {
+    return new Promise(function (resolve, reject) {
+      var u = URL.createObjectURL(blob);
+      var img = new Image();
+      img.onload = function () { URL.revokeObjectURL(u); resolve(img); };
+      img.onerror = function () { URL.revokeObjectURL(u); reject(new Error('That image couldn’t be read.')); };
+      img.src = u;
+    });
+  }
+  function downscale(file) {
+    return decode(file).then(function (src) {
+      var w = src.width || src.naturalWidth, h = src.height || src.naturalHeight;
+      var dims = NL.files.previews.fitWithin(w, h, MAX_EDGE);
+      var canvas = document.createElement('canvas');
+      canvas.width = dims.w; canvas.height = dims.h;
+      var ctx = canvas.getContext('2d');
+      var type = canWebp() ? 'image/webp' : (file.type === 'image/jpeg' ? 'image/jpeg' : 'image/png');
+      if (type === 'image/jpeg') { ctx.fillStyle = 'white'; ctx.fillRect(0, 0, dims.w, dims.h); }
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(src, 0, 0, dims.w, dims.h);
+      if (src.close) { try { src.close(); } catch (e) {} }
+      return new Promise(function (resolve, reject) {
+        canvas.toBlob(function (b) { b ? resolve(b) : reject(new Error('That image couldn’t be resized.')); }, type, 0.85);
+      });
+    });
+  }
+  function uploadImage(file) {
+    if (!ALLOWED[file.type]) return Promise.reject(new Error('Use a PNG, JPEG, WebP or GIF.'));
+    var deckId = cur.id;
+    return downscale(file).then(function (blob) {
+      if (blob.size > MAX_UPLOAD) throw new Error('That image is too large, even resized.');
+      var ext = { 'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/png': 'png' }[blob.type] || 'img';
+      var ref = firebase.storage().ref('decks/' + deckId + '/' + rid() + '.' + ext);
+      return NL.ensureAuth()
+        .then(function () { return ref.put(blob, { contentType: blob.type, cacheControl: 'private, max-age=31536000' }); })
+        .then(function () { return ref.getDownloadURL(); });
+    });
+  }
+
+  /* ── Slide operations ──────────────────────────────────────────────── */
+  function openPicker() {
+    var grid = el('div', 'dk-pick');
+    var modal;
+    TYPE_ORDER.forEach(function (type) {
+      var b = el('button', 'dk-pick__opt'); b.type = 'button';
+      var sample = { id: 'sample', type: type, fields: SAMPLES[type] };
+      var secs = type === 'section' ? [{ i: 0, name: SAMPLES.section.name }] : [{ i: 0, name: 'Matchday' }, { i: 9, name: 'Digital' }];
+      b.appendChild(renderSlide(sample, { index: 0, total: 1, sections: secs, ghost: true, live: false }));
+      b.appendChild(el('span', 'dk-pick__name', TYPES[type].label));
+      b.addEventListener('click', function () { modal.close(); addSlide(type); });
+      grid.appendChild(b);
+    });
+    modal = NL.modal({ title: 'Add slide', width: 'wide', body: grid });
+  }
+
+  function addSlide(type) {
+    var at = cur.deck.slides.length ? cur.sel + 1 : 0;
+    cur.deck.slides.splice(at, 0, { id: rid(), type: type, fields: {}, notes: '' });
+    cur.sel = at;
+    changed(true);
+    var first = $('dkPanel').querySelector('input[type="text"], textarea');
+    if (first) first.focus();
+    focusThumbQuiet(at);
+  }
+  function focusThumbQuiet(i) {
+    var t = $('dkThumbs').children[i];
+    if (t) t.scrollIntoView({ block: 'nearest' });
+  }
+
+  function duplicateSlide(i) {
+    var s = cur.deck.slides[i];
+    cur.deck.slides.splice(i + 1, 0, { id: rid(), type: s.type, fields: Object.assign({}, s.fields), notes: s.notes });
+    cur.sel = i + 1;
+    changed(true);
+    focusThumbQuiet(i + 1);
+  }
+
+  function hasContent(s) {
+    return Object.keys(s.fields || {}).some(function (k) { return clean(s.fields[k]); }) || !!clean(s.notes);
+  }
+  function deleteSlide(i) {
+    var s = cur.deck.slides[i];
+    var go = hasContent(s)
+      ? NL.confirm('Delete slide ' + (i + 1) + '?', { title: 'Delete slide', confirmText: 'Delete', variant: 'danger' })
+      : Promise.resolve(true);
+    go.then(function (ok) {
+      if (!ok) return;
+      cur.deck.slides.splice(i, 1);
+      cur.sel = Math.min(i, cur.deck.slides.length - 1);
+      changed(true);
+    });
+  }
+
+  /* A structural change (add, move, delete) redraws everything; typing
+     in a field redraws only the preview and that slide's thumbnail —
+     plus every thumbnail when a section name changes, since the rail on
+     every slide shows it. */
+  function changed(structural) {
+    if (structural) { renderThumbs(); selectSlide(cur.sel); }
+    scheduleSave();
+  }
+  function edited() {
+    var s = cur.deck.slides[cur.sel];
+    renderStage(true);
+    if (s && s.type === 'section') cur.deck.slides.forEach(function (x, i) { refreshThumb(i); });
+    else refreshThumb(cur.sel);
+    scheduleSave();
+  }
+
+  /* ── Autosave ──────────────────────────────────────────────────────── */
+  function setSave(state) {
+    var e = $('dkSave');
+    e.classList.toggle('dk-save--err', state === 'error');
+    e.textContent = { '': '', pending: 'Saving…', saving: 'Saving…', saved: 'Saved', error: 'Not saved' }[state] || '';
+  }
+  function scheduleSave() {
+    if (!cur) return;
+    pendingSave = true;
+    setSave('pending');
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveNow, SAVE_DELAY);
+  }
+  function saveNow() {
+    if (!cur || !pendingSave) return Promise.resolve();
+    if (saving) { clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 400); return Promise.resolve(); }
+    saving = true;
+    pendingSave = false;
+    setSave('saving');
+    var id = cur.id;
+    var title = clean($('dkTitle').value).slice(0, DECK_TITLE_MAX) || cur.deck.title;
+    cur.deck.title = title;
+    return deckRef(id).update({ title: title, slides: forSave(cur.deck.slides), updatedAt: TS(), updatedBy: uid })
+      .then(function () {
+        saving = false;
+        if (decks[id]) { decks[id].title = title; decks[id].slides = cur.deck.slides.slice(); decks[id].updatedAt = Date.now(); }
+        if (cur && cur.id === id && !pendingSave) setSave('saved');
+      })
+      .catch(function (e) {
+        saving = false;
+        pendingSave = true;
+        setSave('error');
+        NL.toast('Couldn’t save: ' + (e.message || e), 'error');
+      });
+  }
+  window.addEventListener('beforeunload', function (e) {
+    if (pendingSave || saving) { e.preventDefault(); e.returnValue = ''; }
+  });
+
+  /* ── Present ───────────────────────────────────────────────────────── */
+  var presenter = null;
+
+  function present(from) {
+    if (!cur || !cur.deck.slides.length) return;
+    saveNow();
+    var slides = cur.deck.slides;
+    var secs = sectionsOf(slides);
+    var i = Math.max(0, Math.min(slides.length - 1, from || 0));
+    var showNotes = false;
+    var idleTimer = null, flashTimer = null;
+
+    /* Whatever had focus (the Present button) must not catch Space or
+       Enter meant for the next slide. */
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    var ov = el('div', 'dk-present');
+    ov.tabIndex = -1;
+    ov.setAttribute('role', 'dialog');
+    ov.setAttribute('aria-label', 'Presenting ' + cur.deck.title);
+    var stage = el('div', 'dk-present__stage');
+    var box = el('div');
+    stage.appendChild(box);
+    var notes = el('div', 'dk-present__notes'); notes.hidden = true;
+    var ctr = el('span', 'dk-present__ctr');
+    var ntext = el('div');
+    notes.appendChild(ctr); notes.appendChild(ntext);
+    var flash = el('div', 'dk-present__flash');
+    ov.appendChild(stage); ov.appendChild(notes); ov.appendChild(flash);
+    document.body.appendChild(ov);
+
+    function size() {
+      var w = stage.clientWidth, h = stage.clientHeight;
+      box.style.width = Math.floor(Math.min(w, h * 16 / 9)) + 'px';
+    }
+    function show() {
+      box.innerHTML = '';
+      box.appendChild(renderSlide(slides[i], { index: i, total: slides.length, sections: secs, ghost: false, live: true }));
+      ctr.textContent = (i + 1) + ' / ' + slides.length;
+      ntext.textContent = str(slides[i].notes).trim() || '–';
+      flash.textContent = ctr.textContent;
+      flash.classList.add('is-on');
+      clearTimeout(flashTimer);
+      flashTimer = setTimeout(function () { flash.classList.remove('is-on'); }, 1200);
+    }
+    function go(d) { var j = Math.max(0, Math.min(slides.length - 1, i + d)); if (j !== i) { i = j; show(); } }
+    function toggleNotes() { showNotes = !showNotes; notes.hidden = !showNotes; size(); }
+
+    function key(e) {
+      var k = e.key;
+      if (k === 'ArrowRight' || k === 'ArrowDown' || k === 'PageDown' || k === ' ' || k === 'Enter') { e.preventDefault(); go(1); }
+      else if (k === 'ArrowLeft' || k === 'ArrowUp' || k === 'PageUp' || k === 'Backspace') { e.preventDefault(); go(-1); }
+      else if (k === 'Home') { e.preventDefault(); i = 0; show(); }
+      else if (k === 'End') { e.preventDefault(); i = slides.length - 1; show(); }
+      else if (k === 'Escape') { e.preventDefault(); close(); }
+      else if (k === 'n' || k === 'N') { e.preventDefault(); toggleNotes(); }
+    }
+    function onKey(e) { if (!e.ctrlKey && !e.metaKey && !e.altKey) key(e); }
+    function onClick(e) {
+      if (e.target.closest('a, button, iframe, .dk-present__notes')) return;
+      go(1);
+    }
+    function onMove() {
+      ov.classList.remove('is-idle');
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(function () { ov.classList.add('is-idle'); }, 2000);
+    }
+    function onFs() { if (!document.fullscreenElement && presenter && presenter.fs) close(); }
+    function close() {
+      if (!presenter) return;
+      var wasFs = presenter.fs;
+      presenter = null;
+      document.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('fullscreenchange', onFs);
+      window.removeEventListener('resize', size);
+      clearTimeout(idleTimer); clearTimeout(flashTimer);
+      if (wasFs && document.fullscreenElement && document.exitFullscreen) { try { document.exitFullscreen(); } catch (e) {} }
+      ov.remove();
+      if (cur) selectSlide(i);
+    }
+
+    presenter = { key: key, fs: false, close: close };
+    document.addEventListener('keydown', onKey, true);
+    document.addEventListener('fullscreenchange', onFs);
+    window.addEventListener('resize', size);
+    ov.addEventListener('click', onClick);
+    ov.addEventListener('mousemove', onMove);
+
+    /* Fullscreen where the browser allows it; otherwise the overlay
+       already covers the window. */
+    if (ov.requestFullscreen) {
+      ov.requestFullscreen().then(function () { if (presenter) presenter.fs = true; size(); }).catch(function () {});
+    }
+    ov.focus();
+    size();
+    show();
+    onMove();
+    NL.track && NL.track('deck_present', { slides: slides.length });
+  }
+
+  /* ── Views and routing ─────────────────────────────────────────────── */
+  function showView(v) {
+    $('dkListView').hidden = v !== 'list';
+    $('dkEditView').hidden = v !== 'edit';
+    if (v === 'edit') {
+      var tb = $('nlTopbar');
+      document.documentElement.style.setProperty('--dk-top', (tb ? tb.offsetHeight : 64) + 'px');
+    }
+  }
+  function route() {
+    var id = decodeURIComponent(location.hash.replace(/^#/, ''));
+    if (presenter) presenter.close();
+    var leaving = cur && cur.id !== id ? saveNow() : Promise.resolve();
+    leaving.then(function () {
+      if (id && /^[A-Za-z0-9_-]{1,40}$/.test(id)) {
+        if (!cur || cur.id !== id) openDeck(id);
+      } else {
+        cur = null;
+        showView('list');
+        loadList();
+      }
+    });
+  }
+
+  function wire() {
+    $('dkNew').addEventListener('click', newDeck);
+    $('dkBack').addEventListener('click', function () { location.hash = ''; });
+    $('dkAdd').addEventListener('click', openPicker);
+    $('dkPresent').addEventListener('click', function () { present(0); });
+    $('dkPresentHere').addEventListener('click', function () { present(cur ? cur.sel : 0); });
+    var title = $('dkTitle');
+    title.addEventListener('input', function () { if (clean(title.value)) scheduleSave(); });
+    title.addEventListener('blur', function () { if (!clean(title.value) && cur) title.value = cur.deck.title; });
+    title.addEventListener('keydown', function (e) { if (e.key === 'Enter') title.blur(); });
+    window.addEventListener('hashchange', route);
+    if (window.ResizeObserver) new ResizeObserver(sizeStage).observe($('dkStageWrap'));
+    else window.addEventListener('resize', sizeStage);
+    window.addEventListener('resize', function () { if (cur) showView('edit'); });
+  }
+
+  /* Public boot entry point — called by nlAuthReady once the session is
+     verified. Don't read RTDB before this fires. */
+  window.TOOL = window.TOOL || {};
+  var booted = false;
+  window.TOOL.boot = function () {
+    if (booted) return;
+    booted = true;
+    NL.ensureAuth().then(function (user) {
+      uid = user.uid;
+      wire();
+      route();
+    }).catch(function () { NL.toast('Sign in again to use Decks.', 'error'); });
+  };
+
+  /* If auth-guard fired before this script loaded, replay the session. */
+  if (window._toolDeferredSession) {
+    window.TOOL.boot(window._toolDeferredSession);
+    delete window._toolDeferredSession;
+  }
+})();
+</script>
+
+</body>
+</html>

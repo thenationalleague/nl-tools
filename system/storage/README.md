@@ -38,6 +38,7 @@ deleting the other two was tidying up after it.
 | `data/` | the Timer · Website article stats Action, through a service account | website-archive (`articles-index.json`) |
 | `programme/<CODE>/` | clubs and NL admins, through the tool | the same tool, across all 73 folders |
 | `newsletter/library/` | staff, through the newsletter tool | the same tool |
+| `decks/<deckId>/` | staff, through Decks (images downscaled before upload) | the same tool |
 | `footage/national-league-cup/` | nothing — the tool was retired 15/08/2026 | nothing |
 
 `footage/` still costs money and still has a rules block, deliberately: deleting
