@@ -155,6 +155,23 @@ test('position is said against the median, never as a rank', () => {
   assert.equal(D.percent(23.44), '23.4%');
 });
 
+test('abbreviated names match, and a name that could be two clubs matches neither', () => {
+  const r = D.resolver([
+    { name: 'Eta United', short: 'Eta', code: 'ETA', division: 'South' },
+    { name: 'Theta Town', short: 'Theta', code: 'THE', division: 'South' },
+    { name: 'Iota City', short: 'Iota C', code: 'IOC', division: 'North' },
+    { name: 'Iota United', short: 'Iota U', code: 'IOU', division: 'North' },
+  ]);
+  assert.equal(r('Eta Utd').code, 'ETA');
+  assert.equal(D.normName("Kappa's Lynn"), D.normName('Kappas Lynn'), 'an apostrophe is not a space');
+  assert.equal(r('ETA UTD.').code, 'ETA');
+  assert.equal(r('Theta').code, 'THE');
+  assert.equal(r('Theta United').code, 'THE', 'the wrong last word still means the only Theta');
+  assert.equal(r('Iota Utd').code, 'IOU', 'an exact name wins over a shared stem');
+  assert.equal(r('Iota'), null, 'two clubs called Iota: ask, do not guess');
+  assert.equal(r('Iota Town'), null);
+});
+
 /* ---- Rules and registry ---------------------------------------------------- */
 
 const rules = JSON.parse(readFileSync(join(REPO, 'system/rtdb/rules.snapshot.json'), 'utf8')).rules;
