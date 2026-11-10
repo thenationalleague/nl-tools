@@ -1,9 +1,13 @@
 /* =============================================================================
    NL Tools — Financial Benchmarking: data layer
    File: /financial-benchmarking/_data.js
-   Version: v0.2 (10/11/2026)
+   Version: v0.3 (10/11/2026)
 
    CHANGELOG
+     v0.3 (10/11/2026) — North and South gain the budgeted squad cost ratio
+       (playing squad budget as % of income budget), beside the ratio to
+       date. Each set says how the club view lays its figures out (`lead`,
+       `panels`); budgets carry a size rank (rankOf, ordinal).
      v0.2 (10/11/2026) — Club names as the returns sheet writes them are
        recognised: "Utd" and the like are read in full, and a name that
        differs only in its last word ("Town", "United") matches when it can
@@ -73,7 +77,7 @@
       ],
       groups: [
         { title: 'Revenue', metrics: [
-          { key: 'incomeBudget', label: 'Income budget', kind: 'money' },
+          { key: 'incomeBudget', label: 'Income budget', kind: 'money', rank: true },
           { key: 'matchRevenue', label: 'Match revenue', kind: 'money' },
           { key: 'commercial',   label: 'Commercial and sponsorship', kind: 'money' },
           { key: 'nonMatchday',  label: 'Non-matchday', kind: 'money' },
@@ -104,16 +108,39 @@
         { key: 'squadBudget',  match: /^playingsquadbudget/ },
         { key: 'playerSpend',  match: /^fqr\d?playerspend/ }
       ],
+      /* HOW THE CLUB VIEW WEIGHTS THESE (settled 10/11/2026).
+         The figure that says most about a club's finances is what it spends
+         on players for every pound it takes in, so that leads: the ratio it
+         budgeted for the season, beside the ratio so far. A budget is size,
+         and a percentage of budget used is pace; both are context for the
+         ratio, and each budget is shown with its own progress beside it
+         rather than as separate, equally loud figures. */
+      lead: {
+        title: 'Playing squad cost against income',
+        metrics: [
+          { key: 'budgetRatio',   label: 'Budgeted for the season' },
+          { key: 'spendOfIncome', label: '{Q} to date' }
+        ]
+      },
+      panels: [
+        { title: 'Income', budget: 'incomeBudget', actual: 'fqrIncome', pct: 'incomePct',
+          actualLabel: 'received', pctLabel: '{Q} income as % of budget' },
+        { title: 'Playing squad', budget: 'squadBudget', actual: 'playerSpend', pct: 'spendPct',
+          actualLabel: 'spent', pctLabel: '{Q} player spend as % of budget' }
+      ],
       groups: [
         { title: 'Income', metrics: [
-          { key: 'incomeBudget', label: 'Income budget', kind: 'money' },
+          { key: 'incomeBudget', label: 'Income budget', kind: 'money', rank: true },
           { key: 'fqrIncome',    label: '{Q} income', kind: 'money' },
           { key: 'incomePct',    label: '{Q} income as % of budget', kind: 'pct' }
         ] },
         { title: 'Playing squad', metrics: [
-          { key: 'squadBudget',   label: 'Playing squad budget', kind: 'money' },
+          { key: 'squadBudget',   label: 'Playing squad budget', kind: 'money', rank: true },
           { key: 'playerSpend',   label: '{Q} player spend', kind: 'money' },
-          { key: 'spendPct',      label: '{Q} player spend as % of budget', kind: 'pct' },
+          { key: 'spendPct',      label: '{Q} player spend as % of budget', kind: 'pct' }
+        ] },
+        { title: 'Squad cost against income', metrics: [
+          { key: 'budgetRatio',   label: 'Squad budget as % of income budget', kind: 'pct' },
           { key: 'spendOfIncome', label: '{Q} player spend as % of income', kind: 'pct' }
         ] }
       ],
@@ -121,6 +148,7 @@
         return {
           incomePct: pct(v.fqrIncome, v.incomeBudget),
           spendPct: pct(v.playerSpend, v.squadBudget),
+          budgetRatio: pct(v.squadBudget, v.incomeBudget),
           spendOfIncome: pct(v.playerSpend, v.fqrIncome)
         };
       }
@@ -330,6 +358,23 @@
     return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
   }
 
+  /* Where a budget sits by size: 1st is the largest. Clubs on the same
+     figure share a place. Used for budgets only — a rank on a percentage
+     would read as a table to climb, and the top of "share of budget spent"
+     is not a place to aim for. */
+  function rankOf(values, own) {
+    var a = list(values);
+    if (own == null || !a.length) return null;
+    var above = 0;
+    a.forEach(function (v) { if (v > own) above++; });
+    return { rank: above + 1, of: a.length };
+  }
+  function ordinal(n) {
+    var t = n % 100;
+    if (t >= 11 && t <= 13) return n + 'th';
+    return n + (['th', 'st', 'nd', 'rd'][n % 10] || 'th');
+  }
+
   function money(n) {
     if (n == null) return '';
     var r = Math.round(Math.abs(n));
@@ -372,6 +417,8 @@
     combine: combine,
     list: list,
     median: median,
+    rankOf: rankOf,
+    ordinal: ordinal,
     money: money,
     percent: percent,
     format: format,

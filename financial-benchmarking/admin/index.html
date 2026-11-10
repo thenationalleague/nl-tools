@@ -1,10 +1,16 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Financial Benchmarking (staff page)
-  Version: v0.2 (10/11/2026)
+  Version: v0.4 (10/11/2026)
   File: /financial-benchmarking/admin/index.html
 
   CHANGELOG
+    v0.4 (10/11/2026) — The club view is weighted (_view.js v0.2): squad cost
+      against income leads, then each budget with its progress. Opening a
+      return refreshes the stored comparison lists if they are behind.
+    v0.3 (10/11/2026) — Figures opens on a ranked chart: one figure at a
+      time, every club in the division by name, high to low, median marked.
+      The table stays below it.
     v0.2 (10/11/2026) — Picks up _data.js v0.2: club names as the returns
       sheet writes them ("Utd") are recognised on import.
     v0.1 (10/11/2026) — First build. Every club's figures by name, one club
@@ -76,6 +82,21 @@
     window.NL_CHANGELOG = [
       {
         date: '10/11/2026',
+        version: 'v0.4',
+        items: [
+          'Club view: squad cost against income leads, then Income and Playing squad, each budget with its progress.',
+          'Budgets show their place by size. Position can be shown as bars or a slider.'
+        ]
+      },
+      {
+        date: '10/11/2026',
+        version: 'v0.3',
+        items: [
+          'Figures shows a ranked chart of every club for the figure you pick, with the median marked.'
+        ]
+      },
+      {
+        date: '10/11/2026',
         version: 'v0.2',
         items: [
           'Import recognises club names as the returns sheet writes them, such as “Utd”.'
@@ -110,9 +131,9 @@
   <script src="/system/nl-topbar.js?v=10"></script>
   <script src="/system/auth-guard.js?v=17"></script>
 
-  <link rel="stylesheet" href="/financial-benchmarking/_view.css?v=1">
-  <script src="/financial-benchmarking/_data.js?v=2"></script>
-  <script src="/financial-benchmarking/_view.js?v=1"></script>
+  <link rel="stylesheet" href="/financial-benchmarking/_view.css?v=2">
+  <script src="/financial-benchmarking/_data.js?v=3"></script>
+  <script src="/financial-benchmarking/_view.js?v=2"></script>
 
 <style>
   /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
@@ -127,6 +148,25 @@
   #fbaTable tbody tr { cursor: pointer; }
   #fbaTable td.ta-right { font-variant-numeric: tabular-nums; white-space: nowrap; }
   #fbaTable td:first-child { white-space: nowrap; }
+  /* The ranked chart: one row per club, named, high to low. Local: canon has
+     no ranked-bar component. Bars are var(--navy); nothing is coloured good
+     or bad. */
+  .fba-rank { margin-bottom: 28px; padding: 16px 18px; background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+  .fba-rank .fb-range { margin: 0 0 14px; max-width: 520px; }
+  .fba-rank__row { display: grid; grid-template-columns: 200px minmax(0, 1fr) 110px; align-items: center; gap: 12px; width: 100%; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+  .fba-rank__row:hover .fba-rank__name { color: var(--primary); }
+  .fba-rank__row:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .fba-rank__name { font-size: var(--text-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fba-rank__track { position: relative; height: 26px; }
+  .fba-rank__track > i { position: absolute; top: 4px; bottom: 4px; background: var(--navy); border-radius: 2px; }
+  .fba-rank__med, .fba-rank__zero { position: absolute; top: 0; bottom: 0; width: 0; }
+  .fba-rank__med { border-left: 1px dashed var(--primary); }
+  .fba-rank__zero { border-left: 1px solid var(--navy-300); }
+  .fba-rank__val { font-size: var(--text-sm); font-weight: 700; font-variation-settings: 'wght' 700; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .fba-rank__val.is-none { font-weight: 400; font-variation-settings: 'wght' 400; color: var(--text-muted); }
+  @media (max-width: 720px) {
+    .fba-rank__row { grid-template-columns: 110px minmax(0, 1fr) 84px; gap: 8px; }
+  }
   .fba-clubhead { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
   .fba-clubhead h2 { margin: 0; font-size: var(--text-md); color: var(--navy); }
   .fba-import textarea { min-height: 180px; font-family: var(--font-mono); font-size: var(--text-xs); }
@@ -157,11 +197,13 @@
           <span class="filter-label">Return</span>
           <select class="nl-select" id="fbaReturn" aria-label="Return"></select>
           <div id="fbaDivs"></div>
+          <div id="fbaMetric"></div>
         </div>
         <div class="toolbar__right">
           <button class="btn btn--ghost btn--sm" id="fbaCsv" type="button">Download CSV</button>
         </div>
       </div>
+      <div id="fbaRank"></div>
       <div id="fbaBody"></div>
       <div id="fbaClub" hidden>
         <div class="fba-clubhead">
@@ -215,7 +257,7 @@
   var S = {
     canWrite: false, meta: null, clubs: [], resolve: null,
     index: {}, returns: [], current: null, data: null,
-    div: 'National', sort: { key: 'name', dir: 1 }, open: null,
+    div: 'National', metric: null, sort: { key: 'name', dir: 1 }, open: null,
     impQuarter: 'q1', pending: null
   };
 
@@ -259,6 +301,7 @@
       if (!S.returns.length) {
         S.current = null; S.data = null;
         closeClub();
+        $('fbaRank').innerHTML = '';
         note(S.canWrite ? 'No returns imported yet' : 'No figures yet');
         return;
       }
@@ -277,12 +320,34 @@
     return db.ref(BASE + '/returns/' + id).once('value').then(function (snap) {
       S.data = snap.val() || {};
       S.data.clubs = S.data.clubs || {};
+      /* The comparison lists are rebuilt from the rows every time, so this
+         page never shows a stale one. If the stored copy — the one clubs
+         read — is behind (a figure added since the import), someone who may
+         write puts it right here, without a re-import. */
+      var fresh = D.benchAll(S.data.clubs);
+      var behind = JSON.stringify(fresh) !== JSON.stringify(benchOf(S.data.bench));
+      S.data.bench = fresh;
+      if (behind && S.canWrite && Object.keys(S.data.clubs).length) {
+        db.ref(BASE + '/returns/' + id + '/bench').set(fresh)['catch'](function (e) {
+          console.error('[financial-benchmarking] comparison lists not refreshed', e);
+        });
+      }
       var have = {};
       Object.keys(S.data.clubs).forEach(function (c) { have[S.data.clubs[c].div] = true; });
       if (!have[S.div]) S.div = DIVS.filter(function (d) { return have[d]; })[0] || 'National';
       S.sort = { key: 'name', dir: 1 };
       if (S.open && S.data.clubs[S.open]) openClub(S.open); else { closeClub(); draw(); }
     });
+  }
+
+  /* The stored lists in the shape benchAll makes them, for comparing. */
+  function benchOf(stored) {
+    var out = {};
+    Object.keys(stored || {}).forEach(function (d) {
+      out[d] = {};
+      Object.keys(stored[d] || {}).forEach(function (k) { out[d][k] = D.list(stored[d][k]); });
+    });
+    return out;
   }
 
   /* ---- The named table ------------------------------------------------ */
@@ -309,11 +374,12 @@
   function draw() {
     if (!S.data) return;
     S.divPick.set(S.div);
+    drawRank();
 
     var metrics = D.metricsOf(D.setFor(S.div));
     var q = D.quarterLabel(S.current.split('/')[1]);
     var rows = sorted(rowsFor(S.div));
-    if (!rows.length) { note('No ' + S.div + ' figures in this return'); return; }
+    if (!rows.length) { $('fbaRank').innerHTML = ''; note('No ' + S.div + ' figures in this return'); return; }
 
     var th = function (key, label, cls) {
       var on = S.sort.key === key;
@@ -331,6 +397,55 @@
           '</tr>';
         }).join('') +
       '</tbody></table></div>';
+  }
+
+  /* ---- The ranked chart ------------------------------------------------- */
+  /* One figure at a time, every club in the division by name, high to low,
+     with the median marked. This is the staff benchmark: the club view shows
+     the same bars without the names. */
+  function drawRank() {
+    var metrics = D.metricsOf(D.setFor(S.div));
+    var q = D.quarterLabel(S.current.split('/')[1]);
+    if (!metrics.some(function (m) { return m.key === S.metric; })) S.metric = metrics[0].key;
+    S.metricPick.setOptions(metrics.map(function (m) {
+      return { value: m.key, label: m.label.replace('{Q}', q) };
+    }));
+    S.metricPick.set(S.metric);
+
+    var m = metrics.filter(function (x) { return x.key === S.metric; })[0];
+    var rows = rowsFor(S.div).sort(function (a, b) {
+      var x = a.f[m.key], y = b.f[m.key];
+      if (x == null || y == null) return (x == null ? 1 : 0) - (y == null ? 1 : 0) || a.name.localeCompare(b.name);
+      return y - x || a.name.localeCompare(b.name);
+    });
+    var vals = rows.map(function (r) { return r.f[m.key]; }).filter(function (n) { return n != null; })
+      .sort(function (a, b) { return a - b; });
+    if (!vals.length) { $('fbaRank').innerHTML = ''; return; }
+
+    var lo = Math.min(0, vals[0]), hi = Math.max(0, vals[vals.length - 1]);
+    if (hi === lo) hi = lo + 1;
+    var span = hi - lo, med = D.median(vals);
+    var x = function (v) { return ((v - lo) / span * 100).toFixed(2); };
+    var marks = '<span class="fba-rank__med" style="left:' + x(med) + '%"></span>' +
+      (lo < 0 ? '<span class="fba-rank__zero" style="left:' + x(0) + '%"></span>' : '');
+
+    $('fbaRank').innerHTML = '<div class="fba-rank">' +
+      '<dl class="fb-range">' +
+        '<div><dt>Lowest</dt><dd>' + esc(D.format(m.kind, vals[0])) + '</dd></div>' +
+        '<div><dt>Median</dt><dd>' + esc(D.format(m.kind, med)) + '</dd></div>' +
+        '<div><dt>Highest</dt><dd>' + esc(D.format(m.kind, vals[vals.length - 1])) + '</dd></div>' +
+      '</dl>' +
+      rows.map(function (r) {
+        var v = r.f[m.key];
+        var bar = v == null ? '' : '<i style="left:' + x(Math.min(v, 0)) + '%;width:' +
+          Math.max(Math.abs(v) / span * 100, 0.4).toFixed(2) + '%"></i>';
+        return '<button type="button" class="fba-rank__row" data-code="' + esc(r.code) + '">' +
+          '<span class="fba-rank__name">' + esc(r.name) + '</span>' +
+          '<span class="fba-rank__track">' + bar + marks + '</span>' +
+          '<span class="fba-rank__val' + (v == null ? ' is-none' : '') + '">' +
+            esc(v == null ? 'No figure' : D.format(m.kind, v)) + '</span>' +
+        '</button>';
+      }).join('') + '</div>';
   }
 
   function sortBy(key) {
@@ -360,6 +475,8 @@
     if (!club) return;
     S.open = code;
     $('fbaBody').hidden = true;
+    $('fbaRank').hidden = true;
+    $('fbaMetric').hidden = true;
     $('fbaDivs').hidden = true;
     $('fbaCsv').hidden = true;
     $('fbaClub').hidden = false;
@@ -373,6 +490,8 @@
     S.open = null;
     $('fbaClub').hidden = true;
     $('fbaBody').hidden = false;
+    $('fbaRank').hidden = false;
+    $('fbaMetric').hidden = false;
     $('fbaDivs').hidden = false;
     $('fbaCsv').hidden = false;
   }
@@ -532,6 +651,10 @@
     var tr = e.target.closest('tr[data-code]');
     if (tr) openClub(tr.getAttribute('data-code'));
   });
+  $('fbaRank').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-code]');
+    if (b) openClub(b.getAttribute('data-code'));
+  });
   $('fbaBody').addEventListener('keydown', function (e) {
     var th = e.target.closest('th[data-sort]');
     if (th && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); sortBy(th.getAttribute('data-sort')); }
@@ -561,6 +684,14 @@
       onChange: function (v) {
         if (v == null) { S.divPick.set(S.div); return; }
         S.div = v; S.sort = { key: 'name', dir: 1 }; draw();
+      }
+    });
+    S.metricPick = NL.filterButton($('fbaMetric'), {
+      label: 'Figure', multiple: false, search: false, options: [], value: null,
+      /* The chart is always of one figure: clearing it leaves it as it was. */
+      onChange: function (v) {
+        if (v == null) { S.metricPick.set(S.metric); return; }
+        S.metric = v; drawRank();
       }
     });
     NL.clubs.load().then(function (meta) {
