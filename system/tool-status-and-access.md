@@ -119,6 +119,7 @@ links this repo cannot see.
 | **Club Directory** | `ops-club-directory` | edit all club data | view all | edit own club's data | view all |
 | **Commercial Benchmarking** | `ops-commercial-benchmarking` | edit data | view benchmarks (club dropdown) | view output only | view output only |
 | **DAZN Viewership** | `media-dazn` | view all; import seasons | view all | own club only, at `/dazn/` by club access code (rules: `clubs/$club` = claim) | same as Club Admin |
+| **Financial Benchmarking** | `ops-financial-benchmarking` | **Manage** — view all clubs by name; import and delete returns | off (Use can be granted per person: view all) | off by account; own club only, at `/financial-benchmarking/` by club access code (rules: `clubs/$club` = claim) | same as Club Admin |
 | **Handbook** | `ops-handbook` | edit content | view | view | view |
 | **Judgements & Decisions** | `ops-judgements` | **Manage** — add / amend / remove all | view | view | view |
 | **Vacancies** | `ops-vacancies` | **Manage** — full CRUD + approve/reject | view all | add/edit own club's; every submission needs NL approval | view all |
