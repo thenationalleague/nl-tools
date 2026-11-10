@@ -1,10 +1,13 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Financial Benchmarking (staff page)
-  Version: v0.3 (10/11/2026)
+  Version: v0.4 (10/11/2026)
   File: /financial-benchmarking/admin/index.html
 
   CHANGELOG
+    v0.4 (10/11/2026) — The club view is weighted (_view.js v0.2): squad cost
+      against income leads, then each budget with its progress. Opening a
+      return refreshes the stored comparison lists if they are behind.
     v0.3 (10/11/2026) — Figures opens on a ranked chart: one figure at a
       time, every club in the division by name, high to low, median marked.
       The table stays below it.
@@ -79,6 +82,14 @@
     window.NL_CHANGELOG = [
       {
         date: '10/11/2026',
+        version: 'v0.4',
+        items: [
+          'Club view: squad cost against income leads, then Income and Playing squad, each budget with its progress.',
+          'Budgets show their place by size. Position can be shown as bars or a slider.'
+        ]
+      },
+      {
+        date: '10/11/2026',
         version: 'v0.3',
         items: [
           'Figures shows a ranked chart of every club for the figure you pick, with the median marked.'
@@ -120,9 +131,9 @@
   <script src="/system/nl-topbar.js?v=10"></script>
   <script src="/system/auth-guard.js?v=17"></script>
 
-  <link rel="stylesheet" href="/financial-benchmarking/_view.css?v=1">
-  <script src="/financial-benchmarking/_data.js?v=2"></script>
-  <script src="/financial-benchmarking/_view.js?v=1"></script>
+  <link rel="stylesheet" href="/financial-benchmarking/_view.css?v=2">
+  <script src="/financial-benchmarking/_data.js?v=3"></script>
+  <script src="/financial-benchmarking/_view.js?v=2"></script>
 
 <style>
   /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
@@ -309,12 +320,34 @@
     return db.ref(BASE + '/returns/' + id).once('value').then(function (snap) {
       S.data = snap.val() || {};
       S.data.clubs = S.data.clubs || {};
+      /* The comparison lists are rebuilt from the rows every time, so this
+         page never shows a stale one. If the stored copy — the one clubs
+         read — is behind (a figure added since the import), someone who may
+         write puts it right here, without a re-import. */
+      var fresh = D.benchAll(S.data.clubs);
+      var behind = JSON.stringify(fresh) !== JSON.stringify(benchOf(S.data.bench));
+      S.data.bench = fresh;
+      if (behind && S.canWrite && Object.keys(S.data.clubs).length) {
+        db.ref(BASE + '/returns/' + id + '/bench').set(fresh)['catch'](function (e) {
+          console.error('[financial-benchmarking] comparison lists not refreshed', e);
+        });
+      }
       var have = {};
       Object.keys(S.data.clubs).forEach(function (c) { have[S.data.clubs[c].div] = true; });
       if (!have[S.div]) S.div = DIVS.filter(function (d) { return have[d]; })[0] || 'National';
       S.sort = { key: 'name', dir: 1 };
       if (S.open && S.data.clubs[S.open]) openClub(S.open); else { closeClub(); draw(); }
     });
+  }
+
+  /* The stored lists in the shape benchAll makes them, for comparing. */
+  function benchOf(stored) {
+    var out = {};
+    Object.keys(stored || {}).forEach(function (d) {
+      out[d] = {};
+      Object.keys(stored[d] || {}).forEach(function (k) { out[d][k] = D.list(stored[d][k]); });
+    });
+    return out;
   }
 
   /* ---- The named table ------------------------------------------------ */

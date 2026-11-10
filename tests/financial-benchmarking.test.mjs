@@ -74,6 +74,7 @@ test('the percentages are worked out from the figures, not read from the sheet',
   assert.equal(f.incomePct, 25);       // the sheet said 99%
   assert.equal(f.spendPct, 30);
   assert.equal(f.spendOfIncome, 48);
+  assert.equal(f.budgetRatio, 40, 'squad budget as a share of income budget');
 });
 
 test('the National sheet parses under its banner row, brackets as a negative', () => {
@@ -170,6 +171,26 @@ test('abbreviated names match, and a name that could be two clubs matches neithe
   assert.equal(r('Iota Utd').code, 'IOU', 'an exact name wins over a shared stem');
   assert.equal(r('Iota'), null, 'two clubs called Iota: ask, do not guess');
   assert.equal(r('Iota Town'), null);
+});
+
+test('a budget is ranked by size, largest first, ties sharing a place', () => {
+  assert.equal(JSON.stringify(D.rankOf([100, 200, 300, 400], 400)), JSON.stringify({ rank: 1, of: 4 }));
+  assert.equal(JSON.stringify(D.rankOf([100, 200, 300, 400], 100)), JSON.stringify({ rank: 4, of: 4 }));
+  assert.equal(D.rankOf([100, 300, 300, 400], 300).rank, 2);
+  assert.equal(D.rankOf([100, 200], null), null);
+  assert.equal(D.rankOf([], 5), null);
+  assert.equal(JSON.stringify([1, 2, 3, 4, 11, 12, 13, 21, 22, 23, 24, 48].map(D.ordinal)),
+    JSON.stringify(['1st', '2nd', '3rd', '4th', '11th', '12th', '13th', '21st', '22nd', '23rd', '24th', '48th']));
+});
+
+test('only budgets carry a rank; every figure the club view lays out exists', () => {
+  for (const set of ['national', 'step2']) {
+    const ms = D.metricsOf(set), keys = ms.map((m) => m.key);
+    for (const m of ms) if (m.rank) assert.match(m.key, /Budget$/, `${m.key} is ranked but is not a budget`);
+    const def = D.SETS[set];
+    for (const m of (def.lead || { metrics: [] }).metrics) assert.ok(keys.includes(m.key), m.key);
+    for (const pn of def.panels || []) for (const k of [pn.budget, pn.actual, pn.pct]) assert.ok(keys.includes(k), k);
+  }
 });
 
 /* ---- Rules and registry ---------------------------------------------------- */
