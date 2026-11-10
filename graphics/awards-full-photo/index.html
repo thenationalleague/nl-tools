@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Monthly Awards Full Photo (Graphics sub-tool)
+  Version: v1.0 (10/11/2026)
+  File: /graphics/awards-full-photo/index.html
+
+  Nominee and winner cards for the monthly awards when the photo can't be
+  cut out: the whole photo fills the card, framed by dragging and zooming,
+  with a navy shade behind the type so it reads on any picture. Headline
+  (NOMINATED or WINNER), award and month, player name, club crest and name,
+  and the official lockup for the division. Four sizes: 4:5, 1:1, 9:16 and
+  16:9, each with its own framing.
+
+  Drawn on a canvas. Exports are each size's standard pixels; the preview
+  draws at twice that so a retina screen doesn't stretch it.
+
+  Storage: none. The photo never leaves the browser.
+  Access: toolKey 'staff-graphics', the Graphics gate.
+  Assets (same-origin, so the canvas can export them):
+    /assets/divisions/{National,North,South}.png   (official Enterprise lockups)
+    /assets/crests/…                               (via NL.clubs / NL.clubPicker)
+    /graphics/_shared/fonts/Carbona-*.otf          (local cuts for the canvas)
+    /graphics/_shared/canvas-art.js                (large images drawn small)
+
+  Changelog:
+    v1.0 (10/11/2026) — first build.
+-->
+<html lang="en-GB">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Monthly Awards Full Photo — NL Tools</title>
+  <meta name="robots" content="noindex,nofollow">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+
+  <!-- Brand stylesheet (lint canonical: ?v=73) -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=73">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'Monthly Awards Full Photo',
+      toolKey: 'staff-graphics'
+    };
+    var NL_TOOL_KEY = 'staff-graphics';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '10/11/2026',
+        version: 'v1.0',
+        items: [
+          'Monthly awards cards for a photo that can\'t be cut out: the whole photo fills the card, with a shade behind the words.',
+          'Drag and zoom to frame it. 4:5, 1:1, 9:16 and 16:9, each with its own framing; download one or all four.'
+        ]
+      }
+    ];
+
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts (lint canonical: ?v=51 / ?v=1 / ?v=10 / ?v=17) -->
+  <script src="/system/nl-utils.js?v=51"></script>
+  <!-- GA4, one property for all of nl.tools. Cookieless, so no consent
+       banner on any page; page views by path, no identity. Tool events go
+       through NL.track(). See system/nl-analytics.js. -->
+  <script src="/system/nl-analytics.js?v=1"></script>
+  <script src="/system/nl-topbar.js?v=10"></script>
+  <script src="/system/auth-guard.js?v=17"></script>
+
+<style>
+  /* The canvas needs the LOCAL Carbona cuts: a canvas drawn before a font
+     resolves falls back to sans-serif without saying so. */
+  @font-face { font-family: 'AFPCarbonaRegular';   src: url('/graphics/_shared/fonts/Carbona-Regular.otf') format('opentype'); }
+  @font-face { font-family: 'AFPCarbonaBold';      src: url('/graphics/_shared/fonts/Carbona-Bold.otf') format('opentype'); }
+  @font-face { font-family: 'AFPCarbonaExtraBold'; src: url('/graphics/_shared/fonts/Carbona-ExtraBold.otf') format('opentype'); }
+
+  .afp-stage { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 18px; align-items: start; }
+  @media (max-width: 860px) { .afp-stage { grid-template-columns: 1fr; } }
+
+  .afp-canvasbox {
+    background: var(--navy-100);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 16px;
+    display: grid; place-items: center;
+  }
+  .afp-canvasbox.is-over { outline: 3px dashed var(--navy); outline-offset: -8px; }
+  /* Fits the window beside the controls: the whole card is always on screen. */
+  #afpCanvas {
+    display: block; max-width: 100%; max-height: calc(100vh - 170px);
+    width: auto; height: auto;
+    box-shadow: var(--shadow); touch-action: none;
+  }
+  #afpCanvas.has-photo { cursor: grab; }
+  #afpCanvas.is-dragging { cursor: grabbing; }
+
+  .afp-panel {
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 16px;
+    display: flex; flex-direction: column; gap: 14px;
+    max-height: calc(100vh - 130px); overflow-y: auto;
+  }
+  @media (max-width: 860px) { .afp-panel { max-height: none; } }
+  .afp-label { display: block; font-size: var(--text-sm); font-weight: 700; margin-bottom: 6px; }
+  .afp-panel input[type="file"] {
+    width: 100%; padding: 8px 10px;
+    border: 1px dashed var(--border); border-radius: var(--radius);
+    font-family: var(--font); font-size: var(--text-sm);
+  }
+  .afp-panel input[type="range"] { width: 100%; accent-color: var(--primary); }
+  .afp-hint { font-size: var(--text-xs); color: var(--text-muted); margin: 6px 0 0; }
+  .afp-hint.is-warn { color: var(--red); }
+  .afp-action { justify-content: center; }
+  .afp-row { display: flex; gap: 8px; align-items: center; }
+  .afp-row > * { flex: 1; }
+
+  /* Size picker: a closed set of four. */
+  .afp-formats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .afp-fmt {
+    display: flex; flex-direction: column; gap: 1px; align-items: center;
+    padding: 7px 4px; cursor: pointer;
+    font: inherit; color: var(--text);
+    background: var(--off-white);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .afp-fmt:hover { border-color: var(--navy-200); }
+  .afp-fmt[aria-pressed="true"] { border-color: var(--primary); background: var(--primary-50); box-shadow: inset 0 0 0 1px var(--primary); }
+  .afp-fmt b { font-size: var(--text-sm); }
+  .afp-fmt span { font-size: var(--text-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+  .afp-dl { display: flex; flex-direction: column; gap: 8px; }
+  .afp-dl-one { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .afp-dl-one .afp-action { padding-left: 4px; padding-right: 4px; }
+</style>
+</head>
+<body>
+
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="page">
+    <div class="afp-stage">
+      <div class="afp-canvasbox" id="afpDrop">
+        <canvas id="afpCanvas" width="2160" height="2700" aria-label="Graphic preview"></canvas>
+      </div>
+
+      <div class="afp-panel">
+        <div class="form-group">
+          <label for="fPhoto">Photo</label>
+          <input id="fPhoto" type="file" accept="image/*">
+          <p class="afp-hint">Or drop it on the preview. Drag to frame it, pinch or scroll to zoom.</p>
+        </div>
+        <div>
+          <span class="afp-label">Size</span>
+          <div class="afp-formats" id="fFormats"></div>
+        </div>
+        <div class="form-group">
+          <label for="fZoom">Zoom</label>
+          <input id="fZoom" type="range" min="1" max="3" step="0.01" value="1" disabled>
+          <p class="afp-hint is-warn" id="fSoft" hidden>This photo is smaller than the frame, so it will look soft. Zoom out or use a bigger photo.</p>
+        </div>
+        <button type="button" class="btn btn--ghost btn--sm afp-action" id="fReset" disabled>Reset framing</button>
+
+        <div class="form-group">
+          <label for="tHead">Headline</label>
+          <input type="text" id="tHead" value="NOMINATED">
+          <p class="afp-hint">WINNER for the announcement.</p>
+        </div>
+        <div class="form-group"><label for="tAward">Award</label><input type="text" id="tAward" value="PLAYER OF THE MONTH"></div>
+        <div class="form-group"><label for="tMonth">Month</label><input type="text" id="tMonth" value=""></div>
+        <div class="form-group"><label for="tName">Player name</label><input type="text" id="tName" value=""></div>
+        <div class="form-group"><span class="afp-label">Club</span><div id="clubPick"></div></div>
+        <div id="divPick"></div>
+
+        <div class="afp-dl">
+          <button type="button" class="btn btn--primary afp-action" id="dlAll" disabled>Download all four</button>
+          <div class="afp-dl-one" id="dlOne"></div>
+        </div>
+
+        <details class="disclosure">
+          <summary>More options</summary>
+          <div style="display:flex;flex-direction:column;gap:12px;padding-top:10px">
+            <div class="form-group"><label for="tClub">Club name on graphic</label><input type="text" id="tClub" value=""></div>
+            <div class="afp-row"><span style="font-size:var(--text-sm)">Accent colour</span><input type="color" id="fAccent" value="#fff700" aria-label="Accent colour"></div>
+            <div class="form-group"><label for="fShade">Shade behind the words</label><input type="range" id="fShade" min="0" max="100" value="70"></div>
+            <div class="form-group"><label for="fCrest">Upload a crest instead</label><input type="file" id="fCrest" accept="image/*"></div>
+          </div>
+        </details>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/graphics/_shared/canvas-art.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  /* Each size's pixels, and how big its headline and name may run. The 16:9
+     keeps its words in a column on the left (`col`) so the photo shows on
+     the right; the shade follows the column. */
+  var FORMATS = {
+    '4x5':  { label: '4:5',  w: 1080, h: 1350, hs: 210, ns: 116 },
+    '1x1':  { label: '1:1',  w: 1080, h: 1080, hs: 180, ns: 104 },
+    '9x16': { label: '9:16', w: 1080, h: 1920, hs: 230, ns: 124 },
+    '16x9': { label: '16:9', w: 1920, h: 1080, hs: 190, ns: 110, col: 900 }
+  };
+  var ORDER = ['4x5', '1x1', '9x16', '16x9'];
+  var PREVIEW_SCALE = 2;      /* the preview only; exports are 1x */
+  var M = 64;                 /* margin */
+  var ZOOM_MAX = 3;
+  var CUT = { 400: 'AFPCarbonaRegular', 700: 'AFPCarbonaBold', 800: 'AFPCarbonaExtraBold' };
+  var LOCKUP_URL = function (d) { return '/assets/divisions/' + d + '.png'; };
+  var ROSE_URL = '/assets/crests/National%20League%20rose%20white.png';
+
+  /* Brand colours for the canvas, read from nl-brand.css so they track the canon. */
+  var C = (function () {
+    var cs = getComputedStyle(document.documentElement);
+    var t = function (n) { return cs.getPropertyValue(n).trim(); };
+    var rgb = function (hex) { var n = parseInt(hex.replace('#', ''), 16); return [n >> 16, (n >> 8) & 255, n & 255].join(','); };
+    var o = { primary: t('--primary'), navy: t('--navy'), navy400: t('--navy-400'), navy800: t('--navy-800'), navy900: t('--navy-900') };
+    o.darkRgb = rgb(o.navy900);
+    return o;
+  })();
+
+  var S = { photo: null, fmt: '4x5', crops: {}, crest: null, rose: null, lockups: {}, div: 'National' };
+  var canvas, ctx;
+
+  function $(id) { return document.getElementById(id); }
+  function loadImg(src) {
+    return new Promise(function (res, rej) {
+      var i = new Image(); i.crossOrigin = 'anonymous';
+      i.onload = function () { res(i); }; i.onerror = rej; i.src = src;
+    });
+  }
+  function slug(s) { return (s || 'graphic').trim().replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, ''); }
+  function lum(hex) {
+    var n = parseInt(String(hex).replace('#', ''), 16);
+    return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+  }
+  function resetCrops() { ORDER.forEach(function (f) { S.crops[f] = { zoom: 1, dx: 0, dy: 0 }; }); }
+
+  /* ---------------- type helpers ---------------- */
+  function setFont(c, weight, size) { c.font = size + 'px "' + CUT[weight >= 800 ? 800 : weight >= 600 ? 700 : 400] + '", sans-serif'; }
+  function spaced(c, em, size) { if ('letterSpacing' in c) c.letterSpacing = (em * size) + 'px'; }
+  function fitSize(c, text, weight, max, width, em) {
+    setFont(c, weight, max); spaced(c, em || 0, max);
+    var w = c.measureText(text).width;
+    return w > width ? Math.floor(max * width / w) : max;
+  }
+  function rr(c, x, y, w, h, r) {
+    c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r);
+    c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath();
+  }
+  function contain(img, x, y, w, h) {
+    var k = Math.min(w / (img.naturalWidth || img.width), h / (img.naturalHeight || img.height));
+    var dw = (img.naturalWidth || img.width) * k, dh = (img.naturalHeight || img.height) * k;
+    return { x: x + (w - dw) / 2, y: y + (h - dh) / 2, w: dw, h: dh };
+  }
+
+  /* ---------------- the photo ----------------
+     Cover-fit to the whole card, then that size's zoom and drag. The drag is
+     clamped so the card is never left bare. */
+  function photoRect(f) {
+    var F = FORMATS[f], p = S.photo, c = S.crops[f];
+    var k = Math.max(F.w / p.naturalWidth, F.h / p.naturalHeight) * c.zoom;
+    var dw = p.naturalWidth * k, dh = p.naturalHeight * k;
+    var mx = (dw - F.w) / 2, my = (dh - F.h) / 2;
+    c.dx = Math.max(-mx, Math.min(mx, c.dx));
+    c.dy = Math.max(-my, Math.min(my, c.dy));
+    return { x: -mx + c.dx, y: -my + c.dy, w: dw, h: dh };
+  }
+  function isSoft(f) { return !!S.photo && S.photo.naturalWidth < photoRect(f).w; }
+
+  /* ---------------- layout ----------------
+     The top block (headline, award pill, month) and the bottom block (name,
+     divider, crest and club, lockup) for one size. Used both to draw and to
+     place the shade behind them. */
+  function layout(c, f) {
+    var F = FORMATS[f], colW = F.col || (F.w - 2 * M);
+    var head = ($('tHead').value.trim() || 'NOMINATED').toUpperCase();
+    var hs = fitSize(c, head, 800, F.hs, colW, -0.015);
+    var base = 70 + Math.round(hs * 0.74);
+    var award = $('tAward').value.trim().toUpperCase(), month = $('tMonth').value.trim().toUpperCase();
+    var ss = 30, aw = 0, mw = 0;
+    for (;;) {   /* shrink the strapline until it fits the column */
+      setFont(c, 800, ss); spaced(c, 0.12, ss); aw = award ? c.measureText(award).width + 36 : 0;
+      setFont(c, 700, ss); spaced(c, 0.12, ss); mw = month ? c.measureText(month).width : 0;
+      if (aw + (award && month ? 22 : 0) + mw <= colW || ss <= 18) break;
+      ss--;
+    }
+    var pillTop = base + 28, pillH = Math.round(ss * 1.75);
+    var name = $('tName').value.trim();
+    var ns = fitSize(c, name || 'M', 800, F.ns, colW, -0.025);
+    var rowTop = F.h - 66 - 72, divider = rowTop - 26;
+    var nameBase = divider - 34 - Math.round(ns * 0.2);
+    var barTop = nameBase - Math.round(ns * 0.74) - 30;
+    return { F: F, colW: colW, head: head, hs: hs, base: base, award: award, month: month, ss: ss, aw: aw, mw: mw,
+      pillTop: pillTop, pillH: pillH, topEnd: pillTop + pillH, name: name, ns: ns,
+      rowTop: rowTop, divider: divider, nameBase: nameBase, barTop: barTop };
+  }
+
+  /* The shade: navy from the top down past the strapline, from the bottom up
+     past the name, and on 16:9 from the left across the column. Strength is
+     the "Shade behind the words" slider. */
+  function shade(c, L) {
+    var F = L.F, s = +$('fShade').value / 100;
+    if (!s) return;
+    var rgb = C.darkRgb;
+    function band(g, stops) {
+      stops.forEach(function (st) { g.addColorStop(st[0], 'rgba(' + rgb + ',' + (st[1] * s) + ')'); });
+      return g;
+    }
+    c.fillStyle = band(c.createLinearGradient(0, 0, 0, L.topEnd + 180), [[0, 0.9], [0.55, 0.55], [1, 0]]);
+    c.fillRect(0, 0, F.w, L.topEnd + 180);
+    var from = L.barTop - 220;
+    c.fillStyle = band(c.createLinearGradient(0, from, 0, F.h), [[0, 0], [0.4, 0.7], [1, 0.95]]);
+    c.fillRect(0, from, F.w, F.h - from);
+    if (F.col) {
+      var to = M + F.col + 320;
+      c.fillStyle = band(c.createLinearGradient(0, 0, to, 0), [[0, 0.85], [0.6, 0.5], [1, 0]]);
+      c.fillRect(0, 0, to, F.h);
+    }
+  }
+
+  function render(g, f, k) {
+    var F = FORMATS[f];
+    g.setTransform(k, 0, 0, k, 0, 0);
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = 'high';
+    g.letterSpacing = '0px';
+    g.fillStyle = C.navy800; g.fillRect(0, 0, F.w, F.h);
+    var L = layout(g, f), accent = $('fAccent').value;
+
+    if (S.photo) {
+      var r = photoRect(f);
+      window.NL_GFX_ART.draw(g, S.photo, r.x, r.y, r.w, r.h, k);
+    } else {
+      setFont(g, 700, 34); spaced(g, 0, 34);
+      g.fillStyle = C.navy400; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText('Add a photo', F.w / 2, F.h / 2);
+    }
+    shade(g, L);
+
+    /* headline */
+    g.textAlign = 'left'; g.textBaseline = 'alphabetic';
+    setFont(g, 800, L.hs); spaced(g, -0.015, L.hs);
+    g.shadowColor = 'rgba(' + C.darkRgb + ',0.6)'; g.shadowBlur = 28; g.fillStyle = '#fff';
+    g.fillText(L.head, M, L.base); g.shadowBlur = 0;
+
+    g.fillStyle = C.primary; g.fillRect(0, 0, F.w, 22); g.fillRect(0, F.h - 22, F.w, 22);
+
+    /* award pill and month, in a row */
+    g.textBaseline = 'middle';
+    var gap = L.award && L.month ? 22 : 0;
+    if (L.award) {
+      setFont(g, 800, L.ss); spaced(g, 0.12, L.ss);
+      g.shadowColor = 'rgba(' + C.darkRgb + ',0.45)'; g.shadowBlur = 18;
+      g.fillStyle = accent; rr(g, M, L.pillTop, L.aw, L.pillH, 4); g.fill(); g.shadowBlur = 0;
+      g.fillStyle = lum(accent) > 0.35 ? '#000' : '#fff';
+      g.fillText(L.award, M + 18, L.pillTop + L.pillH / 2 + 1);
+    }
+    if (L.month) {
+      setFont(g, 700, L.ss); spaced(g, 0.12, L.ss); g.fillStyle = '#fff';
+      g.shadowColor = 'rgba(' + C.darkRgb + ',0.75)'; g.shadowBlur = 16;
+      g.fillText(L.month, M + L.aw + gap, L.pillTop + L.pillH / 2 + 1);
+      g.shadowBlur = 0;
+    }
+
+    /* bottom block: name, divider, club, lockup */
+    g.textBaseline = 'alphabetic'; g.fillStyle = '#fff';
+    if (L.name) {
+      setFont(g, 800, L.ns); spaced(g, -0.025, L.ns);
+      g.shadowColor = 'rgba(' + C.darkRgb + ',0.6)'; g.shadowBlur = 24;
+      g.fillText(L.name, M, L.nameBase); g.shadowBlur = 0;
+    }
+    g.fillStyle = accent; g.fillRect(M, L.barTop, 96, 8);
+    g.fillStyle = C.navy; g.fillRect(M, L.divider, F.col ? L.colW : F.w - 2 * M, 2);
+    if (S.crest) { var cr = contain(S.crest, M, L.rowTop, 72, 72); window.NL_GFX_ART.draw(g, S.crest, cr.x, cr.y, cr.w, cr.h, k); }
+    var club = $('tClub').value.trim();
+    if (club) {
+      g.textBaseline = 'middle'; g.fillStyle = '#fff';
+      var cs = fitSize(g, club, 600, 34, 520, 0); setFont(g, 600, cs); spaced(g, 0, cs);
+      g.fillText(club, S.crest ? M + 90 : M, L.rowTop + 37);
+    }
+    var lock = S.lockups[S.div];
+    if (lock) {
+      var lh = 116, lw = Math.min(280, lock.naturalWidth * lh / lock.naturalHeight);
+      var lr = contain(lock, F.w - M - lw, L.rowTop + 36 - lh / 2, lw, lh);
+      window.NL_GFX_ART.draw(g, lock, lr.x, lr.y, lr.w, lr.h, k);
+    }
+    g.letterSpacing = '0px';
+  }
+
+  function draw() {
+    var F = FORMATS[S.fmt];
+    if (canvas.width !== F.w * PREVIEW_SCALE) canvas.width = F.w * PREVIEW_SCALE;
+    if (canvas.height !== F.h * PREVIEW_SCALE) canvas.height = F.h * PREVIEW_SCALE;
+    render(ctx, S.fmt, PREVIEW_SCALE);
+    $('fZoom').value = S.crops[S.fmt].zoom;
+    $('fSoft').hidden = !isSoft(S.fmt);
+    [].forEach.call($('fFormats').children, function (b) { b.setAttribute('aria-pressed', String(b.dataset.fmt === S.fmt)); });
+  }
+  var pending = false;
+  function drawSoon() {
+    if (pending) return; pending = true;
+    requestAnimationFrame(function () { pending = false; draw(); });
+  }
+
+  /* ---------------- photo in ---------------- */
+  function setPhoto(file) {
+    if (!file || !/^image\//.test(file.type)) { NL.toast('That file isn\'t an image.', 'error'); return; }
+    var url = URL.createObjectURL(file), img = new Image();
+    img.onload = function () {
+      URL.revokeObjectURL(url);
+      S.photo = img; resetCrops();
+      ['fZoom', 'fReset', 'dlAll'].forEach(function (id) { $(id).disabled = false; });
+      document.querySelectorAll('.afp-dl-one button').forEach(function (b) { b.disabled = false; });
+      canvas.classList.add('has-photo');
+      draw();
+    };
+    img.onerror = function () { NL.toast('That image couldn\'t be opened.', 'error'); };
+    img.src = url;
+  }
+
+  function setZoom(z) { S.crops[S.fmt].zoom = Math.max(1, Math.min(ZOOM_MAX, z)); drawSoon(); }
+
+  /* One finger or the mouse drags; two fingers pinch; a trackpad pinch
+     arrives as a wheel event with ctrlKey set. */
+  function wireGestures() {
+    var pts = {}, drag = null, pinch = null;
+    function scale() { return FORMATS[S.fmt].w / canvas.getBoundingClientRect().width; }
+    function two() { var ids = Object.keys(pts); return ids.length === 2 ? [pts[ids[0]], pts[ids[1]]] : null; }
+    function dist(p) { return Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y); }
+    canvas.addEventListener('pointerdown', function (e) {
+      if (!S.photo) { $('fPhoto').click(); return; }
+      canvas.setPointerCapture(e.pointerId);
+      pts[e.pointerId] = { x: e.clientX, y: e.clientY };
+      var c = S.crops[S.fmt], p = two();
+      if (p) { drag = null; pinch = { d: dist(p), zoom: c.zoom }; }
+      else drag = { x: e.clientX, y: e.clientY, dx: c.dx, dy: c.dy };
+      canvas.classList.add('is-dragging');
+    });
+    canvas.addEventListener('pointermove', function (e) {
+      if (!pts[e.pointerId]) return;
+      pts[e.pointerId] = { x: e.clientX, y: e.clientY };
+      var c = S.crops[S.fmt], p = two();
+      if (pinch && p) { setZoom(pinch.zoom * dist(p) / pinch.d); return; }
+      if (drag) { var k = scale(); c.dx = drag.dx + (e.clientX - drag.x) * k; c.dy = drag.dy + (e.clientY - drag.y) * k; drawSoon(); }
+    });
+    function end(e) {
+      delete pts[e.pointerId]; pinch = null;
+      var ids = Object.keys(pts), c = S.crops[S.fmt];
+      drag = ids.length === 1 ? { x: pts[ids[0]].x, y: pts[ids[0]].y, dx: c.dx, dy: c.dy } : null;
+      if (!ids.length) canvas.classList.remove('is-dragging');
+    }
+    canvas.addEventListener('pointerup', end);
+    canvas.addEventListener('pointercancel', end);
+    canvas.addEventListener('wheel', function (e) {
+      if (!S.photo) return;
+      e.preventDefault();
+      setZoom(S.crops[S.fmt].zoom * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)));
+    }, { passive: false });
+  }
+  function wireDrop() {
+    var box = $('afpDrop');
+    ['dragenter', 'dragover'].forEach(function (t) { box.addEventListener(t, function (e) { e.preventDefault(); box.classList.add('is-over'); }); });
+    ['dragleave', 'drop'].forEach(function (t) { box.addEventListener(t, function (e) { e.preventDefault(); box.classList.remove('is-over'); }); });
+    box.addEventListener('drop', function (e) { var f = e.dataTransfer && e.dataTransfer.files[0]; if (f) setPhoto(f); });
+  }
+
+  /* ---------------- downloads ---------------- */
+  function fileName(f) {
+    return slug($('tAward').value) + '_' + slug($('tMonth').value) + '_' + slug($('tName').value) + ' - ' + f + '.png';
+  }
+  function save(f) {
+    return new Promise(function (resolve) {
+      var c = document.createElement('canvas');
+      c.width = FORMATS[f].w; c.height = FORMATS[f].h;
+      render(c.getContext('2d'), f, 1);
+      try {
+        c.toBlob(function (blob) {
+          if (blob) NL.download(fileName(f), blob, 'image/png');
+          else NL.toast('The ' + FORMATS[f].label + ' PNG couldn\'t be made. Try again.', 'error');
+          resolve();
+        }, 'image/png');
+      } catch (err) { NL.toast('The PNG couldn\'t be made: ' + err.message, 'error'); resolve(); }
+    });
+  }
+  function saveAll() {
+    return ORDER.reduce(function (chain, f) {
+      return chain.then(function () { return save(f); })
+        .then(function () { return new Promise(function (r) { setTimeout(r, 400); }); });   /* browsers drop downloads that arrive too close together */
+    }, Promise.resolve());
+  }
+
+  /* ---------------- club ---------------- */
+  function setDivision(d) { S.div = d; divPick.set(d); drawSoon(); }
+  var divPick;
+  function setClub(sel) {
+    if (!sel || !sel.name) { S.crest = null; $('tClub').value = ''; drawSoon(); return; }
+    $('tClub').value = sel.name;
+    var div = sel.division || (sel.club && sel.club.division);
+    if (['National', 'North', 'South'].indexOf(div) >= 0) setDivision(div);
+    var col = sel.club && sel.club.colors && sel.club.colors.primary;
+    if (col && /^#[0-9a-f]{6}$/i.test(col)) $('fAccent').value = col.toLowerCase();
+    loadImg(sel.crestUrl).then(function (i) { S.crest = i; }, function () { S.crest = S.rose; }).then(drawSoon);
+  }
+
+  /* ---------------- boot ---------------- */
+  var booted = false;
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function () {
+    if (booted) return; booted = true;
+    canvas = $('afpCanvas'); ctx = canvas.getContext('2d');
+    resetCrops();
+
+    /* The awards are for the month just gone. */
+    var d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1);
+    $('tMonth').value = d.toLocaleString('en-GB', { month: 'long', year: 'numeric' }).toUpperCase();
+
+    ORDER.forEach(function (f) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.className = 'afp-fmt'; b.dataset.fmt = f;
+      b.innerHTML = '<b>' + FORMATS[f].label + '</b><span>' + FORMATS[f].w + '×' + FORMATS[f].h + '</span>';
+      b.addEventListener('click', function () { S.fmt = f; draw(); });
+      $('fFormats').appendChild(b);
+      var d1 = document.createElement('button');
+      d1.type = 'button'; d1.className = 'btn btn--ghost btn--sm afp-action'; d1.disabled = true;
+      d1.textContent = FORMATS[f].label;
+      d1.title = 'Download the ' + FORMATS[f].label + ' only';
+      d1.addEventListener('click', function () { save(f); });
+      $('dlOne').appendChild(d1);
+    });
+
+    $('fPhoto').addEventListener('change', function () { setPhoto(this.files[0]); this.value = ''; });
+    $('fZoom').addEventListener('input', function () { setZoom(+this.value); });
+    $('fReset').addEventListener('click', function () { S.crops[S.fmt] = { zoom: 1, dx: 0, dy: 0 }; draw(); });
+    $('dlAll').addEventListener('click', saveAll);
+    ['tHead', 'tAward', 'tMonth', 'tName', 'tClub', 'fAccent', 'fShade'].forEach(function (id) { $(id).addEventListener('input', drawSoon); });
+    $('fCrest').addEventListener('change', function () {
+      var f = this.files[0]; if (!f) return;
+      var url = URL.createObjectURL(f), i = new Image();
+      i.onload = function () { S.crest = i; drawSoon(); }; i.src = url;
+    });
+    wireGestures();
+    wireDrop();
+
+    divPick = NL.filterButton('#divPick', {
+      label: 'Division', multiple: false, value: 'National', allLabel: 'National',
+      options: [{ value: 'National', label: 'National' }, { value: 'North', label: 'North' }, { value: 'South', label: 'South' }],
+      onChange: function (v) { S.div = v || 'National'; drawSoon(); }
+    });
+    try { NL.clubPicker('#clubPick', { mode: 'search', divisions: ['National', 'North', 'South'], onSelect: setClub }); }
+    catch (e) { console.error('[awards-full-photo] club picker', e); }
+
+    var fonts = Promise.all([800, 700].map(function (w) { return document.fonts.load('40px "' + CUT[w] + '"'); })).catch(function () {});
+    var art = Promise.all([
+      loadImg(ROSE_URL).then(function (i) { S.rose = i; }, function () {})
+    ].concat(['National', 'North', 'South'].map(function (dv) {
+      return loadImg(LOCKUP_URL(dv)).then(function (i) { S.lockups[dv] = i; }, function () {});
+    })));
+    Promise.all([fonts, art]).then(draw);
+    draw();
+  };
+  if (window._toolDeferredSession) { window.TOOL.boot(window._toolDeferredSession); delete window._toolDeferredSession; }
+})();
+</script>
+
+</body>
+</html>
