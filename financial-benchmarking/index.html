@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Financial Benchmarking (club page)
+  Version: v0.1 (10/11/2026)
+  File: /financial-benchmarking/index.html
+
+  CHANGELOG
+    v0.1 (10/11/2026) — First build. A club enters its access code and sees
+      its own figures from the financial return, each against the nameless
+      figures of the clubs it is compared with.
+
+  THE GATE. The one club access code, checked SERVER-SIDE:
+  NL.codeGate.viaFunction posts it to the clubCodeAuth trigger under
+  app-data/club-codes, which mints a token carrying `club: '<CODE>'`. The
+  RTDB rules on app-data/ops-financial-benchmarking/returns/<season>/<quarter>/
+  clubs/$club open only where $club equals that claim, so a club cannot read
+  another club's row however the page is tampered with. The gate is the
+  screen; the rules are the boundary.
+
+  WHO HOLDS THE CODE. Everyone at a club who has its access code can open
+  this page — it is the same code as the club's other tools. A separate
+  finance-only code was considered and turned down on 10/11/2026.
+
+  What a club can read: its own row, and bench/ for the divisions it is
+  compared with — sorted lists of figures with no names, one list per
+  figure. A National club reads National only; a North or South club reads
+  North and South. See _data.js for why the lists cannot be joined back into
+  a club's row.
+
+  A League holder of an access code (claim "NL") or a staff token ("*") has
+  no club row to read, so it is pointed at the staff page instead.
+
+  No auth-guard: that gates NL accounts, and this page is entered by code.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Financial Benchmarking — The National League</title>
+  <!-- Favicons. Static, not injected: a standalone page never loads
+       nl-topbar.js, which adds them on the gated pages. -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="/system/nl-brand.css?v=73">
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+  </script>
+  <script src="/system/nl-utils.js?v=51"></script>
+  <!-- GA4 for nl.tools — cookieless, no banner, no identity. See system/nl-analytics.js -->
+  <script src="/system/nl-analytics.js?v=1"></script>
+  <link rel="stylesheet" href="/financial-benchmarking/_view.css?v=1">
+  <script src="/financial-benchmarking/_data.js?v=1"></script>
+  <script src="/financial-benchmarking/_view.js?v=1"></script>
+</head>
+<body>
+  <!-- White bar: no NL account is behind this page. -->
+  <header class="nl-idbar">
+    <img class="nl-idbar__crest" id="fbCrest" src="/assets/crests/National%20League%20rose.png"
+         alt="" width="42" height="42">
+    <div class="nl-idbar__id">
+      <div class="nl-idbar__title">Financial Benchmarking</div>
+      <div class="nl-idbar__sub" id="fbClub">The National League</div>
+    </div>
+    <div class="nl-idbar__actions">
+      <button class="nl-idbar__btn" id="fbOut" type="button" hidden>Sign out</button>
+    </div>
+  </header>
+
+  <div class="gate" id="fbGate"></div>
+
+  <main class="page" id="fbShell" hidden>
+    <div id="fbBody"></div>
+  </main>
+
+<script>
+(function () {
+  'use strict';
+
+  var BASE = 'app-data/ops-financial-benchmarking';
+  var db = firebase.database();
+  var D = window.FBData;
+  var $ = function (id) { return document.getElementById(id); };
+  var S = { code: null, meta: null, returns: [] };
+
+  function message(title, text) {
+    $('fbBody').innerHTML = '<div class="empty-state"><div class="empty-state__title">' +
+      NL.escHtml(title) + '</div>' + (text ? '<div class="empty-state__text">' + text + '</div>' : '') + '</div>';
+  }
+
+  function failed(e) {
+    console.error('[financial-benchmarking]', e);
+    message('Figures could not be loaded', 'Reload the page to try again.');
+  }
+
+  function at(id) { return BASE + '/returns/' + id; }
+
+  function readClub(id) {
+    return db.ref(at(id) + '/clubs/' + S.code).once('value').then(function (snap) {
+      var club = snap.val();
+      return club && club.div && club.v ? club : null;
+    });
+  }
+
+  /* A division's nameless lists. The rules refuse a division this club is
+     not compared with, and a refusal there is "nothing to show", not an
+     error — so it reads as empty rather than failing the page. */
+  function readBench(id, div) {
+    return db.ref(at(id) + '/bench/' + div).once('value')
+      .then(function (snap) { return snap.val() || null; })
+      .catch(function () { return null; });
+  }
+
+  /* Open on the newest return this club has a row in. */
+  function firstWithRow(i) {
+    if (i >= S.returns.length) return Promise.resolve(null);
+    return readClub(S.returns[i].id).then(function (club) {
+      return club ? S.returns[i].id : firstWithRow(i + 1);
+    });
+  }
+
+  function show(id) {
+    message('Loading…');
+    return readClub(id).then(function (club) {
+      if (!club) { message('No figures for your club in this return'); return; }
+      var divs = (D.SETS[D.setFor(club.div)] || {}).divisions || [];
+      return Promise.all(divs.map(function (d) { return readBench(id, d); })).then(function (lists) {
+        var benches = {};
+        divs.forEach(function (d, i) { if (lists[i]) benches[d] = lists[i]; });
+        FBView.render($('fbBody'), {
+          div: club.div, v: club.v, benches: benches,
+          quarter: id.split('/')[1],
+          returns: S.returns, current: id, onReturn: show
+        });
+      });
+    }).catch(failed);
+  }
+
+  function start(session) {
+    $('fbGate').hidden = true;
+    $('fbShell').hidden = false;
+    $('fbOut').hidden = false;
+
+    var code = session && session.role;
+    if (!code || code === '*' || code === 'NL') {
+      message('This page shows a club’s own figures',
+        'League staff: every club is on <a href="/financial-benchmarking/admin/">the staff page</a>.');
+      return;
+    }
+    S.code = code;
+
+    NL.clubs.load().catch(function () { return null; }).then(function (meta) {
+      S.meta = meta;
+      var c = NL.clubs.byCode(code);
+      var name = (c && c.name) || (session && session.name) || code;
+      $('fbClub').textContent = name;
+      var crest = $('fbCrest');
+      crest.src = NL.clubs.crestUrl(name, 'thumb');
+      NL.clubs.wireCrestImg(crest, name);
+      return db.ref(BASE + '/index').once('value');
+    }).then(function (snap) {
+      var idx = (snap && snap.val()) || {};
+      S.returns = [];
+      Object.keys(idx).sort().reverse().forEach(function (season) {
+        Object.keys(idx[season] || {}).sort().reverse().forEach(function (q) {
+          S.returns.push({ id: season + '/' + q, label: NL.season.label(S.meta, season) + ' · ' + D.quarterLabel(q) });
+        });
+      });
+      if (!S.returns.length) { message('No figures yet'); return; }
+      return firstWithRow(0).then(function (id) {
+        if (!id) { message('No figures for your club yet'); return; }
+        return show(id);
+      });
+    }).catch(failed);
+  }
+
+  $('fbOut').addEventListener('click', function () {
+    NL.codeGate.signOut().then(function () { location.reload(); });
+  });
+
+  NL.codeGate.ensure({
+    mount: $('fbGate'),
+    title: 'Financial Benchmarking',
+    sub: 'Enter your access code.',
+    numeric: false,
+    verify: NL.codeGate.viaFunction('app-data/club-codes', { tool: 'financial-benchmarking' }),
+    claim: 'club'
+  }).then(start);
+})();
+</script>
+</body>
+</html>
