@@ -1,9 +1,13 @@
 /* =============================================================================
    NL Tools — Financial Benchmarking: data layer
    File: /financial-benchmarking/_data.js
-   Version: v0.1 (10/11/2026)
+   Version: v0.2 (10/11/2026)
 
    CHANGELOG
+     v0.2 (10/11/2026) — Club names as the returns sheet writes them are
+       recognised: "Utd" and the like are read in full, and a name that
+       differs only in its last word ("Town", "United") matches when it can
+       mean one club only.
      v0.1 (10/11/2026) — First build. Reads a financial return as pasted from
        the spreadsheet, works out each club's derived figures, and builds the
        nameless comparison lists a club is shown against.
@@ -167,26 +171,46 @@
   function normHead(s) { return String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]/g, ''); }
 
   /* Names as a spreadsheet writes them against names as clubs-meta holds
-     them: case, punctuation, "FC" / "AFC" and "&" all vary. */
+     them: case, punctuation, "FC" / "AFC" and "&" all vary, and the returns
+     sheet abbreviates ("Maidstone Utd"). */
+  var ABBREV = { utd: 'united', ath: 'athletic', tn: 'town', boro: 'borough',
+                 wdrs: 'wanderers', rvrs: 'rovers', rov: 'rovers', utds: 'united' };
   function normName(s) {
     return String(s == null ? '' : s).toLowerCase()
       .replace(/&/g, ' and ')
+      .replace(/['’]/g, '')
       .replace(/[^a-z0-9 ]/g, ' ')
       .replace(/\b(afc|fc|the)\b/g, ' ')
-      .replace(/\s+/g, ' ').trim();
+      .replace(/\s+/g, ' ').trim()
+      .split(' ').map(function (w) { return ABBREV[w] || w; }).join(' ');
+  }
+  /* The name without its last word when that word is the kind clubs share
+     ("Town", "United"): "Maidstone", from "Maidstone United" or "Maidstone
+     Utd". Used only where it points at exactly one club. */
+  function stem(s) {
+    return normName(s).replace(/ (united|town|city|athletic|rovers|wanderers|borough|harriers|angels|invicta|moors)$/, '');
   }
 
-  /* clubs: [{ name, short, code, division }] → fn(name) → club | null */
+  /* clubs: [{ name, short, code, division }] → fn(name) → club | null
+
+     Exact names first (full, then short). A stem is a fallback and only
+     counts when one club has it: two clubs sharing a stem match neither, and
+     the admin is asked which is meant. A wrong guess here would put one
+     club's finances on another club's page. */
   function resolver(clubs) {
-    var idx = {};
+    var idx = {}, stems = {};
     (clubs || []).forEach(function (c) {
       if (!c || !c.code || !c.division) return;
       [c.name, c.short].forEach(function (n) {
         var k = normName(n);
         if (k && !idx[k]) idx[k] = c;
       });
+      var st = stem(c.name);
+      if (st) stems[st] = (st in stems && stems[st] !== c) ? null : c;
     });
-    return function (name) { return idx[normName(name)] || null; };
+    return function (name) {
+      return idx[normName(name)] || stems[stem(name)] || null;
+    };
   }
 
   /* A return as pasted from the spreadsheet (tab-separated, header row
