@@ -86,8 +86,9 @@ test('the National sheet parses under its banner row, brackets as a negative', (
   assert.equal(a.v.transfers, -40000);
   const f = D.figures('national', a.v);
   assert.equal(f.income, 500000);
-  assert.equal(f.incomePct, 25);
-  assert.equal(f.wagesOfIncome, 90);
+  assert.ok(!('incomePct' in f), 'National income is not shown as a share of budget');
+  /* 450,000 of wages against a 2,000,000 BUDGET, not the 500,000 received. */
+  assert.equal(f.wagesOfBudget, 22.5);
 });
 
 test('a missing figure stays missing, and takes its derived figures with it', () => {
@@ -97,7 +98,7 @@ test('a missing figure stays missing, and takes its derived figures with it', ()
   const f = D.figures('national', b.v);
   assert.equal(f.nonMatchday, null);
   assert.equal(f.income, null, 'a total with a part missing is not a total');
-  assert.equal(f.incomePct, null);
+  assert.equal(f.wagesOfBudget, 24, 'wages against budget do not need the income lines');
   assert.equal(f.playerWages, 200000);
   assert.equal(D.figures('step2', { fqrIncome: 5, incomeBudget: 0 }).incomePct, null, 'no percentage of a zero budget');
 });
@@ -173,7 +174,7 @@ test('abbreviated names match, and a name that could be two clubs matches neithe
   assert.equal(r('Iota Town'), null);
 });
 
-test('a budget is ranked by size, largest first, ties sharing a place', () => {
+test('a figure is ranked by size, largest first, ties sharing a place', () => {
   assert.equal(JSON.stringify(D.rankOf([100, 200, 300, 400], 400)), JSON.stringify({ rank: 1, of: 4 }));
   assert.equal(JSON.stringify(D.rankOf([100, 200, 300, 400], 100)), JSON.stringify({ rank: 4, of: 4 }));
   assert.equal(D.rankOf([100, 300, 300, 400], 300).rank, 2);
@@ -183,14 +184,30 @@ test('a budget is ranked by size, largest first, ties sharing a place', () => {
     JSON.stringify(['1st', '2nd', '3rd', '4th', '11th', '12th', '13th', '21st', '22nd', '23rd', '24th', '48th']));
 });
 
-test('only budgets carry a rank; every figure the club view lays out exists', () => {
+test('every figure the club view lays out exists, and the set names its return', () => {
   for (const set of ['national', 'step2']) {
-    const ms = D.metricsOf(set), keys = ms.map((m) => m.key);
-    for (const m of ms) if (m.rank) assert.match(m.key, /Budget$/, `${m.key} is ranked but is not a budget`);
+    const keys = D.metricsOf(set).map((m) => m.key);
     const def = D.SETS[set];
-    for (const m of (def.lead || { metrics: [] }).metrics) assert.ok(keys.includes(m.key), m.key);
+    for (const k of (def.ratios || { metrics: [] }).metrics) assert.ok(keys.includes(k), k);
     for (const pn of def.panels || []) for (const k of [pn.budget, pn.actual, pn.pct]) assert.ok(keys.includes(k), k);
   }
+  assert.equal(D.quarterLabel('q1', 'national'), 'SCMP1');
+  assert.equal(D.quarterLabel('q3', 'step2'), 'FQR3');
+  assert.equal(D.quarterLabel('q1'), 'FQR1');
+});
+
+test('finance\'s wording: the titles as asked, the return named in each', () => {
+  const title = (set, key) => D.metricsOf(set).find((m) => m.key === key).label
+    .replace(/\{Q\}/g, D.quarterLabel('q1', set));
+  assert.equal(title('national', 'income'),
+    'SCMP1 income excluding transfers, distributions, parachute payments, and prize money');
+  assert.equal(title('national', 'wagesOfBudget'), 'Wages as % of budgeted income');
+  assert.equal(JSON.stringify(D.SETS.national.groups[0].metrics.slice(0, 2).map((m) => m.key)),
+    JSON.stringify(['incomeBudget', 'income']), 'income to date sits beside the budget');
+  assert.equal(title('step2', 'budgetRatio'), 'Budgeted squad spend as a % of income');
+  assert.equal(title('step2', 'spendOfIncome'), 'FQR1 squad spend as a % of FQR1 income');
+  assert.equal(title('step2', 'incomePct'), 'FQR1 income as a % of budgeted income');
+  assert.equal(title('step2', 'spendPct'), 'FQR1 player spend as a % of budgeted player spend');
 });
 
 /* ---- Rules and registry ---------------------------------------------------- */

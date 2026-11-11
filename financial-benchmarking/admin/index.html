@@ -1,10 +1,13 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Financial Benchmarking (staff page)
-  Version: v0.6 (11/11/2026)
+  Version: v0.7 (11/11/2026)
   File: /financial-benchmarking/admin/index.html
 
   CHANGELOG
+    v0.7 (11/11/2026) — Finance's review (_data v0.4, _view v0.4). The return
+      is named for the division in view: FQR for North and South, SCMP for
+      National. Chart, table and CSV titles follow.
     v0.6 (11/11/2026) — The club card is canon: NL.clubs.headerHtml draws
       .nl-club-header (nl-brand v2.77, nl-utils v1.48), promoted from the
       card v0.5 built here. Same crest, name, division and return, All
@@ -92,6 +95,15 @@
     window.NL_CHANGELOG = [
       {
         date: '11/11/2026',
+        version: 'v0.7',
+        items: [
+          'National: the return is the SCMP; income to date sits beside the budget; wages are a share of budgeted income; two charts to a row.',
+          'North and South: Income and Playing squad first, the two squad spend ratios below, every chart titled in full.',
+          'Every figure shows its place by size.'
+        ]
+      },
+      {
+        date: '11/11/2026',
         version: 'v0.6',
         items: [
           'The club card at the top of one club’s view is now the shared club header used across NL Tools.'
@@ -155,9 +167,9 @@
   <script src="/system/nl-topbar.js?v=10"></script>
   <script src="/system/auth-guard.js?v=17"></script>
 
-  <link rel="stylesheet" href="/financial-benchmarking/_view.css?v=3">
-  <script src="/financial-benchmarking/_data.js?v=3"></script>
-  <script src="/financial-benchmarking/_view.js?v=3"></script>
+  <link rel="stylesheet" href="/financial-benchmarking/_view.css?v=4">
+  <script src="/financial-benchmarking/_data.js?v=4"></script>
+  <script src="/financial-benchmarking/_view.js?v=4"></script>
 
 <style>
   /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
@@ -285,9 +297,14 @@
     var c = NL.clubs.byCode(code);
     return c ? c.name : code;
   }
-  function returnLabel(id) {
+  function bothNames(q) { return D.quarterLabel(q, 'step2') + ' / ' + D.quarterLabel(q, 'national'); }
+  function returnLabel(id, set) {
     var p = id.split('/');
-    return NL.season.label(S.meta, p[0]) + ' · ' + D.quarterLabel(p[1]);
+    /* Named for the division in view: FQR for North and South, SCMP for
+       National. With no division (the list of returns on file, which holds
+       both), it carries both names. */
+    var q = set ? D.quarterLabel(p[1], set) : bothNames(p[1]);
+    return NL.season.label(S.meta, p[0]) + ' · ' + q;
   }
   function note(text) {
     $('fbaBody').innerHTML = '<div class="empty-state"><div class="empty-state__title">' + esc(text) + '</div></div>';
@@ -326,7 +343,7 @@
         return;
       }
       $('fbaReturn').innerHTML = S.returns.map(function (id) {
-        return '<option value="' + esc(id) + '">' + esc(returnLabel(id)) + '</option>';
+        return '<option value="' + esc(id) + '" data-id="' + esc(id) + '">' + esc(returnLabel(id)) + '</option>';
       }).join('');
       var want = S.returns.indexOf(S.current) !== -1 ? S.current : S.returns[0];
       $('fbaReturn').value = want;
@@ -370,6 +387,14 @@
     return out;
   }
 
+  /* The Return picker names each return for the division on screen. */
+  function nameReturns(div) {
+    var set = D.setFor(div);
+    $('fbaReturn').querySelectorAll('option').forEach(function (o) {
+      o.textContent = returnLabel(o.value, set);
+    });
+  }
+
   /* ---- The named table ------------------------------------------------ */
   function rowsFor(div) {
     var set = D.setFor(div);
@@ -394,10 +419,11 @@
   function draw() {
     if (!S.data) return;
     S.divPick.set(S.div);
+    nameReturns(S.div);
     drawRank();
 
     var metrics = D.metricsOf(D.setFor(S.div));
-    var q = D.quarterLabel(S.current.split('/')[1]);
+    var q = D.quarterLabel(S.current.split('/')[1], D.setFor(S.div));
     var rows = sorted(rowsFor(S.div));
     if (!rows.length) { $('fbaRank').innerHTML = ''; note('No ' + S.div + ' figures in this return'); return; }
 
@@ -409,7 +435,7 @@
     $('fbaBody').innerHTML =
       '<div class="table-wrap"><table class="table" id="fbaTable"><thead><tr>' +
         th('name', 'Club') +
-        metrics.map(function (m) { return th(m.key, m.label.replace('{Q}', q), 'ta-right'); }).join('') +
+        metrics.map(function (m) { return th(m.key, m.label.replace(/\{Q\}/g, q), 'ta-right'); }).join('') +
       '</tr></thead><tbody>' +
         rows.map(function (r) {
           return '<tr data-code="' + esc(r.code) + '"><td>' + esc(r.name) + '</td>' +
@@ -425,10 +451,10 @@
      the same bars without the names. */
   function drawRank() {
     var metrics = D.metricsOf(D.setFor(S.div));
-    var q = D.quarterLabel(S.current.split('/')[1]);
+    var q = D.quarterLabel(S.current.split('/')[1], D.setFor(S.div));
     if (!metrics.some(function (m) { return m.key === S.metric; })) S.metric = metrics[0].key;
     S.metricPick.setOptions(metrics.map(function (m) {
-      return { value: m.key, label: m.label.replace('{Q}', q) };
+      return { value: m.key, label: m.label.replace(/\{Q\}/g, q) };
     }));
     S.metricPick.set(S.metric);
 
@@ -477,8 +503,8 @@
   function downloadCsv() {
     if (!S.data) return;
     var metrics = D.metricsOf(D.setFor(S.div));
-    var q = D.quarterLabel(S.current.split('/')[1]);
-    var rows = [['Club'].concat(metrics.map(function (m) { return m.label.replace('{Q}', q); }))];
+    var q = D.quarterLabel(S.current.split('/')[1], D.setFor(S.div));
+    var rows = [['Club'].concat(metrics.map(function (m) { return m.label.replace(/\{Q\}/g, q); }))];
     sorted(rowsFor(S.div)).forEach(function (r) {
       rows.push([r.name].concat(metrics.map(function (m) {
         var n = r.f[m.key];
@@ -502,8 +528,9 @@
     $('fbaClub').hidden = false;
     var name = nameOf(code);
     var head = $('fbaClubHead');
+    nameReturns(club.div);
     head.innerHTML = NL.clubs.headerHtml(name, {
-      sub: club.div + ' · ' + returnLabel(S.current),
+      sub: club.div + ' · ' + returnLabel(S.current, D.setFor(club.div)),
       actionsHtml: '<button class="btn btn--ghost btn--sm" id="fbaBack" type="button">All clubs</button>'
     });
     NL.clubs.wireCrestImgs(head);   /* medium → full → rose, same tick as insertion */
@@ -538,7 +565,7 @@
   function drawQuarter() {
     var pick = NL.filterButton($('fbaQuarter'), {
       label: 'Return', multiple: false, search: false,
-      options: D.QUARTERS.map(function (q) { return { value: q, label: D.quarterLabel(q) }; }),
+      options: D.QUARTERS.map(function (q) { return { value: q, label: bothNames(q) }; }),
       value: S.impQuarter,
       /* A return is always for one quarter: clearing it leaves it as it was. */
       onChange: function (v) { if (v == null) pick.set(S.impQuarter); else S.impQuarter = v; }
