@@ -153,12 +153,6 @@ test('the editor still logs every change, off the page', () => {
   assert.match(live, /function persist\(club, what, undoOf\) \{\s*logJournal\(club, what, undoOf\);/);
 });
 
-test('publishing still freezes a copy, though nothing lists them any more', () => {
-  const live = strip(EDITOR);
-  assert.match(live, /ref\(ROOT \+ '\/editions'\)\.push\(\)/, 'Publish no longer writes an edition');
-  assert.match(live, /edRef\.set\(edition\)/);
-});
-
 test('a phone extension is small and stays in one piece', () => {
   const rule = /\.cd-row__ext \{([^}]*)\}/.exec(CSS);
   assert.ok(rule, '.cd-row__ext has no rule');
@@ -176,7 +170,7 @@ test('the staff page edits in place, behind Edit, for Manage only', () => {
   assert.match(live, /<script src="\/club-directory\/_editor\.js\?v=\d+"><\/script>/);
   assert.match(live, /<link rel="stylesheet" href="\/club-directory\/_editor\.css\?v=\d+">/);
   assert.match(live, /id="editBtn"[^>]*hidden>Edit</, 'Edit starts hidden');
-  assert.match(live, /id="publish"[^>]*hidden>Publish</, 'Publish starts hidden');
+  assert.ok(!/id="publish"/.test(live), 'there is no Publish button: every save is live');
   assert.match(live, /function canEdit\(\) \{[\s\S]*?ses\.role === 'superadmin' \|\| ses\.toolLevel === 'admin'/);
   assert.match(live, /NLEditor\.start\(EDIT_HOST\)/);
   assert.ok(!/admin\/edit\//.test(live), 'nothing on the staff page still points at the old edit page');
@@ -209,29 +203,100 @@ test('the old edit addresses forward to the staff page in editing', () => {
   }
 });
 
-test('Change log downloads the whole log, marked live or not yet live', () => {
+test('Change log downloads the whole log', () => {
   const live = strip(EDITOR);
   assert.match(live, /label: 'Download \(CSV\)'/);
   const fn = live.slice(live.indexOf('function downloadLog()'));
   assert.match(fn, /journalAll\(\)/, 'every journalled change');
   assert.match(fn, /editList\(club\)/, 'every hand-edited field');
-  assert.match(fn, /at > PUBLISHED_AT/, 'each row says whether it is live yet');
   assert.match(fn, /NL\.csv\(/, 'canon CSV, not a hand-rolled one');
   assert.match(fn, /NL\.download\(/);
 });
 
-test('Publish says what it will change, from the live copy, before it changes it', () => {
+
+/* ---------------------------------------------- every save is live (v3.0)
+   Richard, 11/11/2026: no Publish. A save writes the working record, the
+   club's published copy and its private half in ONE update. */
+const RULES = JSON.parse(readFileSync(join(REPO, 'system/rtdb/rules.snapshot.json'), 'utf8'))
+  .rules['app-data']['ops-club-directory'];
+const REG = JSON.parse(readFileSync(join(REPO, 'system/rtdb/tools-registry.snapshot.json'), 'utf8'));
+const CLUBPAGE = readFileSync(join(REPO, 'club-directory/index.html'), 'utf8');
+
+test('a save writes the record, the public copy and the private half together', () => {
   const live = strip(EDITOR);
-  const fn = live.slice(live.indexOf('function publishConfirmed('));
+  const lu = live.slice(live.indexOf('function liveUpdates('));
+  const body = lu.slice(0, lu.indexOf('\n  }\n'));
+  for (const path of ["'clubs/' + name", "'published/clubs/' + name", "'private/' + name"]) {
+    assert.ok(body.includes(path), 'liveUpdates writes ' + path);
+  }
+  assert.match(live, /function saveClub\(name\) \{[\s\S]*?ref\(ROOT\)\.update\(lu\.updates\)/,
+    'one multi-path update, so the three cannot disagree');
+  /* Every write to a club goes through it. */
+  assert.ok(!/ref\(ROOT \+ '\/clubs\/' \+ club\)\.set\(/.test(live), 'a club saved without going live');
+  assert.ok(!/function publishNow|ROOT \+ '\/editions'\)\.push/.test(live), 'Publish and its frozen copies are gone');
+});
+
+test('the private half holds only what the public copy leaves out', () => {
+  const live = strip(EDITOR);
+  const fn = live.slice(live.indexOf('function privateOf('));
   const body = fn.slice(0, fn.indexOf('\n  }\n'));
-  /* Read what readers have now, then compare, then ask — in that order. */
-  const read = body.indexOf("ref(ROOT + '/published/clubs').once('value')");
-  const diff = body.indexOf('publishDiff(built,');
-  const ask = body.indexOf('NL.modal(');
-  assert.ok(read > -1 && diff > read && ask > diff, 'reads the live copy, diffs, then asks');
-  assert.match(live, /function publishDiff\(built, live\)/);
-  assert.match(live, /'New to the directory'/);
-  assert.match(live, /'Taken out of the directory'/);
-  assert.match(live, /lines\.push\('Added: '/);
-  assert.match(live, /lines\.push\('Removed: '/);
+  assert.match(body, /p\.hideContact \|\| NLDirectory\.ownHide\(e\)/);
+  assert.match(body, /p\.hideContact \|\| NLDirectory\.ownHide\(x\)/);
+  /* The club's code goes with it, for the rules to match. */
+  assert.match(live, /priv\.code = String\(meta\.code\)\.toUpperCase\(\)/);
+});
+
+test('the rules: old codes off, private details for staff and that club only', () => {
+  const all = JSON.stringify(RULES);
+  assert.deepEqual([...all.matchAll(/token\.dir === '(\w+)'/g)].map((m) => m[1]), ['reader'],
+    'only the reader code is honoured, and only once');
+  assert.match(RULES.published['.read'], /token\.dir === 'reader'/);
+  for (const k of ['clubs', 'provenance', 'editions', 'undo']) {
+    assert.ok(!/token\.dir|token\.club/.test(RULES[k]['.read']), k + ' is readable by a code');
+  }
+  const priv = RULES.private.$club['.read'];
+  assert.match(priv, /data\.child\('code'\)\.val\(\) === auth\.token\.club/);
+  assert.match(priv, /auth\.token\.club !== 'NL'/, 'the shared NL code is not a club');
+  assert.ok(!/token\.dir/.test(priv), 'the reader code never reads private details');
+  assert.equal(RULES.editions.$edition['.write'], false, 'no more frozen copies');
+  assert.ok(!/val\(\) === 'club-admin'/.test(RULES.clubs.$clubName['.write']),
+    'a club login does not write its own record directly');
+});
+
+test('club logins are off on the staff page', () => {
+  const d = REG['ops-club-directory'].defaults;
+  assert.equal(d['club-admin'], 'off');
+  assert.equal(d['club-staff'], 'off');
+});
+
+test("a club's own page shows its private details, marked; others show the marker", () => {
+  const live = strip(CLUBPAGE);
+  assert.match(live, /ref\(NLGate\.ROOT \+ '\/private\/' \+ OWN\)/, 'reads its OWN private half only');
+  assert.match(live, /o\.showHidden = isOwn\(o\.club\) && OWN_PRIVATE/);
+  assert.match(live, /privateMarker: true/);
+  assert.match(live, /As a representative of your club, you can see/);
+  assert.match(live, /mailto:admin@thenationalleague\.org\.uk\?subject=/);
+  const pub = strip(readFileSync(join(REPO, 'club-directory/public/index.html'), 'utf8'));
+  assert.ok(!/privateMarker|\/private\//.test(pub), 'the public page never hints at, or asks for, private details');
+});
+
+test('every rename asks: same person, or someone new', () => {
+  const live = strip(EDITOR);
+  assert.match(live, /function renameThen\(\) \{\s*if \(roles\.length\) \{\s*resolveRename\(/);
+  assert.match(live, /title: 'Same person, or someone new\?'/);
+});
+
+test('removing someone on a mailing list asks who takes their place', () => {
+  const live = strip(EDITOR);
+  /* Both ways a person leaves go through it, before the save. */
+  const whole = live.slice(live.indexOf('function removeWholePerson('));
+  assert.match(whole.slice(0, whole.indexOf('\n  }\n')), /coverLists\(club, person\)[\s\S]*applyCover\(club, person, cover\)/);
+  const role = live.slice(live.indexOf('function removeRole('));
+  assert.match(role.slice(0, role.indexOf('\n  }\n')), /coverLists\(club, person\)/);
+  /* Someone new replacing a leaver takes their lists. */
+  const rep = live.slice(live.indexOf('function replaceInRole('));
+  assert.match(rep.slice(0, rep.indexOf('\n  }\n')), /cover\[k\] = fresh\.id/);
+  /* Who's who in the list editor: name and job, and a flag when the job does not fit. */
+  assert.match(live, /function whoLabel\(p\)/);
+  assert.match(live, /'ed-lg__who' \+ \(fitsList\(byId\[id\], key\) \? '' : ' is-odd'\)/);
 });

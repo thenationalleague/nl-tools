@@ -1,8 +1,18 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Club Directory (staff)
-  Version: v1.18 (11/11/2026)
+  Version: v1.20 (11/11/2026)
 
+  v1.20 (11/11/2026) – every save is live (editor v3.0): the Publish button
+          goes. No club in the address shows the badge wall clubs land on,
+          with an All clubs button to get back to it. Staff see private
+          details, each marked with a padlock, under "As League staff, you
+          can see private details for every club."
+  v1.19 (11/11/2026) – Mailing lists: the table fits the page again. The job
+          titles and "also" addresses under a name used the extension style,
+          which stopped wrapping in _directory.css v1.10, so a long run of
+          titles pushed Phone off the side. They have their own style now,
+          and each phone number sits on its own line without splitting.
   v1.18 (11/11/2026) – editing moves onto this page (Richard). An Edit
           button beside the club picker, for Manage on Club Directory only,
           turns the editor on in the Directory tab: pens on every row, Add
@@ -247,8 +257,8 @@
   <title>Club Directory — NL Tools</title>
 
   <link rel="stylesheet" href="/system/nl-brand.css?v=74">
-  <link rel="stylesheet" href="/club-directory/_directory.css?v=40">
-  <link rel="stylesheet" href="/club-directory/_editor.css?v=2">
+  <link rel="stylesheet" href="/club-directory/_directory.css?v=41">
+  <link rel="stylesheet" href="/club-directory/_editor.css?v=5">
 
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
@@ -275,6 +285,20 @@
     var NL_TOOL_KEY = 'ops-club-directory';
 
     window.NL_CHANGELOG = [
+      {
+        date: '11/11/2026',
+        version: 'v1.20',
+        items: [
+          'Every save goes live straight away: there is no Publish button any more.',
+          'Private details show with a padlock. Clubs see their own; other clubs and the public do not.',
+          'With no club chosen you see every club\u2019s badge, the same as clubs do.'
+        ]
+      },
+      {
+        date: '11/11/2026',
+        version: 'v1.19',
+        items: ['Mailing lists: the table fits the page again, with one phone number per line.']
+      },
       {
         date: '11/11/2026',
         version: 'v1.18',
@@ -429,9 +453,9 @@
   <script src="/system/nl-analytics.js?v=1"></script>
   <script src="/system/nl-topbar.js?v=10"></script>
   <script src="/system/auth-guard.js?v=17"></script>
-  <script src="/club-directory/_directory.js?v=40"></script>
+  <script src="/club-directory/_directory.js?v=41"></script>
   <script src="/club-directory/_tidy.js?v=30"></script>
-  <script src="/club-directory/_editor.js?v=3"></script>
+  <script src="/club-directory/_editor.js?v=6"></script>
 
 <style>
   .cd-pickbar {
@@ -439,6 +463,10 @@
     margin: 0 0 4px;
   }
   .cd-pick { width: 280px; max-width: 100%; }
+  .cd-staffnote {
+    display: flex; align-items: center; gap: 8px; margin: 0 0 14px;
+    font-size: var(--text-sm); color: var(--navy-600);
+  }
 
   .ov-pane[hidden] { display: none; }
 
@@ -601,6 +629,13 @@
   .lb-clubcell { display: flex; align-items: center; gap: 7px; }
   .lb-clubcell img { width: 18px; height: 18px; object-fit: contain; flex: none; }
   .lb-none { color: var(--text-muted); font-style: italic; }
+  /* The job titles and "also" addresses under a name. They borrowed the
+     directory's extension style until v1.19, and when that learned not to
+     wrap (so "ext 217" stays in one piece) a long run of titles stopped
+     wrapping too and pushed the phone column off the side. */
+  .lb-sub { font-size: var(--text-xs); color: var(--text-muted); }
+  /* One number per line, never split mid-number. */
+  .lb-tel { white-space: nowrap; font-variant-numeric: tabular-nums; }
 </style>
 </head>
 <body>
@@ -687,7 +722,7 @@
         <div class="cd-pick" id="pick"></div>
         <button class="btn btn--ghost btn--sm" id="editBtn" type="button" aria-pressed="false" hidden>Edit</button>
         <button class="btn btn--ghost btn--sm" id="changes" type="button" hidden>Change log</button>
-        <button class="btn btn--primary btn--sm" id="publish" type="button" hidden>Publish</button>
+        <button class="btn btn--ghost btn--sm" id="allClubs" type="button" hidden>All clubs</button>
       </div>
       <div class="cd-search"><div class="cd-search__box">
         <svg class="cd-search__icon" width="17" height="17" viewBox="0 0 24 24" fill="none"
@@ -722,7 +757,7 @@ window.TOOL = (function () {
   var esc = NL.escHtml;
   var arr = function (v) { return NLDirectory.arr(v); };
   var ALL = {}, names = [], clubNames = [], AUDIT = {}, ADMIN = false, PICK = null, current = '',
-      EDITING = false;
+      EDITING = false, ROSTER = [];
 
   var LIST_ORDER = NLDirectory.LIST_ORDER;
   var LIST_LABEL = NLDirectory.LIST_LABEL;
@@ -757,9 +792,11 @@ window.TOOL = (function () {
   function boot() {
     Promise.all([
       NL.clubs.load(),
-      db.ref('app-data/ops-club-directory/clubs').once('value')
+      db.ref('app-data/ops-club-directory/clubs').once('value'),
+      NL.clubs.forSeason().catch(function () { return []; })
     ]).then(function (res) {
       ALL = res[1].val() || {};
+      ROSTER = res[2] || [];
       names = Object.keys(ALL).sort();
       /* The mailing-list builder and its warnings speak only to clubs — an
          org record (the League, the Trust) has no club-role lists to be on. */
@@ -1538,16 +1575,18 @@ window.TOOL = (function () {
           '<td>' + esc(r.name) +
             (r.kind === 'inbox' ? ' <span class="pill pill--info">shared mailbox</span>' : '') +
             (r.held ? ' <span class="pill pill--pending">has withheld details</span>' : '') +
-            (r.roles.length ? '<br><span class="cd-row__ext">' +
+            (r.roles.length ? '<br><span class="lb-sub">' +
               esc(r.roles.join(' / ')) + '</span>' : '') + '</td>' +
           '<td><span class="lb-clubcell"><img data-crest="' + esc(r.club) + '" alt="">' +
             esc(r.club) + '</span></td>' +
           '<td>' + (r.emails.length
             ? '<a href="mailto:' + esc(r.emails[0]) + '">' + esc(r.emails[0]) + '</a>' +
-              (r.emails.length > 1 ? '<br><span class="cd-row__ext">also ' +
+              (r.emails.length > 1 ? '<br><span class="lb-sub">also ' +
                 r.emails.slice(1).map(esc).join(', ') + '</span>' : '')
             : '<span class="lb-none">no email held</span>') + '</td>' +
-          '<td>' + (r.phones.length ? esc(r.phones.join(', ')) : '') + '</td>' +
+          '<td>' + r.phones.map(function (n) {
+            return '<span class="lb-tel">' + esc(n) + '</span>';
+          }).join('<br>') + '</td>' +
         '</tr>';
       }).join('') + '</tbody>';
     wireCrests($('lbTable'));
@@ -1731,7 +1770,9 @@ window.TOOL = (function () {
     $('q').addEventListener('input', onSearch);
     $('editBtn').hidden = !canEdit();
     $('editBtn').addEventListener('click', function () { setEdit(!EDITING); });
-    var first = fromHash() || names[0];
+    $('allClubs').addEventListener('click', function () { $('q').value = ''; draw(''); });
+    /* No club in the address: the badge wall, the same one clubs land on. */
+    var first = fromHash();
     /* ?edit opens straight into editing — the old edit page forwards here
        with it, and a reload while editing keeps you editing. */
     if (/(^|[?&])edit(=|&|$)/.test(location.search.slice(1)) && canEdit()) { setEdit(true, first); }
@@ -1749,13 +1790,16 @@ window.TOOL = (function () {
   }
 
   function draw(name) {
+    if (!name) { return drawIndex(); }
     var rec = ALL[name];
     if (!rec) { return; }
     if (EDITING) { return NLEditor.draw(name); }
     drew(name);
     rec.club = rec.club || name;
     $('extra').innerHTML = '';
-    $('out').innerHTML = NLDirectory.renderClub(rec, { showGaps: true });
+    /* Staff see everything the League holds, private details included,
+       each one marked; the line says why. */
+    $('out').innerHTML = staffNote() + NLDirectory.renderClub(rec, { showGaps: true, showHidden: true });
     var crest = document.getElementById('cdCrest');
     if (crest) {
       var ck = NLDirectory.bannerCrestOf(rec);
@@ -1766,11 +1810,36 @@ window.TOOL = (function () {
     }
   }
 
+  /* No club chosen: every club's badge, clubs and the League's own records,
+     exactly as clubs see it at /club-directory/. Pick one to open it. */
+  function drawIndex() {
+    current = '';
+    if (PICK) { PICK.set(''); }
+    if (location.hash) { history.replaceState(null, '', location.pathname + location.search); }
+    $('allClubs').hidden = true;
+    $('extra').innerHTML = '';
+    $('out').innerHTML = NLDirectory.renderIndex({
+      roster: ROSTER,
+      extra: names,
+      isReady: function (n) { return !!ALL[n]; },
+      orgs: names.filter(function (n) { return NLDirectory.isOrg(ALL[n]); })
+        .map(function (n) { return { name: n, crestName: ALL[n].crestName }; })
+    });
+    NLDirectory.wireIndex($('out'), function (n) { draw(n); window.scrollTo(0, 0); });
+  }
+
+  function staffNote() {
+    return '<p class="cd-staffnote"><svg class="icon icon--sm" aria-hidden="true"><use href="' +
+      '/assets/icons/sprites.svg#icon-lock"></use></svg>As League staff, you can see private ' +
+      'details for every club.</p>';
+  }
+
   /* Whichever way a club was drawn — read or edited, from the picker, the
      address, the overview or an undo — the picker, the address and the
      overview row follow it. */
   function drew(name) {
     current = name;
+    $('allClubs').hidden = false;
     if (PICK) { PICK.set(name); }
     if (location.hash !== '#' + encodeURIComponent(name)) {
       history.replaceState(null, '', '#' + encodeURIComponent(name));
@@ -1833,7 +1902,6 @@ window.TOOL = (function () {
     btn.classList.toggle('btn--navy', EDITING);
     btn.classList.toggle('btn--ghost', !EDITING);
     $('changes').hidden = !EDITING;
-    $('publish').hidden = !EDITING;
     $('pane-directory').classList.toggle('ed-on', EDITING);
     var url = location.pathname + (EDITING ? '?edit' : '') + location.hash;
     history.replaceState(null, '', url);
@@ -1841,7 +1909,7 @@ window.TOOL = (function () {
   function redraw(name) {
     var q = $('q').value;
     if (q.trim()) { onSearch({ target: { value: q } }); }
-    else if (name) { draw(name); }
+    else { draw(name); }
   }
 
   function onSearch(e) {

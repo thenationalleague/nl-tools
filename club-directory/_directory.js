@@ -1,7 +1,16 @@
 /* =========================================================================
    NL Tools — Club Directory presentation
    File: /club-directory/_directory.js
-   Version: v1.17 (11/11/2026)
+   Version: v1.18 (11/11/2026)
+
+   v1.18 — "Private" replaces "Not published" everywhere, with a padlock:
+   held() on a single address or number, the whole-person tag, and the
+   quiet line where a channel is kept back. And opts.privateMarker: on the
+   club-code page every club shows "Private" where a detail is kept back
+   (Richard: they can see it is there, not what it is). Without the option
+   nothing changes — the public page passes neither it nor showQuiet, so a
+   stranger still sees no sign that anything was held.
+
 
    v1.17 — an org's shared-mailbox extension uses .cd-row__ext like every
    other extension, which _directory.css v1.10 sets small and unbroken.
@@ -526,7 +535,10 @@
     });
     if (opts.value) { pk.setValue(opts.value); }
     return {
-      set: function (name) { if (name && name !== pk.getValue()) { pk.setValue(name); } },
+      set: function (name) {
+        if (!name) { if (pk.getValue()) { pk.clear(); } return; }
+        if (name !== pk.getValue()) { pk.setValue(name); }
+      },
       get: function () { return pk.getValue(); },
       refresh: function () {
         var was = pk.getValue();
@@ -579,6 +591,7 @@
        72 clubs. The state is now stated wherever the details are shown. */
     var showHidden = !!(opts && opts.showHidden);
     var loud = !opts || opts.showQuiet !== false;
+    var marker = loud || !!(opts && opts.privateMarker);
     var unlisted = !!p.hideContact;
     var here = arr(p.roles).filter(function (r) { return r.section === section; });
     var titles = here.map(function (r) { return (r.title || '').trim(); }).filter(Boolean);
@@ -609,17 +622,16 @@
 
        Default is loud, so the editor and every other caller are unchanged;
        the reader opts out for the 71 clubs that are not yours. */
-    var quietEm = !loud ? ''
-      : (em.withheld && !showHidden ? 'Not published'
-      : (holdsAny(p, 'emails') ? '' : 'None held'));
+    var quietEm = (em.withheld && !showHidden && marker) ? privateMark()
+      : (!loud || holdsAny(p, 'emails') ? '' : '<span class="cd-row__quiet">None held</span>');
     /* The person-level tag survives for the person-level decision only. When
        it is set, everything is held back, and tagging each of six lines
        individually says the same thing six times. Where the decision is
        per address, the address itself carries the mark instead. */
     var tag = (unlisted && showHidden)
-      ? '<span class="cd-row__unlisted" title="The club asked us to keep this ' +
-        'person’s details out of the published directory. The reader shows ' +
-        '&quot;Not published&quot; here.">Not published</span>'
+      ? '<span class="cd-row__unlisted" title="Every contact detail of theirs is ' +
+        'private: League staff and their own club see them, nobody else does.">' +
+        strokeGlyph('lock') + 'Private</span>'
       : '';
     /* The row says who it is. The editor used to work this out by counting —
        "the third row under Leadership is the third person in Leadership" —
@@ -647,13 +659,11 @@
         (titles.length ? titles.map(esc).join(' &middot; ')
           : (opts && opts.showGaps ? '<em>No job title</em>' : '')) +
       '</div>' +
-      '<div>' + tag + (mail || (quietEm
-        ? '<span class="cd-row__quiet">' + quietEm + '</span>' : '')) + '</div>' +
+      '<div>' + tag + (mail || quietEm) + '</div>' +
       /* The phone cell has always stayed blank when there is simply no
          number — "None held" against 400 people is noise. It speaks up only
          to say a number exists and is being kept back. */
-      '<div>' + (ph || (loud && tl.withheld && !showHidden
-        ? '<span class="cd-row__quiet">Not published</span>' : '')) + '</div>' +
+      '<div>' + (ph || (marker && tl.withheld && !showHidden ? privateMark() : '')) + '</div>' +
       '</li>';
   }
 
@@ -681,9 +691,15 @@
 
   function held(entry, on) {
     return (on && entry.hide)
-      ? ' <span class="cd-held" title="This one is kept out of the published ' +
-        'directory. Others on the same person may still be published.">not published</span>'
+      ? ' <span class="cd-held" title="Private: League staff and their own club see ' +
+        'this. Nobody else does.">' + strokeGlyph('lock') + 'Private</span>'
       : '';
+  }
+  /* Where a detail is kept back and this view is not shown it: the padlock
+     and the word, nothing else. */
+  function privateMark() {
+    return '<span class="cd-private" title="Kept private by the club">' +
+      strokeGlyph('lock') + 'Private</span>';
   }
 
   function facts(pairs) {
@@ -710,6 +726,7 @@
   function personCard(p, opts) {
     var showHidden = !!(opts && opts.showHidden);
     var loud = !opts || opts.showQuiet !== false;
+    var marker = loud || !!(opts && opts.privateMarker);
     var unlisted = !!p.hideContact;
     var roles = arr(p.roles);
 
@@ -744,10 +761,9 @@
         '<div class="cd-pc__name">' + displayName(p) + '</div>' +
       '</div></div>' +
       (jobs ? '<ul class="cd-pc__jobs">' + jobs + '</ul>' : '') +
-      '<div class="cd-pc__lines">' + (lines || (!loud ? '' :
-        '<span class="cd-row__quiet">' +
-        ((em.withheld || tl.withheld) && !showHidden ? 'Not published' : 'None held') +
-        '</span>')) + '</div>' +
+      '<div class="cd-pc__lines">' + (lines ||
+        ((em.withheld || tl.withheld) && !showHidden && marker ? privateMark()
+          : (loud ? '<span class="cd-row__quiet">None held</span>' : ''))) + '</div>' +
     '</li>';
   }
 

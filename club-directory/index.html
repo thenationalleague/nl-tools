@@ -15,6 +15,17 @@
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
 <!--
   club-directory / index.html   (was /club-directory/reader/)
+  v2.1 – (11/11/2026) Private details (Richard). A club signed in with its
+          own club code now sees its own private details too, each marked
+          with a padlock, under the line "As a representative of your club,
+          you can see its private details. Please don't share them." They are
+          read from private/<club>, which the rules open to that club's code
+          and to League staff only; every other club's page shows "Private"
+          where a detail is kept back, and nothing more. The shared
+          Directory reader code sees the markers, never the details.
+          · Suggest a change, on your own club only: an email to
+            admin@thenationalleague.org.uk with the club in the subject.
+          · Lockstep _directory.* ?v=41.
   v2.0 – (11/11/2026) Moved to the tool's root (Richard): a tool clubs use
           has the club's page at its root and the staff page at /admin/.
           Nothing about the page changed: clubs still come in with their club
@@ -203,7 +214,7 @@
   Not lint-covered: no auth-guard, by design.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=74">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=40">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=41">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
@@ -212,7 +223,7 @@
 <!-- GA4 for nl.tools — cookieless, no banner, no identity. See system/nl-analytics.js -->
 <script src="/system/nl-analytics.js?v=1"></script>
 <script src="/club-directory/_gate.js?v=30"></script>
-<script src="/club-directory/_directory.js?v=40"></script>
+<script src="/club-directory/_directory.js?v=41"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -242,6 +253,16 @@
      this page does not have. */
   .cd-search { top: 46px; }
   .rd-hits { margin: 0 0 30px; }
+  /* Your own club only: why you can see what other clubs cannot, and the
+     way to ask for a change. */
+  .rd-own {
+    display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap;
+    margin: 0 0 18px; padding: 10px 14px;
+    background: var(--navy-50); border-radius: var(--radius);
+    font-size: var(--text-sm); color: var(--navy);
+  }
+  .rd-own p { margin: 0; flex: 1 1 320px; display: flex; align-items: center; gap: 8px; }
+  .rd-own__lock { flex: 0 0 auto; }
   .rd-hit__club {
     font-size: var(--text-xs); text-transform: uppercase; letter-spacing: var(--tracking-tight);
     font-weight: 700; font-variation-settings: 'wght' 700; color: var(--primary);
@@ -318,9 +339,13 @@
      loud only where those are the same: "Not published" and "None held" are a
      to-do list on your own entry and a column of noise on the other 71. */
   function viewOpts(extra) {
-    var o = { cards: VIEW === 'cards', viewSwitch: true };
+    var o = { cards: VIEW === 'cards', viewSwitch: true, privateMarker: true };
     for (var k in (extra || {})) { o[k] = extra[k]; }
-    if (o.club != null) { o.showQuiet = isOwn(o.club); delete o.club; }
+    if (o.club != null) {
+      o.showQuiet = isOwn(o.club);
+      o.showHidden = isOwn(o.club) && OWN_PRIVATE;
+      delete o.club;
+    }
     else { o.showQuiet = false; }
     return o;
   }
@@ -329,7 +354,34 @@
      comparison rather than a guess. Empty for a Directory reader code, which
      carries no club — so nobody who is not a club sees any of it. */
   var OWN = '';
+  var OWN_PRIVATE = false;   /* true once this club's private half is merged in */
   function isOwn(name) { return !!OWN && name === OWN; }
+
+  /* Your own club's private details, merged into the published record as
+     entries carrying hide: true — the same shape the editor works in, so
+     the renderer marks each one "Private" with no new code. The rules open
+     private/<club> to that club's own code; anyone else is refused, and a
+     refusal is simply no merge. */
+  function mergeOwnPrivate() {
+    if (!OWN || !ALL[OWN]) { return Promise.resolve(); }
+    return firebase.database().ref(NLGate.ROOT + '/private/' + OWN).once('value')
+      .then(function (snap) {
+        var priv = (snap.val() || {}).people || {};
+        var people = NLDirectory.arr(ALL[OWN].people);
+        people.forEach(function (p, i) {
+          var held = priv[p.id || ('i' + i)];
+          if (!held) { return; }
+          p.emails = NLDirectory.arr(p.emails).concat(NLDirectory.arr(held.emails).map(function (e) {
+            return Object.assign({}, e, { hide: true });
+          }));
+          p.phones = NLDirectory.arr(p.phones).concat(NLDirectory.arr(held.phones).map(function (x) {
+            return Object.assign({}, x, { hide: true });
+          }));
+          delete p.hideEmail; delete p.hidePhone;
+        });
+        OWN_PRIVATE = true;
+      }).catch(function () { /* not this club's to read: the public view stands */ });
+  }
 
   /* Two doors, one card. A club types the SAME six characters that open the
      Handbook and Programme Packs; anyone else the League has given a
@@ -415,6 +467,8 @@
        no name at all — the claim is the club KEY, and the name comes back
        through the roster. */
     OWN = ownClub();
+    return mergeOwnPrivate();
+  }).then(function () {
     var sub = document.querySelector('.nl-idbar__sub');
     if (sub) sub.textContent = OWN || (SESSION && SESSION.name) || 'The National League';
     if (!names.length) {
@@ -555,7 +609,9 @@
       return;
     }
     rec.club = rec.club || name;
-    $('out').innerHTML = NLDirectory.renderClub(rec, viewOpts({ club: name }));
+    $('out').innerHTML = ownBar(name) + NLDirectory.renderClub(rec, viewOpts({ club: name }));
+    var lock = $('out').querySelector('.rd-own [data-lock]');
+    if (lock) { var ic = NL.icon('lock', 'sm'); ic.classList.add('rd-own__lock'); lock.replaceWith(ic); }
     var crest = document.getElementById('cdCrest');
     if (crest) {
       var ck = NLDirectory.bannerCrestOf(rec);
@@ -564,6 +620,19 @@
       NL.clubs.wireCrestImg(crest, ck, true);
       crest.src = NL.clubs.crestUrl(ck, 'medium');
     }
+  }
+
+  /* Your own club only. Suggest a change opens an email to the League with
+     the club in the subject and nothing else: the club says what, in its
+     own words, and Graham and Alastair make the edit. */
+  function ownBar(name) {
+    if (!isOwn(name)) { return ''; }
+    var subject = 'Club Directory change \u2013 ' + name;
+    return '<div class="rd-own">' +
+      (OWN_PRIVATE ? '<p><span data-lock></span>As a representative of your club, you can see ' +
+        'its private details. Please don\u2019t share them.</p>' : '<p></p>') +
+      '<a class="btn btn--ghost btn--sm" href="mailto:admin@thenationalleague.org.uk?subject=' +
+        encodeURIComponent(subject) + '">Suggest a change</a></div>';
   }
 
   function onSearch(e) {
