@@ -1,7 +1,12 @@
 /* =========================================================================
    NL Tools — Club Directory editor
    File: /club-directory/_editor.js
-   Version: v2.2 (11/11/2026)
+   Version: v2.3 (11/11/2026)
+
+   v2.3 – (11/11/2026) Change log → Download (CSV): every journalled change
+          and every hand-edited field (with was / now), newest first, each
+          marked whether it went out at the last Publish or is saved but not
+          live yet.
 
    v2.2 – (11/11/2026) Editing moves into the staff page (Richard): no
           separate edit page. /club-directory/admin/ has an Edit button
@@ -1941,10 +1946,71 @@ window.NLEditor = (function () {
       title: 'Change log',
       size: 'lg',
       body: body,
-      buttons: [{ label: 'Close', className: 'btn--ghost',
-        onClick: function (c) { c.close(); } }]
+      buttons: [
+        { label: 'Download (CSV)', className: 'btn--ghost',
+          onClick: function () { downloadLog(); } },
+        { label: 'Close', className: 'btn--ghost',
+          onClick: function (c) { c.close(); } }
+      ]
     });
     return ctrl;
+  }
+
+  /* The whole log as a spreadsheet (v2.3, Richard: "can i get a change log
+     export first so i can see this"). Two kinds of row, newest first:
+
+       · Change – one per act in the journal: what was done, by whom, and
+         whether it has since been undone.
+       · Field  – one per field changed by hand, with what it was and what
+         it is now (the edit log logEdit keeps; `from` is the value before
+         any hand edit, so a field edited three times is one row).
+
+     "Live?" says whether the change was made before the last Publish. A
+     change made after it is saved but has not reached the clubs yet, which
+     is the question this exists to answer while Publish still exists.
+     Every club, every editor; nothing here is filtered. Staff-only data,
+     downloaded by staff, the same values the editor already shows. */
+  function downloadLog() {
+    var live = function (at) {
+      if (!PUBLISHED_AT) { return 'No \u2013 nothing published yet'; }
+      return at > PUBLISHED_AT ? 'No \u2013 saved after the last publish' : 'Yes';
+    };
+    var when = function (at) { return at ? NL.formatDateTime(at) : ''; };
+    var rows = [];
+    journalAll().forEach(function (x) {
+      var e = x.e;
+      rows.push({ at: e.at || 0, cells: [when(e.at), x.club, 'Change', e.what || '', '', '',
+        e.by || '', x.undone ? 'Yes, by ' + (x.undone.by || 'editor') : (e.undoOf ? 'Reversal' : ''),
+        live(e.at || 0)] });
+    });
+    Object.keys(PROV).forEach(function (club) {
+      var people = {};
+      NLDirectory.arr((ALL[club] || {}).people).forEach(function (p) {
+        if (p.id) { people[p.id] = NLDirectory.fullName(p) || p.id; }
+      });
+      editList(club).forEach(function (e) {
+        var m = /^([^/]+)\/(.*)$/.exec(e.path || '');
+        var field = e.path || '';
+        if (m && /^(info|leads|inboxes)$/.test(m[1])) {
+          field = ({ info: 'Club details', leads: 'Mailing list', inboxes: 'Shared mailbox' })[m[1]] +
+            ' \u2013 ' + m[2];
+        } else if (m) {
+          field = (people[m[1]] || 'Someone no longer listed') + ' \u2013 ' +
+            m[2].replace(/^roles\/\d+\/title$/, 'job title');
+        }
+        rows.push({ at: e.at || 0, cells: [when(e.at), club, 'Field', field, e.from || '', e.to || '',
+          e.by || '', '', live(e.at || 0)] });
+      });
+    });
+    rows.sort(function (a, b) { return b.at - a.at; });
+    var csv = NL.csv([['When', 'Club', 'Kind', 'What', 'Was', 'Now', 'By', 'Undone', 'Live?']]
+      .concat(rows.map(function (r) { return r.cells; })), { bom: true });
+    NL.download('club-directory-change-log-' + new Date().toISOString().slice(0, 10) + '.csv',
+      csv, 'text/csv;charset=utf-8');
+    var waiting = rows.filter(function (r) { return PUBLISHED_AT && r.at > PUBLISHED_AT; }).length;
+    NL.toast(rows.length + (rows.length === 1 ? ' row' : ' rows') + ' downloaded' + (PUBLISHED_AT
+      ? ', ' + waiting + ' saved since the last publish (' + NL.formatDateTime(PUBLISHED_AT) + ')'
+      : ''), 'success');
   }
 
   /* Somebody else may have touched the same person since. That is the one

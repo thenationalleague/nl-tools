@@ -208,3 +208,14 @@ test('the old edit addresses forward to the staff page in editing', () => {
     assert.ok(!/auth-guard/.test(src), 'a redirect stub waits on nothing');
   }
 });
+
+test('Change log downloads the whole log, marked live or not yet live', () => {
+  const live = strip(EDITOR);
+  assert.match(live, /label: 'Download \(CSV\)'/);
+  const fn = live.slice(live.indexOf('function downloadLog()'));
+  assert.match(fn, /journalAll\(\)/, 'every journalled change');
+  assert.match(fn, /editList\(club\)/, 'every hand-edited field');
+  assert.match(fn, /at > PUBLISHED_AT/, 'each row says whether it is live yet');
+  assert.match(fn, /NL\.csv\(/, 'canon CSV, not a hand-rolled one');
+  assert.match(fn, /NL\.download\(/);
+});
