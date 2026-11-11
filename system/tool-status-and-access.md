@@ -102,7 +102,8 @@ portal session as well, and the address clubs hold never changes.
 |---|---|
 | Programme Packs, DAZN Viewership | follows it |
 | Club Kits | no club page any more: the console is the root (public form retired 15/10/2026) |
-| Handbook, Club Directory | **as they are for now; planned, not scheduled** (Richard, 15/10/2026): the full portal tool moves to `/admin/`; the Directory's code-gated `/editor/` (a stopgap for editors without a portal login) retires; `/reader/` retires into a redirect. `/public/` (open, noindex) is unaffected. What then sits at the root is open, and by the rule above it is the club's page. |
+| Handbook | **as it is for now; planned, not scheduled** (Richard, 15/10/2026): the full portal tool moves to `/admin/`; `/reader/` retires into a redirect. `/public/` (open, noindex) is unaffected. What then sits at the root is the club's page. |
+| Club Directory | **Done 11/11/2026.** `/club-directory/` is the club's page (club code); `/club-directory/admin/` is the staff page and `/club-directory/admin/edit/` the editor, both behind the login, where Manage edits and publishes. `/reader/` and `/editor/` forward. `/public/` unchanged. Still to do: switch off the old editor codes (and `_gate.js` with the `functions/club-directory.js` code exchange, if nothing else needs them). |
 | Responsibilities (`/view/`), UW Promo | kept as they are, by decision |
 | Document Library | follows it from the start (28/10/2026): `/document-library/` for clubs by access code, read-only; `/document-library/admin/` the console. |
 | Local Media | follows it from the start (29/10/2026): `/local-media/` is the clubs' page – an open form, no code – and `/local-media/admin/` the console. |

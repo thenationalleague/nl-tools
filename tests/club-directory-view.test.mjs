@@ -9,8 +9,8 @@ import { REPO } from './load-canon.mjs';
 
 const JS = readFileSync(join(REPO, 'club-directory/_directory.js'), 'utf8');
 const CSS = readFileSync(join(REPO, 'club-directory/_directory.css'), 'utf8');
-const READER = readFileSync(join(REPO, 'club-directory/reader/index.html'), 'utf8');
-const EDITOR = readFileSync(join(REPO, 'club-directory/editor/index.html'), 'utf8');
+const READER = readFileSync(join(REPO, 'club-directory/index.html'), 'utf8');
+const EDITOR = readFileSync(join(REPO, 'club-directory/admin/edit/index.html'), 'utf8');
 const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/<!--[\s\S]*?-->/g, '');
 
 test('the switcher is built where the people are, not by the page', () => {

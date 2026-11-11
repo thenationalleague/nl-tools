@@ -75,7 +75,7 @@ test('the withheld details are removed at PUBLISH, not hidden at render', () => 
   /* The load-bearing half. A page that fetched everything and declined to
      draw some of it would have already sent it. PUB_PERSON is the allowlist
      and the emails/phones are filtered behind !p.hideContact. */
-  const ed = read('club-directory/editor/index.html');
+  const ed = read('club-directory/admin/edit/index.html');
   assert.match(ed, /var PUB_PERSON = \[/, 'the published person is an allowlist');
   assert.ok(!/'emails'|'phones'/.test(ed.slice(ed.indexOf('var PUB_PERSON'), ed.indexOf('function publishablePerson'))),
     'contacts are not in the allowlist — they are added under a condition');
@@ -187,11 +187,11 @@ test('the wall is written once, and both pages ask for it', () => {
   assert.match(js, /renderIndex: renderIndex,/);
   assert.match(js, /wireIndex: wireIndex,/);
   assert.match(css, /\.rd-tile__name \{/, 'the wall styles moved with it');
-  for (const p of ['club-directory/reader/index.html', 'club-directory/public/index.html']) {
+  for (const p of ['club-directory/index.html', 'club-directory/public/index.html']) {
     assert.match(read(p), /NLDirectory\.renderIndex\(/, `${p} draws its own wall`);
   }
   /* The reader's inline copy is gone, not shadowing the shared one. */
-  const rd = read('club-directory/reader/index.html');
+  const rd = read('club-directory/index.html');
   assert.ok(!/\.rd-tile__name \{/.test(rd), 'the reader still has its own tile CSS');
   assert.ok(!/function drawIndex\(\) \{\s*var seen/.test(rd), 'the reader still builds its own wall');
 });
@@ -200,8 +200,8 @@ test('every consumer of _directory.* moved to the same version', () => {
   /* Same rule as the canon `?v=`: a bump means the shared file changed, and a
      page left behind loads a wall whose CSS it does not have. */
   const seen = new Set();
-  for (const p of ['club-directory/index.html', 'club-directory/editor/index.html',
-    'club-directory/reader/index.html', 'club-directory/public/index.html']) {
+  for (const p of ['club-directory/admin/index.html', 'club-directory/admin/edit/index.html',
+    'club-directory/index.html', 'club-directory/public/index.html']) {
     for (const m of read(p).matchAll(/_directory\.(?:css|js)\?v=(\d+)/g)) seen.add(m[1]);
   }
   assert.equal(seen.size, 1, `mixed versions across the family: ${[...seen].join(', ')}`);

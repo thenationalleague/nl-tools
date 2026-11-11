@@ -143,7 +143,7 @@ test('both club-facing doors say which tool they are', () => {
   /* The handbook's gate lives in handbook/_reader.js as of 26/08/2026 —
      handbook/public shares the reader and calls boot({ gated: false }). */
   const hb = readFileSync(join(REPO, 'handbook/_reader.js'), 'utf8');
-  const dir = readFileSync(join(REPO, 'club-directory/reader/index.html'), 'utf8');
+  const dir = readFileSync(join(REPO, 'club-directory/index.html'), 'utf8');
   assert.match(hb, /viaFunction\('app-data\/club-codes', \{ tool: 'handbook' \}\)/);
   assert.match(dir, /viaFunction\('app-data\/club-codes', \{ tool: 'directory' \}\)/);
   assert.match(PROG, /noteUse\(db, hit\.key, "programme", hit\.userId\)/,
