@@ -30,9 +30,10 @@ Programme Packs. A club code also opens that club's own private details;
 a reader code never could. League staff use `/club-directory/admin/` with
 their portal login. The admin team knew the reader codes were going.
 
-## Left behind
+## Cleared
 
-`config/editors`, `config/readers` and `config/reader` are dead data in the
-live database, and the `cd-*` users in Firebase Authentication are dead
-accounts. Neither can do anything now: no function honours the codes and no
-rule honours the claim. Delete them in the console when convenient.
+11/11/2026, by a one-off workflow (PR #1479, removed after its run): the code
+lists (`config/editors` 5, `config/readers` 72, `config/reader`), the
+handshake's leftovers (`authGrants` 5, `rate` 2) and the 6 `cd-*` sign-in
+accounts. All of it was saved first to the private bucket, at
+`nl-tools-monthly-backups/retired/2026-11-11T18-45-33-947Z/club-directory-codes.json`.
