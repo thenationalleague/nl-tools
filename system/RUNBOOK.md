@@ -122,6 +122,8 @@ the PR body should say so.** A PR that adds a function needs nothing.
 | Timer · New season | 02:00, 1 July | New season |
 | Timer · Handbook PDF backup | daily, 05:25 UTC | Re-renders if stale. Backup only: publishing starts it at once |
 | Timer · Predictor leaderboard | every 15 min | Fan predictor standings |
+| Timer · Check last night's backup | 10:41 daily | Fails if Firebase's daily database backup is over 26 hours old or half the size of the one before. Names and sizes only |
+| Timer · Monthly database copy | 11:19, the 1st | Copies the newest daily backup into `nl-tools-monthly-backups`, kept a year. Creates the bucket on its first run |
 | Timer · Fixtures and results graphics | 4am UK (today-only matchday cards); 10am UK; every 15 min from midday UTC — and started by the `fixturesGraphicsAtFullTime` function five minutes after the last game of the day ends, because GitHub's timer runs late | Fixtures cards two days before each round, and at 4am on each day of a round that spans several days a card with only that day's games; results cards and league tables (Cup groups A–D in the group stage) as soon as a day's games are all full time. To Drive (media Shared Drive → Graphics → **Main**: per day, final cards only; **Extended**: every cut, per round) and Storage `graphics/fixtures/`. Round numbers from `assets/data/rounds-<season>.json` — a new one is needed each summer. Run workflow with **Dry run** ticked to test any date. |
 
 Plus the ones that run on push and keep generated artefacts current:
@@ -223,6 +225,22 @@ exists only in live is a deletion. It refuses unless `allow_deletions` is
 ticked. This is the mechanism that let `tools/ops-estate` sit for weeks holding
 a stale copy of the entire registry nested one level too deep, back when the
 instruction was still "paste it into the console".
+
+**Something in the database was overwritten or deleted.**
+Firebase backs up the whole nl-tools database daily into
+`nl-tools-default-rtdb-backups` (kept 30 days), and **Timer · Monthly database
+copy** keeps the 1st-of-month one for a year in `nl-tools-monthly-backups`.
+Neither is Firebase Storage, so no website user can read them.
+
+To put part of it back: **Actions → Recovery · Restore from backup**. Fill in
+a Club Directory club (restores its working copy, published copy and private
+details together) or a database path, and a date (`2026-11-10`, or `2026-11`
+for a monthly copy; blank for the newest). Run it in `report` mode first: it
+changes nothing and says how far live is from the backup. Then `restore`, and
+type `restore`. What was live is saved to `nl-tools-monthly-backups/restore-saves/`
+first, it reads back after writing, and it logs one line to the audit. It never
+restores the whole database or the audit log. The run log is public, so it
+reports counts only.
 
 **The audit feed is missing entries.**
 Either the path is on `NL.installAuditHook`'s skip list (`admin/audit*`,
