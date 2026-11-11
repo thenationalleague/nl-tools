@@ -1229,7 +1229,7 @@ window.NLEditor = (function () {
     var b = document.createElement('button');
     b.className = 'btn btn--sm btn--ghost';
     b.type = 'button';
-    b.textContent = 'Change who is on these lists\u2026';
+    b.textContent = 'Edit lists';
     b.addEventListener('click', function () { editLists(club, rec); });
     wrap.appendChild(b);
     $('extra').appendChild(wrap);
@@ -3264,6 +3264,17 @@ window.NLEditor = (function () {
     b.appendChild(document.createTextNode('Add someone'));
     b.addEventListener('click', function () { addPerson(club); });
     wrap.appendChild(b);
+    /* On the line with List / Cards (v3.0, Richard), not under the last
+       department: on a big club the foot of the page is screens away. */
+    var sw = $('out').querySelector('[data-view-switch]');
+    if (sw) {
+      var line = document.createElement('div');
+      line.className = 'ed-vwline';
+      sw.parentNode.insertBefore(line, sw);
+      line.appendChild(sw);
+      line.appendChild(wrap);
+      return;
+    }
     $('out').appendChild(wrap);
   }
 
