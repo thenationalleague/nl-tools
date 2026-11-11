@@ -285,3 +285,18 @@ test('every rename asks: same person, or someone new', () => {
   assert.match(live, /function renameThen\(\) \{\s*if \(roles\.length\) \{\s*resolveRename\(/);
   assert.match(live, /title: 'Same person, or someone new\?'/);
 });
+
+test('removing someone on a mailing list asks who takes their place', () => {
+  const live = strip(EDITOR);
+  /* Both ways a person leaves go through it, before the save. */
+  const whole = live.slice(live.indexOf('function removeWholePerson('));
+  assert.match(whole.slice(0, whole.indexOf('\n  }\n')), /coverLists\(club, person\)[\s\S]*applyCover\(club, person, cover\)/);
+  const role = live.slice(live.indexOf('function removeRole('));
+  assert.match(role.slice(0, role.indexOf('\n  }\n')), /coverLists\(club, person\)/);
+  /* Someone new replacing a leaver takes their lists. */
+  const rep = live.slice(live.indexOf('function replaceInRole('));
+  assert.match(rep.slice(0, rep.indexOf('\n  }\n')), /cover\[k\] = fresh\.id/);
+  /* Who's who in the list editor: name and job, and a flag when the job does not fit. */
+  assert.match(live, /function whoLabel\(p\)/);
+  assert.match(live, /'ed-lg__who' \+ \(fitsList\(byId\[id\], key\) \? '' : ' is-odd'\)/);
+});

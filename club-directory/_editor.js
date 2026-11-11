@@ -1240,6 +1240,128 @@ window.NLEditor = (function () {
      the form shows what each list HAS and lets you take somebody off or put
      somebody on — the same shape as the page it edits, banner and all, rather
      than a wall of names repeated eleven times. */
+  /* Which people a list is likely to be for: the department of the same
+     name, or a job title that says so. Only ever a suggestion and a flag —
+     nothing is put on or taken off a list by a match. */
+  var LIST_MATCH = {
+    secretary:  { dept: 'Club secretary', re: /secretar/i },
+    media:      { dept: 'Media & marketing', re: /media|press|communicat|marketing/i },
+    programme:  { dept: 'Programme', re: /programme/i },
+    commercial: { dept: 'Commercial', re: /commercial|sponsor|partnership|hospitality/i },
+    finance:    { dept: 'Finance', re: /financ|account|treasurer/i },
+    ticketing:  { dept: 'Ticketing', re: /ticket|box office/i },
+    medical:    { dept: 'Medical', re: /medic|physio|doctor|therapist/i },
+    safety:     { dept: 'Matchday & safety', re: /safety/i },
+    slo:        { re: /supporter liaison|\bslo\b/i },
+    dlo:        { re: /disab|\bdlo\b/i },
+    plo:        { re: /police|\bplo\b/i }
+  };
+  function fitsList(p, key) {
+    var m = LIST_MATCH[key];
+    return !!m && NLDirectory.arr(p && p.roles).some(function (r) {
+      return (m.dept && r.section === m.dept) || m.re.test(r.title || '');
+    });
+  }
+  function jobsOf(p) {
+    return NLDirectory.arr(p && p.roles).map(function (r) { return (r.title || '').trim(); })
+      .filter(Boolean).join(', ');
+  }
+  /* Who's who in a list of names: the name, then what they do. */
+  function whoLabel(p) {
+    var j = jobsOf(p);
+    return (NLDirectory.fullName(p) || 'Someone without a name') + (j ? ' \u2013 ' + j : '');
+  }
+  function leadId(x) { return typeof x === 'string' ? x : ((x && x.id) || ''); }
+  function listsWith(rec, id) {
+    return LIST_ORDER.filter(function (k) {
+      return NLDirectory.arr((rec.leads || {})[k]).map(leadId).indexOf(id) > -1;
+    });
+  }
+  /* The people to offer for a list: those whose job fits it first. */
+  function listOptions(people, key, firstLabel) {
+    var fit = people.filter(function (p) { return fitsList(p, key); });
+    var rest = people.filter(function (p) { return !fitsList(p, key); });
+    var opt = function (p) {
+      return '<option value="' + esc(p.id) + '">' + esc(whoLabel(p)) + '</option>';
+    };
+    return '<option value="">' + esc(firstLabel) + '</option>' +
+      (fit.length ? '<optgroup label="Job matches this list">' + fit.map(opt).join('') + '</optgroup>' : '') +
+      (rest.length ? '<optgroup label="' + (fit.length ? 'Everyone else' : 'Everyone') + '">' +
+        rest.map(opt).join('') + '</optgroup>' : '');
+  }
+
+  /* Somebody is leaving the directory and is on mailing lists (v3.0,
+     Richard: "when we remove someone that's on a list, we aren't being
+     prompted"). Asked before the removal is saved, one line per list:
+     who takes their place, or nobody. Resolves to { key: id|'' }, or null
+     if cancelled; resolves {} straight away when they are on no list. */
+  function coverLists(club, person) {
+    var rec = ALL[club] || {};
+    var on = person.id ? listsWith(rec, person.id) : [];
+    if (!on.length) { return Promise.resolve({}); }
+    var others = NLDirectory.arr(rec.people).filter(function (p) { return p.id && p !== person; })
+      .slice().sort(NLDirectory.bySurname);
+    var name = NLDirectory.fullName(person) || 'They';
+    var body = document.createElement('div');
+    body.innerHTML = '<p class="confirm-text">' + esc(name) + ' is on ' +
+      (on.length === 1 ? 'a mailing list' : on.length + ' mailing lists') +
+      '. Who takes their place?</p>';
+    var sels = {};
+    on.forEach(function (key) {
+      var row = document.createElement('label');
+      row.className = 'ed-cover';
+      row.innerHTML = '<span class="ed-cover__list">' + esc(LIST_LABEL[key] || key) + '</span>';
+      var sel = document.createElement('select');
+      sel.className = 'ed-dept';
+      sel.innerHTML = listOptions(others, key, 'Nobody for now');
+      row.appendChild(sel);
+      body.appendChild(row);
+      sels[key] = sel;
+    });
+    return new Promise(function (resolve) {
+      var settled = false;
+      var done = function (v) { if (!settled) { settled = true; resolve(v); } };
+      NL.modal({
+        title: 'Mailing lists',
+        body: body,
+        onClose: function () { done(null); },
+        buttons: [
+          { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+          { label: 'Continue', className: 'btn--primary', onClick: function (c) {
+            var out = {};
+            on.forEach(function (k) { out[k] = sels[k].value; });
+            done(out); c.close();
+          } }
+        ]
+      });
+    });
+  }
+  /* Takes the leaver off each list and puts whoever was chosen on. Returns
+     the words for the journal: "– Club secretary now Jo Bloggs". */
+  function applyCover(club, leaver, cover) {
+    var rec = ALL[club];
+    var leaverId = leaver.id;
+    var people = {};
+    people[leaverId] = leaver;
+    NLDirectory.arr(rec.people).forEach(function (p) { if (p.id) { people[p.id] = p; } });
+    var said = [];
+    Object.keys(cover || {}).forEach(function (k) {
+      var ids = NLDirectory.arr((rec.leads || {})[k]).map(leadId)
+        .filter(function (id) { return id && id !== leaverId; });
+      var to = cover[k];
+      if (to && ids.indexOf(to) < 0) { ids.push(to); }
+      var before = NLDirectory.arr((rec.leads || {})[k]).map(leadId);
+      rec.leads = rec.leads || {};
+      if (ids.length) { rec.leads[k] = ids; } else { delete rec.leads[k]; }
+      var nm = function (list) {
+        return list.map(function (id) { return people[id] ? NLDirectory.fullName(people[id]) : id; }).join(', ');
+      };
+      logEdit(club, 'leads/' + k, nm(before), nm(ids));
+      said.push((LIST_LABEL[k] || k) + ' now ' + (to && people[to] ? NLDirectory.fullName(people[to]) : 'nobody'));
+    });
+    return said.length ? ' \u2013 ' + said.join('; ') : '';
+  }
+
   function editLists(club, rec) {
     var people = NLDirectory.arr(rec.people).filter(function (p) { return p.id; })
       .slice().sort(NLDirectory.bySurname);
@@ -1269,8 +1391,12 @@ window.NLEditor = (function () {
         } else {
           on.forEach(function (id) {
             var chip = document.createElement('span');
-            chip.className = 'ed-lg__who';
-            chip.innerHTML = esc(NLDirectory.fullName(byId[id]));
+            chip.className = 'ed-lg__who' + (fitsList(byId[id], key) ? '' : ' is-odd');
+            chip.innerHTML = esc(NLDirectory.fullName(byId[id])) +
+              (jobsOf(byId[id]) ? ' <span class="ed-lg__job">' + esc(jobsOf(byId[id])) + '</span>' : '');
+            if (!fitsList(byId[id], key)) {
+              chip.title = 'Their job title does not mention this list \u2013 still the right person?';
+            }
             var x = document.createElement('button');
             x.type = 'button';
             x.className = 'ed-lg__x';
@@ -1289,11 +1415,7 @@ window.NLEditor = (function () {
         if (left.length) {
           var sel = document.createElement('select');
           sel.className = 'ed-lg__add';
-          sel.innerHTML = '<option value="">Add someone\u2026</option>' +
-            left.map(function (p) {
-              return '<option value="' + esc(p.id) + '">' +
-                esc(NLDirectory.fullName(p)) + '</option>';
-            }).join('');
+          sel.innerHTML = listOptions(left, key, 'Add someone\u2026');
           sel.addEventListener('change', function () {
             if (!sel.value) { return; }
             state[key] = state[key].concat(sel.value);
@@ -2651,10 +2773,14 @@ window.NLEditor = (function () {
       'the page will put just this person back, whenever you need it.',
       { title: 'Remove person', variant: 'danger', confirmText: 'Remove person' }
     ).then(function (ok) {
-      if (!ok) { return; }
+      if (!ok) { return null; }
+      return coverLists(club, person);
+    }).then(function (cover) {
+      if (!cover) { return; }
       ALL[club].people = NLDirectory.arr(ALL[club].people)
         .filter(function (p) { return p !== person; });
-      saveStructure(club, name + ' removed from the directory');
+      var note = applyCover(club, person, cover);
+      saveStructure(club, name + ' removed from the directory' + note);
     });
   }
 
@@ -2710,9 +2836,13 @@ window.NLEditor = (function () {
       saveStructure(club, name + ' removed from ' + here);
     };
     var dropPerson = function () {
-      ALL[club].people = NLDirectory.arr(ALL[club].people)
-        .filter(function (p) { return p !== person; });
-      saveStructure(club, name + ' removed from the directory');
+      coverLists(club, person).then(function (cover) {
+        if (!cover) { return; }
+        ALL[club].people = NLDirectory.arr(ALL[club].people)
+          .filter(function (p) { return p !== person; });
+        var note = applyCover(club, person, cover);
+        saveStructure(club, name + ' removed from the directory' + note);
+      });
     };
 
     /* One role: one outcome, and it is the whole entry. */
@@ -3000,12 +3130,21 @@ window.NLEditor = (function () {
     person.roles = roles.filter(function (r, i) { return i !== ridx; });
     /* Their only job was this one: they have left, so they come out. */
     var people = NLDirectory.arr(ALL[club].people);
+    var note = '';
     if (!person.roles.length) {
       people = people.filter(function (p) { return p !== person; });
     }
     ALL[club].people = people.concat(fresh);
+    /* Someone who has left entirely is replaced on their mailing lists too:
+       the new person was brought in to do their job. Somebody who stays
+       keeps their lists — Edit lists if that should change. */
+    if (!person.roles.length && person.id) {
+      var cover = {};
+      listsWith(ALL[club], person.id).forEach(function (k) { cover[k] = fresh.id; });
+      note = applyCover(club, person, cover);
+    }
     saveStructure(club, name + ' replaces ' + NLDirectory.fullName(person) +
-      ' in ' + role.section);
+      ' in ' + role.section + note);
   }
 
 
