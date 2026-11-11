@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Monthly Awards Full Photo (Graphics sub-tool)
-  Version: v1.0 (10/11/2026)
+  Version: v1.1 (11/11/2026)
   File: /graphics/awards-full-photo/index.html
 
   Nominee and winner cards for the monthly awards when the photo can't be
@@ -23,6 +23,8 @@
     /graphics/_shared/canvas-art.js                (large images drawn small)
 
   Changelog:
+    v1.1 (11/11/2026) — Words: Top and bottom, or All at the bottom, for a
+      photo with no room above the player's head.
     v1.0 (10/11/2026) — first build.
 -->
 <html lang="en-GB">
@@ -68,6 +70,13 @@
     var NL_TOOL_KEY = 'staff-graphics';
 
     window.NL_CHANGELOG = [
+      {
+        date: '11/11/2026',
+        version: 'v1.1',
+        items: [
+          'Words: Top and bottom, or All at the bottom. For a photo with no room above the player\'s head, the headline, award and month move down above the name.'
+        ]
+      },
       {
         date: '10/11/2026',
         version: 'v1.0',
@@ -204,7 +213,7 @@
         <div class="form-group"><label for="tMonth">Month</label><input type="text" id="tMonth" value=""></div>
         <div class="form-group"><label for="tName">Player name</label><input type="text" id="tName" value=""></div>
         <div class="form-group"><span class="afp-label">Club</span><div id="clubPick"></div></div>
-        <div id="divPick"></div>
+        <div class="afp-row"><div id="divPick"></div><div id="posPick"></div></div>
 
         <div class="afp-dl">
           <button type="button" class="btn btn--primary afp-action" id="dlAll" disabled>Download all four</button>
@@ -257,7 +266,8 @@
     return o;
   })();
 
-  var S = { photo: null, fmt: '4x5', crops: {}, crest: null, rose: null, lockups: {}, div: 'National' };
+  var S = { photo: null, fmt: '4x5', crops: {}, crest: null, rose: null, lockups: {}, div: 'National',
+            words: 'split' };   /* split: headline at the top, name at the bottom; bottom: all at the bottom */
   var canvas, ctx;
 
   function $(id) { return document.getElementById(id); }
@@ -314,7 +324,6 @@
     var F = FORMATS[f], colW = F.col || (F.w - 2 * M);
     var head = ($('tHead').value.trim() || 'NOMINATED').toUpperCase();
     var hs = fitSize(c, head, 800, F.hs, colW, -0.015);
-    var base = 70 + Math.round(hs * 0.74);
     var award = $('tAward').value.trim().toUpperCase(), month = $('tMonth').value.trim().toUpperCase();
     var ss = 30, aw = 0, mw = 0;
     for (;;) {   /* shrink the strapline until it fits the column */
@@ -323,20 +332,32 @@
       if (aw + (award && month ? 22 : 0) + mw <= colW || ss <= 18) break;
       ss--;
     }
-    var pillTop = base + 28, pillH = Math.round(ss * 1.75);
+    var pillH = Math.round(ss * 1.75);
     var name = $('tName').value.trim();
     var ns = fitSize(c, name || 'M', 800, F.ns, colW, -0.025);
     var rowTop = F.h - 66 - 72, divider = rowTop - 26;
     var nameBase = divider - 34 - Math.round(ns * 0.2);
     var barTop = nameBase - Math.round(ns * 0.74) - 30;
+    var bottom = S.words === 'bottom', base, pillTop;
+    if (bottom) {
+      /* Stacked up from the name: award and month above the accent bar,
+         the headline above them. The top of the photo stays clear. */
+      pillTop = barTop - 26 - pillH;
+      base = pillTop - 28;
+    } else {
+      base = 70 + Math.round(hs * 0.74);
+      pillTop = base + 28;
+    }
+    /* Where the words start, for the shade behind them. */
+    var wordsTop = bottom ? base - Math.round(hs * 0.74) : barTop;
     return { F: F, colW: colW, head: head, hs: hs, base: base, award: award, month: month, ss: ss, aw: aw, mw: mw,
       pillTop: pillTop, pillH: pillH, topEnd: pillTop + pillH, name: name, ns: ns,
-      rowTop: rowTop, divider: divider, nameBase: nameBase, barTop: barTop };
+      rowTop: rowTop, divider: divider, nameBase: nameBase, barTop: barTop, bottom: bottom, wordsTop: wordsTop };
   }
 
-  /* The shade: navy from the top down past the strapline, from the bottom up
-     past the name, and on 16:9 from the left across the column. Strength is
-     the "Shade behind the words" slider. */
+  /* The shade: navy from the bottom up past the words, from the top down
+     past the strapline when the headline is at the top, and on 16:9 from the
+     left across the column. Strength is the "Shade behind the words" slider. */
   function shade(c, L) {
     var F = L.F, s = +$('fShade').value / 100;
     if (!s) return;
@@ -345,9 +366,11 @@
       stops.forEach(function (st) { g.addColorStop(st[0], 'rgba(' + rgb + ',' + (st[1] * s) + ')'); });
       return g;
     }
-    c.fillStyle = band(c.createLinearGradient(0, 0, 0, L.topEnd + 180), [[0, 0.9], [0.55, 0.55], [1, 0]]);
-    c.fillRect(0, 0, F.w, L.topEnd + 180);
-    var from = L.barTop - 220;
+    if (!L.bottom) {
+      c.fillStyle = band(c.createLinearGradient(0, 0, 0, L.topEnd + 180), [[0, 0.9], [0.55, 0.55], [1, 0]]);
+      c.fillRect(0, 0, F.w, L.topEnd + 180);
+    }
+    var from = Math.max(0, L.wordsTop - 220);
     c.fillStyle = band(c.createLinearGradient(0, from, 0, F.h), [[0, 0], [0.4, 0.7], [1, 0.95]]);
     c.fillRect(0, from, F.w, F.h - from);
     if (F.col) {
@@ -584,6 +607,11 @@
       label: 'Division', multiple: false, value: 'National', allLabel: 'National',
       options: [{ value: 'National', label: 'National' }, { value: 'North', label: 'North' }, { value: 'South', label: 'South' }],
       onChange: function (v) { S.div = v || 'National'; drawSoon(); }
+    });
+    NL.filterButton('#posPick', {
+      label: 'Words', multiple: false, value: 'split', allLabel: 'Top and bottom',
+      options: [{ value: 'split', label: 'Top and bottom' }, { value: 'bottom', label: 'All at the bottom' }],
+      onChange: function (v) { S.words = v || 'split'; drawSoon(); }
     });
     try { NL.clubPicker('#clubPick', { mode: 'search', divisions: ['National', 'North', 'South'], onSelect: setClub }); }
     catch (e) { console.error('[awards-full-photo] club picker', e); }
