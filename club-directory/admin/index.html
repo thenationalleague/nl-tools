@@ -1,8 +1,19 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Club Directory (staff)
-  Version: v1.17 (11/11/2026)
+  Version: v1.18 (11/11/2026)
 
+  v1.18 (11/11/2026) – editing moves onto this page (Richard). An Edit
+          button beside the club picker, for Manage on Club Directory only,
+          turns the editor on in the Directory tab: pens on every row, Add
+          someone, the club-details pen, shared mailboxes and lists, and
+          Publish and Change log beside the picker. "Done editing" turns it
+          off. The editor's code is /club-directory/_editor.js (v2.2) and
+          _editor.css, started on first use and sharing this page's ALL, so
+          the overview and the mailing lists see an edit as soon as it saves.
+          ?edit opens the page in editing; /club-directory/admin/edit/ and
+          /club-directory/editor/ forward to it. The overview's Fix button
+          opens the club here in editing instead of a new tab.
   v1.17 (11/11/2026) – the club chooser above the directory is canon
           NL.clubPicker (crest, name, division, type to jump) through
           NLDirectory.picker (_directory.js v1.16), the same one the editor
@@ -236,7 +247,8 @@
   <title>Club Directory — NL Tools</title>
 
   <link rel="stylesheet" href="/system/nl-brand.css?v=74">
-  <link rel="stylesheet" href="/club-directory/_directory.css?v=39">
+  <link rel="stylesheet" href="/club-directory/_directory.css?v=40">
+  <link rel="stylesheet" href="/club-directory/_editor.css?v=2">
 
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
@@ -263,6 +275,14 @@
     var NL_TOOL_KEY = 'ops-club-directory';
 
     window.NL_CHANGELOG = [
+      {
+        date: '11/11/2026',
+        version: 'v1.18',
+        items: [
+          'Editing is on this page now: press Edit beside the club picker (Manage on Club Directory). Publish and Change log sit beside it while you edit.',
+          'Fix in the Admin tab opens the club here, ready to edit.'
+        ]
+      },
       {
         date: '11/11/2026',
         version: 'v1.17',
@@ -409,8 +429,9 @@
   <script src="/system/nl-analytics.js?v=1"></script>
   <script src="/system/nl-topbar.js?v=10"></script>
   <script src="/system/auth-guard.js?v=17"></script>
-  <script src="/club-directory/_directory.js?v=39"></script>
+  <script src="/club-directory/_directory.js?v=40"></script>
   <script src="/club-directory/_tidy.js?v=30"></script>
+  <script src="/club-directory/_editor.js?v=3"></script>
 
 <style>
   .cd-pickbar {
@@ -664,7 +685,9 @@
     <div class="ov-pane" id="pane-directory">
       <div class="cd-pickbar">
         <div class="cd-pick" id="pick"></div>
-        <a class="btn btn--ghost btn--sm" id="editLink" hidden>Edit</a>
+        <button class="btn btn--ghost btn--sm" id="editBtn" type="button" aria-pressed="false" hidden>Edit</button>
+        <button class="btn btn--ghost btn--sm" id="changes" type="button" hidden>Change log</button>
+        <button class="btn btn--primary btn--sm" id="publish" type="button" hidden>Publish</button>
       </div>
       <div class="cd-search"><div class="cd-search__box">
         <svg class="cd-search__icon" width="17" height="17" viewBox="0 0 24 24" fill="none"
@@ -674,6 +697,7 @@
           aria-label="Search">
       </div></div>
       <div id="out"></div>
+      <div id="extra"></div>
     </div>
 
 
@@ -697,7 +721,8 @@ window.TOOL = (function () {
   var $ = function (id) { return document.getElementById(id); };
   var esc = NL.escHtml;
   var arr = function (v) { return NLDirectory.arr(v); };
-  var ALL = {}, names = [], clubNames = [], AUDIT = {}, ADMIN = false, PICK = null, current = '';
+  var ALL = {}, names = [], clubNames = [], AUDIT = {}, ADMIN = false, PICK = null, current = '',
+      EDITING = false;
 
   var LIST_ORDER = NLDirectory.LIST_ORDER;
   var LIST_LABEL = NLDirectory.LIST_LABEL;
@@ -924,8 +949,9 @@ window.TOOL = (function () {
         num(r.noTitle, 'warn') +
         (r.noDetails ? '<td class="ov-n ov-n--bad">empty</td>' : dash()) +
         flagCell(r) +
-        '<td class="ta-right"><a class="btn btn--ghost btn--sm" href="/club-directory/admin/edit/#' +
-          encodeURIComponent(r.club) + '" target="_blank" rel="noopener">Fix</a></td>' +
+        '<td class="ta-right">' + (canEdit()
+          ? '<button class="btn btn--ghost btn--sm" type="button" data-goto="' + esc(r.club) +
+            '" data-edit="1">Fix</button>' : '') + '</td>' +
       '</tr>';
     }).join('') : '<tr class="empty-row"><td colspan="' + (OV_COLS.length + 1) +
         '">Nothing missing anywhere.</td></tr>';
@@ -968,7 +994,10 @@ window.TOOL = (function () {
       return;
     }
     var go = e.target.closest('[data-goto]');
-    if (go) { showPane('directory'); draw(go.dataset.goto); }
+    if (go) {
+      showPane('directory');
+      if (go.dataset.edit) { setEdit(true, go.dataset.goto); } else { draw(go.dataset.goto); }
+    }
   });
 
   /* One choice: Something missing, or nothing chosen for all clubs. */
@@ -1700,8 +1729,13 @@ window.TOOL = (function () {
       onPick: function (n) { $('q').value = ''; draw(n); }
     });
     $('q').addEventListener('input', onSearch);
+    $('editBtn').hidden = !canEdit();
+    $('editBtn').addEventListener('click', function () { setEdit(!EDITING); });
     var first = fromHash() || names[0];
-    draw(first);
+    /* ?edit opens straight into editing — the old edit page forwards here
+       with it, and a reload while editing keeps you editing. */
+    if (/(^|[?&])edit(=|&|$)/.test(location.search.slice(1)) && canEdit()) { setEdit(true, first); }
+    else { draw(first); }
     window.addEventListener('hashchange', function () {
       var n = fromHash();
       if (n) { showPane('directory'); draw(n); return; }
@@ -1717,19 +1751,11 @@ window.TOOL = (function () {
   function draw(name) {
     var rec = ALL[name];
     if (!rec) { return; }
-    current = name;
-    if (PICK) { PICK.set(name); }
+    if (EDITING) { return NLEditor.draw(name); }
+    drew(name);
     rec.club = rec.club || name;
-    if (location.hash !== '#' + encodeURIComponent(name)) {
-      history.replaceState(null, '', '#' + encodeURIComponent(name));
-    }
+    $('extra').innerHTML = '';
     $('out').innerHTML = NLDirectory.renderClub(rec, { showGaps: true });
-    /* Manage only: the edit screen refuses anyone else, so offering it would
-       only show them a refusal. */
-    var ses = NL.session || {};
-    var edit = $('editLink');
-    edit.hidden = !(ses.role === 'superadmin' || ses.toolLevel === 'admin');
-    edit.href = '/club-directory/admin/edit/#' + encodeURIComponent(name);
     var crest = document.getElementById('cdCrest');
     if (crest) {
       var ck = NLDirectory.bannerCrestOf(rec);
@@ -1740,7 +1766,87 @@ window.TOOL = (function () {
     }
   }
 
+  /* Whichever way a club was drawn — read or edited, from the picker, the
+     address, the overview or an undo — the picker, the address and the
+     overview row follow it. */
+  function drew(name) {
+    current = name;
+    if (PICK) { PICK.set(name); }
+    if (location.hash !== '#' + encodeURIComponent(name)) {
+      history.replaceState(null, '', '#' + encodeURIComponent(name));
+    }
+    /* An edit can change what is missing, so the overview row is re-read. */
+    AUDIT[name] = auditClub(name);
+  }
+
+  /* ---------------------------------------------------------------- edit
+     Editing lives here, behind a button, rather than on a page of its own
+     (v1.18, Richard). Manage on Club Directory only — the same check the
+     rules make on every write. Off, this is the reading view it always was;
+     on, the editor (/club-directory/_editor.js) draws the club with its pens
+     and shows Publish and Change log. The editor is started on first use,
+     and shares this page's ALL, so the overview and the lists see an edit
+     the moment it saves. ?edit in the address keeps editing across a
+     reload. */
+  function canEdit() {
+    var ses = NL.session || {};
+    return ses.role === 'superadmin' || ses.toolLevel === 'admin';
+  }
+  var EDIT_HOST = {
+    all: null,
+    names: function () { return names; },
+    session: null,
+    editing: function () { return EDITING; },
+    onDraw: drew,
+    draw: draw,
+    failHost: function () { return $('pane-directory'); }
+  };
+  function setEdit(on, name) {
+    var target = name || current;
+    if (on && !canEdit()) { on = false; }
+    if (!on) {
+      EDITING = false;
+      paintEdit();
+      redraw(target);
+      return;
+    }
+    EDIT_HOST.all = ALL;
+    EDIT_HOST.session = NL.session || {};
+    var btn = $('editBtn');
+    btn.disabled = true;
+    NLEditor.start(EDIT_HOST).then(function () {
+      btn.disabled = false;
+      EDITING = true;
+      paintEdit();
+      redraw(target);
+    }).catch(function (err) {
+      btn.disabled = false;
+      NL.toast('Could not start editing: ' + ((err && err.message) || err), 'error');
+    });
+  }
+  function paintEdit() {
+    var btn = $('editBtn');
+    btn.textContent = EDITING ? 'Done editing' : 'Edit';
+    btn.setAttribute('aria-pressed', EDITING ? 'true' : 'false');
+    /* Navy while on: the page is in a different state, and red is
+       Publish's — two red buttons side by side read as two releases. */
+    btn.classList.toggle('btn--navy', EDITING);
+    btn.classList.toggle('btn--ghost', !EDITING);
+    $('changes').hidden = !EDITING;
+    $('publish').hidden = !EDITING;
+    $('pane-directory').classList.toggle('ed-on', EDITING);
+    var url = location.pathname + (EDITING ? '?edit' : '') + location.hash;
+    history.replaceState(null, '', url);
+  }
+  function redraw(name) {
+    var q = $('q').value;
+    if (q.trim()) { onSearch({ target: { value: q } }); }
+    else if (name) { draw(name); }
+  }
+
   function onSearch(e) {
+    if (EDITING) { return NLEditor.search(e.target.value); }
+    $('extra').innerHTML = '';
     var hits = NLDirectory.search(ALL, e.target.value);
     if (!hits) { draw(current); return; }
     if (!hits.length) { $('out').innerHTML = '<p class="cd-empty">Nothing matched that.</p>'; return; }

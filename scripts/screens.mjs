@@ -88,7 +88,12 @@ function serve() {
 }
 
 /* Firebase compat, as far as a tool page uses it: ref().on/once/off/set/
-   update/push/remove against an in-memory tree, so saves round-trip. */
+   update/push/remove against an in-memory tree, so saves round-trip.
+   push() returns a ThenableReference — a promise that is also a reference,
+   with .key and .set() — per the v8/compat reference docs:
+   https://firebase.google.com/docs/reference/js/v8/firebase.database.Reference#push
+   (.set() was missing until 11/11/2026, so a page that pushes an empty key
+   and fills it later, as Club Directory's Publish does, failed here only.) */
 const FIREBASE = `
 window.__db = window.__seed || {};
 function get(p){return p.split('/').filter(Boolean).reduce((o,k)=>o&&o[k],window.__db)}
@@ -106,7 +111,7 @@ window.firebase={apps:[1],initializeApp(){},app(){return{}},
     set(v){put(p,v);fire();return Promise.resolve()},
     update(o){Object.keys(o).forEach(k=>put(p+'/'+k,o[k]));fire();return Promise.resolve()},
     remove(){put(p,null);fire();return Promise.resolve()},
-    push(v){const k='k'+Date.now()+Math.random().toString(36).slice(2,6);if(v!==undefined)put(p+'/'+k,v);fire();return Object.assign(Promise.resolve(),{key:k})},
+    push(v){const k='k'+Date.now()+Math.random().toString(36).slice(2,6);if(v!==undefined)put(p+'/'+k,v);fire();return Object.assign(Promise.resolve(),{key:k,set(x){put(p+'/'+k,x);fire();return Promise.resolve()}})},
     orderByChild(){return this},limitToLast(){return this},equalTo(){return this},orderByKey(){return this},startAt(){return this},endAt(){return this},child(c){return window.firebase.database().ref(p+'/'+c)}
   }}}}};`;
 
