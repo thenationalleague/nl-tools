@@ -421,6 +421,17 @@ and `scripts/backfill-ga-hourly-archive.js` went too, having run once in May
 - **Each tool keeps its own `NL_CHANGELOG`** array near the top of `index.html`, plus a date-stamped block-comment changelog in the file header. Bump version + add entry when you edit a tool.
 - **Don't `git add -A`.** Per session policy, stage files by name.
 
+## Retiring something
+
+Deleting a tool, page, function, workflow, rules node or live data follows one
+order (worked out clearing the Club Directory codes, 11/11/2026):
+
+- **Report first, then Richard's yes.** Counts and sizes only: Actions logs on a public repo are public, so never a name, email or key.
+- **Save before deleting.** Live data goes to the private bucket `nl-tools-monthly-backups` under `retired/<date>/`; code is recoverable from git, so name the last commit.
+- **Data has no deploy path, so use a one-off `Button ·` workflow** (report, then clear with a typed confirm), check it is gone, write one `admin/audit` line, and remove the workflow in the next PR.
+- **Pages leave a forwarding stub**; a removed function is deleted by the next deploy (`--force`); rules changes need the button.
+- **Write it down** in `system/retired/<name>.md`, and update whatever else named it (`system/estate.json`, RUNBOOK, plans, tests that now check it stays gone).
+
 ## Files to look at first when something is mysterious
 
 - A tool says "This tool isn't available" (or, before auth-guard v15.0, silently redirected to the portal) → check the audit log for `page_unavailable`: "not in the registry" means the `tools/` record never published; "no access" means the grant or default. Then `system/auth-guard.js` (`checkAccess`) + the user's `tools/<toolKey>` entry + `tools/<toolKey>/defaults` in RTDB.
