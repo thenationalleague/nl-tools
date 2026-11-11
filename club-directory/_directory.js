@@ -1,7 +1,11 @@
 /* =========================================================================
    NL Tools — Club Directory presentation
    File: /club-directory/_directory.js
-   Version: v1.20 (11/11/2026)
+   Version: v1.21 (11/11/2026)
+
+   v1.21 — the padlock goes AFTER a private detail, not in front of it, so
+   a private number lines up with the public ones above and below it
+   (Richard). The tint is a shade stronger (navy-100, css v1.14).
 
    v1.20 — how a number and an address are SHOWN (the data is untouched).
    A UK mobile reads 07xxx xxx xxx whatever spacing it was typed with, and
@@ -724,8 +728,8 @@
   function held(entry, on, html) {
     if (!(on && entry.hide)) { return html; }
     return '<span class="cd-priv" title="Private: League staff and their own club ' +
-      'see this. Nobody else does.">' + strokeGlyph('lock') +
-      '<span class="cd-sr">Private: </span>' + html + '</span>';
+      'see this. Nobody else does.">' + html + strokeGlyph('lock') +
+      '<span class="cd-sr"> (private)</span></span>';
   }
   /* Where a detail is kept back and this view is not shown it: the padlock
      and the word, nothing else. */

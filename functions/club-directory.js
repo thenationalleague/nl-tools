@@ -16,21 +16,21 @@
  * the full account — this is deliberately the same shape, so anyone who has
  * read one has read both.
  *
- * Two kinds of code, one gate
- * ---------------------------
- *   · editor — one code per named person, minted and revoked individually.
- *              The uid is `cd-ed-<key>`, so every write in admin/audit and in
- *              app-data/ops-club-directory/audit names who made it. A shared
- *              code would make the audit trail say nothing, and an audit trail
- *              is the whole reason this tool exists rather than people editing
- *              the database by hand.
- *   · reader — one shared code for the whole League, uid `cd-reader`. Read
- *              only; attribution is meaningless and unwanted here.
+ * One kind of code: the Directory reader
+ * --------------------------------------
+ *   · reader — a code per holder, kept in config/readers/<key> as
+ *              { name, code, revoked? }, uid `cd-rd-<key>`; plus the original
+ *              single code at config/reader, uid `cd-reader`. Read only: the
+ *              rules let `dir === 'reader'` read the published copy and
+ *              nothing else.
  *
- * The claim is `dir: 'editor' | 'reader'`, which the RTDB rules enforce
- * against. With plain anonymous auth the token would carry nothing, so the
- * rules could not tell a reader from an editor and anyone who opened the page
- * could rewrite all 72 clubs.
+ * Until 11/11/2026 this door also minted `dir: 'editor'` (per-person editor
+ * codes, config/editors) and `dir: 'admin'` (an editor code marked master, or
+ * a superadmin arriving with { admin: true }). Editing moved behind the
+ * portal login on /club-directory/admin/, the rules stopped honouring either
+ * claim, and both routes were removed here so nothing can mint a claim the
+ * database no longer recognises. Anything left under config/editors is dead
+ * data and can be deleted in the console.
  *
  * Flow (identical to programme.js)
  * --------------------------------
@@ -42,9 +42,9 @@
  *   3. Client reads the grant, deletes both nodes while it still owns that uid,
  *      then signs in with the custom token.
  *
- * Migration note: when these people are on the portal, this file is deleted.
- * `dir` is replaced by the portal's users/<uid>/role and the rules change from
- * `auth.token.dir === 'editor'` to the portal equivalent. Nothing else moves.
+ * Clubs do not come through here: they sign in with their club code at
+ * club-code.js (NL.codeGate), which carries a `club` claim instead. When the
+ * reader codes are retired too, this file goes.
  */
 const { onValueWritten } = require("firebase-functions/v2/database");
 const logger = require("firebase-functions/logger");
@@ -85,34 +85,16 @@ function safeEqual(a, b) {
   return diff === 0;
 }
 
-/* Who does this code belong to? Editors first, then the single reader code.
-   An editor record is { name, code, revoked? }; `revoked` is preferred over
-   deletion so the audit trail keeps resolving a departed editor's uid to a
-   name rather than showing a bare key. */
+/* Who does this code belong to? A per-holder reader code first, then the
+   original single one. `revoked` is preferred over deletion so an audit line
+   keeps resolving a departed holder's uid to a name. */
 function pickHolder(cfg, code) {
-  const editors = (cfg && cfg.editors) || {};
-  const hit = Object.keys(editors).find((k) => {
-    const e = editors[k];
-    return e && !e.revoked && safeEqual(normCode(e.code), code);
-  });
-  if (hit) {
-    /* `master: true` on an editor record is the only route to the one-shot
-       build and to writing the clubs node whole. It has to live in config,
-       which no client can read or write, because the alternative was the
-       portal admin path — and the people holding these codes have no portal
-       account, which is the entire reason this gate exists. As shipped there
-       was no way to reach the build at all. */
-    return {
-      role: editors[hit].master === true ? "admin" : "editor",
-      key: hit,
-      name: editors[hit].name || hit
-    };
-  }
-  /* One code per club rather than one code for everybody. The directory is
-     going out to 72 clubs, and a single shared code cannot be revoked for one
-     of them, cannot say who has been in, and cannot be rotated without
-     telling all 72. Each entry is keyed by club so an audit line names the
-     club rather than "Reader". */
+  /* One code per club rather than one code for everybody: a shared code
+     cannot be revoked for one club, cannot say who has been in, and cannot be
+     rotated without telling all 72. Each entry is keyed by club so an audit
+     line names the club rather than "Reader". Clubs now sign in with their
+     club code first; the page only falls back to this door when that one
+     says no. */
   const readers = (cfg && cfg.readers) || {};
   const rhit = Object.keys(readers).find((k) => {
     const r = readers[k];
@@ -200,24 +182,6 @@ exports.clubDirectoryAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
   const grant = (payload) => db.ref(ROOT + "/authGrants/" + uid).set(payload);
 
   try {
-    /* ---- Portal path: caller is already signed in on the portal --------- */
-    /* This is how the bake gets run and how editor codes are minted. Both are
-       superadmin-only and neither should need a code of its own. */
-    if (req.admin === true) {
-      const role = String(
-        (await db.ref("users/" + uid + "/role").once("value")).val() || ""
-      ).toLowerCase();
-
-      if (role !== "superadmin") {
-        logger.warn("clubDirectoryAuth: admin claim refused", { uid, role });
-        return grant({ ok: false, error: "Directory administration is superadmin-only." });
-      }
-      const customToken = await admin.auth()
-        .createCustomToken("cd-admin-" + uid, { dir: "admin" });
-      logger.info("clubDirectoryAuth: admin granted", { uid });
-      return grant({ ok: true, customToken, role: "admin", name: "National League" });
-    }
-
     /* ---- Code path ------------------------------------------------------ */
     if (await throttled(uid)) {
       return grant({
@@ -248,17 +212,8 @@ exports.clubDirectoryAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
 
     await db.ref(ROOT + "/rate/uid/" + uid).remove().catch(() => {});
 
-    /* One uid per editor, not per device — that is the point of per-person
-       codes. The reader shares a single uid, where attribution would be
-       meaningless anyway. */
-    /* uid stays keyed on the editor, not the granted role, so a master's
-       edits still attribute to them by name rather than to a shared admin. */
-    /* One uid per holder, so every write and every audit line resolves to a
-       person or a club. Readers used to share one; with a code each they get
-       an identity each. */
-    const uidFor = hit.key === "reader" ? "cd-reader"
-      : hit.role === "reader" ? "cd-" + hit.key
-        : "cd-ed-" + hit.key;
+    /* One uid per holder, so every read in the audit resolves to a name. */
+    const uidFor = hit.key === "reader" ? "cd-reader" : "cd-" + hit.key;
     const customToken = await admin.auth()
       .createCustomToken(uidFor, { dir: hit.role, dirName: hit.name });
 
