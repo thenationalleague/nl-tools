@@ -15,6 +15,12 @@
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
 <!--
   club-directory / index.html   (was /club-directory/reader/)
+  v2.4 – (11/11/2026) The club chooser is the canon club picker, crests and
+          all, with an All clubs button beside it to go back to the wall —
+          the same pair as the staff page. It sits above the search now, not
+          in the bar. Clubs nobody has checked are on the wall only. Lockstep
+          _directory.* ?v=44 (padlock after a private detail, navy-100 tint)
+          and _gate.js ?v=31 (openAsAdmin removed).
   v2.3 – (11/11/2026) Lockstep _directory.* ?v=43: mobiles read 07xxx xxx xxx
           and addresses break only at the @ or a dot.
   v2.2 – (11/11/2026) Lockstep _directory.* ?v=42: your own club's private
@@ -218,7 +224,7 @@
   Not lint-covered: no auth-guard, by design.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=74">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=43">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=44">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
@@ -226,8 +232,8 @@
 <script src="/system/nl-utils.js?v=52"></script>
 <!-- GA4 for nl.tools — cookieless, no banner, no identity. See system/nl-analytics.js -->
 <script src="/system/nl-analytics.js?v=1"></script>
-<script src="/club-directory/_gate.js?v=30"></script>
-<script src="/club-directory/_directory.js?v=43"></script>
+<script src="/club-directory/_gate.js?v=31"></script>
+<script src="/club-directory/_directory.js?v=44"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -245,17 +251,12 @@
      confusion the entry-route rule in nl-brand.css v2.37 exists to stop.
      Both are white with a red underline now: you typed a code, and the page
      knows that and nothing more. */
-  /* The club selector sits in the bar and needs a visible edge now the ground
-     is white — it had none, because white-on-red drew its own. */
-  .rd-pick {
-    font-family: var(--font); font-size: var(--text-sm);
-    font-weight: 600; font-variation-settings: 'wght' 600;
-    padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius);
-    background: var(--white); color: var(--text); max-width: 260px;
-  }
   /* The search bar clears the sticky bar above it rather than the 72px topbar
      this page does not have. */
   .cd-search { top: 46px; }
+  /* The picker is the first thing under the bar, so it needs the room the
+     staff page's tabs give it there. */
+  .cd-wrap > .cd-pickbar { margin-top: 18px; }
   .rd-hits { margin: 0 0 30px; }
   /* Your own club only: why you can see what other clubs cannot, and the
      way to ask for a change. */
@@ -290,11 +291,14 @@
       <div class="nl-idbar__sub">Signed in by code</div>
     </div>
     <div class="nl-idbar__actions">
-      <select class="rd-pick" id="pick" aria-label="Choose a club"></select>
       <button class="nl-idbar__btn" id="signOut" type="button">Sign out</button>
     </div>
   </div>
   <div class="cd-wrap">
+    <div class="cd-pickbar">
+      <div class="cd-pick" id="pick"></div>
+      <button class="btn btn--ghost btn--sm" id="allClubs" type="button" hidden>All clubs</button>
+    </div>
     <div class="cd-search"><div class="cd-search__box">
       <svg class="cd-search__icon" width="17" height="17" viewBox="0 0 24 24" fill="none"
         stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
@@ -318,6 +322,10 @@
      club, so it needs a value no club can collide with. A leading '#' is
      already reserved by the hash it lives in. */
   var INDEX = '#all';
+  /* What is on screen: a club's name, or INDEX for the wall. The chooser
+     used to hold this as its value; the canon picker has no "All clubs"
+     row, so the page keeps it (v2.4). */
+  var current = INDEX, PICK = null;
 
   /* Remembered per person, not per club. The alternative is choosing it again
      on every one of 72. */
@@ -482,23 +490,20 @@
       $('app').hidden = false;
       return;
     }
-    /* Every club is listed, because a club missing from the list looks like a
-       club that does not exist. The ones nobody has checked yet are disabled:
-       visibly there, greyed, and unselectable — which says "not ready" rather
-       than "not a club". */
-    $('pick').innerHTML =
-      '<option value="' + esc(INDEX) + '">All clubs</option>' +
-      NLDirectory.orgFirst(names.concat(PENDING), function (n) { return ALL[n]; })
-        .map(function (n) {
-        var ok = ready(n);
-        return '<option value="' + esc(n) + '"' + (ok ? '' : ' disabled') + '>' +
-          esc(n) + (ok ? '' : ' — not yet checked') + '</option>';
-      }).join('');
-    $('pick').addEventListener('change', function () { draw(this.value); });
+    /* The canon club picker, crests and all, the same one the staff page
+       uses (v2.4). It offers the published clubs only: the ones nobody has
+       checked yet stay on the wall, greyed, which is where "not a club yet"
+       was always clearer than a disabled row. All clubs, beside it, goes
+       back to the wall. */
+    PICK = NLDirectory.picker($('pick'), {
+      names: function () { return names; }, recOf: function (n) { return ALL[n]; },
+      onPick: function (n) { $('q').value = ''; draw(n); }
+    });
+    $('allClubs').addEventListener('click', function () { $('q').value = ''; draw(INDEX); });
     $('q').addEventListener('input', onSearch);
     wireView(function () {
       var q = $('q').value;
-      if (q.trim()) { onSearch({ target: { value: q } }); } else { draw($('pick').value); }
+      if (q.trim()) { onSearch({ target: { value: q } }); } else { draw(current); }
     });
     $('app').hidden = false;
     /* THE INDEX FIRST — all 72 by crest and division, with your own club as a
@@ -516,17 +521,14 @@
        names a club still opens that club — fromHash wins, which is what makes
        a shared link a link to the thing it names. */
     if (!names.filter(ready).length) {
-      $('pick').value = INDEX;
       $('out').innerHTML = '<p class="cd-empty">No club has been checked yet. ' +
         'They appear here once the National League has been through them.</p>';
       return;
     }
-    var first = fromHash() || INDEX;
-    $('pick').value = first;
-    draw(first);
+    draw(fromHash() || INDEX);
     window.addEventListener('hashchange', function () {
       var n = fromHash();
-      if (n) { $('pick').value = n; draw(n); }
+      if (n) { draw(n); }
     });
   }).catch(function (err) {
     $('out').innerHTML = '<p class="cd-empty">' + esc((err && err.message) || String(err)) + '</p>';
@@ -590,13 +592,17 @@
       own: (OWN && (ready(OWN) || PENDING.indexOf(OWN) > -1)) ? OWN : ''
     });
     NLDirectory.wireIndex($('out'), function (n) {
-      $('pick').value = n;
       draw(n);
       window.scrollTo(0, 0);
     });
   }
 
   function draw(name) {
+    current = name;
+    $('allClubs').hidden = name === INDEX;
+    /* A club nobody has checked is not in the picker, so it shows empty
+       rather than naming something it cannot offer. */
+    if (PICK) { PICK.set(name !== INDEX && ready(name) ? name : ''); }
     if (name === INDEX) {
       if (location.hash !== '#all') history.replaceState(null, '', '#all');
       drawIndex();
@@ -645,7 +651,7 @@
        clubs by hand, which worked but meant the back door was one forgotten
        filter away from being open. */
     var hits = NLDirectory.search(ALL, e.target.value);
-    if (!hits) { draw($('pick').value); return; }
+    if (!hits) { draw(current); return; }
     if (!hits.length) {
       $('out').innerHTML = '<p class="cd-empty">Nothing matched that.</p>';
       return;

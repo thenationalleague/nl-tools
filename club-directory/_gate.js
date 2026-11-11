@@ -1,11 +1,15 @@
 /* =========================================================================
    NL Tools — Club Directory passcode gate (client half)
    File: /club-directory/_gate.js
-   Version: v1.0 (04/08/2026)
+   Version: v1.1 (11/11/2026)
 
-   The browser half of the handshake in functions/club-directory.js. Shared by
-   the editor and the reader, which differ only in what the granted claim lets
-   them do.
+   v1.1 — openAsAdmin gone with the server's portal route: editing is behind
+          the login on /club-directory/admin/ and nothing asks this door for
+          an admin claim any more. Only the club page loads this file now,
+          for resume() and ROOT; its sign-in is NL.codeGate.
+
+   The browser half of the handshake in functions/club-directory.js. It now
+   grants one thing, a read-only Directory reader claim.
 
    The dance, and why it is a dance rather than a function call:
 
@@ -185,18 +189,11 @@
   /* Drop the session and show the gate again. */
   function signOut() { return firebase.auth().signOut(); }
 
-  /* The portal route, for whoever holds the master key. Uses the caller's
-     existing auth-guard session instead of a code, and the trigger checks the
-     role server-side. */
-  function openAsAdmin() {
-    return exchange({ admin: true });
-  }
-
     /* Resume if we can, gate if we cannot. What every caller actually wants. */
   function ensure(opts) {
     return resume().then(function (s) { return s || open(opts); });
   }
 
   window.NLGate = { open: open, ensure: ensure, resume: resume,
-                    signOut: signOut, openAsAdmin: openAsAdmin, ROOT: ROOT };
+                    signOut: signOut, ROOT: ROOT };
 }());
