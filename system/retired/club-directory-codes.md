@@ -37,3 +37,13 @@ lists (`config/editors` 5, `config/readers` 72, `config/reader`), the
 handshake's leftovers (`authGrants` 5, `rate` 2) and the 6 `cd-*` sign-in
 accounts. All of it was saved first to the private bucket, at
 `nl-tools-monthly-backups/retired/2026-11-11T18-45-33-947Z/club-directory-codes.json`.
+
+## Also cleared: the frozen copies
+
+Same day, by a second one-off workflow (PR #1481, removed after its run):
+`app-data/ops-club-directory/editions` (31 frozen copies Publish used to take,
+about 21 MB, unread since the change log and undo replaced them) and `bake`
+(the record of the one-off build). The daily and monthly database backups do
+the frozen copies' job. Both saved first to
+`nl-tools-monthly-backups/retired/2026-11-11T18-51-52-192Z/club-directory-frozen-copies.json`;
+their rules went in the same PR.
