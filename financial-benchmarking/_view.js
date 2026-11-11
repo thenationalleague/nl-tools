@@ -1,9 +1,11 @@
 /* =============================================================================
    NL Tools — Financial Benchmarking: the club's view
    File: /financial-benchmarking/_view.js
-   Version: v0.2 (10/11/2026)
+   Version: v0.3 (11/11/2026)
 
    CHANGELOG
+     v0.3 (11/11/2026) — Canon sweep: control titles are canon .filter-label
+       and a panel is canon .form-panel; the local copies of both are gone.
      v0.2 (10/11/2026) — North and South are weighted: squad cost against
        income leads (budgeted, and to date), then Income and Playing squad as
        two panels, each budget with its own progress beside it. Budgets carry
@@ -134,8 +136,8 @@
     var pv = own[p.key], av = own[a.key], values = D.list(bench[p.key]);
     var vs = D.againstMedian('pct', pv, D.median(values), who);
     var label = pn.pctLabel.replace('{Q}', q);
-    return '<article class="fb-panel">' +
-      '<h3 class="fb-panel__head">' + esc(pn.title) + '</h3>' +
+    return '<article class="form-panel fb-panel">' +
+      '<h3 class="form-panel__head">' + esc(pn.title) + '</h3>' +
       '<div class="fb-panel__body">' +
         '<div class="fb-fig">' + figure(b, b.label, own[b.key], D.list(bench[b.key]), who) + '</div>' +
         '<div class="fb-fig fb-fig--todate">' +
@@ -166,7 +168,7 @@
 
     var controls = '';
     if ((o.returns || []).length > 1) {
-      controls += '<label class="fb-control"><span class="fb-control__label">Return</span>' +
+      controls += '<label class="fb-control"><span class="filter-label">Return</span>' +
         '<select class="nl-select" data-fb-return>' + o.returns.map(function (r) {
           return '<option value="' + esc(r.id) + '"' + (r.id === o.current ? ' selected' : '') + '>' + esc(r.label) + '</option>';
         }).join('') + '</select></label>';
@@ -174,7 +176,7 @@
     /* A filter button carries its own name, so it takes no title above. */
     if (canBoth) controls += '<div class="fb-control" data-fb-compare></div>';
 
-    controls += '<div class="fb-control"><span class="fb-control__label">Show position as</span>' +
+    controls += '<div class="fb-control"><span class="filter-label">Show position as</span>' +
       '<div class="tabs fb-viztabs" role="tablist" aria-label="Show position as">' +
         ['bars', 'slider'].map(function (v) {
           return '<button type="button" class="tab' + (v === vizMode ? ' active' : '') + '" role="tab" aria-selected="' +
