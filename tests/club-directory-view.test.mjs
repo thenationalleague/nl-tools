@@ -302,3 +302,19 @@ test('removing someone on a mailing list asks who takes their place', () => {
   assert.match(live, /function whoLabel\(p\)/);
   assert.match(live, /'ed-lg__who' \+ \(fitsList\(byId\[id\], key\) \? '' : ' is-odd'\)/);
 });
+
+test('mobiles read 07xxx xxx xxx and addresses break only at @ or a dot', async () => {
+  const vm = await import('node:vm');
+  const NL = { escHtml: (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;') };
+  const w = { NL }; w.window = w;
+  const ctx = vm.createContext({ window: w, NL });
+  vm.runInContext(JS, ctx);
+  const D = w.NLDirectory;
+  for (const n of ['07700900123', '07700 900123', '+44 7700 900123', '(07700) 900-123']) {
+    assert.equal(D.phoneText(n), '07700 900 123', n);
+  }
+  assert.equal(D.phoneText('0121 634 3155'), '0121 634 3155', 'a landline is left as entered');
+  assert.equal(D.mailText('a.b@c.co.uk'), 'a<wbr>.b@<wbr>c<wbr>.co<wbr>.uk');
+  assert.ok(!/overflow-wrap: anywhere/.test(CSS.slice(CSS.indexOf('.cd-row a {'), CSS.indexOf('.cd-row a {') + 300)),
+    'links no longer break mid-word');
+});
