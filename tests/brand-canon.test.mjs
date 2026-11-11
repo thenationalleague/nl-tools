@@ -1396,3 +1396,41 @@ test('the Style Guide shows the club header live, and no page keeps a private on
     assert.doesNotMatch(readFileSync(join(REPO, file), 'utf8'), re, `${file} no longer draws its own club header`);
   }
 });
+
+
+/* ── A button's direction is an icon, never a typed arrow ──────────────────
+   nl-brand.css's Icon system convention: a navigation icon sits BEFORE the
+   words (back), a completion icon AFTER (send), and both come from the
+   sprite. A typed ← or ‹ is a glyph pretending to be an icon: it takes its
+   size and weight from whatever font loaded and sits on the text baseline.
+   Eight tools typed one until 11/11/2026 — Attendance, Vacancies, NLS
+   Monitor, Responsibilities, Portal, Website Archive, Fixture Management and
+   Save of the Month — each a slightly different character. This keeps them
+   out. Embeds are outside the sprite's reach (the CMS strips what it would
+   need), and the Style Guide and generated wellbeing pages are not tools. */
+test('no button types an arrow character where the sprite has an icon', () => {
+  const walk = (d, out = []) => {
+    for (const e of readdirSync(join(REPO, d), { withFileTypes: true })) {
+      if (e.name.startsWith('.') || e.name === 'node_modules') continue;
+      const p = d ? d + '/' + e.name : e.name;
+      if (e.isDirectory()) {
+        if (['system', 'style-guide', 'embeds', 'tests', 'scripts', 'functions', 'gas', 'assets',
+          'wellbeing-hub', 'trident-wellbeing', 'public'].includes(p)) continue;
+        walk(p, out);
+      } else if (/\.(html|js)$/.test(e.name)) out.push(p);
+    }
+    return out;
+  };
+  const ARROW = '(?:←|→|‹|›|«|»|&larr;|&rarr;|&lsaquo;|&rsaquo;|&laquo;|&raquo;|&#8592;|&#8594;)';
+  /* The visible label of a <button>: the text between its tag and the next
+     tag. Attributes (title="Previous (←)", a keyboard hint) are not labels. */
+  /* Same line only: prose in a changelog comment mentions "<button>" too. */
+  const inMarkup = new RegExp('<button\\b[^>\\n]*>[^<\\n]*' + ARROW, 'i');
+  /* A label handed to a helper that builds the button: btn('← Previous', …). */
+  const inHelper = new RegExp("\\bbtn\\(\\s*['\"][^'\"]*" + ARROW);
+  const bad = walk('').filter((f) => {
+    const text = readFileSync(join(REPO, f), 'utf8');
+    return inMarkup.test(text) || inHelper.test(text);
+  });
+  assert.deepEqual(bad, [], 'use the sprite icon (icon-back / icon-forward) instead of a typed arrow:\n  ' + bad.join('\n  '));
+});

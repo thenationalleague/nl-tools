@@ -1,7 +1,9 @@
 /* =========================================================================
    NL Tools — Responsibilities map
    File: /responsibilities/_map.js
-   Version: v1.0 (08/10/2026)
+   Version: v1.1 (11/11/2026)
+     v1.1 (11/11/2026) — Previous / Next in the detail panel carry the canon
+       chevron icons in place of typed arrow characters.
 
    The spoke map, its detail panel, the "Without" switches and the
    narrow-screen list — everything that DRAWS the department's work. Moved out
@@ -452,8 +454,16 @@
 
       var foot = document.createElement('div');
       foot.className = 'rp-panel__foot';
-      foot.appendChild(btn('← Previous', 'btn--ghost btn--sm', function () { step(-1); }));
-      foot.appendChild(btn('Next →', 'btn--ghost btn--sm', function () { step(1); }));
+      /* Direction is the canon chevron icon, not a typed arrow: before the
+         word going back, after it going on. */
+      var prev = btn('Previous', 'btn--ghost btn--sm', function () { step(-1); });
+      var next = btn('Next', 'btn--ghost btn--sm', function () { step(1); });
+      if (window.NL && NL.icon) {
+        prev.insertBefore(NL.icon('back', 'sm'), prev.firstChild);
+        next.appendChild(NL.icon('forward', 'sm'));
+      }
+      foot.appendChild(prev);
+      foot.appendChild(next);
       inner.appendChild(foot);
     }
 
