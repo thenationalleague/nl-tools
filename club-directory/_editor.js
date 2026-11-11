@@ -1,7 +1,13 @@
 /* =========================================================================
    NL Tools — Club Directory editor
    File: /club-directory/_editor.js
-   Version: v2.3 (11/11/2026)
+   Version: v2.4 (11/11/2026)
+
+   v2.4 – (11/11/2026) Publish says what it will change before you confirm:
+          the live published copy is read and compared with the one this
+          press would write, club by club and person by person (added,
+          removed, name / job / email / phone changed, club details), with
+          the clubs' crests. "Nothing has changed" when nothing has.
 
    v2.3 – (11/11/2026) Change log → Download (CSV): every journalled change
           and every hand-edited field (with was / now), newest first, each
@@ -1510,22 +1516,170 @@ window.NLEditor = (function () {
     publishConfirmed(built);
   }
 
+  /* What Publish would change, worked out against what readers have now
+     (v2.4, Richard: "publish atm doesn't say what'll change"). The live
+     published copy is read and compared, club by club and person by person,
+     with the copy this press would write — so the list is the actual
+     difference readers will see, not a reconstruction from the journal. A
+     detail kept back is invisible here exactly as it is to readers: it is
+     not in either copy. */
+  function canon(v) {
+    if (Array.isArray(v)) {
+      var a = v.map(canon).filter(function (x) { return x !== undefined; });
+      return a.length ? a : undefined;
+    }
+    if (v && typeof v === 'object') {
+      var o = {}, any = false;
+      Object.keys(v).sort().forEach(function (k) {
+        var c = canon(v[k]);
+        if (c !== undefined) { o[k] = c; any = true; }
+      });
+      return any ? o : undefined;
+    }
+    if (v === null || v === undefined || v === '' || v === false) { return undefined; }
+    return v;
+  }
+  function sameish(a, b) { return JSON.stringify(canon(a)) === JSON.stringify(canon(b)); }
+
+  function personLines(a, b) {
+    var lines = [];
+    var byId = function (list) {
+      var m = {};
+      NLDirectory.arr(list).forEach(function (p, i) { m[(p && p.id) || ('#' + i)] = p; });
+      return m;
+    };
+    var was = byId(a), now = byId(b);
+    var who = function (p) { return NLDirectory.fullName(p) || 'Someone without a name'; };
+    var jobs = function (p) {
+      return NLDirectory.arr(p.roles).map(function (r) { return (r.title || '').trim(); })
+        .filter(Boolean).join(', ');
+    };
+    Object.keys(now).forEach(function (id) {
+      var n = now[id];
+      if (!was[id]) {
+        lines.push('Added: ' + who(n) + (jobs(n) ? ' (' + jobs(n) + ')' : ''));
+        return;
+      }
+      var w = was[id], what = [];
+      /* Was \u2192 now, in words. Everything here is already in the published
+         copy, so nothing kept back can surface in this list. */
+      var span = function (label, a, b) {
+        what.push(label + ' ' + (a || '(none)') + ' \u2192 ' + (b || '(none)'));
+      };
+      var mails = function (p) {
+        return NLDirectory.arr(p.emails).map(NLDirectory.addrOf).filter(Boolean).join(', ');
+      };
+      var nums = function (p) {
+        return NLDirectory.arr(p.phones).map(function (x) {
+          return x ? (x.number || '') + (x.ext ? ' ext ' + x.ext : '') : '';
+        }).filter(Boolean).join(', ');
+      };
+      if (who(w) !== who(n)) { span('name', who(w), who(n)); }
+      if (!sameish(w.roles, n.roles)) {
+        if (jobs(w) !== jobs(n)) { span('job', jobs(w), jobs(n)); }
+        else { what.push('department changed'); }
+      }
+      /* Same addresses but different entries means a setting on one of them
+         (which roles it shows under) — said as such, not as "a → a". */
+      var chan = function (label, list, hideKey, show) {
+        var a = w[hideKey] ? 'kept back' : show(w), b = n[hideKey] ? 'kept back' : show(n);
+        if (a !== b) { span(label, a, b); }
+        else if (!sameish(w[list], n[list])) { what.push('where their ' + label + ' shows changed'); }
+      };
+      chan('email', 'emails', 'hideEmail', mails);
+      chan('phone', 'phones', 'hidePhone', nums);
+      if (!!w.hideContact !== !!n.hideContact) {
+        what.push(n.hideContact ? 'all contact details now kept back' : 'contact details now shown');
+      }
+      if (what.length) { lines.push(who(n) + ' \u2013 ' + what.join('; ')); }
+      else if (!sameish(w, n)) { lines.push(who(n) + ' \u2013 changed'); }
+    });
+    Object.keys(was).forEach(function (id) {
+      if (!now[id]) { lines.push('Removed: ' + who(was[id])); }
+    });
+    return lines;
+  }
+
+  function publishDiff(built, live) {
+    var out = [];
+    var names = {};
+    Object.keys(live || {}).forEach(function (n) { names[n] = 1; });
+    Object.keys(built.clubs).forEach(function (n) { names[n] = 1; });
+    Object.keys(names).sort().forEach(function (n) {
+      var a = (live || {})[n], b = built.clubs[n];
+      if (!a) { out.push({ club: n, lines: ['New to the directory'] }); return; }
+      if (!b) { out.push({ club: n, lines: ['Taken out of the directory'] }); return; }
+      if (sameish(a, b)) { return; }
+      var lines = personLines(a.people, b.people);
+      var info = [];
+      var ai = a.info || {}, bi = b.info || {};
+      Object.keys(Object.assign({}, ai, bi)).sort().forEach(function (k) {
+        if (!sameish(ai[k], bi[k])) { info.push(infoName(k)); }
+      });
+      if (info.length) { lines.push('Club details: ' + info.join(', ')); }
+      if (!sameish(a.inboxes, b.inboxes)) { lines.push('Shared mailboxes changed'); }
+      if (!lines.length) { lines.push('Changed'); }
+      out.push({ club: n, lines: lines });
+    });
+    return out;
+  }
+  function infoName(k) {
+    var label = '';
+    (INFO_FIELDS || []).forEach(function (g) {
+      (g[1] || []).forEach(function (f) { if (f[0] === k) { label = f[1]; } });
+    });
+    return String(label || k).toLowerCase();
+  }
+
   function publishConfirmed(built) {
     var prev = PUBLISHED_AT;
     var when = NL.formatDate(Date.now());
-    NL.confirm('This replaces what readers see with all ' + built.count +
-      ' club' + (built.count === 1 ? '' : 's') + ' as they stand right now \u2014 ' +
-      built.people + ' people, of whom ' + built.held + ' asked us to keep their ' +
-      'contact details back. Those details are left out of the published copy ' +
-      'entirely; the person is still listed.\n\n' +
-      (prev ? 'Last published ' + NL.formatDateTime(prev) + '.'
-            : 'Nothing has been published before.'), {
-      title: 'Publish',
-      confirmText: 'Publish'
+    var btn = $('publish');
+    btn.disabled = true;
+    firebase.database().ref(ROOT + '/published/clubs').once('value').then(function (snap) {
+      btn.disabled = false;
+      var diff = publishDiff(built, snap.val() || {});
+      var body = document.createElement('div');
+      body.className = 'ed-pubdiff';
+      var head = (prev ? 'Last published ' + NL.formatDateTime(prev) + '. ' : 'Nothing has been published before. ') +
+        (diff.length
+          ? 'Publishing now changes ' + diff.length + ' club' + (diff.length === 1 ? '' : 's') + ':'
+          : 'Nothing has changed since then \u2013 readers already see all of this.');
+      body.innerHTML = '<p class="form-hint">' + esc(head) + '</p>' +
+        (diff.length ? '<ul class="ed-pubdiff__list">' + diff.map(function (d) {
+          return '<li><img class="ed-pubdiff__crest" alt="" data-crest="' + esc(d.club) + '">' +
+            '<div><b>' + esc(d.club) + '</b><ul>' + d.lines.map(function (l) {
+              return '<li>' + esc(l) + '</li>';
+            }).join('') + '</ul></div></li>';
+        }).join('') + '</ul>' : '') +
+        '<p class="form-hint">' + esc(built.held + ' of ' + built.people + ' people asked us to ' +
+          'keep some or all of their contact details back. Those details are never published.') + '</p>';
+      body.querySelectorAll('img[data-crest]').forEach(function (img) {
+        var n = img.dataset.crest;
+        NL.clubs.wireCrestImg(img, (ALL[n] && NLDirectory.crestKeyOf(ALL[n])) || n, true);
+        img.src = NL.clubs.crestUrl((ALL[n] && NLDirectory.crestKeyOf(ALL[n])) || n, 'thumb');
+      });
+      return new Promise(function (resolve) {
+        var settled = false;
+        var done = function (v) { if (!settled) { settled = true; resolve(v); } };
+        NL.modal({
+          title: 'Publish',
+          body: body,
+          onClose: function () { done(false); },
+          buttons: [
+            { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+            { label: diff.length ? 'Publish' : 'Publish anyway', className: 'btn--primary',
+              onClick: function (c) { done(true); c.close(); } }
+          ]
+        });
+      });
+    }, function (err) {
+      btn.disabled = false;
+      NL.toast('Could not read what readers see now: ' + ((err && err.message) || err), 'error');
+      return false;
     }).then(function (ok) {
       if (!ok) { return; }
       var label = 'Published ' + when;
-      var btn = $('publish');
       btn.disabled = true; btn.textContent = 'Publishing\u2026';
       var db = firebase.database();
       var at = Date.now();

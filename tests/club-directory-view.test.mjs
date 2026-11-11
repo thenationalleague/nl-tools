@@ -219,3 +219,19 @@ test('Change log downloads the whole log, marked live or not yet live', () => {
   assert.match(fn, /NL\.csv\(/, 'canon CSV, not a hand-rolled one');
   assert.match(fn, /NL\.download\(/);
 });
+
+test('Publish says what it will change, from the live copy, before it changes it', () => {
+  const live = strip(EDITOR);
+  const fn = live.slice(live.indexOf('function publishConfirmed('));
+  const body = fn.slice(0, fn.indexOf('\n  }\n'));
+  /* Read what readers have now, then compare, then ask — in that order. */
+  const read = body.indexOf("ref(ROOT + '/published/clubs').once('value')");
+  const diff = body.indexOf('publishDiff(built,');
+  const ask = body.indexOf('NL.modal(');
+  assert.ok(read > -1 && diff > read && ask > diff, 'reads the live copy, diffs, then asks');
+  assert.match(live, /function publishDiff\(built, live\)/);
+  assert.match(live, /'New to the directory'/);
+  assert.match(live, /'Taken out of the directory'/);
+  assert.match(live, /lines\.push\('Added: '/);
+  assert.match(live, /lines\.push\('Removed: '/);
+});
