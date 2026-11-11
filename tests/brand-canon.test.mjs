@@ -1314,3 +1314,85 @@ test('NL.filterButton exists, and the Style Guide demonstrates it', () => {
   const sg = readFileSync(join(REPO, 'style-guide/index.html'), 'utf8');
   assert.match(sg, /NL\.filterButton\(/, 'the Style Guide shows the filter button');
 });
+
+/* ── .nl-club-header: the club header (brand v2.77) ──────────────────────────
+   One club is the subject of the view. Promoted from two hand-rolled cards
+   and a navy strip; the contracts below are the ones a well-meant edit
+   would break without anything looking wrong in the file. */
+function clubHeaderBlock() {
+  const i = rules.indexOf('\n.nl-club-header {');
+  assert.notEqual(i, -1, '.nl-club-header is present in nl-brand.css');
+  /* Through its phone block, which is the last rule of the component. */
+  const end = rules.indexOf('\n}\n', rules.indexOf('@media', i));
+  return rules.slice(i, end);
+}
+
+test('.nl-club-header is a white card that hosts the trim', () => {
+  const body = ruleBody('.nl-club-header');
+  assert.match(body, /background:\s*var\(--white\)/, 'the name sits on white, never on a club colour');
+  assert.match(body, /border:\s*1px solid var\(--border\)/);
+  assert.match(body, /border-radius:\s*var\(--radius\)/);
+  assert.match(body, /box-shadow:\s*var\(--shadow\)/);
+  /* .nl-club-bands is position:absolute; bottom:0. Without these two it
+     pins to the page instead, or pokes out past the rounded corners. */
+  assert.match(body, /position:\s*relative/, 'the trim is absolute to the card');
+  assert.match(body, /overflow:\s*hidden/, 'and is clipped to its corners');
+});
+
+test('.nl-club-header clears the --lg trim with its own bottom padding', () => {
+  /* The trim is 8px + 4px + a 1px hairline. If the padding does not clear
+     it, a wrapped actions row or a meta line sits under the bands. */
+  const lg = /\.nl-club-bands--lg i:first-child \{ height: (\d+)px; \}[\s\S]*?\.nl-club-bands--lg i:last-child\s*\{ height: (\d+)px; \}/.exec(rules);
+  assert.ok(lg, 'the --lg band heights are still stated');
+  const trim = Number(lg[1]) + Number(lg[2]) + 1;
+  const block = clubHeaderBlock();
+  const pads = [...block.matchAll(/\.nl-club-header \{[^}]*?padding:\s*\d+px \d+px (\d+)px/g)].map((m) => Number(m[1]));
+  assert.equal(pads.length, 2, 'desktop and phone both state a bottom padding');
+  for (const p of pads) assert.ok(p >= trim + 12, `bottom padding ${p}px clears the ${trim}px trim with room`);
+});
+
+test('.nl-club-header is tokened — no raw hex, no rgba', () => {
+  assert.doesNotMatch(clubHeaderBlock(), /#[0-9a-fA-F]{3,8}\b|rgba?\(/);
+});
+
+test('.nl-club-header: crest through .nl-crest, name at the page-title scale', () => {
+  /* The crest takes its size from the canon square box, not a width of its
+     own, so a tall badge and a wide one occupy the same area. */
+  const crest = ruleBody('.nl-club-header__crest');
+  assert.match(crest, /--crest-size:\s*60px/);
+  assert.doesNotMatch(crest, /(^|[;{\s])(width|height)\s*:/, 'sized by --crest-size only');
+  const name = ruleBody('.nl-club-header__name');
+  const title = ruleBody('.page-header__title');
+  const size = (b) => /font-size:\s*([^;]+);/.exec(b)[1];
+  assert.equal(size(name), size(title), 'the same scale as .page-header__title');
+  assert.match(name, /color:\s*var\(--navy\)/);
+  assert.match(ruleBody('.nl-club-header__sub'), /font-size:\s*var\(--text-sm\)/);
+  assert.match(ruleBody('.nl-club-header__sub'), /color:\s*var\(--text-muted\)/);
+});
+
+test('.nl-club-header actions sit right and wrap on a phone', () => {
+  const act = ruleBody('.nl-club-header__actions');
+  assert.match(act, /margin-left:\s*auto/, 'pushed to the right');
+  assert.match(act, /flex-wrap:\s*wrap/);
+  assert.match(ruleBody('.nl-club-header'), /flex-wrap:\s*wrap/, 'the card itself wraps');
+  const block = clubHeaderBlock();
+  const phone = block.slice(block.indexOf('@media'));
+  assert.match(phone, /max-width:\s*600px/);
+  assert.match(phone, /\.nl-club-header__actions \{[^}]*width:\s*100%/, 'a full row of their own on a phone');
+});
+
+test('the Style Guide shows the club header live, and no page keeps a private one', () => {
+  const sg = readFileSync(join(REPO, 'style-guide/index.html'), 'utf8');
+  assert.match(sg, /NL\.clubs\.headerHtml\(/);
+  assert.equal(typeof NL.clubs.headerHtml, 'function');
+  /* The three it replaced. A copy coming back is the drift it was promoted
+     to stop. */
+  const gone = [
+    ['financial-benchmarking/admin/index.html', /\.fba-club(card|id)\s*\{/],
+    ['programme/_shared.css', /\.own(__\w+)?\s*\{/],
+    ['attendance/index.html', /\.club-strip[\w-]*\s*\{/],
+  ];
+  for (const [file, re] of gone) {
+    assert.doesNotMatch(readFileSync(join(REPO, file), 'utf8'), re, `${file} no longer draws its own club header`);
+  }
+});

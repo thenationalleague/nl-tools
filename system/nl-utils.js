@@ -1,7 +1,18 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.47 (30/10/2026)
+   Version: v1.48 (11/11/2026)
+
+   v1.48 — NL.clubs.headerHtml(club, opts): the club header, "this is the
+   club you are looking at" (nl-brand v2.77 .nl-club-header; cache-bust
+   nl-utils ?v=51 -> ?v=52, nl-brand ?v=73 -> ?v=74). A white card with the
+   crest, the club's name, an optional line beneath, an optional slot under
+   that, optional actions on the right, and the club's colours as the
+   .nl-club-bands--lg trim. Promoted on the second hand-rolled copy
+   (Financial Benchmarking's club card and Programme Packs' own-club card);
+   Attendance's navy club strip was a third way of saying the same thing.
+   The name and sub are escaped here; metaHtml and actionsHtml are the
+   caller's own markup and go in as given. Tested in tests/canon.test.mjs.
 
    v1.47 — NL.filterButton(mount, opts): the brand filter button (nl-brand
    v2.74 .filter-btn; cache-bust nl-utils ?v=50 -> ?v=51, nl-brand ?v=70 ->
@@ -2568,6 +2579,57 @@
       return '<span class="nl-club-bands' + (opts && opts.lg ? ' nl-club-bands--lg' : '') + '">' +
         '<i style="background:' + hex(c.primary, 'var(--navy)') + '"></i>' +
         '<i style="background:' + hex(c.secondary, 'var(--primary)') + '"></i></span>';
+    },
+    /* The club header: "this is the club you are looking at". The canon
+       .nl-club-header (nl-brand v2.77) as an HTML STRING: a white card with
+       the crest, the club's name, an optional line beneath, optional actions
+       on the right, and the club's colours as the --lg trim along the base.
+
+       For a view whose SUBJECT is one club: a drill-down, or a club's own
+       page. Not for a row in a list, a card in a grid, or a code-gated
+       page's identity bar (.nl-idbar).
+
+         headerHtml('Aldershot Town')
+         headerHtml(rec, { sub: 'National League · Q1 return',
+                           actionsHtml: '<button class="btn btn--ghost btn--sm">All clubs</button>' })
+
+       `club` is a name or a clubs-meta record, as for bandsHtml. A name
+       that is not in clubs-meta (or clubs-meta not loaded yet) still draws:
+       the name is set, the crest is left to the sweep's fallback chain and
+       the trim falls back to brand tokens.
+
+         opts.sub         → one plain-text line under the name. ESCAPED here.
+         opts.heading     → 'h1' (default), 'h2' or 'div'. A page has one h1;
+                            pass 'h2' or 'div' where it already has one.
+                            Anything else is read as 'h1'.
+         opts.metaHtml    → TRUSTED HTML for the slot beneath the sub (a
+                            status pill and a note, say). NOT escaped: the
+                            caller builds it and escapes what it puts in.
+         opts.actionsHtml → TRUSTED HTML for the right-hand actions (canon
+                            .btn markup). NOT escaped, same contract.
+         opts.id          → id on the root element. Escaped.
+
+       The crest is eager and medium-tier: it is the subject of the page, at
+       60px, which a 96px thumb cannot fill on a dense screen. Like
+       crestImgHtml the string carries no fallback of its own, so sweep in
+       the same tick: NL.clubs.wireCrestImgs(container). */
+    headerHtml: function(club, opts) {
+      opts = opts || {};
+      var esc = window.NL.escHtml;
+      var rec = (club && typeof club === 'object') ? club : null;
+      var name = rec ? (rec.name || '') : (club == null ? '' : String(club));
+      var tag = (opts.heading === 'h2' || opts.heading === 'div') ? opts.heading : 'h1';
+      return '<div class="nl-club-header"' + (opts.id ? ' id="' + esc(opts.id) + '"' : '') + '>' +
+        this.crestImgHtml((rec && rec.crestName) || name, 'medium',
+          { className: 'nl-crest nl-club-header__crest', eager: true }) +
+        '<div class="nl-club-header__id">' +
+          '<' + tag + ' class="nl-club-header__name">' + esc(name) + '</' + tag + '>' +
+          (opts.sub ? '<p class="nl-club-header__sub">' + esc(opts.sub) + '</p>' : '') +
+          (opts.metaHtml ? '<div class="nl-club-header__meta">' + opts.metaHtml + '</div>' : '') +
+        '</div>' +
+        (opts.actionsHtml ? '<div class="nl-club-header__actions">' + opts.actionsHtml + '</div>' : '') +
+        this.bandsHtml(rec || name, { lg: true }) +
+      '</div>';
     },
     /* Load + memoise clubs-meta. One network hit per session. */
     load: function() {
