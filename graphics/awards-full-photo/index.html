@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Monthly Awards Full Photo (Graphics sub-tool)
-  Version: v1.5 (11/11/2026)
+  Version: v1.6 (11/11/2026)
   File: /graphics/awards-full-photo/index.html
 
   Nominee and winner cards for the monthly awards when the photo can't be
@@ -23,6 +23,9 @@
     /graphics/_shared/canvas-art.js                (large images drawn small)
 
   Changelog:
+    v1.6 (11/11/2026) — The lockup always sits at the card's opposite edge
+      from the words, so down one side it is in the bottom corner of the
+      clear side, not in the middle; the name gets the column back.
     v1.5 (11/11/2026) — The lockup is as tall as the name and club together,
       top and bottom aligned with them, at the opposite edge; the name and
       club fit the width beside it. Club name about 40% of the name's size.
@@ -81,6 +84,13 @@
     var NL_TOOL_KEY = 'staff-graphics';
 
     window.NL_CHANGELOG = [
+      {
+        date: '11/11/2026',
+        version: 'v1.6',
+        items: [
+          'Down one side: the league badge sits in the bottom corner on the other side of the card, not in the middle, so the name has the whole column again.'
+        ]
+      },
       {
         date: '11/11/2026',
         version: 'v1.5',
@@ -324,6 +334,22 @@
     var n = parseInt(String(hex).replace('#', ''), 16);
     return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
   }
+  /* The part of an image that isn't transparent, as fractions of its size.
+     Read once per image from a small copy. */
+  function visibleBox(img) {
+    try {
+      var w = 200, h = Math.max(1, Math.round(200 * img.naturalHeight / img.naturalWidth));
+      var c = document.createElement('canvas'); c.width = w; c.height = h;
+      var g = c.getContext('2d'); g.drawImage(img, 0, 0, w, h);
+      var d = g.getImageData(0, 0, w, h).data, x0 = w, y0 = h, x1 = -1, y1 = -1;
+      for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) {
+        if (d[(y * w + x) * 4 + 3] > 24) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+      }
+      if (x1 < 0) return null;
+      return { x: x0 / w, y: y0 / h, w: (x1 + 1 - x0) / w, h: (y1 + 1 - y0) / h };
+    } catch (e) { return null; }
+  }
+
   function resetCrops() { ORDER.forEach(function (f) { S.crops[f] = { zoom: 1, dx: 0, dy: 0 }; }); }
 
   /* ---------------- type helpers ---------------- */
@@ -391,13 +417,22 @@
        left beside the lockup, with a fixed gap. */
     var rowTop = F.h - 66 - 72, rowBottom = rowTop + 72;
     var blockH = function (n) { return rowBottom - (rowTop - 22 - Math.round(n * 0.2) - Math.round(n * 0.74)); };
-    var lockImg = S.lockups[S.div];
-    var lockAR = lockImg ? lockImg.naturalWidth / lockImg.naturalHeight : 1.44;
-    var lockMaxW = side ? Math.round(colW * 0.3) : 300;
-    /* The lockup's x: the column's far edge down one side; otherwise the
-       card's right margin, opposite the words. Right-hand column: its left. */
-    var lockXFor = function (w) { return right ? x0 : side ? x0 + colW - w : F.w - M - w; };
-    var wordsWFor = function (w) { return right ? colW - w - 32 : Math.min(colW, lockXFor(w) - 32 - x0); };
+    /* Sized on the lockup's visible edges, not its file's: the artwork
+       carries a little transparent padding, which left it 4px low and 6px
+       short of the block it is lined up with. */
+    var lockImg = S.lockups[S.div], vis = lockImg && lockImg._visible;
+    var lockAR = !lockImg ? 1.44
+      : (lockImg.naturalWidth * (vis ? vis.w : 1)) / (lockImg.naturalHeight * (vis ? vis.h : 1));
+    var lockMaxW = 300;
+    /* The lockup always closes the card's opposite edge from the words: the
+       right margin, or the left margin when the words are on the right. Down
+       one side that puts it on the clear side, in the bottom corner, rather
+       than loose in the middle of the card. The words keep the width up to
+       it, less a fixed gap. */
+    var lockXFor = function (w) { return right ? M : F.w - M - w; };
+    var wordsWFor = function (w) {
+      return right ? Math.min(colW, x0 + colW - (M + w) - 32) : Math.min(colW, F.w - M - w - 32 - x0);
+    };
     var ns = fitSize(c, name || 'M', 800, F.ns, colW, -0.025);
     var lockW = Math.min(lockMaxW, blockH(ns) * lockAR);
     var wordsW = wordsWFor(lockW);
@@ -533,7 +568,12 @@
       var cw = g.measureText(club).width;
       g.fillText(club, L.right ? L.x0 + L.colW - crestW - cw : L.x0 + crestW, mid + 1);
     }
-    if (lock) window.NL_GFX_ART.draw(g, lock, L.lockX, L.lockY, L.lockW, L.lockH, k);
+    if (lock) {
+      /* L.lockX/Y/W/H are the visible box; draw the whole file around it. */
+      var v = lock._visible || { x: 0, y: 0, w: 1, h: 1 };
+      var fw = L.lockW / v.w, fh = L.lockH / v.h;
+      window.NL_GFX_ART.draw(g, lock, L.lockX - v.x * fw, L.lockY - v.y * fh, fw, fh, k);
+    }
     g.letterSpacing = '0px';
   }
 
@@ -714,7 +754,7 @@
     var art = Promise.all([
       loadImg(ROSE_URL).then(function (i) { S.rose = i; }, function () {})
     ].concat(['National', 'North', 'South'].map(function (dv) {
-      return loadImg(LOCKUP_URL(dv)).then(function (i) { S.lockups[dv] = i; }, function () {});
+      return loadImg(LOCKUP_URL(dv)).then(function (i) { i._visible = visibleBox(i); S.lockups[dv] = i; }, function () {});
     })));
     Promise.all([fonts, art]).then(draw);
     draw();
