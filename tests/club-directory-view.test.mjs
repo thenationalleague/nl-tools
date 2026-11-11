@@ -10,7 +10,7 @@ import { REPO } from './load-canon.mjs';
 const JS = readFileSync(join(REPO, 'club-directory/_directory.js'), 'utf8');
 const CSS = readFileSync(join(REPO, 'club-directory/_directory.css'), 'utf8');
 const READER = readFileSync(join(REPO, 'club-directory/index.html'), 'utf8');
-const EDITOR = readFileSync(join(REPO, 'club-directory/admin/edit/index.html'), 'utf8');
+const EDITOR = readFileSync(join(REPO, 'club-directory/_editor.js'), 'utf8');
 const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/<!--[\s\S]*?-->/g, '');
 
 test('the switcher is built where the people are, not by the page', () => {
@@ -118,14 +118,14 @@ test('a name is set as its owner writes it', () => {
    The changes are still logged — read in Change log — but not on the page. */
 const STAFF = readFileSync(join(REPO, 'club-directory/admin/index.html'), 'utf8');
 
-test('both staff pages choose a club with the canon picker, not a bare <select>', () => {
+test('the staff page chooses a club with the canon picker, not a bare <select>', () => {
   assert.match(JS, /function picker\(mount, opts\)/);
   assert.match(JS, /window\.NL\.clubPicker\(mount,/, 'picker() is built on NL.clubPicker');
+  const live = strip(STAFF);
+  assert.ok(!/<select[^>]*id="pick"/.test(live), 'the staff page still has a <select> chooser');
+  assert.match(live, /NLDirectory\.picker\(\$\('pick'\)/, 'the staff page uses NLDirectory.picker');
   for (const [name, src] of [['staff view', STAFF], ['editor', EDITOR]]) {
-    const live = strip(src);
-    assert.ok(!/<select[^>]*id="pick"/.test(live), `${name} still has a <select> chooser`);
-    assert.match(live, /NLDirectory\.picker\(\$\('pick'\)/, `${name} uses NLDirectory.picker`);
-    assert.ok(!/\$\('pick'\)\.value/.test(live), `${name} still reads the old <select>`);
+    assert.ok(!/\$\('pick'\)\.value/.test(strip(src)), `${name} still reads the old <select>`);
   }
 });
 
@@ -149,7 +149,7 @@ test('the editor still logs every change, off the page', () => {
   const live = strip(EDITOR);
   assert.match(live, /function logJournal\(/);
   assert.match(live, /function logEdit\(/);
-  assert.match(live, /id="changes"[^>]*>Change log</);
+  assert.match(strip(STAFF), /id="changes"[^>]*>Change log</);
   assert.match(live, /function persist\(club, what, undoOf\) \{\s*logJournal\(club, what, undoOf\);/);
 });
 
@@ -165,4 +165,46 @@ test('a phone extension is small and stays in one piece', () => {
   assert.match(rule[1], /font-size: var\(--text-xs\)/);
   assert.match(rule[1], /white-space: nowrap/);
   assert.ok(!/class="cd-f__sub">ext /.test(JS), 'an extension still uses the facts style');
+});
+
+/* ------------------------------------------ one page, an Edit button (v1.18)
+   Editing moved onto the staff page (Richard, 11/11/2026). */
+const EDIT_STUB = readFileSync(join(REPO, 'club-directory/admin/edit/index.html'), 'utf8');
+
+test('the staff page edits in place, behind Edit, for Manage only', () => {
+  const live = strip(STAFF);
+  assert.match(live, /<script src="\/club-directory\/_editor\.js\?v=\d+"><\/script>/);
+  assert.match(live, /<link rel="stylesheet" href="\/club-directory\/_editor\.css\?v=\d+">/);
+  assert.match(live, /id="editBtn"[^>]*hidden>Edit</, 'Edit starts hidden');
+  assert.match(live, /id="publish"[^>]*hidden>Publish</, 'Publish starts hidden');
+  assert.match(live, /function canEdit\(\) \{[\s\S]*?ses\.role === 'superadmin' \|\| ses\.toolLevel === 'admin'/);
+  assert.match(live, /NLEditor\.start\(EDIT_HOST\)/);
+  assert.ok(!/admin\/edit\//.test(live), 'nothing on the staff page still points at the old edit page');
+});
+
+test('the editor is a module the page drives, not a page', () => {
+  assert.match(EDITOR, /window\.NLEditor = \(function \(\) \{/);
+  assert.match(EDITOR, /return \{ start: start, draw: draw, search: search \};/);
+  const live = strip(EDITOR);
+  for (const gone of ['nlAuthReady', '_cdBoot', "$('app')", "$('who')", 'history.replaceState',
+    'function runBake', 'function rebuildInfo', 'ops-club-contacts/submissions']) {
+    assert.ok(!live.includes(gone), `the editor module still has ${gone}`);
+  }
+  /* Shared-class rules only while editing, so the reading view is untouched. */
+  const css = readFileSync(join(REPO, 'club-directory/_editor.css'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+  for (const sel of css.match(/[^{}]+(?=\{)/g) || []) {
+    for (const one of sel.split(',')) {
+      if (/\.cd-/.test(one) && !/@media/.test(one)) {
+        assert.match(one, /\.ed-on\b|\.ed-/, `"${one.trim()}" styles the reading view too`);
+      }
+    }
+  }
+});
+
+test('the old edit addresses forward to the staff page in editing', () => {
+  for (const src of [EDIT_STUB, readFileSync(join(REPO, 'club-directory/editor/index.html'), 'utf8')]) {
+    assert.match(src, /location\.replace\('\/club-directory\/admin\/\?edit' \+ location\.hash\)/);
+    assert.ok(!/auth-guard/.test(src), 'a redirect stub waits on nothing');
+  }
 });

@@ -75,7 +75,7 @@ test('the withheld details are removed at PUBLISH, not hidden at render', () => 
   /* The load-bearing half. A page that fetched everything and declined to
      draw some of it would have already sent it. PUB_PERSON is the allowlist
      and the emails/phones are filtered behind !p.hideContact. */
-  const ed = read('club-directory/admin/edit/index.html');
+  const ed = read('club-directory/_editor.js');
   assert.match(ed, /var PUB_PERSON = \[/, 'the published person is an allowlist');
   assert.ok(!/'emails'|'phones'/.test(ed.slice(ed.indexOf('var PUB_PERSON'), ed.indexOf('function publishablePerson'))),
     'contacts are not in the allowlist — they are added under a condition');
@@ -200,7 +200,7 @@ test('every consumer of _directory.* moved to the same version', () => {
   /* Same rule as the canon `?v=`: a bump means the shared file changed, and a
      page left behind loads a wall whose CSS it does not have. */
   const seen = new Set();
-  for (const p of ['club-directory/admin/index.html', 'club-directory/admin/edit/index.html',
+  for (const p of ['club-directory/admin/index.html',
     'club-directory/index.html', 'club-directory/public/index.html']) {
     for (const m of read(p).matchAll(/_directory\.(?:css|js)\?v=(\d+)/g)) seen.add(m[1]);
   }
