@@ -1,7 +1,19 @@
 /* =========================================================================
    NL Tools — Club Directory presentation
    File: /club-directory/_directory.js
-   Version: v1.15 (06/10/2026)
+   Version: v1.16 (11/11/2026)
+
+   v1.16 — picker(): the club chooser for the staff view and the editor,
+   built on canon NL.clubPicker (select mode: crest, name, division, type to
+   jump) instead of a bare <select>. The roster is the directory's own
+   records, orgs first, not the clubs-meta season list — the directory holds
+   the League and related bodies, and a club is in it because it has a
+   record, not because clubs-meta says it plays this season. NL.clubPicker
+   has no fixed-roster option, so the season roster is filtered to nothing
+   (a division no club has) and the records go in as extraClubs, which the
+   picker appends after that filter. Canon candidate: a `roster` option on
+   NL.clubPicker would make this one line, and Trust Cup's comment already
+   asks for the same thing.
 
    v1.15 — renderIndex() takes opts.isPicked, which turns the wall into a
    multi-select: every tile is a toggle (aria-pressed, .is-picked), whatever
@@ -477,6 +489,49 @@
     var orgs = [], clubs = [];
     names.forEach(function (n) { (isOrg(recOf(n)) ? orgs : clubs).push(n); });
     return orgs.sort().concat(clubs.sort());
+  }
+  /* The directory's own records as NL.clubPicker rows, orgs first. A club's
+     division comes from clubs-meta when it knows the name; an org says so. */
+  var NO_DIVISION = '\u2014 directory records only \u2014';
+  function pickerRows(names, recOf) {
+    return orgFirst(names, recOf).map(function (n) {
+      var rec = recOf(n) || {};
+      var meta = (!isOrg(rec) && window.NL && NL.clubs && NL.clubs.byName) ? NL.clubs.byName(n) : null;
+      return {
+        name: n,
+        crestName: rec.crestName || n,
+        division: isOrg(rec) ? 'Organisation' : ((meta && meta.division) || '')
+      };
+    });
+  }
+  /* opts: names (a function returning the current list — the pages
+     reassign theirs when a record is added), recOf(name), onPick(name),
+     value. Returns { set(name), get(), refresh() }; call refresh() after a
+     record is added so the new one is choosable. */
+  function picker(mount, opts) {
+    var namesOf = function () {
+      return typeof opts.names === 'function' ? opts.names() : (opts.names || []);
+    };
+    var pk = window.NL.clubPicker(mount, {
+      mode: 'select',
+      season: 'current',
+      divisions: [NO_DIVISION],
+      clearable: false,
+      placeholder: 'Choose a club',
+      extraClubs: pickerRows(namesOf(), opts.recOf),
+      onSelect: function (sel) { if (sel && sel.name) { opts.onPick(sel.name); } }
+    });
+    if (opts.value) { pk.setValue(opts.value); }
+    return {
+      set: function (name) { if (name && name !== pk.getValue()) { pk.setValue(name); } },
+      get: function () { return pk.getValue(); },
+      refresh: function () {
+        var was = pk.getValue();
+        return pk.setExtraClubs(pickerRows(namesOf(), opts.recOf)).then(function () {
+          if (was) { pk.setValue(was); }
+        });
+      }
+    };
   }
   /* An organisation's shared mailboxes (commercial@, media@) belong on its
      card: a club's live in the editor and the staff list-builder, but an
@@ -1059,6 +1114,7 @@
     crestKeyOf: crestKeyOf,
     bannerCrestOf: bannerCrestOf,
     orgFirst: orgFirst,
+    picker: picker,
     LIST_LABEL: LIST_LABEL,
     LIST_ORDER: LIST_ORDER,
     ORDER: ORDER,

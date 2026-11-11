@@ -110,3 +110,41 @@ test('a name is set as its owner writes it', () => {
   const fn = js.slice(js.indexOf('function displayName('));
   assert.match(fn.slice(0, 200), /return esc\(fullName\(p\) \|\| 'Name not given'\);/);
 });
+
+/* --------------------------------------------- a live document (11/11/2026)
+   The import is over. The editor used to annotate every club with what the
+   tidier changed, what the League added and whether somebody had signed the
+   club off, and to lock a signed-off club. Richard: "this is now a live doc".
+   The changes are still logged — read in Change log — but not on the page. */
+const STAFF = readFileSync(join(REPO, 'club-directory/admin/index.html'), 'utf8');
+
+test('both staff pages choose a club with the canon picker, not a bare <select>', () => {
+  assert.match(JS, /function picker\(mount, opts\)/);
+  assert.match(JS, /window\.NL\.clubPicker\(mount,/, 'picker() is built on NL.clubPicker');
+  for (const [name, src] of [['staff view', STAFF], ['editor', EDITOR]]) {
+    const live = strip(src);
+    assert.ok(!/<select[^>]*id="pick"/.test(live), `${name} still has a <select> chooser`);
+    assert.match(live, /NLDirectory\.picker\(\$\('pick'\)/, `${name} uses NLDirectory.picker`);
+    assert.ok(!/\$\('pick'\)\.value/.test(live), `${name} still reads the old <select>`);
+  }
+});
+
+test('the editor no longer marks up a club with its import history', () => {
+  const live = strip(EDITOR);
+  /* Quoted as they were in code, so the changelog naming them does not trip
+     this. */
+  for (const gone of ["' \\u2014 COMPLETE'", "'Added by us'", "'Was: '", "'Mark complete'",
+    ">Re-check all<", 'function runRecheck', 'function markProvenance', 'function markEdits', 'function showSignoff',
+    'function diagnose', 'function showMerges']) {
+    assert.ok(!live.includes(gone), `editor still has ${gone}`);
+  }
+  assert.ok(!/signedOffBy\(/.test(live), 'editing is still gated on sign-off');
+});
+
+test('the editor still logs every change, off the page', () => {
+  const live = strip(EDITOR);
+  assert.match(live, /function logJournal\(/);
+  assert.match(live, /function logEdit\(/);
+  assert.match(live, /id="changes"[^>]*>Change log</);
+  assert.match(live, /function persist\(club, what, undoOf\) \{\s*logJournal\(club, what, undoOf\);/);
+});

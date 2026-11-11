@@ -1,8 +1,12 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Club Directory (staff)
-  Version: v1.16 (11/11/2026)
+  Version: v1.17 (11/11/2026)
 
+  v1.17 (11/11/2026) – the club chooser above the directory is canon
+          NL.clubPicker (crest, name, division, type to jump) through
+          NLDirectory.picker (_directory.js v1.16), the same one the editor
+          uses, in place of a bare <select>.
   v1.16 (11/11/2026) – moves from /club-directory/ to /club-directory/admin/
   (Richard): a tool clubs use has the club's page at its root and the staff
   page at /admin/. The club-code page now sits at /club-directory/. Editing
@@ -232,7 +236,7 @@
   <title>Club Directory — NL Tools</title>
 
   <link rel="stylesheet" href="/system/nl-brand.css?v=74">
-  <link rel="stylesheet" href="/club-directory/_directory.css?v=38">
+  <link rel="stylesheet" href="/club-directory/_directory.css?v=39">
 
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
@@ -259,6 +263,11 @@
     var NL_TOOL_KEY = 'ops-club-directory';
 
     window.NL_CHANGELOG = [
+      {
+        date: '11/11/2026',
+        version: 'v1.17',
+        items: ['Choose a club with the standard club picker, crests and all.']
+      },
       {
         date: '11/11/2026',
         version: 'v1.16',
@@ -400,7 +409,7 @@
   <script src="/system/nl-analytics.js?v=1"></script>
   <script src="/system/nl-topbar.js?v=10"></script>
   <script src="/system/auth-guard.js?v=17"></script>
-  <script src="/club-directory/_directory.js?v=38"></script>
+  <script src="/club-directory/_directory.js?v=39"></script>
   <script src="/club-directory/_tidy.js?v=30"></script>
 
 <style>
@@ -408,13 +417,7 @@
     display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
     margin: 0 0 4px;
   }
-  .cd-pickbar select {
-    font-family: var(--font); font-size: var(--text-sm);
-    font-weight: 600; font-variation-settings: 'wght' 600;
-    padding: 8px 11px; border: 1px solid var(--border);
-    border-radius: var(--radius); background: var(--white); color: var(--text);
-    max-width: 280px;
-  }
+  .cd-pick { width: 280px; max-width: 100%; }
 
   .ov-pane[hidden] { display: none; }
 
@@ -660,7 +663,7 @@
     <!-- =========================================================== DIRECTORY -->
     <div class="ov-pane" id="pane-directory">
       <div class="cd-pickbar">
-        <select id="pick" aria-label="Choose a club"></select>
+        <div class="cd-pick" id="pick"></div>
         <a class="btn btn--ghost btn--sm" id="editLink" hidden>Edit</a>
       </div>
       <div class="cd-search"><div class="cd-search__box">
@@ -694,7 +697,7 @@ window.TOOL = (function () {
   var $ = function (id) { return document.getElementById(id); };
   var esc = NL.escHtml;
   var arr = function (v) { return NLDirectory.arr(v); };
-  var ALL = {}, names = [], clubNames = [], AUDIT = {}, ADMIN = false;
+  var ALL = {}, names = [], clubNames = [], AUDIT = {}, ADMIN = false, PICK = null, current = '';
 
   var LIST_ORDER = NLDirectory.LIST_ORDER;
   var LIST_LABEL = NLDirectory.LIST_LABEL;
@@ -791,8 +794,8 @@ window.TOOL = (function () {
     /* Each tab owns the address while it shows: the club being read, the
        mailing-list selection, or #admin — so a reload opens where you were. */
     if (which === 'lists') { writeMailHash(); }
-    else if (which === 'directory' && $('pick').value) {
-      history.replaceState(null, '', '#' + encodeURIComponent($('pick').value));
+    else if (which === 'directory' && current) {
+      history.replaceState(null, '', '#' + encodeURIComponent(current));
     } else if (which === 'admin') {
       history.replaceState(null, '', '#admin');
     }
@@ -965,7 +968,7 @@ window.TOOL = (function () {
       return;
     }
     var go = e.target.closest('[data-goto]');
-    if (go) { showPane('directory'); $('pick').value = go.dataset.goto; draw(go.dataset.goto); }
+    if (go) { showPane('directory'); draw(go.dataset.goto); }
   });
 
   /* One choice: Something missing, or nothing chosen for all clubs. */
@@ -1690,19 +1693,18 @@ window.TOOL = (function () {
 
   /* ------------------------------------------------------------ directory */
   function wireDirectory() {
-    /* Orgs above the clubs; `names` itself stays alphabetical for fromHash. */
-    $('pick').innerHTML = NLDirectory.orgFirst(names, function (n) { return ALL[n]; })
-      .map(function (n) {
-      return '<option value="' + esc(n) + '">' + esc(n) + '</option>';
-    }).join('');
-    $('pick').addEventListener('change', function () { draw(this.value); });
+    /* Orgs above the clubs in the chooser; `names` itself stays alphabetical
+       for fromHash. */
+    PICK = NLDirectory.picker($('pick'), {
+      names: function () { return names; }, recOf: function (n) { return ALL[n]; },
+      onPick: function (n) { $('q').value = ''; draw(n); }
+    });
     $('q').addEventListener('input', onSearch);
     var first = fromHash() || names[0];
-    $('pick').value = first;
     draw(first);
     window.addEventListener('hashchange', function () {
       var n = fromHash();
-      if (n) { showPane('directory'); $('pick').value = n; draw(n); return; }
+      if (n) { showPane('directory'); draw(n); return; }
       if (readMailHash()) { showPane('lists'); drawLists(); }
     });
   }
@@ -1715,6 +1717,8 @@ window.TOOL = (function () {
   function draw(name) {
     var rec = ALL[name];
     if (!rec) { return; }
+    current = name;
+    if (PICK) { PICK.set(name); }
     rec.club = rec.club || name;
     if (location.hash !== '#' + encodeURIComponent(name)) {
       history.replaceState(null, '', '#' + encodeURIComponent(name));
@@ -1738,7 +1742,7 @@ window.TOOL = (function () {
 
   function onSearch(e) {
     var hits = NLDirectory.search(ALL, e.target.value);
-    if (!hits) { draw($('pick').value); return; }
+    if (!hits) { draw(current); return; }
     if (!hits.length) { $('out').innerHTML = '<p class="cd-empty">Nothing matched that.</p>'; return; }
     var byClub = {};
     hits.forEach(function (h) { (byClub[h.club] = byClub[h.club] || []).push(h.person); });
