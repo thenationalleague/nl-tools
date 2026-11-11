@@ -998,10 +998,13 @@ window.NLEditor = (function () {
     var marks = document.createElement('div');
     marks.id = 'edBoxEdits';
     wrap.appendChild(marks);
-    var btn = document.createElement('button');
-    btn.className = 'btn btn--sm btn--ghost';
-    btn.type = 'button';
-    btn.textContent = keys.length ? 'Edit shared mailboxes' : 'Add a shared mailbox';
+    /* "+ Shared mailbox" when there are none, like every other add. */
+    var btn = keys.length ? document.createElement('button') : smallAdd('Shared mailbox');
+    if (keys.length) {
+      btn.className = 'btn btn--sm btn--ghost';
+      btn.type = 'button';
+      btn.textContent = 'Edit shared mailboxes';
+    }
     btn.addEventListener('click', function () { editInboxes(club, rec); });
     head.appendChild(btn);
     $('extra').appendChild(wrap);
@@ -1042,7 +1045,7 @@ window.NLEditor = (function () {
         grid.className = 'form-grid';
 
         var dept = document.createElement('select');
-        dept.className = 'ed-dept';
+        dept.className = 'nl-select ed-dept';
         dept.innerHTML = DEPTS.map(function (sec) {
           return '<option value="' + esc(sec) + '"' +
             (sec === r.dept ? ' selected' : '') + '>' + esc(sec) + '</option>';
@@ -1089,7 +1092,7 @@ window.NLEditor = (function () {
         card.appendChild(grid);
 
         var drop = document.createElement('button');
-        drop.className = 'btn btn--sm btn--ghost ed-del';
+        drop.className = 'btn btn--sm btn--ghost';
         drop.type = 'button';
         drop.textContent = 'Remove this mailbox';
         drop.addEventListener('click', function () { r.gone = true; paint(); });
@@ -1097,10 +1100,7 @@ window.NLEditor = (function () {
         wrap.appendChild(card);
       });
 
-      var add = document.createElement('button');
-      add.className = 'btn btn--sm btn--ghost';
-      add.type = 'button';
-      add.textContent = 'Add a shared mailbox';
+      var add = smallAdd('Shared mailbox');
       add.addEventListener('click', function () {
         rows.push({ key: '', dept: DEPTS[0], email: '', phone: '',
                     ext: '', gone: false });
@@ -1312,7 +1312,7 @@ window.NLEditor = (function () {
       row.className = 'ed-cover';
       row.innerHTML = '<span class="ed-cover__list">' + esc(LIST_LABEL[key] || key) + '</span>';
       var sel = document.createElement('select');
-      sel.className = 'ed-dept';
+      sel.className = 'nl-select ed-dept';
       sel.innerHTML = listOptions(others, key, 'Nobody for now');
       row.appendChild(sel);
       body.appendChild(row);
@@ -1414,7 +1414,7 @@ window.NLEditor = (function () {
         var left = people.filter(function (p) { return on.indexOf(p.id) < 0; });
         if (left.length) {
           var sel = document.createElement('select');
-          sel.className = 'ed-lg__add';
+          sel.className = 'nl-select ed-lg__add';
           sel.innerHTML = listOptions(left, key, 'Add someone\u2026');
           sel.addEventListener('change', function () {
             if (!sel.value) { return; }
@@ -2276,7 +2276,7 @@ window.NLEditor = (function () {
 
   function deptSelect(value, cls, forOrg) {
     var s = document.createElement('select');
-    s.className = cls || 'ed-dept';
+    s.className = 'nl-select ' + (cls || 'ed-dept');
     (forOrg ? NLDirectory.ORG_ORDER : NLDirectory.ORDER).forEach(function (name) {
       var o = document.createElement('option');
       o.value = name; o.textContent = name;
@@ -2364,6 +2364,11 @@ window.NLEditor = (function () {
     hideBox.type = 'checkbox';
     hideBox.className = 'ed-chide__box';
     hideBox.checked = !!hide;
+    /* The detail's own setting, kept apart from what the box shows: while
+       "All their contact details private" is on, every box shows on and
+       cannot be changed, and turning it off puts each back as it was. */
+    row.dataset.own = hide ? '1' : '0';
+    hideBox.addEventListener('change', function () { row.dataset.own = hideBox.checked ? '1' : '0'; });
     hideLab.appendChild(hideBox);
     hideLab.appendChild(NL.icon('lock', 'sm'));
     hideLab.appendChild(document.createTextNode('Private'));
@@ -2371,9 +2376,17 @@ window.NLEditor = (function () {
       (kind === 'email' ? 'address' : 'number') + '.';
     var paint = function () { row.classList.toggle('is-private', hideBox.checked); };
     hideBox.addEventListener('change', paint);
+    row.__all = function (all) {
+      hideBox.checked = all || row.dataset.own === '1';
+      hideBox.disabled = !!all;
+      hideLab.title = all ? 'All their contact details are private.'
+        : 'Only League staff and their own club see this ' +
+          (kind === 'email' ? 'address' : 'number') + '.';
+      paint();
+    };
 
     var del = document.createElement('button');
-    del.className = 'btn btn--icon btn--ghost ed-del';
+    del.className = 'btn btn--icon btn--ghost';
     del.type = 'button';
     del.title = 'Remove this ' + kind;
     del.setAttribute('aria-label', 'Remove this ' + kind);
@@ -2449,6 +2462,10 @@ window.NLEditor = (function () {
     pubLab.appendChild(NL.icon('lock', 'sm'));
     pubLab.appendChild(document.createTextNode('All their contact details private'));
     wrap.appendChild(pubLab);
+    var syncAll = function () {
+      wrap.querySelectorAll('.ed-crow').forEach(function (r) { if (r.__all) { r.__all(pubBox.checked); } });
+    };
+    pubBox.addEventListener('change', syncAll);
 
     /* ---- how to reach them ---- */
     group('Contact', sections.length > 1
@@ -2465,6 +2482,7 @@ window.NLEditor = (function () {
     var addEmail = smallAdd('Email');
     addEmail.addEventListener('click', function () {
       emailBox.appendChild(contactRow('email', '', [], sections));
+      syncAll();
     });
 
     var phoneBox = document.createElement('div');
@@ -2478,6 +2496,7 @@ window.NLEditor = (function () {
     var addPhone = smallAdd('Phone');
     addPhone.addEventListener('click', function () {
       phoneBox.appendChild(contactRow('phone', '', [], sections));
+      syncAll();
     });
     var adds = document.createElement('div');
     adds.className = 'ed-adds';
@@ -2511,7 +2530,7 @@ window.NLEditor = (function () {
       card.appendChild(d);
 
       var drop = document.createElement('button');
-      drop.className = 'btn btn--icon btn--ghost ed-del';
+      drop.className = 'btn btn--icon btn--ghost';
       drop.type = 'button';
       drop.title = 'Remove this role';
       drop.setAttribute('aria-label', 'Remove this role');
@@ -2538,7 +2557,7 @@ window.NLEditor = (function () {
     extra.className = 'ed-morebtns';
     var addRole = smallAdd('Role');
     var removeBtn = document.createElement('button');
-    removeBtn.className = 'btn btn--sm btn--ghost ed-del ed-removeperson';
+    removeBtn.className = 'btn btn--sm btn--ghost ed-removeperson';
     removeBtn.type = 'button';
     removeBtn.textContent = 'Remove this person\u2026';
     extra.appendChild(addRole);
@@ -2547,14 +2566,14 @@ window.NLEditor = (function () {
 
     var read = function (box) {
       return [].slice.call(box.querySelectorAll('.ed-crow')).map(function (r) {
-        var h = r.querySelector('.ed-chide__box');
         return { value: r.querySelector('.ed-cval').value.trim(),
                  sections: r.__scope ? r.__scope() : [],
-                 hide: !!(h && h.checked),
+                 hide: r.dataset.own === '1',
                  ext: r.dataset.ext || '' };
       }).filter(function (x) { return x.value; });
     };
 
+    syncAll();
     var ctrl = NL.modal({
       title: name0 || 'Update details',
       body: wrap,
