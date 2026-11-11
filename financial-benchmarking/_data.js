@@ -1,9 +1,14 @@
 /* =============================================================================
    NL Tools — Financial Benchmarking: data layer
    File: /financial-benchmarking/_data.js
-   Version: v0.3 (10/11/2026)
+   Version: v0.4 (11/11/2026)
 
    CHANGELOG
+     v0.4 (11/11/2026) — Finance's review. National: the return is the SCMP,
+       not the FQR; income to date sits beside the budget and is renamed;
+       income as % of budget is gone; wages are a share of BUDGETED income
+       (wagesOfBudget replaces wagesOfIncome). North and South: panels first,
+       ratios after, all four percentages retitled. Every figure is ranked.
      v0.3 (10/11/2026) — North and South gain the budgeted squad cost ratio
        (playing squad budget as % of income budget), beside the ratio to
        date. Each set says how the club view lays its figures out (`lead`,
@@ -42,7 +47,11 @@
   'use strict';
 
   var QUARTERS = ['q1', 'q2', 'q3', 'q4'];
-  function quarterLabel(q) { return 'FQR' + String(q || '').replace(/\D/g, ''); }
+  /* A return is named for its regime: North and South file the FQR, the
+     National division the SCMP. With no set given it reads as the FQR. */
+  function quarterLabel(q, set) {
+    return (set === 'national' ? 'SCMP' : 'FQR') + String(q || '').replace(/\D/g, '');
+  }
 
   function sum() {
     var t = 0;
@@ -75,28 +84,29 @@
         { key: 'playerWages',  match: /^playerwages/ },
         { key: 'managerWages', match: /^managerwages/ }
       ],
+      /* Order and wording are finance's (11/11/2026): the budget and the
+         income to date lead, side by side; income is not shown as a share of
+         budget; wages are measured against the BUDGETED income, not the
+         income so far, which early in a season would overstate every club. */
       groups: [
         { title: 'Revenue', metrics: [
-          { key: 'incomeBudget', label: 'Income budget', kind: 'money', rank: true },
+          { key: 'incomeBudget', label: 'Income budget', kind: 'money' },
+          { key: 'income',       label: '{Q} income excluding transfers, distributions, parachute payments, and prize money', kind: 'money' },
           { key: 'matchRevenue', label: 'Match revenue', kind: 'money' },
           { key: 'commercial',   label: 'Commercial and sponsorship', kind: 'money' },
           { key: 'nonMatchday',  label: 'Non-matchday', kind: 'money' },
-          { key: 'income',       label: '{Q} income, excluding transfers', kind: 'money' },
-          { key: 'incomePct',    label: '{Q} income as % of budget', kind: 'pct' },
           { key: 'transfers',    label: 'Transfer income / (spend)', kind: 'money' }
         ] },
         { title: 'Costs', metrics: [
           { key: 'playerWages',   label: 'Player wages', kind: 'money' },
           { key: 'managerWages',  label: 'Manager wages', kind: 'money' },
-          { key: 'wagesOfIncome', label: 'Wages as % of {Q} income', kind: 'pct' }
+          { key: 'wagesOfBudget', label: 'Wages as % of budgeted income', kind: 'pct' }
         ] }
       ],
       derive: function (v) {
-        var income = sum(v.matchRevenue, v.commercial, v.nonMatchday);
         return {
-          income: income,
-          incomePct: pct(income, v.incomeBudget),
-          wagesOfIncome: pct(sum(v.playerWages, v.managerWages), income)
+          income: sum(v.matchRevenue, v.commercial, v.nonMatchday),
+          wagesOfBudget: pct(sum(v.playerWages, v.managerWages), v.incomeBudget)
         };
       }
     },
@@ -108,40 +118,35 @@
         { key: 'squadBudget',  match: /^playingsquadbudget/ },
         { key: 'playerSpend',  match: /^fqr\d?playerspend/ }
       ],
-      /* HOW THE CLUB VIEW WEIGHTS THESE (settled 10/11/2026).
-         The figure that says most about a club's finances is what it spends
-         on players for every pound it takes in, so that leads: the ratio it
-         budgeted for the season, beside the ratio so far. A budget is size,
-         and a percentage of budget used is pace; both are context for the
-         ratio, and each budget is shown with its own progress beside it
-         rather than as separate, equally loud figures. */
-      lead: {
-        title: 'Playing squad cost against income',
-        metrics: [
-          { key: 'budgetRatio',   label: 'Budgeted for the season' },
-          { key: 'spendOfIncome', label: '{Q} to date' }
-        ]
-      },
+      /* HOW THE CLUB VIEW LAYS THESE OUT (finance's order, 11/11/2026).
+         Two panels first, Income and Playing squad, each a budget with the
+         share of it received or spent so far. Below them, the two squad
+         cost ratios: what was budgeted, and what the return shows. (An
+         earlier layout led with the ratios; finance asked for them last.) */
       panels: [
         { title: 'Income', budget: 'incomeBudget', actual: 'fqrIncome', pct: 'incomePct',
-          actualLabel: 'received', pctLabel: '{Q} income as % of budget' },
+          actualLabel: 'received', pctLabel: '{Q} income as a % of budgeted income' },
         { title: 'Playing squad', budget: 'squadBudget', actual: 'playerSpend', pct: 'spendPct',
-          actualLabel: 'spent', pctLabel: '{Q} player spend as % of budget' }
+          actualLabel: 'spent', pctLabel: '{Q} player spend as a % of budgeted player spend' }
       ],
+      ratios: {
+        title: 'Squad spend against income',
+        metrics: ['budgetRatio', 'spendOfIncome']
+      },
       groups: [
         { title: 'Income', metrics: [
-          { key: 'incomeBudget', label: 'Income budget', kind: 'money', rank: true },
+          { key: 'incomeBudget', label: 'Income budget', kind: 'money' },
           { key: 'fqrIncome',    label: '{Q} income', kind: 'money' },
-          { key: 'incomePct',    label: '{Q} income as % of budget', kind: 'pct' }
+          { key: 'incomePct',    label: '{Q} income as a % of budgeted income', kind: 'pct' }
         ] },
         { title: 'Playing squad', metrics: [
-          { key: 'squadBudget',   label: 'Playing squad budget', kind: 'money', rank: true },
+          { key: 'squadBudget',   label: 'Playing squad budget', kind: 'money' },
           { key: 'playerSpend',   label: '{Q} player spend', kind: 'money' },
-          { key: 'spendPct',      label: '{Q} player spend as % of budget', kind: 'pct' }
+          { key: 'spendPct',      label: '{Q} player spend as a % of budgeted player spend', kind: 'pct' }
         ] },
-        { title: 'Squad cost against income', metrics: [
-          { key: 'budgetRatio',   label: 'Squad budget as % of income budget', kind: 'pct' },
-          { key: 'spendOfIncome', label: '{Q} player spend as % of income', kind: 'pct' }
+        { title: 'Squad spend against income', metrics: [
+          { key: 'budgetRatio',   label: 'Budgeted squad spend as a % of income', kind: 'pct' },
+          { key: 'spendOfIncome', label: '{Q} squad spend as a % of {Q} income', kind: 'pct' }
         ] }
       ],
       derive: function (v) {
@@ -358,10 +363,10 @@
     return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
   }
 
-  /* Where a budget sits by size: 1st is the largest. Clubs on the same
-     figure share a place. Used for budgets only — a rank on a percentage
-     would read as a table to climb, and the top of "share of budget spent"
-     is not a place to aim for. */
+  /* Where a figure sits by size: 1st is the largest. Clubs on the same
+     figure share a place. Every figure carries it, at finance's request
+     (11/11/2026); it was first held to budgets alone. "By size" is the whole
+     claim — first is biggest, not best. */
   function rankOf(values, own) {
     var a = list(values);
     if (own == null || !a.length) return null;

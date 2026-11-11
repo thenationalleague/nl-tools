@@ -1,9 +1,12 @@
 /* =============================================================================
    NL Tools — Financial Benchmarking: the club's view
    File: /financial-benchmarking/_view.js
-   Version: v0.3 (11/11/2026)
+   Version: v0.4 (11/11/2026)
 
    CHANGELOG
+     v0.4 (11/11/2026) — Finance's review: every figure shows its place by
+       size; North and South run panels first and ratios after, each chart
+       titled in full; National is two charts to a row.
      v0.3 (11/11/2026) — Canon sweep: control titles are canon .filter-label
        and a panel is canon .form-panel; the local copies of both are gone.
      v0.2 (10/11/2026) — North and South are weighted: squad cost against
@@ -20,9 +23,9 @@
    cannot drift apart.
 
    NO VERDICT (settled 10/11/2026). The words say how far a figure is from
-   the median. A BUDGET also carries its place by size, because finance asked
-   for it and "16th largest budget" is a fact about scale; a percentage never
-   does, because the top of "share of budget spent" is not a place to aim for.
+   the median, and every figure carries its place by size ("16th of 24 by
+   size") — finance asked for it on all of them on 11/11/2026. First is
+   largest, not best.
    Nothing is coloured as good or bad: income and wages do not arrive evenly
    through a season, so "behind budget after one quarter" would be wrong for
    any club whose year is front- or back-loaded.
@@ -110,12 +113,11 @@
       '</dl>';
   }
 
-  /* One figure: label, the club's number, where it sits. `m.rank` adds its
-     place by size (budgets only — see FBData.rankOf). */
+  /* One figure: label, the club's number, its place by size, where it sits. */
   function figure(m, label, own, values, who, cls) {
     var vs = D.againstMedian(m.kind, own, D.median(values), who);
     var num = own == null ? '<span class="fb-card__none">No figure</span>' : esc(D.format(m.kind, own));
-    var r = m.rank ? D.rankOf(values, own) : null;
+    var r = D.rankOf(values, own);
     var alt = label + ': ' + (own == null ? 'no figure' : D.format(m.kind, own)) + (vs ? ', ' + vs : '') + '.';
     return '<h3 class="fb-card__label">' + esc(label) + '</h3>' +
       '<div class="fb-card__head">' +
@@ -135,16 +137,18 @@
     var b = byKey[pn.budget], a = byKey[pn.actual], p = byKey[pn.pct];
     var pv = own[p.key], av = own[a.key], values = D.list(bench[p.key]);
     var vs = D.againstMedian('pct', pv, D.median(values), who);
-    var label = pn.pctLabel.replace('{Q}', q);
+    var pr = D.rankOf(values, pv);
+    var label = pn.pctLabel.replace(/\{Q\}/g, q);
     return '<article class="form-panel fb-panel">' +
       '<h3 class="form-panel__head">' + esc(pn.title) + '</h3>' +
       '<div class="fb-panel__body">' +
         '<div class="fb-fig">' + figure(b, b.label, own[b.key], D.list(bench[b.key]), who) + '</div>' +
         '<div class="fb-fig fb-fig--todate">' +
-          '<h3 class="fb-card__label">' + esc(q + ' to date') + '</h3>' +
+          '<h3 class="fb-card__label">' + esc(label) + '</h3>' +
           '<div class="fb-card__head">' +
             '<div class="fb-card__num">' + (pv == null ? '<span class="fb-card__none">No figure</span>' : esc(D.percent(pv))) + '</div>' +
             (av == null ? '' : '<div class="fb-rank"><b>' + esc(D.money(av)) + '</b> ' + esc(pn.actualLabel) + '</div>') +
+            (pr ? '<div class="fb-rank"><b>' + D.ordinal(pr.rank) + '</b> of ' + pr.of + ' by size</div>' : '') +
           '</div>' +
           '<div class="fb-card__vs">' + esc(vs) + '</div>' +
           viz('pct', pv, values, label + ': ' + (pv == null ? 'no figure' : D.percent(pv)) + (vs ? ', ' + vs : '') + '.') +
@@ -157,7 +161,7 @@
     var set = D.setFor(o.div), def = D.SETS[set];
     if (!def) { mount.innerHTML = ''; return; }
 
-    var q = D.quarterLabel(o.quarter);
+    var q = D.quarterLabel(o.quarter, set);
     var own = D.figures(set, o.v);
     var benches = o.benches || {};
     var other = set === 'step2' ? (o.div === 'North' ? 'South' : 'North') : null;
@@ -190,23 +194,24 @@
     D.metricsOf(set).forEach(function (m) { byKey[m.key] = m; });
     var body;
     if (def.panels) {
-      /* The ratio leads, then each budget with its progress. */
-      body = '<section class="fb-group">' +
-          '<div class="section-head"><h2>' + esc(def.lead.title) + '</h2></div>' +
-          '<div class="fb-grid fb-grid--2">' + def.lead.metrics.map(function (l) {
-            var m = byKey[l.key];
-            return card(m, l.label.replace('{Q}', q), own[m.key], D.list(bench[m.key]), who, 'fb-card__num--lead');
-          }).join('') + '</div>' +
-        '</section>' +
-        '<section class="fb-group"><div class="fb-grid fb-grid--2">' + def.panels.map(function (pn) {
+      /* Each budget with its progress, then the squad spend ratios. */
+      body = '<section class="fb-group"><div class="fb-grid fb-grid--2">' + def.panels.map(function (pn) {
           return panel(pn, byKey, own, bench, who, q);
-        }).join('') + '</div></section>';
+        }).join('') + '</div></section>' +
+        '<section class="fb-group">' +
+          '<div class="section-head"><h2>' + esc(def.ratios.title) + '</h2></div>' +
+          '<div class="fb-grid fb-grid--2">' + def.ratios.metrics.map(function (k) {
+            var m = byKey[k];
+            return card(m, m.label.replace(/\{Q\}/g, q), own[m.key], D.list(bench[m.key]), who);
+          }).join('') + '</div>' +
+        '</section>';
     } else {
+      /* Two to a row, as the panels are. */
       body = def.groups.map(function (g) {
         return '<section class="fb-group">' +
           '<div class="section-head"><h2>' + esc(g.title) + '</h2></div>' +
-          '<div class="fb-grid">' + g.metrics.map(function (m) {
-            return card(m, m.label.replace('{Q}', q), own[m.key], D.list(bench[m.key]), who);
+          '<div class="fb-grid fb-grid--2">' + g.metrics.map(function (m) {
+            return card(m, m.label.replace(/\{Q\}/g, q), own[m.key], D.list(bench[m.key]), who);
           }).join('') + '</div>' +
         '</section>';
       }).join('');
