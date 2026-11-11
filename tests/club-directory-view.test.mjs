@@ -169,7 +169,9 @@ test('the staff page edits in place, behind Edit, for Manage only', () => {
   const live = strip(STAFF);
   assert.match(live, /<script src="\/club-directory\/_editor\.js\?v=\d+"><\/script>/);
   assert.match(live, /<link rel="stylesheet" href="\/club-directory\/_editor\.css\?v=\d+">/);
-  assert.match(live, /id="editBtn"[^>]*hidden>Edit</, 'Edit starts hidden');
+  assert.match(live, /class="cd-vw cd-mode" id="editBtn"[^>]*hidden>/, 'View / Edit starts hidden');
+  assert.match(live, /data-mode="view"[^>]*>View</);
+  assert.match(live, /data-mode="edit"[^>]*>Edit</);
   assert.ok(!/id="publish"/.test(live), 'there is no Publish button: every save is live');
   assert.match(live, /function canEdit\(\) \{[\s\S]*?ses\.role === 'superadmin' \|\| ses\.toolLevel === 'admin'/);
   assert.match(live, /NLEditor\.start\(EDIT_HOST\)/);

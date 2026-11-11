@@ -1,7 +1,14 @@
 /* =========================================================================
    NL Tools — Club Directory presentation
    File: /club-directory/_directory.js
-   Version: v1.18 (11/11/2026)
+   Version: v1.19 (11/11/2026)
+
+   v1.19 — a private detail is the detail with a padlock in front of it on
+   a faint tint, not a "PRIVATE" pill after it (Richard: "looks shit"). And
+   every private address and number is marked on its own, phone included:
+   a whole-person private entry used to carry one tag in the email column
+   and leave the phone looking public.
+
 
    v1.18 — "Private" replaces "Not published" everywhere, with a padlock:
    held() on a single address or number, the whole-person tag, and the
@@ -600,13 +607,13 @@
     var tl = channel(p, all.phones, 'hidePhone', showHidden);
 
     var mail = em.show.map(function (e) {
-      return '<a href="mailto:' + esc(e.value) + '">' + esc(e.value) + '</a>' +
-        held(e, showHidden && !unlisted);
+      return held(e, showHidden,
+        '<a href="mailto:' + esc(e.value) + '">' + esc(e.value) + '</a>');
     }).join('<br>');
     var ph = tl.show.map(function (x) {
-      return '<a href="tel:' + esc(tel(x.value)) + '">' + esc(x.value) + '</a>' +
-        (x.ext ? ' <span class="cd-row__ext">ext ' + esc(x.ext) + '</span>' : '') +
-        held(x, showHidden && !unlisted);
+      return held(x, showHidden,
+        '<a href="tel:' + esc(tel(x.value)) + '">' + esc(x.value) + '</a>' +
+        (x.ext ? ' <span class="cd-row__ext">ext ' + esc(x.ext) + '</span>' : ''));
     }).join('<br>');
 
     /* Per channel now: an email cell can read "Not published" while the phone
@@ -628,11 +635,9 @@
        it is set, everything is held back, and tagging each of six lines
        individually says the same thing six times. Where the decision is
        per address, the address itself carries the mark instead. */
-    var tag = (unlisted && showHidden)
-      ? '<span class="cd-row__unlisted" title="Every contact detail of theirs is ' +
-        'private: League staff and their own club see them, nobody else does.">' +
-        strokeGlyph('lock') + 'Private</span>'
-      : '';
+    /* Every private line is marked on its own now (v1.19), so a whole-
+       person private entry needs no tag of its own. */
+    var tag = '';
     /* The row says who it is. The editor used to work this out by counting —
        "the third row under Leadership is the third person in Leadership" —
        which held only while the render order matched the array order. Adding
@@ -689,11 +694,13 @@
     return ' <span class="cd-scope">' + esc(s.join(' \u00b7 ')) + ' only</span>';
   }
 
-  function held(entry, on) {
-    return (on && entry.hide)
-      ? ' <span class="cd-held" title="Private: League staff and their own club see ' +
-        'this. Nobody else does.">' + strokeGlyph('lock') + 'Private</span>'
-      : '';
+  /* A private address or number, in a view that is shown it: the padlock
+     in front, a faint tint behind, and the word for a screen reader. */
+  function held(entry, on, html) {
+    if (!(on && entry.hide)) { return html; }
+    return '<span class="cd-priv" title="Private: League staff and their own club ' +
+      'see this. Nobody else does.">' + strokeGlyph('lock') +
+      '<span class="cd-sr">Private: </span>' + html + '</span>';
   }
   /* Where a detail is kept back and this view is not shown it: the padlock
      and the word, nothing else. */
@@ -743,16 +750,21 @@
     var all = contactsOf(p, '');
     var em = channel(p, all.emails, 'hideEmail', showHidden);
     var tl = channel(p, all.phones, 'hidePhone', showHidden);
-    var mark = showHidden && !unlisted;
+    /* A private line swaps its email/phone glyph for the padlock and takes
+       the tint, the same signal the list view gives. */
+    var priv = function (x) { return showHidden && x.hide; };
     var lines = em.show.map(function (e) {
-      return '<a class="cd-pc__line" href="mailto:' + esc(e.value) + '">' +
-        '<span class="cd-pc__ic">' + glyph('email') + '</span>' + esc(e.value) +
-        scopeNote(e, p) + held(e, mark) + '</a>';
+      return '<a class="cd-pc__line' + (priv(e) ? ' is-private' : '') + '" href="mailto:' +
+        esc(e.value) + '"' + (priv(e) ? ' title="Private"' : '') + '>' +
+        '<span class="cd-pc__ic">' + (priv(e) ? strokeGlyph('lock') : glyph('email')) + '</span>' +
+        esc(e.value) + scopeNote(e, p) + '</a>';
     }).concat(tl.show.map(function (x) {
-      return '<a class="cd-pc__line" href="tel:' + esc(tel(x.value)) + '">' +
-        '<span class="cd-pc__ic">' + glyph('phone') + '</span>' + esc(x.value) +
+      return '<a class="cd-pc__line' + (priv(x) ? ' is-private' : '') + '" href="tel:' +
+        esc(tel(x.value)) + '"' + (priv(x) ? ' title="Private"' : '') + '>' +
+        '<span class="cd-pc__ic">' + (priv(x) ? strokeGlyph('lock') : glyph('phone')) + '</span>' +
+        esc(x.value) +
         (x.ext ? ' <span class="cd-row__ext">ext ' + esc(x.ext) + '</span>' : '') +
-        scopeNote(x, p) + held(x, mark) + '</a>';
+        scopeNote(x, p) + '</a>';
     })).join('');
 
     return '<li class="cd-pc' + (unlisted ? ' cd-pc--unlisted' : '') + '"' +

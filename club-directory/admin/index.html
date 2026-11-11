@@ -1,8 +1,13 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Club Directory (staff)
-  Version: v1.20 (11/11/2026)
+  Version: v1.21 (11/11/2026)
 
+  v1.21 (11/11/2026) – a View / Edit switch (the directory's List / Cards
+          switch) in place of the Edit / Done editing button. Search results show staff the private details too
+          (they were hidden, which made no sense for the people allowed to
+          see them). Private details are a padlock and a tint now, phone
+          numbers included (_directory.* ?v=42).
   v1.20 (11/11/2026) – every save is live (editor v3.0): the Publish button
           goes. No club in the address shows the badge wall clubs land on,
           with an All clubs button to get back to it. Staff see private
@@ -257,7 +262,7 @@
   <title>Club Directory — NL Tools</title>
 
   <link rel="stylesheet" href="/system/nl-brand.css?v=74">
-  <link rel="stylesheet" href="/club-directory/_directory.css?v=41">
+  <link rel="stylesheet" href="/club-directory/_directory.css?v=42">
   <link rel="stylesheet" href="/club-directory/_editor.css?v=5">
 
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -285,6 +290,11 @@
     var NL_TOOL_KEY = 'ops-club-directory';
 
     window.NL_CHANGELOG = [
+      {
+        date: '11/11/2026',
+        version: 'v1.21',
+        items: ['Search shows you private details too, and every private email and phone number is marked with a padlock.']
+      },
       {
         date: '11/11/2026',
         version: 'v1.20',
@@ -453,7 +463,7 @@
   <script src="/system/nl-analytics.js?v=1"></script>
   <script src="/system/nl-topbar.js?v=10"></script>
   <script src="/system/auth-guard.js?v=17"></script>
-  <script src="/club-directory/_directory.js?v=41"></script>
+  <script src="/club-directory/_directory.js?v=42"></script>
   <script src="/club-directory/_tidy.js?v=30"></script>
   <script src="/club-directory/_editor.js?v=6"></script>
 
@@ -463,6 +473,9 @@
     margin: 0 0 4px;
   }
   .cd-pick { width: 280px; max-width: 100%; }
+  #editBtn.is-busy { opacity: 0.6; pointer-events: none; }
+  .cd-pickbar .cd-mode { margin: 0; }
+  .cd-mode button { min-height: 40px; padding: 0 18px; font-size: var(--text-sm); }
   .cd-staffnote {
     display: flex; align-items: center; gap: 8px; margin: 0 0 14px;
     font-size: var(--text-sm); color: var(--navy-600);
@@ -720,7 +733,10 @@
     <div class="ov-pane" id="pane-directory">
       <div class="cd-pickbar">
         <div class="cd-pick" id="pick"></div>
-        <button class="btn btn--ghost btn--sm" id="editBtn" type="button" aria-pressed="false" hidden>Edit</button>
+        <div class="cd-vw cd-mode" id="editBtn" role="group" aria-label="View or edit" hidden>
+          <button type="button" class="is-on" data-mode="view" aria-pressed="true">View</button>
+          <button type="button" data-mode="edit" aria-pressed="false">Edit</button>
+        </div>
         <button class="btn btn--ghost btn--sm" id="changes" type="button" hidden>Change log</button>
         <button class="btn btn--ghost btn--sm" id="allClubs" type="button" hidden>All clubs</button>
       </div>
@@ -1769,7 +1785,13 @@ window.TOOL = (function () {
     });
     $('q').addEventListener('input', onSearch);
     $('editBtn').hidden = !canEdit();
-    $('editBtn').addEventListener('click', function () { setEdit(!EDITING); });
+    /* View / Edit, the directory's own two-way switch, the same one as
+       List / Cards (v1.21): it says which mode you are in, where a lone Edit
+       button only said what pressing it does. */
+    $('editBtn').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-mode]');
+      if (b && (b.dataset.mode === 'edit') !== EDITING) { setEdit(b.dataset.mode === 'edit'); }
+    });
     $('allClubs').addEventListener('click', function () { $('q').value = ''; draw(''); });
     /* No club in the address: the badge wall, the same one clubs land on. */
     var first = fromHash();
@@ -1882,25 +1904,23 @@ window.TOOL = (function () {
     EDIT_HOST.all = ALL;
     EDIT_HOST.session = NL.session || {};
     var btn = $('editBtn');
-    btn.disabled = true;
+    btn.classList.add('is-busy');
     NLEditor.start(EDIT_HOST).then(function () {
-      btn.disabled = false;
+      btn.classList.remove('is-busy');
       EDITING = true;
       paintEdit();
       redraw(target);
     }).catch(function (err) {
-      btn.disabled = false;
+      btn.classList.remove('is-busy');
       NL.toast('Could not start editing: ' + ((err && err.message) || err), 'error');
     });
   }
   function paintEdit() {
-    var btn = $('editBtn');
-    btn.textContent = EDITING ? 'Done editing' : 'Edit';
-    btn.setAttribute('aria-pressed', EDITING ? 'true' : 'false');
-    /* Navy while on: the page is in a different state, and red is
-       Publish's — two red buttons side by side read as two releases. */
-    btn.classList.toggle('btn--navy', EDITING);
-    btn.classList.toggle('btn--ghost', !EDITING);
+    $('editBtn').querySelectorAll('[data-mode]').forEach(function (b) {
+      var on = (b.dataset.mode === 'edit') === EDITING;
+      b.classList.toggle('is-on', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
     $('changes').hidden = !EDITING;
     $('pane-directory').classList.toggle('ed-on', EDITING);
     var url = location.pathname + (EDITING ? '?edit' : '') + location.hash;
@@ -1923,7 +1943,9 @@ window.TOOL = (function () {
     $('out').innerHTML = Object.keys(byClub).sort().map(function (c) {
       return '<div class="cd-dept"><h3 class="cd-dept__h">' + esc(c) + '</h3><ul class="cd-rows">' +
         byClub[c].map(function (p) {
-          return NLDirectory.personRow(p, (NLDirectory.rolesOf(p)[0] || {}).section, {});
+          /* Staff see private details here too, marked, as on the club page. */
+          return NLDirectory.personRow(p, (NLDirectory.rolesOf(p)[0] || {}).section,
+            { showHidden: true });
         }).join('') + '</ul></div>';
     }).join('');
   }
