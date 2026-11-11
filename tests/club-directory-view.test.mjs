@@ -255,14 +255,16 @@ test('the rules: old codes off, private details for staff and that club only', (
   assert.ok(!/token\.dir/.test(all), 'a retired Directory code is honoured again');
   for (const k of ['authRequests', 'authGrants', 'rate']) assert.ok(!(k in RULES), k + ' is back');
   assert.match(RULES.published['.read'], /auth\.token\.club != null/);
-  for (const k of ['clubs', 'provenance', 'editions', 'undo']) {
+  for (const k of ['clubs', 'provenance', 'undo']) {
     assert.ok(!/token\.dir|token\.club/.test(RULES[k]['.read']), k + ' is readable by a code');
   }
   const priv = RULES.private.$club['.read'];
   assert.match(priv, /data\.child\('code'\)\.val\(\) === auth\.token\.club/);
   assert.match(priv, /auth\.token\.club !== 'NL'/, 'the shared NL code is not a club');
   assert.ok(!/token\.dir/.test(priv), 'the reader code never reads private details');
-  assert.equal(RULES.editions.$edition['.write'], false, 'no more frozen copies');
+  /* The frozen copies and the one-off build record were cleared 11/11/2026;
+     the database backups do their job. */
+  for (const k of ['editions', 'bake']) assert.ok(!(k in RULES), k + ' is back');
   assert.ok(!/val\(\) === 'club-admin'/.test(RULES.clubs.$clubName['.write']),
     'a club login does not write its own record directly');
 });
