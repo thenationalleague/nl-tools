@@ -53,6 +53,7 @@ it, extend the canon (in lockstep — see the `?v=` rules), don't fork a local c
 
 Concretely, do NOT hand-roll — the canon already has these:
 - Club selection → `NL.clubPicker`; club data/crests → `NL.clubs.*`
+- "This is the club you are looking at" (a drill-down, a club's own page) → `NL.clubs.headerHtml` / `.nl-club-header`
 - Dialogs → `NL.modal` / `NL.confirm` / `NL.prompt` / `NL.alert` (never native `confirm`/`alert`/`prompt`)
 - Notifications → `NL.toast`; clipboard → `NL.copy`; downloads → `NL.download`; CSV → `NL.csv`
 - Dates → `NL.parseDate` / `formatDate` / `formatDateShort` / `formatDateTime` / `timeAgo`

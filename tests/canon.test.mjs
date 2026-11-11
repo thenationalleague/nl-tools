@@ -702,3 +702,80 @@ test('NL.filterButton.summarise: nothing, one, two, many', () => {
   assert.equal(s(['gone'], opts), 'All', 'a value no option lists is ignored, never a blank');
   assert.equal(s([3], [{ value: 3 }]), '3', 'values compare as strings; a missing label falls back to the value');
 });
+
+
+/* ── NL.clubs.headerHtml: the club header (nl-utils v1.48) ───────────────────
+   The string for canon .nl-club-header. It writes a club's name into a page,
+   so the escaping is the part that has to be right; the rest is that the
+   card is whole whatever it is handed. */
+test('clubs.headerHtml draws the card: crest, name, trim', async () => {
+  await NL.clubs.load();
+  const html = NL.clubs.headerHtml('AFC Fylde');
+  assert.ok(html.startsWith('<div class="nl-club-header">'), 'the root is the component');
+  assert.ok(html.includes('<h1 class="nl-club-header__name">AFC Fylde</h1>'), 'the name is an h1 by default');
+  assert.ok(html.includes('class="nl-crest nl-club-header__crest"'), 'the crest is canon .nl-crest');
+  assert.ok(html.includes('data-crest="AFC Fylde"'), 'and carries data-crest for the fallback sweep');
+  assert.ok(html.includes('src="/assets/crests/medium/AFC%20Fylde.png"'), 'medium tier: 60px on a dense screen outruns a thumb');
+  assert.ok(!html.includes('loading="lazy"'), 'eager: the crest is the subject of the page');
+  assert.ok(html.includes('<span class="nl-club-bands nl-club-bands--lg">'), 'the heavier trim is appended');
+  const fylde = NL.clubs.byName('AFC Fylde');
+  assert.ok(html.includes('<i style="background:' + fylde.colors.primary + '"></i>'), 'in the club\'s own primary');
+  assert.ok(!html.includes('nl-club-header__sub'), 'no sub unless asked');
+  assert.ok(!html.includes('nl-club-header__meta'), 'no meta slot unless asked');
+  assert.ok(!html.includes('nl-club-header__actions'), 'no actions unless asked');
+});
+
+test('clubs.headerHtml takes a clubs-meta record as readily as a name', async () => {
+  await NL.clubs.load();
+  const rec = NL.clubs.byName('Rochdale');
+  assert.equal(NL.clubs.headerHtml(rec), NL.clubs.headerHtml('Rochdale'));
+});
+
+test('clubs.headerHtml escapes a hostile name and sub everywhere they appear', () => {
+  const evil = '<img src=x onerror=alert(1)>"FC';
+  const html = NL.clubs.headerHtml(evil, { sub: '<script>alert(2)</script> & "co"', id: 'a"b' });
+  assert.ok(!html.includes('<img src=x'), 'the name never opens a tag');
+  assert.ok(!html.includes('<script>'), 'nor does the sub');
+  assert.ok(html.includes('>&lt;img src=x onerror=alert(1)&gt;&quot;FC</h1>'), 'the name is text');
+  assert.ok(html.includes('data-crest="&lt;img src=x onerror=alert(1)&gt;&quot;FC"'), 'and inert in the crest attribute');
+  assert.ok(html.includes('<p class="nl-club-header__sub">&lt;script&gt;alert(2)&lt;/script&gt; &amp; &quot;co&quot;</p>'));
+  assert.ok(html.includes(' id="a&quot;b"'), 'the id cannot close its attribute');
+  /* Exactly the tags the helper writes, and none the data smuggled in. */
+  assert.equal((html.match(/<img /g) || []).length, 1, 'one image: the crest');
+});
+
+test('clubs.headerHtml: the heading is h1, h2 or div, and nothing else', () => {
+  assert.ok(NL.clubs.headerHtml('Barrow', { heading: 'h2' }).includes('<h2 class="nl-club-header__name">Barrow</h2>'));
+  assert.ok(NL.clubs.headerHtml('Barrow', { heading: 'div' }).includes('<div class="nl-club-header__name">Barrow</div>'));
+  /* The option goes straight into a tag name, so it is a closed set. */
+  const odd = NL.clubs.headerHtml('Barrow', { heading: 'h1 onclick=alert(1)' });
+  assert.ok(odd.includes('<h1 class="nl-club-header__name">Barrow</h1>'), 'an unknown heading reads as h1');
+  assert.ok(!odd.includes('onclick'));
+});
+
+test('clubs.headerHtml: sub is text, the meta slot and actions are the caller\'s markup', () => {
+  const html = NL.clubs.headerHtml('Barrow', {
+    sub: 'National League · Q1',
+    metaHtml: '<span class="pill pill--approved">All submitted</span>',
+    actionsHtml: '<button class="btn btn--ghost btn--sm" id="back">All clubs</button>'
+  });
+  assert.ok(html.includes('<p class="nl-club-header__sub">National League · Q1</p>'));
+  assert.ok(html.includes('<div class="nl-club-header__meta"><span class="pill pill--approved">All submitted</span></div>'));
+  assert.ok(html.includes('<div class="nl-club-header__actions"><button class="btn btn--ghost btn--sm" id="back">All clubs</button></div>'));
+  /* Order is the layout: identity, then actions, then the trim last. */
+  assert.ok(html.indexOf('nl-club-header__id') < html.indexOf('nl-club-header__actions'));
+  assert.ok(html.indexOf('nl-club-header__actions') < html.indexOf('nl-club-bands'));
+});
+
+test('clubs.headerHtml still draws a club that is not in clubs-meta', async () => {
+  await NL.clubs.load();
+  const html = NL.clubs.headerHtml('Nowhere Rovers');
+  assert.ok(html.includes('>Nowhere Rovers</h1>'));
+  assert.ok(html.includes('data-crest="Nowhere Rovers"'), 'the crest still carries data-crest for the fallback sweep');
+  assert.ok(html.includes('<i style="background:var(--navy)"></i><i style="background:var(--primary)"></i>'),
+    'the trim falls back to brand tokens');
+  /* And before clubs-meta has loaded at all, or with nothing to name. */
+  const cold = freshCanon();
+  assert.ok(cold.clubs.headerHtml('AFC Fylde').includes('>AFC Fylde</h1>'), 'no load → still a card');
+  assert.ok(cold.clubs.headerHtml(null).includes('<h1 class="nl-club-header__name"></h1>'), 'null → an empty card, not a throw');
+});
