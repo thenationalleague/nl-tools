@@ -1,7 +1,10 @@
 /* =========================================================================
    NL Tools — Club Directory presentation
    File: /club-directory/_directory.js
-   Version: v1.16 (11/11/2026)
+   Version: v1.17 (11/11/2026)
+
+   v1.17 — an org's shared-mailbox extension uses .cd-row__ext like every
+   other extension, which _directory.css v1.10 sets small and unbroken.
 
    v1.16 — picker(): the club chooser for the staff view and the editor,
    built on canon NL.clubPicker (select mode: crest, name, division, type to
@@ -549,7 +552,7 @@
       }
       if (b.phone) {
         bits.push('<a href="tel:' + esc(tel(b.phone)) + '">' + esc(b.phone) + '</a>' +
-          (b.ext ? ' <span class="cd-f__sub">ext ' + esc(b.ext) + '</span>' : ''));
+          (b.ext ? ' <span class="cd-row__ext">ext ' + esc(b.ext) + '</span>' : ''));
       }
       return [b.dept || k, bits.join(' &middot; ')];
     }).sort(function (a, b) { return a[0].localeCompare(b[0]); });
