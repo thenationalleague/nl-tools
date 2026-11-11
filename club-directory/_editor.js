@@ -1,7 +1,34 @@
 /* =========================================================================
    NL Tools — Club Directory editor
    File: /club-directory/_editor.js
-   Version: v2.4 (11/11/2026)
+   Version: v3.0 (11/11/2026)
+
+   v3.0 – (11/11/2026) Every save is live, and private details have their
+          own place (Richard). There is no Publish button.
+          · saveClub(): one multi-path update writes the working record,
+            the club's published copy (private details taken out) and its
+            private half (private/<club>, only the details kept back, with
+            the club's code so the rules can let that club in). The three
+            land together or not at all.
+          · goLive(): the first time the editor opens after this ships,
+            every club is written that way once, published/live is stamped,
+            and Publish's own label/count/edition fields are cleared.
+          · No more frozen copies in editions/ (the old ones stay,
+            read-only): nightly backups and the monthly copy are the history.
+          · A private detail still showing through a duplicate entry is
+            reported after the save that caused it.
+          · The padlock: "Private" on each address and number, and "All
+            their contact details private" for the whole person, replace the
+            "Not published" ticks. Update details is reworked: name, the
+            padlock, one Contact list with "+ Email" "+ Phone", one line per
+            role, Remove this person at the foot.
+          · Every rename asks "Same person, or someone new?" (before, only
+            people with more than one role were asked). Someone new gets the
+            job and none of the old person's details; if it was their only
+            job, the old person comes out.
+          · Change log opens on everyone's changes with Club and Who filter
+            buttons, Club starting on the club you are looking at. The
+            download drops its "Live?" column: everything saved is live.
 
    v2.4 – (11/11/2026) Publish says what it will change before you confirm:
           the live published copy is read and compared with the one this
@@ -750,7 +777,6 @@ window.NLEditor = (function () {
       else if (current) { draw(current); }
     });
   }
-  var PUBLISHED_AT = 0;
 
   /* Nothing in a browser tells you a click handler died. Today an exception
      inside the club-details save took everything after it with it — the
@@ -805,15 +831,16 @@ window.NLEditor = (function () {
     watchFaults();
     STARTED = Promise.all([
       firebase.database().ref(ROOT + '/provenance').once('value'),
-      /* Only the stamp, not the payload — the editor never needs the
-         published copy, it needs to know when it was last made. */
-      firebase.database().ref(ROOT + '/published/at').once('value')
+      firebase.database().ref(ROOT + '/published/live').once('value')
     ]).then(function (res) {
       PROV = res[0].val() || {};
-      PUBLISHED_AT = res[1].val() || 0;
       $('changes').addEventListener('click', showChanges);
-      $('publish').addEventListener('click', publishNow);
       wireView();
+      /* The switch to live saving happens once, the first time anybody
+         opens the editor after it ships: every club's page and private
+         details written from the directory as it stands, so nothing saved
+         under the old Publish is left behind. */
+      if (!res[1].val()) { return goLive(); }
     }).catch(function (err) {
       STARTED = null;
       throw err;
@@ -1316,36 +1343,21 @@ window.NLEditor = (function () {
     });
   }
 
-  /* -------------------------------------------------------------- editions
-     Each Publish also writes the whole directory, frozen, to editions/ -
-     write-once in the rules, so nobody can alter or delete one. Until v2.1
-     a Versions button listed them and put a club back from one; it went
-     because Change log already puts changes back one at a time, and two
-     ways to undo is one too many. The copies are still made, so "how did
-     Chester look when we published in November" stays answerable, by
-     reading the node, if it is ever asked. */
+  /* ------------------------------------------------------------ going live
+     Every save is live (v3.0, Richard, 11/11/2026). There is no Publish:
+     the moment a club is saved, three things are written together, in one
+     update, so they can never disagree:
 
-  /* --------------------------------------------------------------- publish
-     The reader used to read the directory itself and decide, in the browser,
-     what not to show: unsigned clubs greyed out, a not-for-publication
-     person's address replaced with "Not published". Both decisions were
-     correct and both were made far too late — the record had already been
-     sent. Behind a six-digit code that was survivable. It is not a thing to
-     carry into a public page, and a public page is where this is going.
+       · clubs/<club>            the full working record (League staff only)
+       · published/clubs/<club>  what readers see: the record with every
+                                 detail kept back taken OUT, not hidden — a
+                                 page cannot leak what it was never sent
+       · private/<club>          only the details kept back, readable by
+                                 League staff and by that club's own code
 
-     So publishing builds a SECOND copy that is already safe to hand over.
-     Every club, and for anyone the club asked us to keep back the
-     contact details are absent rather than flagged: the person is still
-     listed, because a directory that silently omits the safeguarding officer
-     reads as a club without one, but there is nothing in the file to hide.
-
-     The point is that no rule has to be clever about this node, and no page
-     built against it later can leak something by asking for too much. There
-     is nothing in it that is not meant to be read.
-
-     It is a button and not a trigger on sign-off because publishing is when
-     the League stands behind the whole thing at once, and somebody should
-     have chosen the moment. Who and when are recorded with it. */
+     Undo is Change log; history is the nightly backup (30 days) and the
+     monthly copy (12 months). The frozen copies Publish used to write in
+     editions/ stop; the ones already there stay, read-only. */
   var PUB_PERSON = ['id', 'title', 'firstName', 'lastName', 'postNominals',
                     'name', 'roles', 'hideContact'];
 
@@ -1382,47 +1394,93 @@ window.NLEditor = (function () {
     return out;
   }
 
-  /* Every club, as it stands. (The first cut published only clubs marked
-     complete; that was the import's checklist, and it went in v2.1.)
-     What does NOT relax is the contact suppression: somebody the club asked
-     us to hold back is held back whether their club has been checked or not,
-     because that is their decision and not a state of our work. */
-  function buildPublished() {
-    var clubs = {}, orgs = {}, pending = [], leaks = [], people = 0, held = 0;
-    Object.keys(ALL).sort().forEach(function (name) {
-      var rec = ALL[name] || {};
-      var list = NLDirectory.arr(rec.people);
-      /* People with ANYTHING kept back, not people with everything kept
-         back — the count is there to say how much of the directory is not
-         in the published copy, and a withheld mobile counts. */
-      list.forEach(function (p) {
-        people++;
-        var c = NLDirectory.contactsOf(p, '');
-        if (c.emails.concat(c.phones).some(function (x) { return x.hide; })) { held++; }
-      });
-      var out = list.map(publishablePerson);
-      clubs[name] = { club: name, info: clone(rec.info || {}), people: out };
-      /* The root markers survive publication: the reader pins organisations
-         above the clubs and picks their crest by these. Org inboxes go too —
-         renderClub puts them on an org's card, where a club's stay private
-         to the editor and the staff list-builder. */
-      if (rec.org) {
-        clubs[name].org = true;
-        if (rec.inboxes) { clubs[name].inboxes = clone(rec.inboxes); }
-        if (rec.colors) { clubs[name].colors = clone(rec.colors); }
-        if (rec.bannerCrestName) { clubs[name].bannerCrestName = rec.bannerCrestName; }
-        if (rec.order) { clubs[name].order = clone(rec.order); }
-        /* The wall's public leaf: names and crest keys only, no contacts.
-           The doorless page cannot list published/clubs, so this is how it
-           knows an org tile exists to draw. Always a truthy crest key —
-           RTDB drops nulls, and a dropped value would drop the org. */
-        orgs[name] = { crestName: rec.crestName || name };
-      }
-      if (rec.crestName) { clubs[name].crestName = rec.crestName; }
-      leaks = leaks.concat(escaped(name, list, out));
+  /* What publishablePerson took out, and nothing else: the private
+     half of one person. hideContact means every address and number. */
+  function privateOf(p) {
+    var em = NLDirectory.arr(p.emails).filter(function (e) {
+      return NLDirectory.addrOf(e).trim() && (p.hideContact || NLDirectory.ownHide(e));
     });
-    return { clubs: clubs, orgs: orgs, pending: pending, leaks: leaks,
-             count: Object.keys(clubs).length, people: people, held: held };
+    var ph = NLDirectory.arr(p.phones).filter(function (x) {
+      return x && (x.number || '').trim() && (p.hideContact || NLDirectory.ownHide(x));
+    });
+    if (!em.length && !ph.length) { return null; }
+    var out = {};
+    if (em.length) { out.emails = clone(em); }
+    if (ph.length) { out.phones = clone(ph); }
+    return out;
+  }
+
+  /* One club, split into its public and private halves. The code is the
+     key a club's own code carries (clubs-meta), which the rules match to
+     let that club, and only that club, read its private half. */
+  function liveOf(name) {
+    var rec = ALL[name] || {};
+    var list = NLDirectory.arr(rec.people);
+    var out = list.map(publishablePerson);
+    var pub = { club: name, info: clone(rec.info || {}), people: out };
+    var org = null;
+    /* The root markers survive: readers pin organisations above the clubs
+       and pick their crest by these, and an org's shared mailboxes are on
+       its card. A club's mailboxes stay staff-only. */
+    if (rec.org) {
+      pub.org = true;
+      if (rec.inboxes) { pub.inboxes = clone(rec.inboxes); }
+      if (rec.colors) { pub.colors = clone(rec.colors); }
+      if (rec.bannerCrestName) { pub.bannerCrestName = rec.bannerCrestName; }
+      if (rec.order) { pub.order = clone(rec.order); }
+      /* The wall's public leaf: name and crest key only. Always truthy —
+         RTDB drops a null, and a dropped value would drop the org. */
+      org = { crestName: rec.crestName || name };
+    }
+    if (rec.crestName) { pub.crestName = rec.crestName; }
+    var meta = (!rec.org && NL.clubs && NL.clubs.byName) ? NL.clubs.byName(name) : null;
+    var priv = { people: {} };
+    if (meta && meta.code) { priv.code = String(meta.code).toUpperCase(); }
+    list.forEach(function (p, i) {
+      var held = privateOf(p);
+      if (held) { priv.people[p.id || ('i' + i)] = held; }
+    });
+    return { pub: pub, org: org, priv: priv, leaks: escaped(name, list, out) };
+  }
+
+  function liveUpdates(name, at, into) {
+    var u = into || {};
+    var l = liveOf(name);
+    u['clubs/' + name] = ALL[name];
+    u['published/clubs/' + name] = l.pub;
+    u['published/orgs/' + name] = l.org;
+    u['private/' + name] = l.priv;
+    u['published/at'] = at;
+    u['published/by'] = session.name || 'editor';
+    return { updates: u, leaks: l.leaks };
+  }
+
+  /* The one save. Every route that changes a club ends here. */
+  function saveClub(name) {
+    var lu = liveUpdates(name, Date.now());
+    return firebase.database().ref(ROOT).update(lu.updates).then(function () {
+      warnLeaks(lu.leaks);
+    });
+  }
+
+  /* The switch-over, run once. Writes every club's public and private
+     halves from the directory as it stands, clears what only Publish used
+     (its label, counts and edition pointer), and marks the directory live. */
+  function goLive() {
+    var at = Date.now(), u = {}, leaks = [];
+    Object.keys(ALL).forEach(function (n) { leaks = leaks.concat(liveUpdates(n, at, u).leaks); });
+    u['published/live'] = at;
+    u['published/label'] = null;
+    u['published/edition'] = null;
+    u['published/count'] = null;
+    u['published/people'] = null;
+    u['published/pending'] = null;
+    return firebase.database().ref(ROOT).update(u).then(function () {
+      NL.writeAudit('directory_live', 'Saves now go live: every club written from the directory (' +
+        Object.keys(ALL).length + ' records) by ' + (session.name || 'editor'));
+      NL.toast('Editing is live now: each save updates that club\u2019s page straight away.', 'success');
+      warnLeaks(leaks);
+    });
   }
 
   /* The one way a withheld detail can still go out, and it is not a fault in
@@ -1465,253 +1523,17 @@ window.NLEditor = (function () {
     return out;
   }
 
-  /* Publishing and versioning are one act, because they were always one
-     fact: "this is what the League is standing behind, as of now". Two
-     buttons meant you could publish without a record of what you published,
-     or freeze something nobody would ever see — and it meant remembering to
-     do the second one, which is the kind of discipline that holds for about a
-     fortnight.
-
-     One press writes two things. The PUBLISHED copy is the stripped, handed-
-     over version readers get. The EDITION is the full working state — people,
-     club details, provenance — frozen and immutable, so any club can be put
-     back to how it stood at any publication. The Versions list is therefore
-     the publication history, and restoring means "back to how this club was
-     when we published that".
-
-     Master only, and not by preference: the rules make an edition writable by
-     a master alone, deliberately, because an editor must not be able to touch
-     the thing that exists to survive an editor. Publishing now writes one, so
-     publishing inherits that. It is also the right answer on its own terms —
-     the reader is 72 clubs, and releasing to them is a decision rather than a
-     step. */
-  function publishNow() {
-    var built = buildPublished();
-    if (!built.count) {
-      NL.alert('There are no clubs in the directory to publish.',
-        { title: 'Nothing to publish' });
-      return;
-    }
-    /* Asked, not silently allowed. Two genuinely different people of the same
-       name at one club sharing a number is possible, so this is not a wall —
-       but it defaults to not publishing, because the thing on the other side
-       of the button cannot be taken back. */
-    if (built.leaks.length) {
-      var lines = built.leaks.slice(0, 12).map(function (x) {
-        return '  \u2022 ' + x.value + ' \u2014 still published on the other ' +
-          x.on + ' record at ' + x.club;
-      }).join('\n');
-      NL.confirm(built.leaks.length + ' detail' + (built.leaks.length === 1 ? '' : 's') +
-        ' marked not-for-publication would still go out, because the same ' +
-        'person is in the directory twice and the second record still carries ' +
-        'it:\n\n' + lines +
-        (built.leaks.length > 12 ? '\n  \u2026and ' + (built.leaks.length - 12) + ' more' : '') +
-        '\n\nThe fix is a minute: open the other record and tick it there too, ' +
-        'or merge the duplicate. Publishing now sends it out anyway.',
-        { title: 'A withheld detail would still be published', variant: 'danger',
-          confirmText: 'Publish anyway', cancelText: 'Let me fix it' }
-      ).then(function (ok) { if (ok) { publishConfirmed(built); } });
-      return;
-    }
-    publishConfirmed(built);
-  }
-
-  /* What Publish would change, worked out against what readers have now
-     (v2.4, Richard: "publish atm doesn't say what'll change"). The live
-     published copy is read and compared, club by club and person by person,
-     with the copy this press would write — so the list is the actual
-     difference readers will see, not a reconstruction from the journal. A
-     detail kept back is invisible here exactly as it is to readers: it is
-     not in either copy. */
-  function canon(v) {
-    if (Array.isArray(v)) {
-      var a = v.map(canon).filter(function (x) { return x !== undefined; });
-      return a.length ? a : undefined;
-    }
-    if (v && typeof v === 'object') {
-      var o = {}, any = false;
-      Object.keys(v).sort().forEach(function (k) {
-        var c = canon(v[k]);
-        if (c !== undefined) { o[k] = c; any = true; }
-      });
-      return any ? o : undefined;
-    }
-    if (v === null || v === undefined || v === '' || v === false) { return undefined; }
-    return v;
-  }
-  function sameish(a, b) { return JSON.stringify(canon(a)) === JSON.stringify(canon(b)); }
-
-  function personLines(a, b) {
-    var lines = [];
-    var byId = function (list) {
-      var m = {};
-      NLDirectory.arr(list).forEach(function (p, i) { m[(p && p.id) || ('#' + i)] = p; });
-      return m;
-    };
-    var was = byId(a), now = byId(b);
-    var who = function (p) { return NLDirectory.fullName(p) || 'Someone without a name'; };
-    var jobs = function (p) {
-      return NLDirectory.arr(p.roles).map(function (r) { return (r.title || '').trim(); })
-        .filter(Boolean).join(', ');
-    };
-    Object.keys(now).forEach(function (id) {
-      var n = now[id];
-      if (!was[id]) {
-        lines.push('Added: ' + who(n) + (jobs(n) ? ' (' + jobs(n) + ')' : ''));
-        return;
-      }
-      var w = was[id], what = [];
-      /* Was \u2192 now, in words. Everything here is already in the published
-         copy, so nothing kept back can surface in this list. */
-      var span = function (label, a, b) {
-        what.push(label + ' ' + (a || '(none)') + ' \u2192 ' + (b || '(none)'));
-      };
-      var mails = function (p) {
-        return NLDirectory.arr(p.emails).map(NLDirectory.addrOf).filter(Boolean).join(', ');
-      };
-      var nums = function (p) {
-        return NLDirectory.arr(p.phones).map(function (x) {
-          return x ? (x.number || '') + (x.ext ? ' ext ' + x.ext : '') : '';
-        }).filter(Boolean).join(', ');
-      };
-      if (who(w) !== who(n)) { span('name', who(w), who(n)); }
-      if (!sameish(w.roles, n.roles)) {
-        if (jobs(w) !== jobs(n)) { span('job', jobs(w), jobs(n)); }
-        else { what.push('department changed'); }
-      }
-      /* Same addresses but different entries means a setting on one of them
-         (which roles it shows under) — said as such, not as "a → a". */
-      var chan = function (label, list, hideKey, show) {
-        var a = w[hideKey] ? 'kept back' : show(w), b = n[hideKey] ? 'kept back' : show(n);
-        if (a !== b) { span(label, a, b); }
-        else if (!sameish(w[list], n[list])) { what.push('where their ' + label + ' shows changed'); }
-      };
-      chan('email', 'emails', 'hideEmail', mails);
-      chan('phone', 'phones', 'hidePhone', nums);
-      if (!!w.hideContact !== !!n.hideContact) {
-        what.push(n.hideContact ? 'all contact details now kept back' : 'contact details now shown');
-      }
-      if (what.length) { lines.push(who(n) + ' \u2013 ' + what.join('; ')); }
-      else if (!sameish(w, n)) { lines.push(who(n) + ' \u2013 changed'); }
-    });
-    Object.keys(was).forEach(function (id) {
-      if (!now[id]) { lines.push('Removed: ' + who(was[id])); }
-    });
-    return lines;
-  }
-
-  function publishDiff(built, live) {
-    var out = [];
-    var names = {};
-    Object.keys(live || {}).forEach(function (n) { names[n] = 1; });
-    Object.keys(built.clubs).forEach(function (n) { names[n] = 1; });
-    Object.keys(names).sort().forEach(function (n) {
-      var a = (live || {})[n], b = built.clubs[n];
-      if (!a) { out.push({ club: n, lines: ['New to the directory'] }); return; }
-      if (!b) { out.push({ club: n, lines: ['Taken out of the directory'] }); return; }
-      if (sameish(a, b)) { return; }
-      var lines = personLines(a.people, b.people);
-      var info = [];
-      var ai = a.info || {}, bi = b.info || {};
-      Object.keys(Object.assign({}, ai, bi)).sort().forEach(function (k) {
-        if (!sameish(ai[k], bi[k])) { info.push(infoName(k)); }
-      });
-      if (info.length) { lines.push('Club details: ' + info.join(', ')); }
-      if (!sameish(a.inboxes, b.inboxes)) { lines.push('Shared mailboxes changed'); }
-      if (!lines.length) { lines.push('Changed'); }
-      out.push({ club: n, lines: lines });
-    });
-    return out;
-  }
-  function infoName(k) {
-    var label = '';
-    (INFO_FIELDS || []).forEach(function (g) {
-      (g[1] || []).forEach(function (f) { if (f[0] === k) { label = f[1]; } });
-    });
-    return String(label || k).toLowerCase();
-  }
-
-  function publishConfirmed(built) {
-    var prev = PUBLISHED_AT;
-    var when = NL.formatDate(Date.now());
-    var btn = $('publish');
-    btn.disabled = true;
-    firebase.database().ref(ROOT + '/published/clubs').once('value').then(function (snap) {
-      btn.disabled = false;
-      var diff = publishDiff(built, snap.val() || {});
-      var body = document.createElement('div');
-      body.className = 'ed-pubdiff';
-      var head = (prev ? 'Last published ' + NL.formatDateTime(prev) + '. ' : 'Nothing has been published before. ') +
-        (diff.length
-          ? 'Publishing now changes ' + diff.length + ' club' + (diff.length === 1 ? '' : 's') + ':'
-          : 'Nothing has changed since then \u2013 readers already see all of this.');
-      body.innerHTML = '<p class="form-hint">' + esc(head) + '</p>' +
-        (diff.length ? '<ul class="ed-pubdiff__list">' + diff.map(function (d) {
-          return '<li><img class="ed-pubdiff__crest" alt="" data-crest="' + esc(d.club) + '">' +
-            '<div><b>' + esc(d.club) + '</b><ul>' + d.lines.map(function (l) {
-              return '<li>' + esc(l) + '</li>';
-            }).join('') + '</ul></div></li>';
-        }).join('') + '</ul>' : '') +
-        '<p class="form-hint">' + esc(built.held + ' of ' + built.people + ' people asked us to ' +
-          'keep some or all of their contact details back. Those details are never published.') + '</p>';
-      body.querySelectorAll('img[data-crest]').forEach(function (img) {
-        var n = img.dataset.crest;
-        NL.clubs.wireCrestImg(img, (ALL[n] && NLDirectory.crestKeyOf(ALL[n])) || n, true);
-        img.src = NL.clubs.crestUrl((ALL[n] && NLDirectory.crestKeyOf(ALL[n])) || n, 'thumb');
-      });
-      return new Promise(function (resolve) {
-        var settled = false;
-        var done = function (v) { if (!settled) { settled = true; resolve(v); } };
-        NL.modal({
-          title: 'Publish',
-          body: body,
-          onClose: function () { done(false); },
-          buttons: [
-            { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
-            { label: diff.length ? 'Publish' : 'Publish anyway', className: 'btn--primary',
-              onClick: function (c) { done(true); c.close(); } }
-          ]
-        });
-      });
-    }, function (err) {
-      btn.disabled = false;
-      NL.toast('Could not read what readers see now: ' + ((err && err.message) || err), 'error');
-      return false;
-    }).then(function (ok) {
-      if (!ok) { return; }
-      var label = 'Published ' + when;
-      btn.disabled = true; btn.textContent = 'Publishing\u2026';
-      var db = firebase.database();
-      var at = Date.now();
-      var by = session.name || 'editor';
-      var name = String(label || '').trim() || ('Published ' + when);
-
-      var edRef = db.ref(ROOT + '/editions').push();
-      var edition = { at: at, by: by, label: name, published: true,
-        clubs: clone(ALL) || {}, provenance: clone(PROV) || {} };
-      var payload = { at: at, by: by, label: name, edition: edRef.key,
-        count: built.count, people: built.people,
-        clubs: built.clubs, orgs: built.orgs, pending: built.pending };
-
-      NL.writeAudit('directory_publish', built.count + ' club(s), ' + built.people +
-        ' people published as "' + name + '" by ' + by);
-
-      /* The frozen copy first. Publishing without a record of what was
-         published is the half of this worth not having. */
-      edRef.set(edition)
-        .then(function () { return db.ref(ROOT + '/published').set(payload); })
-        .then(function () {
-          PUBLISHED_AT = at;
-          btn.disabled = false; btn.textContent = 'Publish';
-          NL.toast(built.count + ' club' + (built.count === 1 ? '' : 's') +
-            ' published and frozen as \u201c' + name + '\u201d', 'success');
-          if (current) { draw(current); }
-        })
-        .catch(function (err) {
-          btn.disabled = false; btn.textContent = 'Publish';
-          showFail('The directory', 'Publish', (err && err.message) || String(err));
-        });
-    });
+  /* After a save, not before it: a save cannot be undone by refusing it, so
+     this says what to fix rather than asking whether to carry on. */
+  function warnLeaks(leaks) {
+    if (!leaks || !leaks.length) { return; }
+    NL.alert(leaks.slice(0, 12).map(function (x) {
+      return '\u2022 ' + x.value + ' \u2013 private on one ' + x.on + ' entry at ' + x.club +
+        ', but showing on the other';
+    }).join('\n') + (leaks.length > 12 ? '\n\u2026and ' + (leaks.length - 12) + ' more' : '') +
+      '\n\nThe same person is in the directory twice, and only one entry marks this ' +
+      'private. Mark it private on the other entry too, or remove the duplicate.',
+      { title: 'A private detail is still showing' });
   }
 
   /* --------------------------------------------------------- the journal
@@ -2008,36 +1830,66 @@ window.NLEditor = (function () {
 
   function myName() { return session.name || 'editor'; }
 
+  /* The log opens on everyone's changes, newest first (v3.0, Richard:
+     "it should actually be all changes, and we should be able to filter").
+     Two canon filter buttons: Club, which starts on the club you are
+     looking at because "what has changed here" is nearly always the
+     question, and Who, for your own or anyone else's. Undo stays on every
+     change that can be put back. */
   function showChanges() {
-    var everyone = false;
     var body = document.createElement('div');
     body.className = 'ed-jrnl';
+    var bar = document.createElement('div');
+    bar.className = 'ed-jrnl__filters';
+    var clubMount = document.createElement('div');
+    var whoMount = document.createElement('div');
+    bar.appendChild(clubMount);
+    bar.appendChild(whoMount);
+    var list = document.createElement('div');
+    body.appendChild(bar);
+    body.appendChild(list);
+
+    var all = journalAll();
+    var count = function (key) {
+      var n = {};
+      all.forEach(function (x) { var k = key(x); n[k] = (n[k] || 0) + 1; });
+      return n;
+    };
+    var byClub = count(function (x) { return x.club; });
+    var byWho = count(function (x) { return x.e.by || 'editor'; });
+    var clubSel = current && byClub[current] ? [current] : [];
+    var whoSel = [];
+    NL.filterButton(clubMount, {
+      label: 'Club', allLabel: 'All clubs', value: clubSel,
+      options: Object.keys(byClub).sort().map(function (c) {
+        return { value: c, label: c, count: byClub[c] };
+      }),
+      onChange: function (v) { clubSel = v; render(); }
+    });
+    NL.filterButton(whoMount, {
+      label: 'Who', allLabel: 'Everyone', value: whoSel,
+      options: Object.keys(byWho).sort().map(function (w) {
+        return { value: w, label: w === myName() ? w + ' (you)' : w, count: byWho[w] };
+      }),
+      onChange: function (v) { whoSel = v; render(); }
+    });
 
     var render = function () {
-      var all = journalAll();
-      var list = everyone ? all : all.filter(function (x) {
-        /* Yours, still standing, and an act rather than the undo of one. */
-        return x.e.by === myName() && !x.undone && !x.e.undoOf;
+      all = journalAll();
+      var shown = all.filter(function (x) {
+        return (!clubSel.length || clubSel.indexOf(x.club) > -1) &&
+               (!whoSel.length || whoSel.indexOf(x.e.by || 'editor') > -1);
       });
-      var head = everyone
-        ? '<p class="form-hint">Everything every editor has done, including undos. ' +
-          'Nothing is ever removed from this list.</p>'
-        : '<p class="form-hint">What you have changed, most recent first, across ' +
-          'every club. Undoing one puts back only what that change touched and takes ' +
-          'it off this list — the record of both still stands.</p>';
-      if (!list.length) {
-        body.innerHTML = head + '<p class="cd-empty">' +
-          (everyone ? 'Nothing has been changed yet.'
-                    : 'You have not changed anything yet.') + '</p>';
-        return void mountToggle();
+      if (!shown.length) {
+        list.innerHTML = '<p class="cd-empty">' + (all.length
+          ? 'Nothing changed for that choice.' : 'Nothing has been changed yet.') + '</p>';
+        return;
       }
-      /* The list runs across every club, so the club is the thing the eye
-         needs first — and a crest finds it faster than reading 72 names. */
-      /* Nothing is deleted, so a master's view across 72 clubs can run long.
-         The list is capped for rendering only, and says what it is not
-         showing rather than trailing off. */
-      var SHOW = 100, hidden = Math.max(0, list.length - SHOW);
-      body.innerHTML = head + '<ul class="ed-jrnl__list">' + list.slice(0, SHOW).map(function (x) {
+      /* Nothing is deleted, so the list can run long. Capped for drawing
+         only, and it says so rather than trailing off; the download has
+         everything. */
+      var SHOW = 100, hidden = Math.max(0, shown.length - SHOW);
+      list.innerHTML = '<ul class="ed-jrnl__list">' + shown.slice(0, SHOW).map(function (x) {
         var e = x.e;
         var when = NL.formatDateTime ? NL.formatDateTime(e.at) : NL.formatDate(e.at);
         return '<li class="ed-jrnl__row' + (x.undone ? ' is-undone' : '') +
@@ -2045,9 +1897,9 @@ window.NLEditor = (function () {
           '<img class="ed-jrnl__crest" alt="" data-crest="' + esc(x.club) + '">' +
           '<div class="ed-jrnl__main">' +
             '<span class="ed-jrnl__what">' + esc(e.what || 'Changed') + '</span>' +
-            '<span class="ed-jrnl__meta">' + esc(x.club) + ' · ' + esc(when) +
-              (everyone ? ' · ' + esc(e.by || 'editor') : '') +
-              (x.undone ? ' · undone by ' + esc(x.undone.by || 'editor') : '') +
+            '<span class="ed-jrnl__meta">' + esc(x.club) + ' \u00b7 ' + esc(when) +
+              ' \u00b7 ' + esc(e.by || 'editor') +
+              (x.undone ? ' \u00b7 undone by ' + esc(x.undone.by || 'editor') : '') +
             '</span>' +
           '</div>' +
           (!x.undone && !e.undoOf && e.undoable
@@ -2060,37 +1912,17 @@ window.NLEditor = (function () {
       }).join('') + '</ul>' + (hidden
         ? '<p class="form-hint">' + hidden + ' older ' +
           (hidden === 1 ? 'change is' : 'changes are') + ' not shown here. ' +
-          'Nothing has been deleted \u2014 they are still on the record.</p>'
+          'Download has them all.</p>'
         : '');
-      body.querySelectorAll('img[data-crest]').forEach(function (img) {
+      list.querySelectorAll('img[data-crest]').forEach(function (img) {
         var n = img.dataset.crest;
         img.alt = n + ' crest';
         NL.clubs.wireCrestImg(img, n, true);
         img.src = NL.clubs.crestUrl(n, 'thumb');
       });
-      body.querySelectorAll('button[data-id]').forEach(function (b) {
+      list.querySelectorAll('button[data-id]').forEach(function (b) {
         b.addEventListener('click', function () {
           undoJournal(b.dataset.club, b.dataset.id, ctrl);
-        });
-      });
-      mountToggle();
-    };
-
-    /* Master only. An editor seeing everyone's work would be fine; an editor
-       seeing an Undo button against a colleague's work would not, and the two
-       are hard to separate once the list is shared. */
-    var mountToggle = function () {
-      if (session.role !== 'admin') { return; }
-      var bar = document.createElement('div');
-      bar.className = 'ed-jrnl__tabs';
-      bar.innerHTML = '<button class="btn btn--sm ' + (everyone ? 'btn--ghost' : 'btn--primary') +
-          '" type="button" data-all="0">Mine</button>' +
-        '<button class="btn btn--sm ' + (everyone ? 'btn--primary' : 'btn--ghost') +
-          '" type="button" data-all="1">Everyone</button>';
-      body.insertBefore(bar, body.firstChild);
-      bar.querySelectorAll('button').forEach(function (b) {
-        b.addEventListener('click', function () {
-          everyone = b.dataset.all === '1'; render();
         });
       });
     };
@@ -2119,23 +1951,15 @@ window.NLEditor = (function () {
          it is now (the edit log logEdit keeps; `from` is the value before
          any hand edit, so a field edited three times is one row).
 
-     "Live?" says whether the change was made before the last Publish. A
-     change made after it is saved but has not reached the clubs yet, which
-     is the question this exists to answer while Publish still exists.
      Every club, every editor; nothing here is filtered. Staff-only data,
      downloaded by staff, the same values the editor already shows. */
   function downloadLog() {
-    var live = function (at) {
-      if (!PUBLISHED_AT) { return 'No \u2013 nothing published yet'; }
-      return at > PUBLISHED_AT ? 'No \u2013 saved after the last publish' : 'Yes';
-    };
     var when = function (at) { return at ? NL.formatDateTime(at) : ''; };
     var rows = [];
     journalAll().forEach(function (x) {
       var e = x.e;
       rows.push({ at: e.at || 0, cells: [when(e.at), x.club, 'Change', e.what || '', '', '',
-        e.by || '', x.undone ? 'Yes, by ' + (x.undone.by || 'editor') : (e.undoOf ? 'Reversal' : ''),
-        live(e.at || 0)] });
+        e.by || '', x.undone ? 'Yes, by ' + (x.undone.by || 'editor') : (e.undoOf ? 'Reversal' : '')] });
     });
     Object.keys(PROV).forEach(function (club) {
       var people = {};
@@ -2153,18 +1977,15 @@ window.NLEditor = (function () {
             m[2].replace(/^roles\/\d+\/title$/, 'job title');
         }
         rows.push({ at: e.at || 0, cells: [when(e.at), club, 'Field', field, e.from || '', e.to || '',
-          e.by || '', '', live(e.at || 0)] });
+          e.by || '', ''] });
       });
     });
     rows.sort(function (a, b) { return b.at - a.at; });
-    var csv = NL.csv([['When', 'Club', 'Kind', 'What', 'Was', 'Now', 'By', 'Undone', 'Live?']]
+    var csv = NL.csv([['When', 'Club', 'Kind', 'What', 'Was', 'Now', 'By', 'Undone']]
       .concat(rows.map(function (r) { return r.cells; })), { bom: true });
     NL.download('club-directory-change-log-' + new Date().toISOString().slice(0, 10) + '.csv',
       csv, 'text/csv;charset=utf-8');
-    var waiting = rows.filter(function (r) { return PUBLISHED_AT && r.at > PUBLISHED_AT; }).length;
-    NL.toast(rows.length + (rows.length === 1 ? ' row' : ' rows') + ' downloaded' + (PUBLISHED_AT
-      ? ', ' + waiting + ' saved since the last publish (' + NL.formatDateTime(PUBLISHED_AT) + ')'
-      : ''), 'success');
+    NL.toast(rows.length + (rows.length === 1 ? ' row' : ' rows') + ' downloaded', 'success');
   }
 
   /* Somebody else may have touched the same person since. That is the one
@@ -2284,7 +2105,7 @@ window.NLEditor = (function () {
     NL.writeAudit('directory_structure',
       club + ' — ' + what + ' (' + (session.name || 'editor') + ')');
     logJournal(club, what, undoOf);
-    return firebase.database().ref(ROOT + '/clubs/' + club).set(ALL[club])
+    return saveClub(club)
       .then(function () { clearFail(); NL.toast(what, 'success'); draw(club); })
       .catch(function (err) {
         /* A save that did not happen is not a three-second toast. It is the
@@ -2353,6 +2174,16 @@ window.NLEditor = (function () {
      Typing into the row is gone with them. Two ways to change the same field
      is worse than one even when both work, and this is the one that can show
      a job title and the address that goes with it at the same time. */
+  /* "+ Email", "+ Phone", "+ Role": the small add buttons under a list. */
+  function smallAdd(what) {
+    var b = document.createElement('button');
+    b.className = 'btn btn--sm btn--ghost ed-addbtn';
+    b.type = 'button';
+    b.appendChild(NL.icon('add', 'sm'));
+    b.appendChild(document.createTextNode(what));
+    return b;
+  }
+
   function contactRow(kind, value, sections, roles, ext, hide) {
     var row = document.createElement('div');
     row.className = 'ed-crow';
@@ -2401,16 +2232,23 @@ window.NLEditor = (function () {
        now saying so meant keeping BOTH out. Worded as the thing being
        withheld rather than as "publish", so the tick and the consequence
        point the same way — a ticked box means something is being kept back. */
+    /* The padlock (v3.0). Private means League staff and the person's own
+       club can see it, and nobody else: it is never written to the copy
+       other clubs and the public read. The row tints while it is on, so a
+       private detail looks private at the point you are editing it. */
     var hideLab = document.createElement('label');
-    hideLab.className = 'ed-chide';
+    hideLab.className = 'ed-lock';
     var hideBox = document.createElement('input');
     hideBox.type = 'checkbox';
     hideBox.className = 'ed-chide__box';
     hideBox.checked = !!hide;
     hideLab.appendChild(hideBox);
-    hideLab.appendChild(document.createTextNode(' Not published'));
-    hideLab.title = 'Keep this ' + (kind === 'email' ? 'address' : 'number') +
-      ' out of the published directory. Their other details are unaffected.';
+    hideLab.appendChild(NL.icon('lock', 'sm'));
+    hideLab.appendChild(document.createTextNode('Private'));
+    hideLab.title = 'Only League staff and their own club see this ' +
+      (kind === 'email' ? 'address' : 'number') + '.';
+    var paint = function () { row.classList.toggle('is-private', hideBox.checked); };
+    hideBox.addEventListener('change', paint);
 
     var del = document.createElement('button');
     del.className = 'btn btn--icon btn--ghost ed-del';
@@ -2422,12 +2260,16 @@ window.NLEditor = (function () {
 
     var top = document.createElement('div');
     top.className = 'ed-crow__top';
+    var kindIc = NL.icon(kind === 'email' ? 'email' : 'phone', 'sm');
+    kindIc.classList.add('ed-crow__ic');
+    top.appendChild(kindIc);
     top.appendChild(input);
     top.appendChild(hideLab);
     top.appendChild(del);
     row.appendChild(top);
     if (scope) { row.appendChild(scope); }
     row.__scope = function () { return scopeState.slice(); };
+    paint();
     return row;
   }
 
@@ -2469,38 +2311,26 @@ window.NLEditor = (function () {
        escapes the separator too, so the dialog read "Directors&lt;/b&gt;,
        &lt;b&gt;Safeguarding & welfare" to everyone who opened somebody with
        more than one post. Same trap the department list carries a note about. */
-    group('Person', others.length
-      ? 'Also listed under <b>' + others.map(esc).join('</b>, <b>') +
-        '</b>. The name and contact details below are shared with those entries.'
-      : '');
-    var grid1 = document.createElement('div');
-    grid1.className = 'form-grid';
     var nameIn = textbox(name0, 'Jane Smith');
-    grid1.appendChild(field('Name', nameIn));
-    wrap.appendChild(grid1);
+    nameIn.className = 'ed-name';
+    nameIn.setAttribute('aria-label', 'Name');
+    wrap.appendChild(field('Name', nameIn));
 
-    var pubWrap = document.createElement('div');
-    pubWrap.className = 'form-group span2 ed-check';
+    /* All of it private, in one switch. One address or one number is the
+       padlock on its own line below. */
     var pubLab = document.createElement('label');
+    pubLab.className = 'ed-lock ed-lock--all';
     var pubBox = document.createElement('input');
     pubBox.type = 'checkbox';
     pubBox.checked = !!person.hideContact;
     pubLab.appendChild(pubBox);
-    pubLab.appendChild(document.createTextNode(
-      ' Keep their contact details out of the published directory'));
-    pubWrap.appendChild(pubLab);
-    var pubHint = document.createElement('p');
-    pubHint.className = 'form-hint';
-    pubHint.textContent = 'Everything of theirs \u2014 every address and every ' +
-      'number. We still hold it; the reader shows "Not published". To keep just ' +
-      'one address or one number back, leave this clear and tick it on the line ' +
-      'itself below.' +
-      (sections.length > 1 ? ' This covers every department they appear in.' : '');
-    pubWrap.appendChild(pubHint);
-    wrap.appendChild(pubWrap);
+    pubLab.appendChild(NL.icon('lock', 'sm'));
+    pubLab.appendChild(document.createTextNode('All their contact details private'));
+    wrap.appendChild(pubLab);
 
     /* ---- how to reach them ---- */
-    group('Email addresses', '');
+    group('Contact', sections.length > 1
+      ? 'Shared by all their roles unless you choose where one shows.' : '');
     var emailBox = document.createElement('div');
     emailBox.className = 'ed-clist';
     wrap.appendChild(emailBox);
@@ -2510,16 +2340,11 @@ window.NLEditor = (function () {
       emailBox.appendChild(contactRow('email', addr,
         NLDirectory.sectionsOf(e), sections, '', NLDirectory.ownHide(e)));
     });
-    var addEmail = document.createElement('button');
-    addEmail.className = 'btn btn--sm btn--ghost';
-    addEmail.type = 'button';
-    addEmail.textContent = 'Add an email address';
+    var addEmail = smallAdd('Email');
     addEmail.addEventListener('click', function () {
       emailBox.appendChild(contactRow('email', '', [], sections));
     });
-    wrap.appendChild(addEmail);
 
-    group('Telephone numbers', '');
     var phoneBox = document.createElement('div');
     phoneBox.className = 'ed-clist';
     wrap.appendChild(phoneBox);
@@ -2528,42 +2353,47 @@ window.NLEditor = (function () {
       phoneBox.appendChild(contactRow('phone', x.number,
         NLDirectory.sectionsOf(x), sections, x.ext || '', NLDirectory.ownHide(x)));
     });
-    var addPhone = document.createElement('button');
-    addPhone.className = 'btn btn--sm btn--ghost';
-    addPhone.type = 'button';
-    addPhone.textContent = 'Add a telephone number';
+    var addPhone = smallAdd('Phone');
     addPhone.addEventListener('click', function () {
       phoneBox.appendChild(contactRow('phone', '', [], sections));
     });
-    wrap.appendChild(addPhone);
+    var adds = document.createElement('div');
+    adds.className = 'ed-adds';
+    adds.appendChild(addEmail);
+    adds.appendChild(addPhone);
+    wrap.appendChild(adds);
 
     /* ---- every job they do ---- */
     /* All of them, not just the row you came in from. The modal claims to be
        everything about this person, and showing one role while merely naming
        the others made a liar of it — an editor fixing two job titles had to
        close it, find the other row, and open it again. */
-    group(roles.length > 1 ? 'Roles' : 'Role', roles.length > 1
-      ? 'One entry per department. The row you opened is marked.' : '');
+    group(roles.length > 1 ? 'Roles' : 'Role', '');
     var roleBox = document.createElement('div');
     roleBox.className = 'ed-roles';
     wrap.appendChild(roleBox);
 
     var roleRows = [];
     roles.forEach(function (r, i) {
+      /* One line per job: title, department, remove. The one you opened
+         is marked, because on somebody with four roles "which one was I
+         looking at" is a real question. */
       var card = document.createElement('div');
       card.className = 'ed-role' + (i === ridx ? ' is-here' : '');
-      var grid = document.createElement('div');
-      grid.className = 'form-grid';
-      var t = textbox(r.title || '', 'Programme Editor');
+      var t = textbox(r.title || '', 'Job title');
+      t.className = 'ed-cval';
+      t.setAttribute('aria-label', 'Job title');
       var d = deptSelect(r.section, 'ed-dept', NLDirectory.isOrg(ALL[club]));
-      grid.appendChild(field('Job title', t));
-      grid.appendChild(field('Department', d));
-      card.appendChild(grid);
+      d.setAttribute('aria-label', 'Department');
+      card.appendChild(t);
+      card.appendChild(d);
 
       var drop = document.createElement('button');
-      drop.className = 'btn btn--sm btn--ghost ed-del ed-roledel';
+      drop.className = 'btn btn--icon btn--ghost ed-del';
       drop.type = 'button';
-      drop.textContent = 'Remove this role';
+      drop.title = 'Remove this role';
+      drop.setAttribute('aria-label', 'Remove this role');
+      drop.appendChild(NL.icon('delete'));
       drop.addEventListener('click', function () {
         /* Their only role is the whole person, so that question gets asked
            rather than answered by a button labelled something smaller. */
@@ -2584,14 +2414,11 @@ window.NLEditor = (function () {
 
     var extra = document.createElement('div');
     extra.className = 'ed-morebtns';
-    var addRole = document.createElement('button');
-    addRole.className = 'btn btn--sm btn--ghost';
-    addRole.type = 'button';
-    addRole.textContent = 'Add another role';
+    var addRole = smallAdd('Role');
     var removeBtn = document.createElement('button');
-    removeBtn.className = 'btn btn--sm btn--ghost ed-del';
+    removeBtn.className = 'btn btn--sm btn--ghost ed-del ed-removeperson';
     removeBtn.type = 'button';
-    removeBtn.textContent = 'Remove this person…';
+    removeBtn.textContent = 'Remove this person\u2026';
     extra.appendChild(addRole);
     extra.appendChild(removeBtn);
     wrap.appendChild(extra);
@@ -2607,7 +2434,7 @@ window.NLEditor = (function () {
     };
 
     var ctrl = NL.modal({
-      title: 'Update details — ' + (name0 || 'this person'),
+      title: name0 || 'Update details',
       body: wrap,
       buttons: [
         { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
@@ -2672,11 +2499,10 @@ window.NLEditor = (function () {
       ? '\u201c' + opening[0] + '\u201d'
       : opening.length + ' of their details:\n\n  ' + opening.join('\n  ');
     return NL.confirm(
-      'Publish ' + what + ' for ' + name + ' in the directory?' + where +
-      '\n\nThe club asked for this to be kept off. Only do it if they have since ' +
-      'said otherwise \u2014 everyone holding the reader code will be able to see it, ' +
-      'and it cannot be taken back once it is out.',
-      { title: 'Publish contact details', variant: 'danger', confirmText: 'Yes, publish' }
+      'Make ' + what + ' for ' + name + ' visible to everyone?' + where +
+      '\n\nThis was private. Saving shows it on every club\u2019s page and the ' +
+      'public directory straight away. Only do it if the club has said so.',
+      { title: 'No longer private', variant: 'danger', confirmText: 'Yes, show it' }
     );
   }
 
@@ -2785,8 +2611,13 @@ window.NLEditor = (function () {
     /* Renaming somebody who holds more than one role is genuinely ambiguous,
        and getting it wrong is the worst thing this tool can do. See the note
        on resolveRename. Hoisted, so proceed() above can call it. */
+    /* Every rename asks now, one role or several (v3.0, Richard). Typing a
+       new name over an old one is how a club's new secretary ends up with
+       the last one's mobile, so "someone new" is offered every time and
+       does it properly: a new entry, in the same job, with none of the old
+       person's details. */
     function renameThen() {
-      if (roles.length > 1) {
+      if (roles.length) {
         resolveRename(club, person, ridx, was.name, next.name).then(function (how) {
           if (!how) { return; }                     /* cancelled: change nothing */
           if (how === 'same') {
@@ -3131,15 +2962,16 @@ window.NLEditor = (function () {
       var settled = false;
       var done = function (v) { if (!settled) { settled = true; resolve(v); } };
       NL.modal({
-        title: 'Which did you mean?',
+        title: 'Same person, or someone new?',
         size: 'sm',
-        body: '<p class="confirm-text">' + esc(from) + ' is listed under ' +
-          esc(here) + ' and ' + esc(others.join(' and ')) + '.</p>' +
-          '<p class="confirm-text">Is <b>' + esc(to) + '</b> the same person under a ' +
-          'corrected name, or somebody new who has taken over ' + esc(here) + '?</p>' +
-          '<p class="form-hint">Somebody new takes the job title but none of the contact ' +
-          'details — those belong to ' + esc(from) + '. Worth checking the title still ' +
-          'fits once they are in.</p>',
+        body: '<p class="confirm-text">Is <b>' + esc(to) + '</b> the same person as ' +
+          esc(from) + ' (a spelling fix or a new surname), or someone new who has taken ' +
+          'over ' + esc(here) + '?</p>' +
+          '<p class="form-hint">' + (others.length
+            ? esc(from) + ' stays listed under ' + esc(others.join(' and ')) + '. '
+            : esc(from) + ' comes out of the directory. ') +
+          'Someone new gets the job but none of ' + esc(from) + '\u2019s email addresses ' +
+          'or phone numbers \u2013 add theirs afterwards.</p>',
         onClose: function () { done(false); },
         buttons: [
           { label: 'Cancel', className: 'btn--ghost',
@@ -3166,7 +2998,12 @@ window.NLEditor = (function () {
                 title: (next && next.title) || role.title || '' }] };
     setAt(fresh, 'name', name);
     person.roles = roles.filter(function (r, i) { return i !== ridx; });
-    ALL[club].people = NLDirectory.arr(ALL[club].people).concat(fresh);
+    /* Their only job was this one: they have left, so they come out. */
+    var people = NLDirectory.arr(ALL[club].people);
+    if (!person.roles.length) {
+      people = people.filter(function (p) { return p !== person; });
+    }
+    ALL[club].people = people.concat(fresh);
     saveStructure(club, name + ' replaces ' + NLDirectory.fullName(person) +
       ' in ' + role.section);
   }
@@ -3274,7 +3111,7 @@ window.NLEditor = (function () {
 
   function persist(club, what, undoOf) {
     logJournal(club, what, undoOf);
-    firebase.database().ref(ROOT + '/clubs/' + club).set(ALL[club])
+    saveClub(club)
       .then(function () { NL.toast(what, 'success'); draw(club); })
       .catch(function (err) {
         NL.toast('Could not save: ' + ((err && err.message) || err), 'error');
