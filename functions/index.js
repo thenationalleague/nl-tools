@@ -49,15 +49,16 @@ Object.assign(exports, require("./account"));
 Object.assign(exports, require("./programme"));
 
 // Fan-widget staff access (fanWidgetsAuth) — RTDB-triggered for the same
-// org-policy reason as programme.js and club-directory.js: a NEW callable
+// org-policy reason as programme.js: a NEW callable
 // cannot be granted a public invoker on this project. It is the only route by
 // which a browser can read the fan data live without that data being copied
 // anywhere. See functions/fan-widgets.js.
 Object.assign(exports, require("./fan-widgets"));
 
-// Club Directory passcode → scoped-claim trigger (clubDirectoryAuth). Same
-// shape and the same org-policy reason as programme.js above.
-Object.assign(exports, require("./club-directory"));
+// clubDirectoryAuth (Club Directory editor and reader codes) was retired on
+// 11/11/2026: editing is behind the portal login and clubs sign in with club
+// codes (club-code.js). The deploy runs with --force, so leaving it out of
+// this file is what deletes it.
 
 // UW Promo Codes credential → scoped-claim trigger (uwPromoAuth, plus the
 // sandbox twin uwPromoAuthTest). Third instance of the same shape and the same

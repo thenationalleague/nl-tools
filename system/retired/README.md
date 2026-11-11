@@ -26,6 +26,7 @@ when someone asks for it, and when they do, this is where the thinking is.
 | [`claudio.md`](claudio.md) | 30/10/2026 | AI assistant with five personas over Apps Script and Anthropic. Backend shut 15/08/2026 as an open proxy. **Rebuild intended**: the switchboard routing and prompt rules are the keepers. |
 | [`holiday-lieu.md`](holiday-lieu.md) | 30/10/2026 | Staff leave and lieu tracker, never launched. **Rebuild intended**: the business rules are recorded; the approver model and lieu ledger need redesigning. |
 | [`site-demo.md`](site-demo.md) | 30/10/2026 | Astro mock-up of the public website. Concept kept; current "shop front and stockroom" thinking recorded. |
+| [`club-directory-codes.md`](club-directory-codes.md) | 11/11/2026 | Not a tool: the Club Directory's own editor, master and reader codes, with `_gate.js` and `clubDirectoryAuth`. Clubs use club codes; staff use the login. |
 
 ## Why one place
 

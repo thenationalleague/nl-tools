@@ -15,6 +15,9 @@
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
 <!--
   club-directory / index.html   (was /club-directory/reader/)
+  v2.5 – (11/11/2026) Club codes only. The Directory reader codes (six-digit,
+          from before club codes) are retired, with _gate.js and the
+          clubDirectoryAuth function behind them; the admin team knew.
   v2.4 – (11/11/2026) The club chooser is the canon club picker, crests and
           all, with an All clubs button beside it to go back to the wall —
           the same pair as the staff page. It sits above the search now, not
@@ -232,7 +235,6 @@
 <script src="/system/nl-utils.js?v=52"></script>
 <!-- GA4 for nl.tools — cookieless, no banner, no identity. See system/nl-analytics.js -->
 <script src="/system/nl-analytics.js?v=1"></script>
-<script src="/club-directory/_gate.js?v=31"></script>
 <script src="/club-directory/_directory.js?v=44"></script>
 <script>
   firebase.initializeApp({
@@ -376,7 +378,7 @@
      refusal is simply no merge. */
   function mergeOwnPrivate() {
     if (!OWN || !ALL[OWN]) { return Promise.resolve(); }
-    return firebase.database().ref(NLGate.ROOT + '/private/' + OWN).once('value')
+    return firebase.database().ref(ROOT + '/private/' + OWN).once('value')
       .then(function (snap) {
         var priv = (snap.val() || {}).people || {};
         var people = NLDirectory.arr(ALL[OWN].people);
@@ -395,23 +397,15 @@
       }).catch(function () { /* not this club's to read: the public view stands */ });
   }
 
-  /* Two doors, one card. A club types the SAME six characters that open the
-     Handbook and Programme Packs; anyone else the League has given a
-     Directory reader code to keeps using it. Both are checked server-side by
-     their own trigger, and the gate tries the club code first because that is
-     the one being issued now — a Directory code costs a second round trip,
-     which is the right way round.
-
-     The letters are why this changed. _gate.js strips everything but digits,
-     so a club code typed here silently lost most of itself and came back "not
-     recognised" — the code was right and the lock was wrong. */
-  /* The tool rides along with the code so the usage log can say which door
-     a club came in by — see noteUse in functions/club-code.js. */
+  /* One door: the club code, the same six characters that open the
+     Handbook and Programme Packs, checked server-side by functions/club-code.js.
+     The tool rides along with the code so the usage log can say which door
+     a club came in by (noteUse in club-code.js). The older Directory reader
+     codes, tried as a fallback until v2.5, are retired. */
+  var ROOT = 'app-data/ops-club-directory';
   var clubVerify = NL.codeGate.viaFunction('app-data/club-codes', { tool: 'directory' });
-  var dirVerify = NL.codeGate.viaFunction(NLGate.ROOT);
 
   NL.codeGate.resume('club')
-    .then(function (s) { return s || NLGate.resume(); })
     .then(function (s) {
       return s || NL.codeGate.open({
         mount: $('gateWrap'),
@@ -428,25 +422,7 @@
            looking for a number they were never given. */
         sub: 'Enter your access code.',
         numeric: false,
-        /* THE FIRST DOOR'S ANSWER IS THE ONE THAT GETS SHOWN.
-
-           A rejected code fell through to the Directory door, and that door
-           normalises to DIGITS ONLY — so an alphanumeric access code arrived
-           there as the two or three digits it happened to contain, failed the
-           length check, and the person was told "Enter your six-digit code."
-           They had entered a code, it was six characters, and none of that
-           was the reason it failed. Reported live, 26/08/2026.
-
-           Fixing the string alone would leave the shape of the bug: whichever
-           door is tried LAST writes the message, and the last door is the
-           legacy one. So the fallback is allowed to succeed and never to
-           speak — a failure reports what the club-code door said, which is
-           the door the code was issued by. */
-        verify: function (code) {
-          return clubVerify(code)['catch'](function (first) {
-            return dirVerify(code)['catch'](function () { throw first; });
-          });
-        }
+        verify: clubVerify
       });
     }).then(function (session) {
     /* codeGate does not take its own card down — the caller owns the mount and
@@ -464,7 +440,7 @@
          reads a copy the editor built to be handed over: signed-off clubs
          only, and no contact details at all for anyone the club asked us to
          keep back. There is nothing here to hide, which is the point. */
-      firebase.database().ref(NLGate.ROOT + '/published').once('value')
+      firebase.database().ref(ROOT + '/published').once('value')
     ]);
   }).then(function (res) {
     ROSTER = res[0] || [];
@@ -561,8 +537,8 @@
      the club's name alongside it, so this is a lookup rather than a guess —
      but the directory is keyed by NAME and the claim's name comes from the
      codes config, so match on the name first and fall back to resolving the
-     key through the roster. A Directory reader code carries no club and lands
-     on the index, which is correct: they are not a club. */
+     key through the roster. A League holder's code (NL) matches no club and
+     lands on the index, which is correct: they are not a club. */
   function ownClub() {
     if (!SESSION) return '';
     var known = names.concat(PENDING);

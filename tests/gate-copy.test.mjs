@@ -19,7 +19,8 @@
         shape; nothing the person was told was true.
 
    So this file pins both halves: no door claims a shape that its lock does
-   not accept, and the fallback never speaks. */
+   not accept, and the fallback never speaks. (The fallback itself went with
+   the Directory reader codes on 11/11/2026; the page has one door now.) */
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -39,7 +40,6 @@ const strip = (s) =>
 /* The message on a failed attempt comes from here, which is why fixing the
    cards alone changed nothing the person complaining could see. */
 const DOORS = ['functions/club-code.js',
-               'functions/club-directory.js',
                'functions/programme.js'];
 
 test('no door tells anyone to type digits', () => {
@@ -63,61 +63,15 @@ test('the club-code door asks for an ACCESS code, not a club code', () => {
   assert.ok(!/your club code/i.test(src), 'no server message says "club code"');
 });
 
-test('a wrong-shaped code at the Directory door is simply not recognised', () => {
-  /* It cannot honestly say more than that: the code it is judging has already
-     had its letters stripped by normCode, so the length it is measuring is
-     not the length the person typed. */
-  const src = strip(read('functions/club-directory.js'));
-  assert.match(src, /if \(code\.length !== 6\) return grant\(\{ ok: false, error: "Code not recognised\." \}\)/);
-});
-
 /* --------------------------------------------- which door gets to speak */
 
-/* Lift the reader's verify out of the shipped page and run it, so this tests
-   the chaining rather than the spelling of it. */
-function readerVerify(club, dir) {
+test('the Club Directory has one door, so only the club-code door speaks', () => {
+  /* Fault 2 above was a second door answering last. The Directory reader
+     codes behind it were retired on 11/11/2026, and with them the fallback:
+     the page now hands codeGate the club-code verify and nothing else. */
   const src = strip(read('club-directory/index.html'));
-  const i = src.indexOf('verify: function (code) {');
-  assert.ok(i >= 0, 'the reader no longer wires a verify');
-  let depth = 0, j = src.indexOf('{', i);
-  for (; j < src.length; j++) {
-    if (src[j] === '{') depth++;
-    else if (src[j] === '}' && --depth === 0) { j++; break; }
-  }
-  const body = src.slice(src.indexOf('function', i), j);
-  // eslint-disable-next-line no-new-func
-  return new Function('clubVerify', 'dirVerify', 'return (' + body + ');')(club, dir);
-}
-
-const reject = (msg) => () => Promise.reject(new Error(msg));
-const resolve = (v) => () => Promise.resolve(v);
-
-test('a code the club door accepts never reaches the fallback', async () => {
-  let hit = 0;
-  const v = readerVerify(resolve({ role: 'ALD' }), () => { hit++; return Promise.reject(new Error('x')); });
-  assert.deepEqual(await v('ALD123'), { role: 'ALD' });
-  assert.equal(hit, 0, 'the second door cost a round trip for nothing');
-});
-
-test('a Directory code still gets in through the fallback', async () => {
-  /* The fallback is silenced, not removed — the codes issued before
-     club-codes existed have to keep working. */
-  const v = readerVerify(reject('Code not recognised.'), resolve({ role: 'reader' }));
-  assert.deepEqual(await v('482913'), { role: 'reader' });
-});
-
-test('a failure reports the FIRST door, never the fallback', async () => {
-  /* THE BUG, in one assertion. The Directory door's complaint is about a
-     string this person never typed. */
-  const v = readerVerify(reject('Code not recognised.'),
-                         reject('Enter your six-digit code.'));
-  await assert.rejects(v('ABC123'), /^Error: Code not recognised\.$/);
-});
-
-test('an outage at the first door reports the outage', async () => {
-  const v = readerVerify(reject('The sign-in service did not answer. Please try again.'),
-                         reject('Code not recognised.'));
-  await assert.rejects(v('ABC123'), /did not answer/);
+  assert.match(src, /verify: clubVerify\s*\}/);
+  assert.ok(!/dirVerify|NLGate/.test(src), 'the retired Directory door is wired back in');
 });
 
 /* ----------------------------------------------------- what the cards say */
