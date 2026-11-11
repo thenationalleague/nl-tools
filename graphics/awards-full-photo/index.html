@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Monthly Awards Full Photo (Graphics sub-tool)
-  Version: v1.1 (11/11/2026)
+  Version: v1.6 (11/11/2026)
   File: /graphics/awards-full-photo/index.html
 
   Nominee and winner cards for the monthly awards when the photo can't be
@@ -23,6 +23,20 @@
     /graphics/_shared/canvas-art.js                (large images drawn small)
 
   Changelog:
+    v1.6 (11/11/2026) — The lockup always sits at the card's opposite edge
+      from the words, so down one side it is in the bottom corner of the
+      clear side, not in the middle; the name gets the column back.
+    v1.5 (11/11/2026) — The lockup is as tall as the name and club together,
+      top and bottom aligned with them, at the opposite edge; the name and
+      club fit the width beside it. Club name about 40% of the name's size.
+    v1.4 (11/11/2026) — No divider between the name and the club row; the
+      name sits on the row, so the two read as one block.
+    v1.3 (11/11/2026) — Tidier foot: the lockup is smaller and sits on the
+      club's line, centred with the crest; the club name is larger. In the
+      side layout the lockup moves onto that line too.
+    v1.2 (11/11/2026) — Words: Down one side (left or right). Everything in
+      a column on that side, the month under the award and the lockup at the
+      foot of the column, so the other side of the photo is clear.
     v1.1 (11/11/2026) — Words: Top and bottom, or All at the bottom, for a
       photo with no room above the player's head.
     v1.0 (10/11/2026) — first build.
@@ -70,6 +84,41 @@
     var NL_TOOL_KEY = 'staff-graphics';
 
     window.NL_CHANGELOG = [
+      {
+        date: '11/11/2026',
+        version: 'v1.6',
+        items: [
+          'Down one side: the league badge sits in the bottom corner on the other side of the card, not in the middle, so the name has the whole column again.'
+        ]
+      },
+      {
+        date: '11/11/2026',
+        version: 'v1.5',
+        items: [
+          'The league badge is now as tall as the name and club together, lined up with them at the opposite edge, so the three read as one block. The club name is bigger.'
+        ]
+      },
+      {
+        date: '11/11/2026',
+        version: 'v1.4',
+        items: [
+          'The thin line between the name and the club has gone. The name sits straight on the club row, so they read as one block and the photo gets a little more room.'
+        ]
+      },
+      {
+        date: '11/11/2026',
+        version: 'v1.3',
+        items: [
+          'Tidier foot: the league badge is a little smaller and sits on the same line as the club, centred with the crest, and the club name is larger.'
+        ]
+      },
+      {
+        date: '11/11/2026',
+        version: 'v1.2',
+        items: [
+          'Words: Down one side, left or right. Everything sits in a column on that side, with the month under the award and the league badge at the foot, so the other side of the photo is clear.'
+        ]
+      },
       {
         date: '11/11/2026',
         version: 'v1.1',
@@ -214,6 +263,7 @@
         <div class="form-group"><label for="tName">Player name</label><input type="text" id="tName" value=""></div>
         <div class="form-group"><span class="afp-label">Club</span><div id="clubPick"></div></div>
         <div class="afp-row"><div id="divPick"></div><div id="posPick"></div></div>
+        <div id="sidePick" hidden></div>
 
         <div class="afp-dl">
           <button type="button" class="btn btn--primary afp-action" id="dlAll" disabled>Download all four</button>
@@ -241,12 +291,13 @@
 
   /* Each size's pixels, and how big its headline and name may run. The 16:9
      keeps its words in a column on the left (`col`) so the photo shows on
-     the right; the shade follows the column. */
+     the right; the shade follows the column. `side` is the column's width
+     when the words go down one side. */
   var FORMATS = {
-    '4x5':  { label: '4:5',  w: 1080, h: 1350, hs: 210, ns: 116 },
-    '1x1':  { label: '1:1',  w: 1080, h: 1080, hs: 180, ns: 104 },
-    '9x16': { label: '9:16', w: 1080, h: 1920, hs: 230, ns: 124 },
-    '16x9': { label: '16:9', w: 1920, h: 1080, hs: 190, ns: 110, col: 900 }
+    '4x5':  { label: '4:5',  w: 1080, h: 1350, hs: 210, ns: 116, side: 680 },
+    '1x1':  { label: '1:1',  w: 1080, h: 1080, hs: 180, ns: 104, side: 680 },
+    '9x16': { label: '9:16', w: 1080, h: 1920, hs: 230, ns: 124, side: 720 },
+    '16x9': { label: '16:9', w: 1920, h: 1080, hs: 190, ns: 110, col: 900, side: 820 }
   };
   var ORDER = ['4x5', '1x1', '9x16', '16x9'];
   var PREVIEW_SCALE = 2;      /* the preview only; exports are 1x */
@@ -267,7 +318,8 @@
   })();
 
   var S = { photo: null, fmt: '4x5', crops: {}, crest: null, rose: null, lockups: {}, div: 'National',
-            words: 'split' };   /* split: headline at the top, name at the bottom; bottom: all at the bottom */
+            words: 'split',     /* split: headline at the top, name at the bottom; bottom: all at the bottom; side: down one side */
+            side: 'left' };     /* which side, for 'side' */
   var canvas, ctx;
 
   function $(id) { return document.getElementById(id); }
@@ -282,6 +334,22 @@
     var n = parseInt(String(hex).replace('#', ''), 16);
     return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
   }
+  /* The part of an image that isn't transparent, as fractions of its size.
+     Read once per image from a small copy. */
+  function visibleBox(img) {
+    try {
+      var w = 200, h = Math.max(1, Math.round(200 * img.naturalHeight / img.naturalWidth));
+      var c = document.createElement('canvas'); c.width = w; c.height = h;
+      var g = c.getContext('2d'); g.drawImage(img, 0, 0, w, h);
+      var d = g.getImageData(0, 0, w, h).data, x0 = w, y0 = h, x1 = -1, y1 = -1;
+      for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) {
+        if (d[(y * w + x) * 4 + 3] > 24) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+      }
+      if (x1 < 0) return null;
+      return { x: x0 / w, y: y0 / h, w: (x1 + 1 - x0) / w, h: (y1 + 1 - y0) / h };
+    } catch (e) { return null; }
+  }
+
   function resetCrops() { ORDER.forEach(function (f) { S.crops[f] = { zoom: 1, dx: 0, dy: 0 }; }); }
 
   /* ---------------- type helpers ---------------- */
@@ -318,10 +386,14 @@
 
   /* ---------------- layout ----------------
      The top block (headline, award pill, month) and the bottom block (name,
-     divider, crest and club, lockup) for one size. Used both to draw and to
+     crest and club, lockup) for one size. Used both to draw and to
      place the shade behind them. */
   function layout(c, f) {
-    var F = FORMATS[f], colW = F.col || (F.w - 2 * M);
+    var F = FORMATS[f], mode = S.words, side = mode === 'side';
+    var right = side && S.side === 'right';
+    var colW = side ? F.side : (F.col || (F.w - 2 * M));
+    var x0 = right ? F.w - M - colW : M;
+    var stacked = side;   /* down one side: the month goes under the award */
     var head = ($('tHead').value.trim() || 'NOMINATED').toUpperCase();
     var hs = fitSize(c, head, 800, F.hs, colW, -0.015);
     var award = $('tAward').value.trim().toUpperCase(), month = $('tMonth').value.trim().toUpperCase();
@@ -329,17 +401,50 @@
     for (;;) {   /* shrink the strapline until it fits the column */
       setFont(c, 800, ss); spaced(c, 0.12, ss); aw = award ? c.measureText(award).width + 36 : 0;
       setFont(c, 700, ss); spaced(c, 0.12, ss); mw = month ? c.measureText(month).width : 0;
-      if (aw + (award && month ? 22 : 0) + mw <= colW || ss <= 18) break;
+      var need = stacked ? Math.max(aw, mw) : aw + (award && month ? 22 : 0) + mw;
+      if (need <= colW || ss <= 18) break;
       ss--;
     }
     var pillH = Math.round(ss * 1.75);
     var name = $('tName').value.trim();
+    /* THE NAME BLOCK: the name, with the crest and club under it, and the
+       league's lockup closing the opposite edge. The lockup is exactly as
+       tall as the name and club together (its top level with the top of the
+       name's capitals, its bottom level with the foot of the crest), so the
+       three read as one rectangle instead of loose parts. The name sits
+       straight on the club row: a divider there was navy on a navy shade
+       and barely showed, for ~60px of gap. The name and club fit the width
+       left beside the lockup, with a fixed gap. */
+    var rowTop = F.h - 66 - 72, rowBottom = rowTop + 72;
+    var blockH = function (n) { return rowBottom - (rowTop - 22 - Math.round(n * 0.2) - Math.round(n * 0.74)); };
+    /* Sized on the lockup's visible edges, not its file's: the artwork
+       carries a little transparent padding, which left it 4px low and 6px
+       short of the block it is lined up with. */
+    var lockImg = S.lockups[S.div], vis = lockImg && lockImg._visible;
+    var lockAR = !lockImg ? 1.44
+      : (lockImg.naturalWidth * (vis ? vis.w : 1)) / (lockImg.naturalHeight * (vis ? vis.h : 1));
+    var lockMaxW = 300;
+    /* The lockup always closes the card's opposite edge from the words: the
+       right margin, or the left margin when the words are on the right. Down
+       one side that puts it on the clear side, in the bottom corner, rather
+       than loose in the middle of the card. The words keep the width up to
+       it, less a fixed gap. */
+    var lockXFor = function (w) { return right ? M : F.w - M - w; };
+    var wordsWFor = function (w) {
+      return right ? Math.min(colW, x0 + colW - (M + w) - 32) : Math.min(colW, F.w - M - w - 32 - x0);
+    };
     var ns = fitSize(c, name || 'M', 800, F.ns, colW, -0.025);
-    var rowTop = F.h - 66 - 72, divider = rowTop - 26;
-    var nameBase = divider - 34 - Math.round(ns * 0.2);
+    var lockW = Math.min(lockMaxW, blockH(ns) * lockAR);
+    var wordsW = wordsWFor(lockW);
+    ns = fitSize(c, name || 'M', 800, F.ns, wordsW, -0.025);
+    var lockH = Math.min(lockW / lockAR, blockH(ns));
+    lockW = lockH * lockAR;
+    var blockTop = rowBottom - blockH(ns);
+    var lockY = blockTop + (blockH(ns) - lockH) / 2, lockX = lockXFor(lockW);
+    var nameBase = rowTop - 22 - Math.round(ns * 0.2);
     var barTop = nameBase - Math.round(ns * 0.74) - 30;
-    var bottom = S.words === 'bottom', base, pillTop;
-    if (bottom) {
+    var base, pillTop;
+    if (mode === 'bottom') {
       /* Stacked up from the name: award and month above the accent bar,
          the headline above them. The top of the photo stays clear. */
       pillTop = barTop - 26 - pillH;
@@ -348,16 +453,24 @@
       base = 70 + Math.round(hs * 0.74);
       pillTop = base + 28;
     }
+    var monthMid = stacked ? pillTop + (award ? pillH + 12 : 0) + Math.round(ss * 0.6) : pillTop + pillH / 2 + 1;
+    var topEnd = stacked ? monthMid + Math.round(ss * 0.6) : pillTop + pillH;
     /* Where the words start, for the shade behind them. */
-    var wordsTop = bottom ? base - Math.round(hs * 0.74) : barTop;
-    return { F: F, colW: colW, head: head, hs: hs, base: base, award: award, month: month, ss: ss, aw: aw, mw: mw,
-      pillTop: pillTop, pillH: pillH, topEnd: pillTop + pillH, name: name, ns: ns,
-      rowTop: rowTop, divider: divider, nameBase: nameBase, barTop: barTop, bottom: bottom, wordsTop: wordsTop };
+    var wordsTop = mode === 'bottom' ? base - Math.round(hs * 0.74) : barTop;
+    return { F: F, mode: mode, side: side, right: right, colW: colW, x0: x0, stacked: stacked,
+      head: head, hs: hs, base: base, award: award, month: month, ss: ss, aw: aw, mw: mw,
+      pillTop: pillTop, pillH: pillH, monthMid: monthMid, topEnd: topEnd, name: name, ns: ns,
+      lockH: lockH, lockW: lockW, lockX: lockX, lockY: lockY, wordsW: wordsW, rowTop: rowTop, nameBase: nameBase, barTop: barTop,
+      wordsTop: wordsTop };
   }
+  /* The left edge of something w wide, in the column: flush left, or flush
+     right when the column is on the right. */
+  function ax(L, w) { return L.right ? L.x0 + L.colW - w : L.x0; }
 
-  /* The shade: navy from the bottom up past the words, from the top down
-     past the strapline when the headline is at the top, and on 16:9 from the
-     left across the column. Strength is the "Shade behind the words" slider. */
+  /* The shade. Down one side: navy in from that side across the column.
+     Otherwise from the bottom up past the words, from the top down past the
+     strapline when the headline is at the top, and on 16:9 from the left
+     across the column. Strength is the "Shade behind the words" slider. */
   function shade(c, L) {
     var F = L.F, s = +$('fShade').value / 100;
     if (!s) return;
@@ -366,7 +479,14 @@
       stops.forEach(function (st) { g.addColorStop(st[0], 'rgba(' + rgb + ',' + (st[1] * s) + ')'); });
       return g;
     }
-    if (!L.bottom) {
+    if (L.side) {
+      var reach = M + L.colW + 300;
+      var g0 = L.right ? c.createLinearGradient(F.w, 0, F.w - reach, 0) : c.createLinearGradient(0, 0, reach, 0);
+      c.fillStyle = band(g0, [[0, 0.9], [0.6, 0.6], [1, 0]]);
+      c.fillRect(L.right ? F.w - reach : 0, 0, reach, F.h);
+      return;
+    }
+    if (L.mode !== 'bottom') {
       c.fillStyle = band(c.createLinearGradient(0, 0, 0, L.topEnd + 180), [[0, 0.9], [0.55, 0.55], [1, 0]]);
       c.fillRect(0, 0, F.w, L.topEnd + 180);
     }
@@ -398,53 +518,61 @@
       g.fillText('Add a photo', F.w / 2, F.h / 2);
     }
     shade(g, L);
+    g.textAlign = 'left';
 
     /* headline */
-    g.textAlign = 'left'; g.textBaseline = 'alphabetic';
+    g.textBaseline = 'alphabetic';
     setFont(g, 800, L.hs); spaced(g, -0.015, L.hs);
     g.shadowColor = 'rgba(' + C.darkRgb + ',0.6)'; g.shadowBlur = 28; g.fillStyle = '#fff';
-    g.fillText(L.head, M, L.base); g.shadowBlur = 0;
+    g.fillText(L.head, ax(L, g.measureText(L.head).width), L.base); g.shadowBlur = 0;
 
     g.fillStyle = C.primary; g.fillRect(0, 0, F.w, 22); g.fillRect(0, F.h - 22, F.w, 22);
 
-    /* award pill and month, in a row */
+    /* award pill, and the month beside it or under it */
     g.textBaseline = 'middle';
     var gap = L.award && L.month ? 22 : 0;
+    var pillX = L.stacked ? ax(L, L.aw) : L.x0;
     if (L.award) {
       setFont(g, 800, L.ss); spaced(g, 0.12, L.ss);
       g.shadowColor = 'rgba(' + C.darkRgb + ',0.45)'; g.shadowBlur = 18;
-      g.fillStyle = accent; rr(g, M, L.pillTop, L.aw, L.pillH, 4); g.fill(); g.shadowBlur = 0;
+      g.fillStyle = accent; rr(g, pillX, L.pillTop, L.aw, L.pillH, 4); g.fill(); g.shadowBlur = 0;
       g.fillStyle = lum(accent) > 0.35 ? '#000' : '#fff';
-      g.fillText(L.award, M + 18, L.pillTop + L.pillH / 2 + 1);
+      g.fillText(L.award, pillX + 18, L.pillTop + L.pillH / 2 + 1);
     }
     if (L.month) {
       setFont(g, 700, L.ss); spaced(g, 0.12, L.ss); g.fillStyle = '#fff';
       g.shadowColor = 'rgba(' + C.darkRgb + ',0.75)'; g.shadowBlur = 16;
-      g.fillText(L.month, M + L.aw + gap, L.pillTop + L.pillH / 2 + 1);
+      g.fillText(L.month, L.stacked ? ax(L, L.mw) : L.x0 + L.aw + gap, L.monthMid);
       g.shadowBlur = 0;
     }
 
-    /* bottom block: name, divider, club, lockup */
+    /* name, club, lockup */
     g.textBaseline = 'alphabetic'; g.fillStyle = '#fff';
     if (L.name) {
       setFont(g, 800, L.ns); spaced(g, -0.025, L.ns);
       g.shadowColor = 'rgba(' + C.darkRgb + ',0.6)'; g.shadowBlur = 24;
-      g.fillText(L.name, M, L.nameBase); g.shadowBlur = 0;
+      g.fillText(L.name, ax(L, g.measureText(L.name).width), L.nameBase); g.shadowBlur = 0;
     }
-    g.fillStyle = accent; g.fillRect(M, L.barTop, 96, 8);
-    g.fillStyle = C.navy; g.fillRect(M, L.divider, F.col ? L.colW : F.w - 2 * M, 2);
-    if (S.crest) { var cr = contain(S.crest, M, L.rowTop, 72, 72); window.NL_GFX_ART.draw(g, S.crest, cr.x, cr.y, cr.w, cr.h, k); }
-    var club = $('tClub').value.trim();
+    g.fillStyle = accent; g.fillRect(ax(L, 96), L.barTop, 96, 8);
+    var club = $('tClub').value.trim(), crestW = S.crest ? 90 : 0, mid = L.rowTop + 36;
+    var lock = S.lockups[S.div];
+    if (S.crest) {
+      var cr = contain(S.crest, ax(L, 72), L.rowTop, 72, 72);
+      window.NL_GFX_ART.draw(g, S.crest, cr.x, cr.y, cr.w, cr.h, k);
+    }
     if (club) {
       g.textBaseline = 'middle'; g.fillStyle = '#fff';
-      var cs = fitSize(g, club, 600, 34, 520, 0); setFont(g, 600, cs); spaced(g, 0, cs);
-      g.fillText(club, S.crest ? M + 90 : M, L.rowTop + 37);
+      /* Second in the hierarchy: about 40% of the name's size. */
+      var cmax = Math.max(30, Math.min(48, Math.round(L.ns * 0.4)));
+      var cs = fitSize(g, club, 600, cmax, L.wordsW - crestW, 0); setFont(g, 600, cs); spaced(g, 0, cs);
+      var cw = g.measureText(club).width;
+      g.fillText(club, L.right ? L.x0 + L.colW - crestW - cw : L.x0 + crestW, mid + 1);
     }
-    var lock = S.lockups[S.div];
     if (lock) {
-      var lh = 116, lw = Math.min(280, lock.naturalWidth * lh / lock.naturalHeight);
-      var lr = contain(lock, F.w - M - lw, L.rowTop + 36 - lh / 2, lw, lh);
-      window.NL_GFX_ART.draw(g, lock, lr.x, lr.y, lr.w, lr.h, k);
+      /* L.lockX/Y/W/H are the visible box; draw the whole file around it. */
+      var v = lock._visible || { x: 0, y: 0, w: 1, h: 1 };
+      var fw = L.lockW / v.w, fh = L.lockH / v.h;
+      window.NL_GFX_ART.draw(g, lock, L.lockX - v.x * fw, L.lockY - v.y * fh, fw, fh, k);
     }
     g.letterSpacing = '0px';
   }
@@ -610,8 +738,14 @@
     });
     NL.filterButton('#posPick', {
       label: 'Words', multiple: false, value: 'split', allLabel: 'Top and bottom',
-      options: [{ value: 'split', label: 'Top and bottom' }, { value: 'bottom', label: 'All at the bottom' }],
-      onChange: function (v) { S.words = v || 'split'; drawSoon(); }
+      options: [{ value: 'split', label: 'Top and bottom' }, { value: 'bottom', label: 'All at the bottom' },
+                { value: 'side', label: 'Down one side' }],
+      onChange: function (v) { S.words = v || 'split'; $('sidePick').hidden = S.words !== 'side'; drawSoon(); }
+    });
+    NL.filterButton('#sidePick', {
+      label: 'Side', multiple: false, value: 'left', allLabel: 'Left',
+      options: [{ value: 'left', label: 'Left' }, { value: 'right', label: 'Right' }],
+      onChange: function (v) { S.side = v || 'left'; drawSoon(); }
     });
     try { NL.clubPicker('#clubPick', { mode: 'search', divisions: ['National', 'North', 'South'], onSelect: setClub }); }
     catch (e) { console.error('[awards-full-photo] club picker', e); }
@@ -620,7 +754,7 @@
     var art = Promise.all([
       loadImg(ROSE_URL).then(function (i) { S.rose = i; }, function () {})
     ].concat(['National', 'North', 'South'].map(function (dv) {
-      return loadImg(LOCKUP_URL(dv)).then(function (i) { S.lockups[dv] = i; }, function () {});
+      return loadImg(LOCKUP_URL(dv)).then(function (i) { i._visible = visibleBox(i); S.lockups[dv] = i; }, function () {});
     })));
     Promise.all([fonts, art]).then(draw);
     draw();
