@@ -1,0 +1,89 @@
+name: Timer · Monthly database copy
+
+# Keeps one backup a month for a year.
+#
+# Firebase's daily backups are deleted after 30 days, so on their own they can
+# only take the database back a month. On the 1st of each month this copies
+# the newest daily backup (and its rules file) into this month's folder of a
+# second bucket, nl-tools-monthly-backups, where each copy is kept for a year.
+# If the daily backups have stopped, it takes the copy straight from the
+# database instead, so a month is never missed because the other thing broke.
+#
+# THE BUCKET IS PRIVATE BY CONSTRUCTION, and deliberately not Firebase Storage:
+# Storage's catch-all rule lets any signed-in user read a file with no rule of
+# its own, and a backup holds everything. This bucket is plain Cloud Storage
+# with uniform access and public access prevention, so only Google Cloud
+# accounts given a role on it can read it — none of the website's users can.
+# A one-year retention period means nobody can delete a copy, by mistake or
+# otherwise, until it is a year old; a lifecycle rule then deletes it.
+#
+# The first run creates the bucket. Run it by hand once to set it up and take
+# the first copy. If creating fails with HTTP 403, the last step says what to do.
+#
+# Restore from either bucket with Recovery · Restore from backup.
+
+on:
+  schedule:
+    - cron: '19 11 1 * *'   # 11:19 UTC on the 1st
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: rtdb-backup-monthly
+  cancel-in-progress: false
+
+jobs:
+  copy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DAILY: nl-tools-default-rtdb-backups
+      MONTHLY: nl-tools-monthly-backups
+      DB: https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Make sure the monthly bucket exists
+        run: |
+          set -euo pipefail
+          if gcloud storage buckets describe "gs://$MONTHLY" --format='value(name)' >/dev/null 2>&1; then
+            echo "The bucket is there."
+            exit 0
+          fi
+          # Delete at 367 days: one day clear of the year-long retention (P1Y
+          # is 365.25 days to Cloud Storage), so the rule never meets a lock.
+          echo '{"rule":[{"action":{"type":"Delete"},"condition":{"age":367}}]}' > lifecycle.json
+          gcloud storage buckets create "gs://$MONTHLY" \
+            --project=nl-tools \
+            --location=europe-west1 \
+            --uniform-bucket-level-access \
+            --public-access-prevention \
+            --retention-period=P1Y \
+            --lifecycle-file=lifecycle.json
+          echo "Created gs://$MONTHLY: europe-west1, private, each file kept a year."
+
+      - name: Copy this month's backup
+        run: |
+          set -euo pipefail
+          TOKEN=$(gcloud auth print-access-token) node scripts/rtdb-backup.mjs monthly
+
+      - name: If it could not
+        if: failure()
+        run: |
+          echo "HTTP 403 creating the bucket: this job may not create buckets. Create it once by hand instead:"
+          echo "  https://console.cloud.google.com/storage/create-bucket?project=nl-tools&authuser=media%40thenationalleague.org.uk"
+          echo "  Name nl-tools-monthly-backups · Region europe-west1 · Prevent public access ON · Access control Uniform"
+          echo "  · Retention policy 1 year (do not lock it) · then run this again."
+          echo "HTTP 403 reading or copying: give nl-archive-ga-reader@nl-tools.iam.gserviceaccount.com"
+          echo "  Storage Object Viewer on nl-tools-default-rtdb-backups and Storage Object Admin on nl-tools-monthly-backups."

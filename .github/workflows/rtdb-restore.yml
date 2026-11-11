@@ -1,0 +1,117 @@
+name: Recovery · Restore from backup
+
+# Puts part of the nl-tools database back as it was in a backup. One club's
+# Club Directory entry, one tool's data, one user — never the whole database.
+#
+# HOW TO USE IT
+#   1. Run it in report mode (the default). It changes nothing; the run's
+#      summary says how far live is from the backup, in counts.
+#   2. If that is what you want, run it again with mode restore and type
+#      restore in the confirm box.
+#
+# Fill in ONE of:
+#   club — a Club Directory club, exactly as named there. Restores its working
+#          copy, published copy and private details together, because
+#          restoring one without the others leaves the page and the editor
+#          disagreeing.
+#   path — any part of the database, e.g. app-data/ops-vacancies. Several,
+#          comma-separated, are restored together.
+#
+# when — the backup to use: 2026-11-10 for that day, 2026-11 for that month,
+#        blank for the newest. source — daily (the last 30 days) or monthly
+#        (one a month for a year).
+#
+# SAFE BY DESIGN
+#   - Before writing, what is live is saved to the private monthly bucket,
+#     under restore-saves/, so a restore can itself be undone.
+#   - After writing, it reads back and fails loudly unless live now matches
+#     the backup exactly.
+#   - It writes one line to the portal's audit log, like any other change.
+#   - The log is public (this repo is public), so it prints counts only:
+#     never a name, an address or a database key.
+#
+# The work is in scripts/rtdb-backup.mjs (restore).
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'report = say what would change. restore = put it back.'
+        required: true
+        default: report
+        type: choice
+        options: [report, restore]
+      source:
+        description: 'Which backups: daily (last 30 days) or monthly (one a month for a year)'
+        required: true
+        default: daily
+        type: choice
+        options: [daily, monthly]
+      when:
+        description: 'Backup date: 2026-11-10, or a month like 2026-11. Blank = newest.'
+        required: false
+        default: ''
+      club:
+        description: 'A Club Directory club, exactly as named there (or leave blank and use path)'
+        required: false
+        default: ''
+      path:
+        description: 'Or a database path, e.g. app-data/ops-vacancies (several: comma-separated)'
+        required: false
+        default: ''
+      confirm:
+        description: 'Type "restore" to allow restore mode. Ignored for report.'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: rtdb-restore
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DB: https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app
+      SAVE_BUCKET: nl-tools-monthly-backups
+      SOURCE_BUCKET: ${{ inputs.source == 'monthly' && 'nl-tools-monthly-backups' || 'nl-tools-default-rtdb-backups' }}
+      MODE: ${{ inputs.mode }}
+      WHEN: ${{ inputs.when }}
+      CLUB: ${{ inputs.club }}
+      PATHS: ${{ inputs.path }}
+    steps:
+      - name: Check the confirmation
+        if: inputs.mode == 'restore'
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [ "$CONFIRM" != "restore" ]; then
+            echo "::error::Restore mode needs the confirm box to say exactly: restore"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Compare, and restore if asked
+        run: |
+          set -euo pipefail
+          TOKEN=$(gcloud auth print-access-token) node scripts/rtdb-backup.mjs restore
+
+      - name: If it could not
+        if: failure()
+        run: |
+          echo "HTTP 403 on a bucket: give nl-archive-ga-reader@nl-tools.iam.gserviceaccount.com Storage Object Viewer"
+          echo "  on nl-tools-default-rtdb-backups and Storage Object Admin on nl-tools-monthly-backups."
+          echo "A restore that saved but did not write leaves live untouched; one that wrote but failed the"
+          echo "read-back says which path above. What was live before is in nl-tools-monthly-backups/restore-saves/."

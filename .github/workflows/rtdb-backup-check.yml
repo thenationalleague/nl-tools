@@ -1,0 +1,51 @@
+name: Timer · Check last night's backup
+
+# Firebase takes a backup of the whole nl-tools database once a day, into the
+# bucket nl-tools-default-rtdb-backups (turned on 11/11/2026, kept 30 days).
+# Nothing tells anyone if it stops. This does: it fails, so the run goes red
+# and GitHub emails, if the newest backup is over 26 hours old, or if it is
+# under half the size of the one before (a database does not lose half of
+# itself overnight; a broken backup does).
+#
+# It reads file names and sizes only. The log is public, so it never opens a
+# backup. The work is in scripts/rtdb-backup.mjs (check).
+#
+# If it fails with HTTP 403: the deployer service account needs Storage Object
+# Viewer on the backup bucket (see the last step).
+
+on:
+  schedule:
+    - cron: '41 10 * * *'   # 10:41 UTC daily; Firebase picks the backup hour itself
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DAILY: nl-tools-default-rtdb-backups
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Check the newest backup
+        run: |
+          set -euo pipefail
+          TOKEN=$(gcloud auth print-access-token) node scripts/rtdb-backup.mjs check
+
+      - name: If it could not look
+        if: failure()
+        run: |
+          echo "An HTTP 403 above means this job may not list the backup bucket. Fix, once:"
+          echo "  https://console.cloud.google.com/storage/browser/nl-tools-default-rtdb-backups;tab=permissions?project=nl-tools&authuser=media%40thenationalleague.org.uk"
+          echo "  Grant access → nl-archive-ga-reader@nl-tools.iam.gserviceaccount.com → Storage Object Viewer."
+          echo "Anything else above is about the backup itself: open Firebase → Realtime Database → Backups."
