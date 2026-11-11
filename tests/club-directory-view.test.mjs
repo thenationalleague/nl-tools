@@ -135,7 +135,11 @@ test('the editor no longer marks up a club with its import history', () => {
      this. */
   for (const gone of ["' \\u2014 COMPLETE'", "'Added by us'", "'Was: '", "'Mark complete'",
     ">Re-check all<", 'function runRecheck', 'function markProvenance', 'function markEdits', 'function showSignoff',
-    'function diagnose', 'function showMerges']) {
+    'function diagnose', 'function showMerges',
+    /* Change log is the one way back; Versions and Add organisation went with
+       it (Richard, 11/11/2026). */
+    '>Versions<', 'function showEditions', 'function restoreFrom',
+    '>Add organisation<', 'function addOrganisation']) {
     assert.ok(!live.includes(gone), `editor still has ${gone}`);
   }
   assert.ok(!/signedOffBy\(/.test(live), 'editing is still gated on sign-off');
@@ -147,4 +151,18 @@ test('the editor still logs every change, off the page', () => {
   assert.match(live, /function logEdit\(/);
   assert.match(live, /id="changes"[^>]*>Change log</);
   assert.match(live, /function persist\(club, what, undoOf\) \{\s*logJournal\(club, what, undoOf\);/);
+});
+
+test('publishing still freezes a copy, though nothing lists them any more', () => {
+  const live = strip(EDITOR);
+  assert.match(live, /ref\(ROOT \+ '\/editions'\)\.push\(\)/, 'Publish no longer writes an edition');
+  assert.match(live, /edRef\.set\(edition\)/);
+});
+
+test('a phone extension is small and stays in one piece', () => {
+  const rule = /\.cd-row__ext \{([^}]*)\}/.exec(CSS);
+  assert.ok(rule, '.cd-row__ext has no rule');
+  assert.match(rule[1], /font-size: var\(--text-xs\)/);
+  assert.match(rule[1], /white-space: nowrap/);
+  assert.ok(!/class="cd-f__sub">ext /.test(JS), 'an extension still uses the facts style');
 });

@@ -30,6 +30,14 @@
             (was My changes), not on the page.
           · Blank job titles still show, as "No job title": a gap to chase
             in a live record, not a fault in a submission.
+          · Versions and Add organisation go (Richard). Change log is how a
+            change is put back. Publish still freezes a copy of everything in
+            editions/ (write-once in the rules), so a club can be recovered
+            from a publication if it ever has to be; there is just no button
+            for it. Publish no longer asks for a name: the copy is labelled
+            "Published <date>".
+          · The extension beside a phone number is set small and kept on
+            one line (_directory.css, ?v=40).
   v2.0 – (11/11/2026) Editing moves behind the staff login (Richard): this
           page is /club-directory/admin/edit/, entered from the staff page,
           and gated by auth-guard instead of an editor code. The plan in
@@ -689,7 +697,7 @@
   folders deep and this page is three.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=74">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=39">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=40">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
@@ -698,7 +706,7 @@
 <!-- GA4 for nl.tools — cookieless, no banner, no identity. See system/nl-analytics.js -->
 <script src="/system/nl-analytics.js?v=1"></script>
 <script src="/club-directory/_tidy.js?v=30"></script>
-<script src="/club-directory/_directory.js?v=39"></script>
+<script src="/club-directory/_directory.js?v=40"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -720,7 +728,8 @@
       items: [
         'The directory is a live document now: the import-era markers (Was, Added by us, Changed, Mark complete) are gone and every club is always editable.',
         'Choose a club with the standard club picker.',
-        'Every change is still recorded — open Change log to see it.'
+        'Every change is still recorded – open Change log to see it, and undo from there.',
+        'Versions and Add organisation are gone. Publish still keeps a frozen copy each time.'
       ]
     },
     {
@@ -1033,10 +1042,8 @@
     </div>
     <div class="nl-idbar__actions">
       <div class="ed-pick" id="pick"></div>
-      <button class="nl-idbar__btn" id="editions" type="button" hidden>Versions</button>
       <button class="nl-idbar__btn ed-out--go" id="publish" type="button" hidden>Publish</button>
       <button class="nl-idbar__btn" id="changes" type="button">Change log</button>
-      <button class="nl-idbar__btn" id="addOrg" type="button" hidden>Add organisation</button>
       <a class="nl-idbar__btn" href="/club-directory/admin/">All clubs</a>
     </div>
   </div>
@@ -1155,7 +1162,6 @@
     names = Object.keys(ALL).sort();
     NL.installAuditHook();
     if (!names.length) { offerBake(); $('app').hidden = false; return; }
-    wireEditions();
     $('changes').addEventListener('click', showChanges);
     /* Master only. It writes an edition, and the rules make an edition
        writable by a master alone — an editor pressing this would be refused by
@@ -1165,11 +1171,6 @@
     if (session.role === 'admin') {
       $('publish').hidden = false;
       $('publish').addEventListener('click', publishNow);
-      /* Master too, though the rules would let an editor: creating a record
-         puts a new page on every surface, and that is a release decision
-         like Publish, not a routine edit. */
-      $('addOrg').hidden = false;
-      $('addOrg').addEventListener('click', addOrganisation);
     }
     wireView();
     PICK = NLDirectory.picker($('pick'), {
@@ -1192,15 +1193,6 @@
     $('out').innerHTML = '<p class="cd-empty">' + esc((err && err.message) || String(err)) + '</p>';
     $('app').hidden = false;
   });
-
-  /* Versions: the frozen copy each Publish writes. Manage only, and enforced
-     in the rules as well — an edition is the thing that exists to survive a
-     bad edit, so it is never editable. (Re-check all lived here until v2.1;
-     it re-ran the import's tidier, and the directory is past its import.) */
-  function wireEditions() {
-    $('editions').hidden = false;
-    $('editions').addEventListener('click', showEditions);
-  }
 
   /* ------------------------------------------------------------ the bake
      Only offered when the node is empty, only to the master key, and it
@@ -1882,136 +1874,13 @@
   }
 
   /* -------------------------------------------------------------- editions
-     Undo protects a change. This protects the project.
-
-     An edition is the whole directory, frozen: every club, every person, and
-     the provenance that explains how it got that way. Taken before handing
-     the tool to somebody new, and again when the League agrees a version is
-     the version. It is the answer to "what did this look like in August",
-     which is a question nobody asks until they very much need to.
-
-     Two rules do the work, and both are in the rules file rather than here,
-     because a safety net a page can decide to ignore is not one:
-
-       · Only a master may create one. An editor must not be able to touch the
-         thing that exists to survive an editor.
-       · Write-once. There is no parent write grant, only a per-edition rule
-         requiring the key to be empty — so nobody, master included, can
-         overwrite or delete an edition. You supersede one by making another.
-
-     Restoring is per club. Putting all 72 back at once is available and loud,
-     but the realistic recovery is "Chester has gone wrong, put Chester back",
-     and a single button that silently discards a fortnight is the footgun we
-     already took out of undo. A restore goes through saveStructure like any
-     other change, so it lands in the journal and can itself be undone. */
-  function editionsList() {
-    return firebase.database().ref(ROOT + '/editions').once('value').then(function (s) {
-      var v = s.val() || {};
-      return Object.keys(v).map(function (k) {
-        var e = v[k] || {};
-        return { id: k, at: e.at || 0, by: e.by || 'unknown', label: e.label || '',
-                 clubs: Object.keys(e.clubs || {}).length };
-      }).sort(function (a, b) { return b.at - a.at; });
-    });
-  }
-
-  function showEditions() {
-    var body = document.createElement('div');
-    body.className = 'ed-jrnl';
-    body.innerHTML = '<p class="form-hint">Loading\u2026</p>';
-    var ctrl = NL.modal({
-      title: 'Published versions',
-      size: 'lg',
-      body: body,
-      buttons: [
-        { label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } }
-      ]
-    });
-    editionsList().then(function (list) {
-      if (!list.length) {
-        body.innerHTML = '<p class="cd-empty">Nothing has been published yet. ' +
-          'Publishing freezes a copy of all ' + names.length + ' clubs at the same ' +
-          'time, which nobody can alter afterwards \u2014 so every version readers ' +
-          'have seen stays recoverable.</p>';
-        return;
-      }
-      body.innerHTML = '<p class="form-hint">Every publication, newest first. Each is ' +
-        'the whole directory as it stood when it went out, and none can be altered. ' +
-        'Restoring puts one club back to how it was at that publication, and lands ' +
-        'in the journal like any other change.</p><ul class="ed-jrnl__list">' + list.map(function (e) {
-        return '<li class="ed-jrnl__row">' +
-          '<div class="ed-jrnl__main">' +
-            '<span class="ed-jrnl__what">' + esc(e.label) + '</span>' +
-            '<span class="ed-jrnl__meta">' + esc(NL.formatDateTime(e.at)) + ' \u00b7 ' +
-              esc(e.by) + ' \u00b7 ' + e.clubs + ' clubs</span>' +
-          '</div>' +
-          '<button class="btn btn--sm btn--ghost" type="button" data-ed="' +
-            esc(e.id) + '">Restore\u2026</button>' +
-        '</li>';
-      }).join('') + '</ul>';
-      body.querySelectorAll('button[data-ed]').forEach(function (b) {
-        b.addEventListener('click', function () { restoreFrom(b.dataset.ed, ctrl); });
-      });
-    }).catch(function (err) {
-      body.innerHTML = '<p class="cd-empty">' + esc((err && err.message) || err) + '</p>';
-    });
-  }
-
-  function restoreFrom(id, ctrl) {
-    var club = current;
-    if (!club) { NL.toast('Open a club first', 'error'); return; }
-    firebase.database().ref(ROOT + '/editions/' + id).once('value').then(function (s) {
-      var ed = s.val();
-      if (!ed) { NL.toast('That version could not be read', 'error'); return; }
-      var was = (ed.clubs || {})[club];
-      if (!was) {
-        NL.alert(club + ' was not in that version, so there is nothing to put ' +
-          'back. Pick a club that existed when it was frozen.', { title: 'Not in that version' });
-        return;
-      }
-      var now = NLDirectory.arr((ALL[club] || {}).people).length;
-      var then = NLDirectory.arr(was.people).length;
-      NL.confirm('Put ' + club + ' back to "' + (ed.label || 'that version') + '"?', {
-        title: 'Restore ' + club,
-        variant: 'danger',
-        detail: 'It goes back to exactly how it stood on ' + NL.formatDate(ed.at) +
-          ' \u2014 ' + then + ' people, where it now has ' + now + '. Everything done ' +
-          'to this club since is discarded.\n\nOnly this club. The other ' +
-          (names.length - 1) + ' are untouched, and this lands in the journal so it ' +
-          'can itself be undone.',
-        confirmText: 'Restore ' + club
-      }).then(function (ok) {
-        if (!ok) { return; }
-        if (ctrl && ctrl.close) { ctrl.close(); }
-        /* Mutated, never replaced. Replacing it orphans every closure the
-           current render is holding — the card pen among them — so the page
-           carries on editing an object nothing will ever save. That is what
-           made a club-card edit write its green marker and change nothing
-           else. */
-        var live = ALL[club] || (ALL[club] = {});
-        Object.keys(live).forEach(function (k) { delete live[k]; });
-        var back = clone(was) || {};
-        Object.keys(back).forEach(function (k) { live[k] = back[k]; });
-        live.club = club;
-        var prov = clone((ed.provenance || {})[club]) || {};
-        var cur = PROV[club] || (PROV[club] = {});
-        /* The journal is the one thing a restore must not roll back: it is the
-           record that the restore happened, and of everything before it. */
-        cur.edits = NLDirectory.arr(prov.edits);
-        cur.changes = NLDirectory.arr(prov.changes);
-        cur.attention = NLDirectory.arr(prov.attention);
-        cur.merges = NLDirectory.arr(prov.merges);
-        var db = firebase.database();
-        ['edits', 'changes', 'attention', 'merges'].forEach(function (k) {
-          db.ref(ROOT + '/provenance/' + club + '/' + k).set(cur[k]);
-        });
-        saveStructure(club, 'Restored to \u201c' + (ed.label || 'a frozen version') +
-          '\u201d', null, true);
-      });
-    }).catch(function (err) {
-      NL.toast('Could not restore: ' + ((err && err.message) || err), 'error');
-    });
-  }
+     Each Publish also writes the whole directory, frozen, to editions/ -
+     write-once in the rules, so nobody can alter or delete one. Until v2.1
+     a Versions button listed them and put a club back from one; it went
+     because Change log already puts changes back one at a time, and two
+     ways to undo is one too many. The copies are still made, so "how did
+     Chester look when we published in November" stays answerable, by
+     reading the node, if it is ever asked. */
 
   /* --------------------------------------------------------------- publish
      The reader used to read the directory itself and decide, in the browser,
@@ -2022,7 +1891,7 @@
      carry into a public page, and a public page is where this is going.
 
      So publishing builds a SECOND copy that is already safe to hand over.
-     Signed-off clubs only, and for anyone the club asked us to keep back the
+     Every club, and for anyone the club asked us to keep back the
      contact details are absent rather than flagged: the person is still
      listed, because a directory that silently omits the safeguarding officer
      reads as a club without one, but there is nothing in the file to hide.
@@ -2207,22 +2076,18 @@
   function publishConfirmed(built) {
     var prev = PUBLISHED_AT;
     var when = NL.formatDate(Date.now());
-    NL.prompt('This replaces what readers see with all ' + built.count +
+    NL.confirm('This replaces what readers see with all ' + built.count +
       ' club' + (built.count === 1 ? '' : 's') + ' as they stand right now \u2014 ' +
       built.people + ' people, of whom ' + built.held + ' asked us to keep their ' +
       'contact details back. Those details are left out of the published copy ' +
       'entirely; the person is still listed.\n\n' +
-      'It also freezes a copy of everything as it stands, which nobody can ' +
-      'alter afterwards \u2014 so any club can be put back to how it is right ' +
-      'now. Give it a name you will recognise in six months.\n\n' +
       (prev ? 'Last published ' + NL.formatDateTime(prev) + '.'
             : 'Nothing has been published before.'), {
       title: 'Publish',
-      default: 'Published ' + when,
-      placeholder: 'e.g. Published ' + when,
       confirmText: 'Publish'
-    }).then(function (label) {
-      if (label === null) { return; }
+    }).then(function (ok) {
+      if (!ok) { return; }
+      var label = 'Published ' + when;
       var btn = $('publish');
       btn.disabled = true; btn.textContent = 'Publishing\u2026';
       var db = firebase.database();
@@ -3456,59 +3321,6 @@
       ]
     });
     setTimeout(function () { form.querySelector('#apName').focus(); }, 30);
-    return ctrl;
-  }
-
-  /* The League and related bodies as records of their own — org: true on the
-     root, an optional crestName for the badge. The name becomes the RTDB key
-     verbatim, exactly as the club records are keyed, so the characters RTDB
-     refuses in a key are refused here rather than thrown at save; a collision
-     would silently swallow a club record, so it is checked first. There is no
-     rename or delete afterwards — same as a club — which is why the name is
-     the whole form. */
-  function addOrganisation() {
-    var form = document.createElement('div');
-    form.className = 'form-grid';
-    form.innerHTML =
-      '<div class="form-group span2"><label>Name <span class="req">*</span></label>' +
-        '<input id="aoName" autocomplete="off" placeholder="e.g. The National League"></div>' +
-      '<div class="form-group span2"><label>Crest</label>' +
-        '<input id="aoCrest" autocomplete="off" placeholder="e.g. The National League">' +
-        '<p class="form-hint">A filename in /assets/crests/ without the .png — the mark ' +
-        'shown on white: tiles and lists. Blank falls back to the name.</p></div>' +
-      '<div class="form-group span2"><label>Banner crest</label>' +
-        '<input id="aoBanner" autocomplete="off" placeholder="e.g. National League rose white">' +
-        '<p class="form-hint">The mark for the coloured banner. Blank uses the crest above.</p></div>';
-    var ctrl = NL.modal({
-      title: 'Add an organisation',
-      body: form,
-      buttons: [
-        { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
-        { label: 'Add', className: 'btn--primary', onClick: function (c) {
-          var name = form.querySelector('#aoName').value.trim();
-          if (!name) { NL.toast('A name is needed', 'error'); return; }
-          if (/[.#$\/\[\]]/.test(name)) {
-            NL.toast('A name cannot contain . # $ / [ ]', 'error'); return;
-          }
-          if (ALL[name]) {
-            NL.toast(name + ' is already in the directory', 'error'); return;
-          }
-          var crestName = form.querySelector('#aoCrest').value.trim();
-          var bannerCrest = form.querySelector('#aoBanner').value.trim();
-          var rec = { club: name, org: true, info: {}, people: [] };
-          if (crestName) { rec.crestName = crestName; }
-          if (bannerCrest) { rec.bannerCrestName = bannerCrest; }
-          ALL[name] = rec;
-          names = Object.keys(ALL).sort();
-          /* The chooser's roster is the records, so the new one joins it;
-             persist() then draws it, which selects it. */
-          if (PICK) { PICK.refresh(); }
-          c.close();
-          persist(name, 'Organisation added');
-        } }
-      ]
-    });
-    setTimeout(function () { form.querySelector('#aoName').focus(); }, 30);
     return ctrl;
   }
 
