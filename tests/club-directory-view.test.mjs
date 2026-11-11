@@ -250,9 +250,11 @@ test('the private half holds only what the public copy leaves out', () => {
 
 test('the rules: old codes off, private details for staff and that club only', () => {
   const all = JSON.stringify(RULES);
-  assert.deepEqual([...all.matchAll(/token\.dir === '(\w+)'/g)].map((m) => m[1]), ['reader'],
-    'only the reader code is honoured, and only once');
-  assert.match(RULES.published['.read'], /token\.dir === 'reader'/);
+  /* Every Directory code (editor, master, reader) is retired, 11/11/2026:
+     no rule honours a `dir` claim, and the handshake's nodes are gone. */
+  assert.ok(!/token\.dir/.test(all), 'a retired Directory code is honoured again');
+  for (const k of ['authRequests', 'authGrants', 'rate']) assert.ok(!(k in RULES), k + ' is back');
+  assert.match(RULES.published['.read'], /auth\.token\.club != null/);
   for (const k of ['clubs', 'provenance', 'editions', 'undo']) {
     assert.ok(!/token\.dir|token\.club/.test(RULES[k]['.read']), k + ' is readable by a code');
   }
@@ -273,7 +275,7 @@ test('club logins are off on the staff page', () => {
 
 test("a club's own page shows its private details, marked; others show the marker", () => {
   const live = strip(CLUBPAGE);
-  assert.match(live, /ref\(NLGate\.ROOT \+ '\/private\/' \+ OWN\)/, 'reads its OWN private half only');
+  assert.match(live, /ref\(ROOT \+ '\/private\/' \+ OWN\)/, 'reads its OWN private half only');
   assert.match(live, /o\.showHidden = isOwn\(o\.club\) && OWN_PRIVATE/);
   assert.match(live, /privateMarker: true/);
   assert.match(live, /As a representative of your club, you can see/);

@@ -72,7 +72,7 @@ Three categories, and knowing which one you are in tells you what a merge does.
   ⚠️ It runs `firebase deploy --only functions`, which deploys **every**
   function in the directory, not just the one you changed. There are around a
   dozen: `consumeInvite`, `submitAccessRequest`, `withdrawAccessRequest`,
-  `clubCodeAuth`, `clubDirectoryAuth`, `fanWidgetsAuth`, `fixturesGraphicsAtFullTime`, `handbookPdfOnPublish`,
+  `clubCodeAuth`, `fanWidgetsAuth`, `fixturesGraphicsAtFullTime`, `handbookPdfOnPublish`,
   `nlsIngestTick`, `nlsIngestHourly`, `programmeAuth`, `uwPromoAuth`,
   `matchdayLiveAuth`, `matchdayLiveSync`, `matchdayLiveRetention`. A broken
   one takes the others with it.

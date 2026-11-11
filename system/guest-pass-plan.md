@@ -42,7 +42,7 @@ This is not a new mechanism. Four Cloud Functions already do the same handshake:
 take a passcode, validate it **server-side**, mint a **scoped claim**.
 
 - `programmeAuth` → `pClub` (a club key, or `'*'` for master)
-- `clubDirectoryAuth`, `uwPromoAuth` → `uwRole`, `fanWidgetsAuth`
+- `uwPromoAuth` → `uwRole`, `fanWidgetsAuth` (`clubDirectoryAuth` was retired 11/11/2026)
 
 RTDB rules already read those claims: `auth.token.pClub === $club`. A guest pass
 is the same shape with a different payload — a list of tool keys rather than one

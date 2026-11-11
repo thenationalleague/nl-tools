@@ -230,7 +230,7 @@ not a control, and the README said so.
 That is fixed. `functions/uw-promo.js` (`uwPromoAuth`) validates the PIN or
 passcode with the Admin SDK and returns a Firebase custom token carrying a
 claim; `config` is now readable only by a minted **master** token. Third
-instance of the shape `programme.js` and `club-directory.js` already use.
+instance of the shape `programme.js` uses (and `club-directory.js` did, until it was retired on 11/11/2026).
 
 | Claim | Who |
 |---|---|
