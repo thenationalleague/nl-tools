@@ -1,7 +1,14 @@
 /* =========================================================================
    NL Tools — Club Directory presentation
    File: /club-directory/_directory.js
-   Version: v1.19 (11/11/2026)
+   Version: v1.20 (11/11/2026)
+
+   v1.20 — how a number and an address are SHOWN (the data is untouched).
+   A UK mobile reads 07xxx xxx xxx whatever spacing it was typed with, and
+   an email address may only break at the @ or before a dot, never in the
+   middle of a word (Richard). phoneText() and mailText(); tel: links still
+   take the bare digits.
+
 
    v1.19 — a private detail is the detail with a padlock in front of it on
    a faint tint, not a "PRIVATE" pill after it (Richard: "looks shit"). And
@@ -567,10 +574,10 @@
       var b = boxes[k] || {};
       var bits = [];
       if (b.email) {
-        bits.push('<a href="mailto:' + esc(b.email) + '">' + esc(b.email) + '</a>');
+        bits.push('<a href="mailto:' + esc(b.email) + '">' + mailText(b.email) + '</a>');
       }
       if (b.phone) {
-        bits.push('<a href="tel:' + esc(tel(b.phone)) + '">' + esc(b.phone) + '</a>' +
+        bits.push('<a href="tel:' + esc(tel(b.phone)) + '">' + phoneText(b.phone) + '</a>' +
           (b.ext ? ' <span class="cd-row__ext">ext ' + esc(b.ext) + '</span>' : ''));
       }
       return [b.dept || k, bits.join(' &middot; ')];
@@ -578,6 +585,24 @@
   }
 
   function tel(n) { return String(n || '').replace(/\s+/g, ''); }
+  /* A UK mobile in the one shape people read them in: 07xxx xxx xxx, from
+     07…, +44 7… or 44 7…, however it was spaced. Anything else (landlines,
+     numbers abroad, anything odd) is shown exactly as it was entered — a
+     landline's grouping depends on its area code, and guessing it wrong is
+     worse than leaving it. Escaped HTML out. */
+  function phoneText(n) {
+    var raw = String(n || '').trim();
+    var d = raw.replace(/[\s().-]/g, '').replace(/^\+?44/, '0');
+    if (/^07\d{9}$/.test(d)) {
+      return d.slice(0, 5) + ' ' + d.slice(5, 8) + ' ' + d.slice(8);
+    }
+    return esc(raw);
+  }
+  /* An address broken only where it reads naturally: after the @, before a
+     dot. <wbr> offers the break; CSS no longer breaks inside words. */
+  function mailText(a) {
+    return esc(String(a || '')).replace(/@/g, '@<wbr>').replace(/\./g, '<wbr>.');
+  }
   function url(u) { return /^https?:\/\//i.test(u) ? u : 'https://' + u; }
   function num(v) {
     var n = String(v || '').replace(/[^0-9]/g, '');
@@ -608,11 +633,11 @@
 
     var mail = em.show.map(function (e) {
       return held(e, showHidden,
-        '<a href="mailto:' + esc(e.value) + '">' + esc(e.value) + '</a>');
+        '<a href="mailto:' + esc(e.value) + '">' + mailText(e.value) + '</a>');
     }).join('<br>');
     var ph = tl.show.map(function (x) {
       return held(x, showHidden,
-        '<a href="tel:' + esc(tel(x.value)) + '">' + esc(x.value) + '</a>' +
+        '<a href="tel:' + esc(tel(x.value)) + '">' + phoneText(x.value) + '</a>' +
         (x.ext ? ' <span class="cd-row__ext">ext ' + esc(x.ext) + '</span>' : ''));
     }).join('<br>');
 
@@ -757,12 +782,12 @@
       return '<a class="cd-pc__line' + (priv(e) ? ' is-private' : '') + '" href="mailto:' +
         esc(e.value) + '"' + (priv(e) ? ' title="Private"' : '') + '>' +
         '<span class="cd-pc__ic">' + (priv(e) ? strokeGlyph('lock') : glyph('email')) + '</span>' +
-        esc(e.value) + scopeNote(e, p) + '</a>';
+        mailText(e.value) + scopeNote(e, p) + '</a>';
     }).concat(tl.show.map(function (x) {
       return '<a class="cd-pc__line' + (priv(x) ? ' is-private' : '') + '" href="tel:' +
         esc(tel(x.value)) + '"' + (priv(x) ? ' title="Private"' : '') + '>' +
         '<span class="cd-pc__ic">' + (priv(x) ? strokeGlyph('lock') : glyph('phone')) + '</span>' +
-        esc(x.value) +
+        phoneText(x.value) +
         (x.ext ? ' <span class="cd-row__ext">ext ' + esc(x.ext) + '</span>' : '') +
         scopeNote(x, p) + '</a>';
     })).join('');
@@ -896,9 +921,9 @@
              are one thought; which county FA it belongs to is another, and it
              was splitting the pair across a row break in the grid. */
           ['Main email', info.mainEmail
-            ? '<a href="mailto:' + esc(info.mainEmail) + '">' + esc(info.mainEmail) + '</a>' : ''],
+            ? '<a href="mailto:' + esc(info.mainEmail) + '">' + mailText(info.mainEmail) + '</a>' : ''],
           ['Switchboard', info.phone
-            ? '<a href="tel:' + esc(tel(info.phone)) + '">' + esc(info.phone) + '</a>' : ''],
+            ? '<a href="tel:' + esc(tel(info.phone)) + '">' + phoneText(info.phone) + '</a>' : ''],
           ['County FA', esc(info.countyFA || '')],
           ['Club sponsor', esc(info.spClub || '')],
           ['Shirt front', esc(info.spFront || '')],
@@ -1139,6 +1164,8 @@
     ownHide: ownHide,
     addrOf: addrOf,
     glyph: glyph,
+    phoneText: phoneText,
+    mailText: mailText,
     strokeGlyph: strokeGlyph,
     listMembers: listMembers,
     isOrg: isOrg,
