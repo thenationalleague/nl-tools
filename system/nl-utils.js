@@ -1,7 +1,15 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.50 (12/11/2026)
+   Version: v1.51 (12/11/2026)
+
+   v1.51 — NL.gas (fetch, send, nonJsonReason) and NL.uuid: the Apps Script
+   calls, promoted from the portal on their second use, unchanged in
+   behaviour. Invites and Requests moved to People and cards; the portal's
+   Users pane still resends invites. Tested in tests/gas-canon.test.mjs.
+   NL.writeAudit takes an optional third argument, the person acted on,
+   and indexes the entry under them too (the portal's writeAuditFor).
+   Cache-bust nl-utils ?v=54 -> ?v=55.
 
    v1.50 — NL.pass for People and cards (permissions plan, step 4): keys
    take an end date in build(); issueRights says what a pass may give out
@@ -1730,7 +1738,12 @@
     catch(e) { return String(d); }
   }
 
-  window.NL.writeAudit = function(action, detail) {
+  /* target (v1.51, optional): { uid, name, email } of the person acted ON —
+     an approval, an invite, a pass. The entry carries targetUid/targetName/
+     targetEmail and is indexed under the target too, so their own audit
+     trail shows it. The portal's writeAuditFor did this for itself until
+     Requests moved to People and cards; the shape is the same. */
+  window.NL.writeAudit = function(action, detail, target) {
     if (!window.firebase || !firebase.database) return;
     if (!window.NL.session) return;
     window.NL._auditLastManualAt = Date.now();
@@ -1744,10 +1757,18 @@
       ts: now,
       at: new Date(now).toISOString()
     };
+    if (target && target.uid) {
+      entry.targetUid = String(target.uid);
+      entry.targetName = target.name || '';
+      entry.targetEmail = target.email || '';
+    }
     var key = String(now) + '_' + Math.random().toString(36).slice(2, 8);
     var updates = {};
     updates['admin/audit/' + key] = entry;
     updates['admin/audit-by-user/' + window.NL.session.uid + '/' + key] = entry;
+    if (entry.targetUid && entry.targetUid !== window.NL.session.uid) {
+      updates['admin/audit-by-user/' + entry.targetUid + '/' + key] = entry;
+    }
     /* Wait for Firebase Auth to be restored before writing — RTDB rules check
        the live auth token, not NL.session. Tools that don't otherwise touch
        RTDB (graphics, etc.) may have a populated session but no resolved
@@ -2476,6 +2497,120 @@
        no access. Fail closed. */
     return (level === 'access' || level === 'admin') ? level : 'off';
   };
+
+  /* ===================================================================
+     NL.gas — calls to the Apps Script web app (v1.51)
+
+     Promoted from the portal on its second use: the invite and request
+     flows moved to People and cards (/people/), and the portal's Users pane
+     still resends invites. Behaviour is unchanged from the portal's
+     nlGasFetch / nlGasSend / nlUuid / nlGasNonJsonReason (portal v5.122–
+     v5.123, 15/09/2026):
+
+       NL.gas.fetch(payload)  POSTs to NL.endpoints.gas with a fresh Firebase
+         ID token on the payload (GAS checks it and the caller's role before
+         acting). Resolves with { ok, status, url, json(), text() }. The body
+         is read HERE: Apps Script reports every fault that matters as an HTML
+         page, and the browser's own parser reduces them all to "Unexpected
+         token '<'". When the body is not JSON, json() rejects with the page's
+         title, first line and the host that answered (nonJsonReason).
+
+       NL.gas.send(payload, opts)  the idempotent send every invite uses. The
+         googleusercontent relay 404s intermittently AFTER the script has
+         acted, so a "failure" may have delivered. The backend keys on
+         payload.token and never emails twice for one token, so the SAME
+         payload is re-sent until a real reply arrives. A clean {ok:false} is
+         a genuine refusal and is returned, never retried. opts.retries
+         (default 4); a token is minted if the payload has none.
+
+       NL.uuid()  a v4 UUID, for those tokens.
+
+     Tested in tests/gas-canon.test.mjs with NL.gas.fetch stubbed; the stub
+     returns only the shapes above, which are this file's own. */
+  (function () {
+    function uuid() {
+      try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch (e) {}
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+        var r = Math.random() * 16 | 0;
+        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+      });
+    }
+
+    function nonJsonReason(text, res) {
+      text = String(text || '');
+      var title = (text.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [, ''])[1]
+        .replace(/\s+/g, ' ').trim();
+      var body = text
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (title && body.indexOf(title) === 0) body = body.slice(title.length).trim();
+      if (body.length > 140) body = body.slice(0, 140).replace(/\s+\S*$/, '') + '…';
+      var host = '';
+      try { host = new URL(res.url).host; } catch (e) {}
+      return 'Google returned a web page, not a reply (HTTP ' + res.status +
+        (host ? ' from ' + host : '') + ')' +
+        (title ? ' — "' + title + '"' : '') +
+        (body ? ': ' + body : '');
+    }
+
+    function gasFetch(payload) {
+      return (window.NL.ensureAuth ? window.NL.ensureAuth() : Promise.resolve())
+        .then(function () {
+          var u = firebase.auth().currentUser;
+          return u ? u.getIdToken() : null;
+        })
+        .then(function (idToken) {
+          payload.idToken = idToken || '';
+          return fetch(window.NL.endpoints.gas + '?cb=' + Date.now(), {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain' },
+            body: JSON.stringify(payload)
+          });
+        })
+        .then(function (res) {
+          return res.text().then(function (text) {
+            var parsed = null, parseErr = null;
+            try { parsed = JSON.parse(text); } catch (e) { parseErr = e; }
+            return {
+              ok: res.ok, status: res.status, url: res.url,
+              text: function () { return Promise.resolve(text); },
+              json: function () {
+                return parseErr ? Promise.reject(new Error(nonJsonReason(text, res))) : Promise.resolve(parsed);
+              }
+            };
+          });
+        });
+    }
+
+    function gasSend(payload, opts) {
+      opts = opts || {};
+      var maxTries = (opts.retries != null ? opts.retries : 4) + 1;
+      var backoff = opts.backoff || function (n) { return Math.min(400 * Math.pow(2, n), 4000); };
+      if (!payload.token) payload.token = uuid();
+      function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+      function attempt(n) {
+        var retry = function (err) {
+          if (n + 1 >= maxTries) return Promise.reject(err);
+          return wait(backoff(n)).then(function () { return attempt(n + 1); });
+        };
+        /* json() resolves with parsed JSON (ok true OR false: done) and rejects
+           on a non-JSON body (retry). A network failure also retries. Looked up
+           on NL.gas at call time so a test can stand in for the network. */
+        return window.NL.gas.fetch(payload).then(
+          function (res) { return res.json().then(function (data) { return data; }, retry); },
+          retry
+        );
+      }
+      return attempt(0);
+    }
+
+    window.NL.uuid = uuid;
+    window.NL.gas = { fetch: gasFetch, send: gasSend, nonJsonReason: nonJsonReason };
+  })();
 
   /* ===================================================================
      NL.pass — the new access model: cards, keys and one resolver (v1.49)

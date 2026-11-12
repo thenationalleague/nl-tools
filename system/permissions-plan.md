@@ -459,8 +459,15 @@ Where it differs from step 4 as planned:
    `/people/`. The pass drawing lives in one page; copying it would be two
    copies to drift. If the form is wanted inside People itself, promote the
    pass drawing to canon first (`nl-brand.css` + an `NL.pass` renderer).
-2. **Invites and Requests are still in the portal's admin area**, linked from
-   People. They move next, the email path unchanged first.
+2. **Invites and Requests moved in** (second part, 12/11/2026). Same writes
+   and emails; the Apps Script calls are canon now (`NL.gas`, `NL.uuid`,
+   nl-utils v1.51), and `NL.writeAudit` takes the person acted on. Two
+   changes on the way: an invite no longer sets per-tool exceptions (it
+   sends the role's defaults, as the old form did unless its sliders were
+   moved), and Reject and Revoke ask first. The portal's Invites and
+   Requests tabs are links here, and `?tab=requests` / the old
+   `?tab=inbound` in admin emails land here. The Users pane and the Audit
+   log stay in the portal for now.
 3. **League Operations can issue only if their role is League Admin** until
    step 6: the database rules let only League Admins and the superadmin
    write `users/<uid>/pass`. Opening that to the League Operations key is a
@@ -468,9 +475,9 @@ Where it differs from step 4 as planned:
 4. **Agreeing each difference** is not recorded yet; the report and its CSV
    are the record for now.
 
-Still to do after this: Invites and Requests into People, reminders before a
-key ends, opening a tool as someone else, the Access denied page, generated
-rules.
+Still to do after this: the portal's Users pane (per-tool switches) retires
+once passes decide, reminders before a key ends, opening a tool as someone
+else, the Access denied page, generated rules.
 
 ## Safety rails
 

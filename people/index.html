@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — People and cards
-  Version: v1.1 (12/11/2026)
+  Version: v1.2 (12/11/2026)
   File: /people/index.html
 
   Who holds which pass: everyone with an account, their role today, their
@@ -11,20 +11,28 @@
   Tabs (a closed set, so canon .tabs):
     People   — everyone, searchable; View their pass (View as) and Edit
                their pass (the issue form on /pass/?view=issue&uid=).
+    Invites  — invite someone (role, club, job title), and the invites
+               waiting to be accepted: resend, revoke. Moved from the
+               portal's admin area; sends through NL.gas.send.
+    Requests — clubs' sign-up requests: approve, reject, archive. Moved
+               from the portal; ?tab=requests (and the old ?tab=inbound
+               in admin emails) opens it.
     Manage   — the migration report: for every person with a pass, each
                tool where the pass would give a different level from
                today's rules. Richard agrees every difference before
                step 6. Downloads as CSV.
 
-  Still in the portal's admin area for now, and moving here next: Invites
-  and Requests. The invite email path moves across unchanged first.
 
   DISPLAY AND ISSUE ONLY. auth-guard still decides who opens what from role
   and defaults. A pass written here changes My pass, not access, until the
   switch at step 6.
 
   Storage (RTDB):
-    users            read (League roles can read it today)
+    users            read (League roles can read it today); an approval or
+                     rejection writes pending / rejected / tools on the
+                     requester, as the portal did
+    admin/invites-pending  read and written (superadmin and League Admin)
+    admin/requests   read and written (superadmin and League Admin)
     users/<uid>/pass written by the issue form on /pass/, not here
     tools            read: the registry and each tool's `permissions`
     tools/ops-people this tool's registration
@@ -37,6 +45,11 @@
            everything, League Operations Club cards and club keys only.
 
   Changelog
+  v1.2 (12/11/2026) — Invites and Requests move in from the portal's admin
+    area, with the same writes and emails (NL.gas, promoted to canon).
+    Invites no longer set per-tool exceptions: they send the role's
+    defaults, as the old form did unless its sliders were moved. Reject
+    and Revoke now ask first. Tabs carry a count of what is waiting.
   v1.1 (12/11/2026) — Canon sweep and declutter. The page's own search
     bar, stat cards, key tags and change badges give way to canon
     .toolbar, .stats, .pill (role pills, .pill--info keys,
@@ -95,6 +108,13 @@
     window.NL_CHANGELOG = [
       {
         date: '12/11/2026',
+        version: 'v1.2',
+        items: [
+          'Invites and Requests are here now, moved from the portal.'
+        ]
+      },
+      {
+        date: '12/11/2026',
         version: 'v1.1',
         items: [
           'Tidier: one style for search, counts and labels, matching the rest of NL Tools.',
@@ -122,8 +142,8 @@
     };
   </script>
 
-  <!-- NL system scripts (lint canonical: ?v=54 / ?v=1 / ?v=12 / ?v=18) -->
-  <script src="/system/nl-utils.js?v=54"></script>
+  <!-- NL system scripts (lint canonical: ?v=55 / ?v=1 / ?v=12 / ?v=18) -->
+  <script src="/system/nl-utils.js?v=55"></script>
   <!-- GA4, one property for all of nl.tools. Cookieless, so no consent
        banner on any page; page views by path, no identity. Tool events go
        through NL.track(). See system/nl-analytics.js. -->
@@ -144,6 +164,14 @@
   .pc-pass { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
   .pc-muted { color: var(--text-muted); }
   .pc-actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+  .pc-invite { margin-bottom: 24px; }
+  .pc-roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
+  .pc-roles .pc-role { margin: 0; display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--white); cursor: pointer; }
+  .pc-roles .pc-role:has(input:checked) { border-color: var(--navy); background: var(--navy-50); }
+  .pc-roles .pc-role input { width: auto; margin: 3px 0 0; padding: 0; }
+  .pc-role__name { display: block; font-size: var(--text-sm); color: var(--text); font-weight: 700; font-variation-settings: 'wght' 700; text-transform: none; letter-spacing: 0; }
+  .pc-role__grant { display: block; font-size: var(--text-xs); color: var(--text-muted); text-transform: none; letter-spacing: 0; font-weight: 400; font-variation-settings: 'wght' 400; }
+  .pc-foot { display: flex; justify-content: flex-end; }
 </style>
 </head>
 <body>
@@ -155,6 +183,8 @@
 
     <div class="tabs" id="pcTabs" role="tablist">
       <button class="tab active" type="button" role="tab" data-pane="people">People</button>
+      <button class="tab" type="button" role="tab" data-pane="invites">Invites <span class="tab__count" id="pcInviteCount" hidden></span></button>
+      <button class="tab" type="button" role="tab" data-pane="requests">Requests <span class="tab__count" id="pcRequestCount" hidden></span></button>
       <button class="tab" type="button" role="tab" data-pane="manage">Manage</button>
     </div>
 
@@ -167,13 +197,38 @@
         </div>
         <div class="toolbar__right"><span class="pc-count" id="pcCount"></span></div>
       </div>
-      <p class="pc-note">Invites and requests are still in the <a href="/portal/?tab=users">portal’s admin area</a> for now.</p>
       <div class="table-wrap">
         <table class="table">
           <thead><tr><th>Person</th><th>Role today</th><th>Pass</th><th aria-label="Actions"></th></tr></thead>
           <tbody id="pcRows"><tr><td colspan="4" class="pc-muted">Loading…</td></tr></tbody>
         </table>
       </div>
+    </section>
+
+    <section data-pane-body="invites" hidden>
+      <div class="form-panel pc-invite">
+        <div class="form-panel__head">Invite someone</div>
+        <div class="form-panel__body">
+          <div class="form-grid">
+            <div class="form-group"><label for="pcInvEmail">Email</label><input type="email" id="pcInvEmail" autocomplete="off"></div>
+            <div class="form-group"><label for="pcInvName">Full name</label><input type="text" id="pcInvName" autocomplete="off"></div>
+            <div class="form-group span2"><label>Role</label><div class="pc-roles" id="pcInvRoles"></div></div>
+            <div class="form-group" id="pcInvClubWrap" hidden><label>Club</label><div id="pcInvClub"></div></div>
+            <div class="form-group"><label for="pcInvJob">Job title</label><input type="text" id="pcInvJob" autocomplete="off"></div>
+          </div>
+          <p class="form-hint">An invite still sets a role. Give their pass once they have signed in.</p>
+        </div>
+        <div class="form-panel__foot pc-foot">
+          <button class="btn btn--primary" type="button" id="pcInvSend"></button>
+        </div>
+      </div>
+      <div class="section-head"><h2>Waiting to be accepted</h2></div>
+      <div id="pcInvites"></div>
+    </section>
+
+    <section data-pane-body="requests" hidden>
+      <div class="section-head"><h2>Waiting for approval</h2></div>
+      <div id="pcRequests"></div>
     </section>
 
     <section data-pane-body="manage" hidden>
@@ -333,6 +388,261 @@
       NL.csv(rows, { bom: true }), 'text/csv;charset=utf-8');
   }
 
+
+  /* ── Invites ───────────────────────────────────────────────────────────
+     Moved from the portal's admin area (portal v5.123, 15/09/2026) with
+     its payloads unchanged: sendInvite carries the same fields and a token
+     minted here, sent through NL.gas.send so a dropped reply is retried
+     with the same token and the backend never emails twice. The pending
+     record carries the token too.
+     One thing an invite no longer does: set per-tool exceptions. The new
+     model has none (plan: "no per-person overrides"); an invite sends
+     tools: {} — the role's defaults, exactly what the old form sent unless
+     its sliders were moved. */
+  var ROLES = ['admin', 'staff', 'club-admin', 'club-staff'];
+  var INV = { role: 'staff', club: '', picker: null };
+
+  function drawRoles() {
+    document.getElementById('pcInvRoles').innerHTML = ROLES.map(function (r) {
+      return '<label class="pc-role"><input type="radio" name="pcInvRole" value="' + r + '"' + (r === INV.role ? ' checked' : '') + '>' +
+        '<span><span class="pc-role__name">' + esc(NL.roles.label(r)) + '</span><span class="pc-role__grant">' + esc(NL.roles.grant(r)) + '</span></span></label>';
+    }).join('');
+  }
+
+  function initInvites() {
+    drawRoles();
+    var send = document.getElementById('pcInvSend');
+    send.innerHTML = 'Send invite ' + icon('send');
+    document.getElementById('pcInvRoles').addEventListener('change', function (e) {
+      INV.role = e.target.value;
+      document.getElementById('pcInvClubWrap').hidden = !NL.isClubUser(INV.role);
+    });
+    INV.picker = NL.clubPicker(document.getElementById('pcInvClub'), {
+      season: 'current', freetext: false, placeholder: 'Search club name…',
+      onSelect: function (sel) { INV.club = (sel && sel.name) || ''; }
+    });
+    send.addEventListener('click', sendInvite);
+  }
+
+  function sendInvite() {
+    var email = document.getElementById('pcInvEmail').value.trim();
+    var name = document.getElementById('pcInvName').value.trim();
+    var jobTitle = document.getElementById('pcInvJob').value.trim();
+    var role = NL.roles.norm(INV.role);
+    var isClub = NL.isClubUser(role);
+    var club = isClub ? (INV.picker && INV.picker.getValue ? (INV.picker.getValue() || '') : INV.club).trim() : '';
+    /* Club roles carry no org; every League role carries the National League. */
+    var org = isClub ? '' : 'National League';
+    if (!email || !name) return NL.toast('Email and name are needed', 'error');
+    if (isClub && !club) return NL.toast('Choose the club', 'error');
+
+    var btn = document.getElementById('pcInvSend');
+    btn.disabled = true;
+    var token = NL.uuid();
+    NL.gas.send({ action: 'sendInvite', token: token, email: email, name: name, role: role,
+      org: org, club: club, jobTitle: jobTitle, tools: {} })
+    .then(function (result) {
+      if (result && result.ok === false) { NL.toast('The invite was not sent: ' + (result.error || 'unknown error'), 'error'); return; }
+      NL.writeAudit('invite_sent', isClub
+        ? 'Invited ' + name + ' as ' + NL.roles.label(role) + ' for ' + club + (jobTitle ? ' (' + jobTitle + ')' : '')
+        : 'Invited ' + name + ' as ' + NL.roles.label(role) + ' (' + org + ')');
+      /* The pending record the Invites list reads, with the token so a
+         resend could reuse it. */
+      db.ref('admin/invites-pending').push({
+        email: email, name: name, role: role, org: org, club: club, jobTitle: jobTitle,
+        tools: {}, token: token, sentAt: Date.now(), sentBy: S.session.name || ''
+      }).then(loadInvites).catch(function () {});
+      NL.toast('Invite sent to ' + email, 'success');
+      ['pcInvEmail', 'pcInvName', 'pcInvJob'].forEach(function (id) { document.getElementById(id).value = ''; });
+      if (INV.picker && INV.picker.clear) INV.picker.clear();
+      INV.club = '';
+    })
+    .catch(function (err) { NL.toast('The invite may not have been sent: ' + (err && err.message || err), 'error'); })
+    .then(function () { btn.disabled = false; });
+  }
+
+  /* Invites waiting to be accepted. One already accepted (its email now on
+     an approved account) is cleared from the list, as the portal did. */
+  function loadInvites() {
+    var box = document.getElementById('pcInvites');
+    return db.ref('admin/invites-pending').once('value').then(function (snap) {
+      var all = snap.val() || {}, items = [], stale = {};
+      var active = {};
+      S.users.forEach(function (u) { if (u.email && !u.pending) active[u.email.toLowerCase()] = true; });
+      Object.keys(all).forEach(function (k) {
+        var inv = all[k]; if (!inv) return; inv._key = k;
+        if (inv.email && active[inv.email.toLowerCase()]) stale['admin/invites-pending/' + k] = null;
+        else items.push(inv);
+      });
+      if (Object.keys(stale).length) db.ref().update(stale).catch(function () {});
+      items.sort(function (a, b) { return (b.sentAt || 0) - (a.sentAt || 0); });
+      count('pcInviteCount', items.length);
+      box.innerHTML = items.length
+        ? '<div class="table-wrap"><table class="table"><thead><tr><th>Person</th><th>Role</th><th>Sent</th><th aria-label="Actions"></th></tr></thead><tbody>' +
+          items.map(function (inv) {
+            var role = NL.roles.label(inv.role) + (NL.isClubUser(inv.role) && inv.club ? ', ' + inv.club : '');
+            return '<tr data-key="' + esc(inv._key) + '">' +
+              '<td><span class="pc-who"><span class="pc-who__name">' + esc(inv.name || '(no name)') + '</span><span class="pc-who__sub">' + esc(inv.email || '') + '</span></span></td>' +
+              '<td>' + esc(role) + (inv.jobTitle ? '<div class="pc-who__sub">' + esc(inv.jobTitle) + '</div>' : '') + '</td>' +
+              '<td>' + (inv.sentAt ? esc(NL.formatDateTime(inv.sentAt, { year: false })) : '') + (inv.sentBy ? '<div class="pc-who__sub">by ' + esc(inv.sentBy) + '</div>' : '') + '</td>' +
+              '<td><span class="pc-actions"><button class="btn btn--ghost btn--sm" type="button" data-act="resend">' + icon('send') + 'Resend</button>' +
+              '<button class="btn btn--ghost btn--sm" type="button" data-act="revoke">' + icon('delete') + 'Revoke</button></span></td></tr>';
+          }).join('') + '</tbody></table></div>'
+        : '<div class="empty-state"><div class="empty-state__title">No invites waiting</div></div>';
+      box.onclick = function (e) {
+        var b = e.target.closest('button[data-act]'); if (!b) return;
+        var inv = items.filter(function (x) { return x._key === b.closest('tr').getAttribute('data-key'); })[0];
+        if (inv) (b.getAttribute('data-act') === 'resend' ? resendInvite : revokeInvite)(inv, b);
+      };
+    }).catch(function (err) {
+      box.innerHTML = '<p class="pc-muted">Invites could not be loaded: ' + esc(err && err.message || String(err)) + '</p>';
+    });
+  }
+
+  /* A resend is a NEW send by intent, so a fresh token: reusing the old one
+     would meet the backend's guard and send nothing. Still retry-safe within
+     this click. */
+  function resendInvite(inv, btn) {
+    btn.disabled = true;
+    var token = NL.uuid();
+    NL.gas.send({ action: 'sendInvite', token: token, email: inv.email || '', name: inv.name || '',
+      role: inv.role || 'staff', org: '', orgKey: '', club: inv.club || '', jobTitle: inv.jobTitle || '', tools: inv.tools || {} })
+    .then(function (result) {
+      if (result && result.ok === false) { NL.toast('Resend failed: ' + (result.error || 'unknown'), 'error'); btn.disabled = false; return; }
+      db.ref('admin/invites-pending/' + inv._key).update({ sentAt: Date.now(), token: token }).catch(function () {});
+      NL.writeAudit('invite_sent', 'Resent invite to ' + (inv.name || inv.email || ''));
+      NL.toast('Invite resent to ' + inv.email, 'success');
+      setTimeout(loadInvites, 1000);
+    })
+    .catch(function () { NL.toast('The resend may not have gone', 'error'); btn.disabled = false; });
+  }
+
+  /* Revoke: the pending record goes; the link in the email expires on its
+     own after 24 hours. */
+  function revokeInvite(inv) {
+    NL.confirm('Revoke the invite to ' + (inv.name || inv.email) + '?', { title: 'Revoke invite', confirmText: 'Revoke', variant: 'danger' })
+    .then(function (ok) {
+      if (!ok) return;
+      return db.ref('admin/invites-pending/' + inv._key).remove().then(function () {
+        NL.writeAudit('invite_cancelled', (inv.name || inv.email || '') + ' invite revoked');
+        NL.toast('Invite revoked', 'success');
+        loadInvites();
+      });
+    }).catch(function (err) { NL.toast('Could not revoke: ' + (err && err.message || err), 'error'); });
+  }
+
+  /* ── Requests ──────────────────────────────────────────────────────────
+     Sign-up requests from clubs (functions/account.js submitAccessRequest:
+     role 'club', tools asked for forced to 'access'). Moved from the portal
+     with the same writes. Approve: pending off, and each club tool they
+     asked for that their role does not open by default is granted at
+     Access — what the portal's card wrote when its sliders were left as
+     they opened. Then the approval email. Reject: rejected on, the
+     rejection email. A request with no linked account can only be
+     archived. */
+  function loadRequests() {
+    var box = document.getElementById('pcRequests');
+    return db.ref('admin/requests').once('value').then(function (snap) {
+      var all = snap.val() || {}, items = [];
+      Object.keys(all).forEach(function (k) { var r = all[k]; if (r && r.status === 'pending') { r._key = k; items.push(r); } });
+      items.sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+      count('pcRequestCount', items.length);
+      box.innerHTML = items.length
+        ? '<div class="table-wrap"><table class="table"><thead><tr><th>Person</th><th>Club</th><th>Asked for</th><th>Received</th><th aria-label="Actions"></th></tr></thead><tbody>' +
+          items.map(function (r) {
+            var asked = Object.keys((r.tools && typeof r.tools === 'object' && !Array.isArray(r.tools)) ? r.tools : {})
+              .map(function (k) { return (S.registry[k] && S.registry[k].label) || k; });
+            var acts = r.uid
+              ? '<button class="btn btn--navy btn--sm" type="button" data-act="approve">' + icon('tick') + 'Approve</button>' +
+                '<button class="btn btn--ghost btn--sm" type="button" data-act="reject">Reject</button>'
+              : '<span class="pc-muted">No linked account</span> <button class="btn btn--ghost btn--sm" type="button" data-act="archive">Archive</button>';
+            return '<tr data-key="' + esc(r._key) + '">' +
+              '<td><span class="pc-who"><span class="pc-who__name">' + esc(r.name || '(no name)') + '</span><span class="pc-who__sub">' + esc(r.email || '') + '</span></span></td>' +
+              '<td>' + esc(r.club || '') + (r.jobTitle ? '<div class="pc-who__sub">' + esc(r.jobTitle) + '</div>' : '') + '</td>' +
+              '<td>' + (asked.length ? esc(asked.join(', ')) : '<span class="pc-muted">Nothing extra</span>') + '</td>' +
+              '<td>' + (r.createdAt ? esc(NL.formatDateTime(r.createdAt)) : '') + '</td>' +
+              '<td><span class="pc-actions">' + acts + '</span></td></tr>';
+          }).join('') + '</tbody></table></div>'
+        : '<div class="empty-state"><div class="empty-state__title">No requests waiting</div></div>';
+      box.onclick = function (e) {
+        var b = e.target.closest('button[data-act]'); if (!b) return;
+        var r = items.filter(function (x) { return x._key === b.closest('tr').getAttribute('data-key'); })[0];
+        if (!r) return;
+        var act = b.getAttribute('data-act');
+        b.disabled = true;
+        (act === 'approve' ? approveRequest : act === 'reject' ? rejectRequest : archiveRequest)(r)
+          .catch(function (err) { NL.toast('Failed: ' + (err && err.message || err), 'error'); b.disabled = false; });
+      };
+    }).catch(function (err) {
+      box.innerHTML = '<p class="pc-muted">Requests could not be loaded: ' + esc(err && err.message || String(err)) + '</p>';
+    });
+  }
+
+  /* The per-tool entries an approval writes: for each tool a club role can
+     hold (not a League-only tool), the role default — or Access where they
+     asked for it and the default is Off. An entry equal to the default is
+     cleared (null), as the portal's overrides-only write did. */
+  function approvalTools(r) {
+    var role = NL.roles.norm(r.role || 'staff'), asked = r.tools || {}, out = {};
+    Object.keys(S.registry).forEach(function (k) {
+      var t = S.registry[k];
+      if (!t || k === 'welcome') return;
+      var aud = t.audience === 'meta' || t.audience === 'league' || t.audience === 'staff' ? 'league'
+        : t.audience === 'club' ? 'club' : ((((t.defaults && t.defaults['club-admin']) || 'off') !== 'off') ? 'club' : 'league');
+      if (aud === 'league') return;
+      var def = (t.defaults && t.defaults[role]) || 'off';
+      var level = (asked[k] === 'access' && def === 'off') ? 'access' : def;
+      out[k] = level === def ? null : level;
+    });
+    return out;
+  }
+
+  function approveRequest(r) {
+    var updates = {};
+    updates['users/' + r.uid + '/pending'] = false;
+    updates['users/' + r.uid + '/rejected'] = false;
+    var tools = approvalTools(r);
+    Object.keys(tools).forEach(function (k) { updates['users/' + r.uid + '/tools/' + k] = tools[k]; });
+    updates['admin/requests/' + r._key + '/status'] = 'approved';
+    NL.writeAudit('request_approved', (r.name || r.email || '') + (r.club ? ' (' + r.club + ')' : ''),
+      { uid: r.uid, name: r.name || '', email: r.email || '' });
+    return db.ref().update(updates).then(function () {
+      NL.gas.fetch({ action: 'sendApproval', name: r.name || '', email: r.email || '', club: r.club || '' }).catch(function () {});
+      NL.toast('Approved — ' + (r.name || r.email || ''), 'success');
+      return refreshPeople().then(loadRequests);
+    });
+  }
+
+  function rejectRequest(r) {
+    return NL.confirm('Reject ' + (r.name || r.email) + '’s request? They are emailed to say so.', { title: 'Reject request', confirmText: 'Reject', variant: 'danger' })
+    .then(function (ok) {
+      if (!ok) { loadRequests(); return; }
+      var updates = {};
+      updates['users/' + r.uid + '/pending'] = false;
+      updates['users/' + r.uid + '/rejected'] = true;
+      updates['admin/requests/' + r._key + '/status'] = 'rejected';
+      NL.writeAudit('request_declined', (r.name || r.email || '') + (r.club ? ' (' + r.club + ')' : ''),
+        { uid: r.uid, name: r.name || '', email: r.email || '' });
+      return db.ref().update(updates).then(function () {
+        NL.gas.fetch({ action: 'sendRejection', name: r.name || '', email: r.email || '' }).catch(function () {});
+        NL.toast('Request rejected', 'success');
+        return refreshPeople().then(loadRequests);
+      });
+    });
+  }
+
+  function archiveRequest(r) {
+    return db.ref('admin/requests/' + r._key + '/status').set('archived').then(function () {
+      NL.toast('Request archived', 'success');
+      loadRequests();
+    });
+  }
+
+  function count(id, n) {
+    var el = document.getElementById(id);
+    el.textContent = n; el.hidden = !n;
+  }
+
   /* ── Tabs ───────────────────────────────────────────────────────────── */
   function showTab(name) {
     document.querySelectorAll('#pcTabs .tab').forEach(function (b) {
@@ -342,7 +652,22 @@
     });
     document.querySelectorAll('[data-pane-body]').forEach(function (s) { s.hidden = s.getAttribute('data-pane-body') !== name; });
     if (name === 'manage') drawManage();
+    if (name === 'invites') loadInvites();
+    if (name === 'requests') loadRequests();
     try { history.replaceState(null, '', name === 'people' ? location.pathname : '?tab=' + name); } catch (e) {}
+  }
+
+  /* Everyone with an account, A–Z; rejected requests are not people. */
+  function refreshPeople() {
+    return db.ref('users').once('value').then(function (snap) {
+      var all = snap.val() || {};
+      S.users = Object.keys(all).filter(function (uid) { return all[uid] && !all[uid].rejected; }).map(function (uid) {
+        var u = all[uid];
+        return { uid: uid, name: u.name || u.email || '', email: u.email || '', role: u.role || '', club: u.club || '',
+          pending: !!u.pending, tools: u.tools || {}, pass: u.pass || null };
+      }).sort(function (a, b) { return a.name.localeCompare(b.name); });
+      drawPeople();
+    });
   }
 
   /* ── Boot ───────────────────────────────────────────────────────────── */
@@ -365,18 +690,20 @@
       onChange: function (v) { S.card = v; drawPeople(); }
     });
 
+    initInvites();
     NL.ensureAuth().then(function () {
-      return Promise.all([db.ref('users').once('value'), db.ref('tools').once('value')]);
-    }).then(function (snaps) {
-      var all = snaps[0].val() || {};
-      S.registry = snaps[1].val() || {};
-      S.users = Object.keys(all).filter(function (uid) { return all[uid] && !all[uid].rejected; }).map(function (uid) {
-        var u = all[uid];
-        return { uid: uid, name: u.name || u.email || '', email: u.email || '', role: u.role || '', club: u.club || '',
-          pending: !!u.pending, tools: u.tools || {}, pass: u.pass || null };
-      }).sort(function (a, b) { return a.name.localeCompare(b.name); });
-      drawPeople();
-      if (new URLSearchParams(location.search).get('tab') === 'manage') showTab('manage');
+      return db.ref('tools').once('value');
+    }).then(function (snap) {
+      S.registry = snap.val() || {};
+      return refreshPeople();
+    }).then(function () {
+      /* Badges on the tabs; the lists load once now so the counts are true. */
+      loadInvites(); loadRequests();
+      /* ?tab= opens a tab: the portal's old Invites and Requests links, and
+         the admin notification emails (?tab=inbound), land here. */
+      var tab = new URLSearchParams(location.search).get('tab');
+      if (tab === 'inbound') tab = 'requests';
+      if (['invites', 'requests', 'manage'].indexOf(tab) >= 0) showTab(tab);
     }).catch(function (e) {
       document.getElementById('pcRows').innerHTML = '<tr><td colspan="4">People could not be loaded: ' + esc(e && e.message || String(e)) + '</td></tr>';
     });
