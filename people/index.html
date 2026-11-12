@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — People and cards
-  Version: v1.2 (12/11/2026)
+  Version: v1.3 (12/11/2026)
   File: /people/index.html
 
   Who holds which pass: everyone with an account, their role today, their
@@ -9,8 +9,13 @@
   against what each pass would give. Step 4 of system/permissions-plan.md.
 
   Tabs (a closed set, so canon .tabs):
-    People   — everyone, searchable; View their pass (View as) and Edit
-               their pass (the issue form on /pass/?view=issue&uid=).
+    People   — everyone, searchable; Edit (the person page, below), View
+               their pass (View as) and Edit their pass (the issue form
+               on /pass/?view=issue&uid=).
+    (person) — ?person=<uid>, opened from a name or Edit: role, club, job
+               title, tool exceptions, Restore defaults, Remove user, and
+               their last ten audit entries. Moved from the portal's Users
+               pane with the same writes.
     Invites  — invite someone (role, club, job title), and the invites
                waiting to be accepted: resend, revoke. Moved from the
                portal's admin area; sends through NL.gas.send.
@@ -30,7 +35,10 @@
   Storage (RTDB):
     users            read (League roles can read it today); an approval or
                      rejection writes pending / rejected / tools on the
-                     requester, as the portal did
+                     requester, as the portal did; the person page writes
+                     role / club / org / jobTitle / tools and removes a
+                     user, as the portal's Users pane did
+    admin/audit-by-user/<uid>  read: a person's history
     admin/invites-pending  read and written (superadmin and League Admin)
     admin/requests   read and written (superadmin and League Admin)
     users/<uid>/pass written by the issue form on /pass/, not here
@@ -45,6 +53,11 @@
            everything, League Operations Club cards and club keys only.
 
   Changelog
+  v1.3 (12/11/2026) — The portal's Users pane moves in as a person page:
+    role, club, job title, tool exceptions (add, change, remove), Restore
+    defaults, Remove user, and their history. Same writes and audit lines
+    as the portal. Only a superadmin may make someone a superadmin. A
+    rejected request's account is listed, marked, so it can be removed.
   v1.2 (12/11/2026) — Invites and Requests move in from the portal's admin
     area, with the same writes and emails (NL.gas, promoted to canon).
     Invites no longer set per-tool exceptions: they send the role's
@@ -108,6 +121,14 @@
     window.NL_CHANGELOG = [
       {
         date: '12/11/2026',
+        version: 'v1.3',
+        items: [
+          'Open a person to change their role, club, job title and tool exceptions, or remove them.',
+          'Each person shows their recent history.'
+        ]
+      },
+      {
+        date: '12/11/2026',
         version: 'v1.2',
         items: [
           'Invites and Requests are here now, moved from the portal.'
@@ -142,13 +163,13 @@
     };
   </script>
 
-  <!-- NL system scripts (lint canonical: ?v=55 / ?v=1 / ?v=12 / ?v=18) -->
-  <script src="/system/nl-utils.js?v=55"></script>
+  <!-- NL system scripts (lint canonical: ?v=56 / ?v=1 / ?v=13 / ?v=18) -->
+  <script src="/system/nl-utils.js?v=56"></script>
   <!-- GA4, one property for all of nl.tools. Cookieless, so no consent
        banner on any page; page views by path, no identity. Tool events go
        through NL.track(). See system/nl-analytics.js. -->
   <script src="/system/nl-analytics.js?v=1"></script>
-  <script src="/system/nl-topbar.js?v=12"></script>
+  <script src="/system/nl-topbar.js?v=13"></script>
   <script src="/system/auth-guard.js?v=18"></script>
 
 <style>
@@ -172,6 +193,27 @@
   .pc-role__name { display: block; font-size: var(--text-sm); color: var(--text); font-weight: 700; font-variation-settings: 'wght' 700; text-transform: none; letter-spacing: 0; }
   .pc-role__grant { display: block; font-size: var(--text-xs); color: var(--text-muted); text-transform: none; letter-spacing: 0; font-weight: 400; font-variation-settings: 'wght' 400; }
   .pc-foot { display: flex; justify-content: flex-end; }
+  /* A panel holding a club picker: canon .form-panel clips overflow, which
+     cut the picker's list off at the panel's edge. */
+  .pc-open { overflow: visible; }
+  .pc-open > :first-child { border-radius: var(--radius) var(--radius) 0 0; }
+  .pc-open > :last-child { border-radius: 0 0 var(--radius) var(--radius); }
+  .pc-link { color: var(--navy); font-weight: 700; font-variation-settings: 'wght' 700; text-decoration: none; }
+  .pc-link:hover { text-decoration: underline; }
+  .pc-back { margin-bottom: 14px; }
+  .pc-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+  .pc-head__name { font-size: var(--text-xl); font-weight: 800; font-variation-settings: 'wght' 800; color: var(--navy); }
+  .pc-head__line { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; font-size: var(--text-sm); }
+  .pc-panel { margin-bottom: 20px; }
+  .pc-hint { font-size: var(--text-sm); color: var(--text-muted); margin: 0 0 10px; }
+  .pc-ex { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+  .pc-select { width: auto; min-width: 180px; max-width: 100%; }
+  /* Outside .form-group on purpose: canon styles every select in a form
+     group as a full-width text box, which drops .nl-select's arrow. */
+  .pc-exblock { margin-top: 18px; min-width: 0; }
+  .pc-label { font-size: var(--text-xs); font-weight: 800; font-variation-settings: 'wght' 800; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 6px; }
+  .pc-foot--split { justify-content: space-between; flex-wrap: wrap; }
+  .pc-foot__right { display: flex; flex-wrap: wrap; gap: 8px; }
 </style>
 </head>
 <body>
@@ -206,7 +248,7 @@
     </section>
 
     <section data-pane-body="invites" hidden>
-      <div class="form-panel pc-invite">
+      <div class="form-panel pc-invite pc-open">
         <div class="form-panel__head">Invite someone</div>
         <div class="form-panel__body">
           <div class="form-grid">
@@ -229,6 +271,11 @@
     <section data-pane-body="requests" hidden>
       <div class="section-head"><h2>Waiting for approval</h2></div>
       <div id="pcRequests"></div>
+    </section>
+
+    <section data-pane-body="person" hidden>
+      <div class="pc-back"><button class="btn btn--ghost btn--sm" type="button" id="pcBack"></button></div>
+      <div id="pcPerson"></div>
     </section>
 
     <section data-pane-body="manage" hidden>
@@ -276,6 +323,7 @@
     var key = NL.roles.norm(u.role);
     var pill = u.role ? '<span class="pill role-' + esc(key) + '">' + esc(NL.roles.label(u.role)) + '</span>' : '<span class="pc-muted">No role</span>';
     if (u.pending) pill += ' <span class="pill role-pending">Waiting</span>';
+    if (u.rejected) pill += ' <span class="pill pill--rejected">Request rejected</span>';
     var club = NL.isClubUser(u.role) && u.club ? '<div class="pc-who__sub">' + esc(u.club) + '</div>' : '';
     return pill + club;
   }
@@ -323,10 +371,11 @@
     var view = P.canViewAs(S.session.pass);
     document.getElementById('pcRows').innerHTML = rows.length ? rows.map(function (u) {
       var acts = '';
-      if (view) acts += '<a class="btn btn--ghost btn--sm" href="/pass/?view=as&uid=' + encodeURIComponent(u.uid) + '">' + icon('eye') + 'View</a>';
+      if (canPerson(u)) acts += '<a class="btn btn--ghost btn--sm" href="?person=' + encodeURIComponent(u.uid) + '" data-person="' + esc(u.uid) + '">' + icon('edit') + 'Edit</a>';
+      if (view) acts += '<a class="btn btn--ghost btn--sm" href="/pass/?view=as&uid=' + encodeURIComponent(u.uid) + '">' + icon('eye') + 'View pass</a>';
       if (canEdit(u)) acts += '<a class="btn btn--ghost btn--sm" href="/pass/?view=issue&uid=' + encodeURIComponent(u.uid) + '">' + icon('edit') + (P.isIssued(u.pass) ? 'Edit pass' : 'Issue pass') + '</a>';
       return '<tr>' +
-        '<td><span class="pc-who"><span class="pc-who__name">' + esc(u.name || '(no name)') + '</span><span class="pc-who__sub">' + esc(u.email) + '</span></span></td>' +
+        '<td><span class="pc-who"><a class="pc-who__name pc-link" href="?person=' + encodeURIComponent(u.uid) + '" data-person="' + esc(u.uid) + '">' + esc(u.name || '(no name)') + '</a><span class="pc-who__sub">' + esc(u.email) + '</span></span></td>' +
         '<td>' + roleHtml(u) + '</td>' +
         '<td>' + passHtml(u.pass) + '</td>' +
         '<td><span class="pc-actions">' + acts + '</span></td>' +
@@ -353,7 +402,7 @@
     var same = rep.filter(function (r) { return !r.rows.length; }).length;
     document.getElementById('pcStats').innerHTML =
       stat(rep.length, 'With a pass') + stat(same, 'Pass matches today') +
-      stat(diffs, 'Differences') + stat(S.users.length - rep.length, 'No pass yet');
+      stat(diffs, 'Differences') + stat(S.users.filter(function (u) { return !u.rejected; }).length - rep.length, 'No pass yet');
     var csv = document.getElementById('pcCsv');
     csv.innerHTML = icon('download') + 'Download CSV';
     csv.disabled = !diffs;
@@ -643,8 +692,284 @@
     el.textContent = n; el.hidden = !n;
   }
 
+  /* ── A person ──────────────────────────────────────────────────────────
+     Moved from the portal's Users pane (portal v15.4 and before) with the
+     same writes: role, club, org, job title and the per-tool entries, all in
+     one update; Remove user deletes users/<uid>. Each is audited against the
+     person, as the portal's writeAuditFor did.
+
+     Per-tool entries are still "exceptions": stored only where a tool's
+     level differs from what the role gives, and nulled where it matches.
+     They decide access until step 6, when keys replace them. Club roles
+     follow their role with no exceptions, as before; anything left over on
+     a club account is shown, and Restore defaults clears it.
+
+     Who may edit: the roles that open this tool today (superadmin and
+     League Admin), as in the portal. A superadmin account is not edited
+     here, and only a superadmin may make one. */
+  var LEVELS = ['off', 'access', 'admin'];
+  var LEVEL_WORD = { off: 'Off', access: 'Access', admin: 'Manage' };
+  var ED = null;
+
+  function canPerson(u) {
+    var r = S.session.role;
+    return (r === 'superadmin' || r === 'admin') && u.role !== 'superadmin' && !u.pending;
+  }
+  function roleChoices() {
+    return S.session.role === 'superadmin' ? ['superadmin'].concat(ROLES) : ROLES;
+  }
+
+  /* The rungs a tool has: its registry `levels` when that is a prefix of
+     Off / Access / Manage, else all three. A club role never holds Manage. */
+  function rungs(toolKey, role) {
+    var t = S.registry[toolKey], d = t && t.levels;
+    var list = (Array.isArray(d) && d.length && d.every(function (l, i) { return l === LEVELS[i]; })) ? d : LEVELS;
+    return NL.isClubUser(role) ? list.filter(function (l) { return l !== 'admin'; }) : list;
+  }
+  function clamp(toolKey, role, level) {
+    var r = rungs(toolKey, role);
+    return r.indexOf(level) >= 0 ? level : (level === 'off' ? 'off' : r[r.length - 1]);
+  }
+  /* League-only tools: closed to club roles before any level is read. */
+  function leagueOnly(t) {
+    if (!t) return false;
+    if (t.audience === 'meta' || t.audience === 'league' || t.audience === 'staff') return true;
+    if (t.audience === 'club') return false;
+    return ((t.defaults && t.defaults['club-admin']) || 'off') === 'off';
+  }
+  function def(toolKey, role) {
+    var t = S.registry[toolKey];
+    return (t && t.defaults && t.defaults[NL.roles.norm(role)]) || 'off';
+  }
+  function toolKeys() {
+    return Object.keys(S.registry).filter(function (k) { return k !== 'welcome' && S.registry[k]; })
+      .sort(function (a, b) { return String(S.registry[a].label || a).localeCompare(String(S.registry[b].label || b)); });
+  }
+  /* Working levels for a role: what they hold today on their own role, the
+     role's defaults on any other — as the portal's role preview did. */
+  function levelsFor(u, role) {
+    var out = {};
+    toolKeys().forEach(function (k) {
+      out[k] = role === NL.roles.norm(u.role)
+        ? NL.resolveToolLevel(u.tools[k], S.registry[k], u.role)
+        : def(k, role);
+    });
+    return out;
+  }
+
+  function openPerson(uid, push) {
+    var u = S.users.filter(function (x) { return x.uid === uid; })[0];
+    if (!u) { NL.toast('That person is not on the list', 'error'); return showTab('people'); }
+    var role = NL.roles.norm(u.role);
+    ED = { u: u, role: role, club: u.club || '', levels: levelsFor(u, role), picker: null };
+    document.getElementById('pcTabs').hidden = true;
+    document.querySelectorAll('[data-pane-body]').forEach(function (s) { s.hidden = s.getAttribute('data-pane-body') !== 'person'; });
+    if (push !== false) { try { history.replaceState(null, '', '?person=' + encodeURIComponent(uid)); } catch (e) {} }
+    drawPerson();
+    window.scrollTo(0, 0);
+  }
+
+  function drawPerson() {
+    var u = ED.u, edit = canPerson(u), box = document.getElementById('pcPerson');
+    var passBtns = '';
+    if (P.canViewAs(S.session.pass)) passBtns += '<a class="btn btn--ghost btn--sm" href="/pass/?view=as&uid=' + encodeURIComponent(u.uid) + '">' + icon('eye') + 'View pass</a>';
+    if (canEdit(u)) passBtns += '<a class="btn btn--ghost btn--sm" href="/pass/?view=issue&uid=' + encodeURIComponent(u.uid) + '">' + icon('edit') + (P.isIssued(u.pass) ? 'Edit pass' : 'Issue pass') + '</a>';
+
+    var html = '<div class="pc-head"><div>' +
+      '<div class="pc-head__name">' + esc(u.name || '(no name)') + '</div>' +
+      '<div class="pc-who__sub">' + esc(u.email) + '</div>' +
+      '<div class="pc-head__line">' + roleHtml(u).replace(/<div class="pc-who__sub">[^<]*<\/div>/, '') + passHtml(u.pass) + '</div>' +
+      '</div><div class="pc-actions">' + passBtns + '</div></div>';
+
+    if (!edit) {
+      html += '<p class="pc-note">' + (u.role === 'superadmin' ? 'A superadmin account is not edited here.' : 'This request is waiting in Requests.') + '</p>';
+    } else {
+      html += '<div class="form-panel pc-panel pc-open">' +
+        '<div class="form-panel__head">Details</div>' +
+        '<div class="form-panel__body"><div class="form-grid">' +
+          '<div class="form-group span2"><label>Role</label><div class="pc-roles" id="pcEdRoles">' +
+            roleChoices().map(function (x) {
+              return '<label class="pc-role"><input type="radio" name="pcEdRole" value="' + x + '"' + (x === ED.role ? ' checked' : '') + '>' +
+                '<span><span class="pc-role__name">' + esc(NL.roles.label(x)) + '</span><span class="pc-role__grant">' + esc(NL.roles.grant(x)) + '</span></span></label>';
+            }).join('') +
+          '</div></div>' +
+          '<div class="form-group" id="pcEdClubWrap"' + (NL.isClubUser(ED.role) ? '' : ' hidden') + '><label>Club</label><div id="pcEdClub"></div></div>' +
+          '<div class="form-group"><label for="pcEdJob">Job title</label><input type="text" id="pcEdJob" autocomplete="off" value="' + esc(u.jobTitle) + '"></div>' +
+        '</div>' +
+        '<div class="pc-exblock"><div class="pc-label">Tool exceptions</div><div id="pcEdEx"></div></div>' +
+        '</div>' +
+        '<div class="form-panel__foot pc-foot pc-foot--split">' +
+          '<button class="btn btn--danger" type="button" id="pcEdRemove">' + icon('delete') + 'Remove user</button>' +
+          '<span class="pc-foot__right"><button class="btn btn--ghost" type="button" id="pcEdRestore">Restore defaults</button>' +
+          '<button class="btn btn--primary" type="button" id="pcEdSave">Save changes</button></span>' +
+        '</div></div>';
+    }
+    html += '<div class="section-head"><h2>History</h2>' +
+      '<a class="btn btn--ghost btn--sm" href="/audit/?uid=' + encodeURIComponent(u.uid) + '">Open in Audit log ' + icon('forward') + '</a></div>' +
+      '<div id="pcEdHistory"><p class="pc-muted">Loading…</p></div>';
+    box.innerHTML = html;
+
+    if (edit) {
+      ED.picker = NL.clubPicker(document.getElementById('pcEdClub'), {
+        season: 'current', freetext: false, clearable: false, placeholder: 'Search clubs…',
+        onSelect: function (sel) { ED.club = (sel && sel.name) || ''; }
+      });
+      if (ED.club && ED.picker.setValue) ED.picker.setValue(ED.club);
+      document.getElementById('pcEdRoles').addEventListener('change', function (e) {
+        ED.role = e.target.value;
+        if (!NL.isClubUser(ED.role)) ED.club = '';
+        document.getElementById('pcEdClubWrap').hidden = !NL.isClubUser(ED.role);
+        if (NL.isClubUser(ED.role) && ED.picker.setValue) ED.picker.setValue(ED.club || '');
+        ED.levels = levelsFor(u, ED.role);
+        drawExceptions();
+      });
+      document.getElementById('pcEdRestore').addEventListener('click', function () {
+        toolKeys().forEach(function (k) { ED.levels[k] = def(k, ED.role); });
+        drawExceptions();
+        NL.toast('Defaults restored. Save to apply.', 'info');
+      });
+      document.getElementById('pcEdSave').addEventListener('click', savePerson);
+      document.getElementById('pcEdRemove').addEventListener('click', removePerson);
+      drawExceptions();
+    }
+    loadHistory(u.uid);
+  }
+
+  /* The exceptions: tools whose working level differs from the role's. */
+  function drawExceptions() {
+    var role = ED.role, club = NL.isClubUser(role), box = document.getElementById('pcEdEx');
+    var keys = toolKeys().filter(function (k) { return !(club && leagueOnly(S.registry[k])); });
+    var ex = keys.filter(function (k) { return clamp(k, role, ED.levels[k]) !== def(k, role); });
+    function label(k) { return (S.registry[k].label || k); }
+    function levelSelect(k, value, attr) {
+      return '<select class="nl-select pc-select" ' + attr + '>' + rungs(k, role).map(function (l) {
+        return '<option value="' + l + '"' + (l === value ? ' selected' : '') + '>' + LEVEL_WORD[l] + '</option>';
+      }).join('') + '</select>';
+    }
+    var html = '<p class="pc-hint">' + esc(NL.roles.label(role)) + ' sets everything else.' +
+      (club ? ' Club access follows the role.' : '') + '</p>';
+    if (ex.length) {
+      html += '<div class="table-wrap"><table class="table"><thead><tr><th>Tool</th><th>' + esc(NL.roles.label(role)) + ' gives</th><th>This person</th><th aria-label="Actions"></th></tr></thead><tbody>' +
+        ex.map(function (k) {
+          var now = clamp(k, role, ED.levels[k]);
+          return '<tr data-key="' + esc(k) + '"><td>' + esc(label(k)) + '</td><td>' + LEVEL_WORD[def(k, role)] + '</td>' +
+            '<td>' + (club ? LEVEL_WORD[now] : levelSelect(k, now, 'data-level aria-label="Level for ' + esc(label(k)) + '"')) + '</td>' +
+            '<td>' + (club ? '' : '<button class="btn btn--ghost btn--sm" type="button" data-drop>' + icon('delete') + 'Remove</button>') + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    } else {
+      html += '<p class="pc-muted">None.</p>';
+    }
+    var spare = club ? [] : keys.filter(function (k) { return ex.indexOf(k) < 0; });
+    if (spare.length) {
+      html += '<div class="pc-ex"><select class="nl-select pc-select" id="pcExTool" aria-label="Tool">' +
+        '<option value="">Add an exception…</option>' +
+        spare.map(function (k) { return '<option value="' + esc(k) + '">' + esc(label(k)) + '</option>'; }).join('') +
+        '</select><select class="nl-select pc-select" id="pcExLevel" aria-label="Level" hidden></select>' +
+        '<button class="btn btn--ghost btn--sm" type="button" id="pcExAdd" hidden>' + icon('add') + 'Add</button></div>';
+    }
+    box.innerHTML = html;
+
+    box.onchange = function (e) {
+      var t = e.target;
+      if (t.hasAttribute('data-level')) { ED.levels[t.closest('tr').getAttribute('data-key')] = t.value; return; }
+      if (t.id === 'pcExTool') {
+        var lv = document.getElementById('pcExLevel'), add = document.getElementById('pcExAdd');
+        lv.hidden = add.hidden = !t.value;
+        if (t.value) {
+          var d = def(t.value, role);
+          lv.innerHTML = rungs(t.value, role).filter(function (l) { return l !== d; }).map(function (l) {
+            return '<option value="' + l + '">' + LEVEL_WORD[l] + '</option>';
+          }).join('');
+        }
+      }
+    };
+    box.onclick = function (e) {
+      if (e.target.closest('[data-drop]')) {
+        var k = e.target.closest('tr').getAttribute('data-key');
+        ED.levels[k] = def(k, role);
+        return drawExceptions();
+      }
+      if (e.target.closest('#pcExAdd')) {
+        var tool = document.getElementById('pcExTool').value, level = document.getElementById('pcExLevel').value;
+        if (tool && level) { ED.levels[tool] = level; drawExceptions(); }
+      }
+    };
+  }
+
+  /* One update, as the portal's Save access: role, club, org, job title,
+     the deprecated orgKey cleared, and every tool's entry — the level where
+     it differs from the role's default, null where it matches. */
+  function savePerson() {
+    var u = ED.u, role = ED.role, club = NL.isClubUser(role);
+    var newClub = club ? (ED.club || (ED.picker && ED.picker.getValue && ED.picker.getValue()) || '').trim() : '';
+    if (club && !newClub) return NL.toast('Choose the club', 'error');
+    var job = document.getElementById('pcEdJob').value.trim();
+    var org = club ? '' : 'National League';
+    var base = 'users/' + u.uid + '/', updates = {}, changed = false;
+
+    toolKeys().forEach(function (k) {
+      var level = (club && leagueOnly(S.registry[k])) ? 'off' : clamp(k, role, ED.levels[k]);
+      var entry = level === def(k, role) ? null : level;
+      var stored = u.tools[k] === undefined ? null : u.tools[k];
+      if (stored !== entry) changed = true;
+      updates[base + 'tools/' + k] = entry;
+    });
+    if (role !== (u.role || '') || newClub !== (u.club || '') || org !== (u.org || '') || job !== (u.jobTitle || '')) changed = true;
+    if (!changed) return NL.toast('Nothing to save', 'info');
+
+    updates[base + 'role'] = role;
+    updates[base + 'club'] = newClub;
+    updates[base + 'org'] = org;
+    updates[base + 'jobTitle'] = job;
+    updates[base + 'orgKey'] = null;
+
+    var btn = document.getElementById('pcEdSave');
+    btn.disabled = true;
+    var roleChanged = role !== (u.role || '');
+    NL.writeAudit('access_changed',
+      (roleChanged ? 'Role: ' + (u.role || '?') + ' -> ' + role + '. ' : '') + 'Access update for ' + (u.name || u.email || u.uid),
+      { uid: u.uid, name: u.name || '', email: u.email || '' });
+    db.ref().update(updates).then(function () {
+      NL.toast('Saved — ' + (u.name || u.email || ''), 'success');
+      return refreshPeople().then(function () { openPerson(u.uid, false); });
+    }).catch(function (err) {
+      btn.disabled = false;
+      NL.toast('Could not save: ' + (err && err.message || err), 'error');
+    });
+  }
+
+  /* Remove user: their record goes (pass and per-tool entries with it). The
+     sign-in account itself stays in Firebase Auth, as it always has. */
+  function removePerson() {
+    var u = ED.u;
+    NL.confirm('Remove ' + (u.name || u.email) + '? They lose every tool.', { title: 'Remove user', confirmText: 'Remove', variant: 'danger' })
+    .then(function (ok) {
+      if (!ok) return;
+      NL.writeAudit('user_removed', (u.name || u.email || '') + ' removed by admin', { uid: u.uid, name: u.name || '', email: u.email || '' });
+      return db.ref('users/' + u.uid).remove().then(function () {
+        NL.toast((u.name || u.email || 'User') + ' removed', 'success');
+        return refreshPeople().then(function () { showTab('people'); });
+      });
+    }).catch(function (err) { NL.toast('Could not remove: ' + (err && err.message || err), 'error'); });
+  }
+
+  /* The ten most recent audit entries by or about them. */
+  function loadHistory(uid) {
+    var box = document.getElementById('pcEdHistory');
+    db.ref('admin/audit-by-user/' + uid).orderByKey().limitToLast(10).once('value').then(function (snap) {
+      var rows = [];
+      snap.forEach(function (c) { var e = c.val(); if (e) { e._key = c.key; rows.push(e); } });
+      rows.reverse();
+      box.innerHTML = rows.length ? NL.audit.table(rows) : '<div class="empty-state"><div class="empty-state__title">Nothing recorded yet</div></div>';
+    }).catch(function (err) {
+      box.innerHTML = '<p class="pc-muted">History could not be loaded: ' + esc(err && err.message || String(err)) + '</p>';
+    });
+  }
+
   /* ── Tabs ───────────────────────────────────────────────────────────── */
   function showTab(name) {
+    ED = null;
+    document.getElementById('pcTabs').hidden = false;
     document.querySelectorAll('#pcTabs .tab').forEach(function (b) {
       var on = b.getAttribute('data-pane') === name;
       b.classList.toggle('active', on);
@@ -657,14 +982,16 @@
     try { history.replaceState(null, '', name === 'people' ? location.pathname : '?tab=' + name); } catch (e) {}
   }
 
-  /* Everyone with an account, A–Z; rejected requests are not people. */
+  /* Everyone with an account, A–Z. A rejected request keeps its account
+     until someone removes it, so it is listed, marked, and can be removed. */
   function refreshPeople() {
     return db.ref('users').once('value').then(function (snap) {
       var all = snap.val() || {};
-      S.users = Object.keys(all).filter(function (uid) { return all[uid] && !all[uid].rejected; }).map(function (uid) {
+      S.users = Object.keys(all).filter(function (uid) { return !!all[uid]; }).map(function (uid) {
         var u = all[uid];
         return { uid: uid, name: u.name || u.email || '', email: u.email || '', role: u.role || '', club: u.club || '',
-          pending: !!u.pending, tools: u.tools || {}, pass: u.pass || null };
+          jobTitle: u.jobTitle || '', org: u.org || '', pending: !!u.pending, rejected: !!u.rejected,
+          tools: u.tools || {}, pass: u.pass || null };
       }).sort(function (a, b) { return a.name.localeCompare(b.name); });
       drawPeople();
     });
@@ -679,6 +1006,16 @@
     });
     document.getElementById('pcSearch').addEventListener('input', function (e) { S.q = e.target.value.trim().toLowerCase(); drawPeople(); });
     document.getElementById('pcCsv').addEventListener('click', downloadCsv);
+    document.getElementById('pcBack').innerHTML = icon('back') + 'People';
+    document.getElementById('pcBack').addEventListener('click', function () { showTab('people'); });
+    /* A name or Edit opens the person here, without a reload; the link
+       still works in a new tab. */
+    document.getElementById('pcRows').addEventListener('click', function (e) {
+      var a = e.target.closest('a[data-person]');
+      if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;
+      e.preventDefault();
+      openPerson(a.getAttribute('data-person'));
+    });
     NL.filterButton(document.getElementById('pcPassFilter'), {
       label: 'Pass', multiple: false, allLabel: 'Everyone',
       options: [{ value: 'issued', label: 'Issued' }, { value: 'none', label: 'Not issued' }],
@@ -701,9 +1038,11 @@
       loadInvites(); loadRequests();
       /* ?tab= opens a tab: the portal's old Invites and Requests links, and
          the admin notification emails (?tab=inbound), land here. */
-      var tab = new URLSearchParams(location.search).get('tab');
+      var q = new URLSearchParams(location.search);
+      var tab = q.get('tab');
       if (tab === 'inbound') tab = 'requests';
-      if (['invites', 'requests', 'manage'].indexOf(tab) >= 0) showTab(tab);
+      if (q.get('person')) openPerson(q.get('person'));
+      else if (['invites', 'requests', 'manage'].indexOf(tab) >= 0) showTab(tab);
     }).catch(function (e) {
       document.getElementById('pcRows').innerHTML = '<tr><td colspan="4">People could not be loaded: ' + esc(e && e.message || String(e)) + '</td></tr>';
     });
