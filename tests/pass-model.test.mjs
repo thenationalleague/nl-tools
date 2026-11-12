@@ -243,6 +243,24 @@ test('issuing a pass keeps when a key was first given, and drops what does not b
   assert.equal(clubPass.keys['club-operations'].given, NOW, 'a move to the other side starts the keys afresh');
 });
 
+test('a key end date is set, kept with the key, and cleared when the form clears it', () => {
+  const first = P.build({ base: 'league', keys: ['league-media'], until: { 'league-media': NOW + 7 * DAY } }, 'u-a', NOW);
+  assert.equal(first.keys['league-media'].until, NOW + 7 * DAY);
+  assert.equal(P.level(first, tool({ grants: { base: { league: 'off', club: 'off' }, key: { 'league-media': 'access' } } }), NOW + 8 * DAY), 'off', 'gone after the date');
+  const cleared = P.build({ base: 'league', keys: ['league-media'] }, 'u-b', NOW + DAY, first);
+  assert.equal(cleared.keys['league-media'].until, undefined);
+  assert.equal(cleared.keys['league-media'].by, 'u-a', 'clearing the date does not re-give the key');
+});
+
+test('who may give out what: Skeleton everything, League Operations club cards only', () => {
+  assert.deepEqual(plain(P.issueRights({ base: 'league', skeleton: { given: 1 } }, NOW)), { league: true, club: true, skeleton: true });
+  assert.deepEqual(plain(P.issueRights(league('league-operations'), NOW)), { league: false, club: true, skeleton: false });
+  assert.deepEqual(plain(P.issueRights(league('league-media'), NOW)), { league: false, club: false, skeleton: false });
+  assert.deepEqual(plain(P.issueRights(club('Woking', 'club-operations'), NOW)), { league: false, club: false, skeleton: false },
+    'a club secretary\'s Operations key is not League Operations');
+  assert.deepEqual(plain(P.issueRights(null, NOW)), { league: false, club: false, skeleton: false });
+});
+
 test('only the Skeleton key issues passes; Tester or Skeleton can View as', () => {
   assert.equal(P.canIssue(league('league-operations')), false);
   assert.equal(P.canIssue({ base: 'league', skeleton: { given: 1 } }), true);
@@ -271,3 +289,30 @@ test('club colours: the pair is kept where it reads, swapped off near-white, nev
   }
   assert.equal(P.clubColours({ colors: { primary: '#FFFFFF', secondary: '#FEFEFE' } }), null);
 });
+
+/* ---- the migration report: today against the pass ---- */
+
+test('today\'s level mirrors auth-guard: superadmin, the League gate, then the resolver', () => {
+  const rec = (k) => ({ key: k, ...REGISTRY[k] });
+  assert.equal(P.todayLevel({ role: 'superadmin' }, rec('ops-estate')), 'manage');
+  assert.equal(P.todayLevel({ role: 'club-admin', tools: { 'ops-club-kits': 'admin' } }, rec('ops-club-kits')), 'off',
+    'a stray grant never opens a League tool to a club role');
+  assert.equal(P.todayLevel({ role: 'staff' }, rec('ops-club-kits')), P.fromOld(REGISTRY['ops-club-kits'].defaults.staff));
+  assert.equal(P.todayLevel({ role: 'staff', tools: { 'ops-club-kits': 'off' } }, rec('ops-club-kits')), 'off', 'an explicit off wins');
+});
+
+test('the report lists only differences, A–Z, and says which way each moves', () => {
+  const user = { role: 'staff', pass: league('league-operations') };
+  const rows = plain(P.compare(user, REGISTRY, NOW));
+  assert.ok(rows.length > 0);
+  assert.deepEqual(rows.map((r) => r.label), [...rows.map((r) => r.label)].sort((a, b) => a.localeCompare(b)));
+  for (const r of rows) {
+    assert.notEqual(r.today, r.pass);
+    assert.ok(['opens', 'closes', 'up', 'down'].includes(r.change));
+  }
+  const codes = rows.find((r) => r.key === 'ops-club-codes');
+  assert.ok(codes && codes.change === 'opens', 'League Operations gain Club Codes, which League Staff do not open today');
+  const none = plain(P.compare({ role: 'superadmin', pass: { base: 'league', skeleton: { given: 1 } } }, REGISTRY, NOW));
+  assert.deepEqual(none, [], 'superadmin today and the Skeleton key agree everywhere');
+});
+

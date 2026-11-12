@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — My pass
-  Version: v1.1 (12/11/2026)
+  Version: v1.3 (12/11/2026)
   File: /pass/index.html
 
   Your pass: the card you belong to (League or Club), the keys you hold on
@@ -34,6 +34,17 @@
   answer to someone with nothing — not "this tool isn't available".
 
   Changelog
+  v1.3 (12/11/2026) — Issue a pass belongs to People and cards (/people/):
+    a way back to it, and ?uid= arrives with the person chosen. Keys take
+    an optional end date. League Operations issue Club cards and club keys
+    to club people only (NL.pass.issueRights); the Skeleton key everything.
+    Until step 6 the database lets only League Admins and the superadmin
+    write a pass, so the form is offered to those roles alone.
+  v1.2 (12/11/2026) — Issue a pass shows the person in full before you
+    issue: name, email, role today (and club), job title on the account,
+    the pass they hold now with who issued it and when, and how long the
+    account has existed. The search list shows email and role too, so two
+    people with similar names can be told apart.
   v1.1 (12/11/2026) — The Skeleton key is a big ACCESS ALL AREAS sticker
     stuck across the holder's own pass, not a second pass hanging behind
     it: on a phone the second pass was almost entirely hidden. The skull
@@ -86,6 +97,21 @@
     window.NL_CHANGELOG = [
       {
         date: '12/11/2026',
+        version: 'v1.3',
+        items: [
+          'Keys can have an end date.',
+          'Issuing passes is reached from People and cards.'
+        ]
+      },
+      {
+        date: '12/11/2026',
+        version: 'v1.2',
+        items: [
+          'Issue a pass shows the person\u2019s details in full before you save.'
+        ]
+      },
+      {
+        date: '12/11/2026',
         version: 'v1.1',
         items: [
           'The Skeleton key is now a big sticker on your own pass, so it shows on a phone.'
@@ -113,10 +139,10 @@
     };
   </script>
 
-  <!-- NL system scripts (lint canonical: ?v=53 / ?v=1 / ?v=11 / ?v=18) -->
-  <script src="/system/nl-utils.js?v=53"></script>
+  <!-- NL system scripts (lint canonical: ?v=54 / ?v=1 / ?v=12 / ?v=18) -->
+  <script src="/system/nl-utils.js?v=54"></script>
   <script src="/system/nl-analytics.js?v=1"></script>
-  <script src="/system/nl-topbar.js?v=11"></script>
+  <script src="/system/nl-topbar.js?v=12"></script>
   <script src="/system/auth-guard.js?v=18"></script>
 
 <style>
@@ -368,9 +394,29 @@
   .choice-row label { display: inline-flex; align-items: center; gap: 8px; font-size: var(--text-sm); color: var(--text); text-transform: none; letter-spacing: 0; font-weight: 400; font-variation-settings: 'wght' 400; margin: 0; }
   .issue-fields { display: flex; flex-direction: column; gap: 18px; }
   .issue-fields[hidden] { display: none; }
-  .issue-chosen { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--navy-50); }
-  .issue-chosen__who { flex: 1; min-width: 0; font-size: var(--text-sm); }
-  .issue-chosen__who small { display: block; color: var(--text-muted); font-size: var(--text-xs); }
+  .issue-person { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--navy-50); padding: 16px; }
+  .issue-person__top { display: flex; align-items: center; gap: 14px; }
+  .issue-person__face {
+    width: 48px; height: 48px; flex: 0 0 48px; border-radius: var(--radius-lg); background: var(--white);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; font-weight: 800; font-variation-settings: 'wght' 800; color: var(--navy);
+  }
+  .issue-person__id { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .issue-person__name { font-size: var(--text-md); font-weight: 700; font-variation-settings: 'wght' 700; color: var(--text); }
+  .issue-person__email { font-size: var(--text-sm); color: var(--text-muted); overflow-wrap: anywhere; }
+  .issue-person__facts { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 14px 0 0; padding-top: 14px; border-top: 1px solid var(--border); font-size: var(--text-sm); }
+  .issue-person__facts dt { color: var(--text-muted); }
+  .issue-person__facts dd { margin: 0; color: var(--text); }
+  @media (max-width: 500px) {
+    .issue-person__facts { grid-template-columns: 1fr; gap: 2px; }
+    .issue-person__facts dd { margin-bottom: 8px; }
+  }
+  .issue-back { align-self: flex-start; }
+  .key-row { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; min-height: 40px; }
+  .key-row label { display: inline-flex; align-items: center; gap: 8px; font-size: var(--text-sm); color: var(--text); text-transform: none; letter-spacing: 0; font-weight: 400; font-variation-settings: 'wght' 400; margin: 0; min-width: 160px; }
+  .key-row input[type="checkbox"] { width: auto; padding: 0; margin: 0; }
+  .key-row__until { display: inline-flex; align-items: center; gap: 8px; font-size: var(--text-xs); color: var(--text-muted); }
+  .key-row__until input[type="date"] { width: auto; padding: 6px 10px; }
   .issue-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
   .issue-actions .spacer { flex: 1; }
 
@@ -550,10 +596,11 @@
   }
 
   function noPassHtml(subject, mine) {
+    var msg = subject.message || (mine ? 'Your pass hasn’t been issued yet' : (subject.name || 'This person') + '’s pass hasn’t been issued yet');
     return '<div class="pass pass--none" style="--band:var(--navy-100);--band-text:var(--text)">' +
       '<div class="pass__slot"></div>' +
       '<div class="pass__band"><span class="pass__seat"><img src="' + esc(NL.clubs.ROSE) + '" alt="The National League crest"></span><span class="pass__org">NL Tools</span></div>' +
-      '<div class="pass__none"><strong>' + esc(mine ? 'Your pass hasn’t been issued yet' : (subject.name || 'This person') + '’s pass hasn’t been issued yet') + '</strong></div>' +
+      '<div class="pass__none"><strong>' + esc(msg) + '</strong></div>' +
     '</div>';
   }
 
@@ -674,7 +721,8 @@
       '<div class="viewbar">' +
         '<span class="viewbar__who">Viewing as <b>' + esc(subject.name) + '</b>' + (subject.made ? ' (made up)' : '') + '</span>' +
         '<button class="btn btn--ghost btn--sm" type="button" id="chooseBtn">' + icon('eye', 'icon--sm') + 'Choose someone</button>' +
-        '<a class="btn btn--ghost btn--sm" href="/pass/">' + icon('back', 'icon--sm') + 'My pass</a>' +
+        (subject.uid ? '<a class="btn btn--ghost btn--sm" href="/people/">' + icon('back', 'icon--sm') + 'People and cards</a>'
+          : '<a class="btn btn--ghost btn--sm" href="/pass/">' + icon('back', 'icon--sm') + 'My pass</a>') +
       '</div>' +
       listHtml(subject, { links: false });
     wireCrests(list);
@@ -784,7 +832,8 @@
       var all = snap.val() || {};
       STATE.users = Object.keys(all).filter(function (uid) { return all[uid] && !all[uid].rejected; }).map(function (uid) {
         var u = all[uid];
-        return { uid: uid, name: u.name || u.email || '', email: u.email || '', role: u.role || '', jobTitle: u.jobTitle || '', pass: u.pass || null };
+        return { uid: uid, name: u.name || u.email || '', email: u.email || '', role: u.role || '', club: u.club || '',
+          jobTitle: u.jobTitle || '', createdAt: u.createdAt || null, pending: !!u.pending, pass: u.pass || null };
       }).sort(function (a, b) { return a.name.localeCompare(b.name); });
       return STATE.users;
     });
@@ -794,10 +843,39 @@
   /* A basic form so passes can be issued before the people screens of step
      4 exist: card, club, keys, job title. The Skeleton key holder chooses;
      the pass is written to users/<uid>/pass; the audit log records it. */
+  /* What this person may give out. The Skeleton key: everything; League
+     Operations: Club cards and club keys only (NL.pass.issueRights). Today's
+     superadmin role counts as the Skeleton key until step 6, so the first
+     pass could be issued. */
+  function myRights() {
+    var s = STATE.session;
+    if (s.role === 'superadmin') return { league: true, club: true, skeleton: true };
+    return P.issueRights(s.pass);
+  }
+  /* Until step 6 the database lets only League Admins and the superadmin
+     write a pass, so the form is offered to those roles alone, within
+     what their own pass allows. */
+  function mayIssueHere() {
+    var s = STATE.session, r = myRights();
+    return s.role === 'superadmin' || (s.role === 'admin' && (r.league || r.club));
+  }
+  /* Can I issue to this person? League Operations reach club people only:
+     not anyone on a League card, nor a League role waiting for one. */
+  function canIssueTo(u) {
+    var r = myRights();
+    if (r.league) return true;
+    if (!r.club) return false;
+    if (u.uid === STATE.session.uid) return false;
+    if (u.pass && u.pass.base === 'league') return false;
+    return NL.roles.realm(u.role) !== 'league';
+  }
+
   function renderIssue() {
     var list = document.getElementById('listCol');
-    var mayGiveSkeleton = P.isSkeleton(STATE.session.pass) || STATE.session.role === 'superadmin';
+    var rights = myRights();
+    var mayGiveSkeleton = rights.skeleton;
     list.innerHTML =
+      '<a class="btn btn--ghost btn--sm issue-back" href="/people/">' + icon('back', 'icon--sm') + 'People and cards</a>' +
       '<div class="form-panel issue-panel">' +
         '<div class="form-panel__head">Issue a pass</div>' +
         '<div class="form-panel__body issue-fields">' +
@@ -805,12 +883,12 @@
             '<div id="issuePerson"></div></div>' +
           '<div id="issueFields" class="issue-fields" hidden>' +
             '<div class="form-group"><label>Card</label><div class="choice-row" id="issueBase">' +
-              '<label><input type="radio" name="issueBase" value="league"> League card</label>' +
+              '<label><input type="radio" name="issueBase" value="league"' + (rights.league ? '' : ' disabled') + '> League card</label>' +
               '<label><input type="radio" name="issueBase" value="club"> Club card</label></div></div>' +
             '<div class="form-group" id="issueClubWrap" hidden><label>Club</label><div id="issueClub"></div></div>' +
             '<div class="form-group"><label for="issueJob">Job title</label>' +
               '<input id="issueJob" type="text" maxlength="80" autocomplete="off"></div>' +
-            '<div class="form-group"><label>Keys</label><div class="choice-row" id="issueKeys"></div></div>' +
+            '<div class="form-group"><label>Keys</label><div id="issueKeys"></div></div>' +
             (mayGiveSkeleton ? '<div class="form-group" id="issueSkelWrap"><label>Skeleton key</label><div class="choice-row">' +
               '<label><input type="checkbox" id="issueSkel"> Opens every tool at Manage</label></div></div>' : '') +
             '<p class="form-hint">Until the switch, a pass changes what people see on My pass, not what they can open.</p>' +
@@ -823,7 +901,7 @@
         '</div>' +
       '</div>';
 
-    STATE.issue = { user: null, base: 'league', club: FALLBACK_CLUB, jobTitle: '', keys: [], skeleton: false };
+    STATE.issue = { user: null, base: rights.league ? 'league' : 'club', club: FALLBACK_CLUB, jobTitle: '', keys: [], until: {}, skeleton: false };
     if (clubNames().indexOf(FALLBACK_CLUB) < 0) STATE.issue.club = clubNames()[0] || FALLBACK_CLUB;
     drawPersonPicker();
     drawIssuePreview();
@@ -834,8 +912,18 @@
       drawIssueKeys(); drawIssuePreview();
     });
     list.querySelector('#issueJob').addEventListener('input', function (e) { STATE.issue.jobTitle = e.target.value; drawIssuePreview(); });
-    list.querySelector('#issueKeys').addEventListener('change', function () {
-      STATE.issue.keys = Array.prototype.map.call(list.querySelectorAll('#issueKeys input:checked'), function (i) { return i.value; });
+    list.querySelector('#issueKeys').addEventListener('change', function (e) {
+      var iss = STATE.issue;
+      if (e.target.matches('input[type="date"]')) {
+        var id = e.target.getAttribute('data-until');
+        if (e.target.value) {
+          var d = e.target.value.split('-');
+          iss.until[id] = new Date(+d[0], +d[1] - 1, +d[2]).getTime(); /* gone from the start of that day */
+        } else delete iss.until[id];
+      } else {
+        iss.keys = Array.prototype.map.call(list.querySelectorAll('#issueKeys input[type="checkbox"]:checked'), function (i) { return i.value; });
+        drawIssueKeys();
+      }
       drawIssuePreview();
     });
     var skel = list.querySelector('#issueSkel');
@@ -852,9 +940,7 @@
     var mount = document.getElementById('issuePerson');
     var u = STATE.issue.user;
     if (u) {
-      mount.innerHTML = '<div class="issue-chosen"><span class="issue-chosen__who">' + esc(u.name) +
-        '<small>' + esc(u.email) + ' · ' + esc(passLine(u.pass)) + '</small></span>' +
-        '<button class="btn btn--ghost btn--sm" type="button" id="issueChange">Change</button></div>';
+      mount.innerHTML = personCardHtml(u);
       mount.querySelector('#issueChange').addEventListener('click', function () { STATE.issue.user = null; drawPersonPicker(); showFields(false); drawIssuePreview(); });
       return;
     }
@@ -865,10 +951,13 @@
       function draw(q) {
         q = String(q || '').toLowerCase();
         var rows = users.filter(function (x) {
+          if (!canIssueTo(x)) return false;
           return !q || (x.name || '').toLowerCase().indexOf(q) >= 0 || (x.email || '').toLowerCase().indexOf(q) >= 0;
         }).slice(0, 60);
         list.innerHTML = rows.length ? rows.map(function (x) {
-          return '<button type="button" data-uid="' + esc(x.uid) + '">' + esc(x.name || '(no name)') + '<small>' + esc(passLine(x.pass)) + '</small></button>';
+          return '<button type="button" data-uid="' + esc(x.uid) + '">' + esc(x.name || '(no name)') +
+            '<small>' + esc([x.email, roleToday(x)].filter(Boolean).join(' · ')) + '</small>' +
+            '<small>' + esc(passLine(x.pass)) + '</small></button>';
         }).join('') : '<button type="button" disabled>Nobody matches.</button>';
       }
       draw('');
@@ -882,13 +971,65 @@
     });
   }
 
+  /* What the person is today, in the old model: role, and club for club
+     roles. The pass replaces this at step 6; until then it is the thing to
+     check the new pass against. */
+  function roleToday(u) {
+    var r = NL.roles.label(u.role) || 'No role';
+    if (u.pending) r += ' (waiting for approval)';
+    return NL.isClubUser(u.role) && u.club ? r + ', ' + u.club : r;
+  }
+  function nameOf(uid) {
+    var x = (STATE.users || []).filter(function (y) { return y.uid === uid; })[0];
+    return x ? x.name : '';
+  }
+
+  /* The chosen person, in full: who they are, what they are today, and the
+     pass they hold now, so the one you are about to save is issued against
+     what you can see. */
+  function personCardHtml(u) {
+    var p = u.pass, passText;
+    if (!P.isIssued(p)) {
+      passText = 'Not issued yet';
+    } else {
+      var keys = P.keysHeld(p).map(function (id) {
+        var until = p.keys[id].until;
+        return P.KEY[id].name + (until ? ' (until ' + NL.formatDate(until) + ')' : '');
+      });
+      if (P.isSkeleton(p)) keys.unshift('Skeleton key');
+      passText = (p.base === 'club' ? 'Club card, ' + p.club : 'League card') +
+        (keys.length ? ' · ' + keys.join(', ') : ' · no keys') +
+        (p.issued ? ' · issued ' + NL.formatDate(p.issued) + (nameOf(p.issuedBy) ? ' by ' + nameOf(p.issuedBy) : '') : '');
+    }
+    var rows = [
+      ['Role today', roleToday(u)],
+      ['Job title on account', u.jobTitle || '—'],
+      ['Pass now', passText]
+    ];
+    if (u.createdAt) rows.push(['Account since', NL.formatDate(u.createdAt)]);
+    return '<div class="issue-person">' +
+      '<div class="issue-person__top">' +
+        '<span class="issue-person__face" aria-hidden="true">' + esc(initials(u.name)) + '</span>' +
+        '<span class="issue-person__id"><span class="issue-person__name">' + esc(u.name) + '</span>' +
+          '<span class="issue-person__email">' + esc(u.email) + '</span></span>' +
+        '<button class="btn btn--ghost btn--sm" type="button" id="issueChange">Change</button>' +
+      '</div>' +
+      '<dl class="issue-person__facts">' + rows.map(function (r) {
+        return '<dt>' + esc(r[0]) + '</dt><dd>' + esc(r[1]) + '</dd>';
+      }).join('') + '</dl>' +
+    '</div>';
+  }
+
   function choosePerson(u) {
     var p = u.pass, iss = STATE.issue;
     iss.user = u;
     iss.base = (p && p.base) || (NL.isClubUser(u.role) ? 'club' : 'league');
     if (p && p.club) iss.club = p.club;
     iss.jobTitle = (p && p.jobTitle) || u.jobTitle || '';
+    if (!myRights().league) iss.base = 'club';
     iss.keys = p ? P.keysHeld(p) : [];
+    iss.until = {};
+    iss.keys.forEach(function (id) { var u0 = p.keys[id] && p.keys[id].until; if (typeof u0 === 'number') iss.until[id] = u0; });
     iss.skeleton = P.isSkeleton(p);
     var root = document.getElementById('listCol');
     root.querySelector('input[name="issueBase"][value="' + iss.base + '"]').checked = true;
@@ -908,20 +1049,31 @@
     var root = document.getElementById('listCol'), iss = STATE.issue;
     root.querySelector('#issueClubWrap').hidden = iss.base !== 'club';
     var sw = root.querySelector('#issueSkelWrap'); if (sw) sw.hidden = iss.base !== 'league';
+    /* One row per key: tick to give it; once ticked, an optional end date
+       (holiday cover, a short project). The key goes on that date. */
     root.querySelector('#issueKeys').innerHTML = P.KEYS.filter(function (k) { return k.base === iss.base; }).map(function (k) {
-      return '<label><input type="checkbox" value="' + esc(k.id) + '"' + (iss.keys.indexOf(k.id) >= 0 ? ' checked' : '') + '> ' + esc(k.name) + '</label>';
+      var on = iss.keys.indexOf(k.id) >= 0;
+      var until = iss.until[k.id];
+      return '<div class="key-row"><label><input type="checkbox" value="' + esc(k.id) + '"' + (on ? ' checked' : '') + '> ' + esc(k.name) + '</label>' +
+        (on ? '<span class="key-row__until"><span>Ends</span><input type="date" data-until="' + esc(k.id) + '" aria-label="' + esc(k.name) + ' key ends"' +
+          (until ? ' value="' + isoDay(until) + '"' : '') + '></span>' : '') + '</div>';
     }).join('');
+  }
+
+  function isoDay(ms) {
+    var d = new Date(ms);
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
   }
 
   function issuedPass() {
     var iss = STATE.issue;
-    return P.build({ base: iss.base, club: iss.club, jobTitle: iss.jobTitle, keys: iss.keys, skeleton: iss.skeleton },
+    return P.build({ base: iss.base, club: iss.club, jobTitle: iss.jobTitle, keys: iss.keys, until: iss.until, skeleton: iss.skeleton },
       STATE.session.uid, Date.now(), iss.user && iss.user.pass);
   }
 
   function drawIssuePreview() {
     var iss = STATE.issue;
-    if (!iss.user) { drawPass({ name: '', pass: null }, false); return; }
+    if (!iss.user) { drawPass({ name: '', pass: null, message: 'Choose who the pass is for' }, false); return; }
     drawPass({ name: iss.user.name, pass: issuedPass() }, false);
   }
 
@@ -984,10 +1136,23 @@
         if (!P.canViewAs(session.pass)) return renderRefusal('View as is for testers and the Skeleton key.');
         var m = MADE_UP[1];
         STATE.subject = { name: m.name, pass: madeUpPass(m, clubNames().indexOf(FALLBACK_CLUB) >= 0 ? FALLBACK_CLUB : clubNames()[0]), made: true };
-        renderAs();
+        /* Arrived from People and cards: that person, not a made-up one. */
+        var asUid = new URLSearchParams(location.search).get('uid');
+        if (!asUid) return renderAs();
+        return loadUsers().then(function (users) {
+          var u = users.filter(function (x) { return x.uid === asUid; })[0];
+          if (u) STATE.subject = { name: u.name, pass: u.pass, uid: u.uid };
+          renderAs();
+        });
       } else if (STATE.view === 'issue') {
-        if (!(P.canIssue(session.pass) || session.role === 'superadmin')) return renderRefusal('Issuing passes is for the Skeleton key.');
+        if (!mayIssueHere()) return renderRefusal('Issuing passes is for the Skeleton key and League Operations.');
         renderIssue();
+        /* Arrived from People and cards with someone chosen. */
+        var uid = new URLSearchParams(location.search).get('uid');
+        if (uid) loadUsers().then(function (users) {
+          var u = users.filter(function (x) { return x.uid === uid; })[0];
+          if (u && canIssueTo(u)) choosePerson(u);
+        });
       } else {
         renderMine();
       }

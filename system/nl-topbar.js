@@ -1,7 +1,12 @@
 /* =========================================================================
    NL Tools — Topbar renderer
    File: /system/nl-topbar.js
-   Version: v1.7 (12/11/2026)
+   Version: v1.8 (12/11/2026)
+
+   v1.8 — People and cards in the menu opens the new tool at /people/, for
+          the roles auth-guard lets in there today (superadmin and League
+          Admin). Cache-bust ?v=11 -> ?v=12, in lockstep with nl-utils
+          ?v=53 -> ?v=54.
 
    v1.7 — The menu under the circle, as system/permissions-plan.md sets it
           ("The top bar"). It holds no tools any more: the "Your tools" list
@@ -10,8 +15,8 @@
           pass (name, job title, key tags, a skull tag for the Skeleton key,
           or "Your pass hasn't been issued yet"), My pass, Who can open this
           (on a tool, for the Skeleton key and whoever holds Manage there by
-          their pass), People and cards (Skeleton key; today's superadmin
-          role too, until the first passes are issued), View as (Skeleton
+          their pass), People and cards (/people/, for the roles that
+          open it today: superadmin and League Admin), View as (Skeleton
           key and Tester). Admin panel stays for League Admins until step 4.
           The role pill goes with the tools list. Display only: nothing here
           changes what anyone can open. Cache-bust ?v=10 -> ?v=11, in
@@ -402,7 +407,7 @@
      system/permissions-plan.md, "The top bar": the menu holds no tools at
      all. The portal home is where you go to tools. It holds, in order: a
      small version of your pass, My pass, Who can open this (on a tool, for
-     the people who run it), People and cards (Skeleton key), View as
+     the people who run it), People and cards (/people/), View as
      (Skeleton key and Tester), the old Admin panel until step 4 replaces it,
      Install as app, Sign out. It never scrolls.
      The pass is DISPLAY ONLY here: what you can open is still decided by
@@ -442,8 +447,11 @@
     /* Issuing passes: the Skeleton key. Until the first pass is issued nobody
        holds one, so today's superadmin role may issue too — the way in for
        the first pass. Goes at step 6, when the role stops meaning anything. */
-    var canIssue = (issued && P.canIssue(pass)) || (session && session.role === 'superadmin');
-    if (canIssue) dd.appendChild(item('/pass/?view=issue', 'edit', 'People and cards'));
+    /* People and cards (/people/): until step 6 auth-guard opens it to the
+       roles that run the portal's admin area today, so the menu offers it
+       to them. */
+    var role = session && session.role;
+    if (role === 'superadmin' || role === 'admin') dd.appendChild(item('/people/', 'list', 'People and cards'));
     if (issued && P.canViewAs(pass)) dd.appendChild(item('/pass/?view=as', 'eye', 'View as'));
 
     /* Today's people screens, until step 4 replaces them with People and

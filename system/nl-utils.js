@@ -1,7 +1,15 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.49 (12/11/2026)
+   Version: v1.50 (12/11/2026)
+
+   v1.50 — NL.pass for People and cards (permissions plan, step 4): keys
+   take an end date in build(); issueRights says what a pass may give out
+   (Skeleton key everything, League Operations Club cards and club keys);
+   todayLevel mirrors auth-guard's answer in the pass's words, and compare
+   lists, per person, every tool where the pass differs from today — the
+   migration report. Tested in tests/pass-model.test.mjs. Cache-bust
+   nl-utils ?v=53 -> ?v=54, in lockstep with nl-topbar ?v=11 -> ?v=12.
 
    v1.49 — NL.pass: the new access model from system/permissions-plan.md
    (steps 2 and 3), as data and one pure resolver. Cards (League / Club),
@@ -2644,20 +2652,62 @@
     /* Today's level words, read as the pass's: 'admin' is Manage. */
     function fromOld(level) { return level === 'admin' ? 'manage' : (level === 'access' ? 'access' : 'off'); }
 
+    /* What auth-guard gives this person on this tool TODAY, in the pass's
+       words. Mirrors auth-guard.js checkAccess step for step: superadmin
+       Manage everywhere; a league/meta tool closed to anyone without a
+       League role; otherwise NL.resolveToolLevel (per-person entry, else
+       the role default). A copy of the guard's order, kept beside the new
+       rule so the migration report can set one against the other; the
+       tests pin both. At step 6 the guard stops asking this question. */
+    function todayLevel(user, record) {
+      var role = (user && user.role) || '';
+      if (role === 'superadmin') return 'manage';
+      var aud = record && record.audience;
+      if ((aud === 'league' || aud === 'staff' || aud === 'meta') &&
+          !(role === 'admin' || role === 'staff')) return 'off';
+      var entry = user && user.tools ? user.tools[record && record.key] : undefined;
+      return fromOld(window.NL.resolveToolLevel(entry, record, role));
+    }
+
+    /* The migration report for one person: every tool where the pass would
+       give a different level from today, A–Z. `registry` is tools/, `user`
+       is users/<uid>. Each row says which way it moves. */
+    function compare(user, registry, now) {
+      var out = [];
+      Object.keys(registry || {}).forEach(function (key) {
+        var rec = registry[key];
+        if (!rec || rec.placeholder) return;
+        var withKey = Object.assign({ key: key }, rec);
+        var today = todayLevel(user, withKey);
+        var pass = explain(user && user.pass, rec, now).level;
+        if (today === pass) return;
+        out.push({
+          key: key, label: rec.label || key, today: today, pass: pass,
+          change: rank(pass) > rank(today) ? (today === 'off' ? 'opens' : 'up') : (pass === 'off' ? 'closes' : 'down')
+        });
+      });
+      return out.sort(function (a, b) { return a.label.localeCompare(b.label); });
+    }
+
     /* Build the pass the "issue a pass" form saves. Keys already held keep
        their original given/by (re-issuing to change a job title must not
-       reset when a key was given); new keys are stamped now, by `by`. Keys
-       from the other side and unknown ids are dropped; the Skeleton key goes
-       only on a League card. */
+       reset when a key was given); new keys are stamped now, by `by`.
+       `input.until` maps key ids to an end date (ms); a key without one has
+       none. Keys from the other side and unknown ids are dropped; the
+       Skeleton key goes only on a League card. */
     function build(input, by, now, previous) {
       now = nowOr(now);
       var base = input.base === 'club' ? 'club' : 'league';
       var prevKeys = (previous && previous.base === base && previous.keys) || {};
-      var keys = {};
+      var keys = {}, until = input.until || {};
       (input.keys || []).forEach(function (id) {
         if (!KEY[id] || KEY[id].base !== base) return;
         var old = prevKeys[id];
-        keys[id] = old ? old : { given: now, by: by };
+        var k = old ? { given: old.given, by: old.by } : { given: now, by: by };
+        /* An end date is the form's to set or clear on every save: a key
+           ticked with no date runs until taken off. */
+        if (typeof until[id] === 'number' && isFinite(until[id])) k.until = until[id];
+        keys[id] = k;
       });
       var pass = {
         base: base,
@@ -2756,12 +2806,23 @@
       summary: summary,
       whoCanOpen: whoCanOpen,
       fromOld: fromOld,
+      todayLevel: todayLevel,
+      compare: compare,
       build: build,
       /* Who may use the "issue a pass" form, and View as. League and Tester
          keys, and the Skeleton key, stay with Skeleton holders (plan, "Who
          gives out cards and keys"). League Operations giving out Club cards
          comes with the people screens in step 4. */
       canIssue: function (pass) { return isSkeleton(pass); },
+      /* What this pass may give out (plan, "Who gives out cards and keys"):
+         Skeleton key – everything; League Operations – Club cards and club
+         keys only, to someone who is not on a League card. Returns
+         { league, club, skeleton } as booleans. */
+      issueRights: function (pass, now) {
+        if (isSkeleton(pass)) return { league: true, club: true, skeleton: true };
+        var ops = !!(pass && pass.base === 'league' && holds(pass, 'league-operations', now));
+        return { league: false, club: ops, skeleton: false };
+      },
       canViewAs: function (pass, now) { return isSkeleton(pass) || holds(pass, 'league-tester', now); },
       issuedLabel: issuedLabel,
       contrast: contrast,

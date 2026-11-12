@@ -1,6 +1,7 @@
 # Permissions – who can open what, and do what
 
-**Status: steps 2 and 3 built (12/11/2026), on a branch, not merged.**
+**Status: steps 2 and 3 built and live (12/11/2026). Step 4's first part
+(People and cards, `/people/`) built 12/11/2026.**
 Decided with Richard on 29/10, 11/11 and 12/11/2026 (the 12/11 grilling, 30
 questions, settled almost everything). What was built, and where it differs
 from the words below, is in "Built so far" at the foot.
@@ -175,7 +176,9 @@ of the canvas are the reference; boards 1–5 were the earlier concepts.
   title; a sticker for each key held, with its code (OPS, MED…) and name; keys
   not held are empty slots with a faint icon, no text; footer "League staff ·
   issued 12 NOV 2026" (date as day, three-letter month, year). The Skeleton
-  key is its own black ACCESS ALL AREAS pass.
+  key is a big black sticker stuck across the holder's own pass: a
+  full-height skull and ACCESS ALL AREAS on two lines, nothing else
+  (changed 12/11 from a second pass behind, which hid on a phone).
 - **Club colours:** band = the club's primary (secondary if the primary is
   near-white); stickers use the other colour; the club's own pair is kept
   whenever it is readable.
@@ -204,7 +207,8 @@ of the canvas are the reference; boards 1–5 were the earlier concepts.
 
 - **The menu under your circle** holds no tools at all: a small version of
   your pass (name, job title, key tags; a skull tag for a Skeleton key), "My
-  pass", "People and cards" (only for those who can give out cards), "View
+  pass", "People and cards" (only for those who can give out cards; the
+  People and cards tool from step 4), "View
   as" (Skeleton key and testers only), Install as app, Sign out. It never
   scrolls. The portal home is where you go to tools.
 - **A bell next to the circle** (see Approvals).
@@ -327,9 +331,30 @@ step 6.
    League Operations + Media, a club secretary). Richard has **dummy
    accounts** for testing as clubs, club secretaries, club media and League
    staff – use those rather than real people.
-4. **People screens and the migration report.** Set card, keys and job title
-   (replaces today's per-tool switches and "exceptions"). Report every
-   person's old vs new level on every tool; Richard agrees every difference.
+4. **People and cards – its own tool, at `nl.tools/people/`** (decided
+   12/11). It replaces three of the portal admin area's four tabs: Users,
+   Invites and Requests. The Audit log covers every tool, not just people,
+   so it stays out (later beside Estate, or a place of its own). Tabs:
+   - **People** – everyone, with card, club, keys (with optional end dates)
+     and job title. Replaces today's role plus per-tool switches and
+     "exceptions". The "issue a pass" form moves here from
+     `/pass/?view=issue`; `/pass/` keeps My pass and View as.
+   - **Invites** – an invite sets card, keys and job title instead of a
+     role. The invite email path (`nlGasSend` and `Invite.js`, with its
+     retry-safe token) moves across **unchanged first**; what an invite sets
+     changes in a separate step, never in the same one.
+   - **Requests** – today's access requests, becoming the one **Pending**
+     list (key requests join it at step 7).
+   - **Manage** (last tab) – bulk jobs, and the **migration report**: every
+     person's old vs new level on every tool. Richard agrees every
+     difference before step 6.
+
+   It is a tool like any other: a registry record, sensitive, keys only, on
+   the Main shelf, its "who can open this" worked out from its grants.
+   Skeleton key holders do everything; League Operations issue Club cards
+   and club keys only. The menu's "People and cards" points here. The old
+   portal tabs link across to it until they are removed. Built after the
+   board meeting.
 5. **New locks beside the old.** `scripts/rtdb-level-rule.mjs` generates rules
    from the grants (Firebase rules can't loop over keys, so each grant becomes
    an explicit generated `users/<uid>/keys/<key>` test;
@@ -412,9 +437,40 @@ Where the build differs from the words above, and why:
    `OPEN_PAGES` lets any signed-in, approved account in, because "your pass
    hasn't been issued yet" is its answer to someone with nothing.
 
-Not in steps 2–3, still to do: key end dates in the form (the data shape and
-the resolver already honour `until`), reminders, opening a tool as someone
-else, the Access denied page, generated rules.
+### Step 4, first part (12/11/2026, PR "People and cards")
+
+- **`/people/`** (`ops-people`), a tool with a registry record: sensitive,
+  League Operations Manage by the pass; today auth-guard opens it to
+  superadmin and League Admin, the roles that run the portal's admin area.
+  Two tabs: **People** (everyone, searchable, filter by pass and card; View
+  and Edit pass) and **Manage** (the migration report: per person with a
+  pass, every tool where the pass differs from today, which way it moves,
+  and a CSV download).
+- **Key end dates** in the issue form; the key goes at the start of that day.
+- **Who gives out what** is `NL.pass.issueRights`: the Skeleton key
+  everything, League Operations Club cards and club keys to club people only.
+- `NL.pass.todayLevel` / `compare` set today's answer (a mirror of
+  auth-guard's `checkAccess`) against the pass's, tested side by side.
+
+Where it differs from step 4 as planned:
+
+1. **The issue form stays at `/pass/?view=issue`**, reached from People (with
+   the person chosen) and leading back to it, rather than being copied into
+   `/people/`. The pass drawing lives in one page; copying it would be two
+   copies to drift. If the form is wanted inside People itself, promote the
+   pass drawing to canon first (`nl-brand.css` + an `NL.pass` renderer).
+2. **Invites and Requests are still in the portal's admin area**, linked from
+   People. They move next, the email path unchanged first.
+3. **League Operations can issue only if their role is League Admin** until
+   step 6: the database rules let only League Admins and the superadmin
+   write `users/<uid>/pass`. Opening that to the League Operations key is a
+   generated rule in step 5.
+4. **Agreeing each difference** is not recorded yet; the report and its CSV
+   are the record for now.
+
+Still to do after this: Invites and Requests into People, reminders before a
+key ends, opening a tool as someone else, the Access denied page, generated
+rules.
 
 ## Safety rails
 
