@@ -176,7 +176,9 @@ of the canvas are the reference; boards 1–5 were the earlier concepts.
   title; a sticker for each key held, with its code (OPS, MED…) and name; keys
   not held are empty slots with a faint icon, no text; footer "League staff ·
   issued 12 NOV 2026" (date as day, three-letter month, year). The Skeleton
-  key is its own black ACCESS ALL AREAS pass.
+  key is a big black sticker stuck across the holder's own pass: a
+  full-height skull and ACCESS ALL AREAS on two lines, nothing else
+  (changed 12/11 from a second pass behind, which hid on a phone).
 - **Club colours:** band = the club's primary (secondary if the primary is
   near-white); stickers use the other colour; the club's own pair is kept
   whenever it is readable.
