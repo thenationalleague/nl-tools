@@ -6,7 +6,8 @@
    v1.9 — Admin panel leaves the menu: the portal's admin area has closed
           (People and cards holds people, invites and requests; the Audit
           log is its own tool). Audit log (/audit/) takes its place, for the
-          same roles. Cache-bust ?v=12 -> ?v=13, in lockstep with nl-utils
+          same roles. The Skeleton key's tag on the small pass reads AAA
+          (Access All Areas), not SKL. Cache-bust ?v=12 -> ?v=13, in lockstep with nl-utils
           ?v=55 -> ?v=56.
 
    v1.8 — People and cards in the menu opens the new tool at /people/, for
@@ -538,7 +539,7 @@
     var tags = el('span', { class: 'topbar__mini-pass-tags' });
     if (P.isSkeleton(pass)) {
       var sk = el('span', { class: 'topbar__mini-pass-tag topbar__mini-pass-tag--skeleton', title: 'Skeleton key' });
-      sk.innerHTML = SKULL_SVG + '<span>SKL</span>';
+      sk.innerHTML = SKULL_SVG + '<span>AAA</span>';
       tags.appendChild(sk);
     }
     P.keysHeld(pass).forEach(function(id) {
