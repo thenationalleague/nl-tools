@@ -19,7 +19,7 @@
     Invites  — invite someone (role, club, job title), and the invites
                waiting to be accepted: resend, revoke. Moved from the
                portal's admin area; sends through NL.gas.send.
-    Requests — clubs' sign-up requests: approve, reject, archive. Moved
+    Requests — clubs' sign-up requests: approve, reject, dismiss. Moved
                from the portal; ?tab=requests (and the old ?tab=inbound
                in admin emails) opens it.
     Manage   — the migration report: for every person with a pass, each
@@ -53,7 +53,10 @@
            everything, League Operations Club cards and club keys only.
 
   Changelog
-  v1.3 (12/11/2026) — The portal's Users pane moves in as a person page:
+  v1.3 (12/11/2026) — Requests gain Dismiss: no email, the request is
+    marked dismissed and its never-approved account removed (Archive, for
+    requests with no account, folds into it).
+    The portal's Users pane moves in as a person page:
     role, club, job title, tool exceptions (add, change, remove), Restore
     defaults, Remove user, and their history. Same writes and audit lines
     as the portal. Only a superadmin may make someone a superadmin. A
@@ -125,7 +128,8 @@
         version: 'v1.3',
         items: [
           'Open a person to change their role, club, job title and tool exceptions, or remove them.',
-          'Each person shows their recent history.'
+          'Each person shows their recent history.',
+          'Dismiss a request without sending an email.'
         ]
       },
       {
@@ -185,7 +189,7 @@
   .pc-who__sub { font-size: var(--text-xs); color: var(--text-muted); overflow-wrap: anywhere; }
   .pc-pass { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
   .pc-muted { color: var(--text-muted); }
-  .pc-actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+  .pc-actions { display: flex; gap: 6px; justify-content: flex-end; align-items: center; flex-wrap: wrap; }
   .pc-invite { margin-bottom: 24px; }
   .pc-roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
   .pc-roles .pc-role { margin: 0; display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--white); cursor: pointer; }
@@ -588,8 +592,10 @@
      asked for that their role does not open by default is granted at
      Access — what the portal's card wrote when its sliders were left as
      they opened. Then the approval email. Reject: rejected on, the
-     rejection email. A request with no linked account can only be
-     archived. */
+     rejection email. Dismiss: for a request nobody should have sent (someone
+     who found the sign-up page) — no email; the request is marked
+     dismissed and its account, never approved, is removed. A request with
+     no linked account can only be dismissed. */
   function loadRequests() {
     var box = document.getElementById('pcRequests');
     return db.ref('admin/requests').once('value').then(function (snap) {
@@ -602,10 +608,11 @@
           items.map(function (r) {
             var asked = Object.keys((r.tools && typeof r.tools === 'object' && !Array.isArray(r.tools)) ? r.tools : {})
               .map(function (k) { return (S.registry[k] && S.registry[k].label) || k; });
-            var acts = r.uid
+            var acts = (r.uid
               ? '<button class="btn btn--navy btn--sm" type="button" data-act="approve">' + icon('tick') + 'Approve</button>' +
                 '<button class="btn btn--ghost btn--sm" type="button" data-act="reject">Reject</button>'
-              : '<span class="pc-muted">No linked account</span> <button class="btn btn--ghost btn--sm" type="button" data-act="archive">Archive</button>';
+              : '<span class="pc-muted">No linked account</span> ') +
+              '<button class="btn btn--ghost btn--sm" type="button" data-act="dismiss">' + icon('delete') + 'Dismiss</button>';
             return '<tr data-key="' + esc(r._key) + '">' +
               '<td><span class="pc-who"><span class="pc-who__name">' + esc(r.name || '(no name)') + '</span><span class="pc-who__sub">' + esc(r.email || '') + '</span></span></td>' +
               '<td>' + esc(r.club || '') + (r.jobTitle ? '<div class="pc-who__sub">' + esc(r.jobTitle) + '</div>' : '') + '</td>' +
@@ -620,7 +627,7 @@
         if (!r) return;
         var act = b.getAttribute('data-act');
         b.disabled = true;
-        (act === 'approve' ? approveRequest : act === 'reject' ? rejectRequest : archiveRequest)(r)
+        (act === 'approve' ? approveRequest : act === 'reject' ? rejectRequest : dismissRequest)(r)
           .catch(function (err) { NL.toast('Failed: ' + (err && err.message || err), 'error'); b.disabled = false; });
       };
     }).catch(function (err) {
@@ -681,10 +688,24 @@
     });
   }
 
-  function archiveRequest(r) {
-    return db.ref('admin/requests/' + r._key + '/status').set('archived').then(function () {
-      NL.toast('Request archived', 'success');
-      loadRequests();
+  /* No email. The account goes only if it is still waiting: one that has
+     since been approved is a person, and is removed from their own page. */
+  function dismissRequest(r) {
+    return NL.confirm('Dismiss ' + (r.name || r.email || 'this request') + '? No email is sent.', { title: 'Dismiss request', confirmText: 'Dismiss', variant: 'danger' })
+    .then(function (ok) {
+      if (!ok) { loadRequests(); return; }
+      return (r.uid ? db.ref('users/' + r.uid).once('value') : Promise.resolve(null)).then(function (snap) {
+        var u = snap && snap.val();
+        var updates = {};
+        updates['admin/requests/' + r._key + '/status'] = 'dismissed';
+        if (u && u.pending && !u.approved) updates['users/' + r.uid] = null;
+        NL.writeAudit('request_dismissed', (r.name || r.email || '') + (r.club ? ' (' + r.club + ')' : ''),
+          r.uid ? { uid: r.uid, name: r.name || '', email: r.email || '' } : null);
+        return db.ref().update(updates);
+      }).then(function () {
+        NL.toast('Request dismissed', 'success');
+        return refreshPeople().then(loadRequests);
+      });
     });
   }
 

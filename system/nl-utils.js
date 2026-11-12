@@ -1812,7 +1812,7 @@
     LABELS: {
       signed_in: 'Signed in', signed_out: 'Signed out',
       invite_sent: 'Invite sent', invite_cancelled: 'Invite cancelled',
-      request_approved: 'Request approved', request_declined: 'Request declined',
+      request_approved: 'Request approved', request_declined: 'Request declined', request_dismissed: 'Request dismissed',
       access_changed: 'Access changed', role_changed: 'Role changed',
       message_created: 'Message created', message_edited: 'Message edited', message_deleted: 'Message deleted',
       user_removed: 'User removed', tool_deployed: 'Tool deployed', tool_seeded: 'Tool seeded',
