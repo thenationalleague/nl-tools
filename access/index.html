@@ -60,7 +60,8 @@
     saving) and Audit (moved in from /audit/). The League Operations key
     gets in, for club people only; the Skeleton key keeps League people,
     League roles, Tools, Audit and Manage. Every change is in the audit log.
-    Copy cut to what changes an action: hints that restated a control, the
+    Tools shows League and Clubs as separate columns, and a tool's page
+    sets them side by side. Copy cut to what changes an action: hints that restated a control, the
     tool's own description, the League / Club side headings, and the
     "Switch off" toast are gone.
   v1.6 (12/11/2026) — Apply passes shows only when something is waiting.
@@ -291,7 +292,8 @@
   .pc-panel { margin-bottom: 20px; }
   .pc-ex { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
   .pc-more { display: flex; justify-content: center; padding: 16px 0; }
-  .tl-grantwrap { max-width: 520px; }
+  .tl-sides { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; }
+  .tl-sidecol { min-width: 0; }
   .tl-grants td, .tl-grants th { white-space: nowrap; }
   .tl-level { width: auto; min-width: 130px; }
   .tl-opens { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -378,7 +380,7 @@
       </div>
       <div class="table-wrap">
         <table class="table">
-          <thead><tr><th>Tool</th><th>Opens to</th><th>Shelf</th><th aria-label="Actions"></th></tr></thead>
+          <thead><tr><th>Tool</th><th>League</th><th>Clubs</th><th>Shelf</th><th aria-label="Actions"></th></tr></thead>
           <tbody id="tlRows"></tbody>
         </table>
       </div>
@@ -1303,10 +1305,11 @@
     return (k.base === 'club' ? 'Club ' : 'League ') + k.name;
   }
   function partTag(id) {
-    if (id === 'league' || id === 'club') return partName(id);
-    var k = P.KEY[id];
-    return (k.base === 'club' ? 'Club ' : '') + k.code;
+    if (id === 'league' || id === 'club') return 'Card';
+    return P.KEY[id].code;
   }
+  /* Within a side, the card and each key by their own names. */
+  function partShort(id) { return (id === 'league' || id === 'club') ? 'Card' : P.KEY[id].name; }
   /* The parts a tool can grant to: League card and keys, and the Club side
      only for a tool that is for clubs too. */
   function partsFor(rec) {
@@ -1325,15 +1328,20 @@
     else g.key[id] = v;
   }
 
-  function opensHtml(rec) {
+  /* Who a tool opens to on one side, League or Clubs, as tags: CARD for the
+     card, the key's code for a key. A side the tool is not for is a dash. */
+  var DASH = '<span class="pc-muted">–</span>';
+  function sideOf(id) { return (id === 'club' || (P.KEY[id] && P.KEY[id].base === 'club')) ? 'club' : 'league'; }
+  function opensHtml(rec, side) {
     var p = rec.permissions;
-    if (p.shelf === 'structural') return '<span class="pc-muted">Skeleton key only</span>';
+    if (side === 'club' && p.for === 'league') return DASH;
+    if (p.shelf === 'structural') return side === 'league' ? '<span class="pill pill--info" title="Skeleton key">AAA</span>' : DASH;
     var w = P.whoCanOpen(rec);
-    var tags = (w && w.rows || []).map(function (r) {
+    var tags = (w && w.rows || []).filter(function (r) { return sideOf(r.id) === side; }).map(function (r) {
       return '<span class="pill pill--info" title="' + esc(partName(r.id)) + '">' + esc(partTag(r.id)) +
         (r.level === 'manage' ? ' · Manage' : '') + '</span>';
     });
-    if (p.shelf === 'sandbox') tags.unshift('<span class="pill pill--info" title="Tester key, until launch">TST</span>');
+    if (side === 'league' && p.shelf === 'sandbox') tags.unshift('<span class="pill pill--info" title="Tester key, until launch">TST</span>');
     return tags.length ? '<span class="tl-opens">' + tags.join('') + '</span>' : '<span class="pc-muted">Nobody</span>';
   }
 
@@ -1349,10 +1357,10 @@
       var r = S.registry[k];
       return '<tr><td><span class="pc-who"><a class="pc-who__name pc-link" href="?tool=' + encodeURIComponent(k) + '" data-tool="' + esc(k) + '">' + esc(r.label || k) + '</a>' +
           (S.live[k] ? '<span class="pc-who__sub">Changed here' + (S.live[k].updated ? ', ' + esc(NL.formatDateShort(S.live[k].updated)) : '') + '</span>' : '') + '</span></td>' +
-        '<td>' + opensHtml(r) + '</td>' +
+        '<td>' + opensHtml(r, 'league') + '</td><td>' + opensHtml(r, 'club') + '</td>' +
         '<td class="pc-legacy">' + esc(P.SHELF[r.permissions.shelf] || '') + '</td>' +
         '<td><span class="pc-actions"><a class="btn btn--ghost btn--sm" href="?tool=' + encodeURIComponent(k) + '" data-tool="' + esc(k) + '">' + icon('edit') + 'Edit</a></span></td></tr>';
-    }).join('') : '<tr><td colspan="4" class="pc-muted">Nothing matches.</td></tr>';
+    }).join('') : '<tr><td colspan="5" class="pc-muted">Nothing matches.</td></tr>';
   }
 
   function openTool(key, push) {
@@ -1387,23 +1395,26 @@
     var structural = p.shelf === 'structural';
     var html = '<div class="pc-head"><div>' +
       '<div class="pc-head__name">' + esc(rec.label || key) + '</div>' +
-      '<div class="pc-who__sub">' + esc(P.SHELF[p.shelf] || '') + ' · ' + esc(P.FOR[p.for] || '') +
-        (S.live[key] ? ' · Changed here' : '') + '</div>' +
+      '<div class="pc-who__sub">' + esc(P.SHELF[p.shelf] || '') + (S.live[key] ? ' · Changed here' : '') + '</div>' +
       '</div></div>';
 
     if (structural) {
       html += '<p class="pc-note">Structure: Skeleton key only.</p>';
     } else {
       if (p.shelf === 'sandbox') html += '<p class="pc-note">Sandbox: only the Tester key opens it until launch.</p>';
-      html += '<div class="form-panel pc-panel pc-open"><div class="form-panel__head">Who opens it</div><div class="form-panel__body">' +
-        '<div class="table-wrap tl-grantwrap"><table class="table tl-grants"><tbody>';
-      partsFor(rec).forEach(function (id) {
-        var v = grantOf(TL.draft, id);
-        html += '<tr><td>' + esc(partName(id)) + '</td><td><select class="nl-select tl-level" data-part="' + esc(id) + '" aria-label="' + esc(partName(id)) + '">' +
-          levels.map(function (l) { return '<option value="' + l + '"' + (l === v ? ' selected' : '') + '>' + LV_WORD[l] + '</option>'; }).join('') +
-          '</select></td></tr>';
-      });
-      html += '</tbody></table></div>' +
+      /* League and Clubs side by side, as two separate things. */
+      html += '<div class="form-panel pc-panel pc-open"><div class="form-panel__body"><div class="tl-sides">' +
+        ['league', 'club'].map(function (side) {
+          var ids = partsFor(rec).filter(function (id) { return sideOf(id) === side; });
+          return '<div class="tl-sidecol"><div class="pc-label">' + (side === 'club' ? 'Clubs' : 'League') + '</div>' + (ids.length
+            ? '<div class="table-wrap"><table class="table tl-grants"><tbody>' + ids.map(function (id) {
+                var v = grantOf(TL.draft, id);
+                return '<tr><td>' + esc(partShort(id)) + '</td><td><select class="nl-select tl-level" data-part="' + esc(id) + '" aria-label="' + esc(partName(id)) + '">' +
+                  levels.map(function (l) { return '<option value="' + l + '"' + (l === v ? ' selected' : '') + '>' + LV_WORD[l] + '</option>'; }).join('') +
+                  '</select></td></tr>';
+              }).join('') + '</tbody></table></div>'
+            : DASH) + '</div>';
+        }).join('') + '</div>' +
         '<div class="pc-exblock" id="tlChangesWrap" hidden><div class="pc-label">What this changes</div><div id="tlChanges"></div></div>' +
         '</div><div class="form-panel__foot pc-foot pc-foot--split">' +
           '<button class="btn btn--danger" type="button" id="tlOff">Switch off</button>' +
