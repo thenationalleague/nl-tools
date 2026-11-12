@@ -1,8 +1,9 @@
 # Permissions – who can open what, and do what
 
 **Status: steps 2, 3, 4 and 6 built (12/11/2026): passes decide who opens
-what. People and cards (`/people/`) and the Audit log (`/audit/`) replaced
-the portal's admin area. Step 5 (rules generated from grants) and 7–9 are
+what. Access (`/access/`) replaced the portal's admin area: people,
+invites, requests, who each tool opens to (live grants) and the Audit log.
+Step 5 (rules generated from grants) and 7–9 are
 still to do.**
 Decided with Richard on 29/10, 11/11 and 12/11/2026 (the 12/11 grilling, 30
 questions, settled almost everything). What was built, and where it differs
@@ -572,6 +573,42 @@ reminders before a key ends, opening a tool as someone else, the Access
 denied page, generated rules. The admin request email still says "Review in
 admin panel"; its link forwards correctly, and the words change with the
 next Apps Script deploy.
+
+### Access: one admin tool, and live grants (12/11/2026, PR "Access")
+
+- **People and cards becomes Access**, at `/access/` (registry key still
+  `ops-people`, so no rules or grants move with the name). The Audit log is
+  a tab of it. `/people/` and `/audit/` forward, keeping their query.
+- **A Tools tab sets who each tool opens to.** Per tool, a level for the
+  League card, each League key and, for a tool that is for clubs too, the
+  Club card and each club key. Before saving it lists every pass holder
+  whose level moves. Saving is **live**: `access-grants/<toolKey>` =
+  `{ base, key, updated, updatedBy }`, read by auth-guard, the portal,
+  My pass and Who can open this through `NL.pass.withLive`, and it replaces
+  the registry's `permissions.grants` where present. No pull request.
+  "Reset to standard" deletes the live entry. Saving also rewrites each
+  pass holder's `users/<uid>/tools/<key>` (`NL.pass.toOld`), so the
+  database reads what the door gives. Each save and reset is in the audit
+  log with what changed (`grants_changed`, `grants_reset`).
+- **The registry snapshot is no longer the whole truth for grants.** A
+  merge that changes a tool's grants in the snapshot is overridden by a
+  live entry until that entry is reset. The Tools tab marks a tool
+  "Changed here". A nightly copy of `access-grants/` into the repo, for
+  history, is still to build.
+- **Who does what in Access (Richard, 12/11/2026): granting League access
+  stays with the Skeleton key.** The League Operations key opens Access
+  (`ops-people` grant `league-operations: access`) and works with club
+  people only: club roles, Club cards, club keys, club invites, club
+  requests. The Tools, Audit and Manage tabs, League people, League roles
+  and League invites are the Skeleton key's. **The page holds this line;
+  the database does not yet:** a League Admin role may write any user, as
+  the portal always allowed. Rules from grants (step 5) move it into the
+  database. `access-grants/` itself is written only by the Skeleton key or
+  the superadmin role (rules; emulator test
+  `tests/emulator/access-grants-rules.mjs`, not yet run: the emulator
+  download is blocked in the build sandbox).
+- Later: two-step sign-in (TOTP) for sensitive keys, after step 5, so the
+  database can check the second factor alongside the grant.
 
 ## Safety rails
 
