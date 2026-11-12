@@ -1,5 +1,10 @@
 # Emulator tests
 
+**On GitHub:** `.github/workflows/test-rules.yml` ("Auto · Test database
+rules") runs the database-only tests listed in its `TESTS` line on every pull
+request that changes the rules, and shows the result as a check on the PR.
+No terminal needed. Add a new database-only test to that line.
+
 Rules tests that need the Firebase emulator, so they are **not** in `npm test`
 (which is zero-dependency and gates every PR). Run them by hand when the rules
 they cover change. They read `system/rtdb/rules.snapshot.json` and
