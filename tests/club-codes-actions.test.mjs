@@ -15,7 +15,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { REPO } from './load-canon.mjs';
 
-const PAGE = readFileSync(join(REPO, 'club-codes/index.html'), 'utf8');
+const PAGE = readFileSync(join(REPO, 'access/index.html'), 'utf8');
 const SPRITE = readFileSync(join(REPO, 'assets/icons/sprites.svg'), 'utf8');
 const BRAND = readFileSync(join(REPO, 'system/nl-brand.css'), 'utf8');
 

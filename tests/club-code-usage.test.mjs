@@ -32,7 +32,7 @@ import { REPO } from './load-canon.mjs';
 const CLUB = readFileSync(join(REPO, 'functions/club-code.js'), 'utf8');
 const PROG = readFileSync(join(REPO, 'functions/programme.js'), 'utf8');
 const RULES = JSON.parse(readFileSync(join(REPO, 'system/rtdb/rules.snapshot.json'), 'utf8'));
-const PAGE = readFileSync(join(REPO, 'club-codes/index.html'), 'utf8');
+const PAGE = readFileSync(join(REPO, 'access/index.html'), 'utf8');
 
 /* Both files explain in prose why the code and the name are not stored, so a
    grep for "code" over the raw source matches the sentence saying it must not

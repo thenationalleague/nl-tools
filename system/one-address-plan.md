@@ -57,3 +57,14 @@ are wanted (Richard, 12/11/2026: codes stay). Each tool is its own PR:
 
 Local Media's public form and UW Promo's partner page are not club pages and
 stay where they are.
+
+**First in the queue: Programme Packs** (Richard, 12/11/2026). It is the one
+club page a Club card cannot reach today: its library signs clubs in through
+its own passcode route (`programmeAuth`) and keeps those sessions apart from
+real accounts by design, so the club claim on a signed-in account is not
+read there. Merging its two pages, with `programmeAuth` taught to accept a
+Club card, closes that loose end.
+
+**Club Codes is no longer a two-page tool to merge:** it became the Codes
+tab of Access (`/access/?tab=codes`) on 12/11/2026, and `/club-codes/`
+forwards there.
