@@ -60,8 +60,11 @@
     saving) and Audit (moved in from /audit/). The League Operations key
     gets in, for club people only; the Skeleton key keeps League people,
     League roles, Tools, Audit and Manage. Every change is in the audit log.
-    Tools shows League and Clubs as separate columns, and a tool's page
-    sets them side by side. Copy cut to what changes an action: hints that restated a control, the
+    Tools is a grid: every tool against the League card and keys, then the
+    Club card and keys, each cell reading Access or Manage (blank for Off).
+    Click a cell for a dropdown; changes wait in a bar until Review and
+    save, which shows whose level moves, then saves them together. A tool's
+    page sets League and Clubs side by side. Copy cut to what changes an action: hints that restated a control, the
     tool's own description, the League / Club side headings, and the
     "Switch off" toast are gone.
   v1.6 (12/11/2026) — Apply passes shows only when something is waiting.
@@ -292,6 +295,21 @@
   .pc-panel { margin-bottom: 20px; }
   .pc-ex { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
   .pc-more { display: flex; justify-content: center; padding: 16px 0; }
+  /* The Tools grid: every tool against every card and key, League then
+     Clubs. A cell is a button showing the level in words; Off is blank. */
+  .tl-grid th.tl-col, .tl-grid td.tl-col { text-align: center !important; padding-left: 4px !important; padding-right: 4px !important; }
+  .tl-grid .tl-sep { border-left: 2px solid var(--navy-300) !important; }
+  .tl-grid th.tl-group { text-align: center !important; }
+  .tl-grid td.tl-na { background: var(--off-white) !important; }
+  .tl-mk { display: inline-flex; align-items: center; justify-content: center; min-width: 64px; height: 24px; padding: 0 8px; border-radius: var(--radius); border: 1px solid transparent; background: none; font: inherit; font-size: var(--text-xs); font-weight: 700; font-variation-settings: 'wght' 700; cursor: pointer; color: var(--text-muted); }
+  .tl-mk:hover { border-color: var(--navy-300); }
+  .tl-mk--access { background: var(--navy-50); color: var(--navy); border-color: var(--navy-200); }
+  .tl-mk--manage { background: var(--navy); color: var(--white); border-color: var(--navy); }
+  .tl-mk.is-changed { box-shadow: 0 0 0 2px var(--primary); }
+  .tl-mk:disabled { cursor: default; border-color: transparent; }
+  .tl-cellsel { width: auto; min-width: 96px; }
+  .tl-bar { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-top: 12px; padding: 12px 16px; background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+  .tl-bar__count { font-weight: 700; font-variation-settings: 'wght' 700; color: var(--navy); }
   .tl-sides { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; }
   .tl-sidecol { min-width: 0; }
   .tl-grants td, .tl-grants th { white-space: nowrap; }
@@ -379,10 +397,17 @@
         <div class="toolbar__right"><span class="pc-count" id="tlCount"></span></div>
       </div>
       <div class="table-wrap">
-        <table class="table">
-          <thead><tr><th>Tool</th><th>League</th><th>Clubs</th><th>Shelf</th><th aria-label="Actions"></th></tr></thead>
+        <table class="table table--compact tl-grid">
+          <thead id="tlHead"></thead>
           <tbody id="tlRows"></tbody>
         </table>
+      </div>
+      <div class="tl-bar" id="tlBar" hidden>
+        <span class="tl-bar__count" id="tlBarCount"></span>
+        <span class="pc-foot__right">
+          <button class="btn btn--ghost" type="button" id="tlDiscard">Discard</button>
+          <button class="btn btn--primary" type="button" id="tlReview">Review and save</button>
+        </span>
       </div>
     </section>
 
@@ -1304,10 +1329,6 @@
     var k = P.KEY[id];
     return (k.base === 'club' ? 'Club ' : 'League ') + k.name;
   }
-  function partTag(id) {
-    if (id === 'league' || id === 'club') return 'Card';
-    return P.KEY[id].code;
-  }
   /* Within a side, the card and each key by their own names. */
   function partShort(id) { return (id === 'league' || id === 'club') ? 'Card' : P.KEY[id].name; }
   /* The parts a tool can grant to: League card and keys, and the Club side
@@ -1328,24 +1349,50 @@
     else g.key[id] = v;
   }
 
-  /* Who a tool opens to on one side, League or Clubs, as tags: CARD for the
-     card, the key's code for a key. A side the tool is not for is a dash. */
   var DASH = '<span class="pc-muted">–</span>';
   function sideOf(id) { return (id === 'club' || (P.KEY[id] && P.KEY[id].base === 'club')) ? 'club' : 'league'; }
-  function opensHtml(rec, side) {
-    var p = rec.permissions;
-    if (side === 'club' && p.for === 'league') return DASH;
-    if (p.shelf === 'structural') return side === 'league' ? '<span class="pill pill--info" title="Skeleton key">AAA</span>' : DASH;
-    var w = P.whoCanOpen(rec);
-    var tags = (w && w.rows || []).filter(function (r) { return sideOf(r.id) === side; }).map(function (r) {
-      return '<span class="pill pill--info" title="' + esc(partName(r.id)) + '">' + esc(partTag(r.id)) +
-        (r.level === 'manage' ? ' · Manage' : '') + '</span>';
+
+  /* The grid's columns: League card and League keys, then Club card and
+     club keys. A closed set (the keys are fixed in NL.pass.KEYS). */
+  var COLS = (function () {
+    var lg = ['league'], cl = ['club'];
+    P.KEYS.forEach(function (k) { (k.base === 'club' ? cl : lg).push(k.id); });
+    return { league: lg, club: cl, all: lg.concat(cl) };
+  })();
+  function colHead(id) { return (id === 'league' || id === 'club') ? 'Card' : P.KEY[id].code; }
+
+  /* Changes waiting to be saved: { toolKey: grants }. */
+  TL.staged = {};
+  function gridGrants(k) { return TL.staged[k] || grantsOf(S.registry[k]); }
+  function stagedCount() {
+    var n = 0;
+    Object.keys(TL.staged).forEach(function (k) {
+      var a = grantsOf(S.registry[k]), b = TL.staged[k];
+      COLS.all.forEach(function (id) { if (grantOf(a, id) !== grantOf(b, id)) n++; });
     });
-    if (side === 'league' && p.shelf === 'sandbox') tags.unshift('<span class="pill pill--info" title="Tester key, until launch">TST</span>');
-    return tags.length ? '<span class="tl-opens">' + tags.join('') + '</span>' : '<span class="pc-muted">Nobody</span>';
+    return n;
+  }
+  function levelsOf(rec) { return (rec.permissions.levels || ['off', 'access']).filter(function (l) { return LV_WORD[l]; }); }
+
+  function cellHtml(k, id) {
+    var rec = S.registry[k], p = rec.permissions;
+    var sep = (id === 'club' ? ' tl-sep' : '');
+    /* Shown as the tool will give it: a Manage grant on a tool with no
+       Manage yet reads as Access, as NL.pass.explain caps it. */
+    var lv = levelsOf(rec);
+    function capped(x) { return lv.indexOf(x) >= 0 ? x : lv[lv.length - 1]; }
+    var v = capped(grantOf(gridGrants(k), id)), was = capped(grantOf(grantsOf(rec), id));
+    return '<td class="tl-col' + sep + '"><button type="button" class="tl-mk tl-mk--' + v + (v !== was ? ' is-changed' : '') + '" data-tool="' + esc(k) + '" data-part="' + esc(id) + '"' +
+      ' aria-label="' + esc((rec.label || k) + ', ' + partName(id) + ': ' + LV_WORD[v]) + '">' + (v === 'off' ? '' : LV_WORD[v]) + '</button></td>';
   }
 
   function drawTools() {
+    document.getElementById('tlHead').innerHTML =
+      '<tr><th rowspan="2">Tool</th><th class="tl-group" colspan="' + COLS.league.length + '">League</th>' +
+      '<th class="tl-group tl-sep" colspan="' + COLS.club.length + '">Clubs</th></tr>' +
+      '<tr>' + COLS.all.map(function (id) {
+        return '<th class="tl-col' + (id === 'club' ? ' tl-sep' : '') + '" title="' + esc(partName(id)) + '">' + esc(colHead(id)) + '</th>';
+      }).join('') + '</tr>';
     var keys = toolKeys().filter(function (k) { return S.registry[k].permissions; });
     var rows = keys.filter(function (k) {
       var r = S.registry[k], p = r.permissions;
@@ -1353,14 +1400,116 @@
       return !TL.q || (String(r.label || k) + ' ' + k).toLowerCase().indexOf(TL.q) >= 0;
     });
     document.getElementById('tlCount').textContent = rows.length + ' of ' + keys.length;
+    var span = COLS.all.length;
     document.getElementById('tlRows').innerHTML = rows.length ? rows.map(function (k) {
-      var r = S.registry[k];
-      return '<tr><td><span class="pc-who"><a class="pc-who__name pc-link" href="?tool=' + encodeURIComponent(k) + '" data-tool="' + esc(k) + '">' + esc(r.label || k) + '</a>' +
-          (S.live[k] ? '<span class="pc-who__sub">Changed here' + (S.live[k].updated ? ', ' + esc(NL.formatDateShort(S.live[k].updated)) : '') + '</span>' : '') + '</span></td>' +
-        '<td>' + opensHtml(r, 'league') + '</td><td>' + opensHtml(r, 'club') + '</td>' +
-        '<td class="pc-legacy">' + esc(P.SHELF[r.permissions.shelf] || '') + '</td>' +
-        '<td><span class="pc-actions"><a class="btn btn--ghost btn--sm" href="?tool=' + encodeURIComponent(k) + '" data-tool="' + esc(k) + '">' + icon('edit') + 'Edit</a></span></td></tr>';
-    }).join('') : '<tr><td colspan="5" class="pc-muted">Nothing matches.</td></tr>';
+      var r = S.registry[k], p = r.permissions;
+      var sub = [];
+      if (p.shelf !== 'main') sub.push(P.SHELF[p.shelf]);
+      if (S.live[k]) sub.push('Changed here');
+      var cells = p.shelf === 'structural'
+        ? '<td class="tl-col" colspan="' + span + '"><span class="pc-muted">Skeleton key only</span></td>'
+        : COLS.league.map(function (id) { return cellHtml(k, id); }).join('') + (p.for === 'league'
+          /* Not for clubs: one shaded block, not a dash in every column. */
+          ? '<td class="tl-na tl-sep" colspan="' + COLS.club.length + '"></td>'
+          : COLS.club.map(function (id) { return cellHtml(k, id); }).join(''));
+      return '<tr data-row="' + esc(k) + '"><td><span class="pc-who"><a class="pc-who__name pc-link" href="?tool=' + encodeURIComponent(k) + '" data-tool-open="' + esc(k) + '">' + esc(r.label || k) + '</a>' +
+          (sub.length ? '<span class="pc-who__sub">' + esc(sub.join(' · ')) + '</span>' : '') + '</span></td>' + cells + '</tr>';
+    }).join('') : '<tr><td colspan="' + (span + 1) + '" class="pc-muted">Nothing matches.</td></tr>';
+    drawBar();
+  }
+
+  function drawBar() {
+    var n = stagedCount();
+    document.getElementById('tlBar').hidden = !n;
+    document.getElementById('tlBarCount').textContent = n + ' change' + (n === 1 ? '' : 's');
+  }
+
+  /* A click on a cell swaps it for a plain dropdown of the levels the tool
+     offers; choosing one stages it. Nothing changes on a click alone. */
+  function editCell(btn) {
+    var k = btn.getAttribute('data-tool'), id = btn.getAttribute('data-part'), rec = S.registry[k];
+    var lv = levelsOf(rec), v = grantOf(gridGrants(k), id);
+    if (lv.indexOf(v) < 0) v = lv[lv.length - 1];
+    var sel = document.createElement('select');
+    sel.className = 'nl-select tl-cellsel';
+    sel.setAttribute('aria-label', btn.getAttribute('aria-label'));
+    sel.innerHTML = levelsOf(rec).map(function (l) { return '<option value="' + l + '"' + (l === v ? ' selected' : '') + '>' + LV_WORD[l] + '</option>'; }).join('');
+    var td = btn.parentNode;
+    td.replaceChild(sel, btn);
+    sel.focus();
+    var done = false;
+    function finish() {
+      if (done) return; done = true;
+      /* Left as it was shown: nothing to stage. */
+      if (sel.value === v) { td.outerHTML = cellHtml(k, id); return; }
+      var g = JSON.parse(JSON.stringify(gridGrants(k)));
+      setGrant(g, id, sel.value);
+      if (sameGrants(g, grantsOf(rec))) delete TL.staged[k]; else TL.staged[k] = g;
+      td.outerHTML = cellHtml(k, id);
+      drawBar();
+    }
+    sel.addEventListener('change', finish);
+    sel.addEventListener('blur', finish);
+  }
+
+  /* Review: every staged change, whose level each tool's change moves, then
+     one update for the lot (live grants and pass holders' entries), and an
+     audit line per tool. */
+  function reviewStaged() {
+    var keys = Object.keys(TL.staged);
+    var body = keys.map(function (k) {
+      var rec = S.registry[k], newRec = P.withLive(S.base[k] || rec, TL.staged[k]);
+      var ch = [];
+      S.users.forEach(function (u) {
+        if (!P.isIssued(u.pass)) return;
+        var a = P.level(u.pass, rec), b = P.level(u.pass, newRec);
+        if (a !== b) ch.push(esc(u.name) + ' ' + LV_WORD[a] + ' → ' + LV_WORD[b]);
+      });
+      return '<div class="pc-label pc-gap">' + esc(rec.label || k) + '</div>' +
+        '<div>' + esc(grantDiff(grantsOf(rec), TL.staged[k], rec)) + '</div>' +
+        (ch.length ? '<ul class="pc-opens">' + ch.map(function (c) { return '<li>' + c + '</li>'; }).join('') + '</ul>' : '<div class="pc-muted">Nobody’s level changes.</div>');
+    }).join('');
+    var box = document.createElement('div');
+    box.innerHTML = body;
+    NL.modal({
+      title: 'Review changes', body: box,
+      buttons: [
+        { label: 'Cancel', onClick: function (m) { m.close(); } },
+        { label: 'Save', className: 'btn--primary', onClick: function (m) {
+            var btns = m.el.querySelectorAll('.modal__footer .btn');
+            btns.forEach(function (b) { b.disabled = true; });
+            saveStaged().then(function () { m.close(); }).catch(function (err) {
+              btns.forEach(function (b) { b.disabled = false; });
+              NL.toast('Could not save: ' + (err && err.message || err), 'error');
+            });
+          } }
+      ]
+    });
+  }
+  function saveStaged() {
+    var keys = Object.keys(TL.staged), updates = {}, now = Date.now(), recs = {};
+    keys.forEach(function (k) {
+      var g = P.cleanGrants(TL.staged[k]), rec = S.registry[k];
+      recs[k] = P.withLive(S.base[k] || rec, g);
+      updates['access-grants/' + k] = { base: g.base, key: g.key, updated: now, updatedBy: S.session.uid };
+      NL.writeAudit('grants_changed', (rec.label || k) + ': ' + grantDiff(grantsOf(rec), g, rec));
+    });
+    S.users.forEach(function (u) {
+      if (!P.isIssued(u.pass)) return;
+      var want = P.toOld(u.pass, recs, u.role);
+      keys.forEach(function (k) {
+        var w = want[k] === undefined ? null : want[k], stored = u.tools[k] === undefined ? null : u.tools[k];
+        if (w !== stored) updates['users/' + u.uid + '/tools/' + k] = w;
+      });
+    });
+    return db.ref().update(updates).then(function () {
+      keys.forEach(function (k) { S.live[k] = updates['access-grants/' + k]; S.registry[k] = recs[k]; });
+      TL.staged = {};
+      return refreshPeople();
+    }).then(function () {
+      NL.toast('Saved', 'success');
+      drawTools();
+    });
   }
 
   function openTool(key, push) {
@@ -1408,7 +1557,7 @@
           var ids = partsFor(rec).filter(function (id) { return sideOf(id) === side; });
           return '<div class="tl-sidecol"><div class="pc-label">' + (side === 'club' ? 'Clubs' : 'League') + '</div>' + (ids.length
             ? '<div class="table-wrap"><table class="table tl-grants"><tbody>' + ids.map(function (id) {
-                var v = grantOf(TL.draft, id);
+                var v = grantOf(TL.draft, id); if (levels.indexOf(v) < 0) v = levels[levels.length - 1];
                 return '<tr><td>' + esc(partShort(id)) + '</td><td><select class="nl-select tl-level" data-part="' + esc(id) + '" aria-label="' + esc(partName(id)) + '">' +
                   levels.map(function (l) { return '<option value="' + l + '"' + (l === v ? ' selected' : '') + '>' + LV_WORD[l] + '</option>'; }).join('') +
                   '</select></td></tr>';
@@ -1519,11 +1668,16 @@
     document.getElementById('tlBack').innerHTML = icon('back') + 'Tools';
     document.getElementById('tlBack').addEventListener('click', function () { showTab('tools'); });
     document.getElementById('tlRows').addEventListener('click', function (e) {
-      var a = e.target.closest('a[data-tool]');
+      var mk = e.target.closest('button.tl-mk');
+      if (mk) return editCell(mk);
+      var a = e.target.closest('a[data-tool-open]');
       if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;
       e.preventDefault();
-      openTool(a.getAttribute('data-tool'));
+      if (stagedCount()) return NL.toast('Save or discard the changes first', 'info');
+      openTool(a.getAttribute('data-tool-open'));
     });
+    document.getElementById('tlReview').addEventListener('click', reviewStaged);
+    document.getElementById('tlDiscard').addEventListener('click', function () { TL.staged = {}; drawTools(); });
   }
 
   /* ── Audit: who did what ──────────────────────────────────────────────
