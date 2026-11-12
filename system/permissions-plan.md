@@ -498,6 +498,14 @@ Where it differs from step 4 as planned:
    the way: only a superadmin can make someone a superadmin (the portal let
    a League Admin pick it), and a rejected request's account is listed in
    People, marked, so it can be removed.
+7. **Skeleton key only, for now** (12/11/2026, after reading the first
+   migration report). People and cards and the Audit log lose their League
+   Operations grants. The Audit log is Skeleton-only for good (the Structure
+   shelf ignored the grant anyway). People and cards gets League Operations
+   back at step 7, for club passes only, when there are club logins to
+   manage. Agreed from the same report: Michaela, Matthew and League staff
+   losing the Sandbox tools (Tester key only) and the Media-key tools is
+   intended, and Matthew stays Finance-only.
 
 Still to do after this: per-tool exceptions retire once passes decide,
 reminders before a key ends, opening a tool as someone else, the Access
