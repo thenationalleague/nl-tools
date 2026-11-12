@@ -8,7 +8,10 @@ that one went.
 ## What it is
 
 One tool, two doors (the club-root + `/admin/` shape in
-`system/tool-status-and-access.md`):
+`system/tool-status-and-access.md`). **Changed 12/11/2026:** the console
+moved to `/fixtures/` and `/fixtures/admin/` forwards there (one address per
+tool, `system/one-address-plan.md`). The forward-facing view below, when it
+is built, is a view of that page decided by the pass, not a second page.
 
 - **`/fixtures/`** — the forward-facing view. Every signed-in user, clubs
   included. Current fixtures only.
@@ -26,7 +29,7 @@ tool's data still sits under `app-data/ops-fixtures/`, and a new tool must not
 inherit or collide with it.
 
 Each tab ships as its own PR. The Fixtures tab (with the import) shipped
-first, in `fixtures/admin/` with its data layer in `fixtures/_core.js`; the
+first, in `fixtures/admin/` (now `fixtures/index.html`) with its data layer in `fixtures/_core.js`; the
 Broadcast tab covers both step 1 and step 2 (North and South) picks.
 
 ## The record

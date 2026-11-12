@@ -213,6 +213,7 @@ which is why work gets re-planned from scratch. Check here first.
 | `system/staff-club-audience-plan.md` | The staff/club audience gate. |
 | `system/roles-and-access-plan.md` | Role model. The SETTLED launch model is the block at the top. |
 | `system/permissions-plan.md` | **Steps 2–3 and the first part of 4 built (display only), the rest planned.** The next access model, decided 29/10–12/11/2026: every person has one **card** (Club / League), any number of **keys**, and a **level** per tool (Off / Access / Manage), worked out from grants, never typed. Grants live at `tools/<key>/permissions`, passes at `users/<uid>/pass`, the one resolver is `NL.pass` in `nl-utils.js`, `/pass/` draws it, and `/people/` (People and cards) lists who holds what, edits people and invites, and reports where passes differ from today. The portal's admin area closed 12/11/2026: people moved to `/people/`, the Audit log to `/audit/`. auth-guard still decides from role and defaults until step 6. "Built so far" at the foot lists where the build differs from the plan's words. Read before touching auth-guard, `NL.roles`, `NL.pass`, the registry shape or the people screens. |
+| `system/one-address-plan.md` | **Started 12/11/2026.** One address per tool: `/fixtures/`, not `/fixtures/admin/`. An `/admin/` page stays only while the front page is a code door that has to stay; who sees what is decided by the pass. Lists every two-page tool and what unlocks each (club logins). Overrides the club-root + `/admin/` shape for new tools. Read before adding an `/admin/` page. |
 | `system/vip-access-spec.md` | **Spec, not built.** VIP Access Manager handover brief. Corrects an earlier draft that pointed at the wrong references, and surfaces that this tool existed before — read `system/retired/dazn-vip.md` alongside it. Two blocking questions at the foot. |
 | `system/guest-pass-plan.md` | **Scoping, not built.** A second door: a code that carries a tool list, for outsiders who should never have an account. Four open questions at the foot. Read before proposing anything about third-party or passcode access. |
 | `system/handbook-editor-plan.md` | **Plan, not built.** The handbook editor's per-clause toolbar, measured: 1,203 nodes × 11 controls. Why the obvious fix (re-render on selection) destroys the caret, and what to do instead. Also records that Appendices P, Q and R never imported. |
@@ -291,7 +292,7 @@ For async flows that need a live auth token mid-flight, use `NL.ensureAuth().the
 
 ## When you add a new tool
 
-If clubs will use the tool, its root is the club's page and the staff console is `/admin/` (the Programme Packs shape; see `system/tool-status-and-access.md`). Not `/reader/`.
+A tool lives at one address, its own (`/fixtures/`), and the pass decides who sees what there: see `system/one-address-plan.md`. An `/admin/` page is only for a tool whose front page must stay a code door for people without accounts. Not `/reader/`.
 
 Use the `/new-tool <slug>` skill. It copies `system/_template/`, swaps the five placeholders, and runs the lint. The skill **does not** wire the tool into the system — two follow-ups remain, both RTDB config:
 

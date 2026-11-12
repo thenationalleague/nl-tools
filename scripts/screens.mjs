@@ -25,7 +25,7 @@
    failed. A fixed layout may scroll on the laptop; it must not rearrange.
 
    USAGE
-     node scripts/screens.mjs /fixtures/admin/ --seed <db.json> \
+     node scripts/screens.mjs /fixtures/ --seed <db.json> \
        --click '[data-tab="rearrange"]' --out <dir>
 
    --seed is a JSON copy of the database tree the page reads ({"app-data":
