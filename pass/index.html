@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — My pass
-  Version: v1.5 (12/11/2026)
+  Version: v1.6 (12/11/2026)
   File: /pass/index.html
 
   Your pass: the card you belong to (League or Club), the keys you hold on
@@ -34,6 +34,12 @@
   answer to someone with nothing — not "this tool isn't available".
 
   Changelog
+  v1.6 (12/11/2026) — A strip's colour says its level: Manage in the pass's
+    first colour (the club's primary, or League red), Access in its second
+    (the club's secondary, or navy). View as and Issue a pass list every
+    tool the pass does not open too, as outlines under "Not on this pass";
+    the issue form shows that list live, under the form. My pass and the
+    form lose their "until the switch" notes.
   v1.5 (12/11/2026) — Passes decide (auth-guard v16.0). Saving a pass also
     writes the per-tool entries the database rules read, worked out from
     the pass (NL.pass.toOld), in the same write; withdrawing one clears
@@ -103,6 +109,14 @@
     var NL_TOOL_KEY = 'pass';
 
     window.NL_CHANGELOG = [
+      {
+        date: '12/11/2026',
+        version: 'v1.6',
+        items: [
+          'Manage and Access each have their own colour.',
+          'Viewing as someone, or issuing a pass, shows the tools it doesn’t open too.'
+        ]
+      },
       {
         date: '12/11/2026',
         version: 'v1.5',
@@ -334,6 +348,7 @@
   .pass-intro { font-size: var(--text-base); color: var(--text-muted); margin: 0; max-width: 64ch; }
   .pass-intro b { color: var(--text); font-weight: 700; font-variation-settings: 'wght' 700; }
   .pass-note { font-size: var(--text-sm); color: var(--text-muted); margin: -12px 0 0; }
+  .issue-tools { display: flex; flex-direction: column; gap: 22px; margin-top: 28px; }
   .strips { display: flex; flex-direction: column; gap: 14px; }
   .strip {
     text-decoration: none; height: 78px; box-sizing: border-box;
@@ -342,7 +357,15 @@
     background: var(--strip, var(--navy)); color: var(--strip-text, var(--white));
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, .16), 0 3px 0 var(--strip-edge, var(--navy-600)), 0 8px 16px rgba(17, 33, 74, .16);
   }
-  .strip--card { --strip: var(--primary); --strip-edge: var(--primary-700); }
+  /* A tool the pass does not open (View as and Issue a pass list every
+     tool): an outline, no fill, no stickers, so the gaps read as clearly as
+     what is held. */
+  .strip--off {
+    height: 52px; background: transparent; color: var(--text-muted);
+    border: 1.5px solid var(--border); box-shadow: none;
+  }
+  .strip--off .strip__name { font-size: 15px; font-weight: 600; font-variation-settings: 'wght' 600; }
+  .strips-head { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); margin: 8px 0 -4px; font-weight: 800; font-variation-settings: 'wght' 800; }
   .strip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   .strip__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
   .strip__name { font-size: 17px; line-height: 1.15; font-weight: 700; font-variation-settings: 'wght' 700; }
@@ -669,22 +692,17 @@
       if (!part) return '<span class="mini" aria-hidden="true"></span>';
       return miniHtml(col, part.level, P.rank(part.level) < P.rank(result), pass);
     }).join('');
-    var byCard = ex.openedBy === 'card';
-    var style = '';
-    /* A club pass's strips use the club's own pair, the way its pass does:
-       the band colour where the card opened it, the key-sticker colour where
-       a key did. (v1.0 had key strips League navy, so a club's list came out
-       half club, half League – Richard, 12/11/2026.) League passes keep red
-       and navy, which are the League's band and sticker. */
-    if (c.club) {
-      var bg = byCard ? c.band : c.sticker, fg = byCard ? c.bandText : c.stickerText;
-      style = ' style="--strip:' + bg + ';--strip-text:' + fg + ';--strip-edge:color-mix(in srgb, ' + bg + ' 70%, black);' +
-        '--mini-text:' + c.miniText + ';--badge:' + c.sticker + ';--badge-text:' + c.stickerText + '"';
-    }
+    /* v1.6: a strip's colour says its LEVEL (Richard, 12/11/2026): Manage in
+       the pass's first colour (the club's primary, or League red), Access in
+       its second (the club's secondary, or navy). Who opened it is what the
+       stickers say. (v1.4 coloured by card or key instead.) */
+    var manage = result === 'manage';
+    var bg = manage ? c.band : c.sticker, fg = manage ? c.bandText : c.stickerText;
+    var style = ' style="--strip:' + bg + ';--strip-text:' + fg + ';--strip-edge:color-mix(in srgb, ' + bg + ' 70%, black);' +
+      (c.miniText ? '--mini-text:' + c.miniText + ';' : '') + '--badge:' + c.sticker + ';--badge-text:' + c.stickerText + '"';
     var tag = link ? 'a' : 'div';
     var href = link ? ' href="' + esc(rec.url || ('/' + item.key + '/')) + '"' : '';
-    var manage = result === 'manage';
-    return '<' + tag + ' class="strip' + (byCard ? ' strip--card' : '') + '"' + href + style + '>' +
+    return '<' + tag + ' class="strip"' + href + style + '>' +
       '<span class="strip__text"><span class="strip__name">' + esc(item.label) + '</span>' +
         (rec.description ? '<span class="strip__desc">' + esc(rec.description) + '</span>' : '') + '</span>' +
       '<span class="strip__foot">' +
@@ -708,6 +726,22 @@
     html += items.length
       ? '<div class="strips">' + items.map(function (it) { return stripHtml(it, pass, columns, c, opts.links); }).join('') + '</div>'
       : '<p class="strips-empty">This pass opens no tools yet.</p>';
+    /* View as and Issue a pass also list every tool the pass does NOT open,
+       as outlines, so what someone lacks is as plain as what they hold. */
+    if (opts.all) {
+      var held = {};
+      items.forEach(function (it) { held[it.key] = true; });
+      var off = Object.keys(STATE.registry).filter(function (k) {
+        var r = STATE.registry[k];
+        return r && !r.placeholder && k !== 'welcome' && !held[k];
+      }).map(function (k) { return { key: k, label: STATE.registry[k].label || k }; })
+        .sort(function (a, b) { return a.label.localeCompare(b.label); });
+      if (off.length) {
+        html += '<div class="strips"><div class="strips-head">Not on this pass</div>' + off.map(function (o) {
+          return '<div class="strip strip--off"><span class="strip__text"><span class="strip__name">' + esc(o.label) + '</span></span></div>';
+        }).join('') + '</div>';
+      }
+    }
     return html;
   }
 
@@ -728,10 +762,7 @@
       list.innerHTML = '<p class="pass-intro">Until it is, you open the same tools as before.</p>';
       return;
     }
-    list.innerHTML = listHtml(subject, {
-      links: true,
-      note: 'New. Until the switch, what you can open is still set the old way.'
-    });
+    list.innerHTML = listHtml(subject, { links: true });
     wireCrests(list);
   }
 
@@ -747,7 +778,7 @@
         (subject.uid ? '<a class="btn btn--ghost btn--sm" href="/people/">' + icon('back', 'icon--sm') + 'People and cards</a>'
           : '<a class="btn btn--ghost btn--sm" href="/pass/">' + icon('back', 'icon--sm') + 'My pass</a>') +
       '</div>' +
-      listHtml(subject, { links: false });
+      listHtml(subject, { links: false, all: true });
     wireCrests(list);
     document.getElementById('chooseBtn').addEventListener('click', openChooser);
   }
@@ -914,7 +945,6 @@
             '<div class="form-group"><label>Keys</label><div id="issueKeys"></div></div>' +
             (mayGiveSkeleton ? '<div class="form-group" id="issueSkelWrap"><label>Skeleton key</label><div class="choice-row">' +
               '<label><input type="checkbox" id="issueSkel"> Opens every tool at Manage</label></div></div>' : '') +
-            '<p class="form-hint">Until the switch, a pass changes what people see on My pass, not what they can open.</p>' +
           '</div>' +
         '</div>' +
         '<div class="form-panel__foot issue-actions" id="issueActions" hidden>' +
@@ -922,7 +952,8 @@
           '<span class="spacer"></span>' +
           '<button class="btn btn--primary" type="button" id="issueSave">Save pass</button>' +
         '</div>' +
-      '</div>';
+      '</div>' +
+      '<div class="issue-tools" id="issueTools"></div>';
 
     STATE.issue = { user: null, base: rights.league ? 'league' : 'club', club: FALLBACK_CLUB, jobTitle: '', keys: [], until: {}, skeleton: false };
     if (clubNames().indexOf(FALLBACK_CLUB) < 0) STATE.issue.club = clubNames()[0] || FALLBACK_CLUB;
@@ -1095,9 +1126,16 @@
   }
 
   function drawIssuePreview() {
-    var iss = STATE.issue;
-    if (!iss.user) { drawPass({ name: '', pass: null, message: 'Choose who the pass is for' }, false); return; }
-    drawPass({ name: iss.user.name, pass: issuedPass() }, false);
+    var iss = STATE.issue, tools = document.getElementById('issueTools');
+    if (!iss.user) {
+      drawPass({ name: '', pass: null, message: 'Choose who the pass is for' }, false);
+      if (tools) tools.innerHTML = '';
+      return;
+    }
+    var subject = { name: iss.user.name, pass: issuedPass() };
+    drawPass(subject, false);
+    /* What this pass opens, and what it does not, as it stands in the form. */
+    if (tools) { tools.innerHTML = listHtml(subject, { links: false, all: true }); wireCrests(tools); }
   }
 
   function saveIssue() {
