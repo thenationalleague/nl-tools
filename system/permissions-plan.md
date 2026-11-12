@@ -1,7 +1,8 @@
 # Permissions – who can open what, and do what
 
 **Status: steps 2 and 3 built and live (12/11/2026). Step 4's first part
-(People and cards, `/people/`) built 12/11/2026.**
+(People and cards, `/people/`) built 12/11/2026; the portal's admin area
+closed the same day (People and cards and the Audit log tool took it over).**
 Decided with Richard on 29/10, 11/11 and 12/11/2026 (the 12/11 grilling, 30
 questions, settled almost everything). What was built, and where it differs
 from the words below, is in "Built so far" at the foot.
@@ -396,8 +397,8 @@ Nobody's access changed. auth-guard still decides from role and defaults.
 - **`/pass/`** – My pass, View as (`?view=as`) and Issue a pass
   (`?view=issue`), drawn from boards 6–10.
 - **The menu under the circle** (`nl-topbar.js` v1.7): small pass, My pass,
-  Who can open this, People and cards, View as, Admin panel (until step 4),
-  Install as app, Sign out. The "Your tools" list is gone.
+  Who can open this, People and cards, View as, Audit log (it replaced
+  Admin panel when that closed, nl-topbar v1.9), Install as app, Sign out. The "Your tools" list is gone.
 - **Findings.** For anyone with a pass, auth-guard (v15.1) logs
   `pass_finding` to the audit log when the pass would give a different level
   from today's rules: once per tool per tab, after the decision is made.
@@ -483,9 +484,26 @@ Where it differs from step 4 as planned:
    · Deploy GAS). Not needed while nobody new is being invited; due with club
    logins (step 7).
 
-Still to do after this: the portal's Users pane (per-tool switches) retires
-once passes decide, reminders before a key ends, opening a tool as someone
-else, the Access denied page, generated rules.
+6. **The admin area closed** (third part, 12/11/2026). The Users pane moved
+   in as a person page (`/people/?person=<uid>`, opened from a name or Edit):
+   role, club, job title, per-tool exceptions, Restore defaults and Remove
+   user, with the portal's writes and audit lines. Exceptions stay until
+   step 6 because they still decide access; keys replace them then, and the
+   page loses that panel. Each person page shows their last ten audit
+   entries. The Audit log is its own tool (`/audit/`, `ops-audit`, Structure
+   shelf, same readers as before: superadmin and League Admin); reading an
+   entry is canon (`NL.audit`, nl-utils v1.52). The portal keeps the
+   welcome-message editor; its old `?tab=` links forward to the new homes,
+   so the admin request emails still land on Requests. Two small changes on
+   the way: only a superadmin can make someone a superadmin (the portal let
+   a League Admin pick it), and a rejected request's account is listed in
+   People, marked, so it can be removed.
+
+Still to do after this: per-tool exceptions retire once passes decide,
+reminders before a key ends, opening a tool as someone else, the Access
+denied page, generated rules. The admin request email still says "Review in
+admin panel"; its link forwards correctly, and the words change with the
+next Apps Script deploy.
 
 ## Safety rails
 

@@ -1,7 +1,14 @@
 /* =========================================================================
    NL Tools — Topbar renderer
    File: /system/nl-topbar.js
-   Version: v1.8 (12/11/2026)
+   Version: v1.9 (12/11/2026)
+
+   v1.9 — Admin panel leaves the menu: the portal's admin area has closed
+          (People and cards holds people, invites and requests; the Audit
+          log is its own tool). Audit log (/audit/) takes its place, for the
+          same roles. The Skeleton key's tag on the small pass reads AAA
+          (Access All Areas), not SKL. Cache-bust ?v=12 -> ?v=13, in lockstep with nl-utils
+          ?v=55 -> ?v=56.
 
    v1.8 — People and cards in the menu opens the new tool at /people/, for
           the roles auth-guard lets in there today (superadmin and League
@@ -408,8 +415,7 @@
      all. The portal home is where you go to tools. It holds, in order: a
      small version of your pass, My pass, Who can open this (on a tool, for
      the people who run it), People and cards (/people/), View as
-     (Skeleton key and Tester), the old Admin panel until step 4 replaces it,
-     Install as app, Sign out. It never scrolls.
+     (Skeleton key and Tester), Audit log, Install as app, Sign out. It never scrolls.
      The pass is DISPLAY ONLY here: what you can open is still decided by
      auth-guard from your role. */
   function buildDropdown(session, isClub, opts) {
@@ -454,11 +460,8 @@
     if (role === 'superadmin' || role === 'admin') dd.appendChild(item('/people/', 'list', 'People and cards'));
     if (issued && P.canViewAs(pass)) dd.appendChild(item('/pass/?view=as', 'eye', 'View as'));
 
-    /* Today's people screens, until step 4 replaces them with People and
-       cards. Kept so nobody loses the way to them in the meantime. */
-    if (!opts.isPortal && session && (session.role === 'superadmin' || session.role === 'admin')) {
-      dd.appendChild(item('/portal/?tab=users', 'settings', 'Admin panel'));
-    }
+    /* The Audit log (/audit/), for the roles the database lets read it. */
+    if (role === 'superadmin' || role === 'admin') dd.appendChild(item('/audit/', 'article', 'Audit log'));
 
     /* Install as app — shown only if browser fired beforeinstallprompt and app
        not already installed. Hidden by default (style.display='none') and
@@ -536,7 +539,7 @@
     var tags = el('span', { class: 'topbar__mini-pass-tags' });
     if (P.isSkeleton(pass)) {
       var sk = el('span', { class: 'topbar__mini-pass-tag topbar__mini-pass-tag--skeleton', title: 'Skeleton key' });
-      sk.innerHTML = SKULL_SVG + '<span>SKL</span>';
+      sk.innerHTML = SKULL_SVG + '<span>AAA</span>';
       tags.appendChild(sk);
     }
     P.keysHeld(pass).forEach(function(id) {

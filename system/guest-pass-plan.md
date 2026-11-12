@@ -172,7 +172,7 @@ club scope the same way; it should not need to know a pass exists.
 
 ## How it would be managed
 
-A **Passes** tab in the admin panel, alongside Users / Invites / Requests.
+A **Passes** tab in People and cards (`/people/`), alongside People / Invites / Requests (the portal's admin area closed on 12/11/2026).
 
 | Field | |
 |---|---|

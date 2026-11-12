@@ -1,7 +1,14 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.51 (12/11/2026)
+   Version: v1.52 (12/11/2026)
+
+   v1.52 — NL.audit: how an audit entry reads (its action in words, its
+   time, a table of entries), promoted from the portal's Audit log pane on
+   its second use. The Audit log is its own tool now (/audit/) and People
+   and cards shows each person's history. Tested in
+   tests/audit-canon.test.mjs. Cache-bust nl-utils ?v=55 -> ?v=56, in
+   lockstep with nl-topbar ?v=12 -> ?v=13.
 
    v1.51 — NL.gas (fetch, send, nonJsonReason) and NL.uuid: the Apps Script
    calls, promoted from the portal on their second use, unchanged in
@@ -1787,6 +1794,83 @@
     }
   };
 
+  /* ── NL.audit — reading the audit log (v1.52) ─────────────────────────
+     Promoted from the portal's Audit log pane on its second use: the Audit
+     log tool (/audit/) and each person's History in People and cards.
+
+       NL.audit.LABELS         action key → words, for the actions tools
+                               write by hand
+       NL.audit.label(entry)   the action in words: LABELS, else
+                               "<tool>_changed" → "Tool data changed" (the
+                               auto-audit hook), else the key made readable
+       NL.audit.time(entry)    when, as NL.timeAgo words. Reads entry.at,
+                               entry.ts, or a "<ms>_<rand>" / "<ms>" key in
+                               entry._key / entry._ts
+       NL.audit.table(rows)    a canon .table of entries, newest first as
+                               given: When, Who, What, About, Detail */
+  window.NL.audit = {
+    LABELS: {
+      signed_in: 'Signed in', signed_out: 'Signed out',
+      invite_sent: 'Invite sent', invite_cancelled: 'Invite cancelled',
+      request_approved: 'Request approved', request_declined: 'Request declined', request_dismissed: 'Request dismissed',
+      access_changed: 'Access changed', role_changed: 'Role changed',
+      message_created: 'Message created', message_edited: 'Message edited', message_deleted: 'Message deleted',
+      user_removed: 'User removed', tool_deployed: 'Tool deployed', tool_seeded: 'Tool seeded',
+      page_opened: 'Page opened', page_unavailable: 'Page not available',
+      pass_issued: 'Pass issued', pass_withdrawn: 'Pass withdrawn', pass_finding: 'Pass differs from today',
+      attendance_submit: 'Attendance submitted', attendance_edit: 'Attendance edited',
+      add_cup_fixture: 'Cup fixture added', edit_cup_fixture: 'Cup fixture edited',
+      delete_cup_fixture: 'Cup fixture deleted', sync_fixture_run: 'Fixture sync run',
+      judgement_added: 'Judgement added', judgement_updated: 'Judgement updated', judgement_deleted: 'Judgement deleted',
+      meeting_created: 'Meeting created', meeting_edited: 'Meeting edited', meeting_started: 'Meeting started',
+      meeting_note_saved: 'Meeting note saved', contact_added: 'Contact added',
+      minutes_generated: 'Minutes generated', minutes_published: 'Minutes published',
+      programme_packs_uploaded: 'Programme pack uploaded', programme_packs_deleted: 'Programme pack deleted',
+      programme_packs_reconciled: 'Programme packs reconciled', programme_packs_zip_downloaded: 'Programme packs zip downloaded',
+      totw_download: 'Team of the Week downloaded', totw_copy_roundup: 'TOTW roundup copied', totw_copy_excel: 'TOTW Excel copied',
+      'single-fixture_download': 'Single fixture downloaded', 'league-tables_download': 'League tables downloaded',
+      'fixtures-results_download': 'Fixtures / results downloaded', 'top-scorers_download': 'Top scorers downloaded',
+      'article-composer_copy_text': 'Article text copied', 'article-composer_copy_html': 'Article HTML copied'
+    },
+    label: function (e) {
+      var a = e && e.action;
+      if (!a) return 'Unknown action';
+      if (this.LABELS[a]) return this.LABELS[a];
+      var m = a.match(/^(.+)_changed$/);
+      if (m) {
+        var tool = m[1].replace(/[-_]/g, ' ');
+        return tool.charAt(0).toUpperCase() + tool.slice(1) + ' data changed';
+      }
+      return a.replace(/[-_]+/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+    },
+    time: function (e) {
+      if (!e) return '';
+      var v = e.at || e.ts || e._key || e._ts;
+      if (!v) return '';
+      if (typeof v === 'string') {
+        if (/^\d+$/.test(v)) v = parseInt(v, 10);
+        else if (isNaN(new Date(v).getTime())) {
+          var m = v.match(/^(\d{10,})/);
+          if (m) v = parseInt(m[1], 10);
+        }
+      }
+      var out = window.NL.timeAgo(v);
+      return out === '—' ? '' : out;
+    },
+    table: function (rows) {
+      var esc = window.NL.escHtml, self = this;
+      return '<div class="table-wrap"><table class="table"><thead><tr>' +
+        '<th>When</th><th>Who</th><th>What</th><th>About</th><th>Detail</th></tr></thead><tbody>' +
+        (rows || []).map(function (e) {
+          return '<tr><td>' + esc(self.time(e)) + '</td>' +
+            '<td>' + esc(e.name || e.email || '') + '</td>' +
+            '<td>' + esc(self.label(e)) + '</td>' +
+            '<td>' + esc(e.targetName || e.targetEmail || '') + '</td>' +
+            '<td>' + esc(e.detail || '') + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    }
+  };
+
   /* ── Auto-audit RTDB writes ──────────────────────────────────────────── */
   /* Paths matching any of these are NOT auto-audited (avoids loops/noise).
      Editable at runtime via NL.AUDIT_AUTO.skipPatterns. */
@@ -2416,7 +2500,7 @@
        actually asking ("which one can submit our attendances?"), and it is
        decided by role, not by any per-tool setting. */
     GRANTS: {
-      superadmin:    'Everything, including this panel.',
+      superadmin:    'Everything, including who gets in.',
       admin:         'All clubs. Can edit their data.',
       staff:         'All clubs. Can view their data.',
       'club-admin':  'Their own club only. Can submit and edit for it.',
