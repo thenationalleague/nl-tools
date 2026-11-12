@@ -610,6 +610,37 @@ next Apps Script deploy.
 - Later: two-step sign-in (TOTP) for sensitive keys, after step 5, so the
   database can check the second factor alongside the grant.
 
+### Step 5, first part: the database follows the pass (12/11/2026, PR "The database follows the pass")
+
+What the plan's words describe (a generated rule expression per tool,
+testing each key in turn) was set aside for something smaller that gets the
+same result, because grants now change live and the expression would have to
+read them too: about 10 keys × 2 sources × every tool, several hundred
+kilobytes of rules against a 256KB limit.
+
+- **The server keeps the per-tool entries.** The database rules already read
+  `users/<uid>/tools/<key>`, through the generated `rtdb-level-rule.mjs`
+  expressions. Three functions now write those entries from the pass, with
+  the door's own resolver (`NL.pass.toOld`, loaded from `system/nl-utils.js`
+  by `functions/canon.js`; the deploy copies the file in):
+  `passEntries` when a pass is written, `grantEntries` when a tool's live
+  grants change, and `keyEndings` each night at 03:20 for keys that ended
+  (with a "Key ended" audit line). The pages still write the same entries;
+  the functions write only where they disagree. A grant changed in the
+  registry snapshot still reaches people through Apply passes, because a
+  merge is not a moment anyone reviewed whose access it moves.
+- **Who may write people is in the database now** (`users` rules). The
+  Skeleton key or the superadmin role: anyone. A League Admin holding a
+  current League Operations key: club people only (club roles, Club cards,
+  never themselves, never a League role or card, never a Skeleton key).
+  Anyone else: nothing. A League Admin role with no Operations key loses
+  the write it had. Proved against the emulator by
+  `tests/emulator/users-rules.mjs`, run on every rules PR by
+  `.github/workflows/test-rules.yml`.
+- **Still to do in step 5:** per-tool rules that read levels rather than
+  roles where tools still hand-write role checks; Manage on the tools that
+  have none; stop Access users writing where a tool lets them.
+
 ## Safety rails
 
 - Report before switch; run both and compare; a way back at every step.

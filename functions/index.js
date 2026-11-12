@@ -8,6 +8,9 @@
  *                       fan data live without mirroring it. See fan-widgets.js.
  *   passClaims        — a Club card puts its club on the account (club logins,
  *                       step 7): the claims a club code gives. See pass-claims.js.
+ *   passEntries,      — the database follows the pass: per-tool entries worked
+ *   grantEntries,       out on the server from the pass and live grants, and
+ *   keyEndings          keys that end overnight. See pass-entries.js.
  *   programmeAuth     — Programme Packs passcode → scoped `pClub` claim, so
  *                       Storage/RTDB rules can enforce write-own for passcode
  *                       (non-portal) clubs. An RTDB trigger, not a callable:
@@ -81,6 +84,13 @@ Object.assign(exports, require("./club-code"));
 // person's own account whenever their pass changes, so club logins open every
 // club page with no code and no rules change. See pass-claims.js.
 Object.assign(exports, require("./pass-claims"));
+
+// The database follows the pass (passEntries, grantEntries, keyEndings): each
+// pass holder's per-tool entries, which the database rules read, are worked
+// out on the server whenever a pass or a tool's live grants change, and once
+// a day for keys that have ended. Same resolver as the door, loaded from
+// system/nl-utils.js (canon.js). See pass-entries.js.
+Object.assign(exports, require("./pass-entries"));
 
 // Brand Exposure ingest key → a `be: <matchId>` claim (brandExposureIngest).
 // Fifth instance of the same shape, and the first whose client is a Python
