@@ -54,7 +54,14 @@ test('the Skeleton-only tabs are held back for everyone else', () => {
   assert.match(PAGE, /function inviteRoles\(\) \{ return sk\(\) \? ROLES : CLUB_ROLES; \}/);
 });
 
-test('/people/ and /audit/ forward to Access, keeping the query', () => {
+test('/people/, /audit/ and /club-codes/ forward to Access, keeping the query', () => {
   assert.match(read('people/index.html'), /var base = '\/access\/';/);
   assert.match(read('audit/index.html'), /var base = '\/access\/\?tab=audit';/);
+  assert.match(read('club-codes/index.html'), /var base = '\/access\/\?tab=codes';/);
+  assert.equal(REG['ops-club-codes'].url, '/access/?tab=codes');
+});
+
+test('the Codes tab is open to everyone Access lets in, and starts only when opened', () => {
+  assert.doesNotMatch(PAGE.match(/var SK_TABS = \[[^\]]*\]/)[0], /codes/);
+  assert.match(PAGE, /if \(name === 'codes' && window\.ACCESS_CODES\) window\.ACCESS_CODES\.init\(\);/);
 });
