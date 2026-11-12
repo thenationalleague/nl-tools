@@ -542,6 +542,31 @@ everything else capped at the club role's default (Club Admin's with Club
 Operations, Club Staff's without). The agreed Club-card grants stay in the
 registry and apply when step 7 sets `NL.pass.CLUB_LOGINS = true`.
 
+### Step 7, first part: club logins (12/11/2026, PR "Club logins")
+
+Richard: club logins available now, even though nobody is being invited yet.
+Built on the boundary the club pages already have rather than a new one:
+
+- **Your pass is your code.** `functions/pass-claims.js` (`passClaims`)
+  writes the claims a club's access code gives (`club`, `clubName`, `pClub`,
+  `pClubName`) onto a Club card holder's own account whenever their pass is
+  written, and clears them for anything else. The club pages and their RTDB
+  rules read the claim, so a signed-in club person opens each club page
+  without a code, sees only their club, and no rules change.
+- `NL.codeGate.resume` asks once for a fresh token when a signed-in account
+  has no club claim yet (nl-utils v1.55), so a pass issued after sign-in is
+  picked up at once.
+- **`clubUrl`** in the registry names a tool's club page (DAZN Viewership,
+  Document Library, Financial Benchmarking, Save of the Month, Club
+  Directory). A Club card reaches those by its grants, and My pass and the
+  portal link a Club card there; tools without a club page stay held to the
+  club role.
+- **Not yet:** Programme Packs (its club library keeps code sessions apart
+  from real accounts by design, so it needs its own route through
+  `programmeAuth`); the request form, approvals by League Operations, the
+  bell and key requests from the plan's step 7. Save of the Month is on the
+  Sandbox shelf, so a Club card does not open it until it launches.
+
 Still to do after this: per-tool exceptions retire once passes decide,
 reminders before a key ends, opening a tool as someone else, the Access
 denied page, generated rules. The admin request email still says "Review in

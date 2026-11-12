@@ -216,14 +216,18 @@ test('the club secretary opens what the board will be shown (from club logins)',
    sent a club account to DAZN Viewership, Programme Packs, Document Library,
    Financial Benchmarking (League staff consoles — "not available") and the
    Club Directory editor (opened, then refused by the database). */
-test('until club logins, a Club card opens only what the club role always did', () => {
+test('a Club card reaches a staff page only where the club role always could; a club page by its grants', () => {
   const fgr = club('Forest Green Rovers', 'club-commercial', 'club-finance');
-  for (const key of ['media-dazn', 'media-programme', 'ops-document-library', 'ops-financial-benchmarking', 'ops-club-directory']) {
-    assert.equal(level(fgr, key), 'off', key);
+  /* No club page yet: held to the club role. */
+  assert.equal(level(fgr, 'media-programme'), 'off');
+  /* A club page (clubUrl): the agreed grants, met there by club login. */
+  for (const key of ['media-dazn', 'ops-document-library', 'ops-financial-benchmarking', 'ops-club-directory']) {
+    assert.ok(REGISTRY[key].clubUrl, key + ' has a club page');
+    assert.equal(level(fgr, key), 'access', key);
   }
   for (const [role, pass] of [['club-staff', fgr], ['club-admin', club('Woking', 'club-operations', 'club-media')]]) {
     for (const [key, rec] of Object.entries(REGISTRY)) {
-      if (rec.placeholder || key === 'welcome') continue;
+      if (rec.placeholder || key === 'welcome' || rec.clubUrl) continue;
       const today = P.todayLevel({ role, tools: {} }, { key, ...rec });
       assert.ok(P.rank(P.level(pass, rec, NOW)) <= P.rank(today), `${role} ${key}: above the role`);
     }
