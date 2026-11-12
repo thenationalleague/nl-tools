@@ -474,6 +474,14 @@ Where it differs from step 4 as planned:
    generated rule in step 5.
 4. **Agreeing each difference** is not recorded yet; the report and its CSV
    are the record for now.
+5. **Invites still set a role** (parked 12/11/2026). Until step 6 a role is
+   what opens tools, so a new account needs one. The next shape: the invite
+   form asks card, club, keys and job title, works out the role from them
+   (League card → League Staff, League Operations → League Admin; Club card
+   → Club Staff, Club Operations → Club Admin), and the account is created
+   with its pass – an Apps Script change (`gas/Invite.js`, shipped by Button
+   · Deploy GAS). Not needed while nobody new is being invited; due with club
+   logins (step 7).
 
 Still to do after this: the portal's Users pane (per-tool switches) retires
 once passes decide, reminders before a key ends, opening a tool as someone
