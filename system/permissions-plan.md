@@ -1,7 +1,7 @@
 # Permissions – who can open what, and do what
 
-**Status: steps 2 and 3 built and live (12/11/2026; PRs #1487 and #1488; #1489 open). Step 4
-shaped (People and cards, its own tool).**
+**Status: steps 2 and 3 built and live (12/11/2026). Step 4's first part
+(People and cards, `/people/`) built 12/11/2026.**
 Decided with Richard on 29/10, 11/11 and 12/11/2026 (the 12/11 grilling, 30
 questions, settled almost everything). What was built, and where it differs
 from the words below, is in "Built so far" at the foot.
@@ -437,9 +437,40 @@ Where the build differs from the words above, and why:
    `OPEN_PAGES` lets any signed-in, approved account in, because "your pass
    hasn't been issued yet" is its answer to someone with nothing.
 
-Not in steps 2–3, still to do: key end dates in the form (the data shape and
-the resolver already honour `until`), reminders, opening a tool as someone
-else, the Access denied page, generated rules.
+### Step 4, first part (12/11/2026, PR "People and cards")
+
+- **`/people/`** (`ops-people`), a tool with a registry record: sensitive,
+  League Operations Manage by the pass; today auth-guard opens it to
+  superadmin and League Admin, the roles that run the portal's admin area.
+  Two tabs: **People** (everyone, searchable, filter by pass and card; View
+  and Edit pass) and **Manage** (the migration report: per person with a
+  pass, every tool where the pass differs from today, which way it moves,
+  and a CSV download).
+- **Key end dates** in the issue form; the key goes at the start of that day.
+- **Who gives out what** is `NL.pass.issueRights`: the Skeleton key
+  everything, League Operations Club cards and club keys to club people only.
+- `NL.pass.todayLevel` / `compare` set today's answer (a mirror of
+  auth-guard's `checkAccess`) against the pass's, tested side by side.
+
+Where it differs from step 4 as planned:
+
+1. **The issue form stays at `/pass/?view=issue`**, reached from People (with
+   the person chosen) and leading back to it, rather than being copied into
+   `/people/`. The pass drawing lives in one page; copying it would be two
+   copies to drift. If the form is wanted inside People itself, promote the
+   pass drawing to canon first (`nl-brand.css` + an `NL.pass` renderer).
+2. **Invites and Requests are still in the portal's admin area**, linked from
+   People. They move next, the email path unchanged first.
+3. **League Operations can issue only if their role is League Admin** until
+   step 6: the database rules let only League Admins and the superadmin
+   write `users/<uid>/pass`. Opening that to the League Operations key is a
+   generated rule in step 5.
+4. **Agreeing each difference** is not recorded yet; the report and its CSV
+   are the record for now.
+
+Still to do after this: Invites and Requests into People, reminders before a
+key ends, opening a tool as someone else, the Access denied page, generated
+rules.
 
 ## Safety rails
 
