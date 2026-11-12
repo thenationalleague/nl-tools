@@ -6,6 +6,8 @@
  *   fanWidgetsAuth    — issues a superadmin a staff token for the separate
  *                       nl-widgets project, so the Fan Widgets tool can read
  *                       fan data live without mirroring it. See fan-widgets.js.
+ *   passClaims        — a Club card puts its club on the account (club logins,
+ *                       step 7): the claims a club code gives. See pass-claims.js.
  *   programmeAuth     — Programme Packs passcode → scoped `pClub` claim, so
  *                       Storage/RTDB rules can enforce write-own for passcode
  *                       (non-portal) clubs. An RTDB trigger, not a callable:
@@ -73,6 +75,12 @@ Object.assign(exports, require("./uw-promo"));
 // second, Programme Packs migrated last. See functions/club-code.js and
 // system/club-code-plan.md.
 Object.assign(exports, require("./club-code"));
+
+// A Club card puts its club on the account (passClaims): the same `club` /
+// `pClub` claims a club's access code gives, written onto a signed-in club
+// person's own account whenever their pass changes, so club logins open every
+// club page with no code and no rules change. See pass-claims.js.
+Object.assign(exports, require("./pass-claims"));
 
 // Brand Exposure ingest key → a `be: <matchId>` claim (brandExposureIngest).
 // Fifth instance of the same shape, and the first whose client is a Python

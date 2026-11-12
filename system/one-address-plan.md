@@ -36,6 +36,13 @@ and the two-door shape at the top of `system/fixture-management-plan.md`.
 | Save of the Month | club page, by code | console | No: clubs nominate by code |
 | UW Promo | partner page | console (not a registry tool) | No: the partner uses it |
 
+## Club logins have started (12/11/2026)
+
+A Club card holder now opens a tool's club page signed in, with no code: the
+pass puts the club's code claim on their account (`functions/pass-claims.js`)
+and the registry's `clubUrl` sends them there. That is the first half of
+merging the two pages; the second is the signed-in page serving both views.
+
 ## What unlocks the rest
 
 Club logins (permissions plan, step 7). Once a club person can sign in with a

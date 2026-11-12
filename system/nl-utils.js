@@ -1,7 +1,14 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.54 (12/11/2026)
+   Version: v1.55 (12/11/2026)
+
+   v1.55 — Club logins (permissions plan, step 7). NL.codeGate.resume asks
+   once for a fresh token when a signed-in account has no club claim, so a
+   Club card issued after sign-in is picked up without a code. NL.pass lets a
+   Club card reach a tool that has a club page (`clubUrl` in the registry) by
+   its grants; tools without one stay held to the club role. Cache-bust
+   nl-utils ?v=58 -> ?v=59.
 
    v1.54 — NL.pass: until club logins (NL.pass.CLUB_LOGINS, false), a Club
    card opens no more than the club role always did: League-audience tools
@@ -2380,11 +2387,22 @@
       var off = firebase.auth().onAuthStateChanged(function (user) {
         off();
         if (!user || user.isAnonymous) { resolve(null); return; }
+        function read(t) {
+          var c = (t && t.claims) || {};
+          return c[claim] ? { role: c[claim], name: c[claim + 'Name'] || '' } : null;
+        }
+        /* v1.55, club logins: a signed-in account (it has an email; a code
+           session does not) whose Club card was issued after its token was
+           minted carries no club claim yet, so ask once for a fresh token
+           before showing the code screen. functions/pass-claims.js writes
+           the claim. */
         user.getIdTokenResult()
           .then(function (t) {
-            var c = (t && t.claims) || {};
-            resolve(c[claim] ? { role: c[claim], name: c[claim + 'Name'] || '' } : null);
+            var s = read(t);
+            if (s || !user.email) return s;
+            return user.getIdTokenResult(true).then(read);
           })
+          .then(function (s) { resolve(s); })
           .catch(function () { resolve(null); });
       });
     });
@@ -2825,7 +2843,11 @@
          else is capped at the club role's registry default — Club Admin's
          with the Club Operations key, Club Staff's without. Set
          NL.pass.CLUB_LOGINS true at step 7 and the agreed grants apply. */
-      if (pass.base === 'club' && !window.NL.pass.CLUB_LOGINS) {
+      /* v1.55: a tool with a club page (`clubUrl` in the registry) is open to
+         a Club card by its grants: club logins reach it there, where the
+         club's own data is shown, through the club claim the pass puts on
+         the account (functions/pass-claims.js). */
+      if (pass.base === 'club' && !window.NL.pass.CLUB_LOGINS && !record.clubUrl) {
         var aud = record.audience;
         if (aud === 'league' || aud === 'staff' || aud === 'meta') { out.reason = 'clubs-later'; return out; }
         var clubRole = holds(pass, 'club-operations', now) ? 'club-admin' : 'club-staff';
