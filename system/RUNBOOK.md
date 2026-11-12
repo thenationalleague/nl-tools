@@ -122,7 +122,7 @@ the PR body should say so.** A PR that adds a function needs nothing.
 | Timer · New season | 02:00, 1 July | New season |
 | Timer · Handbook PDF backup | daily, 05:25 UTC | Re-renders if stale. Backup only: publishing starts it at once |
 | Timer · Predictor leaderboard | every 15 min | Fan predictor standings |
-| Timer · Check last night's backup | 10:41 daily | Fails if Firebase's daily database backup is over 26 hours old or half the size of the one before. Names and sizes only |
+| Timer · Check last night's backup | 18:41 daily | Fails if Firebase's daily database backup is over 26 hours old or half the size of the one before. Names and sizes only |
 | Timer · Monthly database copy | 11:19, the 1st | Copies the newest daily backup into `nl-tools-monthly-backups`, kept a year. Creates the bucket on its first run |
 | Timer · Fixtures and results graphics | 4am UK (today-only matchday cards); 10am UK; every 15 min from midday UTC — and started by the `fixturesGraphicsAtFullTime` function five minutes after the last game of the day ends, because GitHub's timer runs late | Fixtures cards two days before each round, and at 4am on each day of a round that spans several days a card with only that day's games; results cards and league tables (Cup groups A–D in the group stage) as soon as a day's games are all full time. To Drive (media Shared Drive → Graphics → **Main**: per day, final cards only; **Extended**: every cut, per round) and Storage `graphics/fixtures/`. Round numbers from `assets/data/rounds-<season>.json` — a new one is needed each summer. Run workflow with **Dry run** ticked to test any date. |
 
