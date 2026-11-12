@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — People and cards
-  Version: v1.5 (12/11/2026)
+  Version: v1.6 (12/11/2026)
   File: /people/index.html
 
   Who holds which pass: everyone with an account, their role today, their
@@ -55,6 +55,10 @@
            once that grant comes back.
 
   Changelog
+  v1.6 (12/11/2026) — Apply passes shows only when something is waiting.
+    The role becomes "Legacy role": the last column, plain text, after the
+    pass (which now carries the season flag and Waiting / Request rejected).
+    On a person page the picker is headed Legacy role.
   v1.5 (12/11/2026) — Passes decide (auth-guard v16.0). Manage becomes
     "Waiting to be applied": per person with a pass, where the per-tool
     entries the database reads still differ from the pass, and an Apply
@@ -143,6 +147,11 @@
     window.NL_CHANGELOG = [
       {
         date: '12/11/2026',
+        version: 'v1.6',
+        items: [ 'Roles move to a quiet Legacy role column; the pass comes first.' ]
+      },
+      {
+        date: '12/11/2026',
         version: 'v1.5',
         items: [
           'Passes now decide who opens what.',
@@ -227,6 +236,8 @@
   .pc-who__job { font-size: var(--text-sm); color: var(--text); }
   .pc-pass { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: var(--text-sm); }
   .pc-crest { --crest-size: 24px; }
+  .pc-legacy { font-size: var(--text-sm); color: var(--text-muted); }
+  .pc-head__line .pc-legacy { margin-left: 6px; }
   .pc-approve__who { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
   .pc-approve__who .pc-crest { --crest-size: 40px; }
   .pc-gap { margin-top: 16px; }
@@ -296,7 +307,7 @@
       </div>
       <div class="table-wrap">
         <table class="table">
-          <thead><tr><th>Person</th><th>Role today</th><th>Pass</th><th aria-label="Actions"></th></tr></thead>
+          <thead><tr><th>Person</th><th>Pass</th><th>Legacy role</th><th aria-label="Actions"></th></tr></thead>
           <tbody id="pcRows"><tr><td colspan="4" class="pc-muted">Loading…</td></tr></tbody>
         </table>
       </div>
@@ -376,16 +387,14 @@
   }
 
   /* Role today: the canon role pill, and the club for club roles. */
-  function roleHtml(u) {
-    var club = NL.isClubUser(u.role) && u.club ? '<div class="pc-who__sub">' + esc(u.club) + offSeason(u.club) + '</div>' : '';
-    return rolePill(u) + club;
-  }
-  function rolePill(u) {
-    var key = NL.roles.norm(u.role);
-    var pill = u.role ? '<span class="pill role-' + esc(key) + '">' + esc(NL.roles.label(u.role)) + '</span>' : '<span class="pc-muted">No role</span>';
-    if (u.pending) pill += ' <span class="pill role-pending">Waiting</span>';
-    if (u.rejected) pill += ' <span class="pill pill--rejected">Request rejected</span>';
-    return pill;
+  /* The legacy role (v1.6): the pass decides who opens what (auth-guard
+     v16.0), so the role is shown last, in plain text, as "Legacy role".
+     It is not gone: until step 5 some database rules still read it (who
+     may edit other people's accounts, for one). */
+  function statusHtml(u) {
+    if (u.pending) return '<span class="pill role-pending">Waiting</span>';
+    if (u.rejected) return '<span class="pill pill--rejected">Request rejected</span>';
+    return '';
   }
 
   /* Who someone is with: their pass's card, else their role today. */
@@ -471,8 +480,8 @@
         '<td><span class="pc-who"><a class="pc-who__name pc-link" href="?person=' + encodeURIComponent(u.uid) + '" data-person="' + esc(u.uid) + '">' + esc(u.name || '(no name)') + '</a>' +
           (jobOf(u) ? '<span class="pc-who__job">' + esc(jobOf(u)) + '</span>' : '') +
           '<span class="pc-who__sub">' + esc(u.email) + '</span></span></td>' +
-        '<td>' + roleHtml(u) + '</td>' +
-        '<td>' + passHtml(u.pass) + '</td>' +
+        '<td><span class="pc-pass">' + passHtml(u.pass) + offSeason(orgOf(u)) + statusHtml(u) + '</span></td>' +
+        '<td class="pc-legacy">' + esc(roleText(u)) + '</td>' +
         '<td><span class="pc-actions">' + acts + '</span></td>' +
       '</tr>';
     }).join('') : '<tr><td colspan="4" class="pc-muted">Nobody matches.</td></tr>';
@@ -541,7 +550,9 @@
     var csv = document.getElementById('pcCsv');
     csv.innerHTML = icon('download') + 'Download CSV';
     csv.disabled = !diffs;
-    document.getElementById('pcApply').disabled = !diffs;
+    /* Shown only when something is waiting: day to day, issuing a pass,
+       approving and saving a person keep everyone in step themselves. */
+    document.getElementById('pcApply').hidden = !diffs;
     var body = '';
     rep.forEach(function (r) {
       r.rows.forEach(function (x, i) {
@@ -977,7 +988,8 @@
       '<div class="pc-head__name">' + esc(u.name || '(no name)') + '</div>' +
       (jobOf(u) ? '<div class="pc-who__job">' + esc(jobOf(u)) + '</div>' : '') +
       '<div class="pc-who__sub">' + esc(u.email) + '</div>' +
-      '<div class="pc-head__line">' + rolePill(u) + passHtml(u.pass) + offSeason(orgOf(u)) + '</div>' +
+      '<div class="pc-head__line">' + passHtml(u.pass) + offSeason(orgOf(u)) + statusHtml(u) +
+        '<span class="pc-legacy">Legacy role: ' + esc(roleText(u)) + '</span></div>' +
       '</div><div class="pc-actions">' + passBtns + '</div></div>';
 
     if (!edit) {
@@ -986,7 +998,9 @@
       html += '<div class="form-panel pc-panel pc-open">' +
         '<div class="form-panel__head">Details</div>' +
         '<div class="form-panel__body"><div class="form-grid">' +
-          '<div class="form-group span2"><label>Role</label><div class="pc-roles" id="pcEdRoles">' +
+          '<div class="form-group span2"><label>Legacy role</label>' +
+            '<p class="pc-hint">Their pass decides what they open; this still sets a few database permissions.</p>' +
+            '<div class="pc-roles" id="pcEdRoles">' +
             roleChoices().map(function (x) {
               return '<label class="pc-role"><input type="radio" name="pcEdRole" value="' + x + '"' + (x === ED.role ? ' checked' : '') + '>' +
                 '<span><span class="pc-role__name">' + esc(NL.roles.label(x)) + '</span><span class="pc-role__grant">' + esc(NL.roles.grant(x)) + '</span></span></label>';
