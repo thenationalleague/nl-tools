@@ -1,6 +1,7 @@
 # Permissions – who can open what, and do what
 
-**Status: steps 2 and 3 built (12/11/2026), on a branch, not merged.**
+**Status: steps 2 and 3 built and live (12/11/2026; PRs #1487 and #1488; #1489 open). Step 4
+shaped (People and cards, its own tool).**
 Decided with Richard on 29/10, 11/11 and 12/11/2026 (the 12/11 grilling, 30
 questions, settled almost everything). What was built, and where it differs
 from the words below, is in "Built so far" at the foot.
@@ -204,7 +205,8 @@ of the canvas are the reference; boards 1–5 were the earlier concepts.
 
 - **The menu under your circle** holds no tools at all: a small version of
   your pass (name, job title, key tags; a skull tag for a Skeleton key), "My
-  pass", "People and cards" (only for those who can give out cards), "View
+  pass", "People and cards" (only for those who can give out cards; the
+  People and cards tool from step 4), "View
   as" (Skeleton key and testers only), Install as app, Sign out. It never
   scrolls. The portal home is where you go to tools.
 - **A bell next to the circle** (see Approvals).
@@ -327,9 +329,30 @@ step 6.
    League Operations + Media, a club secretary). Richard has **dummy
    accounts** for testing as clubs, club secretaries, club media and League
    staff – use those rather than real people.
-4. **People screens and the migration report.** Set card, keys and job title
-   (replaces today's per-tool switches and "exceptions"). Report every
-   person's old vs new level on every tool; Richard agrees every difference.
+4. **People and cards – its own tool, at `nl.tools/people/`** (decided
+   12/11). It replaces three of the portal admin area's four tabs: Users,
+   Invites and Requests. The Audit log covers every tool, not just people,
+   so it stays out (later beside Estate, or a place of its own). Tabs:
+   - **People** – everyone, with card, club, keys (with optional end dates)
+     and job title. Replaces today's role plus per-tool switches and
+     "exceptions". The "issue a pass" form moves here from
+     `/pass/?view=issue`; `/pass/` keeps My pass and View as.
+   - **Invites** – an invite sets card, keys and job title instead of a
+     role. The invite email path (`nlGasSend` and `Invite.js`, with its
+     retry-safe token) moves across **unchanged first**; what an invite sets
+     changes in a separate step, never in the same one.
+   - **Requests** – today's access requests, becoming the one **Pending**
+     list (key requests join it at step 7).
+   - **Manage** (last tab) – bulk jobs, and the **migration report**: every
+     person's old vs new level on every tool. Richard agrees every
+     difference before step 6.
+
+   It is a tool like any other: a registry record, sensitive, keys only, on
+   the Main shelf, its "who can open this" worked out from its grants.
+   Skeleton key holders do everything; League Operations issue Club cards
+   and club keys only. The menu's "People and cards" points here. The old
+   portal tabs link across to it until they are removed. Built after the
+   board meeting.
 5. **New locks beside the old.** `scripts/rtdb-level-rule.mjs` generates rules
    from the grants (Firebase rules can't loop over keys, so each grant becomes
    an explicit generated `users/<uid>/keys/<key>` test;
