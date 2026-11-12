@@ -3,6 +3,10 @@
 <head>
 <!--
   Programme Packs — club library (standalone, passcode; ?master=1 for admins)
+  Version: v1.23 (13/11/2026) - club logins: someone signed in to NL Tools on a
+           Club card opens their club's library with no passcode
+           (PP.enterAsCard, _shared.js v1.7). "Not you?" takes them to the
+           portal. The passcode door is unchanged.
   Version: v1.22 (11/11/2026) - your club's card is canon: NL.clubs.headerHtml
            draws .nl-club-header (nl-brand v2.77, nl-utils v1.48), promoted
            from the .own card here and Financial Benchmarking's club card.
@@ -135,7 +139,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
 <script src="/system/nl-utils.js?v=60"></script>
-<script src="/programme/_shared.js?v=6"></script>
+<script src="/programme/_shared.js?v=7"></script>
 <!-- GA4 for nl.tools — cookieless, no banner, no identity. See system/nl-analytics.js -->
 <script src="/system/nl-analytics.js?v=1"></script>
 <link rel="stylesheet" href="/programme/_shared.css?v=6">
@@ -313,7 +317,12 @@
       el('gateSub').textContent = (e && e.message) || 'Something went wrong. Please try again.';
     });
   } else {
-    PP.resume().then(function (s) {
+    /* A Club card first (signed in to NL Tools, club on the account), then a
+       remembered device, then the passcode. Each resolves null rather than
+       failing, so the next door is always tried. */
+    PP.enterAsCard().catch(function () { return null; }).then(function (s) {
+      return s || PP.resume();
+    }).then(function (s) {
       if (s) { enter(s); return; }
       showGate();
     }).catch(showGate);
@@ -359,6 +368,9 @@
        bounce to a gate that signs straight back in — the useful exit is the
        console. Clubs keep the original meaning. */
     if ((PP.session || {}).isAdmin) { location.href = '/programme/admin/'; return; }
+    /* Signed in on a Club card: there is no passcode to forget, and the way
+       to be someone else is to sign out of NL Tools. */
+    if ((PP.session || {}).viaCard) { location.href = '/portal/'; return; }
     PP.forget();
     location.href = location.pathname;
   });

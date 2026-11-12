@@ -219,9 +219,10 @@ test('the club secretary opens what the board will be shown (from club logins)',
 test('a Club card reaches a staff page only where the club role always could; a club page by its grants', () => {
   const fgr = club('Forest Green Rovers', 'club-commercial', 'club-finance');
   /* No club page yet: held to the club role. */
-  assert.equal(level(fgr, 'media-programme'), 'off');
-  /* A club page (clubUrl): the agreed grants, met there by club login. */
-  for (const key of ['media-dazn', 'ops-document-library', 'ops-financial-benchmarking', 'ops-club-directory']) {
+  assert.equal(level(fgr, 'ops-handbook'), 'access', 'Handbook: the club role\'s own level, no more');
+  /* A club page (clubUrl): the agreed grants, met there by club login.
+     Programme Packs joined 13/11/2026 (the library's Club card door). */
+  for (const key of ['media-dazn', 'ops-document-library', 'ops-financial-benchmarking', 'ops-club-directory', 'media-programme']) {
     assert.ok(REGISTRY[key].clubUrl, key + ' has a club page');
     assert.equal(level(fgr, key), 'access', key);
   }

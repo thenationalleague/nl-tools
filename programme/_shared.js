@@ -1,5 +1,10 @@
 /*
   Programme Packs — shared runtime for the library + admin console
+  Version: v1.7 (13/11/2026) — the club card door: PP.enterAsCard opens the
+           library with the person's own NL Tools sign-in when their Club card
+           has put their club on the account (functions/pass-claims.js), with
+           no passcode. PP.app becomes a getter, since that door switches the
+           library to the default app.
   Version: v1.6 (28/10/2026) — the file helpers are canon (NL.files, nl-utils
            v1.46): safeName, humanSize, uploadType, fileKind, kindIcon and
            the preview tiers are now the canon functions under their old PP
@@ -471,6 +476,41 @@
     });
   }
 
+  /* ── Club card door (v1.7, 13/11/2026) ─────────────────────────────────
+     Club logins (permissions plan, step 7). A person signed in to NL Tools on
+     a Club card already carries their club on their own account: when the
+     pass is issued, functions/pass-claims.js writes the same `pClub` claim a
+     club code mints here. The rules only ask for that claim, so the library
+     opens with the portal's own session: no passcode, no exchange, no wait.
+
+     The named app (the passcode session) is left alone, and the library's
+     database and storage calls switch to the default app for this visit.
+     A League account carries no pClub and a master session is '*': both
+     fall through to the doors they always used. */
+  function enterAsCard() {
+    return authReady(ensureDefaultApp().auth()).then(function (u) {
+      if (!u || u.isAnonymous || !u.email) return null;
+      function read(t) {
+        var c = (t && t.claims) || {};
+        return (c.pClub && c.pClub !== '*') ? c : null;
+      }
+      return u.getIdTokenResult().then(function (t) {
+        /* A pass issued since this token was minted: ask once for a fresh one. */
+        return read(t) || u.getIdTokenResult(true).then(read);
+      }).then(function (c) {
+        if (!c) return null;
+        app = ensureDefaultApp();
+        session = {
+          code: c.pClub, name: c.pClubName || c.pClub, division: '',
+          isNL: c.pClub === 'NL', isAdmin: false, viaCard: true
+        };
+        PP.session = session;
+        audit('sign-in', { via: 'card' });
+        return session;
+      }, function () { return null; });
+    });
+  }
+
   function requireSession() {
     if (!session) throw new Error('No Programme Packs session');
     return session;
@@ -509,7 +549,8 @@
   window.PP = {
     ROOT: ROOT,
     STORAGE_ROOT: STORAGE_ROOT,
-    app: app,
+    /* A getter: the club card door switches `app` to the default app. */
+    get app() { return app; },
     db: function () { return app.database(); },
     storage: function () { return app.storage(); },
     ref: function (path) { return app.database().ref(ROOT + (path ? '/' + path : '')); },
@@ -538,6 +579,7 @@
     enter: enter,
     enterAsAdmin: enterAsAdmin,
     enterMaster: enterMaster,
+    enterAsCard: enterAsCard,
     resume: resume,
     forget: forget,
     requireSession: requireSession,
