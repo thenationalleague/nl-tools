@@ -30,6 +30,13 @@ asks for it. Real life has now asked:
 - **Outsiders have no home.** The external realm was retired in August, and
   DAZN, the Trust and suppliers get a different coded link per job.
 - **"Who can open this?" is hand-written** in four documents, and they drift.
+- **Two answers to "can I edit?".** On about a dozen tools it is the Manage
+  level; on the rest it is the role. A page can follow one rule for one
+  control and the other for the next. Real case, 12/11/2026: Graham, League
+  Staff, saw Club Directory's **Admin** tab (shown to every League person) but
+  no **Edit** button (shown only with Manage). He was set to Use, so the page
+  was right, and it still looked broken. In this plan, Manage is the only
+  thing that means "can edit", on every tool.
 
 ## The model
 
