@@ -1,7 +1,13 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.52 (12/11/2026)
+   Version: v1.53 (12/11/2026)
+
+   v1.53 — NL.pass.toOld: the per-tool entries that make today's rule give
+   what a pass gives, so the database (which reads users/<uid>/tools) stays
+   in step once passes decide at the door (step 6, auth-guard v16.0).
+   Tested in tests/pass-model.test.mjs. Cache-bust nl-utils ?v=56 -> ?v=57,
+   in lockstep with auth-guard ?v=18 -> ?v=19.
 
    v1.52 — NL.audit: how an audit entry reads (its action in words, its
    time, a table of entries), promoted from the portal's Audit log pane on
@@ -2908,6 +2914,34 @@
       return out.sort(function (a, b) { return a.label.localeCompare(b.label); });
     }
 
+    /* The old per-tool entries that make today's rule give exactly what the
+       pass gives (step 6, "passes decide"). The database rules and every
+       page that still asks NL.resolveToolLevel read users/<uid>/tools, so
+       writing these alongside the pass keeps both locks in step: the door
+       (auth-guard, which reads the pass) and the database (which reads the
+       entries). An entry is written only where the pass differs from the
+       role's default, and is null where it matches — the same overrides-only
+       shape the portal always wrote. A superadmin, and a club role on a
+       League-only tool, are decided before any entry is read, so theirs is
+       null. Manage is the old 'admin'. Returns { toolKey: entry | null }
+       for every tool but `welcome`. Tested in tests/pass-model.test.mjs:
+       todayLevel over these entries equals the pass, tool by tool. */
+    function toOld(pass, registry, role, now) {
+      var out = {};
+      var leagueRole = role === 'superadmin' || role === 'admin' || role === 'staff';
+      Object.keys(registry || {}).forEach(function (key) {
+        var rec = registry[key];
+        if (!rec || key === 'welcome') return;
+        var aud = rec.audience;
+        if (role === 'superadmin' ||
+            ((aud === 'league' || aud === 'staff' || aud === 'meta') && !leagueRole)) { out[key] = null; return; }
+        var bare = todayLevel({ role: role, tools: {} }, Object.assign({ key: key }, rec));
+        var want = explain(pass, rec, now).level;
+        out[key] = want === bare ? null : (want === 'manage' ? 'admin' : want);
+      });
+      return out;
+    }
+
     /* Build the pass the "issue a pass" form saves. Keys already held keep
        their original given/by (re-issuing to change a job title must not
        reset when a key was given); new keys are stamped now, by `by`.
@@ -3027,6 +3061,7 @@
       fromOld: fromOld,
       todayLevel: todayLevel,
       compare: compare,
+      toOld: toOld,
       build: build,
       /* Who may use the "issue a pass" form, and View as. League and Tester
          keys, and the Skeleton key, stay with Skeleton holders (plan, "Who

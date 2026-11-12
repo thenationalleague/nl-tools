@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — People and cards
-  Version: v1.4 (12/11/2026)
+  Version: v1.5 (12/11/2026)
   File: /people/index.html
 
   Who holds which pass: everyone with an account, their role today, their
@@ -55,6 +55,13 @@
            once that grant comes back.
 
   Changelog
+  v1.5 (12/11/2026) — Passes decide (auth-guard v16.0). Manage becomes
+    "Waiting to be applied": per person with a pass, where the per-tool
+    entries the database reads still differ from the pass, and an Apply
+    passes button that writes them (NL.pass.toOld). A pass holder's person
+    page shows the tools their pass gives instead of exceptions, and saving
+    them rewrites the entries from the pass. Approving a request writes the
+    entries from the new pass, and its preview lists what that pass opens.
   v1.4 (12/11/2026) — Each pass reads as its card's badge (the rose, or
     the club's crest) and its key tags: rose + OPS, a club crest + FIN. An
     Organisation filter (searchable: the League, then every club with
@@ -136,6 +143,14 @@
     window.NL_CHANGELOG = [
       {
         date: '12/11/2026',
+        version: 'v1.5',
+        items: [
+          'Passes now decide who opens what.',
+          'Apply passes, on Manage, brings everyone’s tools in line with their pass.'
+        ]
+      },
+      {
+        date: '12/11/2026',
         version: 'v1.4',
         items: [
           'Each pass shows its badge and key tags: the rose with OPS, a club crest with FIN.',
@@ -190,14 +205,14 @@
     };
   </script>
 
-  <!-- NL system scripts (lint canonical: ?v=56 / ?v=1 / ?v=13 / ?v=18) -->
-  <script src="/system/nl-utils.js?v=56"></script>
+  <!-- NL system scripts (lint canonical: ?v=57 / ?v=1 / ?v=13 / ?v=19) -->
+  <script src="/system/nl-utils.js?v=57"></script>
   <!-- GA4, one property for all of nl.tools. Cookieless, so no consent
        banner on any page; page views by path, no identity. Tool events go
        through NL.track(). See system/nl-analytics.js. -->
   <script src="/system/nl-analytics.js?v=1"></script>
   <script src="/system/nl-topbar.js?v=13"></script>
-  <script src="/system/auth-guard.js?v=18"></script>
+  <script src="/system/auth-guard.js?v=19"></script>
 
 <style>
   /* Canon does the layout (.tabs, .toolbar, .stats, .table, .pill,
@@ -321,8 +336,9 @@
     <section data-pane-body="manage" hidden>
       <div class="stats" id="pcStats"></div>
       <div class="section-head">
-        <h2>Where passes differ from today</h2>
-        <button class="btn btn--ghost btn--sm" type="button" id="pcCsv"></button>
+        <h2>Waiting to be applied</h2>
+        <span class="pc-actions"><button class="btn btn--ghost btn--sm" type="button" id="pcCsv"></button>
+        <button class="btn btn--primary btn--sm" type="button" id="pcApply">Apply passes</button></span>
       </div>
       <div id="pcReport"></div>
     </section>
@@ -471,10 +487,48 @@
   var CHANGE = { opens: 'Opens', closes: 'Closes', up: 'Up to Manage', down: 'Down to Access' };
   var PILL = { opens: 'pill--approved', up: 'pill--approved', closes: 'pill--rejected', down: 'pill--rejected' };
 
+  /* Since auth-guard v16.0 the pass decides at the door; the database still
+     reads users/<uid>/tools. The report lists, per person with a pass, every
+     tool where those entries give something different — what Apply passes
+     will change. Two kinds of row are left out because the door does not
+     follow the pass there either: a club role on a League tool (the
+     audience gate stands until club logins) and the superadmin role
+     (always in). */
+  function gatedFor(u, key) {
+    var r = u.role || '';
+    if (r === 'superadmin') return true;
+    var aud = S.registry[key] && S.registry[key].audience;
+    return (aud === 'league' || aud === 'staff' || aud === 'meta') && !(r === 'admin' || r === 'staff');
+  }
   function report() {
     return S.users.filter(function (u) { return P.isIssued(u.pass); }).map(function (u) {
-      return { user: u, rows: P.compare(u, S.registry) };
+      return { user: u, rows: P.compare(u, S.registry).filter(function (x) { return !gatedFor(u, x.key); }) };
     });
+  }
+
+  /* Apply passes: write each pass holder's per-tool entries from their pass
+     (NL.pass.toOld) in one update, so the database gives what the door
+     gives. Only people with a waiting change are written. */
+  function applyPasses() {
+    var todo = report().filter(function (r) { return r.rows.length; });
+    if (!todo.length) return NL.toast('Nothing waiting', 'info');
+    var n = todo.reduce(function (t, r) { return t + r.rows.length; }, 0);
+    NL.confirm('Apply ' + n + ' change' + (n === 1 ? '' : 's') + ' for ' + todo.length + ' ' + (todo.length === 1 ? 'person' : 'people') +
+      '? Their tools then follow their pass everywhere, including the data inside each tool.',
+      { title: 'Apply passes', confirmText: 'Apply' })
+    .then(function (ok) {
+      if (!ok) return;
+      var updates = {};
+      todo.forEach(function (r) {
+        var old = P.toOld(r.user.pass, S.registry, r.user.role);
+        Object.keys(old).forEach(function (k) { updates['users/' + r.user.uid + '/tools/' + k] = old[k]; });
+      });
+      NL.writeAudit('passes_applied', n + ' changes for ' + todo.length + ' people');
+      return db.ref().update(updates).then(function () {
+        NL.toast('Applied', 'success');
+        return refreshPeople().then(drawManage);
+      });
+    }).catch(function (err) { NL.toast('Could not apply: ' + (err && err.message || err), 'error'); });
   }
 
   function drawManage() {
@@ -482,11 +536,12 @@
     var diffs = rep.reduce(function (n, r) { return n + r.rows.length; }, 0);
     var same = rep.filter(function (r) { return !r.rows.length; }).length;
     document.getElementById('pcStats').innerHTML =
-      stat(rep.length, 'With a pass') + stat(same, 'Pass matches today') +
-      stat(diffs, 'Differences') + stat(S.users.filter(function (u) { return !u.rejected; }).length - rep.length, 'No pass yet');
+      stat(rep.length, 'With a pass') + stat(same, 'Applied') +
+      stat(diffs, 'Changes waiting') + stat(S.users.filter(function (u) { return !u.rejected; }).length - rep.length, 'No pass yet');
     var csv = document.getElementById('pcCsv');
     csv.innerHTML = icon('download') + 'Download CSV';
     csv.disabled = !diffs;
+    document.getElementById('pcApply').disabled = !diffs;
     var body = '';
     rep.forEach(function (r) {
       r.rows.forEach(function (x, i) {
@@ -498,7 +553,7 @@
     });
     document.getElementById('pcReport').innerHTML = body
       ? '<div class="table-wrap"><table class="table"><thead><tr><th>Person</th><th>Tool</th><th>Today</th><th>Pass</th><th>Change</th></tr></thead><tbody>' + body + '</tbody></table></div>'
-      : '<div class="empty-state"><div class="empty-state__title">' + (rep.length ? 'Every pass matches today' : 'No passes issued yet') + '</div></div>';
+      : '<div class="empty-state"><div class="empty-state__title">' + (rep.length ? 'Every pass is applied' : 'No passes issued yet') + '</div></div>';
   }
   function stat(n, label) {
     return '<div class="stat"><div class="stat__num">' + n + '</div><div class="stat__label">' + esc(label) + '</div></div>';
@@ -711,25 +766,6 @@
     });
   }
 
-  /* The per-tool entries an approval writes: for each tool a club role can
-     hold (not a League-only tool), the role default — or Access where they
-     asked for it and the default is Off. An entry equal to the default is
-     cleared (null), as the portal's overrides-only write did. */
-  function approvalTools(r, chosen) {
-    var role = NL.roles.norm(chosen || r.role || 'staff'), asked = r.tools || {}, out = {};
-    Object.keys(S.registry).forEach(function (k) {
-      var t = S.registry[k];
-      if (!t || k === 'welcome') return;
-      var aud = t.audience === 'meta' || t.audience === 'league' || t.audience === 'staff' ? 'league'
-        : t.audience === 'club' ? 'club' : ((((t.defaults && t.defaults['club-admin']) || 'off') !== 'off') ? 'club' : 'league');
-      if (aud === 'league') return;
-      var def = (t.defaults && t.defaults[role]) || 'off';
-      var level = (asked[k] === 'access' && def === 'off') ? 'access' : def;
-      out[k] = level === def ? null : level;
-    });
-    return out;
-  }
-
   /* Approve shows what is being issued before anything is written: the
      role (Club Admin or Club Staff — the request's own is chosen to start
      with), the pass that goes with it (their club's card, and the Club
@@ -739,14 +775,11 @@
     return P.build({ base: 'club', club: r.club || '', jobTitle: r.jobTitle || '',
       keys: role === 'club-admin' ? ['club-operations'] : [] }, S.session.uid);
   }
+  /* What the new pass opens, as the door will answer it: the pass, less
+     League tools (a club role never opens those until club logins). */
   function opensFor(r, role) {
-    var tools = approvalTools(r, role), out = [];
-    Object.keys(tools).forEach(function (k) {
-      var t = S.registry[k];
-      var level = tools[k] != null ? tools[k] : ((t.defaults && t.defaults[role]) || 'off');
-      if (level !== 'off' && !t.placeholder) out.push({ label: t.label || k, level: level });
-    });
-    return out.sort(function (a, b) { return a.label.localeCompare(b.label); });
+    return P.summary(passFor(r, role), S.registry).filter(function (x) { return !gatedFor({ role: role }, x.key); })
+      .map(function (x) { return { label: x.label, level: x.explain.level === 'manage' ? 'admin' : 'access' }; });
   }
   function approveRequest(r) {
     var start = NL.roles.norm(r.role || 'club-staff');
@@ -800,7 +833,7 @@
     updates[base + 'rejected'] = false;
     updates[base + 'role'] = role;
     updates[base + 'pass'] = passFor(r, role);
-    var tools = approvalTools(r, role);
+    var tools = P.toOld(passFor(r, role), S.registry, role);
     Object.keys(tools).forEach(function (k) { updates[base + 'tools/' + k] = tools[k]; });
     updates['admin/requests/' + r._key + '/status'] = 'approved';
     NL.writeAudit('request_approved', (r.name || r.email || '') + (r.club ? ' (' + r.club + ')' : '') +
@@ -962,7 +995,7 @@
           '<div class="form-group" id="pcEdClubWrap"' + (NL.isClubUser(ED.role) ? '' : ' hidden') + '><label>Club</label><div id="pcEdClub"></div></div>' +
           '<div class="form-group"><label for="pcEdJob">Job title</label><input type="text" id="pcEdJob" autocomplete="off" value="' + esc(u.jobTitle) + '"></div>' +
         '</div>' +
-        '<div class="pc-exblock"><div class="pc-label">Tool exceptions</div><div id="pcEdEx"></div></div>' +
+        '<div class="pc-exblock"><div class="pc-label">' + (P.isIssued(u.pass) ? 'Tools' : 'Tool exceptions') + '</div><div id="pcEdEx"></div></div>' +
         '</div>' +
         '<div class="form-panel__foot pc-foot pc-foot--split">' +
           '<button class="btn btn--danger" type="button" id="pcEdRemove">' + icon('delete') + 'Remove user</button>' +
@@ -990,6 +1023,7 @@
         ED.levels = levelsFor(u, ED.role);
         drawExceptions();
       });
+      if (P.isIssued(u.pass)) document.getElementById('pcEdRestore').hidden = true;
       document.getElementById('pcEdRestore').addEventListener('click', function () {
         toolKeys().forEach(function (k) { ED.levels[k] = def(k, ED.role); });
         drawExceptions();
@@ -1005,6 +1039,19 @@
   /* The exceptions: tools whose working level differs from the role's. */
   function drawExceptions() {
     var role = ED.role, club = NL.isClubUser(role), box = document.getElementById('pcEdEx');
+    /* A pass holder's tools come from their pass (auth-guard v16.0); the
+       entries are written from it on save, so there is nothing to set by
+       hand. */
+    if (P.isIssued(ED.u.pass)) {
+      var held = P.summary(ED.u.pass, S.registry).filter(function (x) { return !gatedFor({ role: role }, x.key); });
+      box.innerHTML = '<p class="pc-hint">Their pass sets these.</p>' + (held.length
+        ? '<ul class="pc-opens">' + held.map(function (x) {
+            return '<li>' + esc(x.label) + ' <span class="pc-muted">' + (x.explain.level === 'manage' ? 'Manage' : 'Access') + '</span></li>';
+          }).join('') + '</ul>'
+        : '<p class="pc-muted">Nothing.</p>');
+      box.onchange = box.onclick = null;
+      return;
+    }
     var keys = toolKeys().filter(function (k) { return !(club && leagueOnly(S.registry[k])); });
     var ex = keys.filter(function (k) { return clamp(k, role, ED.levels[k]) !== def(k, role); });
     function label(k) { return (S.registry[k].label || k); }
@@ -1073,10 +1120,14 @@
     var job = document.getElementById('pcEdJob').value.trim();
     var org = club ? '' : 'National League';
     var base = 'users/' + u.uid + '/', updates = {}, changed = false;
+    /* A pass holder's entries follow the pass, worked out for the role
+       being saved (a role change moves the defaults they are measured
+       against). Anyone else keeps the exceptions set here. */
+    var fromPass = P.isIssued(u.pass) ? P.toOld(u.pass, S.registry, role) : null;
 
     toolKeys().forEach(function (k) {
       var level = (club && leagueOnly(S.registry[k])) ? 'off' : clamp(k, role, ED.levels[k]);
-      var entry = level === def(k, role) ? null : level;
+      var entry = fromPass ? (fromPass[k] === undefined ? null : fromPass[k]) : (level === def(k, role) ? null : level);
       var stored = u.tools[k] === undefined ? null : u.tools[k];
       if (stored !== entry) changed = true;
       updates[base + 'tools/' + k] = entry;
@@ -1178,6 +1229,7 @@
     });
     document.getElementById('pcSearch').addEventListener('input', function (e) { S.q = e.target.value.trim().toLowerCase(); drawPeople(); });
     document.getElementById('pcCsv').addEventListener('click', downloadCsv);
+    document.getElementById('pcApply').addEventListener('click', applyPasses);
     document.getElementById('pcBack').innerHTML = icon('back') + 'People';
     document.getElementById('pcBack').addEventListener('click', function () { showTab('people'); });
     /* A name or Edit opens the person here, without a reload; the link

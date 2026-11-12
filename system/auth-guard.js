@@ -1,7 +1,19 @@
 /*
  * auth-guard.js — NL Tools v2
  * File: /system/auth-guard.js
- * Version: v15.1 (12/11/2026)
+ * Version: v16.0 (12/11/2026)
+ *
+ * v16.0: Passes decide (system/permissions-plan.md, step 6). Someone with an
+ *       issued pass is let in by it — card, keys, the tool's grants — and the
+ *       page gets the pass's level as session.toolLevel (Manage = 'admin').
+ *       Someone without a pass is decided as before. Two things stay ahead
+ *       of the pass: the superadmin role (always in, so a pass mistake can
+ *       never lock out the person who fixes it) and the audience gate (a
+ *       club role never opens a League tool, until club logins). The way
+ *       back is one line: PASS_DECIDES = false. The database still reads
+ *       users/<uid>/tools; People and cards writes those to match each pass
+ *       (NL.pass.toOld), and pass_finding now logs where they drift.
+ *       Cache-bust ?v=18 -> ?v=19, in lockstep with nl-utils ?v=56 -> ?v=57.
  *
  * v15.1: Passes, shown not obeyed (system/permissions-plan.md, step 3).
  *       Nobody's access changes in this version. Three additions:
@@ -235,6 +247,15 @@
 
   /* Always expose -- portal needs this even when NL_TOOL_KEY is not set */
   window.nlSession = nlSession;
+
+  /* ── Passes decide (v16.0, system/permissions-plan.md step 6) ───────────
+     THE WAY BACK: set this to false and every page goes back to deciding
+     from role and per-tool entries, exactly as v15.1 did. Nothing else needs
+     to change — the pass is still read and shown, and findings still log.
+     The portal reads window.nlPassDecides so its cards follow the same
+     answer as the door. */
+  var PASS_DECIDES = true;
+  window.nlPassDecides = PASS_DECIDES;
 
   /* ── Validate -- bail if no tool key (e.g. when loaded on portal) ───────── */
   if (typeof NL_TOOL_KEY === 'undefined' || !NL_TOOL_KEY) {
@@ -470,17 +491,34 @@
        inline fallback covers a head that has drifted rather than trusting it,
        because failing open here would grant access. */
     var rawEntry = session.tools ? session.tools[NL_TOOL_KEY] : undefined;
-    var level = (window.NL && NL.resolveToolLevel)
+    var oldLevel = (window.NL && NL.resolveToolLevel)
       ? NL.resolveToolLevel(rawEntry, toolData, session.role)
       : 'off';
 
+    /* v16.0: someone with an issued pass is decided by it (NL.pass.explain:
+       card, keys, the tool's grants, Skeleton key, Sandbox, end dates).
+       Someone without one — a new invite, an account nobody has looked at
+       yet — keeps the old answer, so nobody is shut out for lacking a pass.
+       The superadmin role and the audience gate above stay ahead of the
+       pass: the first so no pass mistake can lock out whoever fixes it, the
+       second until club logins (step 7). Manage is the old 'admin'. */
+    var level = oldLevel;
+    var byPass = PASS_DECIDES && window.NL && NL.pass && NL.pass.isIssued(session.pass);
+    if (byPass) {
+      var ex = NL.pass.explain(session.pass, toolData);
+      level = ex.level === 'manage' ? 'admin' : ex.level;
+    }
+
     /* Hand the resolved level to the page (v6.5). This is the ONLY value a
        tool should read to decide what the user may do: it already accounts
-       for the per-user entry, both legacy entry shapes, and the registry
-       default for the role. Reading session.tools[key] directly misses the
-       default and is how three tools disagreed with their own registry. */
+       for the pass, the per-user entry, both legacy entry shapes, and the
+       registry default for the role. Reading session.tools[key] directly
+       misses all that and is how three tools disagreed with their own
+       registry. */
     session.toolLevel = level;
-    notePassFinding(session, toolData, level);
+    /* Findings now mean drift: the per-tool entries the database reads no
+       longer match the pass (People and cards → Manage → Apply passes). */
+    notePassFinding(session, toolData, oldLevel);
 
     if (level === 'access' || level === 'admin') {
       grantAccess(session);
@@ -488,7 +526,7 @@
       /* off (or legacy hidden). The reason separates the two cases that look
          identical to the user: a tool not published to the registry yet, and
          a person without a grant. */
-      showUnavailable(session, toolData ? 'no access' : 'not in the registry');
+      showUnavailable(session, !toolData ? 'not in the registry' : (byPass ? 'no access (pass)' : 'no access'));
     }
   }
 
