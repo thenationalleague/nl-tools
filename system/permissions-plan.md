@@ -1,8 +1,9 @@
 # Permissions – who can open what, and do what
 
-**Status: steps 2 and 3 built and live (12/11/2026). Step 4's first part
-(People and cards, `/people/`) built 12/11/2026; the portal's admin area
-closed the same day (People and cards and the Audit log tool took it over).**
+**Status: steps 2, 3, 4 and 6 built (12/11/2026): passes decide who opens
+what. People and cards (`/people/`) and the Audit log (`/audit/`) replaced
+the portal's admin area. Step 5 (rules generated from grants) and 7–9 are
+still to do.**
 Decided with Richard on 29/10, 11/11 and 12/11/2026 (the 12/11 grilling, 30
 questions, settled almost everything). What was built, and where it differs
 from the words below, is in "Built so far" at the foot.
@@ -506,6 +507,28 @@ Where it differs from step 4 as planned:
    manage. Agreed from the same report: Michaela, Matthew and League staff
    losing the Sandbox tools (Tester key only) and the Media-key tools is
    intended, and Matthew stays Finance-only.
+
+### Step 6: passes decide (12/11/2026, PR "Passes decide")
+
+- **auth-guard v16.0** lets anyone with an issued pass in by it
+  (`NL.pass.explain`), and hands the page the pass's level as
+  `session.toolLevel` (Manage is the old `admin`). Anyone without a pass is
+  decided as before. Ahead of the pass: the **superadmin role** (always in,
+  so a pass mistake cannot lock out the person who fixes it) and the
+  **audience gate** (a club role never opens a League tool, until step 7).
+  **The way back** is one line in auth-guard: `PASS_DECIDES = false`.
+- **The database still reads `users/<uid>/tools`.** `NL.pass.toOld` works
+  out the entries that make the old rule give what the pass gives; the
+  issue form writes them with the pass, approvals write them with the new
+  pass, a person page rewrites them on save, and **Apply passes** (People
+  and cards → Manage) writes them for everyone at once. The Manage report is
+  now "Waiting to be applied": where those entries still differ.
+- The portal's cards follow the pass too (`window.nlPassDecides`).
+- Done ahead of step 5 rather than after it: step 5's rules from grants
+  are still worth doing (end dates, and no entries to keep in step), but
+  with the entries mirrored they are no longer what the switch waits on.
+  One gap until then: a key's end date closes the door on the day, but the
+  entries stay until the pass is next saved or applied.
 
 Still to do after this: per-tool exceptions retire once passes decide,
 reminders before a key ends, opening a tool as someone else, the Access

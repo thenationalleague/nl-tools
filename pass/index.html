@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — My pass
-  Version: v1.4 (12/11/2026)
+  Version: v1.5 (12/11/2026)
   File: /pass/index.html
 
   Your pass: the card you belong to (League or Club), the keys you hold on
@@ -34,6 +34,10 @@
   answer to someone with nothing — not "this tool isn't available".
 
   Changelog
+  v1.5 (12/11/2026) — Passes decide (auth-guard v16.0). Saving a pass also
+    writes the per-tool entries the database rules read, worked out from
+    the pass (NL.pass.toOld), in the same write; withdrawing one clears
+    them, back to the role's defaults.
   v1.4 (12/11/2026) — A club pass's tool strips are all in the club's
     colours: the band colour where the card opened a tool, the key-sticker
     colour where a key did, matching the pass itself. Key strips were
@@ -101,6 +105,11 @@
     window.NL_CHANGELOG = [
       {
         date: '12/11/2026',
+        version: 'v1.5',
+        items: [ 'Your pass now decides which tools you can open.' ]
+      },
+      {
+        date: '12/11/2026',
         version: 'v1.4',
         items: ['Club passes show every tool in the club\u2019s own colours.']
       },
@@ -148,11 +157,11 @@
     };
   </script>
 
-  <!-- NL system scripts (lint canonical: ?v=56 / ?v=1 / ?v=13 / ?v=18) -->
-  <script src="/system/nl-utils.js?v=56"></script>
+  <!-- NL system scripts (lint canonical: ?v=57 / ?v=1 / ?v=13 / ?v=19) -->
+  <script src="/system/nl-utils.js?v=57"></script>
   <script src="/system/nl-analytics.js?v=1"></script>
   <script src="/system/nl-topbar.js?v=13"></script>
-  <script src="/system/auth-guard.js?v=18"></script>
+  <script src="/system/auth-guard.js?v=19"></script>
 
 <style>
   /* The pass is an illustration of a real lanyard pass (boards 6–10), so a
@@ -1096,8 +1105,14 @@
     if (iss.base === 'club' && !iss.club) { NL.toast('Choose the club first', 'error'); return; }
     var pass = issuedPass();
     var btn = document.getElementById('issueSave'); btn.disabled = true;
+    /* v1.5: the pass and the per-tool entries the database reads go in one
+       write, so both locks agree the moment it saves (NL.pass.toOld). */
+    var updates = {}, base = 'users/' + iss.user.uid + '/';
+    updates[base + 'pass'] = pass;
+    var old = P.toOld(pass, STATE.registry, iss.user.role);
+    Object.keys(old).forEach(function (k) { updates[base + 'tools/' + k] = old[k]; });
     NL.ensureAuth().then(function () {
-      return db.ref('users/' + iss.user.uid + '/pass').set(pass);
+      return db.ref().update(updates);
     }).then(function () {
       NL.writeAudit('pass_issued', iss.user.name + ': ' + passLine(pass));
       iss.user.pass = pass;
@@ -1114,7 +1129,12 @@
     var iss = STATE.issue; if (!iss.user) return;
     NL.confirm('Withdraw ' + iss.user.name + '’s pass? They go back to having no card and no keys.', { title: 'Withdraw pass', confirmText: 'Withdraw', variant: 'danger' }).then(function (ok) {
       if (!ok) return;
-      return NL.ensureAuth().then(function () { return db.ref('users/' + iss.user.uid + '/pass').remove(); }).then(function () {
+      /* The entries written to match the pass go with it: no pass means the
+         role's defaults, as for anyone never given one. */
+      var updates = {}, base = 'users/' + iss.user.uid + '/';
+      updates[base + 'pass'] = null;
+      Object.keys(STATE.registry).forEach(function (k) { if (k !== 'welcome') updates[base + 'tools/' + k] = null; });
+      return NL.ensureAuth().then(function () { return db.ref().update(updates); }).then(function () {
         NL.writeAudit('pass_withdrawn', iss.user.name);
         iss.user.pass = null;
         if (iss.user.uid === STATE.session.uid) STATE.session.pass = null;

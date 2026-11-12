@@ -316,3 +316,57 @@ test('the report lists only differences, A–Z, and says which way each moves', 
   assert.deepEqual(none, [], 'superadmin today and the Skeleton key agree everywhere');
 });
 
+
+/* ── Step 6: the old entries follow the pass ─────────────────────────────
+   NL.pass.toOld writes the users/<uid>/tools entries that make today's rule
+   (todayLevel, the mirror of auth-guard's old path and of the generated
+   database rules) give exactly what the pass gives. The property: after
+   writing them, the migration report for that person is empty — on the
+   real registry, for every card and role combination in use. */
+const mirrored = (pass, role) => ({ role, pass, tools: plain(P.toOld(pass, REGISTRY, role, NOW)) });
+const cases = [
+  ['League staff, Operations', league('league-operations'), 'staff'],
+  ['League admin, Finance only', league('league-finance'), 'admin'],
+  ['League admin, Operations and Senior', league('league-operations', 'league-senior'), 'admin'],
+  ['League staff, Media and Tester', league('league-media', 'league-tester'), 'staff'],
+  ['League staff, no keys', league(), 'staff'],
+  ['Club admin, Operations and Media', club('FC Halifax Town', 'club-operations', 'club-media'), 'club-admin'],
+  ['Club admin, Commercial and Finance', club('Forest Green Rovers', 'club-commercial', 'club-finance'), 'club-admin'],
+  ['Club staff, no keys', club('Woking'), 'club-staff'],
+];
+/* One boundary stays where it is until club logins (step 7): the audience
+   gate. A club role never opens a League-audience tool — Document Library
+   and Programme Packs serve clubs through their own code-entry pages, not
+   the staff console — even where a Club card's grants would. auth-guard
+   keeps the gate ahead of the pass, so those rows are the gate's, not
+   drift, and are left out here. */
+const gated = (role, key) => !['superadmin', 'admin', 'staff'].includes(role) &&
+  ['league', 'staff', 'meta'].includes(REGISTRY[key].audience);
+for (const [name, pass, role] of cases) {
+  test(`toOld: ${name} — today's rule then matches the pass on every tool`, () => {
+    const left = plain(P.compare(mirrored(pass, role), REGISTRY, NOW)).filter((r) => !gated(role, r.key));
+    assert.deepEqual(left, []);
+  });
+}
+
+test('toOld writes only differences: a pass that matches the role default writes nothing', () => {
+  const t = plain(P.toOld(league('league-operations'), REGISTRY, 'staff', NOW));
+  for (const [key, v] of Object.entries(t)) {
+    if (v === null) continue;
+    const today = P.todayLevel({ role: 'staff', tools: {} }, { key, ...REGISTRY[key] });
+    assert.notEqual(P.fromOld(v), today, `${key} written though it equals the default`);
+  }
+});
+
+test('toOld leaves a superadmin, and a club role on a League-only tool, alone', () => {
+  assert.ok(Object.values(plain(P.toOld(league(), REGISTRY, 'superadmin', NOW))).every((v) => v === null));
+  const c = plain(P.toOld(club('Woking', 'club-operations'), REGISTRY, 'club-admin', NOW));
+  assert.equal(c['ops-people'], null);
+  assert.ok(!('welcome' in c));
+});
+
+test('toOld says Manage in the old words', () => {
+  const t = plain(P.toOld(league('league-operations'), REGISTRY, 'staff', NOW));
+  assert.ok(Object.values(t).includes('admin'));
+  assert.ok(!Object.values(t).includes('manage'));
+});
