@@ -1,7 +1,12 @@
 /*
  * auth-guard.js — NL Tools v2
  * File: /system/auth-guard.js
- * Version: v16.1 (12/11/2026)
+ * Version: v16.2 (13/11/2026)
+ *
+ * v16.2: A Club card holder who lands on a tool's staff page (an /admin/
+ *       address) is sent to the tool's club page (`clubUrl`) when their pass
+ *       opens it, instead of "This tool isn't available". Cache-bust
+ *       ?v=20 -> ?v=21, in lockstep with every page.
  *
  * v16.1: The tool's live grants (access-grants/<toolKey>, edited in the
  *       Access tool) replace its registry grants when present
@@ -408,6 +413,20 @@
     } catch (e) {}
   }
 
+  /* A Club card holder at a tool's staff page, when the tool has a club page
+     the pass opens: go there (v16.2). Returns true when it has redirected. */
+  function toClubPage(session, toolData) {
+    try {
+      var P = window.NL && NL.pass;
+      var url = toolData && toolData.clubUrl;
+      if (!P || !url || !P.isIssued(session.pass) || session.pass.base !== 'club') return false;
+      if (location.pathname === url || location.pathname === url.replace(/\/$/, '')) return false;
+      if (P.explain(session.pass, toolData).level === 'off') return false;
+      location.replace(url);
+      return true;
+    } catch (e) { return false; }
+  }
+
   /* ── Pass findings (v15.1) ─────────────────────────────────────────────
      Step 3 of system/permissions-plan.md: the pass is shown, the old rules
      still decide. Where the two disagree for someone who has been issued a
@@ -479,6 +498,12 @@
          audiences differently; this file does not care about shelves. */
       var LEAGUE = { superadmin: true, admin: true, staff: true };
       if (!LEAGUE[session.role]) {
+        /* v16.2: a Club card holder whose pass opens this tool on its club
+           page (`clubUrl`) is sent there, instead of being told the staff
+           page is not available. The club page is a code door, not behind
+           this guard, so this cannot loop; the path check is belt and
+           braces. */
+        if (toClubPage(session, toolData)) return;
         notePassFinding(session, toolData, 'off');
         showUnavailable(session, 'league-only tool');
         return;
@@ -531,6 +556,7 @@
       /* off (or legacy hidden). The reason separates the two cases that look
          identical to the user: a tool not published to the registry yet, and
          a person without a grant. */
+      if (toClubPage(session, toolData)) return;
       showUnavailable(session, !toolData ? 'not in the registry' : (byPass ? 'no access (pass)' : 'no access'));
     }
   }
