@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — My pass
-  Version: v1.1 (12/11/2026)
+  Version: v1.2 (12/11/2026)
   File: /pass/index.html
 
   Your pass: the card you belong to (League or Club), the keys you hold on
@@ -34,6 +34,11 @@
   answer to someone with nothing — not "this tool isn't available".
 
   Changelog
+  v1.2 (12/11/2026) — Issue a pass shows the person in full before you
+    issue: name, email, role today (and club), job title on the account,
+    the pass they hold now with who issued it and when, and how long the
+    account has existed. The search list shows email and role too, so two
+    people with similar names can be told apart.
   v1.1 (12/11/2026) — The Skeleton key is a big ACCESS ALL AREAS sticker
     stuck across the holder's own pass, not a second pass hanging behind
     it: on a phone the second pass was almost entirely hidden. The skull
@@ -84,6 +89,13 @@
     var NL_TOOL_KEY = 'pass';
 
     window.NL_CHANGELOG = [
+      {
+        date: '12/11/2026',
+        version: 'v1.2',
+        items: [
+          'Issue a pass shows the person\u2019s details in full before you save.'
+        ]
+      },
       {
         date: '12/11/2026',
         version: 'v1.1',
@@ -368,9 +380,23 @@
   .choice-row label { display: inline-flex; align-items: center; gap: 8px; font-size: var(--text-sm); color: var(--text); text-transform: none; letter-spacing: 0; font-weight: 400; font-variation-settings: 'wght' 400; margin: 0; }
   .issue-fields { display: flex; flex-direction: column; gap: 18px; }
   .issue-fields[hidden] { display: none; }
-  .issue-chosen { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--navy-50); }
-  .issue-chosen__who { flex: 1; min-width: 0; font-size: var(--text-sm); }
-  .issue-chosen__who small { display: block; color: var(--text-muted); font-size: var(--text-xs); }
+  .issue-person { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--navy-50); padding: 16px; }
+  .issue-person__top { display: flex; align-items: center; gap: 14px; }
+  .issue-person__face {
+    width: 48px; height: 48px; flex: 0 0 48px; border-radius: var(--radius-lg); background: var(--white);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; font-weight: 800; font-variation-settings: 'wght' 800; color: var(--navy);
+  }
+  .issue-person__id { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .issue-person__name { font-size: var(--text-md); font-weight: 700; font-variation-settings: 'wght' 700; color: var(--text); }
+  .issue-person__email { font-size: var(--text-sm); color: var(--text-muted); overflow-wrap: anywhere; }
+  .issue-person__facts { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 14px 0 0; padding-top: 14px; border-top: 1px solid var(--border); font-size: var(--text-sm); }
+  .issue-person__facts dt { color: var(--text-muted); }
+  .issue-person__facts dd { margin: 0; color: var(--text); }
+  @media (max-width: 500px) {
+    .issue-person__facts { grid-template-columns: 1fr; gap: 2px; }
+    .issue-person__facts dd { margin-bottom: 8px; }
+  }
   .issue-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
   .issue-actions .spacer { flex: 1; }
 
@@ -550,10 +576,11 @@
   }
 
   function noPassHtml(subject, mine) {
+    var msg = subject.message || (mine ? 'Your pass hasn’t been issued yet' : (subject.name || 'This person') + '’s pass hasn’t been issued yet');
     return '<div class="pass pass--none" style="--band:var(--navy-100);--band-text:var(--text)">' +
       '<div class="pass__slot"></div>' +
       '<div class="pass__band"><span class="pass__seat"><img src="' + esc(NL.clubs.ROSE) + '" alt="The National League crest"></span><span class="pass__org">NL Tools</span></div>' +
-      '<div class="pass__none"><strong>' + esc(mine ? 'Your pass hasn’t been issued yet' : (subject.name || 'This person') + '’s pass hasn’t been issued yet') + '</strong></div>' +
+      '<div class="pass__none"><strong>' + esc(msg) + '</strong></div>' +
     '</div>';
   }
 
@@ -784,7 +811,8 @@
       var all = snap.val() || {};
       STATE.users = Object.keys(all).filter(function (uid) { return all[uid] && !all[uid].rejected; }).map(function (uid) {
         var u = all[uid];
-        return { uid: uid, name: u.name || u.email || '', email: u.email || '', role: u.role || '', jobTitle: u.jobTitle || '', pass: u.pass || null };
+        return { uid: uid, name: u.name || u.email || '', email: u.email || '', role: u.role || '', club: u.club || '',
+          jobTitle: u.jobTitle || '', createdAt: u.createdAt || null, pending: !!u.pending, pass: u.pass || null };
       }).sort(function (a, b) { return a.name.localeCompare(b.name); });
       return STATE.users;
     });
@@ -852,9 +880,7 @@
     var mount = document.getElementById('issuePerson');
     var u = STATE.issue.user;
     if (u) {
-      mount.innerHTML = '<div class="issue-chosen"><span class="issue-chosen__who">' + esc(u.name) +
-        '<small>' + esc(u.email) + ' · ' + esc(passLine(u.pass)) + '</small></span>' +
-        '<button class="btn btn--ghost btn--sm" type="button" id="issueChange">Change</button></div>';
+      mount.innerHTML = personCardHtml(u);
       mount.querySelector('#issueChange').addEventListener('click', function () { STATE.issue.user = null; drawPersonPicker(); showFields(false); drawIssuePreview(); });
       return;
     }
@@ -868,7 +894,9 @@
           return !q || (x.name || '').toLowerCase().indexOf(q) >= 0 || (x.email || '').toLowerCase().indexOf(q) >= 0;
         }).slice(0, 60);
         list.innerHTML = rows.length ? rows.map(function (x) {
-          return '<button type="button" data-uid="' + esc(x.uid) + '">' + esc(x.name || '(no name)') + '<small>' + esc(passLine(x.pass)) + '</small></button>';
+          return '<button type="button" data-uid="' + esc(x.uid) + '">' + esc(x.name || '(no name)') +
+            '<small>' + esc([x.email, roleToday(x)].filter(Boolean).join(' · ')) + '</small>' +
+            '<small>' + esc(passLine(x.pass)) + '</small></button>';
         }).join('') : '<button type="button" disabled>Nobody matches.</button>';
       }
       draw('');
@@ -880,6 +908,52 @@
     }).catch(function () {
       mount.querySelector('#issueList').innerHTML = '<button type="button" disabled>People could not be loaded.</button>';
     });
+  }
+
+  /* What the person is today, in the old model: role, and club for club
+     roles. The pass replaces this at step 6; until then it is the thing to
+     check the new pass against. */
+  function roleToday(u) {
+    var r = NL.roles.label(u.role) || 'No role';
+    if (u.pending) r += ' (waiting for approval)';
+    return NL.isClubUser(u.role) && u.club ? r + ', ' + u.club : r;
+  }
+  function nameOf(uid) {
+    var x = (STATE.users || []).filter(function (y) { return y.uid === uid; })[0];
+    return x ? x.name : '';
+  }
+
+  /* The chosen person, in full: who they are, what they are today, and the
+     pass they hold now, so the one you are about to save is issued against
+     what you can see. */
+  function personCardHtml(u) {
+    var p = u.pass, passText;
+    if (!P.isIssued(p)) {
+      passText = 'Not issued yet';
+    } else {
+      var keys = P.keysHeld(p).map(function (id) { return P.KEY[id].name; });
+      if (P.isSkeleton(p)) keys.unshift('Skeleton key');
+      passText = (p.base === 'club' ? 'Club card, ' + p.club : 'League card') +
+        (keys.length ? ' · ' + keys.join(', ') : ' · no keys') +
+        (p.issued ? ' · issued ' + NL.formatDate(p.issued) + (nameOf(p.issuedBy) ? ' by ' + nameOf(p.issuedBy) : '') : '');
+    }
+    var rows = [
+      ['Role today', roleToday(u)],
+      ['Job title on account', u.jobTitle || '—'],
+      ['Pass now', passText]
+    ];
+    if (u.createdAt) rows.push(['Account since', NL.formatDate(u.createdAt)]);
+    return '<div class="issue-person">' +
+      '<div class="issue-person__top">' +
+        '<span class="issue-person__face" aria-hidden="true">' + esc(initials(u.name)) + '</span>' +
+        '<span class="issue-person__id"><span class="issue-person__name">' + esc(u.name) + '</span>' +
+          '<span class="issue-person__email">' + esc(u.email) + '</span></span>' +
+        '<button class="btn btn--ghost btn--sm" type="button" id="issueChange">Change</button>' +
+      '</div>' +
+      '<dl class="issue-person__facts">' + rows.map(function (r) {
+        return '<dt>' + esc(r[0]) + '</dt><dd>' + esc(r[1]) + '</dd>';
+      }).join('') + '</dl>' +
+    '</div>';
   }
 
   function choosePerson(u) {
@@ -921,7 +995,7 @@
 
   function drawIssuePreview() {
     var iss = STATE.issue;
-    if (!iss.user) { drawPass({ name: '', pass: null }, false); return; }
+    if (!iss.user) { drawPass({ name: '', pass: null, message: 'Choose who the pass is for' }, false); return; }
     drawPass({ name: iss.user.name, pass: issuedPass() }, false);
   }
 
