@@ -1,7 +1,21 @@
 /* =========================================================================
    NL Tools — Topbar renderer
    File: /system/nl-topbar.js
-   Version: v1.6 (17/08/2026)
+   Version: v1.7 (12/11/2026)
+
+   v1.7 — The menu under the circle, as system/permissions-plan.md sets it
+          ("The top bar"). It holds no tools any more: the "Your tools" list
+          and the RTDB read that filled it are gone, and the portal home is
+          where you go to tools. In their place: a small version of your
+          pass (name, job title, key tags, a skull tag for the Skeleton key,
+          or "Your pass hasn't been issued yet"), My pass, Who can open this
+          (on a tool, for the Skeleton key and whoever holds Manage there by
+          their pass), People and cards (Skeleton key; today's superadmin
+          role too, until the first passes are issued), View as (Skeleton
+          key and Tester). Admin panel stays for League Admins until step 4.
+          The role pill goes with the tools list. Display only: nothing here
+          changes what anyone can open. Cache-bust ?v=10 -> ?v=11, in
+          lockstep with nl-utils ?v=52 -> ?v=53 and auth-guard ?v=17 -> ?v=18.
 
    v1.6 — This file's CSS is injected as a JavaScript STRING, so every sweep
           of the estate's stylesheets walked straight past it — including the
@@ -122,14 +136,6 @@
   var LOGO_URL = CREST_BASE + 'National%20League%20rose%20white.png';
   var LOGO_FALLBACK = CREST_BASE + 'National%20League%20rose.png';
 
-  /* Role labels for the pill */
-  var ROLE_LABELS = {
-    superadmin: 'Superadmin',
-    admin:      'Admin',
-    staff:      'Staff',
-    club:       'Club'
-  };
-
   /* ── Public API ──────────────────────────────────────────────────────── */
 
   /**
@@ -159,8 +165,6 @@
       currentToolKey: cfg.toolKey || null
     }));
 
-    /* Load tool catalogue for dropdown (async, non-blocking) */
-    if (session && session.uid) loadToolCatalogue(session);
   };
 
 
@@ -394,51 +398,70 @@
     }
   }
 
+  /* ── The menu under the circle (v1.7) ──────────────────────────────────
+     system/permissions-plan.md, "The top bar": the menu holds no tools at
+     all. The portal home is where you go to tools. It holds, in order: a
+     small version of your pass, My pass, Who can open this (on a tool, for
+     the people who run it), People and cards (Skeleton key), View as
+     (Skeleton key and Tester), the old Admin panel until step 4 replaces it,
+     Install as app, Sign out. It never scrolls.
+     The pass is DISPLAY ONLY here: what you can open is still decided by
+     auth-guard from your role. */
   function buildDropdown(session, isClub, opts) {
     var dd = el('div', { class: 'topbar__dropdown' });
+    var P = window.NL && window.NL.pass;
+    var pass = session && session.pass;
+    var issued = !!(P && P.isIssued(pass));
 
-    /* Header: name + email + role pill */
-    var head = el('div', { class: 'topbar__dd-head' });
-    head.appendChild(el('div', {
-      class: 'topbar__dd-name',
-      text: (session && session.name) || (session && session.email) || 'Unknown user'
-    }));
-    if (session && session.email) {
-      head.appendChild(el('div', { class: 'topbar__dd-email', text: session.email }));
+    dd.appendChild(buildMiniPass(session, pass, issued));
+
+    function item(href, iconName, label, onClick) {
+      var a = el(href ? 'a' : 'button', { class: 'topbar__dd-item' });
+      if (href) a.href = href; else a.type = 'button';
+      var ic = el('span', { class: 'topbar__dd-item-icon' });
+      if (window.NL && window.NL.icon) ic.appendChild(window.NL.icon(iconName, 'sm'));
+      a.appendChild(ic);
+      a.appendChild(el('span', { class: 'topbar__dd-item-label', text: label }));
+      if (onClick) a.addEventListener('click', onClick);
+      return a;
     }
-    head.appendChild(buildRolePill(session, isClub));
-    dd.appendChild(head);
 
-    /* Tools section — populated async by loadToolCatalogue */
-    dd.appendChild(el('div', { class: 'topbar__dd-section', text: 'Your tools' }));
-    dd.appendChild(el('div', { id: 'nlDdTools', html: '<div class="topbar__dd-item" style="color:var(--text-muted);">Loading\u2026</div>' }));
+    var onPassPage = !!(window.NL_TOOL && window.NL_TOOL.toolKey === 'pass');
+    if (!onPassPage) dd.appendChild(item('/pass/', 'user', 'My pass'));
 
-    /* Admin Panel shortcut (superadmin/admin only, not on portal) */
+    /* Who can open this — on a tool page, for whoever runs it (Manage by the
+       pass) and the Skeleton key. Worked out from the grants, never typed. */
+    var toolKey = !opts.isPortal && !onPassPage && opts.currentToolKey;
+    if (toolKey && issued && (P.isSkeleton(pass) || session.passLevel === 'manage')) {
+      dd.appendChild(item(null, 'info', 'Who can open this', function() {
+        dd.classList.remove('is-open');
+        openWhoCanOpen(toolKey, opts.title);
+      }));
+    }
+
+    /* Issuing passes: the Skeleton key. Until the first pass is issued nobody
+       holds one, so today's superadmin role may issue too — the way in for
+       the first pass. Goes at step 6, when the role stops meaning anything. */
+    var canIssue = (issued && P.canIssue(pass)) || (session && session.role === 'superadmin');
+    if (canIssue) dd.appendChild(item('/pass/?view=issue', 'edit', 'People and cards'));
+    if (issued && P.canViewAs(pass)) dd.appendChild(item('/pass/?view=as', 'eye', 'View as'));
+
+    /* Today's people screens, until step 4 replaces them with People and
+       cards. Kept so nobody loses the way to them in the meantime. */
     if (!opts.isPortal && session && (session.role === 'superadmin' || session.role === 'admin')) {
-      dd.appendChild(el('div', { class: 'topbar__dd-divider' }));
-      var adminBtn = el('a', {
-        class: 'topbar__dd-item',
-        href: '/portal/?tab=users'
-      });
-      adminBtn.innerHTML =
-        '<span class="topbar__dd-item-icon">\ud83d\udee1\ufe0f</span>' +
-        '<span class="topbar__dd-item-label">Admin panel</span>';
-      dd.appendChild(adminBtn);
+      dd.appendChild(item('/portal/?tab=users', 'settings', 'Admin panel'));
     }
 
     /* Install as app — shown only if browser fired beforeinstallprompt and app
        not already installed. Hidden by default (style.display='none') and
        revealed by the event listener when the prompt becomes available. */
-    var installBtn = el('button', { class: 'topbar__dd-item topbar__dd-item--install' });
-    installBtn.innerHTML =
-      '<span class="topbar__dd-item-icon">⬇️</span>' +
-      '<span class="topbar__dd-item-label">Install as app</span>';
+    var installBtn = item(null, 'download', 'Install as app');
+    installBtn.classList.add('topbar__dd-item--install');
     installBtn.style.display = (deferredInstallPrompt && !isAppInstalled) ? '' : 'none';
     installBtn.addEventListener('click', function() {
       if (!deferredInstallPrompt) return;
       deferredInstallPrompt.prompt();
-      deferredInstallPrompt.userChoice.then(function(result) {
-        /* result.outcome: 'accepted' or 'dismissed' */
+      deferredInstallPrompt.userChoice.then(function() {
         deferredInstallPrompt = null;
         installBtn.style.display = 'none';
       }).catch(function() {
@@ -450,9 +473,9 @@
 
     /* Sign out */
     dd.appendChild(el('div', { class: 'topbar__dd-divider' }));
-    var signOut = el('button', { class: 'topbar__dd-item topbar__dd-item--danger' });
+    var signOut = el('button', { class: 'topbar__dd-item topbar__dd-item--danger', type: 'button' });
     signOut.innerHTML =
-      '<span class="topbar__dd-item-icon">\u21aa</span>' +
+      '<span class="topbar__dd-item-icon">↪</span>' +
       '<span class="topbar__dd-item-label">Sign out</span>';
     signOut.addEventListener('click', function() {
       /* Before sign-out: write audit entry (needs auth to succeed) and clear session cache */
@@ -482,129 +505,84 @@
     return dd;
   }
 
-  function buildRolePill(session, isClub) {
-    if (isClub) {
-      var pill = el('span', { class: 'topbar__dd-role topbar__dd-role--club' });
-      var img = el('img', {
-        src: CREST_BASE + encodeURIComponent(session.club) + '.png',
-        alt: ''
-      });
-      img.onerror = function() { this.onerror = null; this.style.display = 'none'; };
-      pill.appendChild(img);
-      pill.appendChild(document.createTextNode(session.club));
-      return pill;
-    }
-    var role = (session && session.role) || 'staff';
-    return el('span', {
-      class: 'topbar__dd-role topbar__dd-role--' + role,
-      text: ROLE_LABELS[role] || role
-    });
-  }
+  /* A small version of your pass: the card's colour along the top, name,
+     job title, a tag per key held, a skull tag for the Skeleton key. Links
+     to My pass. Someone with no pass gets one line saying so. */
+  function buildMiniPass(session, pass, issued) {
+    var P = window.NL && window.NL.pass;
+    var name = (session && session.name) || (session && session.email) || 'Unknown user';
+    var card = el('a', { class: 'topbar__mini-pass', href: '/pass/', 'aria-label': 'My pass' });
+    var band = el('span', { class: 'topbar__mini-pass-band' });
+    card.appendChild(band);
+    var body = el('span', { class: 'topbar__mini-pass-body' });
+    body.appendChild(el('span', { class: 'topbar__dd-name', text: name }));
 
-  /* ── Tool catalogue — populate dropdown tools list ───────────────────── */
-  function loadToolCatalogue(session) {
-    if (!window.firebase || !firebase.database) return;
-
-    firebase.database().ref('tools').once('value').then(function(snap) {
-      var tools = snap.val() || {};
-      renderToolsList(tools, session);
-    }).catch(function(err) {
-      console.warn('[nl-topbar] Could not load tools:', err.message);
-      var slot = document.getElementById('nlDdTools');
-      if (slot) slot.innerHTML = '';
-    });
-  }
-
-  function renderToolsList(tools, session) {
-    var slot = document.getElementById('nlDdTools');
-    if (!slot) return;
-
-    var userTools = (session && session.tools) || {};
-    var currentKey = (window.NL_TOOL && window.NL_TOOL.toolKey) || null;
-    var isPortal = !!(window.NL_TOOL && window.NL_TOOL.isPortal);
-
-    /* Filter tools user has access to */
-    var visible = [];
-    Object.keys(tools).forEach(function(key) {
-      var t = tools[key];
-      if (!t || t.placeholder) return;
-
-      var entry = userTools[key];
-      var level;
-      if (entry === undefined || entry === null) {
-        /* No per-user entry — fall back to the tool's role default, matching
-           auth-guard and the portal. (Legacy 'club' role maps to 'club-admin';
-           a role absent from defaults, e.g. third-party, resolves to 'off'.) */
-        var role = (session && session.role) || 'staff';
-        if (role === 'club') role = 'club-admin';
-        level = (t.defaults && t.defaults[role]) || 'off';
-      } else if (typeof entry === 'object') {
-        level = entry.admin ? 'admin' : (entry.access ? 'access' : 'off');
-      } else if (typeof entry === 'string') {
-        level = entry;            /* 'access' | 'admin' | 'off' | legacy 'hidden' */
-      } else if (entry === true) {
-        level = 'access';
-      } else {
-        level = 'off';
-      }
-      var hasAccess = (level === 'access' || level === 'admin');
-      var isAdmin   = (level === 'admin');
-      /* Superadmin sees everything */
-      if (session && session.role === 'superadmin') {
-        hasAccess = true;
-        isAdmin = true;
-      }
-      if (!hasAccess) return;
-
-      visible.push({ key: key, tool: t, isAdmin: isAdmin });
-    });
-
-    /* Sort by catalogue order (if present), then label */
-    visible.sort(function(a, b) {
-      var oa = (a.tool.order != null) ? a.tool.order : 999;
-      var ob = (b.tool.order != null) ? b.tool.order : 999;
-      if (oa !== ob) return oa - ob;
-      return (a.tool.label || a.key).localeCompare(b.tool.label || b.key);
-    });
-
-    slot.innerHTML = '';
-
-    if (visible.length === 0) {
-      slot.innerHTML = '<div class="topbar__dd-item" style="color:var(--text-muted);">No tools available</div>';
-      return;
+    if (!issued) {
+      card.classList.add('topbar__mini-pass--none');
+      body.appendChild(el('span', { class: 'topbar__dd-email', text: 'Your pass hasn’t been issued yet' }));
+      card.appendChild(body);
+      return card;
     }
 
-    visible.forEach(function(item) {
-      var t = item.tool;
-      var isCurrent = (item.key === currentKey) && !isPortal;
-      var a = document.createElement(isCurrent ? 'div' : 'a');
-      a.className = 'topbar__dd-item';
-      if (isCurrent) {
-        a.classList.add('topbar__dd-item--active');
-      } else {
-        a.href = t.url || ('/' + item.key + '/');
-      }
-
-      var icon = document.createElement('span');
-      icon.className = 'topbar__dd-item-icon';
-      icon.textContent = t.icon || '\u25a1';
-
-      var label = document.createElement('span');
-      label.className = 'topbar__dd-item-label';
-      label.textContent = t.label || item.key;
-
-      a.appendChild(icon);
-      a.appendChild(label);
-
-      if (item.isAdmin && !isCurrent) {
-        var badge = document.createElement('span');
-        badge.className = 'topbar__dd-item-badge';
-        badge.textContent = 'Admin';
-        a.appendChild(badge);
-      }
-
-      slot.appendChild(a);
+    if (pass.jobTitle) body.appendChild(el('span', { class: 'topbar__dd-email', text: pass.jobTitle }));
+    var tags = el('span', { class: 'topbar__mini-pass-tags' });
+    if (P.isSkeleton(pass)) {
+      var sk = el('span', { class: 'topbar__mini-pass-tag topbar__mini-pass-tag--skeleton', title: 'Skeleton key' });
+      sk.innerHTML = SKULL_SVG + '<span>SKL</span>';
+      tags.appendChild(sk);
+    }
+    P.keysHeld(pass).forEach(function(id) {
+      var k = P.KEY[id];
+      tags.appendChild(el('span', { class: 'topbar__mini-pass-tag', title: k.name, text: k.code }));
     });
+    if (tags.childNodes.length) body.appendChild(tags);
+    card.appendChild(body);
+
+    /* Club card: the club's own band colour once clubs-meta is in. League:
+       NL red, from the stylesheet. */
+    if (pass.base === 'club' && window.NL.clubs && window.NL.clubs.load) {
+      card.classList.add('topbar__mini-pass--club');
+      window.NL.clubs.load().then(function() {
+        var col = P.clubColours(window.NL.clubs.byName(pass.club));
+        if (col) { band.style.background = col.band; card.style.setProperty('--mini-pass-tag', col.sticker); card.style.setProperty('--mini-pass-tag-text', col.stickerText); }
+      }).catch(function() {});
+    }
+    return card;
+  }
+
+  /* A skull, for the Skeleton key's tag. Drawn, not an emoji. */
+  var SKULL_SVG = '<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" fill="currentColor">' +
+    '<path d="M12 2C7 2 3.5 5.6 3.5 10.2c0 2.6 1.1 4.6 2.9 5.9V19a1 1 0 0 0 1 1h1.8v-2h1.6v2h2.4v-2h1.6v2h1.8a1 1 0 0 0 1-1v-2.9c1.8-1.3 2.9-3.3 2.9-5.9C20.5 5.6 17 2 12 2zM8.6 13.6a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm6.8 0a2 2 0 1 1 0-4 2 2 0 0 1 0 4z"/></svg>';
+
+  /* "Who can open this": one read of tools/<key>, rows from the grants. */
+  function openWhoCanOpen(toolKey, title) {
+    var P = window.NL && window.NL.pass;
+    if (!P || !window.firebase || !firebase.database || !window.NL.modal) return;
+    firebase.database().ref('tools/' + toolKey).once('value').then(function(snap) {
+      var w = P.whoCanOpen(snap.val());
+      var esc = window.NL.escHtml || function(s) { return String(s); };
+      var html;
+      if (!w) {
+        html = '<p>This tool has no grants yet, so only the Skeleton key opens it.</p>';
+      } else {
+        var shelf = w.shelf === 'structural' ? 'On the Structure shelf: only the Skeleton key opens it.'
+          : w.shelf === 'sandbox' ? (w.testers ? 'In Sandbox: until it launches, only testers and the Skeleton key open it.' : 'In Sandbox: until it launches, only the Skeleton key opens it.')
+          : '';
+        html = (shelf ? '<p class="topbar__who-note">' + esc(shelf) + '</p>' : '') +
+          '<table class="topbar__who"><tbody>' +
+          (w.rows.length ? w.rows.map(function(r) {
+            var lv = r.level === 'manage' ? 'Manage' : 'Access';
+            if (r.granted === 'manage' && r.level !== 'manage') lv = 'Access <span class="topbar__who-later">(Manage once the tool offers it)</span>';
+            return '<tr><td>' + esc(r.label) + '</td><td class="topbar__who-level">' + lv + '</td></tr>';
+          }).join('') : '<tr><td colspan="2">Nobody but the Skeleton key.</td></tr>') +
+          '</tbody></table>' +
+          '<p class="topbar__who-note">' + esc(P.FOR[w.for] || '') +
+          (w.for === 'both' ? ' · ' + esc(P.CLUB_DATA[w.clubData] || '') : '') +
+          (w.sensitive ? ' · Sensitive' : '') + '</p>' +
+          '<p class="topbar__who-note">Shown from the new passes. Until the switch, today’s roles still decide who gets in.</p>';
+      }
+      window.NL.modal({ title: 'Who can open ' + (title || 'this'), body: html, size: 'sm' });
+    }).catch(function() {});
   }
 
   /* ── Utilities ───────────────────────────────────────────────────────── */
@@ -721,7 +699,26 @@
       '.nl-changelog-entry__list{margin:0;padding-left:20px;}',
       '.nl-changelog-entry__list li{font-size:var(--text-sm);line-height:1.6;color:var(--text);margin-bottom:6px;}',
       '.nl-changelog-entry__list li:last-child{margin-bottom:0;}',
-      '.nl-changelog-entry__note{font-size:var(--text-sm);line-height:1.6;color:var(--text);}'
+      '.nl-changelog-entry__note{font-size:var(--text-sm);line-height:1.6;color:var(--text);}',
+      /* v1.7 — the small pass at the head of the menu. Canon candidate: the
+         same card-band-and-key-tag idea is drawn large on /pass/; if a third
+         place wants it, promote to nl-brand.css. */
+      '.topbar__mini-pass{display:flex;flex-direction:column;text-decoration:none;color:var(--text);border-bottom:1px solid var(--border);--mini-pass-tag:var(--navy);--mini-pass-tag-text:var(--white);}',
+      '.topbar__mini-pass:hover{background:var(--off-white);}',
+      '.topbar__mini-pass:focus-visible{outline:none;box-shadow:inset var(--focus-ring);}',
+      '.topbar__mini-pass-band{height:8px;background:var(--primary);}',
+      '.topbar__mini-pass--none .topbar__mini-pass-band{background:var(--navy-100);}',
+      '.topbar__mini-pass-body{display:flex;flex-direction:column;gap:2px;padding:12px 16px 14px;}',
+      '.topbar__mini-pass-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}',
+      '.topbar__mini-pass-tag{display:inline-flex;align-items:center;gap:4px;background:var(--mini-pass-tag);color:var(--mini-pass-tag-text);font-size:var(--text-xs);font-weight:800;letter-spacing:0.04em;padding:3px 7px;border-radius:var(--radius-sm);}',
+      '.topbar__mini-pass-tag--skeleton{background:var(--navy-900);color:var(--white);}',
+      '.topbar__dd-item-icon .icon{display:block;margin:0 auto;}',
+      '.topbar__who{width:100%;border-collapse:collapse;font-size:var(--text-sm);}',
+      '.topbar__who td{padding:8px 0;border-bottom:1px solid var(--border);}',
+      '.topbar__who-level{text-align:right;font-weight:700;color:var(--navy);}',
+      '.topbar__who-later{display:block;font-weight:400;font-size:var(--text-xs);color:var(--text-muted);}',
+      '.topbar__who-note{font-size:var(--text-sm);color:var(--text-muted);margin:10px 0 0;}',
+      '.topbar__who-note:first-child{margin:0 0 10px;}'
     ].join('\n');
     document.head.appendChild(cs);
   }

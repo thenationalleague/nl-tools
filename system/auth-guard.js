@@ -1,7 +1,24 @@
 /*
  * auth-guard.js — NL Tools v2
  * File: /system/auth-guard.js
- * Version: v15.0 (20/10/2026)
+ * Version: v15.1 (12/11/2026)
+ *
+ * v15.1: Passes, shown not obeyed (system/permissions-plan.md, step 3).
+ *       Nobody's access changes in this version. Three additions:
+ *       · The session carries `pass` (users/<uid>/pass) for the menu and
+ *         My pass to draw from.
+ *       · Where someone with a pass would get a different level from the
+ *         pass than from today's rules, `pass_finding` goes to the audit
+ *         log, once per tool per tab. The decision is made first and the
+ *         finding cannot alter it. `session.passLevel` carries the pass's
+ *         answer for display.
+ *       · OPEN_PAGES: `pass` (/pass/, My pass) opens for any signed-in,
+ *         approved account with no registry record and no grant, because
+ *         its answer to someone with nothing is "your pass hasn't been
+ *         issued yet", not "this tool isn't available".
+ *       A minor version: this session's turn number is below 15.
+ *       Cache-bust ?v=17 -> ?v=18, in lockstep with nl-utils ?v=52 -> ?v=53
+ *       and nl-topbar ?v=10 -> ?v=11.
  *
  * v15.0: No more silent bounce. A user the guard turns away — no access, a
  *       club role on a league tool, or a tool whose registry record has not
@@ -191,6 +208,9 @@
           jobTitle: userData.jobTitle || '',
           pending:  userData.pending  || false,
           tools:    userData.tools    || {},
+          /* v15.1: the person's pass (users/<uid>/pass), for display — the
+             menu, My pass, findings. Nothing in this file grants on it. */
+          pass:     userData.pass     || null,
           cachedAt: Date.now()
         }));
       } catch(e) {}
@@ -362,6 +382,40 @@
     } catch (e) {}
   }
 
+  /* ── Pass findings (v15.1) ─────────────────────────────────────────────
+     Step 3 of system/permissions-plan.md: the pass is shown, the old rules
+     still decide. Where the two disagree for someone who has been issued a
+     pass, say so in the audit log as `pass_finding`, once per tool per tab,
+     so the differences are known before step 6 switches anyone over.
+     Read-only and fail-quiet: a missing NL.pass or a throw here must never
+     touch the access decision, which has already been made. Old 'admin' is
+     the pass's Manage. */
+  function notePassFinding(session, toolData, oldLevel) {
+    try {
+      if (!session.pass || !window.NL || !NL.pass || !NL.pass.isIssued(session.pass)) return;
+      var ex = NL.pass.explain(session.pass, toolData);
+      session.passLevel = ex.level;
+      var was = NL.pass.fromOld(oldLevel);
+      if (ex.level === was) return;
+      var seenKey = 'nl_pass_finding_' + NL_TOOL_KEY;
+      if (sessionStorage.getItem(seenKey)) return;
+      sessionStorage.setItem(seenKey, '1');
+      if (!NL.session) NL.session = session; /* writeAudit signs entries from it */
+      if (NL.writeAudit) {
+        NL.writeAudit('pass_finding', '[' + NL_TOOL_KEY + '] today ' + was + ', pass ' + ex.level + ' (' + ex.reason + ')');
+      }
+    } catch (e) {}
+  }
+
+  /* ── Pages open to every signed-in person (v15.1) ──────────────────────
+     A page here needs a signed-in, approved account and nothing else: no
+     registry record, no grant. It is for pages ABOUT the person, not tools —
+     `pass` is My pass, which must open for someone with no access to any
+     tool, because "your pass hasn't been issued yet" is its answer to them.
+     Keep this list short; a tool never goes on it.
+     tests/tools-registry.test.mjs reads this line. */
+  var OPEN_PAGES = { pass: true };
+
   /* ── Access check ──────────────────────────────────────────────────────── */
   function checkAccess(session, toolData) {
     if (session.pending) {
@@ -369,9 +423,16 @@
       return;
     }
 
+    if (OPEN_PAGES[NL_TOOL_KEY] === true) {
+      session.toolLevel = 'access';
+      grantAccess(session);
+      return;
+    }
+
     /* Superadmin: always granted, and always at the top level. */
     if (session.role === 'superadmin') {
       session.toolLevel = 'admin';
+      notePassFinding(session, toolData, 'admin');
       grantAccess(session);
       return;
     }
@@ -392,6 +453,7 @@
          audiences differently; this file does not care about shelves. */
       var LEAGUE = { superadmin: true, admin: true, staff: true };
       if (!LEAGUE[session.role]) {
+        notePassFinding(session, toolData, 'off');
         showUnavailable(session, 'league-only tool');
         return;
       }
@@ -418,6 +480,7 @@
        default for the role. Reading session.tools[key] directly misses the
        default and is how three tools disagreed with their own registry. */
     session.toolLevel = level;
+    notePassFinding(session, toolData, level);
 
     if (level === 'access' || level === 'admin') {
       grantAccess(session);

@@ -81,11 +81,26 @@ function gatedPages() {
   return out;
 }
 
+/* auth-guard's pages for every signed-in person (My pass): no record needed.
+   Read from the guard itself so the list cannot be widened in one place and
+   not the other. */
+const OPEN_PAGES = (() => {
+  const src = readFileSync(join(REPO, 'system/auth-guard.js'), 'utf8');
+  const m = src.match(/var OPEN_PAGES = \{([^}]*)\};/);
+  assert.ok(m, 'auth-guard.js declares OPEN_PAGES on one line');
+  return new Set([...m[1].matchAll(/([a-z-]+):\s*true/g)].map((x) => x[1]));
+})();
+
+test('the open pages are pages about the person, not tools', () => {
+  assert.deepEqual([...OPEN_PAGES], ['pass']);
+  for (const key of OPEN_PAGES) assert.ok(!(key in registry), `${key} is open to everyone, so it must not be a registry tool`);
+});
+
 test('every gated page has a registry record, or is parked on purpose', () => {
   const pages = gatedPages();
   assert.ok(pages.length > 20, `found only ${pages.length} gated pages — the scan is broken, not the estate`);
   for (const { page, key } of pages) {
-    assert.ok(key in registry || key in parked,
+    assert.ok(key in registry || key in parked || OPEN_PAGES.has(key),
       `${page} asks for tools/${key}, which is in neither the registry nor the parked list — ` +
       'everyone but the superadmin would be turned away');
   }

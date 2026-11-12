@@ -1,7 +1,17 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.48 (11/11/2026)
+   Version: v1.49 (12/11/2026)
+
+   v1.49 — NL.pass: the new access model from system/permissions-plan.md
+   (steps 2 and 3), as data and one pure resolver. Cards (League / Club),
+   keys, the Skeleton key, Off / Access / Manage worked out from the grants
+   on each registry record's `permissions`. Display only: auth-guard still
+   decides who gets in through NL.resolveToolLevel, which is untouched.
+   Also clubColours (a club's colours on a pass) and build (the pass the
+   "issue a pass" form saves). Tested in tests/pass-model.test.mjs.
+   Cache-bust nl-utils ?v=52 -> ?v=53, in lockstep with nl-topbar ?v=10 ->
+   ?v=11 and auth-guard ?v=17 -> ?v=18.
 
    v1.48 — NL.clubs.headerHtml(club, opts): the club header, "this is the
    club you are looking at" (nl-brand v2.77 .nl-club-header; cache-bust
@@ -2458,6 +2468,306 @@
        no access. Fail closed. */
     return (level === 'access' || level === 'admin') ? level : 'off';
   };
+
+  /* ===================================================================
+     NL.pass — the new access model: cards, keys and one resolver (v1.49)
+
+     system/permissions-plan.md decided it; this is the code. A person has a
+     PASS at users/<uid>/pass:
+
+       { base: 'league' | 'club',          the card – exactly one
+         club: 'Forest Green Rovers',      club card only
+         jobTitle: 'Club Secretary',       printed on the pass
+         keys: { 'club-operations': { given: <ms>, by: <uid>, until?: <ms> } },
+         skeleton: { given, by },          the override card – Manage everywhere
+         issued: <ms>, issuedBy: <uid> }
+
+     and a tool has `permissions` on its registry record (tools/<key>):
+
+       { for: 'league' | 'both', shelf: 'main' | 'sandbox' | 'structural',
+         clubData: 'none' | 'all' | 'own' | 'bench', sensitive, lifespan,
+         levels: ['off','access'(,'manage')], testers?: false,
+         grants: { base: { league, club }, key: { 'league-media': 'manage' } } }
+
+     Key ids carry a hyphen, not the prototype's dot: Firebase refuses a dot in
+     a key. Club and League keys with the same name are separate keys.
+
+     STEP 3 OF THE PLAN: DISPLAY ONLY. auth-guard still decides who gets in,
+     from role and defaults (NL.resolveToolLevel above). This resolver answers
+     "what would the pass give", for the My pass page, View as, the "who can
+     open this" panel, and the mismatch findings auth-guard logs. Nothing reads
+     it to grant or refuse anything until step 6.
+
+     Pure: no Firebase, no DOM, `now` passed in where time matters, so it is
+     tested in tests/pass-model.test.mjs and the rules generator can load it.
+     =================================================================== */
+  (function () {
+    var RANK = { off: 0, access: 1, manage: 2 };
+    var LEVELS = ['off', 'access', 'manage'];
+
+    /* Order is the order on the pass: card sticker first, then these. Tester
+       is special – it only shows when held, never as an empty slot. `icon`
+       names the faint glyph drawn in an empty slot (boards 6–10). */
+    var KEYS = [
+      { id: 'league-operations', base: 'league', name: 'Operations',        code: 'OPS', icon: 'ops' },
+      { id: 'league-media',      base: 'league', name: 'Media',             code: 'MED', icon: 'media' },
+      { id: 'league-commercial', base: 'league', name: 'Commercial',        code: 'COM', icon: 'commercial' },
+      { id: 'league-finance',    base: 'league', name: 'Finance',           code: 'FIN', icon: 'finance' },
+      { id: 'league-senior',     base: 'league', name: 'Senior leadership', code: 'SNR', icon: 'senior' },
+      { id: 'league-tester',     base: 'league', name: 'Tester',            code: 'TST', icon: 'tester', special: true },
+      { id: 'club-operations',   base: 'club',   name: 'Operations',        code: 'OPS', icon: 'ops' },
+      { id: 'club-media',        base: 'club',   name: 'Media',             code: 'MED', icon: 'media' },
+      { id: 'club-commercial',   base: 'club',   name: 'Commercial',        code: 'COM', icon: 'commercial' },
+      { id: 'club-finance',      base: 'club',   name: 'Finance',           code: 'FIN', icon: 'finance' }
+    ];
+    var KEY = {};
+    KEYS.forEach(function (k) { KEY[k.id] = k; });
+
+    function rank(l) { return RANK[l] || 0; }
+    function byRank(r) { return LEVELS[r] || 'off'; }
+    function nowOr(now) { return (typeof now === 'number') ? now : Date.now(); }
+
+    function isIssued(pass) {
+      return !!(pass && (pass.base === 'league' || (pass.base === 'club' && pass.club)));
+    }
+    function isSkeleton(pass) { return !!(pass && pass.skeleton); }
+
+    /* A key counts if it is on the pass, belongs to the pass's own side, and
+       has not passed its end date. A club person can never hold a League key
+       by accident of data: the realm check is here, not in the caller. */
+    function holds(pass, id, now) {
+      if (!isIssued(pass) || !pass.keys || !pass.keys[id] || !KEY[id]) return false;
+      if (KEY[id].base !== pass.base) return false;
+      var until = pass.keys[id] && pass.keys[id].until;
+      return !(typeof until === 'number' && until <= nowOr(now));
+    }
+    function keysHeld(pass, now) {
+      return KEYS.filter(function (k) { return holds(pass, k.id, now); }).map(function (k) { return k.id; });
+    }
+
+    function cap(record) {
+      var p = record && record.permissions;
+      var levels = (p && p.levels) || [];
+      return levels.indexOf('manage') >= 0 ? 2 : 1;
+    }
+
+    /* The plan's rule, in its order:
+         skeleton key                         → Manage
+         Structure shelf                      → Off
+         Sandbox shelf                        → Off, unless Tester: max(launch, Access)
+         League-only tool, Club card          → Off
+         otherwise the highest of the card's grant and each held key's grant
+         nothing matched                      → Off
+       Every level is capped at the highest the tool offers – a grant of
+       Manage on a tool that has no Manage in its code yet reads as Access,
+       because that is what the person would actually get.
+       Returns the level and WHY, part by part, because every screen that
+       shows a level (My pass, View as) also shows what opened it. */
+    function explain(pass, record, now) {
+      var out = { level: 'off', reason: 'nothing', parts: [], openedBy: null };
+      if (!isIssued(pass)) { out.reason = 'no-pass'; return out; }
+      if (isSkeleton(pass)) {
+        out.level = 'manage'; out.reason = 'skeleton'; out.openedBy = 'skeleton';
+        out.parts = [{ id: 'skeleton', level: 'manage' }];
+        return out;
+      }
+      var p = record && record.permissions;
+      if (!p || !p.grants) { out.reason = 'no-record'; return out; }
+      if (p.shelf === 'structural') { out.reason = 'structure'; return out; }
+      if (p.for === 'league' && pass.base === 'club') { out.reason = 'league-only'; return out; }
+
+      var max = cap(record);
+      var g = p.grants, best = 0, fromCard = 0;
+      var cardLevel = Math.min(rank((g.base || {})[pass.base]), max);
+      if (cardLevel) { out.parts.push({ id: 'card', level: byRank(cardLevel) }); best = fromCard = cardLevel; }
+      keysHeld(pass, now).forEach(function (id) {
+        var l = Math.min(rank((g.key || {})[id]), max);
+        if (l) { out.parts.push({ id: id, level: byRank(l) }); if (l > best) best = l; }
+      });
+
+      if (p.shelf === 'sandbox') {
+        var tester = pass.base === 'league' && holds(pass, 'league-tester', now) && p.testers !== false;
+        if (!tester) { out.reason = 'sandbox'; out.parts = []; return out; }
+        if (!out.parts.some(function (x) { return x.id === 'league-tester'; })) {
+          out.parts.push({ id: 'league-tester', level: 'access' });
+        }
+        best = Math.max(best, 1);
+      }
+
+      out.level = byRank(best);
+      out.reason = best ? 'grants' : 'nothing';
+      /* Before launch it is the Tester key that opens a Sandbox tool, never
+         the card, whatever the card will give at launch. */
+      if (best) out.openedBy = (p.shelf !== 'sandbox' && fromCard >= best) ? 'card' : 'key';
+      return out;
+    }
+
+    /* Every tool the pass opens, A–Z by label, with the explanation each
+       strip on My pass needs. `registry` is the tools/ node. Placeholders
+       are not tools. */
+    function summary(pass, registry, now) {
+      var out = [];
+      Object.keys(registry || {}).forEach(function (key) {
+        var rec = registry[key];
+        if (!rec || rec.placeholder) return;
+        var ex = explain(pass, rec, now);
+        if (ex.level !== 'off') out.push({ key: key, record: rec, label: rec.label || key, explain: ex });
+      });
+      return out.sort(function (a, b) { return a.label.localeCompare(b.label); });
+    }
+
+    /* Who can open a tool, worked out from its grants – never typed. Rows are
+       only the parts that grant something, capped like the resolver caps;
+       `granted` keeps the agreed level, so a Manage grant waiting on the tool
+       to offer Manage can say so. */
+    function whoCanOpen(record) {
+      var p = record && record.permissions;
+      if (!p || !p.grants) return null;
+      var max = cap(record), rows = [];
+      ['league', 'club'].forEach(function (b) {
+        if (b === 'club' && p.for === 'league') return;
+        var g = rank((p.grants.base || {})[b]), l = Math.min(g, max);
+        if (l) rows.push({ id: b, label: (b === 'league' ? 'Everyone on a League card' : 'Everyone on a Club card'), level: byRank(l), granted: byRank(g) });
+      });
+      KEYS.forEach(function (k) {
+        if (k.base === 'club' && p.for === 'league') return;
+        var g = rank((p.grants.key || {})[k.id]), l = Math.min(g, max);
+        if (l) rows.push({ id: k.id, label: (k.base === 'league' ? 'League ' : 'Club ') + k.name + ' key', level: byRank(l), granted: byRank(g) });
+      });
+      return {
+        rows: rows,
+        shelf: p.shelf, for: p.for, sensitive: !!p.sensitive, clubData: p.clubData,
+        testers: p.shelf === 'sandbox' && p.testers !== false
+      };
+    }
+
+    /* Today's level words, read as the pass's: 'admin' is Manage. */
+    function fromOld(level) { return level === 'admin' ? 'manage' : (level === 'access' ? 'access' : 'off'); }
+
+    /* Build the pass the "issue a pass" form saves. Keys already held keep
+       their original given/by (re-issuing to change a job title must not
+       reset when a key was given); new keys are stamped now, by `by`. Keys
+       from the other side and unknown ids are dropped; the Skeleton key goes
+       only on a League card. */
+    function build(input, by, now, previous) {
+      now = nowOr(now);
+      var base = input.base === 'club' ? 'club' : 'league';
+      var prevKeys = (previous && previous.base === base && previous.keys) || {};
+      var keys = {};
+      (input.keys || []).forEach(function (id) {
+        if (!KEY[id] || KEY[id].base !== base) return;
+        var old = prevKeys[id];
+        keys[id] = old ? old : { given: now, by: by };
+      });
+      var pass = {
+        base: base,
+        jobTitle: String(input.jobTitle || '').trim().slice(0, 80),
+        issued: (previous && previous.issued) || now,
+        issuedBy: (previous && previous.issuedBy) || by,
+        updated: now,
+        updatedBy: by
+      };
+      if (base === 'club') pass.club = String(input.club || '').trim();
+      if (Object.keys(keys).length) pass.keys = keys;
+      if (base === 'league' && input.skeleton) {
+        pass.skeleton = (previous && previous.skeleton) || { given: now, by: by };
+      }
+      return pass;
+    }
+
+    var MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+    /* "12 NOV 2026" – the pass footer's date, as the design fixes it. */
+    function issuedLabel(ms) {
+      if (typeof ms !== 'number' || !isFinite(ms)) return '';
+      var d = new Date(ms);
+      return d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + d.getFullYear();
+    }
+
+    /* ---- Club colours on a pass (board 8) ---------------------------------
+       Band = the club's primary, or its secondary when the primary is near
+       white (a white band on a white pass is no band). Stickers take the
+       other colour of the pair, falling back to tertiary, then the band, when
+       that one is near white too. Type keeps the club's own pair wherever it
+       reads at 4.5:1, else white or black, whichever reads better. */
+    function lum(hex) {
+      var h = String(hex || '').replace('#', '');
+      if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+      if (!/^[0-9a-f]{6}$/i.test(h)) return null;
+      var c = [0, 2, 4].map(function (i) {
+        var v = parseInt(h.substr(i, 2), 16) / 255;
+        return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+      });
+      return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    }
+    function contrast(a, b) {
+      var la = lum(a), lb = lum(b);
+      if (la === null || lb === null) return 0;
+      return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+    }
+    var WHITE = '#ffffff', BLACK = '#000000';
+    function nearWhite(hex) { return lum(hex) === null || contrast(hex, WHITE) < 1.5; }
+    function textOn(bg, preferred) {
+      if (preferred && contrast(bg, preferred) >= 4.5) return preferred;
+      return contrast(bg, WHITE) >= contrast(bg, BLACK) ? WHITE : BLACK;
+    }
+    function clubColours(club) {
+      var c = (club && (club.colors || club.colours)) || {};
+      var p = c.primary, s = c.secondary, t = c.tertiary;
+      var band = !nearWhite(p) ? p : (!nearWhite(s) ? s : (!nearWhite(t) ? t : null));
+      if (!band) return null; /* no usable colour: the caller draws League red */
+      var other = band === p ? s : p;
+      var sticker = [other, t, band].filter(function (x) { return !nearWhite(x) && String(x).toLowerCase() !== String(band).toLowerCase(); })[0] || band;
+      return {
+        band: band,
+        bandText: textOn(band, sticker),
+        sticker: sticker,
+        stickerText: textOn(sticker, band)
+      };
+    }
+
+    window.NL.pass = {
+      LEVELS: LEVELS,
+      KEYS: KEYS,
+      KEY: KEY,
+      BASES: { league: 'League', club: 'Club' },
+      SHELF: { main: 'Main', sandbox: 'Sandbox', structural: 'Structure' },
+      FOR: { league: 'League only', both: 'League and clubs' },
+      CLUB_DATA: {
+        none: 'Same for every club',
+        own: 'Own club only',
+        all: 'Every club, changes own',
+        bench: 'Own club, others anonymous'
+      },
+      rank: rank,
+      isIssued: isIssued,
+      isSkeleton: isSkeleton,
+      holds: holds,
+      keysHeld: keysHeld,
+      /* The pass page's grid: every key of the card's side, Tester only when
+         held. */
+      slots: function (pass, now) {
+        var base = (pass && pass.base) || 'league';
+        return KEYS.filter(function (k) {
+          return k.base === base && (!k.special || holds(pass, k.id, now));
+        });
+      },
+      explain: explain,
+      level: function (pass, record, now) { return explain(pass, record, now).level; },
+      summary: summary,
+      whoCanOpen: whoCanOpen,
+      fromOld: fromOld,
+      build: build,
+      /* Who may use the "issue a pass" form, and View as. League and Tester
+         keys, and the Skeleton key, stay with Skeleton holders (plan, "Who
+         gives out cards and keys"). League Operations giving out Club cards
+         comes with the people screens in step 4. */
+      canIssue: function (pass) { return isSkeleton(pass); },
+      canViewAs: function (pass, now) { return isSkeleton(pass) || holds(pass, 'league-tester', now); },
+      issuedLabel: issuedLabel,
+      contrast: contrast,
+      clubColours: clubColours
+    };
+  })();
 
   /* ===================================================================
      NL.clubs — cached clubs-meta accessor (v1.11)

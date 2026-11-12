@@ -1,15 +1,28 @@
 # Permissions – who can open what, and do what
 
-**Status: plan, not built.** Decided with Richard on 29/10/2026 and 11/11/2026.
-Built over several sessions, in the order at the foot. Read this before
-touching `auth-guard.js`, `NL.roles`, `NL.resolveToolLevel`, the portal's
-people screens, the `tools/` registry shape or the rules generator.
+**Status: steps 2 and 3 built (12/11/2026), on a branch, not merged.**
+Decided with Richard on 29/10, 11/11 and 12/11/2026 (the 12/11 grilling, 30
+questions, settled almost everything). What was built, and where it differs
+from the words below, is in "Built so far" at the foot.
+Read this before touching `auth-guard.js`, `NL.roles`, `NL.resolveToolLevel`,
+the portal's people screens, `system/nl-topbar.js`, the `tools/` registry
+shape, the rules generator or the login page.
 
-When it is built, it **replaces** four older documents, which describe the
-model it retires: `roles-and-access-plan.md`, `staff-club-audience-plan.md`,
-the access tables in `tool-status-and-access.md`, and `guest-pass-plan.md`
-(see open question 4). Until then those are the record of how today's system
-works; this is where it is going.
+The grants for every tool live in the prototype, "Permissions – who can open
+what" (artifact, v40.0), which starts from Richard's saved grid of 12/11/2026.
+Its "Copy for session 2" / "Save as a file" output is the hand-over for step 2.
+Visual design: the "NL Tools – card and key concepts" canvas, boards 6–10
+(locked 12/11 – see "The pass" below).
+
+When built, this **replaces** `roles-and-access-plan.md`,
+`staff-club-audience-plan.md`, the access tables in `tool-status-and-access.md`,
+`guest-pass-plan.md` and `club-code-plan.md`. Until then those are the record
+of how today's system works; this is where it is going.
+
+**Deadline that sets the pace:** the board meeting, about 19/11/2026. Steps 2
+and 3 (passes visible, nothing about access changed) are the target for it.
+They are built in a fresh coding session with push access to the NL Tools
+repo; this document is that session's brief.
 
 ---
 
@@ -17,19 +30,17 @@ works; this is where it is going.
 
 Today a person has **one role** (Superadmin, Admin, Staff, Club Admin or Club
 Staff), and each tool says what each role gets (`tools/<key>/defaults`), with a
-per-person override on top. That was the right call for launch, and the
-17/08/2026 settlement said so: simple first, add complexity when real life
-asks for it. Real life has now asked:
+per-person override on top. That was the right call for launch (17/08/2026:
+simple first). Real life has now asked:
 
 - **A role mixes up who you are with what you do.** "Admin" means League,
-  *and* senior, *and* allowed to manage most tools. There is no way to say
-  "League, in Commercial" or "a club's secretary" without inventing a role.
-- **Clubs share one code each.** A club code says which club, never which
-  person. So nothing can be given to a club's secretary and not its kit man,
-  and Club Directory editing has to stay with League Admin.
-- **Outsiders have no home.** The external realm was retired in August, and
-  DAZN, the Trust and suppliers get a different coded link per job.
+  *and* senior, *and* allowed to manage most tools.
+- **Clubs share one code each.** A code says which club, never which person.
+- **Outsiders have no home.**
 - **"Who can open this?" is hand-written** in four documents, and they drift.
+- **Exceptions pile up.** One senior League account (12/11/2026) carries nine
+  per-person "exceptions"; eight change nothing and one lowers its Club
+  Directory access from Manage to Use.
 - **Two answers to "can I edit?".** On about a dozen tools it is the Manage
   level; on the rest it is the role. A page can follow one rule for one
   control and the other for the next. Real case, 12/11/2026: Graham, League
@@ -40,215 +51,383 @@ asks for it. Real life has now asked:
 
 ## The model
 
-Four words, one meaning each. Use them in code, comments and conversation.
-
 | Word | What it is | Values |
 |---|---|---|
-| **Base** | Where a person belongs. **Everyone has exactly one.** | Club · League · External |
-| **Club** | Which club. Only for the Club base. | one of the 72 |
-| **Key** | Something extra a person holds on top of their base. Any number, including none. | e.g. Secretary, Media, Commercial, Finance (club side); Operations, Finance, Commercial, Media and Broadcast, Senior leadership, Board, Heads of department (League side); DAZN, Trust (external side) |
-| **Level** | What a person can do on one tool. | Off · Access (read only) · Manage (anything that writes) |
+| **Card** (the base) | Where a person belongs. Exactly one each. | Club · League · External (parked) |
+| **Club** | Which club. Club card only. | one of the 72 |
+| **Key** | An extra job, held on top of the card. Any number. | League: Operations, Media, Commercial, Finance, Senior leadership, Tester. Club: Operations, Media, Commercial, Finance. |
+| **Level** | What a person can do on one tool. | Off · Access · Manage |
 
-(Richard called the bases "lanes" once, on 11/11/2026. The agreed word is
-**Base**.)
+On screen the card is shown as a **pass** (see "The pass").
 
-Plus one badge: **Superadmin**, which sits on top of normal membership and
-opens everything. It is a badge, not a base: a superadmin is still League with
-their own keys. A lighter "can manage people" badge may follow; not yet.
+- **Access** reads. **Manage** is anything that changes what other people see
+  (saving a draft, uploading, resetting a code, a club submitting its figures).
+  A person's own filters or view preferences don't count. Access and Manage
+  are the words on screen (eye and pencil icons); new fields store `access` /
+  `manage`, old fields are left alone until the tidy-up.
+- Club and League keys with the same name are **separate keys**
+  (`club.finance` ≠ `league.finance`). Board and Heads of department are not
+  keys; board members are club people and come in on their club card. The
+  club secretary's key is **Operations** (renamed from Secretary).
+- **Skeleton key**: a separate override card. Opens every tool at Manage. Not
+  a base. The word "superadmin" is retired on screen. **Two holders: Richard
+  and Alastair.** Every Skeleton-key action is recorded. Each holder's own
+  card shows their job title like anyone else's.
+- **No per-person overrides and no one-off passes.** If one person needs
+  something, they get a key. Keys go with the job, not the job title.
+- Every key records **when it was given and by whom**, with an **optional end
+  date** (holiday cover, short projects). It disappears on that date; holder
+  and giver get a reminder a few days before. A periodic review (e.g. annual
+  "who holds what" for the Skeleton holders) can be switched on later from
+  the same records.
+- **Everyone starts with no card.** Cards are given deliberately, one by one
+  (not pre-filled from today's roles).
+- **Who gives out cards and keys:** League Operations give out Club cards and
+  club keys only. League cards, League keys, Tester and the Skeleton key stay
+  with the Skeleton key holders.
 
-### How a person's level on a tool is worked out
-
-Each tool's record says what each base gets and what each key adds. A person
-gets the **highest** level any of their grants gives them on that tool.
+### Working out a level
 
 ```
 level(person, tool) =
-  superadmin                        → Manage
+  skeleton key                         → Manage
+  tool on the Structure shelf          → Off
+  tool on the Sandbox shelf            → Off, unless the person holds Tester:
+                                          then max(launch level, Access)
+  tool is League only, person is Club  → Off
   otherwise the highest of:
     tool.grants.base[person.base]
     tool.grants.key[k] for each key k the person holds
-  nothing matched                   → Off
+  nothing matched                      → Off
 ```
 
-Then, on a **club-specific** tool, a Club-base person only ever sees **their
-own club's** data, whatever their level. That is enforced in the database
-rules, not just on the page.
+Then the tool's **club data** setting limits what a Club-card person sees,
+enforced in the database rules:
 
-So "a club's secretary manages their own Directory entry" is one grant:
-Club Directory → key Secretary → Manage. No role invented, no override.
+- **Same for every club** – Handbook, Document Library, Judgements
+- **Own club only** – DAZN Viewership, Save of the Month (a pure submission tool)
+- **Every club, changes own** – Club Directory, Programme Packs, Attendance,
+  Vacancies
+- **Own club, others anonymous** – Commercial and Financial Benchmarking
+
+Tools a person can't open are not shown to them at all.
 
 ### What each tool record carries
 
-- **Club-specific or not.** Yes means club people see their own club only.
-- **Which levels it offers.** Some tools have nothing to manage and only ever
-  offer Off or Access (or Off or Manage). The portal never offers a level the
-  tool does not read; that rule from 17/08 stays.
-- **Grants:** per base and per key.
-- **Single-use or permanent.** Single-use tools live at `nl.tools/temp/<tool>`.
+- **For:** League only, or League and clubs. League only always wins over any
+  club grant.
+- **Shelf:** Main, Sandbox (in progress; testers and Skeleton key only) or
+  Structure (Skeleton key only, permanently).
+- **Club data:** one of the four above.
+- **Levels offered**, **grants** per card and per key, **sensitive** flag,
+  single-use or permanent (single-use at `nl.tools/temp/<tool>`).
 
-When a new tool is built, `/new-tool` asks in this order: **single-use or
-permanent → club-specific or not → which bases and keys get what.**
+When a new tool is built, `/new-tool` asks: single-use or permanent → League
+only or clubs too → club data → grants. It starts in Sandbox; moving it to
+Main is the launch, and everyone holding the right keys has it at once.
+Graphics is one tool: open it and you get every graphics sub-tool (split one
+out only when a specific person needs one sub-tool alone).
 
-### The "who can open this" panel
+### Rules agreed on 12/11
 
-Admins and superadmins see an info panel on every tool listing who can open
-it and who can manage it, **worked out from the grants**, never typed. The
-four drifting documents above become one generated answer.
+1. **The League card opens anything that's for looking at.** Tools for making
+   things – Graphics, Fan Widgets, Newsletter – belong to the team that makes
+   them.
+2. **Sensitive tools stay keys-only:** Club Codes, both benchmarking tools,
+   Responsibilities. On both benchmarking tools clubs only ever get Access;
+   Manage sits with the matching League team (Commercial for Commercial
+   Benchmarking, Finance for Financial Benchmarking).
+3. **Structure** = Data, Estate, NLServices API, Style Guide, Responsibilities.
+4. **Club Codes:** Access = see codes to hand out; Manage = reset or change.
+   League Operations hold Manage; nobody else opens it.
+5. **Newsletter:** a place for making it (the PDF is the output). Media
+   manage; everyone else Off.
+6. **View as:** testers and the Skeleton key can see the *portal* as any
+   person, real or made-up (which tools, which level, why). Opening a tool
+   as someone else is Skeleton key only.
+7. **The "who can open this" panel** on every tool, for admins, worked out
+   from the grants, never typed.
 
-## Decisions already made, per tool
+### How a tool is managed (standard, adopted 12/11)
 
-From Richard, 29/10/2026 and 11/11/2026. Everything else is decided tool by
-tool in session 1.
+1. Access never shows an edit control – no greyed-out buttons, nothing.
+2. Changing the thing in front of you happens **in place** (an Edit button on
+   the item). Running the tool – imports, settings, approvals, the bin, bulk
+   uploads – happens in a **Manage tab**.
+3. The Manage tab is **always the last tab, on the tool's own page**. The nine
+   separate `/admin/` pages move into it a tool at a time, as each is touched.
+4. Clubs only ever edit in place, and only their own things; they never see a
+   Manage tab. Club Directory, Attendance, Programme Packs and Save of the
+   Month need both styles.
 
-| Tool | Club-specific | League | Club | External |
-|---|---|---|---|---|
-| **Document Library** | no | Operations: Manage; everyone else: Access | all clubs: Access | – |
-| **Attendance** | yes | can lock and unlock a club's figures | clubs: Manage their own figures | – |
-| **Newsletter** | no | Media and Broadcast, Operations: Manage; others Off | Off | Off |
-| **DAZN** | yes | Media and Broadcast, Operations: Manage (data import); all League: Access | clubs: Access (own) | DAZN key: Access to all clubs |
-| **Handbook** | no | Operations: Manage only; all League: Access. (Superadmin edits through the badge, not through a Media key.) | all clubs: Access | – |
-| **Club Directory** | yes, with a twist | League Admin (Graham, Alastair): Manage | Secretary key: Manage **own** entry; other club staff: Access. Clubs see other clubs' basic details, and their own in full. | – |
-| **Judgements** | no | staff editing stays as is; it is a communication tool | Access | – |
+## The pass (design locked 12/11)
 
-Club Directory's twist: it is club-specific for *editing* and *private
-details*, but every club can read every other club's public entry. Model it as
-club-specific with a stated exception, not as two tools.
+On screen the card is a **pass**: a lanyard accreditation pass. Boards 6–10
+of the canvas are the reference; boards 1–5 were the earlier concepts.
 
-## Logins: the part that sets the pace
+- **Where it lives:** its own page, **`nl.tools/pass`**. Reached from the
+  small pass and the "My pass" item in the menu under the circle, and from
+  the Access denied page ("see your pass"). Shows only your own pass;
+  anyone else's is "View as". Keep it separate from any existing account
+  page (name, password) and link between them.
+- **The pass:** strap and metal clip threaded through a slot; header band in
+  the club's (or League's) colour with the crest on a white seat; name and job
+  title; a sticker for each key held, with its code (OPS, MED…) and name; keys
+  not held are empty slots with a faint icon, no text; footer "League staff ·
+  issued 12 NOV 2026" (date as day, three-letter month, year). The Skeleton
+  key is its own black ACCESS ALL AREAS pass.
+- **Club colours:** band = the club's primary (secondary if the primary is
+  near-white); stickers use the other colour; the club's own pair is kept
+  whenever it is readable.
+- **Motion:** the pass falls straight in, catches on the strap with a small
+  wobble, then swings gently from a pivot well above the screen. No hover
+  effect. Motion is off for people whose device asks for less motion.
+- **"My pass" screen:** the pass on the left (on a phone, above), hanging
+  from under the top bar. Beside it, one alphabetical list of every tool the
+  person can open, each a raised strip of the same height:
+  - name and up to two lines of description;
+  - a sticker for **each part of the pass that opens it**, in fixed columns
+    (the rose/crest = everyone on that card, then one column per key held),
+    each with a badge – eye = Access, pencil = Manage; stickers outranked by
+    a higher level are faded;
+  - the result on the right: **Access** or **Manage**;
+  - navy strip when a key opened it, red (the club's colour for clubs) when
+    the card alone did. No rose means colleagues without that key can't get
+    in.
+  - One line explains: Access lets you look; Manage lets you change what
+    other people see.
+- **Phone:** the stickers drop to a small row along the bottom of each strip.
+- **No pass yet:** someone with no card sees "Your pass hasn't been issued
+  yet" instead of an empty pass.
 
-Keys on the club side need **a login per person**, and Richard is not yet
-comfortable giving clubs logins. So the build is in two halves:
+## The top bar
 
-1. **Everything that does not need club logins.** League and External people
-   already have accounts (or will). The model, the grants, the rules and the
-   portal screens can all land with clubs still on codes.
-2. **Club codes stand in for the Club base.** A club code signs in as "Club,
-   that club, no keys": the **club representative**, which is what Richard
-   wants as the default club access anyway. Every club-specific tool keeps
-   working exactly as it does today.
-3. **Club logins, later and separately.** When they come, a club person is
-   Club base + their club + keys. Club Directory self-editing (Secretary key)
-   is the first thing that waits on this.
+- **The menu under your circle** holds no tools at all: a small version of
+  your pass (name, job title, key tags; a skull tag for a Skeleton key), "My
+  pass", "People and cards" (only for those who can give out cards), "View
+  as" (Skeleton key and testers only), Install as app, Sign out. It never
+  scrolls. The portal home is where you go to tools.
+- **A bell next to the circle** (see Approvals).
+- Later: a breadcrumb in the top bar for tools with sub-pages ("Graphics ›
+  Fixtures graphic", parent clickable).
 
-Clubs keep using their club codes until Richard says otherwise.
+## Access denied
+
+- **Signed out:** nothing revealed; the sign-in page, then back to the page
+  you wanted (`?next=` side job).
+- **Signed in:** one consistent **"Access denied"** page showing the person's
+  own cards and keys and what this tool needs ("View: club Media key ·
+  Changes: club Operations key").
+  - **Club people** get a **request button per key** that would open it: a
+    key request, never a tool request. Strict pipeline: one route only
+    (Pending), a one-line reason required, the approver sees everything the
+    key opens before deciding, every approval and decline recorded. Club
+    keys approved by League Operations.
+  - **League staff** get no request buttons: the page says to **speak to the
+    Operations team**. Never name individuals on this page.
+  - **Sensitive tools:** no keys listed, no buttons – "speak to the
+    Operations team".
+  - **Tools for the other side** (a club person on a League tool): "This is
+    for League staff" – nothing to request.
+  - **Sandbox and Structure tools:** "Not available".
+- The page (and the 404) is rebuilt in the portal's own layout – top bar and
+  card styling – so it feels part of NL Tools.
+
+## Club logins (now in scope)
+
+Codes are retired, not kept:
+
+1. Build club logins as part of this work.
+2. Clubs request access: club, proposed keys, **job title** (printed on the
+   pass). The existing request-access flow (`functions/account.js`,
+   `submitAccessRequest`, server-written) gains the key picker and job title.
+3. **League Operations approve every club request** and set or change the
+   keys. Clubs managing their own staff is for later.
+4. Email clubs about a month ahead; codes and logins run side by side (codes
+   keep exactly their current powers); **codes off on a fixed date.**
+5. The public Vacancies form retires on the same date; clubs submit from
+   inside NL Tools.
+
+## Approvals and notifications
+
+- **One approval pattern:** a club submits, it waits as **Pending**, League
+  Operations approve, change or reject. Used by Club Directory edits,
+  Vacancies, access requests and key requests.
+- Each tool's Manage tab shows "Pending (n)".
+- **A bell in the shared top bar** counts pending items for tools where you
+  hold Manage. Clicking opens a short drop-down (not a modal), grouped by
+  tool; each item links to the tool's Manage tab at that item. Approving
+  happens in the tool, never in the drop-down.
+- **Monthly club email** to each club's Operations holder: their Directory
+  entry and who has NL Tools access on the club's behalf. The link opens a
+  pre-filled page; corrections go to Pending.
+
+## Per-tool notes
+
+- **Matchday Live:** Sandbox, no testers.
+- **Local Media:** Sandbox, League only, out of the monthly email; the public
+  form retires with codes. Revisit later.
+- **Brand Exposure, Social Output:** League card reads; in Sandbox until launch.
+- **Website Archive:** offers Access only (nobody manages it).
+- **Club Kits, Fixture Management:** League only, League card reads,
+  Operations manage. **Content Plan:** League card reads, Media manage.
+- Tools needing a **Manage level added in code:** Attendance, Brand Exposure,
+  Club Codes, Club Kits, Commercial Benchmarking, Handbook, DAZN Viewership,
+  Programme Packs, Save of the Month, Newsletter.
+- How tools decide levels today (survey 12/11): 11 already ask the guard for
+  the level (Brand Exposure, Club Directory, Content Plan, Document Library,
+  Financial Benchmarking, Fixture Management, Judgements, Matchday Live,
+  Social Output, Vacancies, Website Archive) and should follow the new logic
+  untouched; 4 check the role directly and need swapping to "if Manage"
+  (Attendance, Commercial Benchmarking, DAZN Viewership, part of Judgements);
+  the rest only care whether you get in. Several tools mention `.role`,
+  probably for display – confirm in step 2.
+- Several tools let Access users write today (Club Codes, Club Kits at
+  least). Audit and fix in step 5.
 
 ## How today maps onto it
 
-For the migration report (session 5). Nothing changes for anyone until the
-report has been read and agreed.
+For the migration report (step 4). Nothing changes for anyone until it has
+been read and agreed.
 
 | Today | Becomes |
 |---|---|
-| `superadmin` | League + Superadmin badge |
-| `admin` | League + keys (decided per person; League Admin people get Operations) |
-| `staff` | League + keys (decided per person) |
-| `club-admin`, `club-staff` (accounts) | Club + their club; keys decided when club logins arrive. Today there are few or none: check. |
-| club code | Club + that club, no keys (club representative) |
-| NL holder of a club code | League, by code (it already is not a club) |
-| per-person override in `users/<uid>/tools/<key>` | a key, if it is a real job ("Vacancies approver"); otherwise dropped |
-| `tools/<key>/defaults[<role>]` | `tools/<key>/grants.base` and `grants.key` |
-| `audience` (league / club / meta) | follows from grants: a tool with no Club grant is League-only, and the rules say so |
-| Level words `access` / `admin` | Access / Manage on screen; whether the stored value changes is open question 3 |
+| `superadmin` | League card + Skeleton key (Richard, Alastair) |
+| `admin`, `staff` | League card + keys, given deliberately per person |
+| club code | Club card, that club, no keys – until the codes-off date |
+| NL holder of a club code | League, by code |
+| per-person override in `users/<uid>/tools/<key>` | a key if it is a real job; otherwise dropped |
+| `tools/<key>/defaults[<role>]` | `tools/<key>/grants` |
+| `audience` (league / club / meta) | `for` and `shelf` |
 
-## Where it lives in the code
+## Build order
 
-For whoever builds it. Today's pieces, and what each becomes:
+Codes keep working until step 9. Nothing changes for anyone's access until
+step 6.
 
-- **`users/<uid>`** gains `base`, `club` (already there for club users),
-  `keys: { <key>: true }` and `superadmin: true`. `role` stays, read-only,
-  until the switch-over is proven, so the old resolver can be put back.
-- **`tools/<key>`** (the registry, `system/rtdb/tools-registry.snapshot.json`,
-  deployed by `deploy-tools-registry.yml`) gains `clubSpecific`, `grants`,
-  `lifespan`. `defaults` stays alongside until the switch.
-- **`NL.resolveToolLevel`** (`nl-utils.js`) gets a successor that takes the
-  person and the tool record and applies the rule above. Pure, tested, one
-  copy. The portal, `auth-guard.js` and the rules generator all call it, as
-  they all call `resolveToolLevel` today.
-- **`scripts/rtdb-level-rule.mjs`** generates rules from the same grants, so
-  the portal and the database cannot disagree (`tests/rules-follow-portal`).
-  Keys in rules: Firebase rules cannot loop over a person's keys, so each
-  grant becomes an explicit `root.child('users').child(auth.uid).child('keys').child('<key>').val() === true`
-  test. Long, generated, never hand-written.
-- **Code doors** (`club-code.js`, `programme.js`, and the others listed in
-  `functions/index.js`) mint claims. A club code's claim already carries the
-  club; it needs nothing new to mean "Club, that club, no keys".
-- **The portal's people screens** set base, club and keys, and show each
-  person's resulting level on every tool, worked out, never typed.
+1. **Finish the decisions.** Prototype v40.0, the canvas and this document.
+   Done 12/11.
+2. **Hand out the keys, as data only.** `users/<uid>` gains `base`, `club`,
+   `keys: { <key>: { given, by, until? } }`, `jobTitle`, `skeleton`;
+   `tools/<key>` (registry, `system/rtdb/tools-registry.snapshot.json`,
+   `deploy-tools-registry.yml`) gains `for`, `shelf`, `clubData`, `grants`,
+   `levels`. The new resolver (successor to `NL.resolveToolLevel` in
+   `nl-utils.js`) applies the rule above: pure, tested, one copy. Nothing
+   reads it yet. `role` and `defaults` stay for the way back.
+   **The staff list is not needed to start (agreed 12/11).** Issue one real
+   pass, Richard's (League card + Skeleton key); everyone else stays
+   unissued until Richard issues them himself.
+3. **Show the passes (board target).** The `nl.tools/pass` page (the design
+   above), the new menu under the circle, the "who can open this" panel for
+   admins, "view as" on the portal for testers and the Skeleton key, and a
+   basic **"issue a pass" form for Skeleton key holders** (card, club, keys,
+   job title) so Richard can issue passes before the full people screens of
+   step 4 exist. Display only; the old guard still decides. Mismatches are
+   logged as findings. For the board, "View as" shows made-up people (e.g.
+   League Operations + Media, a club secretary). Richard has **dummy
+   accounts** for testing as clubs, club secretaries, club media and League
+   staff – use those rather than real people.
+4. **People screens and the migration report.** Set card, keys and job title
+   (replaces today's per-tool switches and "exceptions"). Report every
+   person's old vs new level on every tool; Richard agrees every difference.
+5. **New locks beside the old.** `scripts/rtdb-level-rule.mjs` generates rules
+   from the grants (Firebase rules can't loop over keys, so each grant becomes
+   an explicit generated `users/<uid>/keys/<key>` test;
+   `tests/rules-follow-portal`). Both resolvers run and disagreements go to
+   the audit. Add Manage to the tools above; swap role checks for level
+   checks; stop Access users writing. The Access denied page.
+6. **Switch League staff.** `auth-guard.js` obeys the new resolver; rules
+   published by button. Codes unchanged.
+7. **Club logins.** Request form, League Operations approvals, Pending and the
+   bell, key requests, Directory approvals, Vacancies inside.
+8. **Email clubs.** Month of overlap; monthly club check email starts.
+9. **Codes off.** Public forms closed; remove `role`, `defaults`, `audience`
+   and the retired documents; update `CLAUDE.md` and `/new-tool`.
+
+Side jobs, any time:
+- The login page returns you to the page you were trying to reach
+  (`auth-guard.js` line ~520 sends to login with no return path; add
+  `?next=`, and the login page accepts only paths starting with a single `/`).
+- Replace the text ▸/▾ arrow in the brand stylesheet's Disclosure row (and the
+  portal's ▼) with the drawn chevron everywhere.
+- Rebuild the 404 page in the portal's own layout.
+- Graphics: a way back up one level (breadcrumb) and a landing page whose
+  cards preview what each graphic produces.
+
+## Built so far
+
+### Steps 2 and 3 (12/11/2026, PR "Passes: keys as data, the resolver, My pass")
+
+Nobody's access changed. auth-guard still decides from role and defaults.
+
+- **Grants as data.** Every record in `system/rtdb/tools-registry.snapshot.json`
+  has a `permissions` object, imported from prototype v40.0 by
+  `scripts/permissions-import.mjs` (run it again on a new "Save as a file"
+  export; it reports and refuses anything it does not recognise).
+- **The resolver** is `NL.pass` in `system/nl-utils.js` (v1.49): `explain`,
+  `level`, `summary`, `whoCanOpen`, `build`, `clubColours`. Pure; tested in
+  `tests/pass-model.test.mjs`, which also reads the agreed grid back through it
+  rule by rule. `NL.resolveToolLevel` is untouched.
+- **`/pass/`** – My pass, View as (`?view=as`) and Issue a pass
+  (`?view=issue`), drawn from boards 6–10.
+- **The menu under the circle** (`nl-topbar.js` v1.7): small pass, My pass,
+  Who can open this, People and cards, View as, Admin panel (until step 4),
+  Install as app, Sign out. The "Your tools" list is gone.
+- **Findings.** For anyone with a pass, auth-guard (v15.1) logs
+  `pass_finding` to the audit log when the pass would give a different level
+  from today's rules: once per tool per tab, after the decision is made.
+
+Where the build differs from the words above, and why:
+
+1. **Nested, not spread.** The plan says `tools/<key>` gains `for`, `shelf`,
+   `levels`… and `users/<uid>` gains `base`, `club`, `jobTitle`… But the
+   registry already has `levels`, `shelf` and `audience`, and users already
+   have `club` and `jobTitle`, each with today's meaning, read by auth-guard
+   and the portal. Writing the new values over them would have changed access
+   on merge. So: `tools/<key>/permissions` and `users/<uid>/pass`. At step 9,
+   when the old fields go, these can be flattened or left as they are.
+2. **Key ids use a hyphen** (`league-operations`), not the prototype's dot:
+   Firebase refuses a dot in a key, and the registry publish would have failed.
+3. **The prototype's own words are kept inside `permissions`**: shelf
+   `main / sandbox / structural`, club data `none / all / own / bench`, so a
+   later export imports on top cleanly. `NL.pass.SHELF` and
+   `NL.pass.CLUB_DATA` hold the words on screen ("Structure", "Own club,
+   others anonymous"…).
+4. **A level is capped at the levels a tool offers.** Ten tools have a Manage
+   grant waiting on Manage being added in code (per-tool notes). Until then
+   the pass shows Access there, and the "who can open this" panel says
+   "Manage once the tool offers it". When step 5 adds Manage to a tool, add
+   `manage` to its `permissions.levels` (re-export from the prototype, or edit
+   the snapshot) and the pass follows.
+5. **Matchday Live** carries `testers: false` ("Sandbox, no testers"); the
+   import script adds it, as the grid has no column for it.
+6. **Issuing passes: today's superadmin role may issue too**, because nobody
+   holds a Skeleton key until the first pass is issued. Remove at step 6.
+   League Operations issuing Club cards waits for the people screens (step 4).
+7. **View as lives on `/pass/`**, not on the portal home: it shows the same
+   answer (which tools, which level, why) without re-rendering the portal as
+   someone else. Real people and made-up ones (eight presets for the board,
+   plus "build one").
+8. **`/pass/` is not a tool.** It has no registry record; auth-guard's
+   `OPEN_PAGES` lets any signed-in, approved account in, because "your pass
+   hasn't been issued yet" is its answer to someone with nothing.
+
+Not in steps 2–3, still to do: key end dates in the form (the data shape and
+the resolver already honour `until`), reminders, opening a tool as someone
+else, the Access denied page, generated rules.
 
 ## Safety rails
 
-- **Report before switch.** Before the new resolver decides anything, a
-  report lists, for every person and every tool, old level and new level, and
-  every difference is agreed. Same report-then-act shape as the registry and
-  restore workflows.
-- **Run both, compare, then switch.** For a period the guard works out both
-  answers and logs any disagreement to the audit, while still obeying the old
-  one.
-- **Superadmin always gets in.** But note the trap already recorded in
-  `CLAUDE.md`: superadmin skipping the check is how a broken tool hides from
-  the one person testing it. Every launch is checked as a non-superadmin.
-- **Rules ship by button**, never on merge, as now.
-- **A way back** at every step: old fields kept until the new ones are proven.
+- Report before switch; run both and compare; a way back at every step.
+- Every launch checked as a non-Skeleton-key person (the Skeleton key hides
+  broken tools from the one person testing).
+- Rules ship by button, never on merge.
 
-## Build order, one session each
+## Still open
 
-1. **Decide every tool.** A standalone prototype page (or artifact) listing
-   every real tool with its club-specific flag, levels and grants, plus a
-   "pick a person, see what they get" preview. Richard goes through the tools
-   one at a time. Output: the grants for every tool, agreed. Nothing live
-   changes. This is Richard's own stated way in: concept first, all real
-   tools, one at a time, then hand over.
-2. **The resolver and the data shape.** New fields on `users/` and `tools/`,
-   the new resolver with tests, the registry snapshot filled from session 1.
-   Nothing reads them yet.
-3. **Rules from grants.** The generator writes rules from the new grants;
-   tests prove portal and rules agree. Not published yet.
-4. **The portal's people screens.** Set base, club, keys, superadmin badge;
-   the who-can-open-this panel on every tool.
-5. **Migration report and switch-over.** Map every current person; Richard
-   agrees the differences; run both resolvers side by side; then switch
-   `auth-guard.js`, publish rules. Old fields stay for the way back.
-6. **Tidy.** Remove `role`-based defaults, the audience field and the retired
-   documents; update `CLAUDE.md` and `/new-tool`.
-7. **Later, separately: club logins.** Club people with keys; Club Directory
-   secretaries manage their own entry. Its own plan when Richard is ready.
-
-Possibly alongside: rebuilding the tools cleanly under `nl.tools/portal/` for
-the new model (Richard, 29/10/2026: considering, not decided).
-
-## Open questions
-
-Answer these in session 1, before anything is built.
-
-1. **Where does the Trust sit?** One group, no subdivisions (29/10/2026). Is
-   that an External base with a Trust key, or its own base?
-2. **Are Keys and League groups the same thing?** This plan treats the League
-   groups (Operations, Finance, and so on) as keys, so one idea covers both
-   sides. Confirm.
-3. **Stored level values.** Keep `access` / `admin` in the database and only
-   say Access / Manage on screen (no migration), or rename the stored values
-   too (cleaner, touches every rule)?
-4. **Coded links for outsiders.** `guest-pass-plan.md` scoped a code that
-   carries a tool list. With an External base, does an outsider get an
-   account with keys instead, or do both exist (accounts for regulars like
-   DAZN, codes for one-off jobs)?
-5. **Per-person overrides.** This plan drops them in favour of keys
-   ("Vacancies approver" becomes a key). Is there any override today that is
-   not really a job and should survive?
-6. **The admin badge.** Who besides superadmin manages people and keys, and
-   is that a badge or a key?
-7. **Heads of department.** A cross-cutting key held alongside a person's own
-   team key: confirm it grants anything on its own, or is it only for
-   mailing and views?
-
-## Inputs this was built from
-
-- Richard's decisions, 29/10/2026 (groups, levels, club-specific, per-tool
-  calls, `/temp/`, the info panel) and 11/11/2026 (Base, Club, Key, Level;
-  one base each; club representative as default; club self-editing waits for
-  logins; clubs stay on codes).
-- Today's code: `system/auth-guard.js` (`checkAccess`, the audience gate),
-  `NL.roles` and `NL.resolveToolLevel` in `system/nl-utils.js`,
-  `scripts/rtdb-level-rule.mjs`, the registry snapshot.
-- The older plans named at the top, and `club-code-plan.md` (one club code
-  for every club-facing tool, settled 19/08/2026).
+1. **External** (DAZN, the Trust, agencies): parked until after club logins.
+2. **Clubs managing their own staff:** later, once logins have bedded in.
+3. **Rebuilding tools under `nl.tools/portal/`** for the new model:
+   considering, not decided (29/10/2026).
+4. **Key or zone?** The pass is settled; whether the stickers are called
+   "keys" or "zones" on screen is not.
