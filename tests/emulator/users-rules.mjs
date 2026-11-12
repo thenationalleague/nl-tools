@@ -46,8 +46,12 @@ await reset();
 await t('Skeleton key: League person, role and pass', update(ref(db('sk'), 'users/lg'), { role: 'admin', pass: { base: 'league', issued: 1, keys: opsKey } }), true);
 await reset();
 await t('superadmin role: anyone', set(ref(db('sa'), 'users/lg/jobTitle'), 'x'), true);
-await t('Skeleton key: the whole users node', update(ref(db('sk'), 'users'), { lg: SEED.lg }), true);
-await t('Operations: not the whole users node', update(ref(db('ops'), 'users'), { cl: SEED.cl }), false);
+/* set() replaces the whole node; update() on users with child keys is a
+   write to each child, judged person by person (the approval below). */
+await t('Skeleton key: the whole users node', set(ref(db('sk'), 'users'), SEED), true);
+await reset();
+await t('Operations: not the whole users node', set(ref(db('ops'), 'users'), { cl: SEED.cl }), false);
+await t('Operations: an update across people is judged person by person', update(ref(db('ops'), 'users'), { cl: SEED.cl, lg: SEED.lg }), false);
 
 await t('Operations: a club person’s job title', set(ref(db('ops'), 'users/cl/jobTitle'), 'Secretary'), true);
 await t('Operations: a club person’s Club card and club keys', set(ref(db('ops'), 'users/cl/pass'), clubPass), true);
