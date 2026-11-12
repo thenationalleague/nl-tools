@@ -1,7 +1,13 @@
 /* =========================================================================
    NL Tools — Topbar renderer
    File: /system/nl-topbar.js
-   Version: v1.9 (12/11/2026)
+   Version: v1.10 (12/11/2026)
+
+   v1.10 — The menu's Access item replaces People and cards and Audit log
+          (both are tabs of Access now), for the Skeleton key and the League
+          Operations key. Who can open this reads the tool's
+          live grants. Cache-bust ?v=13 -> ?v=14, in lockstep with nl-utils
+          ?v=59 -> ?v=60 and auth-guard ?v=19 -> ?v=20.
 
    v1.9 — Admin panel leaves the menu: the portal's admin area has closed
           (People and cards holds people, invites and requests; the Audit
@@ -414,8 +420,8 @@
      system/permissions-plan.md, "The top bar": the menu holds no tools at
      all. The portal home is where you go to tools. It holds, in order: a
      small version of your pass, My pass, Who can open this (on a tool, for
-     the people who run it), People and cards (/people/), View as
-     (Skeleton key and Tester), Audit log, Install as app, Sign out. It never scrolls.
+     the people who run it), Access (/access/), View as (Skeleton key and
+     Tester), Install as app, Sign out. It never scrolls.
      The pass is DISPLAY ONLY here: what you can open is still decided by
      auth-guard from your role. */
   function buildDropdown(session, isClub, opts) {
@@ -450,18 +456,13 @@
       }));
     }
 
-    /* Issuing passes: the Skeleton key. Until the first pass is issued nobody
-       holds one, so today's superadmin role may issue too — the way in for
-       the first pass. Goes at step 6, when the role stops meaning anything. */
-    /* People and cards (/people/): until step 6 auth-guard opens it to the
-       roles that run the portal's admin area today, so the menu offers it
-       to them. */
+    /* Access (/access/): people, invites, requests, who each tool opens to,
+       and the audit log. Offered to whoever the door lets in there: the
+       Skeleton key, the League Operations key (club people only, inside),
+       and the superadmin role (always in). */
     var role = session && session.role;
-    if (role === 'superadmin' || role === 'admin') dd.appendChild(item('/people/', 'list', 'People and cards'));
+    if (role === 'superadmin' || (issued && P.issueRights(pass).club)) dd.appendChild(item('/access/', 'shield', 'Access'));
     if (issued && P.canViewAs(pass)) dd.appendChild(item('/pass/?view=as', 'eye', 'View as'));
-
-    /* The Audit log (/audit/), for the roles the database lets read it. */
-    if (role === 'superadmin' || role === 'admin') dd.appendChild(item('/audit/', 'article', 'Audit log'));
 
     /* Install as app — shown only if browser fired beforeinstallprompt and app
        not already installed. Hidden by default (style.display='none') and
@@ -569,8 +570,12 @@
   function openWhoCanOpen(toolKey, title) {
     var P = window.NL && window.NL.pass;
     if (!P || !window.firebase || !firebase.database || !window.NL.modal) return;
-    firebase.database().ref('tools/' + toolKey).once('value').then(function(snap) {
-      var w = P.whoCanOpen(snap.val());
+    var db = firebase.database();
+    Promise.all([
+      db.ref('tools/' + toolKey).once('value'),
+      db.ref('access-grants/' + toolKey).once('value').catch(function() { return null; })
+    ]).then(function(snaps) {
+      var w = P.whoCanOpen(P.withLive(snaps[0].val(), snaps[1] && snaps[1].val()));
       var esc = window.NL.escHtml || function(s) { return String(s); };
       var html;
       if (!w) {

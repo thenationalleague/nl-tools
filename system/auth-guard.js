@@ -1,7 +1,12 @@
 /*
  * auth-guard.js — NL Tools v2
  * File: /system/auth-guard.js
- * Version: v16.0 (12/11/2026)
+ * Version: v16.1 (12/11/2026)
+ *
+ * v16.1: The tool's live grants (access-grants/<toolKey>, edited in the
+ *       Access tool) replace its registry grants when present
+ *       (NL.pass.withLive). Unreadable or absent: the registry stands.
+ *       Cache-bust ?v=19 -> ?v=20, in lockstep with nl-utils ?v=59 -> ?v=60.
  *
  * v16.0: Passes decide (system/permissions-plan.md, step 6). Someone with an
  *       issued pass is let in by it — card, keys, the tool's grants — and the
@@ -627,7 +632,10 @@
 
       Promise.all([
         db.ref('users/' + user.uid).once('value'),
-        db.ref('tools/' + NL_TOOL_KEY).once('value')
+        db.ref('tools/' + NL_TOOL_KEY).once('value'),
+        /* v16.1: the tool's live grants (edited in Access). Unreadable means
+           none: the registry's grants stand. */
+        db.ref('access-grants/' + NL_TOOL_KEY).once('value').catch(function () { return null; })
       ]).then(function (snaps) {
         if (!snaps[0].exists()) {
           /* User record missing -- account deleted or never set up. */
@@ -637,6 +645,8 @@
         }
         var userData = snaps[0].val();
         var toolData = snaps[1].exists() ? snaps[1].val() : null;
+        var live = snaps[2] && snaps[2].exists() ? snaps[2].val() : null;
+        if (toolData && live && window.NL && NL.pass && NL.pass.withLive) toolData = NL.pass.withLive(toolData, live);
 
         /* Refresh cache so portal / other tools see the latest values. */
         nlSession.write(user.uid, userData);

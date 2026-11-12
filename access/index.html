@@ -1,0 +1,1723 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Access
+  Version: v2.0 (12/11/2026)
+  File: /access/index.html
+
+  Who gets in: everyone with an account and their pass, invites, sign-up
+  requests, who each tool opens to, and the audit log. One tool for the
+  admin team (12/11/2026), replacing People and cards (/people/) and the
+  Audit log (/audit/), which both forward here. The registry key stays
+  ops-people, so no rules or grants move with the name.
+
+  Tabs (a closed set, so canon .tabs):
+    People   — everyone, searchable; Edit (the person page, below), View
+               their pass (View as) and Edit their pass (the issue form
+               on /pass/?view=issue&uid=).
+    (person) — ?person=<uid>, opened from a name or Edit: role, club, job
+               title, tool exceptions, Restore defaults, Remove user, and
+               their last ten audit entries.
+    Invites  — invite someone (role, club, job title), and the invites
+               waiting to be accepted: resend, revoke. Sends through
+               NL.gas.send.
+    Requests — clubs' sign-up requests: approve, reject, dismiss.
+               ?tab=requests (and the old ?tab=inbound in admin emails)
+               opens it.
+    Tools    — every tool and who it opens to; ?tool=<key> edits one.
+               Saved live at access-grants/<key>, no pull request.
+    Audit    — who did what: everything, by person, by action, searched.
+    Manage   — where per-tool entries still differ from passes, and Apply
+               passes.
+
+  Who does what here (Richard, 12/11/2026): granting League access stays
+  with the Skeleton key. So:
+    Skeleton key (or the superadmin role)  everything.
+    League Operations key                  People, Invites and Requests,
+                                           for club people only: club
+                                           roles, Club cards and club keys.
+                                           No Tools, Audit or Manage tab.
+  The database does not hold that line yet: a League Admin role may write
+  any user today, as the portal always allowed. Rules from grants (plan,
+  step 5) are where it moves into the database.
+
+  Storage (RTDB):
+    users            read; a person page, an approval, a rejection, a grant
+                     change and Apply passes write here
+    admin/audit, admin/audit-by-user/<uid>  read (Audit, a person's history)
+    admin/invites-pending, admin/requests   read and written
+    access-grants/<toolKey>  live grants: read by everyone signed in (the
+                     door needs them), written by the Skeleton key
+    users/<uid>/pass written by the issue form on /pass/, not here
+    tools            read: the registry and each tool's `permissions`
+
+  Access (registry ops-people): the Skeleton key (Manage) and the League
+  Operations key (Access). Before passes, superadmin and League Admin.
+
+  Changelog
+  v2.0 (12/11/2026) — Access. People and cards becomes Access, at /access/,
+    with two new tabs: Tools (who each tool opens to, edited live, saved at
+    access-grants/<key>, with the people each change moves shown before
+    saving) and Audit (moved in from /audit/). The League Operations key
+    gets in, for club people only; the Skeleton key keeps League people,
+    League roles, Tools, Audit and Manage. Every change is in the audit log.
+  v1.6 (12/11/2026) — Apply passes shows only when something is waiting.
+    The role becomes "Legacy role": the last column, plain text, after the
+    pass (which now carries the season flag and Waiting / Request rejected).
+    On a person page the picker is headed Legacy role.
+  v1.5 (12/11/2026) — Passes decide (auth-guard v16.0). Manage becomes
+    "Waiting to be applied": per person with a pass, where the per-tool
+    entries the database reads still differ from the pass, and an Apply
+    passes button that writes them (NL.pass.toOld). A pass holder's person
+    page shows the tools their pass gives instead of exceptions, and saving
+    them rewrites the entries from the pass. Approving a request writes the
+    entries from the new pass, and its preview lists what that pass opens.
+  v1.4 (12/11/2026) — Each pass reads as its card's badge (the rose, or
+    the club's crest) and its key tags: rose + OPS, a club crest + FIN. An
+    Organisation filter (searchable: the League, then every club with
+    someone in it) replaces the Card filter. A club not in the National
+    League, North or South this season gets a quiet "Not this season"
+    flag. People rows keep name, job title and email on three lines that
+    never wrap; on a phone the table scrolls sideways. Approve shows what
+    is being issued first — role, pass, every tool and its level — and
+    issues the pass with the approval.
+  v1.3 (12/11/2026) — Requests gain Dismiss: no email, the request is
+    marked dismissed and its never-approved account removed (Archive, for
+    requests with no account, folds into it).
+    The portal's Users pane moves in as a person page:
+    role, club, job title, tool exceptions (add, change, remove), Restore
+    defaults, Remove user, and their history. Same writes and audit lines
+    as the portal. Only a superadmin may make someone a superadmin. A
+    rejected request's account is listed, marked, so it can be removed.
+    The Skeleton key's tag reads AAA, a three-letter code like every key.
+  v1.2 (12/11/2026) — Invites and Requests move in from the portal's admin
+    area, with the same writes and emails (NL.gas, promoted to canon).
+    Invites no longer set per-tool exceptions: they send the role's
+    defaults, as the old form did unless its sliders were moved. Reject
+    and Revoke now ask first. Tabs carry a count of what is waiting.
+  v1.1 (12/11/2026) — Canon sweep and declutter. The page's own search
+    bar, stat cards, key tags and change badges give way to canon
+    .toolbar, .stats, .pill (role pills, .pill--info keys,
+    .pill--approved / --rejected changes) and .section-head; icons come
+    from NL.icon. People loses the Issued column and the job title (both
+    on View). Manage is one table of differences grouped by person, not a
+    table each; people whose pass matches today are counted, not listed,
+    and the explanatory line under the tabs is now the section heading.
+  v1.0 (12/11/2026) — First build: People and the migration report.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Access — NL Tools</title>
+  <!-- Favicons. Static, not injected: nl-topbar.js adds these too, but a
+       standalone page never loads it, and an icon that arrives with the JS
+       leaves the tab blank until it does. /favicon.ico at the root is the
+       backstop every browser asks for without being told. -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+
+  <!-- Brand stylesheet (lint canonical: ?v=74) -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=74">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'Access',
+      toolKey: 'ops-people'
+    };
+    var NL_TOOL_KEY = 'ops-people';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '12/11/2026',
+        version: 'v2.0',
+        items: [
+          'People and cards is now Access.',
+          'Tools: choose who each tool opens to, and see who a change affects before saving.',
+          'The Audit log is a tab here.',
+          'League Operations can look after club people; League access stays with the Skeleton key.'
+        ]
+      },
+      {
+        date: '12/11/2026',
+        version: 'v1.6',
+        items: [ 'Roles move to a quiet Legacy role column; the pass comes first.' ]
+      },
+      {
+        date: '12/11/2026',
+        version: 'v1.5',
+        items: [
+          'Passes now decide who opens what.',
+          'Apply passes, on Manage, brings everyone’s tools in line with their pass.'
+        ]
+      },
+      {
+        date: '12/11/2026',
+        version: 'v1.4',
+        items: [
+          'Each pass shows its badge and key tags: the rose with OPS, a club crest with FIN.',
+          'Filter by organisation.',
+          'A quiet flag on clubs not in our leagues this season.',
+          'Tidier rows: name, job title and email on three lines.',
+          'Approving a request shows the role, pass and tools first.'
+        ]
+      },
+      {
+        date: '12/11/2026',
+        version: 'v1.3',
+        items: [
+          'Open a person to change their role, club, job title and tool exceptions, or remove them.',
+          'Each person shows their recent history.',
+          'Dismiss a request without sending an email.'
+        ]
+      },
+      {
+        date: '12/11/2026',
+        version: 'v1.2',
+        items: [
+          'Invites and Requests are here now, moved from the portal.'
+        ]
+      },
+      {
+        date: '12/11/2026',
+        version: 'v1.1',
+        items: [
+          'Tidier: one style for search, counts and labels, matching the rest of NL Tools.',
+          'The report is one table of differences, grouped by person.'
+        ]
+      },
+      {
+        date: '12/11/2026',
+        version: 'v1.0',
+        items: [
+          'Everyone with an account, their role today and their pass.',
+          'The report of where each pass differs from today’s access.'
+        ]
+      }
+    ];
+
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts (lint canonical: ?v=60 / ?v=1 / ?v=14 / ?v=20) -->
+  <script src="/system/nl-utils.js?v=60"></script>
+  <!-- GA4, one property for all of nl.tools. Cookieless, so no consent
+       banner on any page; page views by path, no identity. Tool events go
+       through NL.track(). See system/nl-analytics.js. -->
+  <script src="/system/nl-analytics.js?v=1"></script>
+  <script src="/system/nl-topbar.js?v=14"></script>
+  <script src="/system/auth-guard.js?v=20"></script>
+
+<style>
+  /* Canon does the layout (.tabs, .toolbar, .stats, .table, .pill,
+     .section-head); this page adds only the few things canon has no word
+     for. */
+  .pc-note { font-size: var(--text-sm); color: var(--text-muted); margin: -8px 0 14px; }
+  .pc-note a { color: var(--navy); }
+  .pc-count { font-size: var(--text-sm); color: var(--text-muted); }
+  .pc-who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .pc-who__name { font-weight: 700; font-variation-settings: 'wght' 700; color: var(--text); }
+  .pc-who__sub { font-size: var(--text-xs); color: var(--text-muted); overflow-wrap: anywhere; }
+  .pc-who__job { font-size: var(--text-sm); color: var(--text); }
+  .pc-pass { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: var(--text-sm); }
+  .pc-crest { --crest-size: 24px; }
+  .pc-legacy { font-size: var(--text-sm); color: var(--text-muted); }
+  .pc-head__line .pc-legacy { margin-left: 6px; }
+  .pc-approve__who { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .pc-approve__who .pc-crest { --crest-size: 40px; }
+  .pc-gap { margin-top: 16px; }
+  .pc-opens { margin: 0; padding-left: 18px; font-size: var(--text-sm); columns: 2; }
+  .pc-off { display: inline-flex; align-items: center; gap: 3px; font-size: var(--text-xs); color: var(--amber); white-space: nowrap; }
+  /* The People list never wraps a cell: name, job title and email sit on
+     three lines, and on a narrow screen the table scrolls sideways
+     instead of breaking an email address mid-word. */
+  #pcRows td { white-space: nowrap; }
+  #pcRows .pc-who__sub { overflow-wrap: normal; }
+  #pcRows .pc-pass, #pcRows .pc-actions { flex-wrap: nowrap; }
+  .pc-muted { color: var(--text-muted); }
+  .pc-actions { display: flex; gap: 6px; justify-content: flex-end; align-items: center; flex-wrap: wrap; }
+  .pc-invite { margin-bottom: 24px; }
+  .pc-roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
+  .pc-roles .pc-role { margin: 0; display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--white); cursor: pointer; }
+  .pc-roles .pc-role:has(input:checked) { border-color: var(--navy); background: var(--navy-50); }
+  .pc-roles .pc-role input { width: auto; margin: 3px 0 0; padding: 0; }
+  .pc-role__name { display: block; font-size: var(--text-sm); color: var(--text); font-weight: 700; font-variation-settings: 'wght' 700; text-transform: none; letter-spacing: 0; }
+  .pc-role__grant { display: block; font-size: var(--text-xs); color: var(--text-muted); text-transform: none; letter-spacing: 0; font-weight: 400; font-variation-settings: 'wght' 400; }
+  .pc-foot { display: flex; justify-content: flex-end; }
+  /* A panel holding a club picker: canon .form-panel clips overflow, which
+     cut the picker's list off at the panel's edge. */
+  .pc-open { overflow: visible; }
+  .pc-open > :first-child { border-radius: var(--radius) var(--radius) 0 0; }
+  .pc-open > :last-child { border-radius: 0 0 var(--radius) var(--radius); }
+  .pc-link { color: var(--navy); font-weight: 700; font-variation-settings: 'wght' 700; text-decoration: none; }
+  .pc-link:hover { text-decoration: underline; }
+  .pc-back { margin-bottom: 14px; }
+  .pc-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+  .pc-head__name { font-size: var(--text-xl); font-weight: 800; font-variation-settings: 'wght' 800; color: var(--navy); }
+  .pc-head__line { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; font-size: var(--text-sm); }
+  .pc-panel { margin-bottom: 20px; }
+  .pc-hint { font-size: var(--text-sm); color: var(--text-muted); margin: 0 0 10px; }
+  .pc-ex { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+  .pc-more { display: flex; justify-content: center; padding: 16px 0; }
+  .tl-grantwrap { max-width: 520px; }
+  .tl-grants td, .tl-grants th { white-space: nowrap; }
+  .tl-level { width: auto; min-width: 130px; }
+  .tl-side { font-size: var(--text-xs); font-weight: 800; font-variation-settings: 'wght' 800; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); }
+  .tl-opens { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pc-select { width: auto; min-width: 180px; max-width: 100%; }
+  /* Outside .form-group on purpose: canon styles every select in a form
+     group as a full-width text box, which drops .nl-select's arrow. */
+  .pc-exblock { margin-top: 18px; min-width: 0; }
+  .pc-label { font-size: var(--text-xs); font-weight: 800; font-variation-settings: 'wght' 800; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 6px; }
+  .pc-foot--split { justify-content: space-between; flex-wrap: wrap; }
+  .pc-foot__right { display: flex; flex-wrap: wrap; gap: 8px; }
+</style>
+</head>
+<body>
+
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="page">
+
+    <div class="tabs" id="pcTabs" role="tablist">
+      <button class="tab active" type="button" role="tab" data-pane="people">People</button>
+      <button class="tab" type="button" role="tab" data-pane="invites">Invites <span class="tab__count" id="pcInviteCount" hidden></span></button>
+      <button class="tab" type="button" role="tab" data-pane="requests">Requests <span class="tab__count" id="pcRequestCount" hidden></span></button>
+      <button class="tab" type="button" role="tab" data-pane="tools">Tools</button>
+      <button class="tab" type="button" role="tab" data-pane="audit">Audit</button>
+      <button class="tab" type="button" role="tab" data-pane="manage">Manage</button>
+    </div>
+
+    <section data-pane-body="people">
+      <div class="toolbar">
+        <div class="toolbar__left">
+          <input class="toolbar__search" type="search" id="pcSearch" placeholder="Search by name, email or club" aria-label="Search people">
+          <span id="pcPassFilter"></span>
+          <span id="pcOrgFilter"></span>
+        </div>
+        <div class="toolbar__right"><span class="pc-count" id="pcCount"></span></div>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Person</th><th>Pass</th><th>Legacy role</th><th aria-label="Actions"></th></tr></thead>
+          <tbody id="pcRows"><tr><td colspan="4" class="pc-muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section data-pane-body="invites" hidden>
+      <div class="form-panel pc-invite pc-open">
+        <div class="form-panel__head">Invite someone</div>
+        <div class="form-panel__body">
+          <div class="form-grid">
+            <div class="form-group"><label for="pcInvEmail">Email</label><input type="email" id="pcInvEmail" autocomplete="off"></div>
+            <div class="form-group"><label for="pcInvName">Full name</label><input type="text" id="pcInvName" autocomplete="off"></div>
+            <div class="form-group span2"><label>Role</label><div class="pc-roles" id="pcInvRoles"></div></div>
+            <div class="form-group" id="pcInvClubWrap" hidden><label>Club</label><div id="pcInvClub"></div></div>
+            <div class="form-group"><label for="pcInvJob">Job title</label><input type="text" id="pcInvJob" autocomplete="off"></div>
+          </div>
+          <p class="form-hint">An invite still sets a role. Give their pass once they have signed in.</p>
+        </div>
+        <div class="form-panel__foot pc-foot">
+          <button class="btn btn--primary" type="button" id="pcInvSend"></button>
+        </div>
+      </div>
+      <div class="section-head"><h2>Waiting to be accepted</h2></div>
+      <div id="pcInvites"></div>
+    </section>
+
+    <section data-pane-body="requests" hidden>
+      <div class="section-head"><h2>Waiting for approval</h2></div>
+      <div id="pcRequests"></div>
+    </section>
+
+    <section data-pane-body="person" hidden>
+      <div class="pc-back"><button class="btn btn--ghost btn--sm" type="button" id="pcBack"></button></div>
+      <div id="pcPerson"></div>
+    </section>
+
+    <section data-pane-body="tools" hidden>
+      <div class="toolbar">
+        <div class="toolbar__left">
+          <input class="toolbar__search" type="search" id="tlSearch" placeholder="Search tools" aria-label="Search tools">
+          <span id="tlShelf"></span>
+        </div>
+        <div class="toolbar__right"><span class="pc-count" id="tlCount"></span></div>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Tool</th><th>Opens to</th><th>Shelf</th><th aria-label="Actions"></th></tr></thead>
+          <tbody id="tlRows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section data-pane-body="tool" hidden>
+      <div class="pc-back"><button class="btn btn--ghost btn--sm" type="button" id="tlBack"></button></div>
+      <div id="tlTool"></div>
+    </section>
+
+    <section data-pane-body="audit" hidden>
+      <div class="toolbar">
+        <div class="toolbar__left">
+          <input class="toolbar__search" type="search" id="alSearch" placeholder="Search actions and details" aria-label="Search the log">
+          <span id="alPerson"></span>
+          <span id="alAction"></span>
+        </div>
+        <div class="toolbar__right"><span class="pc-count" id="alNote"></span></div>
+      </div>
+      <div id="alList"><p class="pc-muted">Loading…</p></div>
+      <div class="pc-more" id="alMore" hidden><button class="btn btn--ghost btn--sm" type="button" id="alMoreBtn">Load 20 more</button></div>
+    </section>
+
+    <section data-pane-body="manage" hidden>
+      <div class="stats" id="pcStats"></div>
+      <div class="section-head">
+        <h2>Waiting to be applied</h2>
+        <span class="pc-actions"><button class="btn btn--ghost btn--sm" type="button" id="pcCsv"></button>
+        <button class="btn btn--primary btn--sm" type="button" id="pcApply">Apply passes</button></span>
+      </div>
+      <div id="pcReport"></div>
+    </section>
+
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var P = NL.pass, esc = NL.escHtml;
+  var S = { session: null, users: [], registry: {}, base: {}, live: {}, q: '', pass: null, org: null, roster: null };
+  var LEAGUE = 'National League';
+
+  function icon(name) { return NL.icon(name, 'sm').outerHTML; }
+
+  /* ── Who may do what here ─────────────────────────────────────────────
+     Same rules as the issue form on /pass/: the Skeleton key (or, until
+     step 6, today's superadmin role) gives out anything; League Operations
+     give Club cards and club keys to club people only. Until step 6 the
+     database lets only League Admins and the superadmin write a pass. */
+  function rights() {
+    var s = S.session;
+    if (s.role === 'superadmin') return { league: true, club: true };
+    if (s.role !== 'admin') return { league: false, club: false };
+    return P.issueRights(s.pass);
+  }
+  /* The Skeleton key (or the superadmin role): everything here. Anyone else
+     the door lets in holds the League Operations key, and works with club
+     people only — granting League access stays with the Skeleton key
+     (Richard, 12/11/2026). So the Tools tab (who each tool opens to), Manage
+     (Apply passes, which writes everyone's entries) and the Audit log are
+     Skeleton-only, and League people, League roles and League invites are
+     out of reach. */
+  function sk() {
+    var s = S.session;
+    return s.role === 'superadmin' || P.isSkeleton(s.pass);
+  }
+  function clubPerson(u) {
+    if (u.uid === S.session.uid) return false;
+    if (u.pass && u.pass.base === 'league') return false;
+    return NL.roles.realm(u.role) !== 'league';
+  }
+  function canEdit(u) {
+    var r = rights();
+    if (r.league) return true;
+    if (!r.club || u.uid === S.session.uid) return false;
+    if (u.pass && u.pass.base === 'league') return false;
+    return NL.roles.realm(u.role) !== 'league';
+  }
+
+  /* Role today: the canon role pill, and the club for club roles. */
+  /* The legacy role (v1.6): the pass decides who opens what (auth-guard
+     v16.0), so the role is shown last, in plain text, as "Legacy role".
+     It is not gone: until step 5 some database rules still read it (who
+     may edit other people's accounts, for one). */
+  function statusHtml(u) {
+    if (u.pending) return '<span class="pill role-pending">Waiting</span>';
+    if (u.rejected) return '<span class="pill pill--rejected">Request rejected</span>';
+    return '';
+  }
+
+  /* Who someone is with: their pass's card, else their role today. */
+  function orgOf(u) {
+    var p = u.pass;
+    if (P.isIssued(p)) return p.base === 'club' ? (p.club || '') : LEAGUE;
+    return NL.isClubUser(u.role) ? (u.club || '') : LEAGUE;
+  }
+
+  /* A club that is not in the National League, North or South this season
+     (relegated out, folded, renamed): a quiet flag beside its name, so a
+     stale club on an account is noticed. Silent until the roster loads. */
+  function offSeason(club) {
+    if (!club || club === LEAGUE || !S.roster || S.roster[club]) return '';
+    return ' <span class="pc-off" title="Not in the National League, North or South this season">' + icon('warning') + 'Not this season</span>';
+  }
+
+  /* The organisation's badge: the rose for the League, else the club's
+     crest (thumb, falling back to full size, then the rose — wired after
+     render by wireCrests). */
+  function crestHtml(org) {
+    if (!org) return '';
+    var src = org === LEAGUE ? NL.clubs.ROSE : NL.clubs.crestUrl(org, 'thumb');
+    return '<img class="nl-crest pc-crest" src="' + esc(src) + '" alt="' + esc(org) + '" title="' + esc(org) + '"' +
+      (org === LEAGUE ? '' : ' data-crest="' + esc(org) + '"') + '>';
+  }
+  function wireCrests(root) {
+    root.querySelectorAll('img[data-crest]').forEach(function (img) {
+      NL.clubs.wireCrestImg(img, img.getAttribute('data-crest'));
+      img.removeAttribute('data-crest');
+    });
+  }
+  function roleText(u) {
+    var r = NL.roles.label(u.role) || 'No role';
+    return NL.isClubUser(u.role) && u.club ? r + ', ' + u.club : r;
+  }
+
+  /* The pass, in one line: card (or club), then a pill per key held — the
+     key's code, with its end date if it has one. */
+  /* The pass, in one line: the card's badge (the rose, or the club's
+     crest), then a three-letter tag per key — AAA for the Skeleton key. */
+  function passHtml(p, label) {
+    if (!P.isIssued(p)) return '<span class="pc-muted">Not issued</span>';
+    var html = crestHtml(p.base === 'club' ? p.club : LEAGUE) + (label ? '<span>' + esc(label) + '</span>' : '');
+    if (P.isSkeleton(p)) html += '<span class="pill pill--info" title="Skeleton key">AAA</span>';
+    P.keysHeld(p).forEach(function (id) {
+      var k = P.KEY[id], until = p.keys[id].until;
+      html += '<span class="pill pill--info" title="' + esc(k.name) + '">' + esc(k.code) +
+        (until ? ' · to ' + esc(NL.formatDateShort(until)) : '') + '</span>';
+    });
+    return '<span class="pc-pass">' + html + '</span>';
+  }
+  function passText(p) {
+    var bits = [p.base === 'club' ? 'Club card, ' + p.club : 'League card'];
+    if (P.isSkeleton(p)) bits.push('Skeleton key');
+    P.keysHeld(p).forEach(function (id) { bits.push(P.KEY[id].name); });
+    return bits.join(', ');
+  }
+
+  /* ── People ─────────────────────────────────────────────────────────── */
+  function matches(u) {
+    if (S.q) {
+      var hay = [u.name, u.email, u.club, u.pass && u.pass.club].join(' ').toLowerCase();
+      if (hay.indexOf(S.q) < 0) return false;
+    }
+    var issued = P.isIssued(u.pass);
+    if (S.pass === 'issued' && !issued) return false;
+    if (S.pass === 'none' && issued) return false;
+    if (S.org && orgOf(u) !== S.org) return false;
+    return true;
+  }
+
+  function drawPeople() {
+    var rows = S.users.filter(matches);
+    document.getElementById('pcCount').textContent = rows.length + ' of ' + S.users.length;
+    var view = P.canViewAs(S.session.pass);
+    document.getElementById('pcRows').innerHTML = rows.length ? rows.map(function (u) {
+      var acts = '';
+      if (canPerson(u)) acts += '<a class="btn btn--ghost btn--sm" href="?person=' + encodeURIComponent(u.uid) + '" data-person="' + esc(u.uid) + '">' + icon('edit') + 'Edit</a>';
+      if (view) acts += '<a class="btn btn--ghost btn--sm" href="/pass/?view=as&uid=' + encodeURIComponent(u.uid) + '">' + icon('eye') + 'View pass</a>';
+      if (canEdit(u)) acts += '<a class="btn btn--ghost btn--sm" href="/pass/?view=issue&uid=' + encodeURIComponent(u.uid) + '">' + icon('edit') + (P.isIssued(u.pass) ? 'Edit pass' : 'Issue pass') + '</a>';
+      return '<tr>' +
+        '<td><span class="pc-who"><a class="pc-who__name pc-link" href="?person=' + encodeURIComponent(u.uid) + '" data-person="' + esc(u.uid) + '">' + esc(u.name || '(no name)') + '</a>' +
+          (jobOf(u) ? '<span class="pc-who__job">' + esc(jobOf(u)) + '</span>' : '') +
+          '<span class="pc-who__sub">' + esc(u.email) + '</span></span></td>' +
+        '<td><span class="pc-pass">' + passHtml(u.pass) + offSeason(orgOf(u)) + statusHtml(u) + '</span></td>' +
+        '<td class="pc-legacy">' + esc(roleText(u)) + '</td>' +
+        '<td><span class="pc-actions">' + acts + '</span></td>' +
+      '</tr>';
+    }).join('') : '<tr><td colspan="4" class="pc-muted">Nobody matches.</td></tr>';
+    wireCrests(document.getElementById('pcRows'));
+  }
+  function jobOf(u) { return (P.isIssued(u.pass) && u.pass.jobTitle) || u.jobTitle || ''; }
+
+  /* ── Manage: the migration report ─────────────────────────────────────
+     One table, every difference, grouped by person (named on their first
+     row). People whose pass matches today are counted, not listed. */
+  var WORD = { off: 'Off', access: 'Access', manage: 'Manage' };
+  var CHANGE = { opens: 'Opens', closes: 'Closes', up: 'Up to Manage', down: 'Down to Access' };
+  var PILL = { opens: 'pill--approved', up: 'pill--approved', closes: 'pill--rejected', down: 'pill--rejected' };
+
+  /* Since auth-guard v16.0 the pass decides at the door; the database still
+     reads users/<uid>/tools. The report lists, per person with a pass, every
+     tool where those entries give something different — what Apply passes
+     will change. Two kinds of row are left out because the door does not
+     follow the pass there either: a club role on a League tool (the
+     audience gate stands until club logins) and the superadmin role
+     (always in). */
+  function gatedFor(u, key) {
+    var r = u.role || '';
+    if (r === 'superadmin') return true;
+    var aud = S.registry[key] && S.registry[key].audience;
+    return (aud === 'league' || aud === 'staff' || aud === 'meta') && !(r === 'admin' || r === 'staff');
+  }
+  function report() {
+    return S.users.filter(function (u) { return P.isIssued(u.pass); }).map(function (u) {
+      return { user: u, rows: P.compare(u, S.registry).filter(function (x) { return !gatedFor(u, x.key); }) };
+    });
+  }
+
+  /* Apply passes: write each pass holder's per-tool entries from their pass
+     (NL.pass.toOld) in one update, so the database gives what the door
+     gives. Only people with a waiting change are written. */
+  function applyPasses() {
+    var todo = report().filter(function (r) { return r.rows.length; });
+    if (!todo.length) return NL.toast('Nothing waiting', 'info');
+    var n = todo.reduce(function (t, r) { return t + r.rows.length; }, 0);
+    NL.confirm('Apply ' + n + ' change' + (n === 1 ? '' : 's') + ' for ' + todo.length + ' ' + (todo.length === 1 ? 'person' : 'people') +
+      '? Their tools then follow their pass everywhere, including the data inside each tool.',
+      { title: 'Apply passes', confirmText: 'Apply' })
+    .then(function (ok) {
+      if (!ok) return;
+      var updates = {};
+      todo.forEach(function (r) {
+        var old = P.toOld(r.user.pass, S.registry, r.user.role);
+        Object.keys(old).forEach(function (k) { updates['users/' + r.user.uid + '/tools/' + k] = old[k]; });
+      });
+      NL.writeAudit('passes_applied', n + ' changes for ' + todo.length + ' people');
+      return db.ref().update(updates).then(function () {
+        NL.toast('Applied', 'success');
+        return refreshPeople().then(drawManage);
+      });
+    }).catch(function (err) { NL.toast('Could not apply: ' + (err && err.message || err), 'error'); });
+  }
+
+  function drawManage() {
+    var rep = report();
+    var diffs = rep.reduce(function (n, r) { return n + r.rows.length; }, 0);
+    var same = rep.filter(function (r) { return !r.rows.length; }).length;
+    document.getElementById('pcStats').innerHTML =
+      stat(rep.length, 'With a pass') + stat(same, 'Applied') +
+      stat(diffs, 'Changes waiting') + stat(S.users.filter(function (u) { return !u.rejected; }).length - rep.length, 'No pass yet');
+    var csv = document.getElementById('pcCsv');
+    csv.innerHTML = icon('download') + 'Download CSV';
+    csv.disabled = !diffs;
+    /* Shown only when something is waiting: day to day, issuing a pass,
+       approving and saving a person keep everyone in step themselves. */
+    document.getElementById('pcApply').hidden = !diffs;
+    var body = '';
+    rep.forEach(function (r) {
+      r.rows.forEach(function (x, i) {
+        body += '<tr>' +
+          '<td>' + (i ? '' : '<span class="pc-who"><span class="pc-who__name">' + esc(r.user.name) + '</span><span class="pc-who__sub">' + esc(passText(r.user.pass)) + '</span></span>') + '</td>' +
+          '<td>' + esc(x.label) + '</td><td>' + WORD[x.today] + '</td><td>' + WORD[x.pass] + '</td>' +
+          '<td><span class="pill ' + PILL[x.change] + '">' + CHANGE[x.change] + '</span></td></tr>';
+      });
+    });
+    document.getElementById('pcReport').innerHTML = body
+      ? '<div class="table-wrap"><table class="table"><thead><tr><th>Person</th><th>Tool</th><th>Today</th><th>Pass</th><th>Change</th></tr></thead><tbody>' + body + '</tbody></table></div>'
+      : '<div class="empty-state"><div class="empty-state__title">' + (rep.length ? 'Every pass is applied' : 'No passes issued yet') + '</div></div>';
+  }
+  function stat(n, label) {
+    return '<div class="stat"><div class="stat__num">' + n + '</div><div class="stat__label">' + esc(label) + '</div></div>';
+  }
+
+  /* CSV: one row per difference. Names and emails stay in the download,
+     never in the repo or an Actions log. */
+  function downloadCsv() {
+    var rows = [['Name', 'Email', 'Role today', 'Pass', 'Tool', 'Today', 'Pass level', 'Change']];
+    report().forEach(function (r) {
+      r.rows.forEach(function (x) {
+        rows.push([r.user.name, r.user.email, roleText(r.user), passText(r.user.pass), x.label, WORD[x.today], WORD[x.pass], CHANGE[x.change]]);
+      });
+    });
+    var d = new Date();
+    NL.download('pass-differences-' + ('0' + d.getDate()).slice(-2) + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + d.getFullYear() + '.csv',
+      NL.csv(rows, { bom: true }), 'text/csv;charset=utf-8');
+  }
+
+
+  /* ── Invites ───────────────────────────────────────────────────────────
+     Moved from the portal's admin area (portal v5.123, 15/09/2026) with
+     its payloads unchanged: sendInvite carries the same fields and a token
+     minted here, sent through NL.gas.send so a dropped reply is retried
+     with the same token and the backend never emails twice. The pending
+     record carries the token too.
+     One thing an invite no longer does: set per-tool exceptions. The new
+     model has none (plan: "no per-person overrides"); an invite sends
+     tools: {} — the role's defaults, exactly what the old form sent unless
+     its sliders were moved. */
+  var ROLES = ['admin', 'staff', 'club-admin', 'club-staff'];
+  var CLUB_ROLES = ['club-admin', 'club-staff'];
+  var INV = { role: 'staff', club: '', picker: null };
+  /* League roles open League tools, so only the Skeleton key invites them. */
+  function inviteRoles() { return sk() ? ROLES : CLUB_ROLES; }
+
+  function drawRoles() {
+    document.getElementById('pcInvRoles').innerHTML = inviteRoles().map(function (r) {
+      return '<label class="pc-role"><input type="radio" name="pcInvRole" value="' + r + '"' + (r === INV.role ? ' checked' : '') + '>' +
+        '<span><span class="pc-role__name">' + esc(NL.roles.label(r)) + '</span><span class="pc-role__grant">' + esc(NL.roles.grant(r)) + '</span></span></label>';
+    }).join('');
+  }
+
+  function initInvites() {
+    if (inviteRoles().indexOf(INV.role) < 0) INV.role = 'club-staff';
+    document.getElementById('pcInvClubWrap').hidden = !NL.isClubUser(INV.role);
+    drawRoles();
+    var send = document.getElementById('pcInvSend');
+    send.innerHTML = 'Send invite ' + icon('send');
+    document.getElementById('pcInvRoles').addEventListener('change', function (e) {
+      INV.role = e.target.value;
+      document.getElementById('pcInvClubWrap').hidden = !NL.isClubUser(INV.role);
+    });
+    INV.picker = NL.clubPicker(document.getElementById('pcInvClub'), {
+      season: 'current', freetext: false, placeholder: 'Search club name…',
+      onSelect: function (sel) { INV.club = (sel && sel.name) || ''; }
+    });
+    send.addEventListener('click', sendInvite);
+  }
+
+  function sendInvite() {
+    var email = document.getElementById('pcInvEmail').value.trim();
+    var name = document.getElementById('pcInvName').value.trim();
+    var jobTitle = document.getElementById('pcInvJob').value.trim();
+    var role = NL.roles.norm(INV.role);
+    if (inviteRoles().indexOf(role) < 0) return NL.toast('Only the Skeleton key invites League staff', 'error');
+    var isClub = NL.isClubUser(role);
+    var club = isClub ? (INV.picker && INV.picker.getValue ? (INV.picker.getValue() || '') : INV.club).trim() : '';
+    /* Club roles carry no org; every League role carries the National League. */
+    var org = isClub ? '' : 'National League';
+    if (!email || !name) return NL.toast('Email and name are needed', 'error');
+    if (isClub && !club) return NL.toast('Choose the club', 'error');
+
+    var btn = document.getElementById('pcInvSend');
+    btn.disabled = true;
+    var token = NL.uuid();
+    NL.gas.send({ action: 'sendInvite', token: token, email: email, name: name, role: role,
+      org: org, club: club, jobTitle: jobTitle, tools: {} })
+    .then(function (result) {
+      if (result && result.ok === false) { NL.toast('The invite was not sent: ' + (result.error || 'unknown error'), 'error'); return; }
+      NL.writeAudit('invite_sent', isClub
+        ? 'Invited ' + name + ' as ' + NL.roles.label(role) + ' for ' + club + (jobTitle ? ' (' + jobTitle + ')' : '')
+        : 'Invited ' + name + ' as ' + NL.roles.label(role) + ' (' + org + ')');
+      /* The pending record the Invites list reads, with the token so a
+         resend could reuse it. */
+      db.ref('admin/invites-pending').push({
+        email: email, name: name, role: role, org: org, club: club, jobTitle: jobTitle,
+        tools: {}, token: token, sentAt: Date.now(), sentBy: S.session.name || ''
+      }).then(loadInvites).catch(function () {});
+      NL.toast('Invite sent to ' + email, 'success');
+      ['pcInvEmail', 'pcInvName', 'pcInvJob'].forEach(function (id) { document.getElementById(id).value = ''; });
+      if (INV.picker && INV.picker.clear) INV.picker.clear();
+      INV.club = '';
+    })
+    .catch(function (err) { NL.toast('The invite may not have been sent: ' + (err && err.message || err), 'error'); })
+    .then(function () { btn.disabled = false; });
+  }
+
+  /* Invites waiting to be accepted. One already accepted (its email now on
+     an approved account) is cleared from the list, as the portal did. */
+  function loadInvites() {
+    var box = document.getElementById('pcInvites');
+    return db.ref('admin/invites-pending').once('value').then(function (snap) {
+      var all = snap.val() || {}, items = [], stale = {};
+      var active = {};
+      S.users.forEach(function (u) { if (u.email && !u.pending) active[u.email.toLowerCase()] = true; });
+      Object.keys(all).forEach(function (k) {
+        var inv = all[k]; if (!inv) return; inv._key = k;
+        if (inv.email && active[inv.email.toLowerCase()]) stale['admin/invites-pending/' + k] = null;
+        else items.push(inv);
+      });
+      if (Object.keys(stale).length) db.ref().update(stale).catch(function () {});
+      items.sort(function (a, b) { return (b.sentAt || 0) - (a.sentAt || 0); });
+      count('pcInviteCount', items.length);
+      box.innerHTML = items.length
+        ? '<div class="table-wrap"><table class="table"><thead><tr><th>Person</th><th>Role</th><th>Sent</th><th aria-label="Actions"></th></tr></thead><tbody>' +
+          items.map(function (inv) {
+            var role = NL.roles.label(inv.role) + (NL.isClubUser(inv.role) && inv.club ? ', ' + inv.club : '');
+            return '<tr data-key="' + esc(inv._key) + '">' +
+              '<td><span class="pc-who"><span class="pc-who__name">' + esc(inv.name || '(no name)') + '</span><span class="pc-who__sub">' + esc(inv.email || '') + '</span></span></td>' +
+              '<td>' + esc(role) + (inv.jobTitle ? '<div class="pc-who__sub">' + esc(inv.jobTitle) + '</div>' : '') + '</td>' +
+              '<td>' + (inv.sentAt ? esc(NL.formatDateTime(inv.sentAt, { year: false })) : '') + (inv.sentBy ? '<div class="pc-who__sub">by ' + esc(inv.sentBy) + '</div>' : '') + '</td>' +
+              /* A League invite is League access: the Skeleton key's to resend or revoke. */
+              '<td><span class="pc-actions">' + (sk() || NL.isClubUser(inv.role)
+                ? '<button class="btn btn--ghost btn--sm" type="button" data-act="resend">' + icon('send') + 'Resend</button>' +
+                  '<button class="btn btn--ghost btn--sm" type="button" data-act="revoke">' + icon('delete') + 'Revoke</button>'
+                : '') + '</span></td></tr>';
+          }).join('') + '</tbody></table></div>'
+        : '<div class="empty-state"><div class="empty-state__title">No invites waiting</div></div>';
+      box.onclick = function (e) {
+        var b = e.target.closest('button[data-act]'); if (!b) return;
+        var inv = items.filter(function (x) { return x._key === b.closest('tr').getAttribute('data-key'); })[0];
+        if (inv) (b.getAttribute('data-act') === 'resend' ? resendInvite : revokeInvite)(inv, b);
+      };
+    }).catch(function (err) {
+      box.innerHTML = '<p class="pc-muted">Invites could not be loaded: ' + esc(err && err.message || String(err)) + '</p>';
+    });
+  }
+
+  /* A resend is a NEW send by intent, so a fresh token: reusing the old one
+     would meet the backend's guard and send nothing. Still retry-safe within
+     this click. */
+  function resendInvite(inv, btn) {
+    btn.disabled = true;
+    var token = NL.uuid();
+    NL.gas.send({ action: 'sendInvite', token: token, email: inv.email || '', name: inv.name || '',
+      role: inv.role || 'staff', org: '', orgKey: '', club: inv.club || '', jobTitle: inv.jobTitle || '', tools: inv.tools || {} })
+    .then(function (result) {
+      if (result && result.ok === false) { NL.toast('Resend failed: ' + (result.error || 'unknown'), 'error'); btn.disabled = false; return; }
+      db.ref('admin/invites-pending/' + inv._key).update({ sentAt: Date.now(), token: token }).catch(function () {});
+      NL.writeAudit('invite_sent', 'Resent invite to ' + (inv.name || inv.email || ''));
+      NL.toast('Invite resent to ' + inv.email, 'success');
+      setTimeout(loadInvites, 1000);
+    })
+    .catch(function () { NL.toast('The resend may not have gone', 'error'); btn.disabled = false; });
+  }
+
+  /* Revoke: the pending record goes; the link in the email expires on its
+     own after 24 hours. */
+  function revokeInvite(inv) {
+    NL.confirm('Revoke the invite to ' + (inv.name || inv.email) + '?', { title: 'Revoke invite', confirmText: 'Revoke', variant: 'danger' })
+    .then(function (ok) {
+      if (!ok) return;
+      return db.ref('admin/invites-pending/' + inv._key).remove().then(function () {
+        NL.writeAudit('invite_cancelled', (inv.name || inv.email || '') + ' invite revoked');
+        NL.toast('Invite revoked', 'success');
+        loadInvites();
+      });
+    }).catch(function (err) { NL.toast('Could not revoke: ' + (err && err.message || err), 'error'); });
+  }
+
+  /* ── Requests ──────────────────────────────────────────────────────────
+     Sign-up requests from clubs (functions/account.js submitAccessRequest:
+     role 'club', tools asked for forced to 'access'). Moved from the portal
+     with the same writes. Approve: pending off, and each club tool they
+     asked for that their role does not open by default is granted at
+     Access — what the portal's card wrote when its sliders were left as
+     they opened. Then the approval email. Reject: rejected on, the
+     rejection email. Dismiss: for a request nobody should have sent (someone
+     who found the sign-up page) — no email; the request is marked
+     dismissed and its account, never approved, is removed. A request with
+     no linked account can only be dismissed. */
+  function loadRequests() {
+    var box = document.getElementById('pcRequests');
+    return db.ref('admin/requests').once('value').then(function (snap) {
+      var all = snap.val() || {}, items = [];
+      Object.keys(all).forEach(function (k) { var r = all[k]; if (r && r.status === 'pending') { r._key = k; items.push(r); } });
+      items.sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+      count('pcRequestCount', items.length);
+      box.innerHTML = items.length
+        ? '<div class="table-wrap"><table class="table"><thead><tr><th>Person</th><th>Club</th><th>Asked for</th><th>Received</th><th aria-label="Actions"></th></tr></thead><tbody>' +
+          items.map(function (r) {
+            var asked = Object.keys((r.tools && typeof r.tools === 'object' && !Array.isArray(r.tools)) ? r.tools : {})
+              .map(function (k) { return (S.registry[k] && S.registry[k].label) || k; });
+            var acts = (r.uid
+              ? '<button class="btn btn--navy btn--sm" type="button" data-act="approve">' + icon('tick') + 'Approve</button>' +
+                '<button class="btn btn--ghost btn--sm" type="button" data-act="reject">Reject</button>'
+              : '<span class="pc-muted">No linked account</span> ') +
+              '<button class="btn btn--ghost btn--sm" type="button" data-act="dismiss">' + icon('delete') + 'Dismiss</button>';
+            return '<tr data-key="' + esc(r._key) + '">' +
+              '<td><span class="pc-who"><span class="pc-who__name">' + esc(r.name || '(no name)') + '</span><span class="pc-who__sub">' + esc(r.email || '') + '</span></span></td>' +
+              '<td>' + esc(r.club || '') + (r.jobTitle ? '<div class="pc-who__sub">' + esc(r.jobTitle) + '</div>' : '') + '</td>' +
+              '<td>' + (asked.length ? esc(asked.join(', ')) : '<span class="pc-muted">Nothing extra</span>') + '</td>' +
+              '<td>' + (r.createdAt ? esc(NL.formatDateTime(r.createdAt)) : '') + '</td>' +
+              '<td><span class="pc-actions">' + acts + '</span></td></tr>';
+          }).join('') + '</tbody></table></div>'
+        : '<div class="empty-state"><div class="empty-state__title">No requests waiting</div></div>';
+      box.onclick = function (e) {
+        var b = e.target.closest('button[data-act]'); if (!b) return;
+        var r = items.filter(function (x) { return x._key === b.closest('tr').getAttribute('data-key'); })[0];
+        if (!r) return;
+        var act = b.getAttribute('data-act');
+        b.disabled = true;
+        (act === 'approve' ? approveRequest : act === 'reject' ? rejectRequest : dismissRequest)(r)
+          .catch(function (err) { NL.toast('Failed: ' + (err && err.message || err), 'error'); b.disabled = false; });
+      };
+    }).catch(function (err) {
+      box.innerHTML = '<p class="pc-muted">Requests could not be loaded: ' + esc(err && err.message || String(err)) + '</p>';
+    });
+  }
+
+  /* Approve shows what is being issued before anything is written: the
+     role (Club Admin or Club Staff — the request's own is chosen to start
+     with), the pass that goes with it (their club's card, and the Club
+     Operations key for a Club Admin) and every tool they will open, at
+     what level. Approving writes all three, then sends the approval email. */
+  function passFor(r, role) {
+    return P.build({ base: 'club', club: r.club || '', jobTitle: r.jobTitle || '',
+      keys: role === 'club-admin' ? ['club-operations'] : [] }, S.session.uid);
+  }
+  /* What the new pass opens, as the door will answer it: the pass, less
+     League tools (a club role never opens those until club logins). */
+  function opensFor(r, role) {
+    return P.summary(passFor(r, role), S.registry).filter(function (x) { return !gatedFor({ role: role }, x.key); })
+      .map(function (x) { return { label: x.label, level: x.explain.level === 'manage' ? 'admin' : 'access' }; });
+  }
+  function approveRequest(r) {
+    var start = NL.roles.norm(r.role || 'club-staff');
+    if (start !== 'club-admin') start = 'club-staff';
+    var role = start;
+    var body = document.createElement('div');
+    function draw() {
+      var opens = opensFor(r, role);
+      body.innerHTML =
+        '<div class="pc-approve__who">' + crestHtml(r.club || '') +
+          '<span class="pc-who"><span class="pc-who__name">' + esc(r.name || r.email || '') + '</span>' +
+          (r.jobTitle ? '<span class="pc-who__job">' + esc(r.jobTitle) + '</span>' : '') +
+          '<span class="pc-who__sub">' + esc(r.email || '') + '</span></span></div>' +
+        (r.club ? '' : '<p class="pc-off">' + icon('warning') + 'No club on this request</p>') +
+        '<div class="pc-label">Role</div><div class="pc-roles">' +
+          ['club-admin', 'club-staff'].map(function (x) {
+            return '<label class="pc-role"><input type="radio" name="pcApRole" value="' + x + '"' + (x === role ? ' checked' : '') + '>' +
+              '<span><span class="pc-role__name">' + esc(NL.roles.label(x)) + '</span><span class="pc-role__grant">' + esc(NL.roles.grant(x)) + '</span></span></label>';
+          }).join('') + '</div>' +
+        '<div class="pc-label pc-gap">Pass</div>' + passHtml(passFor(r, role), 'Club card') + offSeason(r.club) +
+        '<div class="pc-label pc-gap">Opens</div>' +
+        (opens.length
+          ? '<ul class="pc-opens">' + opens.map(function (o) {
+              return '<li>' + esc(o.label) + ' <span class="pc-muted">' + (o.level === 'admin' ? 'Manage' : 'Access') + '</span></li>';
+            }).join('') + '</ul>'
+          : '<p class="pc-muted">Nothing yet.</p>');
+      wireCrests(body);
+    }
+    body.addEventListener('change', function (e) { if (e.target.name === 'pcApRole') { role = e.target.value; draw(); } });
+    draw();
+    return new Promise(function (resolve) {
+      NL.modal({
+        title: 'Approve request', body: body, onClose: function () { resolve(); loadRequests(); },
+        buttons: [
+          { label: 'Cancel', onClick: function (m) { m.close(); } },
+          { label: 'Approve and email', className: 'btn--primary', onClick: function (m) {
+              var btns = m.el.querySelectorAll('.modal__footer .btn');
+              btns.forEach(function (b) { b.disabled = true; });
+              doApprove(r, role).then(function () { m.close(); }).catch(function (err) {
+                btns.forEach(function (b) { b.disabled = false; });
+                NL.toast('Failed: ' + (err && err.message || err), 'error');
+              });
+            } }
+        ]
+      });
+    });
+  }
+  function doApprove(r, role) {
+    var updates = {}, base = 'users/' + r.uid + '/';
+    updates[base + 'pending'] = false;
+    updates[base + 'rejected'] = false;
+    updates[base + 'role'] = role;
+    updates[base + 'pass'] = passFor(r, role);
+    var tools = P.toOld(passFor(r, role), S.registry, role);
+    Object.keys(tools).forEach(function (k) { updates[base + 'tools/' + k] = tools[k]; });
+    updates['admin/requests/' + r._key + '/status'] = 'approved';
+    NL.writeAudit('request_approved', (r.name || r.email || '') + (r.club ? ' (' + r.club + ')' : '') +
+      ' as ' + NL.roles.label(role) + ', Club card' + (role === 'club-admin' ? ' with Operations' : ''),
+      { uid: r.uid, name: r.name || '', email: r.email || '' });
+    return db.ref().update(updates).then(function () {
+      NL.gas.fetch({ action: 'sendApproval', name: r.name || '', email: r.email || '', club: r.club || '' }).catch(function () {});
+      NL.toast('Approved — ' + (r.name || r.email || ''), 'success');
+      return refreshPeople();
+    });
+  }
+
+  function rejectRequest(r) {
+    return NL.confirm('Reject ' + (r.name || r.email) + '’s request? They are emailed to say so.', { title: 'Reject request', confirmText: 'Reject', variant: 'danger' })
+    .then(function (ok) {
+      if (!ok) { loadRequests(); return; }
+      var updates = {};
+      updates['users/' + r.uid + '/pending'] = false;
+      updates['users/' + r.uid + '/rejected'] = true;
+      updates['admin/requests/' + r._key + '/status'] = 'rejected';
+      NL.writeAudit('request_declined', (r.name || r.email || '') + (r.club ? ' (' + r.club + ')' : ''),
+        { uid: r.uid, name: r.name || '', email: r.email || '' });
+      return db.ref().update(updates).then(function () {
+        NL.gas.fetch({ action: 'sendRejection', name: r.name || '', email: r.email || '' }).catch(function () {});
+        NL.toast('Request rejected', 'success');
+        return refreshPeople().then(loadRequests);
+      });
+    });
+  }
+
+  /* No email. The account goes only if it is still waiting: one that has
+     since been approved is a person, and is removed from their own page. */
+  function dismissRequest(r) {
+    return NL.confirm('Dismiss ' + (r.name || r.email || 'this request') + '? No email is sent.', { title: 'Dismiss request', confirmText: 'Dismiss', variant: 'danger' })
+    .then(function (ok) {
+      if (!ok) { loadRequests(); return; }
+      return (r.uid ? db.ref('users/' + r.uid).once('value') : Promise.resolve(null)).then(function (snap) {
+        var u = snap && snap.val();
+        var updates = {};
+        updates['admin/requests/' + r._key + '/status'] = 'dismissed';
+        if (u && u.pending && !u.approved) updates['users/' + r.uid] = null;
+        NL.writeAudit('request_dismissed', (r.name || r.email || '') + (r.club ? ' (' + r.club + ')' : ''),
+          r.uid ? { uid: r.uid, name: r.name || '', email: r.email || '' } : null);
+        return db.ref().update(updates);
+      }).then(function () {
+        NL.toast('Request dismissed', 'success');
+        return refreshPeople().then(loadRequests);
+      });
+    });
+  }
+
+  function count(id, n) {
+    var el = document.getElementById(id);
+    el.textContent = n; el.hidden = !n;
+  }
+
+  /* ── A person ──────────────────────────────────────────────────────────
+     Moved from the portal's Users pane (portal v15.4 and before) with the
+     same writes: role, club, org, job title and the per-tool entries, all in
+     one update; Remove user deletes users/<uid>. Each is audited against the
+     person, as the portal's writeAuditFor did.
+
+     Per-tool entries are still "exceptions": stored only where a tool's
+     level differs from what the role gives, and nulled where it matches.
+     They decide access until step 6, when keys replace them. Club roles
+     follow their role with no exceptions, as before; anything left over on
+     a club account is shown, and Restore defaults clears it.
+
+     Who may edit: the roles that open this tool today (superadmin and
+     League Admin), as in the portal. A superadmin account is not edited
+     here, and only a superadmin may make one. */
+  var LEVELS = ['off', 'access', 'admin'];
+  var LEVEL_WORD = { off: 'Off', access: 'Access', admin: 'Manage' };
+  var ED = null;
+
+  function canPerson(u) {
+    var r = S.session.role;
+    return (r === 'superadmin' || r === 'admin') && u.role !== 'superadmin' && !u.pending && (sk() || clubPerson(u));
+  }
+  function roleChoices() {
+    if (!sk()) return CLUB_ROLES;
+    return S.session.role === 'superadmin' ? ['superadmin'].concat(ROLES) : ROLES;
+  }
+
+  /* The rungs a tool has: its registry `levels` when that is a prefix of
+     Off / Access / Manage, else all three. A club role never holds Manage. */
+  function rungs(toolKey, role) {
+    var t = S.registry[toolKey], d = t && t.levels;
+    var list = (Array.isArray(d) && d.length && d.every(function (l, i) { return l === LEVELS[i]; })) ? d : LEVELS;
+    return NL.isClubUser(role) ? list.filter(function (l) { return l !== 'admin'; }) : list;
+  }
+  function clamp(toolKey, role, level) {
+    var r = rungs(toolKey, role);
+    return r.indexOf(level) >= 0 ? level : (level === 'off' ? 'off' : r[r.length - 1]);
+  }
+  /* League-only tools: closed to club roles before any level is read. */
+  function leagueOnly(t) {
+    if (!t) return false;
+    if (t.audience === 'meta' || t.audience === 'league' || t.audience === 'staff') return true;
+    if (t.audience === 'club') return false;
+    return ((t.defaults && t.defaults['club-admin']) || 'off') === 'off';
+  }
+  function def(toolKey, role) {
+    var t = S.registry[toolKey];
+    return (t && t.defaults && t.defaults[NL.roles.norm(role)]) || 'off';
+  }
+  function toolKeys() {
+    return Object.keys(S.registry).filter(function (k) { return k !== 'welcome' && S.registry[k]; })
+      .sort(function (a, b) { return String(S.registry[a].label || a).localeCompare(String(S.registry[b].label || b)); });
+  }
+  /* Working levels for a role: what they hold today on their own role, the
+     role's defaults on any other — as the portal's role preview did. */
+  function levelsFor(u, role) {
+    var out = {};
+    toolKeys().forEach(function (k) {
+      out[k] = role === NL.roles.norm(u.role)
+        ? NL.resolveToolLevel(u.tools[k], S.registry[k], u.role)
+        : def(k, role);
+    });
+    return out;
+  }
+
+  function openPerson(uid, push) {
+    var u = S.users.filter(function (x) { return x.uid === uid; })[0];
+    if (!u) { NL.toast('That person is not on the list', 'error'); return showTab('people'); }
+    var role = NL.roles.norm(u.role);
+    ED = { u: u, role: role, club: u.club || '', levels: levelsFor(u, role), picker: null };
+    document.getElementById('pcTabs').hidden = true;
+    document.querySelectorAll('[data-pane-body]').forEach(function (s) { s.hidden = s.getAttribute('data-pane-body') !== 'person'; });
+    if (push !== false) { try { history.replaceState(null, '', '?person=' + encodeURIComponent(uid)); } catch (e) {} }
+    drawPerson();
+    window.scrollTo(0, 0);
+  }
+
+  function drawPerson() {
+    var u = ED.u, edit = canPerson(u), box = document.getElementById('pcPerson');
+    var passBtns = '';
+    if (P.canViewAs(S.session.pass)) passBtns += '<a class="btn btn--ghost btn--sm" href="/pass/?view=as&uid=' + encodeURIComponent(u.uid) + '">' + icon('eye') + 'View pass</a>';
+    if (canEdit(u)) passBtns += '<a class="btn btn--ghost btn--sm" href="/pass/?view=issue&uid=' + encodeURIComponent(u.uid) + '">' + icon('edit') + (P.isIssued(u.pass) ? 'Edit pass' : 'Issue pass') + '</a>';
+
+    var html = '<div class="pc-head"><div>' +
+      '<div class="pc-head__name">' + esc(u.name || '(no name)') + '</div>' +
+      (jobOf(u) ? '<div class="pc-who__job">' + esc(jobOf(u)) + '</div>' : '') +
+      '<div class="pc-who__sub">' + esc(u.email) + '</div>' +
+      '<div class="pc-head__line">' + passHtml(u.pass) + offSeason(orgOf(u)) + statusHtml(u) +
+        '<span class="pc-legacy">Legacy role: ' + esc(roleText(u)) + '</span></div>' +
+      '</div><div class="pc-actions">' + passBtns + '</div></div>';
+
+    if (!edit) {
+      html += '<p class="pc-note">' + (u.role === 'superadmin' ? 'A superadmin account is not edited here.' : 'This request is waiting in Requests.') + '</p>';
+    } else {
+      html += '<div class="form-panel pc-panel pc-open">' +
+        '<div class="form-panel__head">Details</div>' +
+        '<div class="form-panel__body"><div class="form-grid">' +
+          '<div class="form-group span2"><label>Legacy role</label>' +
+            '<p class="pc-hint">Their pass decides what they open; this still sets a few database permissions.</p>' +
+            '<div class="pc-roles" id="pcEdRoles">' +
+            roleChoices().map(function (x) {
+              return '<label class="pc-role"><input type="radio" name="pcEdRole" value="' + x + '"' + (x === ED.role ? ' checked' : '') + '>' +
+                '<span><span class="pc-role__name">' + esc(NL.roles.label(x)) + '</span><span class="pc-role__grant">' + esc(NL.roles.grant(x)) + '</span></span></label>';
+            }).join('') +
+          '</div></div>' +
+          '<div class="form-group" id="pcEdClubWrap"' + (NL.isClubUser(ED.role) ? '' : ' hidden') + '><label>Club</label><div id="pcEdClub"></div></div>' +
+          '<div class="form-group"><label for="pcEdJob">Job title</label><input type="text" id="pcEdJob" autocomplete="off" value="' + esc(u.jobTitle) + '"></div>' +
+        '</div>' +
+        '<div class="pc-exblock"><div class="pc-label">' + (P.isIssued(u.pass) ? 'Tools' : 'Tool exceptions') + '</div><div id="pcEdEx"></div></div>' +
+        '</div>' +
+        '<div class="form-panel__foot pc-foot pc-foot--split">' +
+          '<button class="btn btn--danger" type="button" id="pcEdRemove">' + icon('delete') + 'Remove user</button>' +
+          '<span class="pc-foot__right"><button class="btn btn--ghost" type="button" id="pcEdRestore">Restore defaults</button>' +
+          '<button class="btn btn--primary" type="button" id="pcEdSave">Save changes</button></span>' +
+        '</div></div>';
+    }
+    /* History reads the audit log, which is the Skeleton key's. */
+    if (sk()) html += '<div class="section-head"><h2>History</h2>' +
+      '<a class="btn btn--ghost btn--sm" href="?tab=audit&uid=' + encodeURIComponent(u.uid) + '">Open in Audit ' + icon('forward') + '</a></div>' +
+      '<div id="pcEdHistory"><p class="pc-muted">Loading…</p></div>';
+    box.innerHTML = html;
+    wireCrests(box);
+
+    if (edit) {
+      ED.picker = NL.clubPicker(document.getElementById('pcEdClub'), {
+        season: 'current', freetext: false, clearable: false, placeholder: 'Search clubs…',
+        onSelect: function (sel) { ED.club = (sel && sel.name) || ''; }
+      });
+      if (ED.club && ED.picker.setValue) ED.picker.setValue(ED.club);
+      document.getElementById('pcEdRoles').addEventListener('change', function (e) {
+        ED.role = e.target.value;
+        if (!NL.isClubUser(ED.role)) ED.club = '';
+        document.getElementById('pcEdClubWrap').hidden = !NL.isClubUser(ED.role);
+        if (NL.isClubUser(ED.role) && ED.picker.setValue) ED.picker.setValue(ED.club || '');
+        ED.levels = levelsFor(u, ED.role);
+        drawExceptions();
+      });
+      if (P.isIssued(u.pass)) document.getElementById('pcEdRestore').hidden = true;
+      document.getElementById('pcEdRestore').addEventListener('click', function () {
+        toolKeys().forEach(function (k) { ED.levels[k] = def(k, ED.role); });
+        drawExceptions();
+        NL.toast('Defaults restored. Save to apply.', 'info');
+      });
+      document.getElementById('pcEdSave').addEventListener('click', savePerson);
+      document.getElementById('pcEdRemove').addEventListener('click', removePerson);
+      drawExceptions();
+    }
+    if (sk()) loadHistory(u.uid);
+  }
+
+  /* The exceptions: tools whose working level differs from the role's. */
+  function drawExceptions() {
+    var role = ED.role, club = NL.isClubUser(role), box = document.getElementById('pcEdEx');
+    /* A pass holder's tools come from their pass (auth-guard v16.0); the
+       entries are written from it on save, so there is nothing to set by
+       hand. */
+    if (P.isIssued(ED.u.pass)) {
+      var held = P.summary(ED.u.pass, S.registry).filter(function (x) { return !gatedFor({ role: role }, x.key); });
+      box.innerHTML = '<p class="pc-hint">Their pass sets these.</p>' + (held.length
+        ? '<ul class="pc-opens">' + held.map(function (x) {
+            return '<li>' + esc(x.label) + ' <span class="pc-muted">' + (x.explain.level === 'manage' ? 'Manage' : 'Access') + '</span></li>';
+          }).join('') + '</ul>'
+        : '<p class="pc-muted">Nothing.</p>');
+      box.onchange = box.onclick = null;
+      return;
+    }
+    var keys = toolKeys().filter(function (k) { return !(club && leagueOnly(S.registry[k])); });
+    var ex = keys.filter(function (k) { return clamp(k, role, ED.levels[k]) !== def(k, role); });
+    function label(k) { return (S.registry[k].label || k); }
+    function levelSelect(k, value, attr) {
+      return '<select class="nl-select pc-select" ' + attr + '>' + rungs(k, role).map(function (l) {
+        return '<option value="' + l + '"' + (l === value ? ' selected' : '') + '>' + LEVEL_WORD[l] + '</option>';
+      }).join('') + '</select>';
+    }
+    var html = '<p class="pc-hint">' + esc(NL.roles.label(role)) + ' sets everything else.' +
+      (club ? ' Club access follows the role.' : '') + '</p>';
+    if (ex.length) {
+      html += '<div class="table-wrap"><table class="table"><thead><tr><th>Tool</th><th>' + esc(NL.roles.label(role)) + ' gives</th><th>This person</th><th aria-label="Actions"></th></tr></thead><tbody>' +
+        ex.map(function (k) {
+          var now = clamp(k, role, ED.levels[k]);
+          return '<tr data-key="' + esc(k) + '"><td>' + esc(label(k)) + '</td><td>' + LEVEL_WORD[def(k, role)] + '</td>' +
+            '<td>' + (club ? LEVEL_WORD[now] : levelSelect(k, now, 'data-level aria-label="Level for ' + esc(label(k)) + '"')) + '</td>' +
+            '<td>' + (club ? '' : '<button class="btn btn--ghost btn--sm" type="button" data-drop>' + icon('delete') + 'Remove</button>') + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    } else {
+      html += '<p class="pc-muted">None.</p>';
+    }
+    var spare = club ? [] : keys.filter(function (k) { return ex.indexOf(k) < 0; });
+    if (spare.length) {
+      html += '<div class="pc-ex"><select class="nl-select pc-select" id="pcExTool" aria-label="Tool">' +
+        '<option value="">Add an exception…</option>' +
+        spare.map(function (k) { return '<option value="' + esc(k) + '">' + esc(label(k)) + '</option>'; }).join('') +
+        '</select><select class="nl-select pc-select" id="pcExLevel" aria-label="Level" hidden></select>' +
+        '<button class="btn btn--ghost btn--sm" type="button" id="pcExAdd" hidden>' + icon('add') + 'Add</button></div>';
+    }
+    box.innerHTML = html;
+
+    box.onchange = function (e) {
+      var t = e.target;
+      if (t.hasAttribute('data-level')) { ED.levels[t.closest('tr').getAttribute('data-key')] = t.value; return; }
+      if (t.id === 'pcExTool') {
+        var lv = document.getElementById('pcExLevel'), add = document.getElementById('pcExAdd');
+        lv.hidden = add.hidden = !t.value;
+        if (t.value) {
+          var d = def(t.value, role);
+          lv.innerHTML = rungs(t.value, role).filter(function (l) { return l !== d; }).map(function (l) {
+            return '<option value="' + l + '">' + LEVEL_WORD[l] + '</option>';
+          }).join('');
+        }
+      }
+    };
+    box.onclick = function (e) {
+      if (e.target.closest('[data-drop]')) {
+        var k = e.target.closest('tr').getAttribute('data-key');
+        ED.levels[k] = def(k, role);
+        return drawExceptions();
+      }
+      if (e.target.closest('#pcExAdd')) {
+        var tool = document.getElementById('pcExTool').value, level = document.getElementById('pcExLevel').value;
+        if (tool && level) { ED.levels[tool] = level; drawExceptions(); }
+      }
+    };
+  }
+
+  /* One update, as the portal's Save access: role, club, org, job title,
+     the deprecated orgKey cleared, and every tool's entry — the level where
+     it differs from the role's default, null where it matches. */
+  function savePerson() {
+    var u = ED.u, role = ED.role, club = NL.isClubUser(role);
+    var newClub = club ? (ED.club || (ED.picker && ED.picker.getValue && ED.picker.getValue()) || '').trim() : '';
+    if (club && !newClub) return NL.toast('Choose the club', 'error');
+    var job = document.getElementById('pcEdJob').value.trim();
+    var org = club ? '' : 'National League';
+    var base = 'users/' + u.uid + '/', updates = {}, changed = false;
+    /* A pass holder's entries follow the pass, worked out for the role
+       being saved (a role change moves the defaults they are measured
+       against). Anyone else keeps the exceptions set here. */
+    var fromPass = P.isIssued(u.pass) ? P.toOld(u.pass, S.registry, role) : null;
+
+    toolKeys().forEach(function (k) {
+      var level = (club && leagueOnly(S.registry[k])) ? 'off' : clamp(k, role, ED.levels[k]);
+      var entry = fromPass ? (fromPass[k] === undefined ? null : fromPass[k]) : (level === def(k, role) ? null : level);
+      var stored = u.tools[k] === undefined ? null : u.tools[k];
+      if (stored !== entry) changed = true;
+      updates[base + 'tools/' + k] = entry;
+    });
+    if (role !== (u.role || '') || newClub !== (u.club || '') || org !== (u.org || '') || job !== (u.jobTitle || '')) changed = true;
+    if (!changed) return NL.toast('Nothing to save', 'info');
+
+    updates[base + 'role'] = role;
+    updates[base + 'club'] = newClub;
+    updates[base + 'org'] = org;
+    updates[base + 'jobTitle'] = job;
+    updates[base + 'orgKey'] = null;
+
+    var btn = document.getElementById('pcEdSave');
+    btn.disabled = true;
+    var roleChanged = role !== (u.role || '');
+    NL.writeAudit('access_changed',
+      (roleChanged ? 'Role: ' + (u.role || '?') + ' -> ' + role + '. ' : '') + 'Access update for ' + (u.name || u.email || u.uid),
+      { uid: u.uid, name: u.name || '', email: u.email || '' });
+    db.ref().update(updates).then(function () {
+      NL.toast('Saved — ' + (u.name || u.email || ''), 'success');
+      return refreshPeople().then(function () { openPerson(u.uid, false); });
+    }).catch(function (err) {
+      btn.disabled = false;
+      NL.toast('Could not save: ' + (err && err.message || err), 'error');
+    });
+  }
+
+  /* Remove user: their record goes (pass and per-tool entries with it). The
+     sign-in account itself stays in Firebase Auth, as it always has. */
+  function removePerson() {
+    var u = ED.u;
+    NL.confirm('Remove ' + (u.name || u.email) + '? They lose every tool.', { title: 'Remove user', confirmText: 'Remove', variant: 'danger' })
+    .then(function (ok) {
+      if (!ok) return;
+      NL.writeAudit('user_removed', (u.name || u.email || '') + ' removed by admin', { uid: u.uid, name: u.name || '', email: u.email || '' });
+      return db.ref('users/' + u.uid).remove().then(function () {
+        NL.toast((u.name || u.email || 'User') + ' removed', 'success');
+        return refreshPeople().then(function () { showTab('people'); });
+      });
+    }).catch(function (err) { NL.toast('Could not remove: ' + (err && err.message || err), 'error'); });
+  }
+
+  /* The ten most recent audit entries by or about them. */
+  function loadHistory(uid) {
+    var box = document.getElementById('pcEdHistory');
+    db.ref('admin/audit-by-user/' + uid).orderByKey().limitToLast(10).once('value').then(function (snap) {
+      var rows = [];
+      snap.forEach(function (c) { var e = c.val(); if (e) { e._key = c.key; rows.push(e); } });
+      rows.reverse();
+      box.innerHTML = rows.length ? NL.audit.table(rows) : '<div class="empty-state"><div class="empty-state__title">Nothing recorded yet</div></div>';
+    }).catch(function (err) {
+      box.innerHTML = '<p class="pc-muted">History could not be loaded: ' + esc(err && err.message || String(err)) + '</p>';
+    });
+  }
+
+  /* ── Tools: who each tool opens to ─────────────────────────────────────
+     Skeleton key only. A tool's grants (card and key → Off / Access /
+     Manage) start from the registry's permissions.grants; a change made
+     here is saved live at access-grants/<toolKey> and takes effect on the
+     next page load, with no pull request (NL.pass.withLive). "Reset to
+     standard" deletes the live entry, so the registry's grants apply again.
+
+     Saving also rewrites each pass holder's per-tool entry for this tool
+     (NL.pass.toOld), so the database reads what the door gives. Every save
+     and reset is in the audit log, with what changed. */
+  var TL = { q: '', shelf: null, key: null, draft: null, filter: null };
+  var LV_WORD = { off: 'Off', access: 'Access', manage: 'Manage' };
+
+  function grantsOf(rec) { return P.cleanGrants(rec && rec.permissions && rec.permissions.grants); }
+  function sameGrants(a, b) { return JSON.stringify(P.cleanGrants(a)) === JSON.stringify(P.cleanGrants(b)); }
+  function partName(id) {
+    if (id === 'league') return 'League card';
+    if (id === 'club') return 'Club card';
+    var k = P.KEY[id];
+    return (k.base === 'club' ? 'Club ' : 'League ') + k.name;
+  }
+  function partTag(id) {
+    if (id === 'league' || id === 'club') return partName(id);
+    var k = P.KEY[id];
+    return (k.base === 'club' ? 'Club ' : '') + k.code;
+  }
+  /* The parts a tool can grant to: League card and keys, and the Club side
+     only for a tool that is for clubs too. */
+  function partsFor(rec) {
+    var p = rec.permissions, out = ['league'];
+    P.KEYS.forEach(function (k) { if (k.base === 'league') out.push(k.id); });
+    if (p.for !== 'league') {
+      out.push('club');
+      P.KEYS.forEach(function (k) { if (k.base === 'club') out.push(k.id); });
+    }
+    return out;
+  }
+  function grantOf(g, id) { return (id === 'league' || id === 'club') ? (g.base[id] || 'off') : (g.key[id] || 'off'); }
+  function setGrant(g, id, v) {
+    if (id === 'league' || id === 'club') g.base[id] = v;
+    else if (v === 'off') delete g.key[id];
+    else g.key[id] = v;
+  }
+
+  function opensHtml(rec) {
+    var p = rec.permissions;
+    if (p.shelf === 'structural') return '<span class="pc-muted">Skeleton key only</span>';
+    var w = P.whoCanOpen(rec);
+    var tags = (w && w.rows || []).map(function (r) {
+      return '<span class="pill pill--info" title="' + esc(partName(r.id)) + '">' + esc(partTag(r.id)) +
+        (r.level === 'manage' ? ' · Manage' : '') + '</span>';
+    });
+    if (p.shelf === 'sandbox') tags.unshift('<span class="pill">Testers</span>');
+    return tags.length ? '<span class="tl-opens">' + tags.join('') + '</span>' : '<span class="pc-muted">Nobody</span>';
+  }
+
+  function drawTools() {
+    var keys = toolKeys().filter(function (k) { return S.registry[k].permissions; });
+    var rows = keys.filter(function (k) {
+      var r = S.registry[k], p = r.permissions;
+      if (TL.shelf && p.shelf !== TL.shelf) return false;
+      return !TL.q || (String(r.label || k) + ' ' + k).toLowerCase().indexOf(TL.q) >= 0;
+    });
+    document.getElementById('tlCount').textContent = rows.length + ' of ' + keys.length;
+    document.getElementById('tlRows').innerHTML = rows.length ? rows.map(function (k) {
+      var r = S.registry[k];
+      return '<tr><td><span class="pc-who"><a class="pc-who__name pc-link" href="?tool=' + encodeURIComponent(k) + '" data-tool="' + esc(k) + '">' + esc(r.label || k) + '</a>' +
+          (S.live[k] ? '<span class="pc-who__sub">Changed here' + (S.live[k].updated ? ', ' + esc(NL.formatDateShort(S.live[k].updated)) : '') + '</span>' : '') + '</span></td>' +
+        '<td>' + opensHtml(r) + '</td>' +
+        '<td class="pc-legacy">' + esc(P.SHELF[r.permissions.shelf] || '') + '</td>' +
+        '<td><span class="pc-actions"><a class="btn btn--ghost btn--sm" href="?tool=' + encodeURIComponent(k) + '" data-tool="' + esc(k) + '">' + icon('edit') + 'Edit</a></span></td></tr>';
+    }).join('') : '<tr><td colspan="4" class="pc-muted">Nothing matches.</td></tr>';
+  }
+
+  function openTool(key, push) {
+    var rec = S.registry[key];
+    if (!rec || !rec.permissions) { NL.toast('That tool is not in the registry', 'error'); return showTab('tools'); }
+    TL.key = key;
+    TL.draft = grantsOf(rec);
+    document.getElementById('pcTabs').hidden = true;
+    document.querySelectorAll('[data-pane-body]').forEach(function (s) { s.hidden = s.getAttribute('data-pane-body') !== 'tool'; });
+    if (push !== false) { try { history.replaceState(null, '', '?tool=' + encodeURIComponent(key)); } catch (e) {} }
+    drawTool();
+    window.scrollTo(0, 0);
+  }
+
+  /* The record as it would be with the draft grants. */
+  function draftRecord() { return P.withLive(S.base[TL.key] || S.registry[TL.key], TL.draft); }
+
+  /* Whose level on this tool the draft changes, from the pass alone. */
+  function changesFor(newRec) {
+    var old = S.registry[TL.key], out = [];
+    S.users.forEach(function (u) {
+      if (!P.isIssued(u.pass)) return;
+      var a = P.level(u.pass, old), b = P.level(u.pass, newRec);
+      if (a !== b) out.push({ u: u, from: a, to: b });
+    });
+    return out;
+  }
+
+  function drawTool() {
+    var key = TL.key, rec = S.registry[key], p = rec.permissions;
+    var levels = (p.levels || ['off', 'access']).filter(function (l) { return LV_WORD[l]; });
+    var structural = p.shelf === 'structural';
+    var html = '<div class="pc-head"><div>' +
+      '<div class="pc-head__name">' + esc(rec.label || key) + '</div>' +
+      (rec.description ? '<div class="pc-who__job">' + esc(rec.description) + '</div>' : '') +
+      '<div class="pc-head__line"><span class="pc-legacy">' + esc(P.SHELF[p.shelf] || '') + ' · ' + esc(P.FOR[p.for] || '') +
+        (S.live[key] ? ' · Changed here' : '') + '</span></div>' +
+      '</div></div>';
+
+    if (structural) {
+      html += '<p class="pc-note">A Structure tool opens to the Skeleton key only, whatever its grants say.</p>';
+    } else {
+      if (p.shelf === 'sandbox') html += '<p class="pc-note">In the Sandbox, only the Tester key opens it. These grants apply once it launches.</p>';
+      html += '<div class="form-panel pc-panel pc-open"><div class="form-panel__head">Who opens it</div><div class="form-panel__body">' +
+        '<div class="table-wrap tl-grantwrap"><table class="table tl-grants"><tbody>';
+      var side = null;
+      partsFor(rec).forEach(function (id) {
+        var s = (id === 'club' || (P.KEY[id] && P.KEY[id].base === 'club')) ? 'club' : 'league';
+        if (s !== side) { side = s; html += '<tr><td colspan="2" class="tl-side">' + (s === 'club' ? 'Club' : 'League') + '</td></tr>'; }
+        var v = grantOf(TL.draft, id);
+        html += '<tr><td>' + esc(partName(id)) + '</td><td><select class="nl-select tl-level" data-part="' + esc(id) + '" aria-label="' + esc(partName(id)) + '">' +
+          levels.map(function (l) { return '<option value="' + l + '"' + (l === v ? ' selected' : '') + '>' + LV_WORD[l] + '</option>'; }).join('') +
+          '</select></td></tr>';
+      });
+      html += '</tbody></table></div>' +
+        '<div class="pc-exblock"><div class="pc-label">What this changes</div><div id="tlChanges"></div></div>' +
+        '</div><div class="form-panel__foot pc-foot pc-foot--split">' +
+          '<button class="btn btn--danger" type="button" id="tlOff">Switch off</button>' +
+          '<span class="pc-foot__right">' +
+            (S.live[key] ? '<button class="btn btn--ghost" type="button" id="tlReset">' + icon('refresh') + 'Reset to standard</button>' : '') +
+            '<button class="btn btn--primary" type="button" id="tlSave">Save</button></span>' +
+        '</div></div>';
+    }
+    var box = document.getElementById('tlTool');
+    box.innerHTML = html;
+    if (structural) return;
+    drawChanges();
+    box.onchange = function (e) {
+      var id = e.target.getAttribute('data-part'); if (!id) return;
+      setGrant(TL.draft, id, e.target.value);
+      drawChanges();
+    };
+    document.getElementById('tlOff').addEventListener('click', function () {
+      partsFor(rec).forEach(function (id) { setGrant(TL.draft, id, 'off'); });
+      box.querySelectorAll('select[data-part]').forEach(function (s) { s.value = 'off'; });
+      drawChanges();
+      NL.toast('Everything set to Off. Save to apply.', 'info');
+    });
+    document.getElementById('tlSave').addEventListener('click', saveTool);
+    if (S.live[key]) document.getElementById('tlReset').addEventListener('click', resetTool);
+  }
+
+  function drawChanges() {
+    var box = document.getElementById('tlChanges');
+    var dirty = !sameGrants(TL.draft, grantsOf(S.registry[TL.key]));
+    document.getElementById('tlSave').disabled = !dirty;
+    if (!dirty) { box.innerHTML = '<p class="pc-muted">Nothing yet.</p>'; return; }
+    var ch = changesFor(draftRecord());
+    box.innerHTML = ch.length
+      ? '<div class="table-wrap"><table class="table"><thead><tr><th>Person</th><th>Now</th><th>After</th></tr></thead><tbody>' +
+        ch.map(function (c) {
+          return '<tr><td><span class="pc-who"><span class="pc-who__name">' + esc(c.u.name) + '</span><span class="pc-who__sub">' + esc(passText(c.u.pass)) + '</span></span></td>' +
+            '<td>' + LV_WORD[c.from] + '</td><td><span class="pill ' + (P.rank(c.to) > P.rank(c.from) ? 'pill--approved' : 'pill--rejected') + '">' + LV_WORD[c.to] + '</span></td></tr>';
+        }).join('') + '</tbody></table></div>'
+      : '<p class="pc-muted">Nobody’s level changes today. It applies to anyone given a pass later.</p>';
+  }
+
+  /* "League card Off → Access, OPS Access → Manage": the audit line. */
+  function grantDiff(a, b, rec) {
+    return partsFor(rec).filter(function (id) { return grantOf(a, id) !== grantOf(b, id); }).map(function (id) {
+      return partName(id) + ' ' + LV_WORD[grantOf(a, id)] + ' → ' + LV_WORD[grantOf(b, id)];
+    }).join(', ');
+  }
+
+  /* The live entry and every pass holder's per-tool entry, in one update. */
+  function writeGrants(newRec, live, action, detail) {
+    var key = TL.key, updates = {}, n = 0;
+    updates['access-grants/' + key] = live;
+    var one = {}; one[key] = newRec;
+    S.users.forEach(function (u) {
+      if (!P.isIssued(u.pass)) return;
+      var want = P.toOld(u.pass, one, u.role)[key];
+      want = want === undefined ? null : want;
+      var stored = u.tools[key] === undefined ? null : u.tools[key];
+      if (want !== stored) { updates['users/' + u.uid + '/tools/' + key] = want; n++; }
+    });
+    NL.writeAudit(action, (S.registry[key].label || key) + ': ' + detail);
+    return db.ref().update(updates).then(function () {
+      if (live) S.live[key] = live; else delete S.live[key];
+      S.registry[key] = newRec;
+      return refreshPeople();
+    }).then(function () {
+      NL.toast('Saved' + (n ? '. ' + n + ' ' + (n === 1 ? 'person' : 'people') + ' updated' : ''), 'success');
+      openTool(key, false);
+    });
+  }
+
+  function saveTool() {
+    var rec = S.registry[TL.key], g = P.cleanGrants(TL.draft);
+    var detail = grantDiff(grantsOf(rec), g, rec);
+    var live = { base: g.base, key: g.key, updated: Date.now(), updatedBy: S.session.uid };
+    document.getElementById('tlSave').disabled = true;
+    writeGrants(P.withLive(S.base[TL.key] || rec, g), live, 'grants_changed', detail)
+      .catch(function (err) {
+        document.getElementById('tlSave').disabled = false;
+        NL.toast('Could not save: ' + (err && err.message || err), 'error');
+      });
+  }
+
+  function resetTool() {
+    var rec = S.registry[TL.key], std = S.base[TL.key];
+    NL.confirm('Go back to the standard grants for ' + (rec.label || TL.key) + '?', { title: 'Reset to standard', confirmText: 'Reset' })
+    .then(function (ok) {
+      if (!ok) return;
+      var detail = grantDiff(grantsOf(rec), grantsOf(std), rec) || 'no change';
+      return writeGrants(std, null, 'grants_reset', detail);
+    }).catch(function (err) { NL.toast('Could not reset: ' + (err && err.message || err), 'error'); });
+  }
+
+  function initTools() {
+    document.getElementById('tlSearch').addEventListener('input', function (e) { TL.q = e.target.value.trim().toLowerCase(); drawTools(); });
+    NL.filterButton(document.getElementById('tlShelf'), {
+      label: 'Shelf', multiple: false, allLabel: 'Any',
+      options: Object.keys(P.SHELF).map(function (s) { return { value: s, label: P.SHELF[s] }; }),
+      onChange: function (v) { TL.shelf = v; drawTools(); }
+    });
+    document.getElementById('tlBack').innerHTML = icon('back') + 'Tools';
+    document.getElementById('tlBack').addEventListener('click', function () { showTab('tools'); });
+    document.getElementById('tlRows').addEventListener('click', function (e) {
+      var a = e.target.closest('a[data-tool]');
+      if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;
+      e.preventDefault();
+      openTool(a.getAttribute('data-tool'));
+    });
+  }
+
+  /* ── Audit: who did what ──────────────────────────────────────────────
+     Skeleton key only. Everything, newest first, 20 at a time; a person,
+     an action or a search reads the last 500 and filters here. A person's
+     own index (admin/audit-by-user/<uid>) holds what they did and what was
+     done to them. */
+  var AL = { uid: null, action: null, q: '', rows: [], cursor: null, more: false, seq: 0, person: null, ready: false };
+  var AL_PAGE = 20, AL_WIDE = 500;
+
+  function alSource() { return db.ref(AL.uid ? 'admin/audit-by-user/' + AL.uid : 'admin/audit'); }
+  function alHit(e) {
+    if (AL.action && e.action !== AL.action) return false;
+    if (!AL.q) return true;
+    return [e.action, NL.audit.label(e), e.detail, e.name, e.email, e.targetName, e.targetEmail]
+      .join(' ').toLowerCase().indexOf(AL.q) >= 0;
+  }
+  function alLoad(fresh) {
+    var seq = ++AL.seq, filtered = !!(AL.action || AL.q);
+    if (fresh) { AL.rows = []; AL.cursor = null; document.getElementById('alList').innerHTML = '<p class="pc-muted">Loading…</p>'; }
+    var q = alSource().orderByKey();
+    q = filtered ? q.limitToLast(AL_WIDE) : (AL.cursor ? q.endBefore(AL.cursor) : q).limitToLast(AL_PAGE + 1);
+    q.once('value').then(function (snap) {
+      if (seq !== AL.seq) return;
+      var got = [];
+      snap.forEach(function (c) { var e = c.val(); if (e) { e._key = c.key; got.push(e); } });
+      got.reverse();
+      if (filtered) { AL.rows = got.filter(alHit); AL.more = false; }
+      else {
+        AL.more = got.length > AL_PAGE;
+        got = got.slice(0, AL_PAGE);
+        AL.rows = AL.rows.concat(got);
+        if (got.length) AL.cursor = got[got.length - 1]._key;
+      }
+      document.getElementById('alList').innerHTML = AL.rows.length
+        ? NL.audit.table(AL.rows)
+        : '<div class="empty-state"><div class="empty-state__title">' + (filtered || AL.uid ? 'Nothing matches' : 'Nothing recorded yet') + '</div></div>';
+      document.getElementById('alMore').hidden = !AL.more;
+      document.getElementById('alNote').textContent = filtered ? AL.rows.length + ' in the last ' + AL_WIDE + ' entries' : '';
+    }).catch(function (err) {
+      document.getElementById('alList').innerHTML = '<p class="pc-muted">The log could not be loaded: ' + esc(err && err.message || String(err)) + '</p>';
+    });
+  }
+  function alPeople() {
+    if (!AL.person) return;
+    AL.person.setOptions(S.users.map(function (u) { return { value: u.uid, label: u.name || u.email || u.uid }; }));
+    if (AL.uid) AL.person.set(AL.uid);
+  }
+  /* Built the first time the tab opens, so nobody without it reads the log. */
+  function initAudit(uid) {
+    if (uid !== undefined) AL.uid = uid || null;
+    if (AL.ready) { if (uid !== undefined) { alPeople(); alLoad(true); } return; }
+    AL.ready = true;
+    AL.person = NL.filterButton(document.getElementById('alPerson'), {
+      label: 'Person', multiple: false, allLabel: 'Everyone', search: true, options: [],
+      onChange: function (v) { AL.uid = v; alLoad(true); }
+    });
+    NL.filterButton(document.getElementById('alAction'), {
+      label: 'Action', multiple: false, allLabel: 'Any',
+      options: Object.keys(NL.audit.LABELS).map(function (a) { return { value: a, label: NL.audit.LABELS[a] }; })
+        .sort(function (a, b) { return a.label.localeCompare(b.label); }),
+      onChange: function (v) { AL.action = v; alLoad(true); }
+    });
+    var t;
+    document.getElementById('alSearch').addEventListener('input', function (e) {
+      clearTimeout(t);
+      var v = e.target.value.trim().toLowerCase();
+      t = setTimeout(function () { AL.q = v; alLoad(true); }, 250);
+    });
+    document.getElementById('alMoreBtn').addEventListener('click', function () { alLoad(false); });
+    alPeople();
+    alLoad(true);
+  }
+
+  /* ── Tabs ───────────────────────────────────────────────────────────── */
+  var SK_TABS = ['tools', 'audit', 'manage'];
+  function showTab(name, opts) {
+    if (SK_TABS.indexOf(name) >= 0 && !sk()) name = 'people';
+    ED = null;
+    TL.key = null;
+    document.getElementById('pcTabs').hidden = false;
+    document.querySelectorAll('#pcTabs .tab').forEach(function (b) {
+      var on = b.getAttribute('data-pane') === name;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    document.querySelectorAll('[data-pane-body]').forEach(function (s) { s.hidden = s.getAttribute('data-pane-body') !== name; });
+    if (name === 'manage') drawManage();
+    if (name === 'invites') loadInvites();
+    if (name === 'requests') loadRequests();
+    if (name === 'tools') drawTools();
+    if (name === 'audit') initAudit(opts && opts.uid);
+    var qs = name === 'people' ? location.pathname : '?tab=' + name + (name === 'audit' && AL.uid ? '&uid=' + encodeURIComponent(AL.uid) : '');
+    try { history.replaceState(null, '', qs); } catch (e) {}
+  }
+
+  /* Everyone with an account, A–Z. A rejected request keeps its account
+     until someone removes it, so it is listed, marked, and can be removed. */
+  function refreshPeople() {
+    return db.ref('users').once('value').then(function (snap) {
+      var all = snap.val() || {};
+      S.users = Object.keys(all).filter(function (uid) { return !!all[uid]; }).map(function (uid) {
+        var u = all[uid];
+        return { uid: uid, name: u.name || u.email || '', email: u.email || '', role: u.role || '', club: u.club || '',
+          jobTitle: u.jobTitle || '', org: u.org || '', pending: !!u.pending, rejected: !!u.rejected,
+          tools: u.tools || {}, pass: u.pass || null };
+      }).sort(function (a, b) { return a.name.localeCompare(b.name); });
+      var orgs = {};
+      S.users.forEach(function (u) { var o = orgOf(u); if (o) orgs[o] = (orgs[o] || 0) + 1; });
+      if (S.orgFilter) S.orgFilter.setOptions(Object.keys(orgs).sort(function (a, b) {
+        return a === LEAGUE ? -1 : b === LEAGUE ? 1 : a.localeCompare(b);
+      }).map(function (o) { return { value: o, label: o, count: orgs[o] }; }));
+      drawPeople();
+      alPeople();
+    });
+  }
+
+  /* ── Boot ───────────────────────────────────────────────────────────── */
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function (session) {
+    S.session = session;
+    document.getElementById('pcTabs').addEventListener('click', function (e) {
+      var b = e.target.closest('.tab'); if (b) showTab(b.getAttribute('data-pane'));
+    });
+    document.getElementById('pcSearch').addEventListener('input', function (e) { S.q = e.target.value.trim().toLowerCase(); drawPeople(); });
+    document.getElementById('pcCsv').addEventListener('click', downloadCsv);
+    document.getElementById('pcApply').addEventListener('click', applyPasses);
+    document.getElementById('pcBack').innerHTML = icon('back') + 'People';
+    document.getElementById('pcBack').addEventListener('click', function () { showTab('people'); });
+    /* A name or Edit opens the person here, without a reload; the link
+       still works in a new tab. */
+    document.getElementById('pcRows').addEventListener('click', function (e) {
+      var a = e.target.closest('a[data-person]');
+      if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;
+      e.preventDefault();
+      openPerson(a.getAttribute('data-person'));
+    });
+    NL.filterButton(document.getElementById('pcPassFilter'), {
+      label: 'Pass', multiple: false, allLabel: 'Everyone',
+      options: [{ value: 'issued', label: 'Issued' }, { value: 'none', label: 'Not issued' }],
+      onChange: function (v) { S.pass = v; drawPeople(); }
+    });
+    /* Organisation: the League, then every club someone is with — a
+       searchable list, as clubs are an open set. Options are filled once
+       people load. */
+    S.orgFilter = NL.filterButton(document.getElementById('pcOrgFilter'), {
+      label: 'Organisation', multiple: false, allLabel: 'Any', search: true, options: [],
+      onChange: function (v) { S.org = v; drawPeople(); }
+    });
+    NL.clubs.load().then(function (meta) {
+      S.roster = {};
+      NL.season.clubsFor(meta).forEach(function (c) { S.roster[c.name] = true; });
+      drawPeople();
+      if (ED) drawPerson();
+    }).catch(function () {});
+
+    /* The Skeleton key's tabs are not shown to anyone else. */
+    if (!sk()) document.querySelectorAll('#pcTabs .tab').forEach(function (b) {
+      if (SK_TABS.indexOf(b.getAttribute('data-pane')) >= 0) b.hidden = true;
+    });
+    initInvites();
+    initTools();
+    /* The registry as stored (S.base, for Reset to standard), the live
+       grants (S.live), and the two together (S.registry), which is what the
+       door uses. access-grants is read separately so a refusal (rules not
+       yet published) leaves the registry standing. */
+    NL.ensureAuth().then(function () {
+      return Promise.all([
+        db.ref('tools').once('value'),
+        db.ref('access-grants').once('value').catch(function () { return null; })
+      ]);
+    }).then(function (snaps) {
+      S.base = snaps[0].val() || {};
+      S.live = (snaps[1] && snaps[1].val()) || {};
+      S.registry = P.withLiveAll(S.base, S.live);
+      return refreshPeople();
+    }).then(function () {
+      /* Badges on the tabs; the lists load once now so the counts are true. */
+      loadInvites(); loadRequests();
+      /* ?tab= opens a tab: the portal's old Invites and Requests links, and
+         the admin notification emails (?tab=inbound), land here. /audit/
+         forwards to ?tab=audit, keeping its ?uid=. */
+      var q = new URLSearchParams(location.search);
+      var tab = q.get('tab');
+      if (tab === 'inbound') tab = 'requests';
+      if (q.get('person')) openPerson(q.get('person'));
+      else if (q.get('tool') && sk()) openTool(q.get('tool'));
+      else if (tab === 'audit') showTab('audit', { uid: q.get('uid') || null });
+      else if (['invites', 'requests', 'manage', 'tools'].indexOf(tab) >= 0) showTab(tab);
+    }).catch(function (e) {
+      document.getElementById('pcRows').innerHTML = '<tr><td colspan="4">People could not be loaded: ' + esc(e && e.message || String(e)) + '</td></tr>';
+    });
+  };
+
+  if (window._toolDeferredSession) {
+    window.TOOL.boot(window._toolDeferredSession);
+    delete window._toolDeferredSession;
+  }
+})();
+</script>
+
+</body>
+</html>

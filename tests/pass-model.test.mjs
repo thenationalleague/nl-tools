@@ -403,3 +403,32 @@ test('toOld says Manage in the old words', () => {
   assert.ok(Object.values(t).includes('admin'));
   assert.ok(!Object.values(t).includes('manage'));
 });
+
+/* ── Live grants (v1.56) ─────────────────────────────────────────────────
+   Edited in Access and saved at access-grants/<toolKey>; they replace the
+   registry's grants. cleanGrants is the guard on what gets saved. */
+test('a live grant replaces the registry grant; the registry is untouched', () => {
+  const rec = REGISTRY['staff-graphics'];
+  const live = { base: { league: 'access', club: 'off' }, key: {} };
+  assert.equal(level(league(), 'staff-graphics'), 'off');
+  assert.equal(P.level(league(), P.withLive(rec, live), NOW), 'access');
+  assert.equal(level(league(), 'staff-graphics'), 'off', 'registry unchanged');
+});
+
+test('switching a tool off: every grant Off, and only the Skeleton key opens it', () => {
+  const off = { base: { league: 'off', club: 'off' }, key: {} };
+  const rec = P.withLive(REGISTRY['ops-vacancies'], off);
+  assert.equal(P.level(league('league-operations'), rec, NOW), 'off');
+  assert.equal(P.level({ base: 'league', skeleton: { given: 1 }, issued: 1 }, rec, NOW), 'manage');
+});
+
+test('cleanGrants drops unknown keys and levels, so a typo cannot widen access', () => {
+  const g = plain(P.cleanGrants({ base: { league: 'everything', club: 'access' }, key: { 'league-media': 'manage', 'made-up': 'manage', 'league-finance': 'admin' } }));
+  assert.deepEqual(g, { base: { league: 'off', club: 'access' }, key: { 'league-media': 'manage' } });
+});
+
+test('withLiveAll applies only where there is a live entry', () => {
+  const all = P.withLiveAll(REGISTRY, { 'staff-graphics': { base: { league: 'access', club: 'off' } } });
+  assert.equal(P.level(league(), all['staff-graphics'], NOW), 'access');
+  assert.deepEqual(plain(all['ops-vacancies']), plain(REGISTRY['ops-vacancies']));
+});

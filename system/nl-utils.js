@@ -1,7 +1,15 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.55 (12/11/2026)
+   Version: v1.56 (12/11/2026)
+
+   v1.56 — Live grants: who a tool opens to is saved at
+   access-grants/<toolKey> and replaces the registry's grants where present
+   (NL.pass.withLive, withLiveAll, cleanGrants, loadRegistry). Edited in the
+   Access tool. Tested in tests/pass-model.test.mjs. NL.audit.LABELS gains
+   passes_applied, grants_changed and grants_reset. Cache-bust nl-utils
+   ?v=59 -> ?v=60, in lockstep with auth-guard ?v=19 -> ?v=20 and nl-topbar
+   ?v=13 -> ?v=14.
 
    v1.55 — Club logins (permissions plan, step 7). NL.codeGate.resume asks
    once for a fresh token when a signed-in account has no club claim, so a
@@ -1838,6 +1846,7 @@
       user_removed: 'User removed', tool_deployed: 'Tool deployed', tool_seeded: 'Tool seeded',
       page_opened: 'Page opened', page_unavailable: 'Page not available',
       pass_issued: 'Pass issued', pass_withdrawn: 'Pass withdrawn', pass_finding: 'Pass differs from today',
+      passes_applied: 'Passes applied', grants_changed: 'Tool access changed', grants_reset: 'Tool access reset',
       attendance_submit: 'Attendance submitted', attendance_edit: 'Attendance edited',
       add_cup_fixture: 'Cup fixture added', edit_cup_fixture: 'Cup fixture edited',
       delete_cup_fixture: 'Cup fixture deleted', sync_fixture_run: 'Fixture sync run',
@@ -2986,6 +2995,47 @@
       return out;
     }
 
+    /* Live grants (v1.56). Who a tool opens to is edited in Access (Tools
+       tab) and saved live at access-grants/<toolKey> = { base: { league,
+       club }, key: { <keyId>: level } }, so a change takes effect on the next
+       page load with no pull request. The registry's permissions.grants is
+       the starting point; a live entry, where there is one, replaces it.
+
+         withLive(record, live)      one record with its live grants applied
+         withLiveAll(registry, all)  the whole tools/ node, likewise
+         cleanGrants(g)              a grants object reduced to known keys and
+                                     levels, for saving: anything unknown is
+                                     dropped, so a bad edit cannot widen access
+                                     through a typo.
+
+       Both return copies; the inputs are never changed. */
+    function cleanGrants(g) {
+      var ok = { off: 1, access: 1, manage: 1 };
+      var out = { base: {}, key: {} };
+      ['league', 'club'].forEach(function (b) {
+        var v = g && g.base && g.base[b];
+        out.base[b] = ok[v] ? v : 'off';
+      });
+      KEYS.forEach(function (k) {
+        var v = g && g.key && g.key[k.id];
+        if (ok[v] && v !== 'off') out.key[k.id] = v;
+      });
+      return out;
+    }
+    function withLive(record, live) {
+      if (!record || !live || !record.permissions) return record;
+      var copy = Object.assign({}, record);
+      copy.permissions = Object.assign({}, record.permissions, { grants: cleanGrants(live) });
+      return copy;
+    }
+    function withLiveAll(registry, all) {
+      var out = {};
+      Object.keys(registry || {}).forEach(function (k) {
+        out[k] = withLive(registry[k], all && all[k]);
+      });
+      return out;
+    }
+
     /* Build the pass the "issue a pass" form saves. Keys already held keep
        their original given/by (re-issuing to change a job title must not
        reset when a key was given); new keys are stamped now, by `by`.
@@ -3109,6 +3159,20 @@
       todayLevel: todayLevel,
       compare: compare,
       toOld: toOld,
+      cleanGrants: cleanGrants,
+      withLive: withLive,
+      withLiveAll: withLiveAll,
+      /* The registry with live grants applied, in one call: tools/ and
+         access-grants/ read together. If access-grants cannot be read (the
+         rules not yet published, or offline) the registry stands alone. */
+      loadRegistry: function (db) {
+        return Promise.all([
+          db.ref('tools').once('value'),
+          db.ref('access-grants').once('value').catch(function () { return null; })
+        ]).then(function (snaps) {
+          return withLiveAll(snaps[0].val() || {}, snaps[1] ? snaps[1].val() : null);
+        });
+      },
       build: build,
       /* Who may use the "issue a pass" form, and View as. League and Tester
          keys, and the Skeleton key, stay with Skeleton holders (plan, "Who
