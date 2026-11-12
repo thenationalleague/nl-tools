@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — People and cards
-  Version: v1.3 (12/11/2026)
+  Version: v1.4 (12/11/2026)
   File: /people/index.html
 
   Who holds which pass: everyone with an account, their role today, their
@@ -53,6 +53,15 @@
            everything, League Operations Club cards and club keys only.
 
   Changelog
+  v1.4 (12/11/2026) — Each pass reads as its card's badge (the rose, or
+    the club's crest) and its key tags: rose + OPS, a club crest + FIN. An
+    Organisation filter (searchable: the League, then every club with
+    someone in it) replaces the Card filter. A club not in the National
+    League, North or South this season gets a quiet "Not this season"
+    flag. People rows keep name, job title and email on three lines that
+    never wrap; on a phone the table scrolls sideways. Approve shows what
+    is being issued first — role, pass, every tool and its level — and
+    issues the pass with the approval.
   v1.3 (12/11/2026) — Requests gain Dismiss: no email, the request is
     marked dismissed and its never-approved account removed (Archive, for
     requests with no account, folds into it).
@@ -125,6 +134,17 @@
     window.NL_CHANGELOG = [
       {
         date: '12/11/2026',
+        version: 'v1.4',
+        items: [
+          'Each pass shows its badge and key tags: the rose with OPS, a club crest with FIN.',
+          'Filter by organisation.',
+          'A quiet flag on clubs not in our leagues this season.',
+          'Tidier rows: name, job title and email on three lines.',
+          'Approving a request shows the role, pass and tools first.'
+        ]
+      },
+      {
+        date: '12/11/2026',
         version: 'v1.3',
         items: [
           'Open a person to change their role, club, job title and tool exceptions, or remove them.',
@@ -187,7 +207,20 @@
   .pc-who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .pc-who__name { font-weight: 700; font-variation-settings: 'wght' 700; color: var(--text); }
   .pc-who__sub { font-size: var(--text-xs); color: var(--text-muted); overflow-wrap: anywhere; }
-  .pc-pass { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .pc-who__job { font-size: var(--text-sm); color: var(--text); }
+  .pc-pass { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: var(--text-sm); }
+  .pc-crest { --crest-size: 24px; }
+  .pc-approve__who { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .pc-approve__who .pc-crest { --crest-size: 40px; }
+  .pc-gap { margin-top: 16px; }
+  .pc-opens { margin: 0; padding-left: 18px; font-size: var(--text-sm); columns: 2; }
+  .pc-off { display: inline-flex; align-items: center; gap: 3px; font-size: var(--text-xs); color: var(--amber); white-space: nowrap; }
+  /* The People list never wraps a cell: name, job title and email sit on
+     three lines, and on a narrow screen the table scrolls sideways
+     instead of breaking an email address mid-word. */
+  #pcRows td { white-space: nowrap; }
+  #pcRows .pc-who__sub { overflow-wrap: normal; }
+  #pcRows .pc-pass, #pcRows .pc-actions { flex-wrap: nowrap; }
   .pc-muted { color: var(--text-muted); }
   .pc-actions { display: flex; gap: 6px; justify-content: flex-end; align-items: center; flex-wrap: wrap; }
   .pc-invite { margin-bottom: 24px; }
@@ -240,7 +273,7 @@
         <div class="toolbar__left">
           <input class="toolbar__search" type="search" id="pcSearch" placeholder="Search by name, email or club" aria-label="Search people">
           <span id="pcPassFilter"></span>
-          <span id="pcCardFilter"></span>
+          <span id="pcOrgFilter"></span>
         </div>
         <div class="toolbar__right"><span class="pc-count" id="pcCount"></span></div>
       </div>
@@ -300,7 +333,8 @@
   'use strict';
 
   var P = NL.pass, esc = NL.escHtml;
-  var S = { session: null, users: [], registry: {}, q: '', pass: null, card: null };
+  var S = { session: null, users: [], registry: {}, q: '', pass: null, org: null, roster: null };
+  var LEAGUE = 'National League';
 
   function icon(name) { return NL.icon(name, 'sm').outerHTML; }
 
@@ -325,12 +359,46 @@
 
   /* Role today: the canon role pill, and the club for club roles. */
   function roleHtml(u) {
+    var club = NL.isClubUser(u.role) && u.club ? '<div class="pc-who__sub">' + esc(u.club) + offSeason(u.club) + '</div>' : '';
+    return rolePill(u) + club;
+  }
+  function rolePill(u) {
     var key = NL.roles.norm(u.role);
     var pill = u.role ? '<span class="pill role-' + esc(key) + '">' + esc(NL.roles.label(u.role)) + '</span>' : '<span class="pc-muted">No role</span>';
     if (u.pending) pill += ' <span class="pill role-pending">Waiting</span>';
     if (u.rejected) pill += ' <span class="pill pill--rejected">Request rejected</span>';
-    var club = NL.isClubUser(u.role) && u.club ? '<div class="pc-who__sub">' + esc(u.club) + '</div>' : '';
-    return pill + club;
+    return pill;
+  }
+
+  /* Who someone is with: their pass's card, else their role today. */
+  function orgOf(u) {
+    var p = u.pass;
+    if (P.isIssued(p)) return p.base === 'club' ? (p.club || '') : LEAGUE;
+    return NL.isClubUser(u.role) ? (u.club || '') : LEAGUE;
+  }
+
+  /* A club that is not in the National League, North or South this season
+     (relegated out, folded, renamed): a quiet flag beside its name, so a
+     stale club on an account is noticed. Silent until the roster loads. */
+  function offSeason(club) {
+    if (!club || club === LEAGUE || !S.roster || S.roster[club]) return '';
+    return ' <span class="pc-off" title="Not in the National League, North or South this season">' + icon('warning') + 'Not this season</span>';
+  }
+
+  /* The organisation's badge: the rose for the League, else the club's
+     crest (thumb, falling back to full size, then the rose — wired after
+     render by wireCrests). */
+  function crestHtml(org) {
+    if (!org) return '';
+    var src = org === LEAGUE ? NL.clubs.ROSE : NL.clubs.crestUrl(org, 'thumb');
+    return '<img class="nl-crest pc-crest" src="' + esc(src) + '" alt="' + esc(org) + '" title="' + esc(org) + '"' +
+      (org === LEAGUE ? '' : ' data-crest="' + esc(org) + '"') + '>';
+  }
+  function wireCrests(root) {
+    root.querySelectorAll('img[data-crest]').forEach(function (img) {
+      NL.clubs.wireCrestImg(img, img.getAttribute('data-crest'));
+      img.removeAttribute('data-crest');
+    });
   }
   function roleText(u) {
     var r = NL.roles.label(u.role) || 'No role';
@@ -339,9 +407,11 @@
 
   /* The pass, in one line: card (or club), then a pill per key held — the
      key's code, with its end date if it has one. */
-  function passHtml(p) {
+  /* The pass, in one line: the card's badge (the rose, or the club's
+     crest), then a three-letter tag per key — AAA for the Skeleton key. */
+  function passHtml(p, label) {
     if (!P.isIssued(p)) return '<span class="pc-muted">Not issued</span>';
-    var html = '<span>' + esc(p.base === 'club' ? p.club : 'League') + '</span>';
+    var html = crestHtml(p.base === 'club' ? p.club : LEAGUE) + (label ? '<span>' + esc(label) + '</span>' : '');
     if (P.isSkeleton(p)) html += '<span class="pill pill--info" title="Skeleton key">AAA</span>';
     P.keysHeld(p).forEach(function (id) {
       var k = P.KEY[id], until = p.keys[id].until;
@@ -366,7 +436,7 @@
     var issued = P.isIssued(u.pass);
     if (S.pass === 'issued' && !issued) return false;
     if (S.pass === 'none' && issued) return false;
-    if (S.card && (!issued || u.pass.base !== S.card)) return false;
+    if (S.org && orgOf(u) !== S.org) return false;
     return true;
   }
 
@@ -380,13 +450,17 @@
       if (view) acts += '<a class="btn btn--ghost btn--sm" href="/pass/?view=as&uid=' + encodeURIComponent(u.uid) + '">' + icon('eye') + 'View pass</a>';
       if (canEdit(u)) acts += '<a class="btn btn--ghost btn--sm" href="/pass/?view=issue&uid=' + encodeURIComponent(u.uid) + '">' + icon('edit') + (P.isIssued(u.pass) ? 'Edit pass' : 'Issue pass') + '</a>';
       return '<tr>' +
-        '<td><span class="pc-who"><a class="pc-who__name pc-link" href="?person=' + encodeURIComponent(u.uid) + '" data-person="' + esc(u.uid) + '">' + esc(u.name || '(no name)') + '</a><span class="pc-who__sub">' + esc(u.email) + '</span></span></td>' +
+        '<td><span class="pc-who"><a class="pc-who__name pc-link" href="?person=' + encodeURIComponent(u.uid) + '" data-person="' + esc(u.uid) + '">' + esc(u.name || '(no name)') + '</a>' +
+          (jobOf(u) ? '<span class="pc-who__job">' + esc(jobOf(u)) + '</span>' : '') +
+          '<span class="pc-who__sub">' + esc(u.email) + '</span></span></td>' +
         '<td>' + roleHtml(u) + '</td>' +
         '<td>' + passHtml(u.pass) + '</td>' +
         '<td><span class="pc-actions">' + acts + '</span></td>' +
       '</tr>';
     }).join('') : '<tr><td colspan="4" class="pc-muted">Nobody matches.</td></tr>';
+    wireCrests(document.getElementById('pcRows'));
   }
+  function jobOf(u) { return (P.isIssued(u.pass) && u.pass.jobTitle) || u.jobTitle || ''; }
 
   /* ── Manage: the migration report ─────────────────────────────────────
      One table, every difference, grouped by person (named on their first
@@ -639,8 +713,8 @@
      hold (not a League-only tool), the role default — or Access where they
      asked for it and the default is Off. An entry equal to the default is
      cleared (null), as the portal's overrides-only write did. */
-  function approvalTools(r) {
-    var role = NL.roles.norm(r.role || 'staff'), asked = r.tools || {}, out = {};
+  function approvalTools(r, chosen) {
+    var role = NL.roles.norm(chosen || r.role || 'staff'), asked = r.tools || {}, out = {};
     Object.keys(S.registry).forEach(function (k) {
       var t = S.registry[k];
       if (!t || k === 'welcome') return;
@@ -654,19 +728,86 @@
     return out;
   }
 
+  /* Approve shows what is being issued before anything is written: the
+     role (Club Admin or Club Staff — the request's own is chosen to start
+     with), the pass that goes with it (their club's card, and the Club
+     Operations key for a Club Admin) and every tool they will open, at
+     what level. Approving writes all three, then sends the approval email. */
+  function passFor(r, role) {
+    return P.build({ base: 'club', club: r.club || '', jobTitle: r.jobTitle || '',
+      keys: role === 'club-admin' ? ['club-operations'] : [] }, S.session.uid);
+  }
+  function opensFor(r, role) {
+    var tools = approvalTools(r, role), out = [];
+    Object.keys(tools).forEach(function (k) {
+      var t = S.registry[k];
+      var level = tools[k] != null ? tools[k] : ((t.defaults && t.defaults[role]) || 'off');
+      if (level !== 'off' && !t.placeholder) out.push({ label: t.label || k, level: level });
+    });
+    return out.sort(function (a, b) { return a.label.localeCompare(b.label); });
+  }
   function approveRequest(r) {
-    var updates = {};
-    updates['users/' + r.uid + '/pending'] = false;
-    updates['users/' + r.uid + '/rejected'] = false;
-    var tools = approvalTools(r);
-    Object.keys(tools).forEach(function (k) { updates['users/' + r.uid + '/tools/' + k] = tools[k]; });
+    var start = NL.roles.norm(r.role || 'club-staff');
+    if (start !== 'club-admin') start = 'club-staff';
+    var role = start;
+    var body = document.createElement('div');
+    function draw() {
+      var opens = opensFor(r, role);
+      body.innerHTML =
+        '<div class="pc-approve__who">' + crestHtml(r.club || '') +
+          '<span class="pc-who"><span class="pc-who__name">' + esc(r.name || r.email || '') + '</span>' +
+          (r.jobTitle ? '<span class="pc-who__job">' + esc(r.jobTitle) + '</span>' : '') +
+          '<span class="pc-who__sub">' + esc(r.email || '') + '</span></span></div>' +
+        (r.club ? '' : '<p class="pc-off">' + icon('warning') + 'No club on this request</p>') +
+        '<div class="pc-label">Role</div><div class="pc-roles">' +
+          ['club-admin', 'club-staff'].map(function (x) {
+            return '<label class="pc-role"><input type="radio" name="pcApRole" value="' + x + '"' + (x === role ? ' checked' : '') + '>' +
+              '<span><span class="pc-role__name">' + esc(NL.roles.label(x)) + '</span><span class="pc-role__grant">' + esc(NL.roles.grant(x)) + '</span></span></label>';
+          }).join('') + '</div>' +
+        '<div class="pc-label pc-gap">Pass</div>' + passHtml(passFor(r, role), 'Club card') + offSeason(r.club) +
+        '<div class="pc-label pc-gap">Opens</div>' +
+        (opens.length
+          ? '<ul class="pc-opens">' + opens.map(function (o) {
+              return '<li>' + esc(o.label) + ' <span class="pc-muted">' + (o.level === 'admin' ? 'Manage' : 'Access') + '</span></li>';
+            }).join('') + '</ul>'
+          : '<p class="pc-muted">Nothing yet.</p>');
+      wireCrests(body);
+    }
+    body.addEventListener('change', function (e) { if (e.target.name === 'pcApRole') { role = e.target.value; draw(); } });
+    draw();
+    return new Promise(function (resolve) {
+      NL.modal({
+        title: 'Approve request', body: body, onClose: function () { resolve(); loadRequests(); },
+        buttons: [
+          { label: 'Cancel', onClick: function (m) { m.close(); } },
+          { label: 'Approve and email', className: 'btn--primary', onClick: function (m) {
+              var btns = m.el.querySelectorAll('.modal__footer .btn');
+              btns.forEach(function (b) { b.disabled = true; });
+              doApprove(r, role).then(function () { m.close(); }).catch(function (err) {
+                btns.forEach(function (b) { b.disabled = false; });
+                NL.toast('Failed: ' + (err && err.message || err), 'error');
+              });
+            } }
+        ]
+      });
+    });
+  }
+  function doApprove(r, role) {
+    var updates = {}, base = 'users/' + r.uid + '/';
+    updates[base + 'pending'] = false;
+    updates[base + 'rejected'] = false;
+    updates[base + 'role'] = role;
+    updates[base + 'pass'] = passFor(r, role);
+    var tools = approvalTools(r, role);
+    Object.keys(tools).forEach(function (k) { updates[base + 'tools/' + k] = tools[k]; });
     updates['admin/requests/' + r._key + '/status'] = 'approved';
-    NL.writeAudit('request_approved', (r.name || r.email || '') + (r.club ? ' (' + r.club + ')' : ''),
+    NL.writeAudit('request_approved', (r.name || r.email || '') + (r.club ? ' (' + r.club + ')' : '') +
+      ' as ' + NL.roles.label(role) + ', Club card' + (role === 'club-admin' ? ' with Operations' : ''),
       { uid: r.uid, name: r.name || '', email: r.email || '' });
     return db.ref().update(updates).then(function () {
       NL.gas.fetch({ action: 'sendApproval', name: r.name || '', email: r.email || '', club: r.club || '' }).catch(function () {});
       NL.toast('Approved — ' + (r.name || r.email || ''), 'success');
-      return refreshPeople().then(loadRequests);
+      return refreshPeople();
     });
   }
 
@@ -799,8 +940,9 @@
 
     var html = '<div class="pc-head"><div>' +
       '<div class="pc-head__name">' + esc(u.name || '(no name)') + '</div>' +
+      (jobOf(u) ? '<div class="pc-who__job">' + esc(jobOf(u)) + '</div>' : '') +
       '<div class="pc-who__sub">' + esc(u.email) + '</div>' +
-      '<div class="pc-head__line">' + roleHtml(u).replace(/<div class="pc-who__sub">[^<]*<\/div>/, '') + passHtml(u.pass) + '</div>' +
+      '<div class="pc-head__line">' + rolePill(u) + passHtml(u.pass) + offSeason(orgOf(u)) + '</div>' +
       '</div><div class="pc-actions">' + passBtns + '</div></div>';
 
     if (!edit) {
@@ -830,6 +972,7 @@
       '<a class="btn btn--ghost btn--sm" href="/audit/?uid=' + encodeURIComponent(u.uid) + '">Open in Audit log ' + icon('forward') + '</a></div>' +
       '<div id="pcEdHistory"><p class="pc-muted">Loading…</p></div>';
     box.innerHTML = html;
+    wireCrests(box);
 
     if (edit) {
       ED.picker = NL.clubPicker(document.getElementById('pcEdClub'), {
@@ -1015,6 +1158,11 @@
           jobTitle: u.jobTitle || '', org: u.org || '', pending: !!u.pending, rejected: !!u.rejected,
           tools: u.tools || {}, pass: u.pass || null };
       }).sort(function (a, b) { return a.name.localeCompare(b.name); });
+      var orgs = {};
+      S.users.forEach(function (u) { var o = orgOf(u); if (o) orgs[o] = (orgs[o] || 0) + 1; });
+      if (S.orgFilter) S.orgFilter.setOptions(Object.keys(orgs).sort(function (a, b) {
+        return a === LEAGUE ? -1 : b === LEAGUE ? 1 : a.localeCompare(b);
+      }).map(function (o) { return { value: o, label: o, count: orgs[o] }; }));
       drawPeople();
     });
   }
@@ -1043,11 +1191,19 @@
       options: [{ value: 'issued', label: 'Issued' }, { value: 'none', label: 'Not issued' }],
       onChange: function (v) { S.pass = v; drawPeople(); }
     });
-    NL.filterButton(document.getElementById('pcCardFilter'), {
-      label: 'Card', multiple: false, allLabel: 'Any',
-      options: [{ value: 'league', label: 'League' }, { value: 'club', label: 'Club' }],
-      onChange: function (v) { S.card = v; drawPeople(); }
+    /* Organisation: the League, then every club someone is with — a
+       searchable list, as clubs are an open set. Options are filled once
+       people load. */
+    S.orgFilter = NL.filterButton(document.getElementById('pcOrgFilter'), {
+      label: 'Organisation', multiple: false, allLabel: 'Any', search: true, options: [],
+      onChange: function (v) { S.org = v; drawPeople(); }
     });
+    NL.clubs.load().then(function (meta) {
+      S.roster = {};
+      NL.season.clubsFor(meta).forEach(function (c) { S.roster[c.name] = true; });
+      drawPeople();
+      if (ED) drawPerson();
+    }).catch(function () {});
 
     initInvites();
     NL.ensureAuth().then(function () {
