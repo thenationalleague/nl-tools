@@ -530,6 +530,18 @@ Where it differs from step 4 as planned:
   One gap until then: a key's end date closes the door on the day, but the
   entries stay until the pass is next saved or applied.
 
+### Until club logins: a Club card is held to the club role (12/11/2026)
+
+Found the same evening, signing in as a club dummy: the pass sent a club
+account to five League staff consoles (DAZN Viewership, Programme Packs,
+Document Library, Financial Benchmarking — "not available" — and the Club
+Directory editor, which opened and was then refused by the database). Clubs
+reach those tools by code. So `NL.pass.explain` (nl-utils v1.54) holds a
+Club card to what the club role always allowed: League-audience tools off,
+everything else capped at the club role's default (Club Admin's with Club
+Operations, Club Staff's without). The agreed Club-card grants stay in the
+registry and apply when step 7 sets `NL.pass.CLUB_LOGINS = true`.
+
 Still to do after this: per-tool exceptions retire once passes decide,
 reminders before a key ends, opening a tool as someone else, the Access
 denied page, generated rules. The admin request email still says "Review in
