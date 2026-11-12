@@ -30,6 +30,12 @@ const k = (...ids) => Object.fromEntries(ids.map((id) => [id, { given: NOW - DAY
 const league = (...keys) => ({ base: 'league', keys: k(...keys) });
 const club = (name, ...keys) => ({ base: 'club', club: name, keys: k(...keys) });
 const level = (pass, key) => P.level(pass, REGISTRY[key], NOW);
+/* The grants Richard agreed for Club cards apply from club logins (step 7).
+   Tests of those grants run with the switch on; tests of today run as is. */
+const afterClubLogins = (fn) => () => {
+  P.CLUB_LOGINS = true;
+  try { fn(); } finally { P.CLUB_LOGINS = false; }
+};
 
 /* A made-up tool of the ordinary shape, for the branches the real grid does
    not happen to exercise. */
@@ -104,12 +110,12 @@ test('a level is capped at the highest the tool offers', () => {
   assert.equal(P.level(league('league-operations'), t, NOW), 'access');
 });
 
-test('a key from the other side of the pass counts for nothing', () => {
+test('a key from the other side of the pass counts for nothing', afterClubLogins(() => {
   const t = tool({ grants: { base: { league: 'off', club: 'off' }, key: { 'league-media': 'manage', 'club-media': 'manage' } } });
   assert.equal(P.level({ base: 'club', club: 'Woking', keys: k('league-media') }, t, NOW), 'off');
   assert.equal(P.level({ base: 'league', keys: k('club-media') }, t, NOW), 'off');
   assert.equal(P.level(club('Woking', 'club-media'), t, NOW), 'manage');
-});
+}));
 
 test('a key past its end date is gone; one with a date still to come still counts', () => {
   const t = tool();
@@ -194,7 +200,7 @@ test('Website Archive offers Access only', () => {
   assert.deepEqual(REGISTRY['staff-website-archive'].permissions.levels, ['off', 'access']);
 });
 
-test('the club secretary opens what the board will be shown', () => {
+test('the club secretary opens what the board will be shown (from club logins)', afterClubLogins(() => {
   const sec = club('Forest Green Rovers', 'club-operations');
   assert.equal(level(sec, 'ops-club-directory'), 'manage');
   assert.equal(level(sec, 'ops-vacancies'), 'manage');
@@ -203,7 +209,30 @@ test('the club secretary opens what the board will be shown', () => {
   const names = plain(P.summary(sec, REGISTRY, NOW).map((x) => x.label));
   assert.deepEqual(names, [...names].sort((a, b) => a.localeCompare(b)), 'A–Z');
   assert.ok(!names.includes('Club Codes'));
+}));
+
+/* ── Until club logins: a Club card is held to the club role ─────────────
+   Found 12/11/2026, signing in as a club dummy after the switch: the pass
+   sent a club account to DAZN Viewership, Programme Packs, Document Library,
+   Financial Benchmarking (League staff consoles — "not available") and the
+   Club Directory editor (opened, then refused by the database). */
+test('until club logins, a Club card opens only what the club role always did', () => {
+  const fgr = club('Forest Green Rovers', 'club-commercial', 'club-finance');
+  for (const key of ['media-dazn', 'media-programme', 'ops-document-library', 'ops-financial-benchmarking', 'ops-club-directory']) {
+    assert.equal(level(fgr, key), 'off', key);
+  }
+  for (const [role, pass] of [['club-staff', fgr], ['club-admin', club('Woking', 'club-operations', 'club-media')]]) {
+    for (const [key, rec] of Object.entries(REGISTRY)) {
+      if (rec.placeholder || key === 'welcome') continue;
+      const today = P.todayLevel({ role, tools: {} }, { key, ...rec });
+      assert.ok(P.rank(P.level(pass, rec, NOW)) <= P.rank(today), `${role} ${key}: above the role`);
+    }
+  }
 });
+
+test('the ceiling comes off at club logins', afterClubLogins(() => {
+  assert.equal(level(club('Forest Green Rovers', 'club-finance'), 'ops-financial-benchmarking'), 'access');
+}));
 
 /* ---- the import, the panel, the form, the footer, the colours ---- */
 

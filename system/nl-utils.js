@@ -1,7 +1,14 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.53 (12/11/2026)
+   Version: v1.54 (12/11/2026)
+
+   v1.54 — NL.pass: until club logins (NL.pass.CLUB_LOGINS, false), a Club
+   card opens no more than the club role always did: League-audience tools
+   off, everything else capped at the club role's default. Found by Richard
+   signing in as a club dummy after the switch: the pass sent a club account
+   to five staff consoles whose club side is a code page. Tested in
+   tests/pass-model.test.mjs. Cache-bust nl-utils ?v=57 -> ?v=58.
 
    v1.53 — NL.pass.toOld: the per-tool entries that make today's rule give
    what a pass gives, so the database (which reads users/<uid>/tools) stays
@@ -2810,6 +2817,21 @@
       if (p.for === 'league' && pass.base === 'club') { out.reason = 'league-only'; return out; }
 
       var max = cap(record);
+      /* Until club logins (plan, step 7), a Club card opens no more than the
+         club role always did (v1.54). The Club-card grants were agreed for
+         after club logins; today the pages they point at are staff pages,
+         and clubs reach those tools by code. So: a League-audience tool is
+         off for a Club card (the same gate auth-guard keeps), and anything
+         else is capped at the club role's registry default — Club Admin's
+         with the Club Operations key, Club Staff's without. Set
+         NL.pass.CLUB_LOGINS true at step 7 and the agreed grants apply. */
+      if (pass.base === 'club' && !window.NL.pass.CLUB_LOGINS) {
+        var aud = record.audience;
+        if (aud === 'league' || aud === 'staff' || aud === 'meta') { out.reason = 'clubs-later'; return out; }
+        var clubRole = holds(pass, 'club-operations', now) ? 'club-admin' : 'club-staff';
+        max = Math.min(max, rank(fromOld(window.NL.resolveToolLevel(undefined, record, clubRole))));
+        if (!max) { out.reason = 'clubs-later'; return out; }
+      }
       var g = p.grants, best = 0, fromCard = 0;
       var cardLevel = Math.min(rank((g.base || {})[pass.base]), max);
       if (cardLevel) { out.parts.push({ id: 'card', level: byRank(cardLevel) }); best = fromCard = cardLevel; }
@@ -3029,6 +3051,9 @@
     }
 
     window.NL.pass = {
+      /* Step 7 (club logins) turns this on; until then a Club card is held to
+         what the club role allows. See explain. */
+      CLUB_LOGINS: false,
       LEVELS: LEVELS,
       KEYS: KEYS,
       KEY: KEY,
