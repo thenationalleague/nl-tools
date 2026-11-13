@@ -45,6 +45,8 @@ async function t(label, p, ok) {
   try { await (ok ? assertSucceeds(p) : assertFails(p)); pass++; console.log('ok  ', label); }
   catch (e) { fail++; console.log('XX  ', label, e.message); }
 }
+/* A kit record must hold club, season, outfield and gk (the rules validate it). */
+const KIT = { club: 'Testham Town', season: '2026', outfield: { a: 1 }, gk: { a: 1 } };
 const N = 'app-data/' + NEWS, K = 'app-data/' + KITS, S = 'app-data/' + SOTM, B = 'app-data/' + BE;
 
 /* Newsletter: Manage only, League only */
@@ -55,11 +57,11 @@ await t('Newsletter: no pass, old admin role still writes', set(ref(db['u-oldad'
 await t('Newsletter: no pass, old staff role no longer reads', get(ref(db['u-oldst'], N + '/editions')), false);
 
 /* Club Kits */
-await t('Club Kits: Manage edits a club', set(ref(db['u-man'], K + '/submissions/Testham Town'), { club: 'Testham Town' }), true);
+await t('Club Kits: Manage edits a club', set(ref(db['u-man'], K + '/submissions/Testham Town'), KIT), true);
 await t('Club Kits: Access looks', get(ref(db['u-acc'], K + '/submissions')), true);
-await t('Club Kits: Access cannot edit', set(ref(db['u-acc'], K + '/submissions/Testham Town'), { club: 'x' }), false);
-await t('Club Kits: a Club card cannot edit', set(ref(db['u-club'], K + '/submissions/Testham Town'), { club: 'x' }), false);
-await t('Club Kits: superadmin edits', set(ref(db['u-sa'], K + '/submissions/Testham Town'), { club: 'Testham Town' }), true);
+await t('Club Kits: Access cannot edit', set(ref(db['u-acc'], K + '/submissions/Testham Town'), KIT), false);
+await t('Club Kits: a Club card cannot edit', set(ref(db['u-club'], K + '/submissions/Testham Town'), KIT), false);
+await t('Club Kits: superadmin edits', set(ref(db['u-sa'], K + '/submissions/Testham Town'), KIT), true);
 
 /* Save of the Month */
 await t('SOTM: League Manage shortlists', set(ref(db['u-man'], S + '/shortlist/2026-11/TST/n1'), true), true);
