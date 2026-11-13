@@ -1,8 +1,15 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.58 (13/11/2026)
+   Version: v1.59 (13/11/2026)
 
+   v1.59 — One set of shelves for the portal and Access (Richard,
+           13/11/2026): NL.pass.SHELVES (Staff Tools, Club Tools, Website,
+           Sandbox, Control, in that order) and NL.pass.shelfOf(record),
+           which puts a registry record on exactly one of them. The portal's
+           Meta shelf is Control and its In Progress shelf is Sandbox, so the
+           two pages name the same thing the same way. Cache-bust nl-utils
+           ?v=62 -> ?v=63, in lockstep.
    v1.58 — The Structure shelf is called Control on screen
            (NL.pass.SHELF.structural). The stored value stays 'structural',
            so nobody's access changes. Cache-bust nl-utils ?v=61 -> ?v=62,
@@ -3192,10 +3199,36 @@
       };
     }
 
+    /* The shelves a tool sits on, in the order the portal shows them, and
+       which one a registry record is on (v1.59). One rule for the portal
+       and Access's Tools grid. Control is the Skeleton key's shelf
+       (permissions.shelf 'structural', audience 'meta'); Sandbox is a tool
+       not launched yet (permissions.shelf 'sandbox', or the older status
+       'wip'); Website is shelf 'website'; Club Tools is a tool clubs use
+       (shelf 'club', audience 'club', or a club page, clubUrl). */
+    var SHELVES = [
+      { id: 'staff', label: 'Staff Tools' },
+      { id: 'club', label: 'Club Tools' },
+      { id: 'website', label: 'Website' },
+      { id: 'sandbox', label: 'Sandbox' },
+      { id: 'control', label: 'Control' }
+    ];
+    function shelfOf(rec) {
+      rec = rec || {};
+      var p = rec.permissions || {};
+      if (p.shelf === 'structural' || rec.audience === 'meta') return 'control';
+      if (p.shelf === 'sandbox' || rec.status === 'wip') return 'sandbox';
+      if (rec.shelf === 'website') return 'website';
+      if (rec.shelf === 'club' || rec.audience === 'club' || rec.clubUrl) return 'club';
+      return 'staff';
+    }
+
     window.NL.pass = {
       /* Step 7 (club logins) turns this on; until then a Club card is held to
          what the club role allows. See explain. */
       CLUB_LOGINS: false,
+      SHELVES: SHELVES,
+      shelfOf: shelfOf,
       LEVELS: LEVELS,
       KEYS: KEYS,
       KEY: KEY,

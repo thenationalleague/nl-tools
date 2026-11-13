@@ -433,3 +433,20 @@ test('withLiveAll applies only where there is a live entry', () => {
   assert.equal(P.level(league(), all['staff-graphics'], NOW), 'access');
   assert.deepEqual(plain(all['ops-vacancies']), plain(REGISTRY['ops-vacancies']));
 });
+
+/* v1.59: one set of shelves for the portal and Access. Each tool on exactly
+   one, named the same on both pages. */
+test('shelves: the portal order, and every tool on one shelf', () => {
+  const P = NL.pass;
+  assert.equal(P.SHELVES.map((s) => s.label).join(' | '), 'Staff Tools | Club Tools | Website | Sandbox | Control');
+  const ids = P.SHELVES.map((s) => s.id);
+  for (const [key, rec] of Object.entries(REGISTRY)) {
+    assert.ok(ids.includes(P.shelfOf(rec)), `${key} is on a shelf`);
+    if (rec.permissions && rec.permissions.shelf === 'structural') assert.equal(P.shelfOf(rec), 'control', `${key}: Skeleton key tools are on Control`);
+    if (rec.permissions && rec.permissions.shelf === 'sandbox') assert.equal(P.shelfOf(rec), 'sandbox', `${key}: Sandbox`);
+  }
+  assert.equal(P.shelfOf({ audience: 'league', status: 'wip', permissions: { shelf: 'main' } }), 'sandbox', 'not launched yet is Sandbox');
+  assert.equal(P.shelfOf({ audience: 'league', clubUrl: '/x/', permissions: { shelf: 'main' } }), 'club', 'a club page makes it a club tool');
+  assert.equal(P.shelfOf({ audience: 'league', shelf: 'website' }), 'website');
+  assert.equal(P.shelfOf({ audience: 'league' }), 'staff');
+});
