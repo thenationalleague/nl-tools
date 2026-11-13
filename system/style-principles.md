@@ -108,3 +108,21 @@ Estate or the lint should flag it rather than relying on someone noticing.
 2. An action that would strand data refuses and says what to do first. **[new]**
 3. Removed things are kept and can be restored, with the same identity. **[new]**
 4. Every change that matters is written to the audit log in words. **[law] [check]**
+
+## 12. The code behind it
+
+1. Delete what is no longer used in the same change that stops using it: the button, its styles, its function, its test. **[new] [check]**
+2. A one-off stays local; a pattern used twice is promoted to the canon, and the local copies and their "canon candidate" notes go. **[law]**
+3. One-off workflows and scripts are removed in the next pull request after they have run. **[law]**
+4. Comments explain why, not what happened. History lives in git and the pull requests. **[new]**
+5. A file's header keeps its last five versions; older entries go, because git keeps them. **[new] [check]**
+6. Page styles use the page's own class names and never restyle a canon class. **[law] [check]**
+7. Check the canon before writing a local style or helper; if it almost does the job, extend the canon. **[law]**
+
+## 13. Versions and What's new
+
+1. Every tool keeps a version number, shown on its badge in the top bar. It is how a change is seen to have landed. **[law]**
+2. The badge and What's new are for League staff only, decided by the pass's card. **[new]**
+3. What's new keeps the last five entries, one plain line each, written for the person using the tool. **[new]**
+4. Entries say what changed, never what went wrong. No clubs, people or incidents are named, in What's new, file headers or pull requests: all of it is public. **[new]**
+5. Anything sensitive about an incident never goes in the repo. **[law]**
