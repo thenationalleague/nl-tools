@@ -23,6 +23,9 @@ test('Attendance: fixtures and audit logs are League and Manage; submissions are
   assert.equal(a.fixtures['.write'], leagueManage('ops-attendance'));
   assert.equal(a['fixtures-audit']['.read'], leagueManage('ops-attendance'));
   assert.equal(a['submissions-audit']['.read'], leagueManage('ops-attendance'));
+  /* Every season's figures live under archive/<season>/ (Attendance
+     v2.18.0); the old root submissions node keeps its rule until it goes. */
+  assert.equal(a.archive.$season.submissions['.write'], levelRule('ops-attendance', 'admin'));
   assert.equal(a.submissions['.write'], levelRule('ops-attendance', 'admin'));
 });
 
@@ -87,4 +90,12 @@ test('batch 1: the pages decide by the level, not the role', () => {
   const be = read('brand-exposure/index.html');
   assert.doesNotMatch(be, /canScan = !!\(session && session\.role === 'superadmin'\);/, 'the scanner asks the pass');
   assert.match(be, /NL\.pass\.isSkeleton\(bePass\)/);
+});
+
+test('Attendance has no Season admin, and every season reads one address', () => {
+  const att = readFileSync(join(REPO, 'attendance/index.html'), 'utf8');
+  assert.doesNotMatch(att, /data-panel="seasonadmin"|function wireSeasonAdmin/);
+  assert.match(att, /function submissionsPath\(\) \{ return BASE_PATH \+ '\/archive\/' \+ \(S\.season \|\| S\.currentSeason\) \+ '\/submissions'; \}/);
+  const fm = readFileSync(join(REPO, 'fixtures/index.html'), 'utf8');
+  assert.match(fm, /return 'app-data\/ops-attendance\/archive\/' \+ key \+ '\/' \+ node;/, 'Fixture Management reads the same address');
 });
