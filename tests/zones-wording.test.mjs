@@ -36,3 +36,15 @@ test('My pass has an Account section that changes your own password, current one
 test('the menu under the circle links to Account', () => {
   assert.match(read('system/nl-topbar.js'), /item\('\/pass\/#account', 'lock', 'Account'/);
 });
+
+/* The new pass front and turning it over (permissions-plan, 13/11/2026). */
+test('the pass is one white card: kind strip, big club sticker, zones, and a back', () => {
+  const pass = read('pass/index.html');
+  assert.match(pass, /return pass\.base === 'club' \? \{ label: 'Club', colour: 'var\(--navy\)' \} : \{ label: 'League', colour: 'var\(--primary\)' \};/,
+    'the strip says the kind of pass, never the club colour');
+  assert.match(pass, /class="pass__circle/, 'the crest sits on a white circle');
+  assert.match(pass, /'<div class="pass__zones">'/);
+  assert.match(pass, /Every tool, Manage/, 'the Skeleton key\'s back');
+  assert.match(pass, /role="button" tabindex="0" aria-pressed="false" aria-label="Turn the pass over"/);
+  assert.match(pass, /e\.key === 'Enter' \|\| e\.key === ' '/, 'turns over from the keyboard too');
+});

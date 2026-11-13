@@ -800,7 +800,7 @@ Settled since: External passes (13/11, above); "zones" is the word on screen
 for keys (13/11, see the Roadmap); the new pass front (13/11, "The new pass
 front" below).
 
-## The new pass front (decided 13/11, not built)
+## The new pass front (decided 13/11, built 13/11)
 
 Replaces the club-coloured header band in "The pass" above. Built together
 with turning the pass over.
