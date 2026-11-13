@@ -1,5 +1,16 @@
 /*
   Programme Packs — shared runtime for the library + admin console
+  Version: v2.0 (13/11/2026) — one club code door. A club's passcode is
+           checked by the shared clubCodeAuth (app-data/club-codes, through
+           NL.codeGate.viaFunction), the same door as every other club page,
+           on the DEFAULT app: it mints the same pClub / pManage claims the
+           rules read. A code session then persists like any Firebase
+           sign-in, so the 30-day remembered passcode (localStorage) goes;
+           PP.resume reads the claims off whoever is signed in (a code or a
+           Club card) instead of re-exchanging a stored code. The named app
+           and programmeAuth now serve only the console's master session.
+           PP.handOff goes: the console's "Open as" opens the master view at
+           that club instead of signing the admin's browser in as the club.
   Version: v1.9 (13/11/2026) — the card door clears a remembered code: one
            mode per browser.
   Version: v1.8 (13/11/2026) — a Club card writes only with Manage: the
@@ -342,49 +353,59 @@
       });
   }
 
-  function remember(code) {
-    try {
-      localStorage.setItem(REMEMBER_KEY, JSON.stringify({ code: code, at: Date.now() }));
-    } catch (e) { /* private browsing — the club just retypes next visit */ }
-  }
-
-  function recall() {
-    try {
-      var raw = localStorage.getItem(REMEMBER_KEY);
-      if (!raw) return null;
-      var rec = JSON.parse(raw);
-      if (!rec || !rec.code) return null;
-      if (Date.now() - (rec.at || 0) > REMEMBER_DAYS * 864e5) { forget(); return null; }
-      return rec;
-    } catch (e) { return null; }
-  }
-
+  /* The 30-day remembered passcode went in v2.0 (a code session persists
+     like any Firebase sign-in). forget() stays to clear a device's old one. */
   function forget() {
     try { localStorage.removeItem(REMEMBER_KEY); } catch (e) {}
   }
 
-  /* Exchange a passcode for a scoped session. The passcode is the whole
-     credential — there is nothing in the URL to combine it with. A per-club
-     ?c= token existed until 04/08/2026 and only narrowed the server-side
-     search; see clubLink below for why it went. */
+  /* Exchange a passcode for a scoped session (v2.0): the shared club code
+     door, clubCodeAuth under app-data/club-codes, on the DEFAULT app. It
+     mints club, pClub, pManage and the names; the rules here read pClub and
+     pManage. The passcode is the whole credential — there is nothing in the
+     URL to combine it with (see clubLink below). */
   function enter(code) {
-    return requestGrant({ code: normCode(code) })
-      .then(function (d) {
-        return app.auth().signInWithCustomToken(d.customToken).then(function () {
-          session = {
-            code: d.club.code, name: d.club.name, division: d.club.division || '',
-            isNL: !!d.isNL, isAdmin: false, viaAdmin: VIA_ADMIN
-          };
-          remember(code);
-          PP.session = session;
-          /* Logged after the session exists, so the entry is attributed to the
-             club rather than to nobody. Failures are not logged here — the
-             trigger already records a rejected passcode server-side, where it
-             cannot be skipped by closing the tab. */
-          audit('sign-in', {});
-          return session;
-        });
+    var def = ensureDefaultApp();
+    return NL.codeGate.viaFunction(CODES_ROOT, { tool: 'programme' })(normCode(code))
+      .then(function () { return fromClaims(def.auth().currentUser); })
+      .then(function (s) {
+        if (!s) throw new Error('Passcode not recognised.');
+        /* Logged after the session exists, so the entry is attributed to the
+           club rather than to nobody. Failures are not logged here — the
+           trigger records a rejected code server-side (usage log). */
+        audit('sign-in', {});
+        return s;
       });
+  }
+
+  /* A session from whoever is signed in on the default app, by its claims:
+     a club code (no email) or a Club card (an NL Tools account whose pass
+     put its club on it, functions/pass-claims.js). Resolves null when there
+     is no club claim, or it is the master '*'. */
+  function fromClaims(u) {
+    if (!u || u.isAnonymous) return Promise.resolve(null);
+    function read(t) {
+      var c = (t && t.claims) || {};
+      return (c.pClub && c.pClub !== '*') ? c : null;
+    }
+    return u.getIdTokenResult().then(function (t) {
+      /* An account whose pass was issued since this token was minted: ask
+         once for a fresh one. A code session's claims never change. */
+      return read(t) || (u.email ? u.getIdTokenResult(true).then(read) : null);
+    }).then(function (c) {
+      if (!c) return null;
+      app = ensureDefaultApp();
+      /* canWrite: the pManage claim. A club code always carries it; a Club
+         card only with Manage on the tool. The rules say the same; this only
+         keeps the buttons honest. */
+      session = {
+        code: c.pClub, name: c.pClubName || c.pClub, division: '',
+        isNL: c.pClub === 'NL', isAdmin: false, viaCard: !!u.email,
+        canWrite: c.pManage === true, viaAdmin: VIA_ADMIN
+      };
+      PP.session = session;
+      return session;
+    }, function () { return null; });
   }
 
   /* Admin console path: the caller is already signed in on the DEFAULT app via
@@ -406,13 +427,13 @@
       });
   }
 
-  /* Silent re-entry on a remembered device. Resolves null (never rejects) when
-     there's nothing stored or the stored passcode has since been regenerated —
-     the caller just shows the gate. */
+  /* Silent re-entry (v2.0): a code session persists like any Firebase
+     sign-in, so resuming is reading the claims of whoever is signed in. The
+     old remembered passcode is cleared on the way, once: it is not read any
+     more. Resolves null (never rejects); the caller shows the gate. */
   function resume() {
-    var rec = recall();
-    if (!rec) return Promise.resolve(null);
-    return enter(rec.code).catch(function () { forget(); return null; });
+    forget();
+    return authReady(ensureDefaultApp().auth()).then(fromClaims).catch(function () { return null; });
   }
 
   /* ── Master entry (the library page, opened by an NL admin) ───────────
@@ -493,34 +514,16 @@
      database and storage calls switch to the default app for this visit.
      A League account carries no pClub and a master session is '*': both
      fall through to the doors they always used. */
+  /* The Club card door (v1.7) is now the same read as resume (v2.0): a
+     card's account carries the club claims. Kept as a name for the library's
+     boot order (card first, then a code). */
   function enterAsCard() {
     return authReady(ensureDefaultApp().auth()).then(function (u) {
-      if (!u || u.isAnonymous || !u.email) return null;
-      function read(t) {
-        var c = (t && t.claims) || {};
-        return (c.pClub && c.pClub !== '*') ? c : null;
-      }
-      return u.getIdTokenResult().then(function (t) {
-        /* A pass issued since this token was minted: ask once for a fresh one. */
-        return read(t) || u.getIdTokenResult(true).then(read);
-      }).then(function (c) {
-        if (!c) return null;
-        /* One mode per browser (13/11/2026): signed in, a code remembered on
-           this device is cleared, so a shared office machine does not keep a
-           club's code behind someone's own account. */
-        forget();
-        app = ensureDefaultApp();
-        /* canWrite: the pass gives Manage here (the pManage claim). Without
-           it the card reads its club's library and writes nothing; the rules
-           say the same, this only keeps the buttons honest. */
-        session = {
-          code: c.pClub, name: c.pClubName || c.pClub, division: '',
-          isNL: c.pClub === 'NL', isAdmin: false, viaCard: true, canWrite: c.pManage === true
-        };
-        PP.session = session;
-        audit('sign-in', { via: 'card' });
-        return session;
-      }, function () { return null; });
+      if (!u || !u.email) return null;
+      return fromClaims(u).then(function (s) {
+        if (s) audit('sign-in', { via: 'card' });
+        return s;
+      });
     });
   }
 
@@ -588,7 +591,6 @@
     /* Seeds the remembered-device slot so the club page signs itself in. Used
        by the console's "Open as" — the passcode is one the admin already
        holds, so this discloses nothing they could not read on that screen. */
-    handOff: function (code) { remember(code); },
     enter: enter,
     enterAsAdmin: enterAsAdmin,
     enterMaster: enterMaster,

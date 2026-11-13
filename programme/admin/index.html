@@ -1,6 +1,14 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Programme Packs (admin)
+  Version: v1.10 (13/11/2026) — tabs: Library first, then Removed files,
+           Audit and Manage (was Access, first): passcodes, usage and sizes
+           are for running the tool, so they sit last (Richard, 13/11/2026).
+           And a club's Open shows its library in the master
+           view (/programme/?master=1#/<club>) instead of signing this browser
+           in as the club: a club code now goes through the shared door on
+           the default app (_shared.js v2.0), which would sign the admin out
+           of NL Tools. Loads _shared.js v2.0 (?v=10).
   Version: v1.9 (11/11/2026) — loads _shared.css v1.4 (?v=6), which no longer
            carries the club library's .own card rules (canon .nl-club-header
            now). This page never used them. No behaviour change.
@@ -221,7 +229,7 @@
 
   <!-- Programme Packs runtime (named app 'nlProgramme'). AFTER nl-utils.js
        since _shared.js v1.6: its file helpers are canon NL.files now. -->
-  <script src="/programme/_shared.js?v=9"></script>
+  <script src="/programme/_shared.js?v=10"></script>
 
   <link rel="stylesheet" href="/programme/_shared.css?v=6">
 <style>
@@ -317,14 +325,17 @@
   <div class="page">
 
     <div class="tabs" id="tabs">
-      <button class="tab active" data-tab="access">Access</button>
-      <button class="tab" data-tab="library">Library</button>
+      <!-- v1.10: the library first; the codes and who uses what (usage,
+           sizes, passcodes) are running the tool, so they sit on Manage,
+           last, as on every tool. The internal key stays 'access'. -->
+      <button class="tab active" data-tab="library">Library</button>
       <button class="tab" data-tab="trash">Removed files</button>
       <button class="tab" data-tab="audit">Audit</button>
+      <button class="tab" data-tab="access">Manage</button>
     </div>
 
-    <div id="paneAccess"></div>
-    <div id="paneLibrary" style="display:none"></div>
+    <div id="paneAccess" style="display:none"></div>
+    <div id="paneLibrary"></div>
     <div id="paneTrash" style="display:none"></div>
     <div id="paneAudit" style="display:none"></div>
 
@@ -349,7 +360,11 @@
   var configSeen = false;
   var FILES = {}, TRASH = {}, AUDIT = {}, ROSTER = [], BY_CODE = {};
   var ready = false;
-  var tab = 'access';
+  var tab = 'library';
+  /* Boot messages go to whichever tab is showing. */
+  function paneEl() {
+    return el({ access: 'paneAccess', library: 'paneLibrary', trash: 'paneTrash', audit: 'paneAudit' }[tab]);
+  }
 
   var esc = function (s) { return NL.escHtml(s); };
   function el(id) { return document.getElementById(id); }
@@ -360,14 +375,14 @@
      blank forever with nothing in the console. Every path below ends in either
      content or a visible message. */
   function status(title, detail) {
-    el('paneAccess').innerHTML = '<div class="boot"><strong>' + esc(title) + '</strong>' +
+    paneEl().innerHTML = '<div class="boot"><strong>' + esc(title) + '</strong>' +
       (detail ? '<div style="margin-top:6px">' + esc(detail) + '</div>' : '') + '</div>';
   }
 
   function fail(where, e) {
     var msg = (e && (e.message || e.code)) || String(e);
     console.error('[programme-admin] ' + where, e);
-    el('paneAccess').innerHTML =
+    paneEl().innerHTML =
       '<div class="empty-state"><div class="empty-state__title">Couldn’t open the console</div>' +
       '<div class="empty-state__text">' + esc(where) + ' — ' + esc(msg) + '</div></div>';
   }
@@ -775,7 +790,7 @@
       '</td>' +
       '<td><span class="row-acts">' +
         '<a class="btn btn--navy btn--sm" data-open="' + esc(code) + '"' +
-          ' href="' + esc(PP.clubLink(code) + '&as=1') + '"' +
+          ' href="' + esc('/programme/?master=1#/' + encodeURIComponent(code)) + '"' +
           ' target="_blank" rel="noopener">Open</a>' +
         '<button class="btn btn--ghost btn--sm" data-email="' + esc(code) + '">Copy email</button>' +
         '<button class="btn btn--ghost btn--sm" data-copy="' + esc(PP.clubLink(code)) + '">Copy link</button>' +
@@ -945,18 +960,8 @@
     });
   }
 
-  /* Open the library as a club, in a new tab. The console already holds that
-     club's passcode, so this discloses nothing new — it just saves copying a
-     link and retyping a code to answer "what are they actually seeing?".
-
-     Two things keep it honest. The impersonation itself is logged from the
-     admin session, so the trail shows who did it. And the tab carries ?as=1,
-     which makes every action it takes record as "opened by NL" rather than
-     appearing to be the club's own work.
-
-     It does leave the club's passcode in this browser's remembered-device
-     slot for 30 days, exactly as if you had signed in as them — "Not you?" on
-     that page clears it. */
+  /* Open a club's library in a new tab, to answer "what are they actually
+     seeing?". Logged from the admin session, so the trail shows who looked. */
   /* A real anchor rather than window.open(). Passing a features string to
      window.open makes Chrome treat it as a popup and blockers stop it, which
      is why the first version silently did nothing. An <a target="_blank">
@@ -964,10 +969,13 @@
 
      The handler runs before the browser follows the link and never calls
      preventDefault, so a failed audit write cannot stop the tab opening. */
+  /* v1.10: Open shows the club's library in the master view, rather than
+     signing this browser in as the club. A club code now goes through the
+     shared door on the default app, so taking one here would have signed the
+     admin out of NL Tools. The master view shows the same folders, and its
+     changes are recorded as the League's, which is what they are. */
   function openAs(code) {
-    var rec = recFor(code);
-    if (!rec) return;
-    PP.handOff(rec.passcode);
+    if (!recFor(code)) return;
     PP.audit('open-as', { club: code, clubName: nameFor(code) });
   }
 

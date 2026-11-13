@@ -22,9 +22,13 @@
 
 ## Now
 
-### One club code door for every club page
-What: Move the Handbook reader and Matchday Live's club page onto the shared code-or-sign-in door. Fold Programme Packs' own passcode check into the shared one, and move its usage figures onto a Manage tab.
-Why: One way in for clubs, one place codes are checked and logged, and less code to look after.
+### Matchday Live on the club code door
+What: Matchday Live's contributors use personal links today. When it leaves Sandbox, they open it the same way as every club page: a club code (named holders, so each clip still says who filed it) or a Club card with the Club Media zone.
+Why: One way in for clubs. It waits for launch because the personal links are part of the pilot.
+
+### Retire programmeAuth's club path
+What: Programme Packs now checks club codes through the shared door (13/11/2026). After a week with no club using the old route, remove the club-passcode half of programmeAuth, leaving only the console's sign-in.
+Why: Two copies of the code check, throttle and log is what this tidy is for.
 
 ### The pass decides everywhere
 What: Attendance and the Handbook still decide who can edit by old role. Switch them to the pass. Then remove the two checks that still sit ahead of the pass: the superadmin role and the "League only" label.
