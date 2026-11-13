@@ -1,8 +1,11 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Access
-  Version: v2.2 (13/11/2026)
+  Version: v2.3 (13/11/2026)
   File: /access/index.html
+  v2.3 (13/11/2026) — The Tools grid is grouped into the portal's shelves
+    (NL.pass.SHELVES / shelfOf, nl-utils v1.59), under a heading row each,
+    instead of a shelf name under every tool and a Shelf filter.
   v2.2 (13/11/2026) — The Structure shelf is called Control.
 
   Who gets in: everyone with an account and their pass, invites, sign-up
@@ -166,6 +169,11 @@
     window.NL_CHANGELOG = [
       {
         date: '13/11/2026',
+        version: 'v2.3',
+        items: [ 'Tools are grouped into the portal\u2019s shelves.' ]
+      },
+      {
+        date: '13/11/2026',
         version: 'v2.2',
         items: [ 'The Structure shelf is called Control.' ]
       },
@@ -253,8 +261,8 @@
     };
   </script>
 
-  <!-- NL system scripts (lint canonical: ?v=62 / ?v=1 / ?v=15 / ?v=21) -->
-  <script src="/system/nl-utils.js?v=62"></script>
+  <!-- NL system scripts (lint canonical: ?v=63 / ?v=1 / ?v=15 / ?v=21) -->
+  <script src="/system/nl-utils.js?v=63"></script>
   <!-- GA4, one property for all of nl.tools. Cookieless, so no consent
        banner on any page; page views by path, no identity. Tool events go
        through NL.track(). See system/nl-analytics.js. -->
@@ -318,6 +326,10 @@
   .tl-grid .tl-sep { border-left: 2px solid var(--navy-300) !important; }
   .tl-grid th.tl-group { text-align: center !important; }
   .tl-grid td.tl-na { background: var(--off-white) !important; }
+  /* A shelf heading row, named as the portal names it. */
+  .tl-grid tr.tl-shelf th { background: var(--navy-50) !important; color: var(--navy) !important; text-align: left !important;
+    font-size: var(--text-xs); text-transform: uppercase; letter-spacing: var(--tracking-wide);
+    font-weight: 800; font-variation-settings: 'wght' 800; padding-top: 8px !important; padding-bottom: 8px !important; }
   .tl-mk { display: inline-flex; align-items: center; justify-content: center; min-width: 64px; height: 24px; padding: 0 8px; border-radius: var(--radius); border: 1px solid transparent; background: none; font: inherit; font-size: var(--text-xs); font-weight: 700; font-variation-settings: 'wght' 700; cursor: pointer; color: var(--text-muted); }
   .tl-mk:hover { border-color: var(--navy-300); }
   .tl-mk--access { background: var(--navy-50); color: var(--navy); border-color: var(--navy-200); }
@@ -693,7 +705,6 @@
       <div class="toolbar">
         <div class="toolbar__left">
           <input class="toolbar__search" type="search" id="tlSearch" placeholder="Search tools" aria-label="Search tools">
-          <span id="tlShelf"></span>
         </div>
         <div class="toolbar__right"><span class="pc-count" id="tlCount"></span></div>
       </div>
@@ -1651,6 +1662,10 @@
   }
 
   var DASH = '<span class="pc-muted">–</span>';
+  function shelfLabel(rec) {
+    var id = P.shelfOf(rec);
+    return (P.SHELVES.filter(function (x) { return x.id === id; })[0] || {}).label || '';
+  }
   function sideOf(id) { return (id === 'club' || (P.KEY[id] && P.KEY[id].base === 'club')) ? 'club' : 'league'; }
 
   /* The grid's columns: League card and League keys, then Club card and
@@ -1696,16 +1711,15 @@
       }).join('') + '</tr>';
     var keys = toolKeys().filter(function (k) { return S.registry[k].permissions; });
     var rows = keys.filter(function (k) {
-      var r = S.registry[k], p = r.permissions;
-      if (TL.shelf && p.shelf !== TL.shelf) return false;
+      var r = S.registry[k];
       return !TL.q || (String(r.label || k) + ' ' + k).toLowerCase().indexOf(TL.q) >= 0;
     });
     document.getElementById('tlCount').textContent = rows.length + ' of ' + keys.length;
     var span = COLS.all.length;
-    document.getElementById('tlRows').innerHTML = rows.length ? rows.map(function (k) {
+    /* The portal's shelves, in its order, one heading row each (v2.3). */
+    function row(k) {
       var r = S.registry[k], p = r.permissions;
       var sub = [];
-      if (p.shelf !== 'main') sub.push(P.SHELF[p.shelf]);
       if (S.live[k]) sub.push('Changed here');
       var cells = p.shelf === 'structural'
         ? '<td class="tl-col" colspan="' + span + '"><span class="pc-muted">Skeleton key only</span></td>'
@@ -1715,6 +1729,10 @@
           : COLS.club.map(function (id) { return cellHtml(k, id); }).join(''));
       return '<tr data-row="' + esc(k) + '"><td><span class="pc-who"><a class="pc-who__name pc-link" href="?tool=' + encodeURIComponent(k) + '" data-tool-open="' + esc(k) + '">' + esc(r.label || k) + '</a>' +
           (sub.length ? '<span class="pc-who__sub">' + esc(sub.join(' · ')) + '</span>' : '') + '</span></td>' + cells + '</tr>';
+    }
+    document.getElementById('tlRows').innerHTML = rows.length ? P.SHELVES.map(function (sh) {
+      var mine = rows.filter(function (k) { return P.shelfOf(S.registry[k]) === sh.id; });
+      return mine.length ? '<tr class="tl-shelf"><th colspan="' + (span + 1) + '">' + esc(sh.label) + '</th></tr>' + mine.map(row).join('') : '';
     }).join('') : '<tr><td colspan="' + (span + 1) + '" class="pc-muted">Nothing matches.</td></tr>';
     drawBar();
   }
@@ -1846,7 +1864,7 @@
     var structural = p.shelf === 'structural';
     var html = '<div class="pc-head"><div>' +
       '<div class="pc-head__name">' + esc(rec.label || key) + '</div>' +
-      '<div class="pc-who__sub">' + esc(P.SHELF[p.shelf] || '') + (S.live[key] ? ' · Changed here' : '') + '</div>' +
+      '<div class="pc-who__sub">' + esc(shelfLabel(rec)) + (S.live[key] ? ' · Changed here' : '') + '</div>' +
       '</div></div>';
 
     if (structural) {
@@ -1962,11 +1980,6 @@
 
   function initTools() {
     document.getElementById('tlSearch').addEventListener('input', function (e) { TL.q = e.target.value.trim().toLowerCase(); drawTools(); });
-    NL.filterButton(document.getElementById('tlShelf'), {
-      label: 'Shelf', multiple: false, allLabel: 'Any',
-      options: Object.keys(P.SHELF).map(function (s) { return { value: s, label: P.SHELF[s] }; }),
-      onChange: function (v) { TL.shelf = v; drawTools(); }
-    });
     document.getElementById('tlBack').innerHTML = icon('back') + 'Tools';
     document.getElementById('tlBack').addEventListener('click', function () { showTab('tools'); });
     document.getElementById('tlRows').addEventListener('click', function (e) {
