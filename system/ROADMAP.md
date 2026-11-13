@@ -71,10 +71,9 @@ Waiting on: you (one press)
 What: Turn on two-step sign-in (a code from a phone app) for the two Skeleton key accounts first.
 Why: Those two accounts open everything.
 
-### A new portal
-What: Redesign the portal, starting with the tool icons: drawn icons from one shared set in place of emojis, each tool's icon named in the tool list. The shelf names, cards and layout get the same look as the rest of NL Tools.
-Why: The portal works, but the emojis look meek and every phone draws them differently. It is the first page everyone sees.
-- The words on the shelves already come from one source (NL.pass.SHELVES), shared with Access.
+### The rest of the portal
+What: The tool cards and drawn icons are done (13/11/2026). Next is the page around them: the noticeboard, the header and the spacing, and the Graphics landing page as the second place the card is used.
+Why: It is the first page everyone sees. When a second page uses the card, it becomes a shared component.
 
 ### Turn the pass over
 What: Tap the pass on My pass and it turns over to show what it opens: Manage in one column, Access in the other, names only. The Skeleton key's back says "Every tool, Manage". The full list beside the pass stays.
