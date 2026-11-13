@@ -21,8 +21,8 @@ test('the tab is Manage, last, with Settings, Import and Removed in that order',
 
 test('Correct opens the clubs and competition and never changes the key', () => {
   assert.match(PAGE, /var fixedTeams = !isNew && !correct && \(comp\.league \|\| rec\.source === 'import'\);/);
-  assert.match(PAGE, /id="fmeCorrect">/);
-  assert.match(PAGE, /ctrl\.close\(\); openEdit\(rec, \{ correct: true \}\);/);
+  assert.match(PAGE, /buttons\.push\(\{ label: 'Correct', className: 'btn--ghost', onClick: function \(m\) \{ m\.close\(\); openEdit\(rec, \{ correct: true \}\); \} \}\);/,
+    'Correct is an action on the game, so it lives in the bottom bar');
   /* a new key is minted only for a new tie */
   assert.match(PAGE, /if \(isNew\) \{\n\s+var key = opta \|\| F\.mintKey/);
   assert.match(PAGE, /NL\.writeAudit\('fixtures_correct'/);
