@@ -137,6 +137,18 @@ Why: Delivery you can see, and no Gmail limits. Not now: it adds a service and a
 What: After the Skeleton key accounts, offer two-step sign-in to everyone.
 Why: It protects every account, not only the two that open everything.
 
-### A new assistant
-What: A chat with Claude on API credit, with a team of agents, each with its own voice, typeface, character and skill set, answering questions through connectors such as the NL Data MCP. Each person's zones decide what it can reach.
-Why: Claudio's idea was right; the build wasn't. The shape is kept in system/retired/claudio.md.
+### Full league history beyond the National League
+What: Add every club's Football League results to our own history, so a club's whole league story sits on one timeline and head-to-heads span both: every league meeting between two clubs, wherever it was played. Two public datasets cover England's top four divisions from 1888 (engsoccerdata, and a database built on it that is kept up to date); our EFL connector only goes back to 2021.
+Why: Many of our clubs had Football League years, and clubs want their whole history, not the part since they joined us.
+- Ask both compilers first, and credit them on every answer: one dataset is marked for non-commercial use with credit, the other states no terms.
+- Built in advance, not in the live database: each club's history and each head-to-head worked out ahead, like the results archive, so searches are instant and free.
+- The real work is which club is which. A list to check and sign off, linking each Football League name to one of our clubs, with phoenix clubs, renames and mergers marked (the old Aldershot is not Aldershot Town). Never combined without asking.
+- Not covered: history in the leagues below us before 1979.
+
+### A new assistant, for clubs first
+What: A chat with Claude on API credit, with a team of agents, each with its own voice, typeface, character and skill set, answering questions through connectors such as the NL Data MCP. Clubs first, starting with the League's history: "when did we last beat Yeovil away?", "our record against Gateshead", head-to-heads for programme notes. A Club card already knows which club is asking. Each person's zones decide what it can reach.
+Why: Clubs can't easily get the League's history anywhere else, and programme editors need head-to-heads every week. Claudio's idea was right; the build wasn't. The shape is kept in system/retired/claudio.md.
+- Every answer comes from the results archive, never the model's memory, and says plainly what the archive doesn't hold (attendances, referees, goalscorers, managers, grounds). Clubs print what they're given.
+- Answers cost almost nothing: the connector works the answer out and the model only words it, repeated questions are answered from a store, and only the agent's own tools go with each message.
+- Our own site is a research source too: the Website Archive's articles, searched in advance, so an answer can add what we wrote at the time, with a link to it. Only our own words; other publications stay out.
+- Programme Packs is a natural home, as the programme editors are already there.
