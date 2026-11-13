@@ -171,7 +171,8 @@ out only when a specific person needs one sub-tool alone).
    **Import** (bringing data in), **Removed** (things taken out, kept so they
    can be put back) and **History** (what changed, and who did it).
    Exports belong to Access, beside what they export. Seasons are not
-   archived: every season stays editable in place at Manage.
+   archived: every season stays editable in place at Manage. Each part of
+   a section is a canon `.form-panel` with its navy head (13/11).
 
 ## The pass (design locked 12/11)
 
