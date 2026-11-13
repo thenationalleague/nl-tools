@@ -22,13 +22,6 @@
 
 ## Now
 
-### Commercial Benchmarking on one address
-What: One page at /commercial-benchmarking/. A club code, or a Club card, shows that club its own figures. A League account sees every club. Manage adds editing, importing late returns, Confirmations and Export.
-Why: The tool should work like every other: one address, and the pass decides what you see. It also stops it deciding by old roles.
-- Starting grants: Commercial key at Manage, Finance key at Access, Senior key removed. Change them in Access.
-- The database rules follow the same levels.
-- Removes the two one-off buttons (Retire Commercial Benchmarking links, Re-run club passes).
-
 ### One club code door for every club page
 What: Move the Handbook reader and Matchday Live's club page onto the shared code-or-sign-in door. Fold Programme Packs' own passcode check into the shared one, and move its usage figures onto a Manage tab.
 Why: One way in for clubs, one place codes are checked and logged, and less code to look after.
