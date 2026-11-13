@@ -12,9 +12,15 @@ A season is named by its first year: `2027` is 2027-28.
 season** (`"seasons": { …, "2027": "National" }`), and promoted or relegated
 clubs need adding or ending. Tools ask "which clubs played this season?" by
 reading that map (`NL.season.clubsFor`, `NL.clubs.forSeason`). The season job
-only moves `seasons.current`. If it moves before the clubs have a 2027 entry,
+only moves `seasons.current`. If it moved before the clubs had a 2027 entry,
 every club picker, Attendance, Fixture Management's league count and every
-club-code door sees **no clubs**.
+club-code door would see **no clubs**.
+
+So the job **refuses to move the season until each division has its 24 clubs
+for the new year**: it writes nothing and its run goes red. Every Monday in
+June it also runs a check that goes red while any division is short, so
+Actions (and Estate's failed-job flag) warns weeks ahead. A red run in June
+means: add the clubs.
 
 - Add each club coming in (code, name, Opta ID, colours, crest name) and its
   2027 division. Its crest goes in `assets/crests/` (the crest thumbs job
@@ -27,13 +33,17 @@ club-code door sees **no clubs**.
 
 | When | Job | What it does |
 |---|---|---|
-| 1 July, 02:00 UTC | **Timer · New season** (`season-rollover.yml`) | Sets `seasons.current` to the new year in clubs-meta and adds its label. Commits straight to main. Nothing else. |
+| Mondays in June, 07:17 UTC | **Timer · New season** (check only) | Counts each division's clubs for the new year. Red if any division is short of 24. Changes nothing. |
+| 1 July, 02:00 UTC | **Timer · New season** (`season-rollover.yml`) | If every division has its 24 clubs, sets `seasons.current` to the new year in clubs-meta and adds its label, and commits straight to main. If not, changes nothing and goes red. |
 | Every night | **Timer · League table snapshot** | Starts saving the new season's tables as soon as NLS has them, reading the season from clubs-meta. |
 | From then on | Attendance | Files figures under `archive/<new season>/` from the first submission. No year-end step exists any more. |
 | From then on | Every tool using `NL.season.current` | Defaults to the new season. The old one stays in each season dropdown. |
 
-If 1 July passes and nothing happened: Actions → **Timer · New season** →
-Run workflow (leave the year blank). It is safe to run twice.
+If 1 July's run went red, add the missing clubs to clubs-meta, merge, then
+Actions → **Timer · New season** → Run workflow (leave the year blank). It is
+safe to run twice. If the season really starts with a division short (a club
+folded in the summer), tick **allow short**. To check without changing
+anything, tick **check only**.
 
 ## What has to be done by hand
 
