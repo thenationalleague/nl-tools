@@ -133,3 +133,25 @@ test('a League account at a code door goes to the League page', () => {
   const pp = readFileSync(join(REPO, 'programme/index.html'), 'utf8');
   assert.match(pp, /location\.replace\('\/programme\/admin\/'\)/);
 });
+
+/* 13/11/2026: one club code door. Programme Packs checks a club's passcode
+   through the shared clubCodeAuth like every club page, and the Handbook
+   reader has both doors. */
+test('Programme Packs: club codes through the shared door, no remembered passcode', () => {
+  const pp = readFileSync(join(REPO, 'programme/_shared.js'), 'utf8');
+  const enter = pp.slice(pp.indexOf('function enter(code)'), pp.indexOf('function fromClaims('));
+  assert.match(enter, /NL\.codeGate\.viaFunction\(CODES_ROOT, \{ tool: 'programme' \}\)/);
+  assert.doesNotMatch(enter, /requestGrant/, 'the club door no longer uses programmeAuth');
+  assert.doesNotMatch(pp, /localStorage\.setItem\(REMEMBER_KEY/, 'no passcode kept on the device');
+  assert.doesNotMatch(pp, /handOff:/, 'no handOff export');
+  const admin = readFileSync(join(REPO, 'programme/admin/index.html'), 'utf8');
+  assert.match(admin, /data-tab="library">Library<\/button>[\s\S]*data-tab="access">Manage<\/button>/, 'Library first, Manage last');
+  assert.match(admin, /\/programme\/\?master=1#\//, 'Open shows the master view at that club');
+});
+
+test('the Handbook reader has both doors', () => {
+  const r = readFileSync(join(REPO, 'handbook/_reader.js'), 'utf8');
+  assert.match(r, /staffUrl: '\/handbook\/'/);
+  assert.match(r, /account: \{ title: 'Handbook', toolKey: 'ops-handbook' \}/);
+  assert.match(readFileSync(join(REPO, 'handbook/reader/index.html'), 'utf8'), /nl-topbar\.js\?v=/);
+});

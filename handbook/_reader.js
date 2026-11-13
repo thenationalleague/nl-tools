@@ -1,7 +1,12 @@
 /* =========================================================================
    NL Tools — Handbook reader
    File: /handbook/_reader.js
-   Version: v1.2 (14/10/2026)
+   Version: v1.3 (13/11/2026)
+
+   v1.3 — Two doors, one mode, as every club page: a Club card signed in to
+          NL Tools reads with the NL Tools top bar (account), and a League
+          account goes to the Handbook's League page (staffUrl, nl-utils
+          v1.61) instead of being shown the code card.
 
    v1.2 — the id bar names the club on a resumed session. clubLabel read
           NL.clubs.all() as if it were an array; it is a promise, so the
@@ -121,7 +126,10 @@ window.NLHandbook = (function () {
       /* The tool rides along with the code so the usage log can say which
          door a club came in by — see noteUse in functions/club-code.js. */
       verify: NL.codeGate.viaFunction('app-data/club-codes', { tool: 'handbook' }),
-      claim: 'club'
+      claim: 'club',
+      /* v1.3: a League account reads on the Handbook's own page. */
+      staffUrl: '/handbook/',
+      account: { title: 'Handbook', toolKey: 'ops-handbook' }
     }).then(function (session) {
       /* HIDE THE GATE FIRST, and before anything that could throw.
 
