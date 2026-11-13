@@ -249,27 +249,55 @@ test('no page reads or writes the retired links node', () => {
   assert.equal(rules.rules['app-data']['ops-commercial-benchmarking'].links, undefined, 'links/ has no rules, so nobody reads it');
 });
 
-test('link.html only forwards to the club page', () => {
-  const src = read('commercial-benchmarking/link.html');
-  assert.doesNotMatch(src, /firebase|dashboard\.js/, 'the stub loads nothing');
-  assert.match(src, /location\.replace\('\/commercial-benchmarking\/club\/'/);
-  assert.match(src, /view=check/, 'the old Proof link lands on Your figures');
+test('link.html and club/ only forward to the one page', () => {
+  const link = read('commercial-benchmarking/link.html');
+  assert.doesNotMatch(link, /firebase|dashboard\.js/, 'the stub loads nothing');
+  assert.match(link, /location\.replace\('\/commercial-benchmarking\/'/);
+  assert.match(link, /view=check/, 'the old Proof link lands on Your figures');
+  const club = read('commercial-benchmarking/club/index.html');
+  assert.doesNotMatch(club, /firebase|dashboard\.js/, 'the stub loads nothing');
+  assert.match(club, /location\.replace\('\/commercial-benchmarking\/' \+ location\.search/);
 });
 
-test('the club page is a two-door code page that confirms on the club record', () => {
-  const src = read('commercial-benchmarking/club/index.html');
+test('one page: a code door for clubs, the pass for League accounts', () => {
+  const src = read('commercial-benchmarking/index.html');
+  assert.doesNotMatch(src, /auth-guard\.js/, 'auth-guard would send a club with a code to the sign-in page');
   assert.match(src, /NL\.codeGate\.ensure\(/);
   assert.match(src, /viaFunction\('app-data\/club-codes', \{ tool: 'commercial-benchmarking' \}\)/);
-  assert.match(src, /staffUrl: '\/commercial-benchmarking\/'/);
-  assert.match(src, /account: \{ title: 'Commercial Benchmarking', toolKey: 'ops-commercial-benchmarking' \}/);
+  assert.match(src, /account: \{ title: 'Commercial Benchmarking', toolKey: KEY \}/);
   assert.match(src, /'clubs\/' \+ S\.key \+ '\/confirm'/);
-  assert.doesNotMatch(src, /auth-guard\.js/, 'entered by code, so no auth-guard');
-  const reg = JSON.parse(read('system/rtdb/tools-registry.snapshot.json'));
-  assert.equal(reg['ops-commercial-benchmarking'].clubUrl, '/commercial-benchmarking/club/');
+  assert.match(src, /canEdit = who\.level === 'manage'/, 'Manage edits; Access views');
+  const reg = JSON.parse(read('system/rtdb/tools-registry.snapshot.json'))['ops-commercial-benchmarking'];
+  assert.equal(reg.url, '/commercial-benchmarking/');
+  assert.equal(reg.clubUrl, reg.url, 'one address for both sides');
+  assert.deepEqual(reg.permissions.levels, ['off', 'access', 'manage']);
+  assert.equal(reg.permissions.grants.key['league-commercial'], 'manage');
+  assert.equal(reg.permissions.grants.key['league-senior'], undefined);
 });
 
-test('the club page finds its row by name, trimmed and case-folded (as the rules do)', () => {
-  const src = read('commercial-benchmarking/club/index.html');
+/* The page works the level out as auth-guard does; run it against NL.pass. */
+test('the page reads the level as auth-guard would', async () => {
+  const { NL } = await import('./load-canon.mjs');
+  const src = read('commercial-benchmarking/index.html');
+  const body = src.slice(src.indexOf('function levelFrom('), src.indexOf('function levelFor('));
+  const box = { NL, KEY: 'ops-commercial-benchmarking', LEAGUE_ROLES: { superadmin: true, admin: true, staff: true } };
+  vm.createContext(box);
+  vm.runInContext(body + ';this.levelFrom = levelFrom; this.isLeague = isLeague;', box);
+  const tool = JSON.parse(read('system/rtdb/tools-registry.snapshot.json'))['ops-commercial-benchmarking'];
+  const K = (...k) => Object.fromEntries(k.map((x) => [x, { given: 1, by: 'x' }]));
+  const league = (...k) => ({ role: 'staff', pass: { base: 'league', issued: 1, keys: K(...k) } });
+  assert.equal(box.levelFrom({ role: 'superadmin' }, tool), 'manage');
+  assert.equal(box.levelFrom(league('league-commercial'), tool), 'manage');
+  assert.equal(box.levelFrom(league('league-finance'), tool), 'access');
+  assert.equal(box.levelFrom(league('league-operations'), tool), 'off', 'Operations does not get in');
+  assert.equal(box.levelFrom(league(), tool), 'off');
+  assert.equal(box.levelFrom({ role: 'staff' }, tool), 'off', 'no pass: the role default, now off');
+  assert.equal(box.isLeague(league()), true);
+  assert.equal(box.isLeague({ role: 'staff', pass: { base: 'club', club: 'Testham Town', issued: 1 } }), false, 'a Club card is the club side, whatever the old role');
+});
+
+test('the club side finds its row by name, trimmed and case-folded (as the rules do)', () => {
+  const src = read('commercial-benchmarking/index.html');
   const body = src.slice(src.indexOf('function fold('), src.indexOf('window.CB_CLUB'));
   const box = {}; vm.createContext(box);
   vm.runInContext(body + ';this.rowKey = rowKey;', box);
@@ -281,7 +309,7 @@ test('the club page finds its row by name, trimmed and case-folded (as the rules
   assert.equal(box.rowKey(null, 'Testham Town'), null);
 });
 
-test('the staff save leaves a club’s own confirmation alone', () => {
+test('the save leaves a club’s own confirmation alone', () => {
   const src = read('commercial-benchmarking/index.html');
   assert.match(src, /k !== 'confirm'/, 'save skips confirm');
   assert.match(src, /clubsUpd\[c\.club \+ '\/' \+ k\]/, 'save writes field by field, not the whole row');

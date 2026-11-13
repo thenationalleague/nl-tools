@@ -1,4 +1,7 @@
-/* commercial-benchmarking/dashboard.js  v1.15
+/* commercial-benchmarking/dashboard.js  v1.16
+   v1.16 (13/11/2026): Export and Confirmations show at Manage only (canEdit),
+     with Edit data and Import rows; Access views. Both pages are one page now
+     (index.html).
    v1.15 (13/11/2026): the private token links are gone. The staff bar's
      Links button is now Confirmations (which clubs have confirmed their
      figures, read from clubs/<club>/confirm); link generation, the links
@@ -7,15 +10,15 @@
 
    Shared dashboard renderer for the Commercial Benchmarking tool. Pure
    rendering — no Firebase, no data loading. Both entry points use it:
-     - index.html  (gated NL tool: staff picker / club's own row via auth-guard)
-     - club/       (club page, entered by club code or a Club card)
+     - index.html  (one page: every club for a League account, one club for a
+                    club code or a Club card)
 
    CBDash.mount(AGG, clubs, opts) → { renderAll }
      AGG    = { meta, aggregates:{<key>:{label,unit,desc,group,scopes:{...}}}, chips }
      clubs  = array of club payloads { club, division, fsSponsor, metrics, chips }
      opts   = { staff, canEdit, onSave(AGG, clubs), confirmByClub }
-              staff:true shows the club picker and Confirmations; canEdit +
-              onSave enable the editor and Import rows.
+              staff:true shows the club picker; canEdit shows Export and
+              Confirmations, and with onSave the editor and Import rows.
    CBDash.review(OWN, { reportEmail, surveyUrl, onConfirm(state) }) — the
      club's own figures to check and confirm, no benchmarks.
    CBDash.importRows(AGG, clubs, rows, {dryRun, replace}) — see the function.
@@ -1008,8 +1011,11 @@ window.CBDash = (function () {
       var bar = $('staffBar');
       if (bar) {
         bar.style.display = '';
-        var btns = '<button class="btn btn--ghost btn--sm" id="cb-export" type="button">Export</button>';
-        btns += '<button class="btn btn--ghost btn--sm" id="cb-confirms" type="button">Confirmations</button>';
+        // Access views; Manage runs the tool (Richard, 13/11/2026): Export
+        // and Confirmations sit with editing and importing.
+        var btns = '';
+        if (opts.canEdit) btns += '<button class="btn btn--ghost btn--sm" id="cb-export" type="button">Export</button>';
+        if (opts.canEdit) btns += '<button class="btn btn--ghost btn--sm" id="cb-confirms" type="button">Confirmations</button>';
         if (opts.canEdit && opts.onSave) btns += '<button class="btn btn--ghost btn--sm" id="cb-import" type="button">Import rows</button>';
         if (opts.canEdit) btns += '<button class="btn btn--primary btn--sm" id="cb-edit" type="button">Edit data</button>';
         bar.innerHTML =
@@ -1020,8 +1026,8 @@ window.CBDash = (function () {
           if (editMode) { editMode = false; setEditUI(); }
           renderAll();
         });
-        $('cb-export').onclick = exportData;
-        $('cb-confirms').onclick = function () { editMode = false; setEditUI(); renderConfirms(); };
+        if ($('cb-export')) $('cb-export').onclick = exportData;
+        if ($('cb-confirms')) $('cb-confirms').onclick = function () { editMode = false; setEditUI(); renderConfirms(); };
         if ($('cb-import')) $('cb-import').onclick = importDialog;
         if ($('cb-edit')) { ebtn = $('cb-edit'); ebtn.onclick = function () { editMode = !editMode; setEditUI(); if (editMode) renderEditForm(); else render(); }; }
       }

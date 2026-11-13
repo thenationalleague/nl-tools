@@ -27,7 +27,7 @@ when someone asks for it, and when they do, this is where the thinking is.
 | [`holiday-lieu.md`](holiday-lieu.md) | 30/10/2026 | Staff leave and lieu tracker, never launched. **Rebuild intended**: the business rules are recorded; the approver model and lieu ledger need redesigning. |
 | [`site-demo.md`](site-demo.md) | 30/10/2026 | Astro mock-up of the public website. Concept kept; current "shop front and stockroom" thinking recorded. |
 | [`club-directory-codes.md`](club-directory-codes.md) | 11/11/2026 | Not a tool: the Club Directory's own editor, master and reader codes, with `_gate.js` and `clubDirectoryAuth`, and its old frozen copies. Clubs use club codes; staff use the login; backups replace the copies. |
-| [`commercial-benchmarking-links.md`](commercial-benchmarking-links.md) | 13/11/2026 | Not a tool: Commercial Benchmarking's private club links (`link.html?t=…`). Clubs use their club code at `/commercial-benchmarking/club/`; confirmations moved onto the club's row. |
+| [`commercial-benchmarking-links.md`](commercial-benchmarking-links.md) | 13/11/2026 | Not a tool: Commercial Benchmarking's private club links (`link.html?t=…`). Clubs use their club code at `/commercial-benchmarking/`; confirmations moved onto the club's row. |
 
 ## Why one place
 
