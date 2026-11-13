@@ -4,9 +4,18 @@ How every NL Tools page should look and behave. The canon (`nl-brand.css`,
 `nl-utils.js`) says what a thing looks like; these say where it goes and
 when to use it. Draft, 13/11/2026: written to be argued with, then held to.
 
+**Work in progress.** The **[new]** rules are not applied across the estate
+yet. Before they are, there is one more full review of these principles
+against every page (the brand sweep, `system/brand-audit.md`), and an agreed
+moment to make the big changes in one go. Until then, a change to a tool
+follows the **[law]** rules and the **[new]** ones where it is touching that
+part of the page anyway; nobody reworks a tool to a **[new]** rule on its
+own.
+
 Each line is one rule. **[law]** is already enforced or agreed;
-**[new]** is proposed here. **[check]** means a machine can test it, so
-Estate or the lint should flag it rather than relying on someone noticing.
+**[new]** is proposed here; **[consider]** is not yet decided either way.
+**[check]** means a machine can test it, so Estate or the lint should flag it
+rather than relying on someone noticing.
 
 ## 1. Foundations
 
@@ -69,6 +78,8 @@ Estate or the lint should flag it rather than relying on someone noticing.
 4. Destructive buttons are red and sit apart from the rest: on the left of a bar. **[new]**
 5. Order in a bar, left to right: destructive, then other actions on the thing, then the primary on the right. **[new]**
 6. A dialog with Save doesn't also need Cancel. The × and Esc close it. A read-only dialog has Close. **[new]**
+7. On a phone, a button may drop its words and show only its icon, when the icon is one of the standard set everyone reads the same way: add, download, upload, edit, delete, search, close, share, print, refresh, back. The words stay for screen readers and show on hover or a long press. **[new] [consider]**
+   The words always stay on the main action of a screen (Save, Send, Publish), on anything that can't be undone, and on any action whose icon is not in the standard set (Move, Restore, Regenerate). The canon decides it, not each tool: a button is marked as allowed to shrink, and a test fails if a button that can't be undone is marked. Plus alone is ambiguous between "add a folder" and "upload a file", so it keeps its noun.
 
 ## 7. Dialogs and editing
 
