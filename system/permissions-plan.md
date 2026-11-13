@@ -635,6 +635,17 @@ Where it differs from step 4 as planned:
   League + Manage, using the new `leagueRule()` (first written by hand for
   Commercial Benchmarking, which it reproduces exactly). Writes kept for the
   superadmin role: Attendance's archive and audit-log writes, until step 5.
+- **Newsletter, Club Kits, Save of the Month and Brand Exposure** gained
+  Manage the same day. Newsletter is Manage only (a tool for making things:
+  League Media; the old staff default went to Off), and anyone below sees
+  one line saying who it is for. Club Kits and Save of the Month show
+  everything at Access and run it at Manage; Brand Exposure already decided
+  editing by level and its scanner moved from the superadmin role to the
+  Skeleton key. All four read at League + Access and write at League +
+  Manage, generated; a Club card never reaches their League-wide nodes, and
+  the clubs' own doors (Save of the Month by club code, Brand Exposure's
+  per-match token) are unchanged. Save of the Month's rules had honoured a
+  Manage it never offered (a known exception since 29/10); that is closed.
 - Behaviour that changed: League staff without the Operations key no longer
   submit attendance or edit the Handbook, whatever their old role (the
   grants agreed 12/11). A club secretary with no pass still submits

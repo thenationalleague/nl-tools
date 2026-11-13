@@ -51,3 +51,40 @@ test('neither page decides by the old role', () => {
   assert.match(hb, /function canEdit\(\)\s*\{ return S\.level === 'admin'; \}/);
   assert.match(hb, /function canSeed\(\)\s*\{ return S\.skeleton; \}/);
 });
+
+/* Manage on Newsletter, Club Kits, Save of the Month and Brand Exposure
+   (13/11/2026): the League-wide nodes read at League + Access and write at
+   League + Manage, generated; the pages decide by session.toolLevel. */
+const lg = (k, min) => A + leagueRule() + ' && ' + levelRule(k, min).slice(A.length);
+
+test('batch 1: every League-wide rule is generated', () => {
+  const n = RULES['staff-newsletter'], k = RULES['ops-club-kits'], s = RULES['media-save-of-the-month'], b = RULES['ops-brand-exposure'];
+  for (const x of ['editions', 'library']) {
+    assert.equal(n[x]['.read'], lg('staff-newsletter', 'admin'));
+    assert.equal(n[x]['.write'], lg('staff-newsletter', 'admin'));
+  }
+  assert.equal(k.submissions.$club['.write'], lg('ops-club-kits', 'admin'));
+  assert.equal(s['.read'], lg('media-save-of-the-month', 'access'));
+  assert.equal(s['.write'], lg('media-save-of-the-month', 'admin'));
+  assert.equal(b.matches['.read'], lg('ops-brand-exposure', 'access'));
+  assert.equal(b.matches['.write'], lg('ops-brand-exposure', 'admin'));
+  assert.ok(b.matches.$matchId['.write'].includes("auth.token.be === $matchId"), 'the per-match token still writes');
+});
+
+test('batch 1: all four offer Manage, in both the old and the pass fields', () => {
+  for (const key of ['staff-newsletter', 'ops-club-kits', 'media-save-of-the-month', 'ops-brand-exposure']) {
+    assert.deepEqual(REG[key].levels, ['off', 'access', 'admin'], key);
+    assert.deepEqual(REG[key].permissions.levels, ['off', 'access', 'manage'], key);
+  }
+  assert.equal(REG['staff-newsletter'].defaults.staff, 'off', 'Newsletter is the Media team\'s, not every League role\'s');
+});
+
+test('batch 1: the pages decide by the level, not the role', () => {
+  const read = (f) => readFileSync(join(REPO, f), 'utf8');
+  assert.match(read('newsletter/index.html'), /session\.toolLevel !== 'admin'/);
+  assert.match(read('club-kits/index.html'), /S\.canManage = !!\(session && session\.toolLevel === 'admin'\)/);
+  assert.match(read('save-of-the-month/admin/index.html'), /S\.canManage = !!\(session && session\.toolLevel === 'admin'\)/);
+  const be = read('brand-exposure/index.html');
+  assert.doesNotMatch(be, /canScan = !!\(session && session\.role === 'superadmin'\);/, 'the scanner asks the pass');
+  assert.match(be, /NL\.pass\.isSkeleton\(bePass\)/);
+});

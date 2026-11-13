@@ -30,8 +30,8 @@ Why: One way in for clubs. It waits for launch because the personal links are pa
 What: Programme Packs now checks club codes through the shared door (13/11/2026). After a week with no club using the old route, remove the club-passcode half of programmeAuth, leaving only the console's sign-in.
 Why: Two copies of the code check, throttle and log is what this tidy is for.
 
-### Manage on the seven tools granted it
-What: DAZN, Programme Packs, Save of the Month, Brand Exposure, Club Codes, Club Kits and Newsletter are granted Manage but have no Manage level built. Build it: Access to use the tool, Manage to run it. Attendance and the Handbook got theirs on 13/11/2026, when the pass started deciding everywhere.
+### Manage on the three tools granted it
+What: DAZN, Programme Packs and Club Codes are granted Manage but have no Manage level built. Build it: Access to use the tool, Manage to run it. Attendance and the Handbook got theirs on 13/11/2026, and Newsletter, Club Kits, Save of the Month and Brand Exposure the same day.
 Why: A grant that changes nothing on screen is a promise the tool doesn't keep.
 
 ### Sign-up and approvals

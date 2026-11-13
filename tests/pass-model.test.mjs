@@ -257,9 +257,13 @@ test('the import turns the prototype\'s dotted keys into Firebase-safe ones and 
 });
 
 test('who can open this is worked out from the grants, capped, and hides the club side of a League tool', () => {
-  const w = P.whoCanOpen(REGISTRY['ops-club-kits']);
-  assert.deepEqual(plain(w.rows).map((r) => [r.id, r.level]), [['league', 'access'], ['league-operations', 'access']]);
-  assert.equal(w.rows[1].granted, 'manage', 'the agreed Manage is kept for the panel to mention');
+  /* Club Kits got its Manage on 13/11/2026, so the capped example is Club
+     Codes, granted Manage and not offering it yet. */
+  const kits = P.whoCanOpen(REGISTRY['ops-club-kits']);
+  assert.deepEqual(plain(kits.rows).map((r) => [r.id, r.level]), [['league', 'access'], ['league-operations', 'manage']]);
+  const w = P.whoCanOpen(REGISTRY['ops-club-codes']);
+  assert.deepEqual(plain(w.rows).map((r) => [r.id, r.level]), [['league-operations', 'access']]);
+  assert.equal(w.rows[0].granted, 'manage', 'the agreed Manage is kept for the panel to mention');
   assert.equal(P.whoCanOpen({ label: 'x' }), null);
   const both = P.whoCanOpen(REGISTRY['ops-club-directory']);
   assert.ok(both.rows.some((r) => r.id === 'club-operations' && r.level === 'manage'));
