@@ -22,10 +22,13 @@ const anon = env.unauthenticatedContext().database();
 const row = { club: 'Testham Town', division: 'North', metrics: { frontShirt: { value: 1 } } };
 const yes = { confirmed: true, at: serverTimestamp() };
 
+/* One database() per context: a second call tries to point an instance that
+   is already running at the emulator again, and the SDK throws. */
 await env.withSecurityRulesDisabled(async (ctx) => {
-  await set(ref(ctx.database(), ROOT + '/clubs/Testham Town'), row);
-  await set(ref(ctx.database(), ROOT + '/clubs/Otherby Rovers'), { club: 'Otherby Rovers' });
-  await set(ref(ctx.database(), ROOT + '/links/tok'), row);
+  const db = ctx.database();
+  await set(ref(db, ROOT + '/clubs/Testham Town'), row);
+  await set(ref(db, ROOT + '/clubs/Otherby Rovers'), { club: 'Otherby Rovers' });
+  await set(ref(db, ROOT + '/links/tok'), row);
 });
 
 let pass = 0, fail = 0;
