@@ -115,7 +115,9 @@ test('rules: a club code reads its own club node and the averages, nothing else'
   const n = rules.rules['app-data']['media-dazn'];
   assert.ok(n, 'media-dazn rules missing');
   assert.ok(!/token\.club/.test(n['.read']), 'the whole node must not be club-readable');
-  assert.ok(!/token\.club|staff/.test(n['.write']), 'only admins import');
+  assert.ok(!/token\.club/.test(n['.write']), 'clubs never import');
+  assert.ok(n['.write'].includes("child('tools').child('media-dazn').val() === 'admin'"), 'importing is Manage on DAZN');
+  assert.ok(n['.write'].includes("child('pass').child('base').val() === 'league'"), 'and League only');
   assert.equal(n.seasons.$season.clubs.$club['.read'], 'auth != null && auth.token.club === $club');
   assert.equal(n.seasons.$season.matches, undefined, 'matches must not be opened to clubs');
 });

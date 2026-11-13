@@ -61,7 +61,13 @@ test('/people/, /audit/ and /club-codes/ forward to Access, keeping the query', 
   assert.equal(REG['ops-club-codes'].url, '/access/?tab=codes');
 });
 
-test('the Codes tab is open to everyone Access lets in, and starts only when opened', () => {
+test('the Codes tab follows the person\'s level on Club Codes, and starts only when opened', () => {
   assert.doesNotMatch(PAGE.match(/var SK_TABS = \[[^\]]*\]/)[0], /codes/);
-  assert.match(PAGE, /if \(name === 'codes' && window\.ACCESS_CODES\) window\.ACCESS_CODES\.init\(\);/);
+  assert.match(PAGE, /P\.explain\(s\.pass, S\.registry && S\.registry\['ops-club-codes'\]\)\.level/);
+  assert.match(PAGE, /if \(name === 'codes' && codesLevel\(\) === 'off'\) name = 'people';/);
+  assert.match(PAGE, /if \(name === 'codes' && window\.ACCESS_CODES\) window\.ACCESS_CODES\.init\(codesLevel\(\)\);/);
+  assert.match(PAGE, /classList\.toggle\('cc-ro', level !== 'manage'\)/, 'Access looks, Manage changes');
+  for (const a of ['#ccIssueAll', '[data-issue]', '[data-add]', '[data-reset]', '[data-reset-user]', '[data-drop-user]']) {
+    assert.ok(PAGE.includes('.cc-ro ' + a), a + ' is hidden at Access');
+  }
 });

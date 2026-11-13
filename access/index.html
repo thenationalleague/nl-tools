@@ -1,8 +1,13 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Access
-  Version: v2.3 (13/11/2026)
+  Version: v2.4 (13/11/2026)
   File: /access/index.html
+  v2.4 (13/11/2026) — The Codes tab follows the person's level on Club Codes
+    (ops-club-codes), worked out from their pass with the live grants
+    (NL.pass.explain): Off hides the tab, Access shows the codes and
+    activity with nothing to change, Manage issues, resets, adds and
+    removes. It was open to everyone who could open Access.
   v2.3 (13/11/2026) — The Tools grid is grouped into the portal's shelves
     (NL.pass.SHELVES / shelfOf, nl-utils v1.59), under a heading row each,
     instead of a shelf name under every tool and a Shelf filter.
@@ -167,6 +172,11 @@
     var NL_TOOL_KEY = 'ops-people';
 
     window.NL_CHANGELOG = [
+      {
+        date: '13/11/2026',
+        version: 'v2.4',
+        items: [ 'The Codes tab opens to people with Club Codes, and only Manage can issue or change a code.' ]
+      },
       {
         date: '13/11/2026',
         version: 'v2.3',
@@ -409,6 +419,9 @@
      wrapper rather than on .section-head, which is canon — otherwise the
      search row and the list it controls end at different places. */
   .cc-wrap { max-width: 900px; }
+  /* Access on Club Codes: look, change nothing (v2.4). */
+  .cc-ro #ccIssueAll, .cc-ro [data-issue], .cc-ro [data-add], .cc-ro [data-reset],
+  .cc-ro [data-reset-user], .cc-ro [data-drop-user] { display: none; }
   .cc-div { margin: 0 0 26px; }
   .cc-div__h {
     font-size: var(--text-xs); text-transform: uppercase;
@@ -623,7 +636,7 @@
       <button class="tab active" type="button" role="tab" data-pane="people">People</button>
       <button class="tab" type="button" role="tab" data-pane="invites">Invites <span class="tab__count" id="pcInviteCount" hidden></span></button>
       <button class="tab" type="button" role="tab" data-pane="requests">Requests <span class="tab__count" id="pcRequestCount" hidden></span></button>
-      <button class="tab" type="button" role="tab" data-pane="codes">Codes</button>
+      <button class="tab" type="button" role="tab" data-pane="codes" id="pcTabCodes" hidden>Codes</button>
       <button class="tab" type="button" role="tab" data-pane="tools">Tools</button>
       <button class="tab" type="button" role="tab" data-pane="audit">Audit</button>
       <button class="tab" type="button" role="tab" data-pane="manage">Manage</button>
@@ -785,6 +798,16 @@
   function sk() {
     var s = S.session;
     return s.role === 'superadmin' || P.isSkeleton(s.pass);
+  }
+  /* This person's level on Club Codes, which the Codes tab follows: from the
+     pass and the live grants, as the door would decide it; with no pass,
+     the old League admin roles. 'off' | 'access' | 'manage'. */
+  function codesLevel() {
+    var s = S.session;
+    if (window.nlPassDecides && P.isIssued(s.pass)) {
+      return P.explain(s.pass, S.registry && S.registry['ops-club-codes']).level;
+    }
+    return (s.role === 'superadmin' || s.role === 'admin') ? 'manage' : 'off';
   }
   function clubPerson(u) {
     if (u.uid === S.session.uid) return false;
@@ -2071,6 +2094,7 @@
   var SK_TABS = ['tools', 'audit', 'manage'];
   function showTab(name, opts) {
     if (SK_TABS.indexOf(name) >= 0 && !sk()) name = 'people';
+    if (name === 'codes' && codesLevel() === 'off') name = 'people';
     ED = null;
     TL.key = null;
     document.getElementById('pcTabs').hidden = false;
@@ -2084,7 +2108,7 @@
     if (name === 'invites') loadInvites();
     if (name === 'requests') loadRequests();
     if (name === 'tools') drawTools();
-    if (name === 'codes' && window.ACCESS_CODES) window.ACCESS_CODES.init();
+    if (name === 'codes' && window.ACCESS_CODES) window.ACCESS_CODES.init(codesLevel());
     if (name === 'audit') initAudit(opts && opts.uid);
     var qs = name === 'people' ? location.pathname : '?tab=' + name + (name === 'audit' && AL.uid ? '&uid=' + encodeURIComponent(AL.uid) : '');
     try { history.replaceState(null, '', qs); } catch (e) {}
@@ -2169,6 +2193,7 @@
       S.base = snaps[0].val() || {};
       S.live = (snaps[1] && snaps[1].val()) || {};
       S.registry = P.withLiveAll(S.base, S.live);
+      document.getElementById('pcTabCodes').hidden = codesLevel() === 'off';
       return refreshPeople();
     }).then(function () {
       /* Badges on the tabs; the lists load once now so the counts are true. */
@@ -2760,7 +2785,10 @@
 
   /* Started by Access the first time its Codes tab opens. */
   var started = false;
-  window.ACCESS_CODES = { init: function () {
+  window.ACCESS_CODES = { init: function (level) {
+    /* Access looks; only Manage sees the buttons that change a code. The
+       rules hold the same line (writes need Manage on ops-club-codes). */
+    document.querySelector('.cc-wrap').classList.toggle('cc-ro', level !== 'manage');
     if (started) return;
     started = true;
     $('ccFind').addEventListener('input', function () {

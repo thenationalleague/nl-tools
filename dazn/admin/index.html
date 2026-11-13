@@ -1,10 +1,14 @@
 <!DOCTYPE html>
 <!--
   NL Tools — DAZN Viewership (staff)
-  Version: v41.1 (30/10/2026)
+  Version: v42.0 (13/11/2026)
   File: /dazn/admin/index.html
 
   CHANGELOG
+    v42.0 (13/11/2026) – Manage, from the pass. The Admin tab is now Manage and
+      opens to whoever's pass gives Manage on DAZN (it asked the old role).
+      Edit games moved under the club's report on the Club tab, so there is
+      one club picker, not two. Manage holds Import.
     v41.1 (30/10/2026) – Off the old chip controls (Declutter, _view v42.1).
       League tab: Division is a canon filter button and takes more than one
       division; it is drawn once and kept, so its list stays open while you
@@ -163,6 +167,14 @@
     var NL_TOOL_KEY = 'media-dazn';
 
     window.NL_CHANGELOG = [
+      {
+        date: '13/11/2026',
+        version: 'v42.0',
+        items: [
+          'The Admin tab is now Manage, and opens to whoever has Manage on DAZN.',
+          'Edit games sits under the club’s report on the Club tab.'
+        ]
+      },
       {
         date: '30/10/2026',
         version: 'v41.1',
@@ -378,7 +390,7 @@
     <div class="tabs" id="dzaTabs" role="tablist">
       <button class="tab active" type="button" role="tab" data-pane="league">League</button>
       <button class="tab" type="button" role="tab" data-pane="club">Club</button>
-      <button class="tab" type="button" role="tab" data-pane="admin" id="dzaTabAdmin" hidden>Admin</button>
+      <button class="tab" type="button" role="tab" data-pane="admin" id="dzaTabAdmin" hidden>Manage</button>
     </div>
 
     <div data-pane-body="league">
@@ -390,22 +402,19 @@
         <div class="dz-slicer"><span class="filter-label">Club</span><div class="dza-pick" id="dzaPicker"></div></div>
       </div>
       <div class="dza-section" id="dzaClubBody"></div>
-    </div>
-
-    <div data-pane-body="admin" hidden>
-      <div id="dzaSeasons"></div>
-
-      <!-- The picker sits OUTSIDE the panel: canon .form-panel clips its
-           contents (overflow: hidden), and the picker's list is absolutely
-           positioned, so inside the panel it was cut off at the panel's
-           bottom edge — worst on load, when the panel held nothing else. -->
-      <div class="filter-bar dz-slicers dza-section">
-        <div class="dz-slicer"><span class="filter-label">Edit games</span><div class="dza-pick" id="dzaEditPicker"></div></div>
-      </div>
+      <!-- Edit games: Manage edits the club in front of them, in place
+           (v-next: moved from the Admin tab, which needed a second picker). -->
       <section class="form-panel dz-panel dz-panel--flush dza-section" id="dzaEditPanel" hidden>
         <div class="form-panel__head dz-panel__head"><span id="dzaEditTitle">Edit games</span></div>
         <div class="form-panel__body" id="dzaEdit"></div>
       </section>
+    </div>
+
+    <div data-pane-body="admin" hidden>
+      <!-- Manage (the access plan's standard: Pending, Settings, Import,
+           Removed, History; a tool shows only what it has). DAZN has Import. -->
+      <div class="section-head"><h2>Import</h2></div>
+      <div id="dzaSeasons"></div>
 
       <section class="form-panel dza-import dza-section" id="dzaImport">
         <div class="form-panel__head">Import a season</div>
@@ -482,11 +491,9 @@
       S.overrides = (got[1] && got[1].val()) || {};
       S.data = snap.val() || {};
       if (S.picker) S.picker.setSeason(key).setExtraClubs(otherSeasonClubs());
-      if (S.editPicker) S.editPicker.setSeason(key);
       drawClubs();
       drawClub();
       drawSeasons();
-      drawEdit();
     });
   }
 
@@ -626,6 +633,7 @@
   }
 
   function drawClub() {
+    drawEdit();
     var host = $('dzaClubBody');
     if (!S.open) {
       host.innerHTML = '';   /* the picker above already says "Pick a club" */
@@ -754,16 +762,18 @@
   function drawEdit() {
     var host = $('dzaEdit');
     if (!host) return;
+    S.editClub = S.isAdmin ? S.open : null;
     $('dzaEditPanel').hidden = !S.editClub;
     if (!S.editClub) { host.innerHTML = ''; return; }
-    var code = S.editClub, F = DAZNView.fmt;
+    var code = S.editClub, F = DAZNView.fmt;   /* the club open on the Club tab */
     $('dzaEditTitle').textContent = 'Edit games: ' + (nameOf(code) || code);
     var mine = function (m) { return m.home === code || m.away === code; };
     var rows = D.values(S.data.matches).filter(mine).map(function (m) { return { m: m, out: false }; })
       .concat(D.values(S.data.notPlayed).filter(mine).map(function (m) { return { m: m, out: true }; }))
       .sort(function (a, b) { return a.m.date < b.m.date ? -1 : a.m.date > b.m.date ? 1 : 0; });
     var idOf = function (m) { return D.matchId(m.date, m.home, m.away); };
-    if (!rows.length) { host.innerHTML = '<div class="empty-state"><div class="empty-state__title">No DAZN games for ' + esc(nameOf(code) || code) + ' this season</div></div>'; return; }
+    /* No games: the club report above already says so. */
+    if (!rows.length) { host.innerHTML = ''; $('dzaEditPanel').hidden = true; return; }
     host.innerHTML = '<div class="table-wrap"><table class="table table--compact"><thead><tr>' +
       '<th>Date</th><th>Game</th><th class="ta-right">Views</th><th>Neutral venue</th><th>Shown in UK</th><th>Counted</th><th></th></tr></thead><tbody>' +
       rows.map(function (r) {
@@ -831,7 +841,7 @@
       S.index[key].games = up['index/' + key + '/games'];
       S.index[key].notPlayed = up['index/' + key + '/notPlayed'];
       NL.toast('Saved. Clubs see the change straight away.', 'success');
-      drawClubs(); drawClub(); drawSeasons(); drawEdit();
+      drawClubs(); drawClub(); drawSeasons();
     }).catch(function (e) {
       console.error('[dazn-admin]', e);
       if (btn) btn.disabled = false;
@@ -1011,12 +1021,14 @@
   window.TOOL = window.TOOL || {};
   window.TOOL.boot = function (session) {
     S.session = session;
-    var role = NL.roles.norm(session && session.role);
-    S.isAdmin = role === 'admin' || role === 'superadmin';
+    /* Manage, from the pass (session.toolLevel 'admin'). It asked the old
+       role until 13/11/2026. */
+    S.isAdmin = !!(session && session.toolLevel === 'admin');
     $('dzaTabAdmin').hidden = !S.isAdmin;
     /* #league, #club=ROC, #admin — where a reload or a shared link lands. */
     var h = (location.hash || '').replace(/^#/, '').split('=');
     if (h[0] === 'club' && h[1]) S.open = h[1].toUpperCase();
+    if (h[0] === 'manage') h[0] = 'admin';
     showPane(h[0] === 'club' || h[0] === 'admin' ? h[0] : 'league');
     loading('Loading…');
     NL.clubs.load().then(function (meta) {
@@ -1030,17 +1042,6 @@
         }
       });
       if (S.open && NL.clubs.byCode(S.open)) S.picker.setValue(NL.clubs.byCode(S.open).name);
-      if (S.isAdmin) {
-        S.editPicker = NL.clubPicker($('dzaEditPicker'), {
-          mode: 'select', season: 'current', placeholder: 'Pick a club',
-          onSelect: function (sel) {
-            var c = (sel && sel.club) || NL.clubs.byName(sel && sel.name);
-            if (!c || !c.code) return;
-            S.editClub = c.code;
-            drawEdit();
-          }
-        });
-      }
       return NL.ensureAuth();
     }).then(loadIndex).catch(function (e) {
       console.error('[dazn-admin]', e);

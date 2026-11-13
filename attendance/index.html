@@ -10,6 +10,11 @@
 
      TECHNICAL CHANGELOG
      -------------------
+     v2.18.1 (13/11/2026) The season badge ("Read-only archive" /
+                         "Archived · Skeleton key can edit") is gone: the
+                         dropdown already marks the live season. Past
+                         seasons open to Manage, as the rules already did;
+                         Skeleton key only before.
      v2.18.0 (13/11/2026) Every season's figures live under
                          archive/<season>/submissions from the start, the
                          live season included, so nothing moves at the end
@@ -1270,6 +1275,11 @@
   window.NL_CHANGELOG = [
     {
       date: '13/11/2026',
+      version: 'v2.18.1',
+      items: [ 'The “Read-only archive” badge beside the season has gone.', 'Anyone with Manage can enter or correct figures in a past season.' ]
+    },
+    {
+      date: '13/11/2026',
       version: 'v2.18.0',
       items: [ 'Season admin has gone: each season’s figures are kept under that season from the start, so there is nothing to move at the end of the year.' ]
     },
@@ -2258,11 +2268,9 @@
 
   <div class="main" id="mainContent">
 
-    <!-- Season switcher + read-only banner (rendered by renderSeasonSwitcher) -->
     <!-- Season, tabs and export: one row (v2.16.1). -->
     <div class="att-top" id="seasonBar">
       <select class="nl-select att-season" id="seasonSelect" aria-label="Season" style="display:none;"></select>
-      <span class="pill pill--soon" id="seasonReadOnly" style="display:none;">Read-only archive</span>
       <div class="tabs att-tabs" id="attTabs" role="tablist">
         <button class="tab att-tab active" type="button" role="tab" data-panel="insights">Crowd insights</button>
         <button class="tab att-tab" type="button" role="tab" data-panel="outstanding" id="outstandingTab">
@@ -2757,10 +2765,6 @@
   function seasonIsCurrent() {
     return !S.season || S.season === S.currentSeason;
   }
-  /* Past seasons are read-only — no submitting, tagging or fixture edits. */
-  function isReadOnlySeason() {
-    return !seasonIsCurrent();
-  }
   /* Every season's figures live under archive/<season>/, the live season's
      included (v2.18.0): there is no year-end step to move them, so no Season
      admin. ("archive" is the old name for the node; it now holds every
@@ -2804,7 +2808,6 @@
        club       – the club a Club card (or old club role) belongs to
        clubManage – a club submitting its own figures (Club Operations or
                     Club Media)
-       skeleton   – the Skeleton key: archived seasons and season admin
      Someone without a pass is read from the old role, as before. */
   function who() {
     var s = S.session || {}, p = s.pass;
@@ -2815,32 +2818,28 @@
     var club = league ? null : ((byPass && p.club) || s.club || null);
     return {
       league: league, manage: manage, admin: league && manage,
-      club: club, clubManage: !league && manage,
-      skeleton: byPass ? NL.pass.isSkeleton(p) : s.role === 'superadmin'
+      club: club, clubManage: !league && manage
     };
   }
 
-  /* The Skeleton key may edit an archived season — back-fill attendance left
-     over at rollover, add/fix/delete a cup fixture, tag a neutral venue. The
-     archive RTDB node is superadmin-writable, and both Skeleton key holders
-     hold that role. For everyone else archived data stays read-only. */
+  /* Manage may edit a past season, as the database allows
+     (archive/<season>/submissions is written at Manage). It was the
+     Skeleton key only until v2.18.1. */
   function canBackfillArchive() {
-    return who().skeleton;
+    return who().manage;
   }
-  /* The single write gate: allowed on the live season, or by a superadmin on an
-     archived season. Used by attendance submit/clear AND cup-fixture
-     create/edit/delete. */
+  /* The single write gate: the live season, or Manage on a past one. */
   function assertCanSubmit() {
     if (seasonIsCurrent()) return true;
     if (canBackfillArchive()) return true;
-    NL.toast('That season is archived — switch to ' + NL.season.label(S.meta, S.currentSeason) + ' to make changes.', 'info');
+    NL.toast('Past seasons can be changed only with Manage. Switch to ' + NL.season.label(S.meta, S.currentSeason) + '.', 'info');
     return false;
   }
   /* Same rule as assertCanSubmit, with a tagging-specific message. */
   function assertCanTag() {
     if (seasonIsCurrent()) return true;
     if (canBackfillArchive()) return true;
-    NL.toast('That season is archived — only the Skeleton key can tag fixtures there.', 'info');
+    NL.toast('Past seasons can be changed only with Manage.', 'info');
     return false;
   }
 
@@ -2962,10 +2961,9 @@
   function renderSeasonSwitcher() {
     renderLeagueHeader();
     var sel = document.getElementById('seasonSelect');
-    var ro = document.getElementById('seasonReadOnly');
-    if (!sel || !ro) return;
+    if (!sel) return;
     var keys = NL.season.keys(S.meta);
-    if (keys.length < 2) { sel.style.display = 'none'; ro.style.display = 'none'; return; }
+    if (keys.length < 2) { sel.style.display = 'none'; return; }
     /* The canon season dropdown (v2.16.1): every season is an option, the
        live one marked, as on Fixture Management and DAZN. */
     sel.style.display = '';
@@ -2977,12 +2975,8 @@
       sel._wired = true;
       sel.addEventListener('change', function() { switchSeason(sel.value); });
     }
-    /* Superadmins can edit an archived season (attendance, cup fixtures, neutral
-       tags), so the badge reflects that rather than a blanket "read-only". */
-    var backfill = isReadOnlySeason() && canBackfillArchive();
-    ro.style.display = isReadOnlySeason() ? '' : 'none';
-    ro.textContent = backfill ? 'Archived · Skeleton key can edit' : 'Read-only archive';
-
+    /* No "read-only" badge (v2.18.1): the dropdown marks the live season,
+       and a past season's forms simply aren't offered. */
   }
 
   /* Switch the viewed season: re-roster, reload that season's data, recompute
