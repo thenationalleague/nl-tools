@@ -82,9 +82,9 @@ Why: A reset email that lands in spam is a locked-out person phoning you.
 Waiting on: you
 
 ### Claudio's leftovers
-What: Delete everything left of the old Claudio assistant, its chat history included.
+What: Delete everything left of the old Claudio assistant, its chat history included. The button is built: run **Button · Retire Claudio's data** in report mode, then again with retire. Then revoke its Anthropic keys and delete their Script Properties.
 Why: The tool is gone and the history may hold questions nobody should keep.
-
+Waiting on: you
 ### A slimmer league table snapshot
 What: Keep the daily table snapshot, but save only positions and points, and keep it in the database or the backup bucket instead of GitHub.
 Why: Today it is 2.4 MB a day, and GitHub keeps every copy forever.
@@ -142,5 +142,5 @@ What: After the Skeleton key accounts, offer two-step sign-in to everyone.
 Why: It protects every account, not only the two that open everything.
 
 ### A new assistant
-What: One chatbot connected to the data tools, where each person's zones decide what it can reach.
-Why: Claudio's idea was right; the build wasn't.
+What: A chat with Claude on API credit, with a team of agents, each with its own voice, typeface, character and skill set, answering questions through connectors such as the NL Data MCP. Each person's zones decide what it can reach.
+Why: Claudio's idea was right; the build wasn't. The shape is kept in system/retired/claudio.md.

@@ -2,6 +2,16 @@
 
 The tool is deleted: `claudio/index.html`, `gas/ClaudioChat.js`, `gas/ClaudioStats.js`, its avatar `assets/icons/claudio.svg`, and its parked registry record. This file records what it was for and what was already decided, so a rebuild starts from the answered questions. **Nothing here is built.** Last version in git: commit `6a0ae99` (`git checkout 6a0ae99 -- claudio gas/ClaudioChat.js gas/ClaudioStats.js`).
 
+## The shape to keep (Richard, 13/11/2026)
+
+The chat history and the code are not worth keeping; the shape and the principles are. A rebuild is:
+
+- **A chat with Claude, paid for by API credit.**
+- **A team of agents, not one assistant.** Each has its own voice, typeface and character, and above all its own skill set: the job it does and the tools it may use.
+- **Connectors, not hand-written tools.** Agents answer questions by reaching data through connectors such as MCP servers (the NL Data MCP already serves fixtures, results, tables, matches and scorers). Claudio's 25-plus Apps Script tools were the same idea built by hand.
+
+Everything below is the detail behind that, and the problems a rebuild should not repeat.
+
 ## What it did
 
 It was an AI assistant for NL staff, at `/claudio/` (`staff-claudio`). Staff chatted with a small "team" of personas, and each persona had its own job, voice and set of data tools. It answered questions on National League history from 1979-80 onwards and on the current season from the live NLS feed. It drafted emails and statements, and answered HR questions from the staff Company Handbook and the user's own holiday and lieu records. Conversations were saved per user and could be reopened, renamed and deleted.
@@ -92,7 +102,7 @@ Each one became a prompt rule above. Mark got `getStaff` because of the first.
 
 ## What stays behind
 
-**RTDB data, not deleted.** Export or delete it from the Firebase console.
+**RTDB data, being deleted (13/11/2026).** The one-off **Button · Retire Claudio's data** reports the three nodes below, then saves them to the private bucket (`retired/<date>/claudio-data.json`) and deletes them. Its rules block left the snapshot in the same pull request, so the next rules run removes it.
 - `app-data/staff-claudio/conversations/<uid>/<conversationId>`: every user's chat history (title, persona, timestamps, messages). It may include HR questions, so treat it as personal data.
 - `app-data/staff-claudio/usage/<uid>/...`: read by the page and never written by anything, so probably empty.
 - `claudio/usage/<uid>/<yyyy-mm-dd>` **at the database root**: the real daily counts, costs and token figures, written by Apps Script with the legacy secret. No rules entry covers it, so only the console can reach it.
