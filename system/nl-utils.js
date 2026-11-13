@@ -1,8 +1,14 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.59 (13/11/2026)
+   Version: v1.60 (13/11/2026)
 
+   v1.60 — The Website shelf goes: its one tool, Fan Widgets, moved to
+           Sandbox, and Staff Tools is League Tools (id 'league'), the word
+           the cards use (Richard, 13/11/2026). NL.pass.SHELVES is League
+           Tools, Club Tools, Sandbox, Control; the portal's headings read
+           their words from it. Cache-bust nl-utils ?v=63 -> ?v=64,
+           in lockstep.
    v1.59 — One set of shelves for the portal and Access (Richard,
            13/11/2026): NL.pass.SHELVES (Staff Tools, Club Tools, Website,
            Sandbox, Control, in that order) and NL.pass.shelfOf(record),
@@ -3204,12 +3210,11 @@
        and Access's Tools grid. Control is the Skeleton key's shelf
        (permissions.shelf 'structural', audience 'meta'); Sandbox is a tool
        not launched yet (permissions.shelf 'sandbox', or the older status
-       'wip'); Website is shelf 'website'; Club Tools is a tool clubs use
+       'wip'); Club Tools is a tool clubs use
        (shelf 'club', audience 'club', or a club page, clubUrl). */
     var SHELVES = [
-      { id: 'staff', label: 'Staff Tools' },
+      { id: 'league', label: 'League Tools' },
       { id: 'club', label: 'Club Tools' },
-      { id: 'website', label: 'Website' },
       { id: 'sandbox', label: 'Sandbox' },
       { id: 'control', label: 'Control' }
     ];
@@ -3218,9 +3223,8 @@
       var p = rec.permissions || {};
       if (p.shelf === 'structural' || rec.audience === 'meta') return 'control';
       if (p.shelf === 'sandbox' || rec.status === 'wip') return 'sandbox';
-      if (rec.shelf === 'website') return 'website';
       if (rec.shelf === 'club' || rec.audience === 'club' || rec.clubUrl) return 'club';
-      return 'staff';
+      return 'league';
     }
 
     window.NL.pass = {

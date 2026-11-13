@@ -1,11 +1,15 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v16.0 (13/11/2026)
+  Version: v16.1 (13/11/2026)
   Date: 09/04/2026
   File: /portal/index.html
 
   Changelog:
+  v16.1 (13/11/2026) – The Website shelf goes with NL.pass's (nl-utils
+    v1.60): Fan Widgets, its one tool, is on Sandbox now. Staff Tools is
+    League Tools, and every shelf heading takes its words from
+    NL.pass.SHELVES, so the portal and Access cannot word them apart.
   v16.0 (13/11/2026) – The shelves come from NL.pass.shelfOf (nl-utils
     v1.59), the same rule Access's Tools grid groups by. Meta is called
     Control and In Progress is called Sandbox; which tools sit on them is
@@ -963,6 +967,11 @@
   window.NL_CHANGELOG = [
     {
       date: '13/11/2026',
+      version: 'v16.1',
+      items: [ 'Staff Tools is now League Tools.', 'Fan Widgets moves to Sandbox; the Website shelf goes.' ]
+    },
+    {
+      date: '13/11/2026',
       version: 'v16.0',
       items: [ 'Shelves match Access: Meta is now Control, In Progress is now Sandbox.' ]
     },
@@ -1213,7 +1222,7 @@
     });
   }
 </script>
-<script src="/system/nl-utils.js?v=63"></script>
+<script src="/system/nl-utils.js?v=64"></script>
 <!-- GA4 for nl.tools — cookieless, no banner, no identity. See system/nl-analytics.js -->
 <script src="/system/nl-analytics.js?v=1"></script>
 <script src="/system/nl-topbar.js?v=15"></script>
@@ -1589,28 +1598,20 @@
 
     <!-- Tool sections — staff see two sections, clubs see one -->
     <div id="staffToolsSection" style="display:none;">
-      <div class="tools-section__head">Staff Tools</div>
+      <div class="tools-section__head" data-shelf="league">League Tools</div>
       <div class="tool-grid" id="staffToolGrid"><!-- Populated by JS --></div>
     </div>
 
     <div id="clubToolsSection" style="display:none;">
-      <div class="tools-section__head" style="margin-top:36px;">Club Tools</div>
+      <div class="tools-section__head" data-shelf="club" style="margin-top:36px;">Club Tools</div>
       <div class="tool-grid" id="clubToolGrid"><!-- Populated by JS --></div>
-    </div>
-
-    <!-- Website — the staff layer over the fan-facing widgets on the public
-         site (registry shelf: 'website'). Renders only when a visible tool
-         carries it. -->
-    <div id="webToolsSection" style="display:none;">
-      <div class="tools-section__head" style="margin-top:36px;">Website</div>
-      <div class="tool-grid" id="webToolGrid"><!-- Populated by JS --></div>
     </div>
 
     <!-- In Progress — registry status: 'wip'. Shelving only: who can open a
          tool here is decided by its defaults and grants exactly as anywhere
          else. Promote a tool by deleting its status. -->
     <div id="wipToolsSection" style="display:none;">
-      <div class="tools-section__head" style="margin-top:36px;">Sandbox</div>
+      <div class="tools-section__head" data-shelf="sandbox" style="margin-top:36px;">Sandbox</div>
       <div class="tool-grid" id="wipToolGrid"><!-- Populated by JS --></div>
     </div>
 
@@ -1621,7 +1622,7 @@
          when a visible tool carries it, so for everyone but superadmin it
          simply never exists. -->
     <div id="metaToolsSection" style="display:none;">
-      <div class="tools-section__head" style="margin-top:36px;">Control</div>
+      <div class="tools-section__head" data-shelf="control" style="margin-top:36px;">Control</div>
       <div class="tool-grid" id="metaToolGrid"><!-- Populated by JS --></div>
     </div>
 
@@ -2119,6 +2120,11 @@ function renderToolGrid() {
      viaClubPage stays: a Club card holder's club-page tool is a club tool to
      them whatever its record says. */
   function shelf(t) { return NL.pass.shelfOf(t.tool); }
+  /* v16.1: the headings' words come from NL.pass.SHELVES, the one source. */
+  NL.pass.SHELVES.forEach(function (s) {
+    var h = document.querySelector('.tools-section__head[data-shelf="' + s.id + '"]');
+    if (h) h.textContent = s.label;
+  });
   function isClubTool(t) { return shelf(t) === 'club' || viaClubPage(t); }
   function isMetaTool(t) { return shelf(t) === 'control'; }
   /* v5.125: two more shelves, both read straight off the registry and neither
@@ -2127,7 +2133,6 @@ function renderToolGrid() {
      fan-facing widgets on the public site. Precedence: meta, then in
      progress, then website, then club/staff — a card sits on one shelf only. */
   function isWipTool(t) { return shelf(t) === 'sandbox'; }
-  function isWebTool(t) { return shelf(t) === 'website'; }
   /* Same structural boundary as auth-guard's audience gate: a club role never
      gets a card for a league or meta tool, whatever a stray grant says, so
      the portal cannot offer a door the guard will refuse. */
@@ -2138,8 +2143,6 @@ function renderToolGrid() {
   var rest       = myTools.filter(function(t) { return !isMetaTool(t); });
   var wipTools   = rest.filter(isWipTool);
   rest           = rest.filter(function(t) { return !isWipTool(t); });
-  var webTools   = rest.filter(isWebTool);
-  rest           = rest.filter(function(t) { return !isWebTool(t); });
   var staffTools = rest.filter(function(t) { return !isClubTool(t); });
   var clubTools  = rest.filter(isClubTool);
 
@@ -2171,7 +2174,6 @@ function renderToolGrid() {
     document.getElementById('staffToolsSection').style.display = 'none';
     document.getElementById('clubToolsSection').style.display = 'none';
     document.getElementById('metaToolsSection').style.display = 'none';
-    document.getElementById('webToolsSection').style.display = 'none';
     document.getElementById('wipToolsSection').style.display = 'none';
     document.getElementById('clubFlatSection').style.display = '';
     /* Clubs see one flat list; the in-progress split is a staff view. */
@@ -2183,11 +2185,9 @@ function renderToolGrid() {
     document.getElementById('clubToolsSection').style.display = clubTools.length ? '' : 'none';
     /* Meta shelf: hidden entirely unless this user can see something on it. */
     document.getElementById('metaToolsSection').style.display = metaTools.length ? '' : 'none';
-    document.getElementById('webToolsSection').style.display  = webTools.length  ? '' : 'none';
     document.getElementById('wipToolsSection').style.display  = wipTools.length  ? '' : 'none';
     populateGrid('staffToolGrid', staffTools);
     populateGrid('clubToolGrid', clubTools);
-    populateGrid('webToolGrid', webTools);
     populateGrid('wipToolGrid', wipTools);
     populateGrid('metaToolGrid', metaTools);
   }
