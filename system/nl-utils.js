@@ -1,7 +1,9 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.63 (13/11/2026)
+   Version: v1.64 (13/11/2026)
+   v1.64 — On screen, a key is a zone (the pass's stickers): whoCanOpen's
+     row label reads "League Operations zone". Ids and data keep "key".
 
    v1.63 — NL.clubPicker (select mode) draws its chevron as an SVG, the same
            path as NL.filterButton's, instead of typing a ▾ character. The
@@ -3051,7 +3053,7 @@
       KEYS.forEach(function (k) {
         if (k.base === 'club' && p.for === 'league') return;
         var g = rank((p.grants.key || {})[k.id]), l = Math.min(g, max);
-        if (l) rows.push({ id: k.id, label: (k.base === 'league' ? 'League ' : 'Club ') + k.name + ' key', level: byRank(l), granted: byRank(g) });
+        if (l) rows.push({ id: k.id, label: (k.base === 'league' ? 'League ' : 'Club ') + k.name + ' zone', level: byRank(l), granted: byRank(g) });
       });
       return {
         rows: rows,
