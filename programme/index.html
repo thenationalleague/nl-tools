@@ -2,37 +2,32 @@
 <html lang="en">
 <head>
 <!--
-  Programme Packs — club library (standalone, passcode; ?master=1 for admins)
+  Programme Packs — the club library and, for the League, its console
+  Version: v1.32 (13/11/2026) - one page for everyone. The console's
+    Removed files, Audit and Manage are tabs here, shown to the League
+    with Manage, beside the Library; /programme/admin/ forwards here. A
+    League account opens the all-clubs library straight away, with the NL
+    Tools bar and no code card. An image or video preview fits the screen
+    whole, by width or height, and is never enlarged; tapping a file's
+    name opens its preview again.
   Version: v1.31 (13/11/2026) - the file library layout (style principles
-    14). The path to here, then the folder as the heading with its own ⋯
-    (download, rename, delete). One bar under it: Upload and New folder,
-    or Download for a visitor; once anything is ticked, the same bar holds
-    the selection's Download, Move and Remove. Folders then files as one
-    list, each row a tick, a thumbnail or icon, the name (a folder opens,
-    a file previews) and its ⋯. Dropping anywhere names where files will
-    land. The League's card heads the directory only.
-  Version: v1.30 (13/11/2026) - Upload is a button in the folder's head, as
-    in any file manager, beside Folder (both with their icons). The whole
-    folder surface still takes a drop; the dashed drop box shows only in an
-    empty folder of your own, as its empty state, and its hint line goes.
-    Upload progress sits at the top of the folder.
+    14): the path, the folder as the heading with its own menu, one bar
+    for Upload and New folder (Download for a visitor) that holds the
+    selection's actions once anything is ticked, folders then files as
+    one list, and a drop anywhere naming where files will land.
+  Version: v1.30 (13/11/2026) - Upload is a button in the folder's head;
+    the dashed drop box shows only in an empty folder of your own.
   Version: v1.29 (13/11/2026) - the selection bar sticks flush under the
-    identity bar, at that bar's real height (it wraps on a phone), and at
-    the very top inside the console, where the bar is hidden. Its buttons
-    sit together at the right on a wide screen, and two by two in equal
-    widths on a phone, instead of wrapping wherever they fell.
+    identity bar, and its buttons sit two by two on a phone.
   Version: v1.28 (13/11/2026) - the code card stays hidden until the page
-    knows who is here, so a League account on its way to the console, or a
-    Club card going straight in, no longer sees it flash first.
-  Version: v1.27 (13/11/2026) - one club code door: the passcode is checked
-    by the shared clubCodeAuth (the same as every club page), and a code
-    session persists like any sign-in, so the remembered passcode goes
-    (_shared.js v2.0, ?v=10).
+    knows who is here.
   File: /programme/index.html
 
   Standalone (NO auth-guard) — named Firebase app + a passcode-minted custom
   token, via _shared.js. The club's 6-character passcode is the whole
-  credential; ?club=<CODE> only brands the gate. NL console: /programme/admin/.
+  credential; ?club=<CODE> only brands the gate. Signed in to NL Tools: a
+  Club card opens its club, the League (with Manage) gets the all-clubs
+  session and the tabs Removed files, Audit and Manage (_console.js).
 
   What this page is
   -----------------
@@ -80,7 +75,7 @@
 <script src="/programme/_shared.js?v=11"></script>
 <!-- GA4 for nl.tools — cookieless, no banner, no identity. See system/nl-analytics.js -->
 <script src="/system/nl-analytics.js?v=1"></script>
-<link rel="stylesheet" href="/programme/_shared.css?v=9">
+<link rel="stylesheet" href="/programme/_shared.css?v=10">
 </head>
 <body>
 
@@ -120,11 +115,23 @@
          mistakes an admin's session for the club's own. -->
     <div id="asBanner" class="as-banner" style="display:none"></div>
 
-    <!-- The National League panel. Rendered above every view, always. -->
-    <div id="nlPanel"></div>
+    <!-- The League's tabs (v1.32). Clubs never see them. -->
+    <div class="tabs pp-tabs" id="ppTabs" hidden>
+      <button class="tab active" data-tab="library">Library</button>
+      <button class="tab" data-tab="trash">Removed files</button>
+      <button class="tab" data-tab="audit">Audit</button>
+      <button class="tab" data-tab="access">Manage</button>
+    </div>
 
-    <div id="viewDir"></div>
-    <div id="viewClub" style="display:none"></div>
+    <div id="paneLibrary">
+      <!-- The National League panel: heads the directory. -->
+      <div id="nlPanel"></div>
+      <div id="viewDir"></div>
+      <div id="viewClub" style="display:none"></div>
+    </div>
+    <div id="paneTrash" hidden></div>
+    <div id="paneAudit" hidden></div>
+    <div id="paneAccess" hidden></div>
   </div>
 </div>
 
@@ -166,7 +173,6 @@
     /* Embedded, each step REPLACES: an iframe shares the parent's session
        history, so stacking entries would turn the console's Back button into
        an unwind of this folder walk. The breadcrumb is the way back here. */
-    if (EMBED) { location.replace(location.pathname + location.search + next); return; }
     location.hash = next;                 // hashchange applies it
   }
   function applyHash() {
@@ -195,23 +201,13 @@
   })();
   var linkClub = params.get('club') || '';
 
-  /* ?master=1 — the admin door. Asks _shared for the console's '*' session
-     instead of a passcode, so an NL admin browses and manages all 73 folders
-     right here. The flag itself grants nothing: PP.enterMaster needs a live
-     portal sign-in and the role check happens server-side, so a club (or
-     anyone) adding it to the URL just meets a sign-in message.
-     ?embed=1 — the page is inside the console's Library tab: the console
-     already says who you are, so the idbar comes off, and in-library
-     navigation replaces history entries rather than stacking them (browser
-     Back in the console should leave the console, not unwind a folder walk). */
-  var MASTER = params.get('master') === '1';
-  var EMBED = params.get('embed') === '1';
-  /* The selection bar sticks just under the identity bar: that bar's real
-     height, which grows when it wraps on a phone, or 0 where it is hidden
-     (inside the console). */
+  /* The library's bar sticks just under whichever bar heads the page: the
+     club's identity bar, or the NL Tools top bar for an account. Its real
+     height, which grows when it wraps on a phone. */
   function fitSelTop() {
     var bar = document.querySelector('.nl-idbar');
-    var h = bar && bar.style.display !== 'none' ? bar.getBoundingClientRect().height : 0;
+    var top = bar && !bar.hidden && bar.style.display !== 'none' ? bar : el('nlTopbar');
+    var h = top ? top.getBoundingClientRect().height : 0;
     document.documentElement.style.setProperty('--sel-top', h + 'px');
   }
   window.addEventListener('resize', fitSelTop);
@@ -242,57 +238,27 @@
   /* A code session persists like any Firebase sign-in (v1.27, the shared
      club code door), so a weekly user isn't retyping it every Tuesday.
      PP.resume() resolves null (never rejects) when nobody with a club is
-     signed in.
-     ?master=1 takes its own door instead — deliberately never falling back
-     to a remembered club passcode, so an admin is always who the audit says
-     they are. */
+     signed in. */
   function revealGate() { el('gate').style.visibility = ''; }
 
-  if (MASTER) {
-    revealGate();
-    el('gateSub').textContent = 'Confirming your National League access…';
-    /* First visit in a browser is a full Eventarc exchange — seconds, not
-       milliseconds. Same courtesy as the passcode path: say so before a
-       working gate starts reading as a hung one. */
-    var masterSlow = setTimeout(function () {
-      el('gateSub').textContent = 'Still confirming — this can take a few seconds.';
-    }, 4000);
-    PP.enterMaster().then(function (s) {
-      clearTimeout(masterSlow);
-      enter(s);
-    }).catch(function (e) {
-      clearTimeout(masterSlow);
-      if (e && e.code === 'pp/no-portal') {
-        el('gateSub').innerHTML =
-          'The master view needs a National League portal sign-in.<br>' +
-          '<a href="/programme/admin/">Open the admin console</a> · ' +
-          '<a href="' + esc(location.pathname) + '">enter a passcode instead</a>';
-        return;
-      }
-      /* The trigger's own message covers the refused-role case
-         ("administration is admin-only") and the timeout alike. */
-      el('gateSub').textContent = (e && e.message) || 'Something went wrong. Please try again.';
-    });
-  } else {
-    /* A Club card first (signed in to NL Tools, club on the account), then a
-       remembered device, then the passcode. Each resolves null rather than
-       failing, so the next door is always tried. */
-    PP.enterAsCard().catch(function () { return null; }).then(function (s) {
-      return s || PP.resume();
-    }).then(function (s) {
-      if (s) { enter(s); return; }
-      showGate();
-    }).catch(showGate);
-  }
+  /* A Club card first (signed in to NL Tools, club on the account), then a
+     remembered device, then the passcode. Each resolves null rather than
+     failing, so the next door is always tried. */
+  PP.enterAsCard().catch(function () { return null; }).then(function (s) {
+    return s || PP.resume();
+  }).then(function (s) {
+    if (s) { enter(s); return; }
+    showGate();
+  }).catch(showGate);
 
   function showGate() {
     /* Revealed below, after the League-account check, so a League account
        never sees the code card on its way to the console. */
-    /* v1.26: signed in to NL Tools with no club on the account (a League
-       account): the console is the League page, so go there rather than ask
-       for a club passcode (nl-utils v1.61 does the same at every code door). */
+    /* Signed in to NL Tools with no club on the account: a League account,
+       which never needs a club passcode (nl-utils v1.61 does the same at
+       every code door). */
     var me = firebase.auth().currentUser;
-    if (me && me.email && !EMBED) { location.replace('/programme/admin/'); return; }
+    if (me && me.email) { enterLeague(me); return; }
     revealGate();
     brandGate();
     el('gateSub').textContent = 'Enter your club passcode.';
@@ -329,27 +295,97 @@
   }
 
   el('signout').addEventListener('click', function () {
-    /* A master session has no passcode to forget, and forgetting would only
-       bounce to a gate that signs straight back in — the useful exit is the
-       console. Clubs keep the original meaning. */
-    if ((PP.session || {}).isAdmin) { location.href = '/programme/admin/'; return; }
-    /* Signed in on a Club card: there is no passcode to forget, and the way
-       to be someone else is to sign out of NL Tools. */
-    if ((PP.session || {}).viaCard) { location.href = '/portal/'; return; }
+    /* Signed in to NL Tools (a Club card, or the League): there is no
+       passcode to forget, and the way to be someone else is to sign out of
+       NL Tools. The idbar is hidden for both, so this is a fallback. */
+    var s0 = PP.session || {};
+    if (s0.viaCard || s0.isAdmin) { location.href = '/portal/'; return; }
     /* A club code: sign the code session out, then back to the gate. */
     NL.codeGate.signOut().then(function () { location.href = location.pathname; });
   });
+
+  /* ── The League's door (v1.32) ──────────────────────────────────────
+     One page for everyone (system/one-address-plan.md): the console that
+     lived at /programme/admin/ is this page's League tabs. Someone signed in
+     to NL Tools with no club gets the all-clubs '*' session (PP.enterMaster)
+     when programmeAuth would grant it: the admin or superadmin role, or a
+     League pass with Manage here. That check is mirrored first, so anyone
+     else is told at once rather than after a ~20s refusal; the server still
+     decides. */
+  function enterLeague(me) {
+    revealGate();
+    el('gateSub').textContent = 'Opening Programme Packs…';
+    firebase.database().ref('users/' + me.uid).once('value').then(function (snap) {
+      var u = snap.val() || {};
+      var role = String(u.role || '').toLowerCase();
+      var entry = u.tools && u.tools['media-programme'];
+      var manage = role === 'admin' || role === 'superadmin' ||
+        (u.pass && u.pass.base === 'league' && entry === 'admin');
+      if (!manage) {
+        el('gateSub').innerHTML = 'Programme Packs is run by League Media and League Commercial.' +
+          '<br><a class="btn btn--ghost gate__back" href="/portal/">' + iconHtml('back') + 'Back to NL Tools</a>';
+        return;
+      }
+      var slow = setTimeout(function () {
+        el('gateSub').textContent = 'Still opening: the first time on a device takes a few seconds.';
+      }, 4000);
+      return PP.enterMaster().then(function (s) { clearTimeout(slow); enter(s); }, function (e) {
+        clearTimeout(slow);
+        el('gateSub').textContent = (e && e.message) || 'Something went wrong. Please try again.';
+      });
+    }).catch(function (e) {
+      el('gateSub').textContent = (e && e.message) || 'Something went wrong. Please try again.';
+    });
+  }
+
+  /* The League's tabs. Library is this page; the other three are
+     _console.js, fetched only now, so clubs never load it. The tab is in the
+     address (?tab=audit) so it can be linked to; the folder stays in the
+     hash. */
+  var TABS = ['library', 'trash', 'audit', 'access'];
+  var leagueTab = 'library';
+  function startLeagueTabs() {
+    el('ppTabs').hidden = false;
+    var want = params.get('tab');
+    Array.prototype.forEach.call(el('ppTabs').querySelectorAll('[data-tab]'), function (b) {
+      b.onclick = function () { showTab(b.getAttribute('data-tab')); };
+    });
+    var js = document.createElement('script');
+    js.src = '/programme/_console.js?v=1';
+    js.onload = function () {
+      window.PPConsole.start({ openClub: function (code) { showTab('library'); navigate(code, null); } });
+      showTab(TABS.indexOf(want) > -1 ? want : leagueTab);
+    };
+    js.onerror = function () { NL.toast('The League tabs could not load. Refresh to try again.', 'error'); };
+    document.body.appendChild(js);
+  }
+  function showTab(t) {
+    leagueTab = t;
+    Array.prototype.forEach.call(el('ppTabs').querySelectorAll('[data-tab]'), function (b) {
+      b.classList.toggle('active', b.getAttribute('data-tab') === t);
+    });
+    el('paneLibrary').hidden = t !== 'library';
+    el('paneTrash').hidden = t !== 'trash';
+    el('paneAudit').hidden = t !== 'audit';
+    el('paneAccess').hidden = t !== 'access';
+    var q = new URLSearchParams(location.search);
+    if (t === 'library') q.delete('tab'); else q.set('tab', t);
+    q.delete('master'); q.delete('embed');
+    var qs = q.toString();
+    history.replaceState(null, '', location.pathname + (qs ? '?' + qs : '') + location.hash);
+    if (t !== 'library' && window.PPConsole) window.PPConsole.show(t);
+  }
 
   /* ── Enter ────────────────────────────────────────────────────────────── */
 
   function enter(session) {
     el('gate').style.display = 'none';
     el('app').style.display = 'block';
-    /* Signed in to NL Tools on a Club card: the NL Tools top bar, as on every
-       club page (NL.codeGate.accountBar, nl-utils v1.57). The code bar below
-       is still built, and hidden. */
-    if (session && session.viaCard) {
-      NL.codeGate.accountBar({ title: 'Programme Packs', toolKey: 'media-programme' });
+    /* Signed in to NL Tools (a Club card, or the League): the NL Tools top
+       bar, as on every club page (NL.codeGate.accountBar, nl-utils v1.57).
+       The code bar below is still built, and hidden. */
+    if (session && (session.viaCard || session.isAdmin)) {
+      NL.codeGate.accountBar({ title: 'Programme Packs', toolKey: 'media-programme' }).then(fitSelTop);
     }
 
     var crest = document.createElement('img');
@@ -363,11 +399,8 @@
     }
     el('idbarCrest').replaceChildren(crest);
     el('idbarClub').textContent = session.name;
-    if (session.isAdmin) el('signout').textContent = 'Console';
-    /* Inside the console's Library tab the page around this one already
-       carries the identity and the way out — a second bar is furniture. */
-    if (EMBED) document.querySelector('.nl-idbar').style.display = 'none';
     fitSelTop();
+    if (session.isAdmin) startLeagueTabs();
 
     if (session.viaAdmin) {
       var b = el('asBanner');
@@ -979,9 +1012,11 @@
     /* A file's name previews it, or saves it where nothing can be shown. */
     each('[data-view]', function (b) {
       b.onclick = function () {
-        var f = (FILES[code] || {})[b.getAttribute('data-view')];
+        /* The id is the key, not a field: a stored record carries no id. */
+        var id = b.getAttribute('data-view');
+        var f = (FILES[code] || {})[id];
         if (!f) return;
-        if (canPreview(f)) preview(code, f.id); else downloadFile(code, f);
+        if (canPreview(f)) preview(code, id); else downloadFile(code, f);
       };
     });
 

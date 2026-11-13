@@ -44,7 +44,7 @@ test('the bar sticks flush under whatever is above it', () => {
 test('14.5 folders then files; a file name previews, every row has its ⋯', () => {
   assert.ok(club.indexOf('subs.map(function (f) { return folderRow(') < club.indexOf('files.map(function (f) { return fileRow('));
   assert.match(PAGE, /data-view="' \+ esc\(f\.id\) \+ '"/);
-  assert.match(PAGE, /if \(canPreview\(f\)\) preview\(code, f\.id\); else downloadFile\(code, f\);/);
+  assert.match(PAGE, /if \(canPreview\(f\)\) preview\(code, id\); else downloadFile\(code, f\);/);
   assert.match(PAGE, /data-filemenu="/);
   assert.match(PAGE, /data-menu="/);
 });
@@ -75,6 +75,9 @@ test('the sprite carries the library icons, stroked like the UI set', () => {
   }
 });
 
-test('the selection bar measures the identity bar, and 0 when it is hidden', () => {
-  assert.match(PAGE, /var h = bar && bar\.style\.display !== 'none' \? bar\.getBoundingClientRect\(\)\.height : 0;/);
+test('the selection bar measures whichever top bar shows', () => {
+  /* The code bar when it shows; otherwise the NL Tools bar, which is
+     sticky too (v1.32). */
+  assert.match(PAGE, /var top = bar && !bar\.hidden && bar\.style\.display !== 'none' \? bar : el\('nlTopbar'\);/);
+  assert.match(PAGE, /var h = top \? top\.getBoundingClientRect\(\)\.height : 0;/);
 });

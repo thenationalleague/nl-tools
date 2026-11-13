@@ -75,8 +75,8 @@ dance and the GAS quota ceilings. Bytes now live in Firebase Storage."
 
 The replacement ran for twelve days while the original stayed on the portal,
 kept its RTDB node, and kept seventeen `pp_*` routes plus a Drive browser live
-in Apps Script. There is no concept to preserve here: `/programme/` and
-`/programme/admin/` are the concept, working.
+in Apps Script. There is no concept to preserve here: `/programme/` is the
+concept, working (its console was `/programme/admin/` until 13/11/2026).
 
 `programme-packs/REBUILD.md` went with it — a v2 spec for a rebuild that had
 already happened somewhere else.
