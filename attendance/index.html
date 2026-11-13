@@ -10,6 +10,15 @@
 
      TECHNICAL CHANGELOG
      -------------------
+     v2.15.0 (13/11/2026) The pass decides who does what here. One who()
+                         reads the pass (or the old role, for someone with
+                         no pass) and every check uses it: League view and
+                         export for League passes; fixtures, neutral venues
+                         and any club's figures for League + Manage (League
+                         Operations); a club's own figures for its Club card
+                         + Manage (Club Operations, Club Media); archived
+                         seasons and season admin for the Skeleton key. The
+                         registry offers Manage; the rules follow it.
      v2.14.1 (11/11/2026) Return to league view carries the canon back icon
                          in place of a typed arrow character.
      v2.14.0 (11/11/2026) The club's heading is the canon club header.
@@ -1209,6 +1218,11 @@
   var NL_TOOL_KEY = 'ops-attendance';
 
   window.NL_CHANGELOG = [
+    {
+      date: '13/11/2026',
+      version: 'v2.15.0',
+      items: [ 'Who can submit and edit now comes from your pass: League Operations run the fixtures, and a club’s Operations or Media holder submits its figures.' ]
+    },
     {
       date: '11/11/2026',
       version: 'v2.14.1',
@@ -3307,12 +3321,37 @@
     return kept;
   }
 
-  /* Superadmins may edit an archived season — back-fill attendance left over at
-     rollover, add/fix/delete a cup fixture, tag a neutral venue. The archive
-     RTDB node is superadmin-writable, so this matches the rules. For everyone
-     else, and for admins on a past season, archived data stays read-only. */
+  /* Who this person is here, from their pass (v2.15.0, 13/11/2026). One answer
+     every check below reads, instead of each asking the old role.
+       league     – League side: all clubs, the focus picker, export
+       manage     – the tool's Manage level (session.toolLevel 'admin')
+       admin      – League and Manage: fixtures, neutral venues, any club's
+                    figures (League Operations, or the Skeleton key)
+       club       – the club a Club card (or old club role) belongs to
+       clubManage – a club submitting its own figures (Club Operations or
+                    Club Media)
+       skeleton   – the Skeleton key: archived seasons and season admin
+     Someone without a pass is read from the old role, as before. */
+  function who() {
+    var s = S.session || {}, p = s.pass;
+    var byPass = !!(window.nlPassDecides && NL.pass && NL.pass.isIssued(p));
+    var league = byPass ? p.base === 'league'
+                        : (s.role === 'staff' || s.role === 'admin' || s.role === 'superadmin');
+    var manage = s.toolLevel === 'admin';
+    var club = league ? null : ((byPass && p.club) || s.club || null);
+    return {
+      league: league, manage: manage, admin: league && manage,
+      club: club, clubManage: !league && manage,
+      skeleton: byPass ? NL.pass.isSkeleton(p) : s.role === 'superadmin'
+    };
+  }
+
+  /* The Skeleton key may edit an archived season — back-fill attendance left
+     over at rollover, add/fix/delete a cup fixture, tag a neutral venue. The
+     archive RTDB node is superadmin-writable, and both Skeleton key holders
+     hold that role. For everyone else archived data stays read-only. */
   function canBackfillArchive() {
-    return S.session && S.session.role === 'superadmin';
+    return who().skeleton;
   }
   /* The single write gate: allowed on the live season, or by a superadmin on an
      archived season. Used by attendance submit/clear AND cup-fixture
@@ -3327,7 +3366,7 @@
   function assertCanTag() {
     if (seasonIsCurrent()) return true;
     if (canBackfillArchive()) return true;
-    NL.toast('That season is archived — only a superadmin can tag fixtures there.', 'info');
+    NL.toast('That season is archived — only the Skeleton key can tag fixtures there.', 'info');
     return false;
   }
 
@@ -3476,7 +3515,7 @@
       var cfb = document.getElementById('clearFocusBtn');
       if (cfb) cfb.style.display = 'none';
     }
-    if (S.session.role !== 'club') S.effectiveClub = null;
+    if (!who().club) S.effectiveClub = null;
     rebuildRosterForSeason();
     renderSeasonSwitcher();
     document.getElementById('insightsLoading').style.display = '';
@@ -3626,9 +3665,8 @@
   }
 
   function resolveEffectiveClub() {
-    if (NL.isClubUser(S.session.role) && S.session.club) {
-      S.effectiveClub = S.session.club;
-    }
+    var w = who();
+    if (w.club) S.effectiveClub = w.club;
   }
 
 
@@ -3906,9 +3944,9 @@
      ========================================================================= */
 
   function setupChromeForRole() {
-    var role = S.session.role;
-    var isStaffLike = (role === 'staff' || role === 'admin' || role === 'superadmin');
-    var isAdmin = (role === 'admin' || role === 'superadmin');
+    var w = who();
+    var isStaffLike = w.league;
+    var isAdmin = w.admin;
 
     /* Outstanding tab visible to everyone \u2014 content switches based on role/focus */
 
@@ -3957,7 +3995,7 @@
        the live path to archive a completed season). */
     var saTab = document.getElementById('seasonAdminTab');
     if (saTab) {
-      if (role === 'superadmin' && !isReadOnlySeason()) {
+      if (w.skeleton && !isReadOnlySeason()) {
         saTab.style.display = '';
         if (typeof wireSeasonAdmin === 'function') wireSeasonAdmin();
       } else {
@@ -3989,7 +4027,7 @@
      clear button, and triggers a re-render. */
   function setFocusedClub(clubName) {
     S.focusedClub = clubName || null;
-    S.effectiveClub = S.focusedClub || (NL.isClubUser(S.session.role) ? S.session.club : null);
+    S.effectiveClub = S.focusedClub || who().club;
     document.getElementById('clearFocusBtn').style.display = S.focusedClub ? '' : 'none';
     updateSubtitle();
     renderForCurrentView();
@@ -4999,8 +5037,7 @@
      - Club user, OR staff/admin with a focused club \u2192 per-club list view (their matches)
      - Staff/admin without a focused club \u2192 League-wide per-club rollup */
   function renderOutstandingPanel() {
-    var role = S.session.role;
-    var isStaffLike = (role === 'staff' || role === 'admin' || role === 'superadmin');
+    var isStaffLike = who().league;
     var showAdminAggregate = isStaffLike && !S.effectiveClub;
 
     document.getElementById('outstandingClubView').style.display = showAdminAggregate ? 'none' : '';
@@ -5016,8 +5053,7 @@
   /* Render the single-club outstanding view \u2014 used for club users AND for staff/admin
      who have a focused club. Shows: summary cards + table of outstanding matches. */
   function renderOutstandingClubView() {
-    var role = S.session.role;
-    var isStaffLike = (role === 'staff' || role === 'admin' || role === 'superadmin');
+    var isStaffLike = who().league;
     var clubName = S.effectiveClub;
 
     /* If somehow no effective club (e.g. a club user with no club assigned), show a gentle empty state */
@@ -5037,7 +5073,7 @@
     /* Heading: differentiates "your" (club user) from focused-club text */
     var heading = document.getElementById('outstandingClubHeading');
     if (heading) {
-      heading.textContent = (NL.isClubUser(role))
+      heading.textContent = (!isStaffLike)
         ? 'Your outstanding home matches'
         : clubName + ' \u2014 outstanding home matches';
     }
@@ -5791,7 +5827,7 @@
        club user. Admins viewing a specific club should switch to League
        view if they want the rankings — keeping them here was just noise. */
     var card = document.getElementById('rankChartCard');
-    var isStaffLike = (S.session.role === 'staff' || S.session.role === 'admin' || S.session.role === 'superadmin');
+    var isStaffLike = who().league;
     if (card) card.style.display = isStaffLike ? 'none' : '';
     if (isStaffLike) return;
 
@@ -5806,7 +5842,7 @@
        - Staff/admin focused on a club: full staff layout with names visible
          throughout, but the focused club's row highlighted in red.
     */
-    if (NL.isClubUser(S.session.role)) {
+    if (!who().league) {
       drawBarsClubStyle('rankBars', rows, clubName, metric, scope);
     } else {
       /* Staff-focused: use the staff 4-column layout. Pass the focused club
@@ -6836,10 +6872,9 @@
 
     /* Determine user's edit capability */
     var isHomeForEffective = fix.homeTeamName === clubName;
-    var role = S.session.role;
-    var isStaffLike = (role === 'staff' || role === 'admin' || role === 'superadmin');
-    var canEditOwnHome = isHomeForEffective && NL.canClubEdit(role) && isWithinEditWindow(fix);
-    var isAdmin = (role === 'admin' || role === 'superadmin');
+    var w = who();
+    var canEditOwnHome = isHomeForEffective && w.clubManage && isWithinEditWindow(fix);
+    var isAdmin = w.admin;
 
     if (sub && !isHomeForEffective) {
       /* Viewing an away match in home club's absence \u2014 view only */
@@ -6851,10 +6886,10 @@
       openSubmitModal(fix, sub);
     } else if (sub) {
       openViewModal(fix, sub);
-    } else if (isHomeForEffective && NL.canClubEdit(role)) {
+    } else if (isHomeForEffective && w.clubManage) {
       openSubmitModal(fix, null);
-    } else if (isHomeForEffective && isStaffLike) {
-      /* Staff/admin submitting on behalf */
+    } else if (isHomeForEffective && isAdmin) {
+      /* League Operations submitting on the club's behalf */
       openSubmitModal(fix, null);
     } else {
       /* Away fixture with no submission yet \u2014 nothing to do */
@@ -7063,9 +7098,9 @@
        - Staff with focused club: that focused club's outstanding home matches
        - Staff with no focus: the whole league (per-club rollup)
        Returns { mode: 'own'|'league', club: clubName|null } */
-    var role = S.session.role;
-    if (NL.isClubUser(role)) {
-      return { mode: 'own', club: S.session.club || null };
+    var w = who();
+    if (!w.league) {
+      return { mode: 'own', club: w.club };
     }
     /* staff/admin/superadmin */
     if (S.focusedClub) {
@@ -7384,9 +7419,8 @@
 
     var existing = S.editingSubmission;
     var now = Date.now();
-    var role = S.session.role;
-    var isAdmin = (role === 'admin' || role === 'superadmin');
-    var onBehalf = isAdmin && fix.homeTeamName !== S.session.club;
+    var isAdmin = who().admin;
+    var onBehalf = isAdmin && fix.homeTeamName !== who().club;
 
     var record = {
       matchID:         matchID,

@@ -150,7 +150,9 @@ test('every registry record carries permissions in the shape the resolver reads'
 test('the new grants sit beside the old access fields, not over them', () => {
   /* levels / shelf / audience / defaults keep today's meanings until step 9:
      auth-guard and the portal read them. */
-  assert.deepEqual(REGISTRY['ops-attendance'].levels, ['off', 'access']);
+  /* Attendance gained Manage on 13/11/2026 (the pass decides everywhere);
+     its old fields still carry it in their own words. */
+  assert.deepEqual(REGISTRY['ops-attendance'].levels, ['off', 'access', 'admin']);
   assert.equal(REGISTRY['ops-attendance'].defaults.staff, 'access');
   assert.equal(REGISTRY['media-programme'].shelf, 'club');
   /* ops-fan-widgets' shelf: 'website' went on 13/11/2026 (Sandbox now). */

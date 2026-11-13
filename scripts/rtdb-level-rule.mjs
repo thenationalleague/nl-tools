@@ -30,7 +30,9 @@
        normalised one has no default), and a missing role reads as 'staff'.
 
    CLI: node scripts/rtdb-level-rule.mjs <toolKey> <access|admin>
-        prints the expression, for pasting into system/rtdb/rules.snapshot.json. */
+        prints the expression, for pasting into system/rtdb/rules.snapshot.json.
+        node scripts/rtdb-level-rule.mjs league
+        prints the League check (leagueRule, below). */
 
 const U = "root.child('users').child(auth.uid)";
 const ROLE = `${U}.child('role').val()`;
@@ -74,10 +76,27 @@ export function levelRule(toolKey, min) {
   return `auth != null && (${ROLE} === 'superadmin' || ${granted})`;
 }
 
+/* "This person is on the League side." The pass's card when they have one;
+   with no pass, a League role (superadmin, admin, staff); and the
+   superadmin role always, as the Skeleton key holders hold it. Used beside
+   levelRule where a tool gives Club cards Manage over their own club's
+   figures but keeps League-wide data and running the tool to the League:
+   `${leagueRule()} && ${levelRule(key, 'admin')}`. First written by hand for
+   Commercial Benchmarking (13/11/2026); generated from its second use,
+   Attendance, and tests/rtdb-league-rule.test.mjs checks the first still
+   matches. */
+const PASS_BASE = `${U}.child('pass').child('base')`;
+export function leagueRule() {
+  const leagueRole = ['superadmin', 'admin', 'staff'].map((r) => `${ROLE} === '${r}'`).join(' || ');
+  return `(${PASS_BASE}.val() === 'league' || (!${PASS_BASE}.exists() && (${leagueRole})) || ${ROLE} === 'superadmin')`;
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   const [key, min] = process.argv.slice(2);
+  if (key === 'league' && !min) { console.log(leagueRule()); process.exit(0); }
   if (!key || !min) {
     console.error('usage: node scripts/rtdb-level-rule.mjs <toolKey> <access|admin>');
+    console.error('       node scripts/rtdb-level-rule.mjs league');
     process.exit(2);
   }
   console.log(levelRule(key, min));
