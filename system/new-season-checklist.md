@@ -6,9 +6,23 @@ real, so treat the first one as a test: check each line afterwards.
 
 A season is named by its first year: `2027` is 2027-28.
 
-## Before 1 July: the one thing that breaks everything if missed
+## Before 1 July: the two things that break everything if missed
 
-**Every club in `assets/data/clubs-meta.json` needs its division for the new
+**1. The season's shape, in `assets/data/competitions-meta.json`.** Each of
+National, North and South carries a `structure` per season: how many clubs,
+games each, how many go up as champions, the play-off places, how many
+play-off winners go up, and how many go down. Copy last season's entry to the
+new year and change what the League has changed (if 3UP succeeds, `promoted`
+or the play-offs change here, nowhere else):
+
+```json
+"2027": { "clubs": 24, "games": 46, "promoted": 1, "playoffs": { "semiFinal": [2, 3], "quarterFinal": [4, 7] }, "playoffWinnersPromoted": 1, "relegated": 4 }
+```
+
+The tests check every shape adds up (games a full home and away, play-off
+places between the promoted and the relegated) on the PR.
+
+**2. Every club in `assets/data/clubs-meta.json` needs its division for the new
 season** (`"seasons": { …, "2027": "National" }`), and promoted or relegated
 clubs need adding or ending. Tools ask "which clubs played this season?" by
 reading that map (`NL.season.clubsFor`, `NL.clubs.forSeason`). The season job
@@ -16,11 +30,12 @@ only moves `seasons.current`. If it moved before the clubs had a 2027 entry,
 every club picker, Attendance, Fixture Management's league count and every
 club-code door would see **no clubs**.
 
-So the job **refuses to move the season until each division has its 24 clubs
-for the new year**: it writes nothing and its run goes red. Every Monday in
-June it also runs a check that goes red while any division is short, so
-Actions (and Estate's failed-job flag) warns weeks ahead. A red run in June
-means: add the clubs.
+So the job **refuses to move the season until both are in**: each division's
+shape for the new year, and exactly that many clubs entered for it. It
+writes nothing and its run goes red. Every Monday in June it also runs a
+check that goes red while either is missing, so Actions (and Estate's
+failed-job flag) warns weeks ahead. A red run in June means: add the shape
+or the clubs; the log says which.
 
 - Add each club coming in (code, name, Opta ID, colours, crest name) and its
   2027 division. Its crest goes in `assets/crests/` (the crest thumbs job
@@ -57,6 +72,15 @@ anything, tick **check only**.
 - Then import the season's workbook in Fixture Management → Manage → Import.
   Check Manage shows 552 league games in each division.
 
+**The shape typed into code.** Two places still draw the table's zones from
+numbers in their own code, not from competitions-meta: the table graphics
+(`graphics/_shared/table-card.js`, `posZone`: champion 1, semi-finals 2–3,
+qualifying round 4–7, bottom four down) and the website's match hub
+(`embeds/match-hub.html`: play-offs 2–7, bottom four, 46 games). If the
+shape changes, change them too. Better: have both read the season's
+`structure` the next time each is touched (a canon candidate: one helper
+that answers "which zone is position N in this season").
+
 **Season numbers typed into code**
 - Travel planner: `var SID=2026` (the NLS season ID) becomes 2027.
 - Broadcast selections: `SEASON_KEY = "2026-27"` and its season button, plus
@@ -81,7 +105,8 @@ anything, tick **check only**.
 
 ## Check afterwards (yes / no)
 
-1. clubs-meta's `seasons.current` is the new year.
+1. clubs-meta's `seasons.current` is the new year, and competitions-meta has
+   its shape for each league.
 2. A club picker lists 72 clubs, the new ones included.
 3. Attendance opens on the new season with every club's fixtures once they
    are imported.
