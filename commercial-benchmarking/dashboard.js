@@ -1,16 +1,23 @@
-/* commercial-benchmarking/dashboard.js  v1.14
+/* commercial-benchmarking/dashboard.js  v1.15
+   v1.15 (13/11/2026): the private token links are gone. The staff bar's
+     Links button is now Confirmations (which clubs have confirmed their
+     figures, read from clubs/<club>/confirm); link generation, the links
+     Excel download and "Open club link" are removed. mount() returns
+     { renderAll } so a page can re-render without mounting twice.
+
    Shared dashboard renderer for the Commercial Benchmarking tool. Pure
    rendering — no Firebase, no data loading. Both entry points use it:
      - index.html  (gated NL tool: staff picker / club's own row via auth-guard)
-     - link.html   (public no-login capability link)
+     - club/       (club page, entered by club code or a Club card)
 
-   CBDash.mount(AGG, clubs, opts)
+   CBDash.mount(AGG, clubs, opts) → { renderAll }
      AGG    = { meta, aggregates:{<key>:{label,unit,desc,group,scopes:{...}}}, chips }
      clubs  = array of club payloads { club, division, fsSponsor, metrics, chips }
-     opts   = { staff, canEdit, onSave(AGG, clubs), writeLink(token, payload),
-                tokenByClub, confirmByClub }
-              staff:true shows the club picker; canEdit + onSave enable the
-              editor and Import rows; writeLink enables the link manager.
+     opts   = { staff, canEdit, onSave(AGG, clubs), confirmByClub }
+              staff:true shows the club picker and Confirmations; canEdit +
+              onSave enable the editor and Import rows.
+   CBDash.review(OWN, { reportEmail, surveyUrl, onConfirm(state) }) — the
+     club's own figures to check and confirm, no benchmarks.
    CBDash.importRows(AGG, clubs, rows, {dryRun, replace}) — see the function.
 
    Operates on fixed IDs present in the page skeleton (#sections, #chips,
@@ -20,7 +27,7 @@
 window.CBDash = (function () {
 
   // One escaper for the whole file: NL.escHtml where nl-utils is loaded
-  // (index.html), the same rule inline for link.html, which does not load it.
+  // (both pages do), the same rule inline as a fallback.
   function esc(s) {
     s = String(s == null ? '' : s);
     if (window.NL && NL.escHtml) return NL.escHtml(s);
@@ -902,99 +909,29 @@ window.CBDash = (function () {
         NL.csv(rows, { bom: true }), 'text/csv;charset=utf-8;');
     }
 
-    // Excel workbook of every club's two links, styled like the on-screen
-    // table, with "Proof"/"Benchmarking" as live hyperlinks (not raw URLs).
-    // Built as Excel-flavoured HTML so it carries both styling and clickable
-    // links without any library.
-    function exportLinks() {
-      var tb = opts.tokenByClub || {};
-      var th = 'style="background:#1B2A4A;color:#fff;font-weight:bold;text-align:left;padding:7px 12px;border:1px solid #cfd6e4"';
-      var td = 'style="padding:6px 12px;border:1px solid #e2e6ee"';
-      function lk(word, url) { return '<a href="' + esc(url) + '" style="color:#9e0000;font-weight:bold;text-decoration:none">' + word + '</a>'; }
-      // Each link twice: as a clickable word, and as the bare URL in its own
-      // cell, because a hyperlink does not survive a copy into a mail merge
-      // or a message — the address does.
-      var rows = clubs.map(function (c) {
-        var tok = tb[c.club];
-        return '<tr><td ' + td + '>' + esc(c.club) + '</td><td ' + td + '>' + esc(c.division) + '</td>' +
-          '<td ' + td + '>' + (tok ? lk('Proof', proofUrl(tok)) : '') + '</td>' +
-          '<td ' + td + '>' + (tok ? esc(proofUrl(tok)) : '') + '</td>' +
-          '<td ' + td + '>' + (tok ? lk('Benchmarking', linkUrl(tok)) : '') + '</td>' +
-          '<td ' + td + '>' + (tok ? esc(linkUrl(tok)) : '') + '</td></tr>';
-      }).join('');
-      var html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8">' +
-        '<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Club links</x:Name>' +
-        '<x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->' +
-        '<style>table{border-collapse:collapse;font-family:Arial,sans-serif;font-size:11pt}</style></head><body>' +
-        '<table><tr><th ' + th + '>Club</th><th ' + th + '>Division</th><th ' + th + '>Proof</th><th ' + th + '>Proof URL</th>' +
-        '<th ' + th + '>Benchmarking</th><th ' + th + '>Benchmarking URL</th></tr>' +
-        rows + '</table></body></html>';
-      NL.download('commercial-benchmarking-links-' + new Date().toISOString().slice(0, 10) + '.xls',
-        new Blob(['﻿' + html], { type: 'application/vnd.ms-excel' }));
-    }
-
-    // ---- admin: generate & manage per-club capability links ----
-    function token24() {
-      var a = new Uint8Array(24); window.crypto.getRandomValues(a);
-      var s = ''; for (var i = 0; i < a.length; i++) s += String.fromCharCode(a[i]);
-      return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    }
-    function linkUrl(tok) { return new URL('link.html?t=' + tok, location.href).href; }
-    function proofUrl(tok) { return linkUrl(tok) + '&mode=verify'; }
-    function linkNote(t) { var el = $('cb-linknote'); if (el) el.textContent = t || ''; }
-    function genOne(club) {
-      var c = clubByName[club]; if (!c || !opts.writeLink) return;
-      var tok = token24();
-      linkNote('Generating link for ' + club + '…');
-      return opts.writeLink(tok, c).then(function () { opts.tokenByClub[club] = tok; renderLinks(); });
-    }
-    function genMissing() {
-      var tb = opts.tokenByClub || {};
-      var missing = clubs.filter(function (c) { return !tb[c.club]; });
-      if (!missing.length) { linkNote('Every club already has a link.'); return; }
-      linkNote('Generating ' + missing.length + ' link' + (missing.length > 1 ? 's' : '') + '…');
-      Promise.all(missing.map(function (c) { var tok = token24(); opts.tokenByClub[c.club] = tok; return opts.writeLink(tok, c); }))
-        .then(function () { renderLinks(); linkNote('Generated ' + missing.length + '.'); },
-          function (e) { console.error(e); linkNote('Generation failed — please try again.'); });
-    }
-    function renderLinks() {
-      var tb = opts.tokenByClub || {}, cf = opts.confirmByClub || {};
+    // Which clubs have confirmed their own figures (Your figures tab on the
+    // club page writes clubs/<club>/confirm). Was the link manager until the
+    // private links were retired on 13/11/2026.
+    function renderConfirms() {
+      var cf = opts.confirmByClub || {};
       function confCell(c) {
         var v = cf[c.club];
         if (!v) return '<span class="cb-unconf">—</span>';
         return '<span class="cb-conf">✓' + (typeof v === 'number' ? ' ' + NL.formatDateShort(v) : '') + '</span>';
       }
       var rows = clubs.map(function (c) {
-        var tok = tb[c.club];
-        var nameCell = c.club + (c._noData ? ' <span class="cb-nodata-tag">(no data yet)</span>' : '');
-        var proof, bench;
-        if (tok) {
-          proof = '<td><a class="cb-linkword" href="' + proofUrl(tok) + '" target="_blank" rel="noopener">Proof</a></td>';
-          bench = '<td><a class="cb-linkword" href="' + linkUrl(tok) + '" target="_blank" rel="noopener">Benchmarked</a></td>';
-        } else {
-          proof = '<td colspan="2"><button class="btn btn--ghost btn--sm" type="button" data-gen="' + c.club.replace(/"/g, '&quot;') + '">Generate links</button></td>';
-          bench = '';
-        }
-        return '<tr><td>' + nameCell + '</td><td>' + c.division + '</td>' + proof + bench + '<td>' + confCell(c) + '</td></tr>';
+        var nameCell = esc(c.club) + (c._noData ? ' <span class="cb-nodata-tag">(no data yet)</span>' : '');
+        return '<tr><td>' + nameCell + '</td><td>' + esc(divName(c.division)) + '</td><td>' + confCell(c) + '</td></tr>';
       }).join('');
-      var have = clubs.filter(function (c) { return tb[c.club]; }).length;
       var confirmed = clubs.filter(function (c) { return cf[c.club]; }).length;
       $('sections').innerHTML = '<div class="cb-edit-actions">' +
-        '<button id="cb-genall" class="btn btn--navy btn--sm" type="button">Generate all missing</button>' +
-        '<button id="cb-linkdl" class="btn btn--navy btn--sm" type="button">Download links (Excel)</button>' +
-        '<button id="cb-linkdone" class="btn btn--ghost btn--sm" type="button">Done</button>' +
-        '<span id="cb-linknote" class="cb-linknote"><b>' + confirmed + ' of ' + clubs.length + '</b> clubs have confirmed their data. ' + have + ' have links. <b>Proof</b> = own-data check; <b>Benchmarked</b> = full comparison.</span></div>' +
-        '<table class="cb-linktable"><thead><tr><th>Club</th><th>Division</th><th>Proof</th><th>Benchmarked</th><th>Confirmed</th></tr></thead><tbody>' + rows + '</tbody></table>';
-      $('cb-linkdone').onclick = function () { $('sections').onclick = null; render(); };
-      $('cb-genall').onclick = genMissing;
-      $('cb-linkdl').onclick = exportLinks;
-      $('sections').onclick = function (e) {
-        var b = e.target.closest('button'); if (!b) return;
-        if (b.getAttribute('data-gen')) genOne(b.getAttribute('data-gen'));
-      };
+        '<button id="cb-confdone" class="btn btn--ghost btn--sm" type="button">Done</button>' +
+        '<span class="cb-confnote"><b>' + confirmed + ' of ' + clubs.length + '</b> clubs have confirmed their figures.</span></div>' +
+        '<div class="table-wrap"><table class="table"><thead><tr><th>Club</th><th>Division</th><th>Confirmed</th></tr></thead><tbody>' +
+        rows + '</tbody></table></div>';
+      $('cb-confdone').onclick = function () { render(); };
     }
 
-    var updateSelLink = null;
     function pickOptions() {
       var opt = '', curDiv = '';
       clubs.forEach(function (c, i) {
@@ -1044,7 +981,7 @@ window.CBDash = (function () {
           var parts = [];
           if (dry.added.length) parts.push('<b>Add ' + dry.added.length + '</b>: ' + dry.added.map(esc).join(', '));
           if (dry.replaced.length) parts.push('<b>Replace ' + dry.replaced.length + '</b>: ' + dry.replaced.map(esc).join(', '));
-          say(parts.join('<br>') + '<br>Every club’s percentiles will be recomputed and links generated for new clubs.');
+          say(parts.join('<br>') + '<br>Every club’s percentiles will be recomputed.');
           goBtn.textContent = 'Import ' + (dry.added.length + dry.replaced.length) + ' club' + (dry.added.length + dry.replaced.length === 1 ? '' : 's');
           return;
         }
@@ -1052,17 +989,12 @@ window.CBDash = (function () {
         var rows = JSON.parse(ta.value);
         var res = importRows(AGG, clubs, rows, { replace: rep.checked });
         if (!res.ok) { goBtn.disabled = false; reset(); say('<b>Nothing imported.</b> ' + esc(res.errors.join(' ')), true); return; }
-        var tb = opts.tokenByClub || (opts.tokenByClub = {});
         Promise.resolve(opts.onSave(AGG, clubs)).then(function () {
-          if (!opts.writeLink) return;
-          var need = res.added.filter(function (n) { return !tb[n]; });
-          return Promise.all(need.map(function (n) { var tok = token24(); tb[n] = tok; return opts.writeLink(tok, clubByName[n]); }));
-        }).then(function () {
           clubByName = {}; clubs.forEach(function (x) { clubByName[x.club] = x; });
           var pick = $('clubPick');
           if (pick) { pick.innerHTML = pickOptions(); var first = res.added[0] || res.replaced[0]; var idx = clubs.map(function (x) { return x.club; }).indexOf(first); if (idx >= 0) { pick.value = String(idx); OWN = clubs[idx]; } }
           setText('lgn', AGG.meta.leagueN);
-          renderAll(); if (updateSelLink) updateSelLink();
+          renderAll();
           c.close();
           if (NL.toast) NL.toast('Imported ' + (res.added.length + res.replaced.length) + ' club' + (res.added.length + res.replaced.length === 1 ? '' : 's'));
         }, function (e) {
@@ -1077,32 +1009,24 @@ window.CBDash = (function () {
       if (bar) {
         bar.style.display = '';
         var btns = '<button class="btn btn--ghost btn--sm" id="cb-export" type="button">Export</button>';
-        if (opts.canEdit && opts.writeLink) btns += '<button class="btn btn--ghost btn--sm" id="cb-links" type="button">Links</button>';
+        btns += '<button class="btn btn--ghost btn--sm" id="cb-confirms" type="button">Confirmations</button>';
         if (opts.canEdit && opts.onSave) btns += '<button class="btn btn--ghost btn--sm" id="cb-import" type="button">Import rows</button>';
         if (opts.canEdit) btns += '<button class="btn btn--primary btn--sm" id="cb-edit" type="button">Edit data</button>';
         bar.innerHTML =
           '<select id="clubPick" class="nl-select cb-staff-pick">' + pickOptions() + '</select>' +
-          '<a id="cb-selLink" class="cb-sellink" target="_blank" rel="noopener"></a>' +
           '<span class="cb-staff-actions">' + btns + '</span>';
-        updateSelLink = function () {
-          var a = $('cb-selLink'); if (!a) return;
-          var tok = (opts.tokenByClub || {})[OWN.club];
-          if (tok) { a.href = new URL('link.html?t=' + tok, location.href).href; a.textContent = 'Open club link ↗'; a.style.display = ''; }
-          else { a.removeAttribute('href'); a.style.display = 'none'; }
-        };
         $('clubPick').addEventListener('change', function () {
           OWN = clubs[+this.value];
           if (editMode) { editMode = false; setEditUI(); }
-          renderAll(); updateSelLink();
+          renderAll();
         });
         $('cb-export').onclick = exportData;
-        if ($('cb-links')) $('cb-links').onclick = function () { editMode = false; setEditUI(); renderLinks(); };
+        $('cb-confirms').onclick = function () { editMode = false; setEditUI(); renderConfirms(); };
         if ($('cb-import')) $('cb-import').onclick = importDialog;
         if ($('cb-edit')) { ebtn = $('cb-edit'); ebtn.onclick = function () { editMode = !editMode; setEditUI(); if (editMode) renderEditForm(); else render(); }; }
-        updateSelLink();
       }
       var pt = $('privacyTxt');
-      if (pt) pt.innerHTML = '<b>NL staff view.</b> Every club’s named figures are visible here; use <b>Links</b> to copy a club’s private link. Clubs only ever see their own data plus anonymous benchmarks.';
+      if (pt) pt.innerHTML = '<b>NL staff view.</b> Every club’s named figures are visible here. Clubs only ever see their own data plus anonymous benchmarks.';
     }
 
     $('scopeSeg').addEventListener('click', function (e) {
@@ -1124,6 +1048,10 @@ window.CBDash = (function () {
 
     setText('lgn', AGG.meta.leagueN);
     renderAll();
+    // A page that swaps views in #sections (the club page's Your figures tab)
+    // re-renders through this rather than mounting again, which would stack
+    // a second set of control listeners.
+    return { renderAll: renderAll };
   }
 
   // 'YYYY-MM' (or 'YYYY') -> 'Mmm YYYY' for the verify page.

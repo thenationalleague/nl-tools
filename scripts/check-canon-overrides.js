@@ -17,7 +17,7 @@
  *   rule silently wins — so the page stops tracking the design system while
  *   still looking like it uses it. That is how meta-reference came to draw its
  *   own `.chip` at a different size, and how commercial-benchmarking/link.html
- *   repaints the canon `.topbar` navy.
+ *   (until 13/11/2026) repainted the canon `.topbar` navy.
  *
  * WHAT IT DOES NOT FLAG
  *   Locally-named classes. A page is free to define `.est-row` or `.mr-cpill`

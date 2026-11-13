@@ -3,8 +3,8 @@ own importer.
 
 The original seed (build-benchmarks.py) rebuilt the WHOLE RTDB node from the
 whole dataset, which was fine when the node was empty. Once it holds live data
-— corrections made in the tool's editor, capability links already sent to
-clubs — a whole-node rebuild would overwrite them, and applying it means a
+— corrections made in the tool's editor, clubs' own confirmations — a
+whole-node rebuild would overwrite them, and applying it means a
 console import at exactly the right node with nothing between the operator
 and the entire database.
 

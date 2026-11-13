@@ -1,8 +1,13 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Commercial Benchmarking
-  Version: v1.14 (16/09/2026)
+  Version: v1.15 (13/11/2026)
   File: /commercial-benchmarking/index.html
+  v1.15 (13/11/2026): the private token links are retired. Clubs open their
+    dashboard at /commercial-benchmarking/club/ with their club code or a
+    Club card; this page no longer reads or writes links/. Confirmations
+    (which clubs have confirmed their figures) read clubs/<club>/confirm.
+    dashboard.js/.css ?v=60.
   v1.14 (16/09/2026): Other holds every free-text sector, the club's own
     included. The "you" pill sits only against the wording the club supplied,
     first in the opened list; on the ring the club's share of Other is a
@@ -65,16 +70,14 @@
   Gated per-club commercial benchmarking dashboard. Signed-in NL staff
   (staff/admin/superadmin) get a club picker and can view any club; signed-in
   club users (club-admin/club-staff) auto-see only their own club's figures.
-  Clubs without a portal account use the no-login capability link page
-  (link.html) instead — same dashboard, resolved by token.
+  Clubs by code, and Club cards, use the club page (club/) — same dashboard.
 
   Storage (RTDB):
     app-data/ops-commercial-benchmarking/aggregates    anonymised stats +
         sorted values (no names) — division & league benchmarks
     app-data/ops-commercial-benchmarking/clubs/<club>   that club's own row;
-        readable by NL staff (all) or the matching club user
-    app-data/ops-commercial-benchmarking/links/<token>  public capability copy
-        (read by link.html)
+        readable by NL staff (all) or the matching club (account or code);
+        clubs/<club>/confirm is the club's own sign-off of its figures
     tools/ops-commercial-benchmarking                   registration
 
   Data lives only in RTDB; nothing club-identifiable is in this (public) file.
@@ -115,6 +118,11 @@
     var NL_TOOL_KEY = 'ops-commercial-benchmarking';
 
     window.NL_CHANGELOG = [
+      {
+        date: '13/11/2026',
+        version: 'v1.15',
+        items: [ 'Private club links retired: clubs open their dashboard with their club code, or signed in.', 'Links is now Confirmations: which clubs have confirmed their figures.' ]
+      },
       {
         date: '16/09/2026',
         version: 'v1.14',
@@ -208,7 +216,7 @@
   <script src="/system/nl-topbar.js?v=14"></script>
   <script src="/system/auth-guard.js?v=21"></script>
 
-  <link rel="stylesheet" href="/commercial-benchmarking/dashboard.css?v=59">
+  <link rel="stylesheet" href="/commercial-benchmarking/dashboard.css?v=60">
 <style>
   body { background: var(--off-white); }
   .page { max-width: 1240px; margin: 0 auto; padding: clamp(20px,3vw,40px) clamp(16px,2.5vw,44px) 80px; }
@@ -275,7 +283,7 @@
   </div>
 </div>
 
-<script src="/commercial-benchmarking/dashboard.js?v=59"></script>
+<script src="/commercial-benchmarking/dashboard.js?v=60"></script>
 <script>
 (function () {
   'use strict';
@@ -301,8 +309,8 @@
       var aggP = db.ref(ROOT + 'aggregates').once('value');
 
       if (isStaff) {
-        Promise.all([aggP, db.ref(ROOT + 'clubs').once('value'), db.ref(ROOT + 'links').once('value')]).then(function (r) {
-          var AGG = r[0].val(), clubsObj = r[1].val() || {}, linksObj = r[2].val() || {};
+        Promise.all([aggP, db.ref(ROOT + 'clubs').once('value')]).then(function (r) {
+          var AGG = r[0].val(), clubsObj = r[1].val() || {};
           if (!AGG) { showMsg('Not available yet', 'Benchmark data isn’t loaded yet.'); return; }
           // Full 72-club list from the roster; stubs for clubs with no return.
           var clubs;
@@ -317,43 +325,32 @@
             clubs.sort(function (a, b) { return (DIV_ORDER[a.division] - DIV_ORDER[b.division]) || a.club.localeCompare(b.club); });
           }
           if (!clubs.length) { showMsg('Not available yet', 'Benchmark data isn’t loaded yet.'); return; }
-          var tokenByClub = {}, confirmByClub = {};
-          Object.keys(linksObj).forEach(function (tok) {
-            var p = linksObj[tok];
-            if (p && p.club) {
-              tokenByClub[p.club] = tok;
-              if (p.confirm && p.confirm.confirmed) confirmByClub[p.club] = p.confirm.at || true;
-            }
+          var confirmByClub = {};
+          Object.keys(clubsObj).forEach(function (k) {
+            var p = clubsObj[k];
+            if (p && p.confirm && p.confirm.confirmed) confirmByClub[k] = p.confirm.at || true;
           });
 
           // Admins can correct figures in place. Saving writes the recomputed
-          // aggregates + every club row with data + the link copies. Empty stub
-          // clubs (no return) are skipped unless they were edited.
+          // aggregates + every club row with data, field by field so a club's
+          // own confirm (written from the club page while this page was open)
+          // is never overwritten by the copy loaded here. Empty stub clubs (no
+          // return) are skipped unless they were edited.
           var canEdit = role === 'admin' || role === 'superadmin';
           var onSave = function (AGG2, clubs2) {
-            var clubsUpd = {}, linksUpd = {};
+            var clubsUpd = {};
             clubs2.forEach(function (c) {
               if (!(c.metrics && Object.keys(c.metrics).length)) return;
-              var rec = {}; for (var k in c) if (k !== '_noData') rec[k] = c[k];
-              clubsUpd[c.club] = rec;
-              var tok = tokenByClub[c.club];
-              if (tok) {
-                var lrec = {}; for (var k2 in rec) lrec[k2] = rec[k2];
-                // keep the club's own confirmation when rewriting the link copy
-                if (linksObj[tok] && linksObj[tok].confirm) lrec.confirm = linksObj[tok].confirm;
-                linksUpd[tok] = lrec;
-              }
+              for (var k in c) if (k !== '_noData' && k !== 'confirm') clubsUpd[c.club + '/' + k] = c[k];
             });
             return Promise.all([
               db.ref(ROOT + 'aggregates').set(AGG2),
-              db.ref(ROOT + 'clubs').update(clubsUpd),
-              db.ref(ROOT + 'links').update(linksUpd)
+              db.ref(ROOT + 'clubs').update(clubsUpd)
             ]);
           };
-          var writeLink = function (token, payload) { return db.ref(ROOT + 'links/' + token).set(payload); };
 
           document.getElementById('cbBody').style.display = '';
-          CBDash.mount(AGG, clubs, { staff: true, tokenByClub: tokenByClub, confirmByClub: confirmByClub, canEdit: canEdit, onSave: onSave, writeLink: writeLink });
+          CBDash.mount(AGG, clubs, { staff: true, confirmByClub: confirmByClub, canEdit: canEdit, onSave: onSave });
         }).catch(err);
       } else {
         var club = session.club;
