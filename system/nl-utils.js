@@ -1,8 +1,13 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.57 (13/11/2026)
+   Version: v1.58 (13/11/2026)
 
+   v1.58 — The Structure shelf is called Control on screen
+           (NL.pass.SHELF.structural). The stored value stays 'structural',
+           so nobody's access changes. Cache-bust nl-utils ?v=61 -> ?v=62,
+           in lockstep with nl-topbar ?v=14 -> ?v=15 and nl-brand
+           ?v=75 -> ?v=76.
    v1.57 — Two doors, one mode (13/11/2026). NL.codeGate: the gate offers
            "Have an NL Tools account? Sign in" under the code; resume says
            which door (session.mode 'account' | 'code'); an account session
@@ -2885,7 +2890,7 @@
 
     /* The plan's rule, in its order:
          skeleton key                         → Manage
-         Structure shelf                      → Off
+         Control shelf (stored 'structural') → Off
          Sandbox shelf                        → Off, unless Tester: max(launch, Access)
          League-only tool, Club card          → Off
          otherwise the highest of the card's grant and each held key's grant
@@ -3195,7 +3200,7 @@
       KEYS: KEYS,
       KEY: KEY,
       BASES: { league: 'League', club: 'Club' },
-      SHELF: { main: 'Main', sandbox: 'Sandbox', structural: 'Structure' },
+      SHELF: { main: 'Main', sandbox: 'Sandbox', structural: 'Control' },
       FOR: { league: 'League only', both: 'League and clubs' },
       CLUB_DATA: {
         none: 'Same for every club',

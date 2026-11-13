@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Roadmap
+  Version: v0.1 (13/11/2026)
+  File: /roadmap/index.html
+  What is being built next, in plain English: Now, Next and Later, each item
+  a headline that opens to what needs doing and why.
+
+  Reads /system/ROADMAP.md, the one source, changed only by pull request
+  (Richard reads here and corrects in chat; Claude updates the file in the
+  same pull request as the work). Read-only by design: two places changing
+  one plan is how plans drift. The file's own header describes its shape.
+
+  Storage: none. The file is in the repo, which is public, so it holds no
+  names, emails or codes.
+  Access: Control shelf, Skeleton key only (registry ops-roadmap).
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Roadmap — NL Tools</title>
+  <!-- Favicons. Static, not injected: nl-topbar.js adds these too, but a
+       standalone page never loads it, and an icon that arrives with the JS
+       leaves the tab blank until it does. /favicon.ico at the root is the
+       backstop every browser asks for without being told. -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+
+  <!-- Brand stylesheet (lint canonical: ?v=76) -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=76">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'Roadmap',
+      toolKey: 'ops-roadmap'
+    };
+    var NL_TOOL_KEY = 'ops-roadmap';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '13/11/2026',
+        version: 'v0.1',
+        items: [
+          'Initial build.'
+        ]
+      }
+    ];
+
+    /* auth-guard fires this once the session is verified + pageWrap is
+       revealed. Boot the main app from here so RTDB reads happen with a
+       live auth token. Do NOT read RTDB before this fires. */
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts (lint canonical: ?v=62 / ?v=1 / ?v=15 / ?v=21) -->
+  <script src="/system/nl-utils.js?v=62"></script>
+  <!-- GA4, one property for all of nl.tools. Cookieless, so no consent
+       banner on any page; page views by path, no identity. Tool events go
+       through NL.track(). See system/nl-analytics.js. -->
+  <script src="/system/nl-analytics.js?v=1"></script>
+  <script src="/system/nl-topbar.js?v=15"></script>
+  <script src="/system/auth-guard.js?v=21"></script>
+
+<style>
+  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
+     style.display = 'block'. Don't clear with '' — would re-trigger the
+     brand rule and re-hide the page. */
+  .rm { max-width: 860px; }
+  .rm-group { margin-bottom: 28px; }
+  .rm-item { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 8px; }
+  .rm-item[open] > summary { border-bottom: 1px solid var(--border); }
+  .rm-item > summary { align-items: center; font-size: var(--text-base); }
+  .rm-wait { margin-left: auto; }
+  .rm-body { padding: 12px 16px 14px; font-size: var(--text-sm); color: var(--text); }
+  .rm-body p { margin: 0 0 8px; line-height: 1.5; }
+  .rm-body p:last-child { margin-bottom: 0; }
+  .rm-lab { font-weight: 800; font-variation-settings: 'wght' 800; color: var(--navy); }
+  .rm-body ul { margin: 0 0 8px; padding-left: 20px; color: var(--text-muted); }
+  .rm-body li { margin: 2px 0; line-height: 1.45; }
+</style>
+</head>
+<body>
+
+<!-- Topbar — auto-rendered by /system/nl-topbar.js from window.NL_TOOL -->
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="page">
+    <div class="rm" id="rm"></div>
+  </div>
+</div>
+
+<!-- Main app -->
+<script>
+(function () {
+  'use strict';
+
+  /* ROADMAP.md → [{ name, items: [{ title, what, why, points, waiting }] }].
+     Only the shapes the file's header lists are read; anything else (the
+     HTML comment, a stray line) is ignored. Exported for tests. */
+  function parse(md) {
+    var groups = [], g = null, it = null, inComment = false;
+    String(md || '').split(/\r?\n/).forEach(function (raw) {
+      var line = raw.trim();
+      if (inComment) { if (line.indexOf('-->') !== -1) inComment = false; return; }
+      if (line.indexOf('<!--') === 0) { if (line.indexOf('-->') === -1) inComment = true; return; }
+      var m;
+      if ((m = line.match(/^##\s+(.+)$/)) && !/^###/.test(line)) {
+        g = { name: m[1].trim(), items: [] }; groups.push(g); it = null; return;
+      }
+      if ((m = line.match(/^###\s+(.+)$/))) {
+        if (!g) { g = { name: '', items: [] }; groups.push(g); }
+        it = { title: m[1].trim(), what: '', why: '', points: [], waiting: '' };
+        g.items.push(it); return;
+      }
+      if (!it) return;
+      if ((m = line.match(/^What:\s*(.*)$/))) it.what = m[1];
+      else if ((m = line.match(/^Why:\s*(.*)$/))) it.why = m[1];
+      else if ((m = line.match(/^Waiting on:\s*(.*)$/))) it.waiting = m[1];
+      else if ((m = line.match(/^-\s+(.+)$/))) it.points.push(m[1]);
+    });
+    return groups;
+  }
+  window.ROADMAP = { parse: parse };
+
+  var esc = function (s) { return NL.escHtml(s); };
+
+  function item(it) {
+    var body = '';
+    if (it.what) body += '<p><span class="rm-lab">What</span> ' + esc(it.what) + '</p>';
+    if (it.why) body += '<p><span class="rm-lab">Why</span> ' + esc(it.why) + '</p>';
+    if (it.points.length) body += '<ul>' + it.points.map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('') + '</ul>';
+    return '<details class="disclosure rm-item"><summary>' + esc(it.title) +
+      (it.waiting ? ' <span class="pill pill--pending rm-wait">' + esc('Waiting on ' + it.waiting) + '</span>' : '') +
+      '</summary><div class="rm-body">' + body + '</div></details>';
+  }
+
+  function render(groups) {
+    var el = document.getElementById('rm');
+    if (!groups.length) {
+      el.innerHTML = '<div class="empty-state"><div class="empty-state__title">Nothing on the roadmap</div></div>';
+      return;
+    }
+    el.innerHTML = groups.map(function (g) {
+      return '<section class="rm-group"><div class="section-head"><h2>' + esc(g.name) + '</h2></div>' +
+        g.items.map(item).join('') + '</section>';
+    }).join('');
+  }
+
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function () {
+    fetch('/system/ROADMAP.md', { cache: 'no-cache' })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+      .then(function (md) { render(parse(md)); })
+      .catch(function (e) {
+        console.error('[roadmap]', e);
+        document.getElementById('rm').innerHTML = '<div class="empty-state"><div class="empty-state__title">The roadmap could not be loaded</div>' +
+          '<div class="empty-state__text">Reload the page to try again.</div></div>';
+      });
+  };
+
+  if (window._toolDeferredSession) {
+    window.TOOL.boot(window._toolDeferredSession);
+    delete window._toolDeferredSession;
+  }
+})();
+</script>
+
+</body>
+</html>
