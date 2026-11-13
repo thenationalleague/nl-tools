@@ -27,23 +27,30 @@ second copy of every row to keep in step on every save.
 
 ## What replaced them
 
-Clubs open `/commercial-benchmarking/club/` with their **club code**
+Clubs open `/commercial-benchmarking/` with their **club code**
 (`functions/club-code.js`, `NL.codeGate`), the same one as their other tools,
-or signed in to NL Tools with a Club card (registry `clubUrl`). Two tabs:
+or signed in to NL Tools with a Club card. (For one morning the club page was
+`/club/`; it became part of the one page the same day, and `/club/` forwards.)
+Two tabs:
 **Benchmarks** and **Your figures** (what the Proof link showed). A
 confirmation is saved on the club's own row, `clubs/<club>/confirm`, and the
-staff page's **Confirmations** button lists who has confirmed. The rules
+**Confirmations** button (at Manage) lists who has confirmed. The rules
 match the code's club name to the row's key, case-folded.
-`link.html` forwards to the club page (a Proof link to Your figures).
+`link.html` forwards to the page (a Proof link to Your figures).
 
 Longer term (Richard): login only.
 
 ## Cleared
 
-By a one-off workflow, `Button · Retire Commercial Benchmarking links`
-(`.github/workflows/retire-cb-links.yml`, removed in the PR after its run):
-the `links` node saved first to the private bucket at
-`nl-tools-monthly-backups/retired/<date>/commercial-benchmarking-links.json`,
-any confirmation copied onto the club's row, then the node deleted and an
-audit line written (`cb_links_retired`). Fill in the date and counts here
-after the run.
+13/11/2026, 07:48, by a one-off workflow, `Button · Retire Commercial
+Benchmarking links` (PR #1515; removed in the next PR after its run). 72
+links. The `links` node was saved first to the private bucket at
+`nl-tools-monthly-backups/retired/2026-11-13/commercial-benchmarking-links.json`;
+the 22 confirmations made through a link were copied onto their clubs' rows;
+then the node was deleted, checked gone, and an audit line written
+(`cb_links_retired`).
+
+The same run's name check found 62 of the 72 benchmarking clubs with a club
+code under the same name. The other 10 had left the National League since the
+2025/26 survey, so they have no code this season. Clubs that leave are a
+new-season question (Roadmap, Later).

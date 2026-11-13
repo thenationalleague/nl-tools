@@ -1,8 +1,27 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Commercial Benchmarking
-  Version: v1.15 (13/11/2026)
+  Version: v2.0 (13/11/2026)
   File: /commercial-benchmarking/index.html
+
+  v2.0 (13/11/2026): one address. The club page (club/, v1.0 earlier the
+    same day) and the staff page become this one page, and the pass decides
+    what it shows:
+      · not signed in        → the club code door (NL.codeGate); a code
+                               shows that club its own figures
+      · a Club card          → that club's own figures, no code (the pass
+                               puts the club's claim on the account)
+      · a League account     → every club by name, at its level on the
+                               tool: Access views, Manage edits, imports,
+                               sees Confirmations and exports
+      · a League account at Off → "isn't available", as auth-guard says it
+    No auth-guard: it gates NL accounts and would send a club with a code to
+    the sign-in page. The level is worked out here the way auth-guard works
+    it out (levelFor below, a canon candidate: the second page that needs it
+    outside auth-guard should promote it). The rules are the boundary either
+    way: clubs/ as a whole is readable only at Access on the League side.
+    The editor and importer, which decided by role (admin / superadmin),
+    now follow Manage.
   v1.15 (13/11/2026): the private token links are retired. Clubs open their
     dashboard at /commercial-benchmarking/club/ with their club code or a
     Club card; this page no longer reads or writes links/. Confirmations
@@ -67,36 +86,34 @@
   v1.3 (12/07/2026): dashboard.js escaper now escapes quotes too, so a club URL
     containing a quote can't break out of its link attribute.
 
-  Gated per-club commercial benchmarking dashboard. Signed-in NL staff
-  (staff/admin/superadmin) get a club picker and can view any club; signed-in
-  club users (club-admin/club-staff) auto-see only their own club's figures.
-  Clubs by code, and Club cards, use the club page (club/) — same dashboard.
 
   Storage (RTDB):
-    app-data/ops-commercial-benchmarking/aggregates    anonymised stats +
-        sorted values (no names) — division & league benchmarks
+    app-data/ops-commercial-benchmarking/aggregates    anonymised stats,
+        sorted values and the club roster (names only); public read
     app-data/ops-commercial-benchmarking/clubs/<club>   that club's own row;
-        readable by NL staff (all) or the matching club (account or code);
+        every row readable at Access on the League side, one row by its
+        club (code or Club card, the `clubName` claim);
         clubs/<club>/confirm is the club's own sign-off of its figures
     tools/ops-commercial-benchmarking                   registration
 
   Data lives only in RTDB; nothing club-identifiable is in this (public) file.
 -->
-<html lang="en">
+<html lang="en-GB">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Commercial Benchmarking — NL Tools</title>
-
-  <!-- Brand stylesheet -->
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Commercial Benchmarking — The National League</title>
+  <!-- Favicons. Static, not injected: a page without auth-guard renders the
+       topbar only for an account, and an icon that arrives with the JS
+       leaves the tab blank until it does. -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
   <link rel="stylesheet" href="/system/nl-brand.css?v=76">
-
-  <!-- Firebase 10.12.0 SDK (compat) -->
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
-
-  <!-- Firebase init -->
   <script>
     firebase.initializeApp({
       apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -107,9 +124,7 @@
       messagingSenderId: "801354670005",
       appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
     });
-    var db = firebase.database();
   </script>
-
   <script>
     window.NL_TOOL = {
       title: 'Commercial Benchmarking',
@@ -118,6 +133,15 @@
     var NL_TOOL_KEY = 'ops-commercial-benchmarking';
 
     window.NL_CHANGELOG = [
+      {
+        date: '13/11/2026',
+        version: 'v2.0',
+        items: [
+          'One address. A club code, or a Club card, shows that club its own figures; a League account sees every club.',
+          'The pass decides: Access to view, Manage to edit, import, see Confirmations and export.',
+          '/commercial-benchmarking/club/ forwards here.'
+        ]
+      },
       {
         date: '13/11/2026',
         version: 'v1.15',
@@ -200,57 +224,64 @@
         ]
       }
     ];
-
-    window.nlAuthReady = function (userData) {
-      window.NL = window.NL || {};
-      window.NL.session = userData;
-      if (window.TOOL && window.TOOL.boot) window.TOOL.boot(userData);
-      else window._toolDeferredSession = userData;
-    };
   </script>
-
-  <!-- NL system scripts -->
   <script src="/system/nl-utils.js?v=62"></script>
+  <!-- A League account or a Club card wears the NL Tools top bar. -->
+  <script src="/system/nl-topbar.js?v=15"></script>
   <!-- GA4 for nl.tools — cookieless, no banner, no identity. See system/nl-analytics.js -->
   <script src="/system/nl-analytics.js?v=1"></script>
-  <script src="/system/nl-topbar.js?v=15"></script>
-  <script src="/system/auth-guard.js?v=21"></script>
-
-  <link rel="stylesheet" href="/commercial-benchmarking/dashboard.css?v=60">
-<style>
-  body { background: var(--off-white); }
-  .page { max-width: 1240px; margin: 0 auto; padding: clamp(20px,3vw,40px) clamp(16px,2.5vw,44px) 80px; }
-  #cbMsg { background: var(--white); border: 1px solid var(--border); border-radius: 6px;
-    padding: 28px 24px; text-align: center; color: var(--text-muted); }
-  #cbMsg h2 { color: var(--navy); font-variation-settings: 'wght' 900; margin: 0 0 8px; }
-</style>
+  <link rel="stylesheet" href="/commercial-benchmarking/dashboard.css?v=61">
+  <style>
+    body { background: var(--off-white); }
+    .cb-page { max-width: 1240px; margin: 0 auto; padding: clamp(20px,3vw,40px) clamp(16px,2.5vw,44px) 80px; }
+  </style>
 </head>
 <body>
+  <div id="nlTopbar"></div>
 
-<div id="nlTopbar"></div>
+  <!-- White bar: a club code, no NL account behind the page. -->
+  <header class="nl-idbar" hidden>
+    <img class="nl-idbar__crest" id="cbCrest" src="/assets/crests/National%20League%20rose.png"
+         alt="" width="42" height="42">
+    <div class="nl-idbar__id">
+      <div class="nl-idbar__title">Commercial Benchmarking</div>
+      <div class="nl-idbar__sub" id="cbClubName">The National League</div>
+    </div>
+    <div class="nl-idbar__actions">
+      <button class="nl-idbar__btn" id="cbOut" type="button" hidden>Sign out</button>
+    </div>
+  </header>
 
-<div id="pageWrap">
-  <div class="page">
+  <div class="gate" id="cbGate"></div>
 
-    <div id="staffBar" class="cb-staffbar" style="display:none"></div>
+  <main class="cb-page" id="cbShell" hidden>
+    <div id="cbMsg" hidden></div>
 
-    <div class="cb-club">
-      <img class="crest" id="crest" alt=""
-           onerror="this.onerror=null;this.src='/assets/crests/National%20League%20rose.png'">
-      <div>
-        <div class="meta">
-          <span class="cb-pill" id="divPill"></span>
-          <span class="cb-spon" id="sponWrap">Front of shirt: <b id="fsSpon"></b></span>
+    <div id="cbMain" hidden>
+      <!-- League side: the club picker and, at Manage, the tools. -->
+      <div id="staffBar" class="cb-staffbar" style="display:none"></div>
+
+      <!-- Club side: two views of one club's row, a closed set, so canon .tabs. -->
+      <div class="tabs" id="cbTabs" role="tablist" hidden>
+        <button class="tab active" type="button" role="tab" data-view="bench">Benchmarks</button>
+        <button class="tab" type="button" role="tab" data-view="check">Your figures</button>
+      </div>
+
+      <div class="cb-club">
+        <img class="crest" id="crest" alt="">
+        <div>
+          <div class="meta">
+            <span class="cb-pill" id="divPill"></span>
+            <span class="cb-spon" id="sponWrap">Front of shirt: <b id="fsSpon"></b></span>
+          </div>
         </div>
       </div>
-    </div>
 
-    <div class="cb-privacy">
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--navy)" stroke-width="2"><path d="M12 2 4 6v6c0 5 3.5 8 8 10 4.5-2 8-5 8-10V6z"/></svg>
-      <div id="privacyTxt">This is your club's private view. Every figure for other clubs is shown only as a <b>benchmark</b> — a median, a range, a distribution or a count. <b>No other club is ever named.</b></div>
-    </div>
+      <div class="cb-privacy">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--navy)" stroke-width="2"><path d="M12 2 4 6v6c0 5 3.5 8 8 10 4.5-2 8-5 8-10V6z"/></svg>
+        <div id="privacyTxt">This is your club's private view. Every figure for other clubs is shown only as a <b>benchmark</b> — a median, a range, a distribution or a count. <b>No other club is ever named.</b></div>
+      </div>
 
-    <div id="cbBody" style="display:none">
       <div class="cb-controls">
         <div class="cb-ctl">
           <span class="lbl">Compare against</span>
@@ -277,100 +308,242 @@
         highlighted bar is this club.
       </div>
     </div>
+  </main>
 
-    <div id="cbMsg" style="display:none"></div>
-
-  </div>
-</div>
-
-<script src="/commercial-benchmarking/dashboard.js?v=60"></script>
+<script src="/commercial-benchmarking/dashboard.js?v=61"></script>
 <script>
 (function () {
   'use strict';
-  window.TOOL = window.TOOL || {};
-  var ROOT = 'app-data/ops-commercial-benchmarking/';
-  var DIV_ORDER = { National: 0, North: 1, South: 2 };
 
-  function showMsg(title, body) {
-    document.getElementById('cbBody').style.display = 'none';
-    // Hide the club header + privacy notice so a message (e.g. the no-data
-    // lockout) stands alone, without the empty crest / placeholder header.
-    var club = document.querySelector('.cb-club'); if (club) club.style.display = 'none';
-    var priv = document.querySelector('.cb-privacy'); if (priv) priv.style.display = 'none';
-    var m = document.getElementById('cbMsg');
-    m.style.display = '';
-    m.innerHTML = '<h2>' + title + '</h2><p>' + body + '</p>';
+  var KEY = 'ops-commercial-benchmarking';
+  var ROOT = 'app-data/' + KEY + '/';
+  var DIV_ORDER = { National: 0, North: 1, South: 2 };
+  var LEAGUE_ROLES = { superadmin: true, admin: true, staff: true };
+  var db = firebase.database();
+  var $ = function (id) { return document.getElementById(id); };
+  var S = { agg: null, own: null, key: null, view: 'bench', dash: null };
+
+  function show() { $('cbGate').hidden = true; $('cbShell').hidden = false; }
+  function message(title, text) {
+    show();
+    $('cbMain').hidden = true;
+    var m = $('cbMsg');
+    m.hidden = false;
+    m.innerHTML = '<div class="empty-state"><div class="empty-state__title">' + NL.escHtml(title) +
+      '</div>' + (text ? '<div class="empty-state__text">' + text + '</div>' : '') + '</div>';
+  }
+  function failed(e) {
+    console.error('[commercial-benchmarking]', e);
+    message('Figures could not be loaded', 'Reload the page to try again.');
   }
 
-  window.TOOL.boot = function (session) {
-    NL.ensureAuth().then(function () {
-      var role = session.role;
-      var isStaff = role === 'staff' || role === 'admin' || role === 'superadmin';
-      var aggP = db.ref(ROOT + 'aggregates').once('value');
-
-      if (isStaff) {
-        Promise.all([aggP, db.ref(ROOT + 'clubs').once('value')]).then(function (r) {
-          var AGG = r[0].val(), clubsObj = r[1].val() || {};
-          if (!AGG) { showMsg('Not available yet', 'Benchmark data isn’t loaded yet.'); return; }
-          // Full 72-club list from the roster; stubs for clubs with no return.
-          var clubs;
-          if (AGG.roster && AGG.roster.length) {
-            clubs = AGG.roster.map(function (e) {
-              var p = clubsObj[e.club] || { club: e.club, division: e.division, metrics: {}, chips: {}, stands: [], standSectors: '', fsSponsor: '', bsSponsor: '', slSponsor: '' };
-              p._noData = !e.data;
-              return p;
-            });
-          } else {
-            clubs = Object.keys(clubsObj).map(function (k) { return clubsObj[k]; });
-            clubs.sort(function (a, b) { return (DIV_ORDER[a.division] - DIV_ORDER[b.division]) || a.club.localeCompare(b.club); });
-          }
-          if (!clubs.length) { showMsg('Not available yet', 'Benchmark data isn’t loaded yet.'); return; }
-          var confirmByClub = {};
-          Object.keys(clubsObj).forEach(function (k) {
-            var p = clubsObj[k];
-            if (p && p.confirm && p.confirm.confirmed) confirmByClub[k] = p.confirm.at || true;
-          });
-
-          // Admins can correct figures in place. Saving writes the recomputed
-          // aggregates + every club row with data, field by field so a club's
-          // own confirm (written from the club page while this page was open)
-          // is never overwritten by the copy loaded here. Empty stub clubs (no
-          // return) are skipped unless they were edited.
-          var canEdit = role === 'admin' || role === 'superadmin';
-          var onSave = function (AGG2, clubs2) {
-            var clubsUpd = {};
-            clubs2.forEach(function (c) {
-              if (!(c.metrics && Object.keys(c.metrics).length)) return;
-              for (var k in c) if (k !== '_noData' && k !== 'confirm') clubsUpd[c.club + '/' + k] = c[k];
-            });
-            return Promise.all([
-              db.ref(ROOT + 'aggregates').set(AGG2),
-              db.ref(ROOT + 'clubs').update(clubsUpd)
-            ]);
-          };
-
-          document.getElementById('cbBody').style.display = '';
-          CBDash.mount(AGG, clubs, { staff: true, confirmByClub: confirmByClub, canEdit: canEdit, onSave: onSave });
-        }).catch(err);
-      } else {
-        var club = session.club;
-        if (!club) { showMsg('No club linked', 'Your account isn’t linked to a club, so there’s no dashboard to show.'); return; }
-        Promise.all([aggP, db.ref(ROOT + 'clubs/' + club).once('value')]).then(function (r) {
-          var AGG = r[0].val(), own = r[1].val();
-          if (!AGG) { showMsg('Not available yet', 'Benchmark data isn’t loaded yet.'); return; }
-          if (!CBDash.hasData(own)) { showMsg(CBDash.NO_DATA.title, CBDash.NO_DATA.body); return; }
-          document.getElementById('cbBody').style.display = '';
-          CBDash.mount(AGG, [own], { staff: false });
-        }).catch(err);
-      }
+  /* ---- Who is this, and at what level? ------------------------------------
+     The same answer auth-guard gives (checkAccess): the superadmin role is
+     Manage; an issued pass decides by NL.pass.explain, with the tool's live
+     grants from Access (NL.pass.withLive); without a pass, the old per-user
+     entry or the role default (NL.resolveToolLevel). Exported for tests. */
+  function levelFrom(user, tool) {
+    user = user || {};
+    if (user.role === 'superadmin') return 'manage';
+    if (NL.pass && NL.pass.isIssued(user.pass)) return NL.pass.explain(user.pass, tool).level;
+    var old = NL.resolveToolLevel((user.tools || {})[KEY], tool, user.role);
+    return old === 'admin' ? 'manage' : old;
+  }
+  function isLeague(user) {
+    user = user || {};
+    if (user.pass && NL.pass && NL.pass.isIssued(user.pass)) return user.pass.base === 'league';
+    return !!LEAGUE_ROLES[user.role];
+  }
+  function levelFor(uid) {
+    return Promise.all([
+      db.ref('users/' + uid).once('value'),
+      db.ref('tools/' + KEY).once('value'),
+      db.ref('access-grants/' + KEY).once('value').catch(function () { return null; })
+    ]).then(function (r) {
+      var user = r[0].val() || {}, tool = r[1].val() || null;
+      var live = r[2] && r[2].exists() ? r[2].val() : null;
+      if (tool && live && NL.pass && NL.pass.withLive) tool = NL.pass.withLive(tool, live);
+      return { user: user, league: isLeague(user), level: tool ? levelFrom(user, tool) : 'off' };
     });
+  }
+  window.CB_PAGE = { levelFrom: levelFrom, isLeague: isLeague };
 
-    function err(e) { console.error(e); showMsg('Something went wrong', 'Please refresh and try again.'); }
-  };
+  /* ---- League side ------------------------------------------------------ */
+  function startLeague(uid, who) {
+    var session = { uid: uid, email: firebase.auth().currentUser.email, name: who.user.name || '',
+      role: who.user.role || '', pass: who.user.pass || null, toolLevel: who.level === 'manage' ? 'admin' : 'access' };
+    NL.session = session;
+    if (NL.installAuditHook) { try { NL.installAuditHook(); } catch (e) {} }
+    NL.codeGate.accountBar({ title: 'Commercial Benchmarking', toolKey: KEY });
+    show();
+    var canEdit = who.level === 'manage';
+    Promise.all([db.ref(ROOT + 'aggregates').once('value'), db.ref(ROOT + 'clubs').once('value')]).then(function (r) {
+      var AGG = r[0].val(), clubsObj = r[1].val() || {};
+      if (!AGG) { message('Not available yet', 'Benchmark data isn’t loaded yet.'); return; }
+      // Full roster; stubs for clubs with no return.
+      var clubs;
+      if (AGG.roster && AGG.roster.length) {
+        clubs = AGG.roster.map(function (e) {
+          var p = clubsObj[e.club] || { club: e.club, division: e.division, metrics: {}, chips: {}, stands: [], standSectors: '', fsSponsor: '', bsSponsor: '', slSponsor: '' };
+          p._noData = !e.data;
+          return p;
+        });
+      } else {
+        clubs = Object.keys(clubsObj).map(function (k) { return clubsObj[k]; });
+        clubs.sort(function (a, b) { return (DIV_ORDER[a.division] - DIV_ORDER[b.division]) || a.club.localeCompare(b.club); });
+      }
+      if (!clubs.length) { message('Not available yet', 'Benchmark data isn’t loaded yet.'); return; }
+      var confirmByClub = {};
+      Object.keys(clubsObj).forEach(function (k) {
+        var p = clubsObj[k];
+        if (p && p.confirm && p.confirm.confirmed) confirmByClub[k] = p.confirm.at || true;
+      });
+      // Manage saves the recomputed aggregates and every club row with data,
+      // field by field so a club's own confirm (written while this page was
+      // open) is never overwritten. Stub clubs are skipped unless edited.
+      var onSave = function (AGG2, clubs2) {
+        var clubsUpd = {};
+        clubs2.forEach(function (c) {
+          if (!(c.metrics && Object.keys(c.metrics).length)) return;
+          for (var k in c) if (k !== '_noData' && k !== 'confirm') clubsUpd[c.club + '/' + k] = c[k];
+        });
+        return Promise.all([
+          db.ref(ROOT + 'aggregates').set(AGG2),
+          db.ref(ROOT + 'clubs').update(clubsUpd)
+        ]);
+      };
+      $('cbMain').hidden = false;
+      CBDash.mount(AGG, clubs, { staff: true, confirmByClub: confirmByClub, canEdit: canEdit, onSave: canEdit ? onSave : null });
+    }).catch(failed);
+  }
 
-  if (window._toolDeferredSession) { window.TOOL.boot(window._toolDeferredSession); delete window._toolDeferredSession; }
+  /* ---- Club side -------------------------------------------------------- */
+  /* The row's exact key: the roster entry whose name matches the claim's,
+     trimmed and case-folded, as the rules compare it. Exported for tests. */
+  function fold(s) { return String(s == null ? '' : s).trim().toLowerCase(); }
+  function rowKey(roster, name) {
+    var want = fold(name);
+    if (!want) return null;
+    for (var i = 0; i < (roster || []).length; i++) {
+      if (roster[i] && fold(roster[i].club) === want) return roster[i].club;
+    }
+    return null;
+  }
+  window.CB_CLUB = { rowKey: rowKey };
+
+  /* Each view sets the crest again, so the fallback has to outlast the
+     first miss: an inline onerror that clears itself left the second view
+     with a broken image. */
+  $('crest').addEventListener('error', function () {
+    var rose = '/assets/crests/National%20League%20rose.png';
+    if (this.getAttribute('src') !== rose) this.setAttribute('src', rose);
+  });
+
+  function setView(v) {
+    S.view = v;
+    Array.prototype.forEach.call(document.querySelectorAll('#cbTabs .tab'), function (b) {
+      var on = b.getAttribute('data-view') === v;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    var bench = v === 'bench';
+    ['.cb-privacy', '.cb-controls', '.cb-foot'].forEach(function (sel) {
+      var el = document.querySelector(sel); if (el) el.hidden = !bench;
+    });
+    if (bench) {
+      if (!CBDash.hasData(S.own)) {
+        $('sections').innerHTML = '<div class="empty-state"><div class="empty-state__title">' +
+          NL.escHtml(CBDash.NO_DATA.title) + '</div><div class="empty-state__text">' + CBDash.NO_DATA.body + '</div></div>';
+        document.querySelector('.cb-controls').hidden = true;
+        document.querySelector('.cb-foot').hidden = true;
+        return;
+      }
+      if (S.dash) S.dash.renderAll();
+      else S.dash = CBDash.mount(S.agg, [S.own], { staff: false });
+    } else {
+      CBDash.review(S.own, {
+        reportEmail: 'commercial@thenationalleague.org.uk',
+        surveyUrl: 'https://www.surveymonkey.com/r/XQQNJVK',
+        onConfirm: function (state) {
+          var rec = { confirmed: !!state, at: firebase.database.ServerValue.TIMESTAMP };
+          return db.ref(ROOT + 'clubs/' + S.key + '/confirm').set(rec).then(function () {
+            S.own.confirm = { confirmed: !!state, at: Date.now() };
+          });
+        }
+      });
+    }
+  }
+
+  $('cbTabs').addEventListener('click', function (e) {
+    var b = e.target.closest('.tab'); if (!b || b.classList.contains('active')) return;
+    setView(b.getAttribute('data-view'));
+  });
+
+  function startClub(session) {
+    show();
+    if (session.mode !== 'account') $('cbOut').hidden = false;
+    var code = session && session.role;
+    if (!code || code === '*' || code === 'NL') {
+      message('This page shows a club’s own figures', 'League staff: sign in to NL Tools to see every club.');
+      return;
+    }
+    var name = (session && session.name) || '';
+    $('cbClubName').textContent = name || code;
+    var crest = $('cbCrest');
+    if (name) { crest.src = NL.clubs.crestUrl(name, 'thumb'); NL.clubs.wireCrestImg(crest, name); }
+
+    db.ref(ROOT + 'aggregates').once('value').then(function (snap) {
+      S.agg = snap.val();
+      if (!S.agg) { message('Not available yet', 'Benchmark data isn’t loaded yet.'); return; }
+      S.key = rowKey(S.agg.roster, name);
+      if (!S.key) { message('No figures for your club'); return; }
+      return db.ref(ROOT + 'clubs/' + S.key).once('value').then(function (r) {
+        S.own = r.val() || { club: S.key, metrics: {} };
+        $('cbMain').hidden = false;
+        $('cbTabs').hidden = false;
+        setView(new URLSearchParams(location.search).get('view') === 'check' ? 'check' : 'bench');
+      });
+    }).catch(failed);
+  }
+
+  function codeDoor() {
+    document.querySelector('.nl-idbar').hidden = false;
+    NL.codeGate.ensure({
+      mount: $('cbGate'),
+      title: 'Commercial Benchmarking',
+      sub: 'Enter your access code.',
+      numeric: false,
+      verify: NL.codeGate.viaFunction('app-data/club-codes', { tool: 'commercial-benchmarking' }),
+      claim: 'club',
+      account: { title: 'Commercial Benchmarking', toolKey: KEY }
+    }).then(startClub);
+  }
+
+  $('cbOut').addEventListener('click', function () {
+    NL.codeGate.signOut().then(function () { location.reload(); });
+  });
+
+  /* Which door: a League account goes straight to the League view at its
+     level; anyone else (signed out, a code, a Club card) to the code door,
+     which resumes a code or a Club card's claim by itself. */
+  var decided = false, off = null;
+  off = firebase.auth().onAuthStateChanged(function (user) {
+    if (decided) return;
+    decided = true;
+    if (off) off();
+    if (!user || !user.email) { codeDoor(); return; }
+    levelFor(user.uid).then(function (who) {
+      if (!who.league) { codeDoor(); return; }
+      if (who.level === 'off') {
+        NL.codeGate.accountBar({ title: 'Commercial Benchmarking', toolKey: KEY });
+        message('This tool isn’t available', 'Please contact media@thenationalleague.org.uk.');
+        return;
+      }
+      startLeague(user.uid, who);
+    }).catch(failed);
+  });
+  if (decided && off) off();
 })();
 </script>
-
 </body>
 </html>

@@ -28,7 +28,7 @@ and the two-door shape at the top of `system/fixture-management-plan.md`.
 | Club Kits | the console | forwards | **Done** (15/10/2026) |
 | Club Directory | the directory, by code | editor | No: the code door is how clubs read it |
 | Commercial Compliance | club page, by code | console | No: clubs submit by code |
-| Commercial Benchmarking | the console (`/commercial-benchmarking/`) | none: the club page is `/club/` | No: clubs read by code (since 13/11/2026; it was token links). Already the shape the merge ends at: the signed-in page serves both views |
+| Commercial Benchmarking | one page | none | **Done** (13/11/2026): a code or a Club card shows that club; a League account sees every club at its level. Built without auth-guard, which would send a code holder to sign in |
 | DAZN Viewership | club page, by code | console | No: clubs read by code |
 | Document Library | club page, by code | console | No: clubs read by code |
 | Financial Benchmarking | club page, by code | console | No: clubs submit by code |
