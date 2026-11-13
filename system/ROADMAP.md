@@ -84,6 +84,7 @@ Why: It is the first page everyone sees. When a second page uses the card, it be
 What: Password reset emails come from Firebase's own address. Point them at an NL address so they don't land in spam. Change password (My pass → Account) and Send reset link (Access) are built (13/11/2026).
 Why: A reset email that lands in spam is a locked-out person phoning you.
 Waiting on: you
+
 ### Claudio's leftovers
 What: Delete everything left of the old Claudio assistant, its chat history included.
 Why: The tool is gone and the history may hold questions nobody should keep.
@@ -91,11 +92,6 @@ Why: The tool is gone and the history may hold questions nobody should keep.
 ### A slimmer league table snapshot
 What: Keep the daily table snapshot, but save only positions and points, and keep it in the database or the backup bucket instead of GitHub.
 Why: Today it is 2.4 MB a day, and GitHub keeps every copy forever.
-
-### Wellbeing posters
-What: Check by hand that the printed Wellbeing Hub and Trident posters match their pages, and remake the PDFs if not.
-Why: The pages were changed after the PDFs were made.
-Waiting on: you
 
 ## Later
 
