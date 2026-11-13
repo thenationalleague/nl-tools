@@ -1,7 +1,11 @@
 /* =========================================================================
    NL Tools — Topbar renderer
    File: /system/nl-topbar.js
-   Version: v1.11 (13/11/2026)
+   Version: v1.12 (13/11/2026)
+
+   v1.12 — Account in the menu, under My pass: /pass/#account, your email
+          and Change password (Roadmap, "Passwords and your account").
+          Cache-bust ?v=15 -> ?v=16, in lockstep with nl-utils ?v=67 -> ?v=68.
 
    v1.11 — "Who can open this" names the Control shelf (was Structure).
           Cache-bust ?v=14 -> ?v=15, in lockstep with nl-utils ?v=61 -> ?v=62
@@ -449,6 +453,7 @@
 
     var onPassPage = !!(window.NL_TOOL && window.NL_TOOL.toolKey === 'pass');
     if (!onPassPage) dd.appendChild(item('/pass/', 'user', 'My pass'));
+    dd.appendChild(item('/pass/#account', 'lock', 'Account', function() { dd.classList.remove('is-open'); }));
 
     /* Who can open this — on a tool page, for whoever runs it (Manage by the
        pass) and the Skeleton key. Worked out from the grants, never typed. */

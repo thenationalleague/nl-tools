@@ -171,7 +171,8 @@ out only when a specific person needs one sub-tool alone).
    **Import** (bringing data in), **Removed** (things taken out, kept so they
    can be put back) and **History** (what changed, and who did it).
    Exports belong to Access, beside what they export. Seasons are not
-   archived: every season stays editable in place at Manage.
+   archived: every season stays editable in place at Manage. Each part of
+   a section is a canon `.form-panel` with its navy head (13/11).
 
 ## The pass (design locked 12/11)
 
@@ -802,7 +803,7 @@ Settled since: External passes (13/11, above); "zones" is the word on screen
 for keys (13/11, see the Roadmap); the new pass front (13/11, "The new pass
 front" below).
 
-## The new pass front (decided 13/11, not built)
+## The new pass front (decided 13/11, built 13/11)
 
 Replaces the club-coloured header band in "The pass" above. Built together
 with turning the pass over.

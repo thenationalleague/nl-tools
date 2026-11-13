@@ -29,6 +29,23 @@ function lastCommit(p) {
   return out ? Number(out) : 0;
 }
 
+/* Last commit that changed what the page SAYS, as a unix timestamp. A
+   commit whose only changed lines are cache-bust `?v=` numbers (every
+   lockstep bump of a shared file touches the poster) is not an edit of the
+   poster, and counting it made this test fail after every bump while the
+   PDF still matched (13/11/2026: the four newest commits were all ?v=, and
+   a fresh render came out byte-for-byte the same). */
+function lastContentCommit(p) {
+  const log = execFileSync('git', ['log', '--format=%H %ct', '--', p], { cwd: REPO, encoding: 'utf8' }).trim();
+  for (const line of log ? log.split('\n') : []) {
+    const [sha, ct] = line.split(' ');
+    const diff = execFileSync('git', ['show', sha, '--format=', '-U0', '--', p], { cwd: REPO, encoding: 'utf8' });
+    const changed = diff.split('\n').filter((l) => /^[-+]/.test(l) && !/^(\+\+\+|---)/.test(l));
+    if (changed.some((l) => !/\?v=\d+/.test(l))) return Number(ct);
+  }
+  return 0;
+}
+
 for (const ed of EDITIONS) {
   const PDF = `${ed.slug}/poster.pdf`;
 
@@ -59,7 +76,7 @@ for (const ed of EDITIONS) {
   const PDF = `${ed.slug}/poster.pdf`;
 
   test(`${ed.key}: the poster PDF is not older than the HTML it came from`, () => {
-  const html = lastCommit(HTML);
+  const html = lastContentCommit(HTML);
   const pdf = lastCommit(PDF);
 
   /* Both unknown means this is running somewhere without history (a shallow

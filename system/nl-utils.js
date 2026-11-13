@@ -1,7 +1,17 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.63 (13/11/2026)
+   Version: v1.65 (13/11/2026)
+   v1.65 — NL.pass.clubColours: writing on a club's primary colour is the
+     club's tertiary (black or white in every club's record, chosen against
+     the primary), so Kidderminster reads white on orange as it does on its
+     own kit. Writing on any other colour keeps the readability rule.
+
+   v1.64 — On screen, a key is a zone (the pass's stickers): whoCanOpen's
+     row label reads "League Operations zone". Ids and data keep "key".
+     NL.audit.LABELS gains the password actions (My pass's Change password,
+     Access's Send reset link) and Fixture Management's correct, remove
+     and restore.
 
    v1.63 — NL.clubPicker (select mode) draws its chevron as an SVG, the same
            path as NL.filterButton's, instead of typing a ▾ character. The
@@ -1893,6 +1903,8 @@
       page_opened: 'Page opened', page_unavailable: 'Page not available',
       pass_issued: 'Pass issued', pass_withdrawn: 'Pass withdrawn', pass_finding: 'Pass differs from today',
       passes_applied: 'Passes applied', grants_changed: 'Tool access changed', grants_reset: 'Tool access reset',
+      password_changed: 'Password changed', password_reset_sent: 'Password reset link sent',
+      fixtures_correct: 'Fixture corrected', fixtures_remove: 'Fixture removed', fixtures_restore: 'Fixture restored',
       attendance_submit: 'Attendance submitted', attendance_edit: 'Attendance edited',
       add_cup_fixture: 'Cup fixture added', edit_cup_fixture: 'Cup fixture edited',
       delete_cup_fixture: 'Cup fixture deleted', sync_fixture_run: 'Fixture sync run',
@@ -3051,7 +3063,7 @@
       KEYS.forEach(function (k) {
         if (k.base === 'club' && p.for === 'league') return;
         var g = rank((p.grants.key || {})[k.id]), l = Math.min(g, max);
-        if (l) rows.push({ id: k.id, label: (k.base === 'league' ? 'League ' : 'Club ') + k.name + ' key', level: byRank(l), granted: byRank(g) });
+        if (l) rows.push({ id: k.id, label: (k.base === 'league' ? 'League ' : 'Club ') + k.name + ' zone', level: byRank(l), granted: byRank(g) });
       });
       return {
         rows: rows,
@@ -3217,8 +3229,14 @@
        Band = the club's primary, or its secondary when the primary is near
        white (a white band on a white pass is no band). Stickers take the
        other colour of the pair, falling back to tertiary, then the band, when
-       that one is near white too. Type keeps the club's own pair wherever it
-       reads at 4.5:1, else white or black, whichever reads better. */
+       that one is near white too. Writing on the primary is the club's
+       tertiary (v1.65): clubs-meta keeps it black or white, picked against
+       the primary, and that is the club's own look even where it sits under
+       4.5:1 (Kidderminster, white on orange). A tertiary that would vanish
+       (under 1.5:1) falls back. Writing on any other colour keeps the club's
+       pair where it reads at 4.5:1, else white or black, whichever reads
+       better: a primary near white means the tertiary was never chosen
+       against the band (Gateshead, black on black). */
     function lum(hex) {
       var h = String(hex || '').replace('#', '');
       if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
@@ -3243,15 +3261,19 @@
     function clubColours(club) {
       var c = (club && (club.colors || club.colours)) || {};
       var p = c.primary, s = c.secondary, t = c.tertiary;
+      function on(bg, preferred) {
+        if (bg === p && lum(t) !== null && contrast(bg, t) >= 1.5) return t;
+        return textOn(bg, preferred);
+      }
       var band = !nearWhite(p) ? p : (!nearWhite(s) ? s : (!nearWhite(t) ? t : null));
       if (!band) return null; /* no usable colour: the caller draws League red */
       var other = band === p ? s : p;
       var sticker = [other, t, band].filter(function (x) { return !nearWhite(x) && String(x).toLowerCase() !== String(band).toLowerCase(); })[0] || band;
       return {
         band: band,
-        bandText: textOn(band, sticker),
+        bandText: on(band, sticker),
         sticker: sticker,
-        stickerText: textOn(sticker, band)
+        stickerText: on(sticker, band)
       };
     }
 

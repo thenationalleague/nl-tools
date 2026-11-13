@@ -62,6 +62,13 @@ divergence is not a fault. There is no reconciliation queue.
 - **Keys:** Opta ID for league and NL Cup. Cup ties we enter get a minted key;
   `optaID` is a separate nullable field, with a "missing Opta ID" list (all 64
   NL Cup rows lack one in the sheet; one National row too).
+- **A key never changes** (13/11/2026, v4.2). Mistakes are put right in
+  place: **Correct** opens an imported game's clubs and competition, and
+  the key, crowd and broadcast stay with it. **Remove** (typed, refused
+  while an attendance figure is attached) moves the record whole to
+  `removed/<key>`, and **Restore** puts it back under the same key. Never
+  delete and re-add: that mints a new key and strands what was attached.
+  Manage checks each division holds n × (n − 1) league games (552 for 24).
 - **Entered by hand:** NL Cup knockouts, playoffs, FA Cup, FA Trophy.
 - **Play-offs belong to their division** (changed 28/10/2026): a National,
   North or South record marked `playoff`, with its round (QF/SF/F) — the
