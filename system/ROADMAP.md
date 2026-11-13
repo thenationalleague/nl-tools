@@ -141,6 +141,10 @@ Why: Delivery you can see, and no Gmail limits. Not now: it adds a service and a
 What: After the Skeleton key accounts, offer two-step sign-in to everyone.
 Why: It protects every account, not only the two that open everything.
 
+### Club Kits as a tool people use
+What: Redesign Club Kits around using the kits, not collecting them. It was built to gather every club's kit colours; that job is done, and it stayed because the kits are useful, but the page is still shaped like a collection console.
+Why: The data is worth more as something people look things up in than as a form that has done its job.
+
 ### A new assistant
 What: One chatbot connected to the data tools, where each person's zones decide what it can reach.
 Why: Claudio's idea was right; the build wasn't.
