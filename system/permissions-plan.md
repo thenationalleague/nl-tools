@@ -492,8 +492,9 @@ Where it differs from step 4 as planned:
    user, with the portal's writes and audit lines. Exceptions stay until
    step 6 because they still decide access; keys replace them then, and the
    page loses that panel. Each person page shows their last ten audit
-   entries. The Audit log is its own tool (`/audit/`, `ops-audit`, Structure
-   shelf, same readers as before: superadmin and League Admin); reading an
+   entries. The Audit log was its own tool (`/audit/`, `ops-audit`, Structure
+   shelf, same readers as before: superadmin and League Admin) until it became
+   the Audit tab of Access; its registry record was removed 13/11/2026; reading an
    entry is canon (`NL.audit`, nl-utils v1.52). The portal keeps the
    welcome-message editor; its old `?tab=` links forward to the new homes,
    so the admin request emails still land on Requests. Two small changes on

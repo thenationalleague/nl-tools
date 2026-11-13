@@ -78,6 +78,14 @@ await t('League Admin role with no Operations key: nothing', set(ref(db('adm'), 
 await t('League staff: nothing', set(ref(db('st'), 'users/cl/jobTitle'), 'x'), false);
 await t('a club account: nothing', set(ref(db('cl'), 'users/cl/jobTitle'), 'x'), false);
 
+/* Starred tools on the portal: every signed-in person's own, nobody else's.
+   Before 13/11/2026 only League Admins could save one, so a star from anyone
+   else vanished on the next load. */
+await t('anyone: star a tool on their own account', set(ref(db('st'), 'users/st/favourites/media-dazn'), true), true);
+await t('a club account: star a tool on its own account', set(ref(db('cl'), 'users/cl/favourites/media-dazn'), true), true);
+await t('anyone: unstar', remove(ref(db('st'), 'users/st/favourites/media-dazn')), true);
+await t('not on someone else’s account', set(ref(db('st'), 'users/cl/favourites/media-dazn'), true), false);
+await t('a star is true, nothing else', set(ref(db('st'), 'users/st/favourites/media-dazn'), 'x'), false);
 await t('a Skeleton key only on a League card', set(ref(db('sk'), 'users/cl/pass/skeleton'), { given: 1, by: 'sk' }), false);
 await t('reading people is unchanged: League staff', get(ref(db('st'), 'users')), true);
 await t('reading people is unchanged: a club account, itself only', get(ref(db('cl'), 'users/cl')), true);
