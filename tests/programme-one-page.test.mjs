@@ -69,3 +69,26 @@ test('tapping a file name previews it by its key', () => {
   assert.match(h, /preview\(code, id\)/);
   assert.doesNotMatch(h, /preview\(code, f\.id\)/);
 });
+
+/* v1.33: signed in to NL Tools, the NL Tools bar comes first. The club's
+   white code bar and the code card used to show while the account was read. */
+test('signed in, nothing white flashes before the NL Tools bar', () => {
+  assert.match(PAGE, /<body>\s*(<!--[\s\S]*?-->\s*)?<div id="nlTopbar"><\/div>/, 'the bar slot is outside the hidden library');
+  const draw = PAGE.slice(PAGE.indexOf('function drawAccountBar('), PAGE.indexOf('function drawAccountBar(') + 700);
+  assert.ok(draw.indexOf('bar.hidden = true') < draw.indexOf('NL.codeGate.accountBar('), 'the code bar hides before the read');
+  const ent = PAGE.slice(PAGE.indexOf('function enter(session)'), PAGE.indexOf('function enter(session)') + 900);
+  assert.match(ent, /drawAccountBar\(\)\.then\(function \(\) \{ el\('app'\)\.style\.display = 'block';/);
+  assert.doesNotMatch(ent.slice(0, ent.indexOf('drawAccountBar')), /el\('app'\)\.style\.display = 'block'/, 'the library waits for the bar');
+  const lg = PAGE.slice(PAGE.indexOf('function enterLeague('), PAGE.indexOf('function drawAccountBar('));
+  assert.doesNotMatch(lg, /revealGate\(\)|gateSub/, 'the League never sees the code card');
+  assert.match(lg, /drawAccountBar\(\);/);
+});
+
+/* v1.34: back closes a preview, as in any photo viewer. */
+test('back closes the preview, and closing it takes its history step back', () => {
+  const pv = PAGE.slice(PAGE.indexOf('function preview(code, fileId)'), PAGE.indexOf('NL.files.renderDocx(f.url'));
+  assert.match(pv, /history\.pushState\(\{ ppPreview: true \}, '', location\.href\);/);
+  assert.match(pv, /function onBack\(\) \{ viaBack = true; ctrl\.close\(\); \}/);
+  assert.match(pv, /window\.addEventListener\('popstate', onBack\);/);
+  assert.match(pv, /window\.removeEventListener\('popstate', onBack\);\s*if \(!viaBack && history\.state && history\.state\.ppPreview\) history\.back\(\);/);
+});

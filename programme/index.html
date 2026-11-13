@@ -3,6 +3,12 @@
 <head>
 <!--
   Programme Packs — the club library and, for the League, its console
+  Version: v1.34 (13/11/2026) - back closes a file's preview instead of
+    leaving the folder behind it.
+  Version: v1.33 (13/11/2026) - signed in to NL Tools, the NL Tools bar is
+    the first thing drawn: the club's white code bar and the code card no
+    longer flash before it. The League's wait and "run by" line sit under
+    that bar.
   Version: v1.32 (13/11/2026) - one page for everyone. The console's
     Removed files, Audit and Manage are tabs here, shown to the League
     with Manage, beside the Library; /programme/admin/ forwards here. A
@@ -17,10 +23,6 @@
     one list, and a drop anywhere naming where files will land.
   Version: v1.30 (13/11/2026) - Upload is a button in the folder's head;
     the dashed drop box shows only in an empty folder of your own.
-  Version: v1.29 (13/11/2026) - the selection bar sticks flush under the
-    identity bar, and its buttons sit two by two on a phone.
-  Version: v1.28 (13/11/2026) - the code card stays hidden until the page
-    knows who is here.
   File: /programme/index.html
 
   Standalone (NO auth-guard) — named Firebase app + a passcode-minted custom
@@ -79,6 +81,11 @@
 </head>
 <body>
 
+<!-- The NL Tools bar, for anyone signed in (a Club card or the League). A
+     direct child of body, as on every tool, so it can show before the
+     library does. Empty for a code session. -->
+<div id="nlTopbar"></div>
+
 <!-- Passcode gate -->
 <!-- Hidden until the page knows who is here (v1.28): a League account is
      sent to the console and a Club card or a signed-in code goes straight
@@ -97,6 +104,11 @@
       <div class="gate__alt"><a id="gateSignIn" href="/?next=%2Fprogramme%2F">Have an NL Tools account? Sign in</a></div>
     </div>
   </div>
+</div>
+
+<!-- The League's door: under the NL Tools bar, never the code card. -->
+<div class="empty-state" id="leagueWait" hidden>
+  <div class="empty-state__text" id="leagueWaitText"></div>
 </div>
 
 <!-- Library -->
@@ -313,8 +325,9 @@
      else is told at once rather than after a ~20s refusal; the server still
      decides. */
   function enterLeague(me) {
-    revealGate();
-    el('gateSub').textContent = 'Opening Programme Packs…';
+    drawAccountBar();
+    el('leagueWait').hidden = false;
+    var say = function (html) { el('leagueWaitText').innerHTML = html; };
     firebase.database().ref('users/' + me.uid).once('value').then(function (snap) {
       var u = snap.val() || {};
       var role = String(u.role || '').toLowerCase();
@@ -322,20 +335,37 @@
       var manage = role === 'admin' || role === 'superadmin' ||
         (u.pass && u.pass.base === 'league' && entry === 'admin');
       if (!manage) {
-        el('gateSub').innerHTML = 'Programme Packs is run by League Media and League Commercial.' +
-          '<br><a class="btn btn--ghost gate__back" href="/portal/">' + iconHtml('back') + 'Back to NL Tools</a>';
+        say('Programme Packs is run by League Media and League Commercial.' +
+          '<br><a class="btn btn--ghost gate__back" href="/portal/">' + iconHtml('back') + 'Back to NL Tools</a>');
         return;
       }
       var slow = setTimeout(function () {
-        el('gateSub').textContent = 'Still opening: the first time on a device takes a few seconds.';
+        say('Still opening: the first time on a device takes a few seconds.');
       }, 4000);
       return PP.enterMaster().then(function (s) { clearTimeout(slow); enter(s); }, function (e) {
         clearTimeout(slow);
-        el('gateSub').textContent = (e && e.message) || 'Something went wrong. Please try again.';
+        say(NL.escHtml((e && e.message) || 'Something went wrong. Please try again.'));
       });
     }).catch(function (e) {
-      el('gateSub').textContent = (e && e.message) || 'Something went wrong. Please try again.';
+      say(NL.escHtml((e && e.message) || 'Something went wrong. Please try again.'));
     });
+  }
+
+  /* The NL Tools bar, drawn once. accountBar reads the account before it
+     draws, so the club's white code bar is hidden first and the library
+     waits for this: nobody signed in sees the code bar flash (v1.33). */
+  var accountBarDrawn = null;
+  function drawAccountBar() {
+    if (!accountBarDrawn) {
+      var bar = document.querySelector('.nl-idbar');
+      if (bar) bar.hidden = true;
+      accountBarDrawn = NL.codeGate.accountBar({ title: 'Programme Packs', toolKey: 'media-programme' })
+        .then(function () {
+          /* No account bar after all: the plainer club bar is still right. */
+          if (!el('nlTopbar').firstChild && bar) bar.hidden = false;
+        });
+    }
+    return accountBarDrawn;
   }
 
   /* The League's tabs. Library is this page; the other three are
@@ -380,12 +410,15 @@
 
   function enter(session) {
     el('gate').style.display = 'none';
-    el('app').style.display = 'block';
+    el('leagueWait').hidden = true;
     /* Signed in to NL Tools (a Club card, or the League): the NL Tools top
-       bar, as on every club page (NL.codeGate.accountBar, nl-utils v1.57).
-       The code bar below is still built, and hidden. */
+       bar, as on every club page (NL.codeGate.accountBar, nl-utils v1.57),
+       and the library shows once it is drawn. A code session shows at once,
+       under the club's own bar. */
     if (session && (session.viaCard || session.isAdmin)) {
-      NL.codeGate.accountBar({ title: 'Programme Packs', toolKey: 'media-programme' }).then(fitSelTop);
+      drawAccountBar().then(function () { el('app').style.display = 'block'; fitSelTop(); });
+    } else {
+      el('app').style.display = 'block';
     }
 
     var crest = document.createElement('img');
@@ -859,7 +892,16 @@
         ' class="prev__frame" title="' + esc(f.name) + '"></iframe>';
     }
 
-    NL.modal({
+    /* Back (the phone's button or a swipe) closes the preview rather than
+       leaving the folder behind it, as in any photo viewer (v1.34). Opening
+       adds a history step for the same address; back takes it. Closing any
+       other way takes the step back too, so the next back leaves as normal.
+       Same address, same hash: no hashchange, so the folder never redraws. */
+    var viaBack = false;
+    history.pushState({ ppPreview: true }, '', location.href);
+    function onBack() { viaBack = true; ctrl.close(); }
+    window.addEventListener('popstate', onBack);
+    var ctrl = NL.modal({
       title: f.name,
       width: 'wide',
       body: '<div class="prev' + surface + '">' + body + '</div>',
@@ -868,7 +910,11 @@
         { label: 'Download', className: 'btn--primary', autofocus: true, onClick: function () {
             downloadFile(code, f);
           } }
-      ]
+      ],
+      onClose: function () {
+        window.removeEventListener('popstate', onBack);
+        if (!viaBack && history.state && history.state.ppPreview) history.back();
+      }
     });
 
     if (kind === 'doc') {
