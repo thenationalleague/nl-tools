@@ -114,7 +114,7 @@ Each one became a prompt rule above. Mark got `getStaff` because of the first.
   - `GITHUB_INTERNAL_TOKEN`: only the handbook tool used it. Revoke on GitHub.
   - `RTDB_SECRET`: keep it, because other Apps Script files still use it.
 
-**Cost.** Nothing runs, and there has been no Anthropic spend since the door shut on 15/08/2026. The only remaining risk is the live keys, which stay live until they are revoked.
+**Cost.** Nothing runs, and there has been no Anthropic spend since the door shut on 15/08/2026. The keys were revoked in the Anthropic console on 13/11/2026, so nothing of Claudio is live.
 
 ## Why it went
 

@@ -25,6 +25,8 @@ rather than relying on someone noticing.
 4. Tokens, never raw values: colour, spacing, radius, type size. The only exceptions are image and canvas exports. **[law] [check]**
 5. Check by eye on the two desktop screens and a phone before shipping. "Same token" is not proof. **[law]**
 6. A pattern written twice is a canon candidate; promote it rather than copying it. **[law]**
+7. The squint test. Look at the page with your eyes half shut: the one thing to do next should still stand out, and the page should read as a few calm blocks, not a scatter. If everything shouts, nothing does. **[new]**
+8. Club-facing pages are tested with real people doing their real tasks before a big change: a few people, the same few tasks each, watched without help. Guessing is for internal tools and changes that are easy to undo. **[new]**
 
 ## 2. Page structure
 
@@ -74,7 +76,7 @@ rather than relying on someone noticing.
 1. A button says what it does in a verb: Save, Remove, Send reset link. **[law]**
 2. Every action button carries its icon from the sprite, in dialogs too. Direction and action icons go before the words, completion icons after. Neutral buttons (Save, Cancel, Close, OK) have none. Never a typed arrow. **[law] [check]**
    If no icon fits, draw one into the sprite in its style; never ship the button bare.
-3. One primary button per view or dialog. **[new]**
+3. One filled button in brand red per view or dialog: the main thing to do there. Everything else is quieter (outlined or plain), so the next step is never in doubt. **[new]**
 4. Destructive buttons are red and sit apart from the rest: on the left of a bar. **[new]**
 5. Order in a bar, left to right: destructive, then other actions on the thing, then the primary on the right. **[new]**
 6. A dialog with Save doesn't also need Cancel. The × and Esc close it. A read-only dialog has Close. **[new]**
@@ -138,3 +140,13 @@ rather than relying on someone noticing.
 3. What's new keeps the last five entries, one plain line each, written for the person using the tool. **[new]**
 4. Entries say what changed, never what went wrong. No clubs, people or incidents are named, in What's new, file headers or pull requests: all of it is public. **[new]**
 5. Anything sensitive about an incident never goes in the repo. **[law]**
+
+## Where these come from
+
+These rules draw on research, but none of it is followed blindly: a source earns a rule only where it fits how our people use these tools.
+
+- **Nielsen Norman Group** (nngroup.com): usability research. A source, not the rulebook.
+- **The GOV.UK Design System** (design-system.service.gov.uk): taken for its words and its behaviour (plain English, one question per screen, errors that say what to do). Not for its look: its pages are calm, but often have no clear main action and fail the squint test (1.7), which is why 6.3 asks for one filled red button.
+- **Gould and Lewis's three principles** (1985), the basis of most usability practice since: focus early on the users and their tasks, measure with real people, and design in rounds. 1.8 is the first two; the version history of every tool is the third.
+
+Source links beside individual **[new]** rules are added in the full review (step 0 of the sweep), as each rule is argued for or dropped.
