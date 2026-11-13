@@ -219,7 +219,9 @@ Next, in order (re-ordered 28/10/2026):
    Attendance reading `public/` for any season the record holds. Left: import
    the 2025-26 workbook (keyed to the Attendance archive by keyToAttendance;
    "Bring in from Attendance" is the fallback with no workbook), watch a matchday or two, then retire
-   FixtureSync.)* Attendance figures are 100% club
+   FixtureSync. Retired 13/11/2026: its timer is off, the file deleted, and
+   Attendance reads only this record for the live season;
+   `system/retired/fixture-sync.md`.)* Attendance figures are 100% club
    submissions, keyed by Opta match ID; only its fixture list comes from
    NLS, copied four times a day by `gas/FixtureSync.js` into
    `app-data/ops-attendance/fixtures`. That copy is now the weakest of

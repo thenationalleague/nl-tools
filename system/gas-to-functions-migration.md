@@ -233,7 +233,7 @@ Migrate to callables with native auth:
 > needed deleting, not planning around — the replacement had been live for
 > twelve days while the original kept its portal card and its routes.
 
-### Phase 5 — FixtureSync: retire, do not migrate
+### Phase 5 — FixtureSync: retire, do not migrate *(done 13/11/2026: see `system/retired/fixture-sync.md`)*
 `gas/FixtureSync.js` (time-driven NLS → `app-data/ops-attendance/fixtures`)
 was to become Cloud Scheduler + a Function. **Changed 28/10/2026: it is
 deleted instead.** It exists only to give Attendance a list of games to

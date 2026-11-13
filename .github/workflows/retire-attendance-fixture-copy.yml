@@ -1,0 +1,112 @@
+name: Button · Retire Attendance fixture copy
+
+# ONE-OFF (13/11/2026). Remove in the next PR once it has run.
+#
+# gas/FixtureSync.js copied NLS fixtures into app-data/ops-attendance/fixtures
+# for Attendance. Fixture Management is now Attendance's only fixture list,
+# so the job is retired (its trigger deleted by hand, the file removed in the
+# same PR as this) and this clears the copy it left.
+# See system/retired/fixture-sync.md.
+#
+# report (default): counts only, nothing written. Actions logs on this repo
+#   are public, so it prints numbers, never a fixture, club or person.
+# retire: type "retire" in the confirm box. In order, stopping at the first
+#   failure:
+#     1. save the node to the private bucket, retired/<date>/
+#     2. delete the node, and check it is gone
+#     3. write one audit line
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'report = count only. retire = save, then delete.'
+        required: true
+        default: report
+        type: choice
+        options: [report, retire]
+      confirm:
+        description: 'Type "retire" to allow retire mode.'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  retire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DB: https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app
+      NODE_PATH_RTDB: app-data/ops-attendance/fixtures
+      BUCKET: nl-tools-monthly-backups
+      MODE: ${{ inputs.mode }}
+    steps:
+      - name: Check the confirmation
+        if: inputs.mode == 'retire' && inputs.confirm != 'retire'
+        run: |
+          echo "::error::Retire mode needs the confirm box to say exactly: retire"
+          exit 1
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Read what is there
+        run: |
+          set -euo pipefail
+          TOKEN=$(gcloud auth print-access-token)
+          get() {
+            code=$(curl -sS -o "$2" -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$DB/$1.json")
+            if [ "$code" != "200" ]; then echo "::error::RTDB read of one node failed with HTTP $code"; exit 1; fi
+          }
+          get "$NODE_PATH_RTDB" fixtures.json
+          get "app-data/ops-attendance/submissions" submissions.json
+
+      - name: Report, and retire if asked
+        run: |
+          set -euo pipefail
+          TOKEN=$(gcloud auth print-access-token) node - <<'JS'
+          const fs = require('fs');
+          const load = (f) => JSON.parse(fs.readFileSync(f, 'utf8')) || {};
+          const fixtures = load('fixtures.json'), subs = load('submissions.json');
+          const ids = Object.keys(fixtures);
+          const manual = ids.filter((k) => k.startsWith('manual_')).length;
+          const bytes = fs.statSync('fixtures.json').size;
+          console.log(`Copied fixtures: ${ids.length} (${manual} typed in by hand), ${Math.round(bytes / 1024)} KB.`);
+          console.log(`Live-season attendance submissions: ${Object.keys(subs).length}.`);
+          const filedUnderCopy = Object.keys(subs).filter((k) => fixtures[k] && k.startsWith('manual_')).length;
+          if (filedUnderCopy) console.log(`::warning::${filedUnderCopy} submissions are filed under a hand-typed fixture that only this copy holds. Stop and tell Claude before retiring.`);
+
+          (async () => {
+            if (process.env.MODE !== 'retire') { console.log('Report only: nothing written.'); return; }
+            if (filedUnderCopy) { console.log('::error::Not retiring: some submissions depend on this copy.'); process.exit(1); }
+            if (!ids.length) { console.log('Nothing to retire: the node is already empty.'); return; }
+            const H = { Authorization: `Bearer ${process.env.TOKEN}`, 'Content-Type': 'application/json' };
+            const now = Date.now(), date = new Date(now).toISOString().slice(0, 10);
+
+            // 1. Save first. Nothing is deleted unless this succeeds.
+            const name = encodeURIComponent(`retired/${date}/attendance-fixture-copy.json`);
+            const up = await fetch(`https://storage.googleapis.com/upload/storage/v1/b/${process.env.BUCKET}/o?uploadType=media&name=${name}`,
+              { method: 'POST', headers: H, body: JSON.stringify(fixtures) });
+            if (!up.ok) { console.log(`::error::Saving to the bucket failed with HTTP ${up.status}. Nothing deleted.`); process.exit(1); }
+            console.log(`Saved to gs://${process.env.BUCKET}/retired/${date}/attendance-fixture-copy.json`);
+
+            // 2. Delete, then check.
+            const del = await fetch(`${process.env.DB}/${process.env.NODE_PATH_RTDB}.json`, { method: 'DELETE', headers: H });
+            if (!del.ok) { console.log(`::error::Delete failed with HTTP ${del.status}.`); process.exit(1); }
+            const after = await (await fetch(`${process.env.DB}/${process.env.NODE_PATH_RTDB}.json?shallow=true`, { headers: H })).json();
+            if (after !== null) { console.log('::error::The node is still there.'); process.exit(1); }
+            console.log('Copied fixture list deleted, and checked gone.');
+
+            // 3. One audit line.
+            const entry = { action: 'attendance_fixture_copy_retired', detail: `Attendance's NLS fixture copy retired: ${ids.length} fixtures (saved to the private bucket)`, uid: 'system', name: 'NL Tools', email: '', ts: now, at: new Date(now).toISOString() };
+            await fetch(`${process.env.DB}/admin/audit/${now}_att_fixture_copy.json`, { method: 'PUT', headers: H, body: JSON.stringify(entry) });
+          })().catch((e) => { console.log(`::error::${e.message}`); process.exit(1); });
+          JS
