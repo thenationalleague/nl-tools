@@ -137,3 +137,20 @@ rather than relying on someone noticing.
 3. What's new keeps the last five entries, one plain line each, written for the person using the tool. **[new]**
 4. Entries say what changed, never what went wrong. No clubs, people or incidents are named, in What's new, file headers or pull requests: all of it is public. **[new]**
 5. Anything sensitive about an incident never goes in the repo. **[law]**
+
+## 14. File libraries
+
+For any page that stores files in folders: Programme Packs, Document Library, and whatever comes next. Drafted 13/11/2026 from how Google Drive, Dropbox and a desktop folder do it, and from a phone look at Programme Packs that was busy and left it unclear where an upload would land. The aim is one answer to "where am I, and where will this go?", visible at all times.
+
+1. **Where you are comes first.** At the top: the path to here as links (All clubs › AFC Telford United ›), then the folder you're in as the heading, not a link. Nothing else sits above it. **[new]**
+2. **The folder's own housekeeping is in its ⋯ beside the heading:** rename, delete, and a folder's details. Nothing destructive sits out in the open. **[new]**
+3. **One action bar, directly under the heading:** Upload (the main action, filled) and New folder. It acts on the folder named above it, so it never has to say where. **[new]**
+4. **Ticking anything turns that same bar into the selection bar:** ×, "2 selected", then Download, Move, Remove. Same place, same height, so nothing below moves. Untick everything and it turns back. Never two bars, and never a bar of greyed-out buttons waiting for a selection. **[new]**
+5. **Folders first, then files, in one list.** Each row: tick box, icon, name, size, and its own ⋯ for what you can do to that one item (Download, Preview, Rename, Move, Remove). Photos may show as a grid of thumbnails; everything else is a list. **[new]**
+6. **Dropping works anywhere on the folder.** While you drag, the whole folder lights up with one line naming the destination ("Drop to upload to Headshots"). Dropping onto a folder in the list lights that folder instead. **[new]**
+7. **No standing drop box.** The dashed box appears only as the empty state of an empty folder you can upload to, saying what to do. **[new]**
+8. **An upload says where it went.** Progress shows at the top of the list while it runs; when it finishes, the new files appear in place and stay highlighted for a moment. **[new]**
+9. **No explanatory lines.** The path, the heading and the buttons say it all. Only consequences are said, at the moment they happen (Remove: "Removed files can be restored from Removed files"). **[law]**
+10. **Read-only is the same layout without the write actions**, with "Read only" beside the heading. Nothing reflows. **[new]**
+11. **On a phone the layout stays the same.** The path shortens to its last level ("‹ AFC Telford United"), the action bar stays one row, and the selection bar may use icon-only buttons under principle 6.7. **[new]**
+12. **One library, one implementation.** Programme Packs and Document Library share `NL.files` already; the layout above becomes a canon component, not two hand-built pages. **[new]**
