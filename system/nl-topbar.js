@@ -1,7 +1,11 @@
 /* =========================================================================
    NL Tools — Topbar renderer
    File: /system/nl-topbar.js
-   Version: v1.10 (12/11/2026)
+   Version: v1.11 (13/11/2026)
+
+   v1.11 — "Who can open this" names the Control shelf (was Structure).
+          Cache-bust ?v=14 -> ?v=15, in lockstep with nl-utils ?v=61 -> ?v=62
+          and nl-brand ?v=75 -> ?v=76.
 
    v1.10 — The menu's Access item replaces People and cards and Audit log
           (both are tabs of Access now), for the Skeleton key and the League
@@ -581,7 +585,7 @@
       if (!w) {
         html = '<p>This tool has no grants yet, so only the Skeleton key opens it.</p>';
       } else {
-        var shelf = w.shelf === 'structural' ? 'On the Structure shelf: only the Skeleton key opens it.'
+        var shelf = w.shelf === 'structural' ? 'On the Control shelf: only the Skeleton key opens it.'
           : w.shelf === 'sandbox' ? (w.testers ? 'In Sandbox: until it launches, only testers and the Skeleton key open it.' : 'In Sandbox: until it launches, only the Skeleton key opens it.')
           : '';
         html = (shelf ? '<p class="topbar__who-note">' + esc(shelf) + '</p>' : '') +

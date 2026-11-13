@@ -275,13 +275,19 @@ test('.disclosure suppresses the native marker in every engine', () => {
 });
 
 test('.disclosure draws its own chevron and swaps it under [open]', () => {
+  /* v2.79: drawn, not typed. A typed ▸/▾ took its size and baseline from the
+     font (Richard, 12/11/2026: "looks terrible", replace everywhere). */
   const closed = rules.indexOf('.disclosure > summary::before');
   assert.notEqual(closed, -1, 'the closed-state chevron is drawn by ::before');
-  assert.match(rules.slice(closed, rules.indexOf('}', closed)), /content:/);
+  const closedBody = rules.slice(closed, rules.indexOf('}', closed));
+  assert.match(closedBody, /content:\s*''/, 'no character in the chevron');
+  assert.match(closedBody, /border-right:/, 'drawn with borders');
+  assert.match(closedBody, /transform:\s*rotate\(-45deg\)/, 'points right while closed');
+  assert.doesNotMatch(closedBody, /transition/, 'a static swap: nothing for reduced-motion to catch');
   const open = rules.indexOf('.disclosure[open] > summary::before');
   assert.notEqual(open, -1, 'an [open] state rule exists');
-  assert.match(rules.slice(open, rules.indexOf('}', open)), /content:/,
-    'the open state is a content swap — no transform, nothing for reduced-motion to catch');
+  assert.match(rules.slice(open, rules.indexOf('}', open)), /transform:\s*rotate\(45deg\)/, 'points down while open');
+  assert.doesNotMatch(rules.slice(closed, rules.indexOf('}', open)), /[▸▾]/, 'no typed arrow');
 });
 
 /* ── Competition identity (v2.72) ─────────────────────────────────────────
