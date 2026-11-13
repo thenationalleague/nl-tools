@@ -101,9 +101,9 @@ What: On screen, the stickers on the pass are called zones, not keys.
 Why: It matches the accreditation-pass idea. Only the word on screen changes.
 
 ### Claudio's leftovers
-What: Delete everything left of the old Claudio assistant, its chat history included.
+What: Delete everything left of the old Claudio assistant, its chat history included. The button is built: run **Button · Retire Claudio's data** in report mode, then again with retire. Then revoke its Anthropic keys and delete their Script Properties.
 Why: The tool is gone and the history may hold questions nobody should keep.
-
+Waiting on: you
 ### A slimmer league table snapshot
 What: Keep the daily table snapshot, but save only positions and points, and keep it in the database or the backup bucket instead of GitHub.
 Why: Today it is 2.4 MB a day, and GitHub keeps every copy forever.

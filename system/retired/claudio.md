@@ -92,7 +92,7 @@ Each one became a prompt rule above. Mark got `getStaff` because of the first.
 
 ## What stays behind
 
-**RTDB data, not deleted.** Export or delete it from the Firebase console.
+**RTDB data, being deleted (13/11/2026).** The one-off **Button · Retire Claudio's data** reports the three nodes below, then saves them to the private bucket (`retired/<date>/claudio-data.json`) and deletes them. Its rules block left the snapshot in the same pull request, so the next rules run removes it.
 - `app-data/staff-claudio/conversations/<uid>/<conversationId>`: every user's chat history (title, persona, timestamps, messages). It may include HR questions, so treat it as personal data.
 - `app-data/staff-claudio/usage/<uid>/...`: read by the page and never written by anything, so probably empty.
 - `claudio/usage/<uid>/<yyyy-mm-dd>` **at the database root**: the real daily counts, costs and token figures, written by Apps Script with the legacy secret. No rules entry covers it, so only the console can reach it.
