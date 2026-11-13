@@ -39,8 +39,13 @@ What: DAZN, Programme Packs, Save of the Month, Attendance, Brand Exposure, Club
 Why: A grant that changes nothing on screen is a promise the tool doesn't keep.
 
 ### Sign-up and approvals
-What: The sign-up request asks for job title and zones. League Operations approves club people. A Pending list and a bell show what is waiting. People can ask for a zone. The request email stops saying "admin panel", and every email the system sends is logged in Access's Audit tab.
-Why: This is the last part of the new model people actually meet. Without it, new people still come in the old way.
+What: Club people ask; everyone else is invited. A club secretary shares one sign-up link with their staff. The link already names the club, so each person adds their name, job title and the zones they need, with a one-line reason, and League Operations approves, usually within a day. League Operations can also invite club staff directly. League staff and externals never ask: they are invited, and the invite sets their card and zones. A Pending list and a bell show what is waiting. People can ask for an extra zone later.
+Why: This is the last part of the new model people actually meet. Without it, new people still come in the old way, and you would have to invite every member of every club by hand.
+- While waiting, the person sees a "pending" page, not an empty portal.
+- The approver sees exactly what each requested zone opens before saying yes.
+- Every email the system sends is logged in Access's Audit tab. Invites and approvals get a Resend button, and a Copy link option so an invite can go by WhatsApp if the email never arrives.
+- The request email stops saying "admin panel".
+- Everyone signs in with email and password. No emailed sign-in links each time (decided 13/11): they hang every sign-in on someone's inbox.
 - Email stays in Apps Script for now. The log records that an email was sent, not whether it arrived.
 
 ## Next
@@ -79,9 +84,21 @@ Why: Those two accounts open everything.
 What: The tool cards and drawn icons are done (13/11/2026). Next is the page around them: the noticeboard, the header and the spacing, and the Graphics landing page as the second place the card is used.
 Why: It is the first page everyone sees. When a second page uses the card, it becomes a shared component.
 
-### Turn the pass over
-What: Tap the pass on My pass and it turns over to show what it opens: Manage in one column, Access in the other, names only. The Skeleton key's back says "Every tool, Manage". The full list beside the pass stays.
-Why: It is how a real accreditation pass works, and it makes the zones easy to read at a glance.
+### Passwords and your account
+What: My pass becomes your account page. An Account section at the foot of it holds your email and a Change password button (current password, then the new one twice), with two-step sign-in added there later. An "Account" link in the menu under your circle jumps straight to it. In Access, each person gets a "Send reset link" button, which emails them the same link as "Forgot password" on the sign-in page.
+Why: If you think someone has seen your password, you should be able to change it there and then. And when someone is locked out, you can start their reset without ever knowing or choosing their password.
+- Nobody can set or see anyone else's password, Skeleton key included.
+- Every reset link sent from Access is logged: who sent it, to whom, when.
+- Reset emails come from Firebase's own address by default. Point them at an NL address so they don't land in spam.
+
+### The new pass, and turning it over
+What: One white NL lanyard pass for everyone. A header strip says which kind of pass it is: red for League, navy for Club, charcoal for External. Below it, one big sticker about two-thirds the width of the pass, filled with the club's or organisation's colour, with the crest or logo on a white circle that has a soft shadow. Under the name and job title, the zones sit as white stickers in two columns; zones not held are faint empty slots. Tap the pass and it turns over to show what it opens: Manage in one column, Access in the other, names only. The Skeleton key's back says "Every tool, Manage". The full list beside the pass stays.
+Why: The colour lives on the sticker, not the whole pass, so every pass looks like it came from the same desk and the club still stands out from across a room. The front says what kind of access it is; the back gives the detail.
+- Designed 13/11/2026 from sketches against real crests: Kidderminster, Hampton & Richmond, Spennymoor, Scunthorpe, Hebburn, Telford, Fylde, Yeovil.
+- League: the rose on red, six zones in three rows. Club: four zones in two rows. External: as many as its organisation has.
+- A club whose main colour is near-white uses its second colour for the sticker.
+- The white circle stops a crest disappearing into its own colour (Kidderminster on orange).
+- Built together: the new front and the flip are one piece of work.
 
 ### Zones
 What: On screen, the stickers on the pass are called zones, not keys.
@@ -101,6 +118,22 @@ Why: The pages were changed after the PDFs were made.
 Waiting on: you
 
 ## Later
+
+### External passes
+What: A third kind of pass, for organisations outside the League and its clubs: DAZN, the Trust, agencies, freelancers. In Access, a new Externals tab: you set up the organisation first (name, colours and an uploaded logo), then its zones, then invite its people. Each zone has a plain name ("Broadcast"), a three-letter code (suggested from the name, changeable, never a duplicate) and the tools it opens. Each person holds one or more of their organisation's zones.
+Why: Partners and freelancers need one or two tools each, with a name on every sign-in, not a shared code. After club logins, as planned.
+- Invite-only. There is no way for an external to ask for access.
+- A pass needs at least one zone: the External card opens nothing by itself.
+- Fine-grained by zones, never by person. If one person needs more, their organisation gets another zone ("DAZN Reporting" beside "DAZN Broadcast"). When someone leaves, removing their pass leaves nothing behind.
+- Every tool is closed to externals unless its record switches it on, and a new tool starts closed, so forgetting only ever keeps someone out.
+- Access is the most an external gets, unless the tool was built for more (uploading to Programme Packs).
+- Externals never get the League's view across all 72 clubs. Each tool says what an external sees there; if it says nothing, they see nothing.
+- Sensitive tools can never be opened to externals: Club Codes, both benchmarking tools, Responsibilities and Access. That is locked three times: Access doesn't offer them, the pass refuses them, and the database rules refuse anyone on an External card. Changing which tools are sensitive is a pull request, not a tickbox.
+- Logos live in file storage in their own folder, starting empty, so changing one is an upload, not a pull request.
+- Only the Skeleton key runs the Externals tab to begin with.
+- First tools: Programme Packs (freelance programme editors see every club's library; it is a shared working space) and Fixture Management (view only).
+- First organisation: the Trust, with Content Plan (view only), Document Library and Graphics (making its own posts, nothing more). If the Trust ever needs to see across every club like League staff, it becomes its own card instead.
+- Later candidates: Brand Exposure (a sponsor sees only its own boards, once that tool is finished), Matchday Live for freelance reporters, Graphics for freelance designers, Content Plan for agencies.
 
 ### Clear away the old access fields
 What: Once nothing reads them, remove the per-person tool entries and the jobs that keep them in step (Apply passes), the old roles, the per-role defaults on every tool, and the forwarding pages kept for old bookmarks.
