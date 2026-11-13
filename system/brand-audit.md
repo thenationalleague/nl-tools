@@ -80,6 +80,7 @@ In the order to make them. Each is one pull request with the lockstep
 | C9 | **Audit words.** Add the 48 missing actions to `NL.audit.LABELS` (list below). | The log reads as code. | Principle 11.4 |
 | C10 | **Top bar.** The version badge decides "League" from the pass's card, not the old role. It keeps the number. | Everything else moved to the pass on 12/11. | Principle 13.2 |
 | C11 | **Override backlog.** Delete the 39 lines for pages that no longer exist. `.btn` is restyled on 10 pages and `.page` on 7, mostly with no reason given: find the need behind them (a toolbar-height button; a dense page's padding) and meet it in the canon. | The backlog hides what the canon is missing. | 135 lines → under 60 |
+| C13 | **Icon-only buttons on a phone** (principle 6.7, to consider). A canon marker on a button lets its words drop under phone width, for the standard icons only; never the main action or anything that can't be undone. A test enforces both. | Worded button rows wrap or crush on a phone (the Programme Packs selection bar, 13/11). | Phone button rows |
 | C12 | **Lint checks** for what can be tested: an action button with no icon, a typed `+`/`▾`/arrow, Cancel with Save, a pixel font size, a browser date formatter, a header over its last five versions. Report first, then fail on new ones, as the override backlog does. | Drift shows itself instead of waiting to be noticed. | Holds the line after the sweep |
 
 **The audit actions with no words (C9):** access_way_back, add_match,
@@ -268,14 +269,21 @@ Club Codes, Club Kits admin, Fixtures admin); 404.
    including every club's colours. Move the data to a file (or the
    database) so the page is only the page?
 3. **Order of the sweep.** Suggested below; say if another order suits.
+4. **The moment.** The principles are a work in progress. Before the sweep
+   starts, one more full review of them against every page, then an agreed
+   date to make the big changes in one go.
+5. **Icon-only buttons on a phone** (C13): adopt, and with which icons?
 
 ## Suggested order
+
+Step 0: the full review of the principles, and an agreed moment to start.
 
 1. **Canon, wave 1** (one PR each): C1 dialog bar, C2 dates, C9 audit
    words, C10 top bar, C11 backlog clean-up. Small, and every later fix
    needs them.
 2. **Canon, wave 2:** C3 date picker, C4 buttons, C5 empty states, C6 form
-   pieces, C8 sprite and the "more" menu.
+   pieces, C8 sprite and the "more" menu, C13 icon-only buttons on a phone
+   if adopted.
 3. **Themes D1–D3 across the estate** (icons, typed symbols, dialog bars):
    the biggest visible gain.
 4. **Tools, worst first**, each in one PR that clears everything for that
