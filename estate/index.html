@@ -1,7 +1,14 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Estate
-  Version: v1.3 (30/10/2026)
+  Version: v1.4 (13/11/2026)
+
+  v1.4 (13/11/2026) — A GitHub job whose last finished run failed shows
+  "Last run failed" under its name (a Needs a look warning, first in the
+  filter), and its name opens that run. Asked of GitHub's public API, one
+  call per job, kept in the browser for 30 minutes (60 calls an hour is
+  GitHub's allowance without signing in). Roadmap: "A weekly note when
+  something fails" asked for this half; the weekly email is still to come.
 
   v1.3 (30/10/2026) — Every row lists its addresses under the name: each
   page of a tool with what it is (admin, reader, sub-page…) and, where a
@@ -185,6 +192,11 @@
     var NL_TOOL_KEY = 'ops-estate';
 
     window.NL_CHANGELOG = [
+      {
+        date: '13/11/2026',
+        version: 'v1.4',
+        items: ['A background job whose last run failed is marked "Last run failed", and its name opens that run.']
+      },
       {
         date: '30/10/2026',
         version: 'v1.3',
@@ -968,6 +980,8 @@
   /* The detail view's checks, in plain words. Red stops something working
      or leaves it open; amber is worth a look. */
   var WARN = {
+    failing:      { label: 'Last run failed',        pill: 'pill--rejected',
+                    title: 'Its most recent finished run on GitHub failed. Open it to see why' },
     norules:      { label: 'No database rules',      pill: 'pill--rejected' },
     openadmin:    { label: 'Admin page not locked',  pill: 'pill--rejected' },
     codeadmin:    { label: 'Admin page on a code',   pill: 'pill--pending',
@@ -978,7 +992,7 @@
     orphan:       { label: 'Nothing links to it',    pill: 'pill--pending',
                     title: 'No page in the repo links here. Fine if people reach it from emails, the website or a QR code' }
   };
-  var WARN_ORDER = ['norules', 'openadmin', 'ungated', 'codeadmin', 'canon', 'unregistered', 'orphan'];
+  var WARN_ORDER = ['failing', 'norules', 'openadmin', 'ungated', 'codeadmin', 'canon', 'unregistered', 'orphan'];
   var DOOR_PILL = { 'Anyone': 'pill--soon', 'Club code': 'pill--pending', 'Clubs and League staff': 'pill--approved',
                     'League staff': 'pill--info', 'Superadmin only': 'pill--postponed' };
 
@@ -1298,11 +1312,46 @@
     return keys.map(function (k) { return { value: k, label: k, count: counts[k] }; });
   }
 
-  function setupAll(inv, est) {
+  /* ── Did each GitHub job's last run work? (v1.4) ────────────────────
+     Asked of GitHub's public API, one call per job (one call for the 100
+     newest runs only reaches about half the jobs: the hourly ones crowd
+     out the weekly). GitHub allows 60 calls an hour without signing in,
+     so the answer is kept in this browser for 30 minutes. If GitHub says
+     no, the list shows without it and the note says so. */
+  var RUNS_KEY = 'nl-estate-runs', RUNS_TTL = 30 * 60 * 1000;
+  function lastRuns(files) {
+    try {
+      var kept = JSON.parse(localStorage.getItem(RUNS_KEY) || 'null');
+      if (kept && Date.now() - kept.at < RUNS_TTL) return Promise.resolve(kept.runs);
+    } catch (e) { /* storage can be off; ask GitHub */ }
+    var api = 'https://api.github.com/repos/thenationalleague/nl-tools/actions/workflows/';
+    return Promise.all(files.map(function (f) {
+      var name = f.split('/').pop();
+      return fetch(api + encodeURIComponent(name) + '/runs?branch=main&status=completed&per_page=1')
+        .then(function (r) { if (!r.ok) throw new Error('GitHub HTTP ' + r.status); return r.json(); })
+        .then(function (j) {
+          var run = j.workflow_runs && j.workflow_runs[0];
+          return [f, run ? { conclusion: run.conclusion, at: run.created_at, url: run.html_url } : null];
+        });
+    })).then(function (pairs) {
+      var runs = {};
+      pairs.forEach(function (p) { runs[p[0]] = p[1]; });
+      try { localStorage.setItem(RUNS_KEY, JSON.stringify({ at: Date.now(), runs: runs })); } catch (e) {}
+      return runs;
+    });
+  }
+
+  function setupAll(inv, est, runs) {
     var items = (est && est.items) || {};
     all.rows = pageRows(inv.pages, items)
       .concat(jobRows(inv.jobs || [], items))
       .concat(extraRows(est && est.extra));
+    /* A GitHub job whose last finished run failed needs a look, and its
+       name opens that run. */
+    if (runs) all.rows.forEach(function (r) {
+      var run = r.kind === 'Background job' && r.runsOn === 'GitHub' && runs[r.hay];
+      if (run && run.conclusion === 'failure') { r.warns.unshift('failing'); if (run.url) r.url = run.url; }
+    });
     all.rows.forEach(function (r) {
       if (KINDS.indexOf(r.kind) === -1) r.kind = 'Page';
     });
@@ -1391,6 +1440,14 @@
 
     Promise.all([getJson(INVENTORY_URL), est, usage])
       .then(function (res) {
+        var files = (res[0].jobs || []).filter(function (j) { return j.kind !== 'function' && /^\.github\/workflows\//.test(j.file); })
+          .map(function (j) { return j.file; });
+        return lastRuns(files).catch(function (err) {
+          console.error('[estate] GitHub runs check failed', err);
+          return null;
+        }).then(function (runs) { res.push(runs); return res; });
+      })
+      .then(function (res) {
         var data = res[0];
         var ungated = {};
         (data.ungatedRegistered || []).forEach(function (r) { ungated[r.url] = true; });
@@ -1401,7 +1458,8 @@
         render();
 
         all.usage = res[2];
-        setupAll(data, res[1]);
+        setupAll(data, res[1], res[3]);
+        if (!res[3]) NL.toast('Could not ask GitHub how the background jobs last ran. Try again later', 'error');
         if (!res[1]) NL.toast('Could not load the names and statuses (system/estate.json)', 'error');
         if (!res[2]) NL.toast('Could not load the use counts', 'error');
       })

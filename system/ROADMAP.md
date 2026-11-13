@@ -64,7 +64,8 @@ What: One written list for 1 July: what the season job does by itself, and what 
 Why: It runs once a year, so nobody will remember it. The season job has never run for real.
 
 ### A weekly note when something fails
-What: One plain-English note a week to a work inbox: which background jobs failed and what that means. Failing jobs also show as "Needs a look" in Estate.
+What: One plain-English note a week to a work inbox: which background jobs failed and what that means. Estate already marks a GitHub job whose last run failed (13/11/2026); the weekly note, and the same check for the cloud jobs, are still to do.
+Waiting on: you (which inbox)
 Why: Failure emails went to a personal inbox in a form nobody could read, so a daily backup failed for ten weeks unnoticed.
 
 ### Prove a backup restores
