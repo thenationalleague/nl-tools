@@ -24,9 +24,9 @@ const registry = JSON.parse(readFileSync(join(REPO, 'system/rtdb/tools-registry.
 
 /* Tools whose rules ask for a grant the portal cannot give, known and not
    yet fixed. Each entry is a promise to come back, dated. */
-const KNOWN = {
-  'media-save-of-the-month': "29/10/2026: rules honour a 'admin' grant; levels offer only off/access",
-};
+/* Empty since 13/11/2026: Save of the Month's, the last, was fixed when it
+   gained Manage. */
+const KNOWN = {};
 
 test('no tool\'s rules ask for a level the portal cannot grant', () => {
   const bad = [];

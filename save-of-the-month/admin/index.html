@@ -1,10 +1,14 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Save of the Month (League console)
-  Version: v20.2 (11/11/2026)
+  Version: v20.3 (13/11/2026)
   File: /save-of-the-month/admin/index.html
 
   CHANGELOG
+    v20.3 (13/11/2026) – Manage built (the pass decides). Access sees the
+      nominations and plays every clip; Manage (League Media, Club Media,
+      the Skeleton key) also opens and closes a month, shortlists, and
+      deletes clips. session.toolLevel decides; the rules write at Manage.
     v20.2 (11/11/2026) – The clip player's previous / next buttons are the
       canon chevron icons, not typed characters; Download carries its icon.
     v20.1 (30/10/2026) – The All / Shortlisted switch above the nominations
@@ -104,6 +108,11 @@
     var NL_TOOL_KEY = 'media-save-of-the-month';
 
     window.NL_CHANGELOG = [
+      {
+        date: '13/11/2026',
+        version: 'v20.3',
+        items: ['Opening a month, shortlisting and deleting clips are for the Media team; everyone else with access can watch.']
+      },
       {
         date: '11/11/2026',
         version: 'v20.2',
@@ -385,8 +394,10 @@
             ? '<button type="button" class="btn btn--ghost btn--sm sm-play" data-play="0" data-club="' + esc(r.club) + '" data-nid="' + esc(r.slot) + '">Play' + (clips.length > 1 ? ' (' + clips.length + ')' : '') + '</button>'
             : '<span class="sm-sub">None</span>') + '</td>' +
           '<td class="ta-right">' + (clips.length ? esc(SOTM.mb(clips.reduce(function (t, cl) { return t + (cl.size || 0); }, 0))) : '') + '</td>' +
-          '<td><button type="button" class="btn btn--sm ' + (r.short ? 'btn--primary' : 'btn--ghost') + '" data-club="' +
-            esc(r.club) + '" data-slot="' + esc(r.slot) + '">' + (r.short ? 'Shortlisted' : 'Shortlist') + '</button></td>' +
+          '<td>' + (S.canManage
+            ? '<button type="button" class="btn btn--sm ' + (r.short ? 'btn--primary' : 'btn--ghost') + '" data-club="' +
+              esc(r.club) + '" data-slot="' + esc(r.slot) + '">' + (r.short ? 'Shortlisted' : 'Shortlist') + '</button>'
+            : (r.short ? '<span class="pill pill--info">Shortlisted</span>' : '')) + '</td>' +
         '</tr>';
       }).join('') + '</tbody></table></div>';
     NL.clubs.wireCrestImgs($('smList'));
@@ -396,7 +407,7 @@
     var p = e.target.closest('button[data-play]');
     if (p) { openPlayer(S.view, p.getAttribute('data-club'), p.getAttribute('data-nid'), +p.getAttribute('data-play')); return; }
     var b = e.target.closest('button[data-slot]');
-    if (!b || !S.view) return;
+    if (!b || !S.view || !S.canManage) return;
     var club = b.getAttribute('data-club'), slot = b.getAttribute('data-slot');
     var on = !(S.short[S.view] && S.short[S.view][club] && S.short[S.view][club][slot]);
     var ref = db.ref(BASE + 'shortlist/' + S.view + '/' + club + '/' + slot);
@@ -496,7 +507,7 @@
       title: clubName(club) + ' · ' + n.minute + '′',
       width: 'wide',
       body: body,
-      buttons: [
+      buttons: (S.canManage ? [
         { label: shortLabel(), className: isShort(month, club, nid) ? 'btn--primary' : 'btn--ghost', onClick: function (c) {
           var on = !isShort(month, club, nid);
           var ref = db.ref(BASE + 'shortlist/' + month + '/' + club + '/' + nid);
@@ -506,8 +517,9 @@
             btn.className = 'btn ' + (on ? 'btn--primary' : 'btn--ghost');
           }, function (e2) { NL.toast('Could not save: ' + (e2 && e2.message), 'error'); });
         } },
+      ] : []).concat([
         { label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } }
-      ]
+      ])
     });
     show();
     return ctrl;
@@ -546,7 +558,12 @@
   /* ── boot ────────────────────────────────────────────────────────────── */
 
   window.TOOL = window.TOOL || {};
-  window.TOOL.boot = function () {
+  window.TOOL.boot = function (session) {
+    /* Manage runs the month: open, close, shortlist, delete clips. Access
+       watches. Hidden here as a courtesy; the rules write at Manage. */
+    S.canManage = !!(session && session.toolLevel === 'admin');
+    document.querySelector('.form-panel').style.display = S.canManage ? '' : 'none';
+    $('smWipe').style.display = S.canManage ? '' : 'none';
     NL.ensureAuth().then(function () { return NL.clubs.load(); }).then(function () {
       function listen(path, key) {
         db.ref(BASE + path).on('value', function (snap) {
