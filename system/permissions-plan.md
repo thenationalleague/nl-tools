@@ -328,9 +328,9 @@ agencies, freelancers.
 - **Later candidates:** Brand Exposure (a sponsor sees only its own boards;
   needs that tool finished first), Matchday Live, Graphics for freelance
   designers, Content Plan for agencies.
-- **The pass:** same NL lanyard, a third header colour, the organisation's
-  logo as the big sticker, zone stickers stacked beneath, each with its plain
-  name.
+- **The pass:** the same white pass with a charcoal header; the big sticker
+  in the organisation's colour with its logo on a white panel; zone stickers
+  beneath, each with its plain name (see "The new pass front").
 
 ## Approvals and notifications
 
@@ -731,10 +731,37 @@ kilobytes of rules against a 256KB limit.
 1. **Clubs managing their own staff:** later, once logins have bedded in.
 2. **Rebuilding tools under `nl.tools/portal/`** for the new model:
    considering, not decided (29/10/2026).
-3. **The new pass front:** one lanyard for all, red header for League, navy
-   for Club, a third colour for External, a big sticker (crest or logo) with
-   zones stacked beneath (13/11). The League layout and the External colour
-   are settled when it is sketched, alongside turning the pass over.
-
 Settled since: External passes (13/11, above); "zones" is the word on screen
-for keys (13/11, see the Roadmap).
+for keys (13/11, see the Roadmap); the new pass front (13/11, "The new pass
+front" below).
+
+## The new pass front (decided 13/11, not built)
+
+Replaces the club-coloured header band in "The pass" above. Built together
+with turning the pass over.
+
+- **One white pass for everyone.** The header strip says the kind of pass
+  and nothing else: red League, navy Club, charcoal External. It never takes
+  a club's or partner's colour, so it reads from across a room.
+- **The big sticker** is about two-thirds of the pass width, slightly
+  rotated, with a white die-cut edge. Its fill is the club's primary colour,
+  or its secondary when the primary is near-white (same test as before). The
+  League's is the rose on NL red; an External's is the organisation's
+  colour.
+- **The crest sits on a white circle** with a soft drop shadow, inside the
+  sticker. Chosen over a crest straight on the colour (Kidderminster's crest
+  vanishes on its own orange), a white edge cut round the crest (doubles the
+  outline on crests that already have one) and a darker shade behind it
+  (still too close).
+- **Sizing the crest:** trim the image to its visible pixels, then fit its
+  longest side to 80% of the circle. Round crests (the rose, Fylde, Yeovil)
+  and very wide ones (Hebburn's scroll) need about 10% less so the white ring
+  shows all the way round. No crest file in the 2026 set has a solid
+  background (checked 13/11); Telford's is small (231 × 348) and wants a
+  better copy before the pass is shown large.
+- **Partner logos** are often wide wordmarks, so an External's seat is a
+  white rounded panel rather than a circle.
+- **Zones** sit under the name and job title as white stickers in two
+  columns, the code in the sticker's colour. Unheld zones are faint dashed
+  slots. League: six (three rows). Club: four (two rows). External: as many
+  as its organisation has.

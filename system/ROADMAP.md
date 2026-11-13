@@ -92,10 +92,13 @@ Why: If you think someone has seen your password, you should be able to change i
 - Reset emails come from Firebase's own address by default. Point them at an NL address so they don't land in spam.
 
 ### The new pass, and turning it over
-What: One NL-styled lanyard pass for everyone. A header strip says which kind of pass it is: red for League, navy for Club, and a third colour for External. Below it, one big sticker about two-thirds the width of the pass carries who you're with: the club's crest in its own colours, or an external organisation's logo. The zone stickers sit stacked underneath it. Tap the pass and it turns over to show what it opens: Manage in one column, Access in the other, names only. The Skeleton key's back says "Every tool, Manage". The full list beside the pass stays.
-Why: The club's colours come from its stickers, not a different pass per club, so every pass looks like it came from the same desk. The front says what kind of access it is; the back gives the detail.
+What: One white NL lanyard pass for everyone. A header strip says which kind of pass it is: red for League, navy for Club, charcoal for External. Below it, one big sticker about two-thirds the width of the pass, filled with the club's or organisation's colour, with the crest or logo on a white circle that has a soft shadow. Under the name and job title, the zones sit as white stickers in two columns; zones not held are faint empty slots. Tap the pass and it turns over to show what it opens: Manage in one column, Access in the other, names only. The Skeleton key's back says "Every tool, Manage". The full list beside the pass stays.
+Why: The colour lives on the sticker, not the whole pass, so every pass looks like it came from the same desk and the club still stands out from across a room. The front says what kind of access it is; the back gives the detail.
+- Designed 13/11/2026 from sketches against real crests: Kidderminster, Hampton & Richmond, Spennymoor, Scunthorpe, Hebburn, Telford, Fylde, Yeovil.
+- League: the rose on red, six zones in three rows. Club: four zones in two rows. External: as many as its organisation has.
+- A club whose main colour is near-white uses its second colour for the sticker.
+- The white circle stops a crest disappearing into its own colour (Kidderminster on orange).
 - Built together: the new front and the flip are one piece of work.
-- The League pass's layout, and the External colour, are settled when the design is sketched.
 
 ### Zones
 What: On screen, the stickers on the pass are called zones, not keys.
