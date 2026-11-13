@@ -1,8 +1,14 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Access
-  Version: v2.4 (13/11/2026)
+  Version: v2.5 (13/11/2026)
   File: /access/index.html
+  v2.5 (13/11/2026) — "Tester zone", not "Tester key" (zones on screen).
+    Send reset link on a person (Roadmap, "Passwords and your account"):
+    Firebase's own reset email to their address, logged as
+    password_reset_sent with the person as the target. Not offered for
+    yourself (My pass → Account changes your own) or for a person this
+    account cannot edit.
   v2.4 (13/11/2026) — The Codes tab follows the person's level on Club Codes
     (ops-club-codes), worked out from their pass with the live grants
     (NL.pass.explain): Off hides the tab, Access shows the codes and
@@ -172,6 +178,11 @@
     var NL_TOOL_KEY = 'ops-people';
 
     window.NL_CHANGELOG = [
+      {
+        date: '13/11/2026',
+        version: 'v2.5',
+        items: [ 'Keys are called zones.', 'Send reset link emails a person the link to set a new password.' ]
+      },
       {
         date: '13/11/2026',
         version: 'v2.4',
@@ -1429,6 +1440,7 @@
     var passBtns = '';
     if (P.canViewAs(S.session.pass)) passBtns += '<a class="btn btn--ghost btn--sm" href="/pass/?view=as&uid=' + encodeURIComponent(u.uid) + '">' + icon('eye') + 'View pass</a>';
     if (canEdit(u)) passBtns += '<a class="btn btn--ghost btn--sm" href="/pass/?view=issue&uid=' + encodeURIComponent(u.uid) + '">' + icon('edit') + (P.isIssued(u.pass) ? 'Edit pass' : 'Issue pass') + '</a>';
+    if (edit && u.email && u.uid !== S.session.uid) passBtns += '<button class="btn btn--ghost btn--sm" type="button" id="pcReset">' + icon('send') + 'Send reset link</button>';
 
     var html = '<div class="pc-head"><div>' +
       '<div class="pc-head__name">' + esc(u.name || '(no name)') + '</div>' +
@@ -1493,7 +1505,26 @@
       document.getElementById('pcEdRemove').addEventListener('click', removePerson);
       drawExceptions();
     }
+    var rb = document.getElementById('pcReset');
+    if (rb) rb.addEventListener('click', function () { sendReset(u); });
     if (sk()) loadHistory(u.uid);
+  }
+
+  /* Send reset link (v2.5): the same email as "Forgot password" on the
+     sign-in page, sent by Firebase to the person's own address. Nobody here
+     sees or chooses their password. Logged: who sent it, to whom, when. */
+  function sendReset(u) {
+    NL.confirm('Email ' + (u.name || u.email) + ' a link to set a new password?',
+      { title: 'Send reset link', confirmText: 'Send' })
+      .then(function (yes) {
+        if (!yes) return;
+        firebase.auth().sendPasswordResetEmail(u.email)
+          .then(function () {
+            NL.writeAudit('password_reset_sent', u.name || u.uid, u.uid);
+            NL.toast('Reset link sent to ' + u.email, 'success');
+          })
+          .catch(function (e) { NL.toast('Not sent: ' + ((e && e.message) || 'unknown error'), 'error'); });
+      });
   }
 
   /* The exceptions: tools whose working level differs from the role's. */
@@ -1893,7 +1924,7 @@
     if (structural) {
       html += '<p class="pc-note">Control: Skeleton key only.</p>';
     } else {
-      if (p.shelf === 'sandbox') html += '<p class="pc-note">Sandbox: only the Tester key opens it until launch.</p>';
+      if (p.shelf === 'sandbox') html += '<p class="pc-note">Sandbox: only the Tester zone opens it until launch.</p>';
       /* League and Clubs side by side, as two separate things. */
       html += '<div class="form-panel pc-panel pc-open"><div class="form-panel__body"><div class="tl-sides">' +
         ['league', 'club'].map(function (side) {

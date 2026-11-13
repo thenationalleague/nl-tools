@@ -4,6 +4,9 @@
    Version: v1.64 (13/11/2026)
    v1.64 — On screen, a key is a zone (the pass's stickers): whoCanOpen's
      row label reads "League Operations zone". Ids and data keep "key".
+     NL.audit.LABELS gains the password actions (My pass's Change password,
+     Access's Send reset link) and Fixture Management's correct, remove
+     and restore.
 
    v1.63 — NL.clubPicker (select mode) draws its chevron as an SVG, the same
            path as NL.filterButton's, instead of typing a ▾ character. The
@@ -1895,6 +1898,8 @@
       page_opened: 'Page opened', page_unavailable: 'Page not available',
       pass_issued: 'Pass issued', pass_withdrawn: 'Pass withdrawn', pass_finding: 'Pass differs from today',
       passes_applied: 'Passes applied', grants_changed: 'Tool access changed', grants_reset: 'Tool access reset',
+      password_changed: 'Password changed', password_reset_sent: 'Password reset link sent',
+      fixtures_correct: 'Fixture corrected', fixtures_remove: 'Fixture removed', fixtures_restore: 'Fixture restored',
       attendance_submit: 'Attendance submitted', attendance_edit: 'Attendance edited',
       add_cup_fixture: 'Cup fixture added', edit_cup_fixture: 'Cup fixture edited',
       delete_cup_fixture: 'Cup fixture deleted', sync_fixture_run: 'Fixture sync run',
