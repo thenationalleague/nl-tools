@@ -25,6 +25,7 @@ Estate or the lint should flag it rather than relying on someone noticing.
 4. A tab holds a different job. A different way of looking at the same things is a view switcher inside the tab (Fixtures: Standard, Broadcast, Attendance). **[new]**
 5. A page does not rearrange itself for a smaller screen. Columns narrow; panels scroll. **[law]**
 6. Inside a tab, parts are section headings; pieces inside a part are panels with a navy head. **[new]**
+7. What you'd send someone is in the address: the tab, the view, the club, the open item (`#club=ALD`, `?tab=codes`). A link that asks for more than the person may see opens the nearest view they can, quietly, with no error. Filters stay out of the address. **[new]**
 
 ## 3. Type
 
@@ -38,10 +39,16 @@ Estate or the lint should flag it rather than relying on someone noticing.
 ## 4. Colour
 
 1. Red marks where you are (the active tab). Navy marks what you have chosen. **[law]**
-2. Status colours mean the same thing everywhere: green done, amber needs a look, red wrong or destructive, blue information. **[new]**
-3. Club colours appear only on club identity: the pass sticker, a club header, a crest seat. Never on controls. **[new]**
-4. Competitions always use their pill colours (National, North, South, NL Cup, FA Cup, FA Trophy). **[law]**
-5. No colour carries meaning on its own. It always comes with a word or an icon. **[new]**
+2. A button's colour says its job, from the canon variants only:
+   - **Primary** (red fill): the one main action, usually Save.
+   - **Danger** (red tint, red words): destructive (Remove, Delete, Withdraw). Always with its icon and set apart on the left, so it never reads as Save.
+   - **Navy** (navy fill): a second important action that starts something (Results, Issue a code).
+   - **Ghost** (outline): everything else, Cancel and Close included.
+   No other button colours; `.btn--secondary` is not canon. **[new] [check]**
+3. Status colours mean the same thing everywhere: green done, amber needs a look, red wrong or destructive, blue information. **[new]**
+4. Club colours appear only on club identity: the pass sticker, a club header, a crest seat. Never on controls. **[new]**
+5. Competitions always use their pill colours (National, North, South, NL Cup, FA Cup, FA Trophy). **[law]**
+6. No colour carries meaning on its own. It always comes with a word or an icon. **[new]**
 
 ## 5. Controls
 
@@ -49,13 +56,15 @@ Estate or the lint should flag it rather than relying on someone noticing.
 2. Choosing a club is always `NL.clubPicker`. Filtering is always `NL.filterButton`. A standalone dropdown is `.nl-select`. **[law] [check]**
 3. No browser-native dialogs: `NL.confirm`, `NL.prompt` and `NL.alert` only. **[law] [check]**
 4. A tick box and its words are one control. Clicking the words ticks the box, and the words read as a sentence, not a label. **[new]**
-5. Dates are shown as people say them (Sat 14 Nov 2026), and stored as ISO. **[law]**
-6. Controls are never greyed out to say "you can't". If you can't use something, it isn't there. **[law]**
+5. Dates read **Sat 14 Nov 2026** (ddd d mmm yyyy), stored as ISO. Leave out only what a heading above already says (rows under a "Sat 14 Nov 2026" heading show no date). **[law]**
+6. Times are 24-hour, **15:00**, everywhere: it reads the same in every context, and kick-offs are published that way. **[law]**
+7. Controls are never greyed out to say "you can't". If you can't use something, it isn't there. **[law]**
 
 ## 6. Buttons and actions
 
 1. A button says what it does in a verb: Save, Remove, Send reset link. **[law]**
-2. A button that does something carries its icon from the sprite. Direction icons go before the words, completion icons after. Neutral buttons (Save, Cancel, Close, OK) have none. Never a typed arrow. **[law] [check]**
+2. Every action button carries its icon from the sprite, in dialogs too. Direction and action icons go before the words, completion icons after. Neutral buttons (Save, Cancel, Close, OK) have none. Never a typed arrow. **[law] [check]**
+   If no icon fits, draw one into the sprite in its style; never ship the button bare.
 3. One primary button per view or dialog. **[new]**
 4. Destructive buttons are red and sit apart from the rest: on the left of a bar. **[new]**
 5. Order in a bar, left to right: destructive, then other actions on the thing, then the primary on the right. **[new]**
@@ -89,7 +98,7 @@ Estate or the lint should flag it rather than relying on someone noticing.
 ## 10. Words
 
 1. No waffle. A line earns its place only if it changes what the reader does, warns of a consequence, or answers a question they would ask. **[law]**
-2. Plain English, British spelling, en dashes, dates as DD/MM/YYYY or Sat 14 Nov 2026. **[law]**
+2. Plain English, British spelling, en dashes. Dates and times as section 5 says. **[law]**
 3. Labels name the thing; buttons name the action; errors say what to do next. **[new]**
 4. One word per concept, everywhere: zone, pass, card, Access, Manage, Remove. Never a synonym. **[law]**
 
