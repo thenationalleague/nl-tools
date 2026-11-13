@@ -21,7 +21,7 @@ test('the tab is Manage, last, with Settings, Import and Removed in that order',
 
 test('Correct opens the clubs and competition and never changes the key', () => {
   assert.match(PAGE, /var fixedTeams = !isNew && !correct;/, 'every game in the list is treated the same');
-  assert.match(PAGE, /buttons\.push\(\{ label: 'Amend', className: 'btn--ghost', onClick: function \(m\) \{ m\.close\(\); openEdit\(rec, \{ correct: true \}\); \} \}\);/,
+  assert.match(PAGE, /buttons\.push\(\{ label: 'Amend', className: 'btn--ghost btn--sm', onClick: function \(m\) \{ m\.close\(\); openEdit\(rec, \{ correct: true \}\); \} \}\);/,
     'Correct is an action on the game, so it lives in the bottom bar');
   /* a new key is minted only for a new tie */
   assert.match(PAGE, /if \(isNew\) \{\n\s+var key = opta \|\| F\.mintKey/);
@@ -53,7 +53,7 @@ test('a division of 24 clubs should hold 552 league games', () => {
 });
 
 test('Move: a dated game changes date only through Move, which asks why and keeps the old date', () => {
-  assert.match(PAGE, /buttons\.push\(\{ label: 'Move', className: 'btn--ghost', onClick: function \(m\) \{ openMove\(rec, m\); \} \}\);/);
+  assert.match(PAGE, /buttons\.push\(\{ label: 'Move', className: 'btn--ghost btn--sm', onClick: function \(m\) \{ openMove\(rec, m\); \} \}\);/);
   assert.match(PAGE, /'<div class="datetime-row"' \+ \(rec && rec\.date \? ' hidden' : ''\)/, 'the window shows a dated game\'s date as a value');
   const fn = PAGE.slice(PAGE.indexOf('function saveMove'), PAGE.indexOf('function openMove'));
   assert.match(fn, /if \(last && last\.outcome === 'moved'\) last\.reason = reason;/);
