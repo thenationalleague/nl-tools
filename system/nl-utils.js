@@ -1,7 +1,12 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.65 (13/11/2026)
+   Version: v1.66 (13/11/2026)
+   v1.66 — Back closes a dialog. Every NL.modal (so NL.confirm, NL.prompt
+     and NL.alert too) that can be dismissed takes a history step for the
+     same address while it is open, and back (the phone's button, a swipe,
+     the browser's arrow) closes the dialog on top instead of leaving the
+     page behind it. Closing any other way leaves no extra back to press.
    v1.65 — NL.pass.clubColours: writing on a club's primary colour is the
      club's tertiary (black or white in every club's record, chosen against
      the primary), so Kidderminster reads white on orange as it does on its
@@ -1444,8 +1449,94 @@
        opts.footerSplit  true → space-between footer (destructive-left layout)
        opts.onClose(result)  fired after teardown
 
-     NL.confirm / NL.prompt / NL.alert are thin Promise wrappers over it. */
+     NL.confirm / NL.prompt / NL.alert are thin Promise wrappers over it.
+
+     Back closes it (v1.66), as in any app: a dismissable dialog takes a
+     history step for the same address while open, and back closes the
+     dialog on top. See modalHistory below for how. */
   var _modalSeq = 0;
+
+  /* ── Back closes a dialog (v1.66) ──────────────────────────────────────
+     Opening a dismissable dialog pushes a history step for the SAME address,
+     marked { nlModal: id }; back pops it, and every open dialog whose step is
+     above where history now stands closes, newest first. Same address and
+     hash, so a hash router sees no hashchange and the page does not redraw.
+
+     Closing any other way (Close, Escape, the backdrop) does NOT call
+     history.back(): code often navigates straight after a dialog closes
+     (confirm, then location.hash = …), and a pending back would undo that
+     navigation. Instead the step stays as a "spare": the next dialog reuses
+     it rather than pushing another, and if back is pressed on a spare, the
+     page it lands on looks the same, so a second back is taken for the
+     person, and one press does what they meant.
+
+     replaceState is wrapped so a page tidying its address (?tab=) on a step
+     keeps the marker, and the step's address stays known; without it the
+     next back would be one press that seemed to do nothing. */
+  var _mh = { seq: 0, open: [], cur: 0, curHref: '', ready: false };
+  function mhId(st) { return st && typeof st === 'object' && st.nlModal ? st.nlModal : 0; }
+  function mhInit() {
+    if (_mh.ready) return true;
+    var w = window, h = w.history;
+    if (!h || typeof h.pushState !== 'function' || typeof h.replaceState !== 'function' ||
+        typeof w.addEventListener !== 'function') return false;
+    _mh.ready = true;
+    _mh.seq = Date.now();
+    _mh.cur = mhId(h.state);
+    _mh.curHref = String(w.location.href);
+    var nativeReplace = h.replaceState;
+    h.replaceState = function (state, title, url) {
+      var id = mhId(h.state);
+      if (id && !mhId(state) && (state == null || typeof state === 'object')) {
+        var keep = {}; for (var k in (state || {})) keep[k] = state[k];
+        keep.nlModal = id; state = keep;
+      }
+      var r = arguments.length > 2 ? nativeReplace.call(h, state, title, url) : nativeReplace.call(h, state, title);
+      _mh.cur = mhId(h.state); _mh.curHref = String(w.location.href);
+      return r;
+    };
+    var nativePush = h.pushState;
+    h.pushState = function () {
+      var r = nativePush.apply(h, arguments);
+      _mh.cur = mhId(h.state); _mh.curHref = String(w.location.href);
+      return r;
+    };
+    /* A hash link is a new entry too; resync in case a browser skips popstate. */
+    w.addEventListener('hashchange', function () {
+      _mh.cur = mhId(h.state); _mh.curHref = String(w.location.href);
+    });
+    w.addEventListener('popstate', function (e) {
+      var left = _mh.cur, leftHref = _mh.curHref;
+      var leftSpare = left && !_mh.open.some(function (m) { return m.step === left; });
+      _mh.cur = mhId(e.state); _mh.curHref = String(w.location.href);
+      if (leftSpare && _mh.curHref === leftHref && _mh.cur < left) { h.back(); return; }
+      _mh.open.slice().reverse().forEach(function (m) { if (m.step > _mh.cur) m.close(); });
+    });
+    return true;
+  }
+  function mhOpen(close) {
+    if (!mhInit()) return null;
+    var h = window.history;
+    var id = mhId(h.state);
+    var spare = id && id === _mh.cur && !_mh.open.some(function (m) { return m.step === id; });
+    var step;
+    if (spare) step = id;
+    else {
+      step = ++_mh.seq;
+      h.pushState({ nlModal: step }, '', String(window.location.href));
+    }
+    var entry = { step: step, close: close };
+    _mh.open.push(entry);
+    return entry;
+  }
+  function mhForget(entry) {
+    var i = _mh.open.indexOf(entry);
+    if (i !== -1) _mh.open.splice(i, 1);
+  }
+  /* At load, so a page reloaded on a step (a dialog was open) still takes
+     one back as one press. Where there is no history (a test sandbox), it
+     tries again at the first dialog. */
+  mhInit();
   window.NL.modal = function(opts) {
     opts = opts || {};
     var prevFocus = (typeof document !== 'undefined') ? document.activeElement : null;
@@ -1526,11 +1617,13 @@
     document.addEventListener('keydown', onKeydown, true);
 
     var closed = false;
+    var hist = null;
     var ctrl = {
       el: modal, backdrop: backdrop, body: body,
       close: function(result) {
         if (closed) return;
         closed = true;
+        if (hist) mhForget(hist);
         document.removeEventListener('keydown', onKeydown, true);
         backdrop.classList.remove('open');
         if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
@@ -1541,6 +1634,7 @@
 
     document.body.appendChild(backdrop);
     backdrop.classList.add('open');
+    if (opts.dismissable !== false) hist = mhOpen(function () { ctrl.close(); });
 
     /* Autofocus: explicit [autofocus] / data-nl-autofocus, else first field,
        else first footer button. */

@@ -84,11 +84,9 @@ test('signed in, nothing white flashes before the NL Tools bar', () => {
   assert.match(lg, /drawAccountBar\(\);/);
 });
 
-/* v1.34: back closes a preview, as in any photo viewer. */
-test('back closes the preview, and closing it takes its history step back', () => {
-  const pv = PAGE.slice(PAGE.indexOf('function preview(code, fileId)'), PAGE.indexOf('NL.files.renderDocx(f.url'));
-  assert.match(pv, /history\.pushState\(\{ ppPreview: true \}, '', location\.href\);/);
-  assert.match(pv, /function onBack\(\) \{ viaBack = true; ctrl\.close\(\); \}/);
-  assert.match(pv, /window\.addEventListener\('popstate', onBack\);/);
-  assert.match(pv, /window\.removeEventListener\('popstate', onBack\);\s*if \(!viaBack && history\.state && history\.state\.ppPreview\) history\.back\(\);/);
+/* v1.35: back closing the preview is the shared dialog's job (nl-utils
+   v1.66, tests/modal-back.test.mjs); the page keeps no history code of its
+   own, which would take two steps for one dialog. */
+test('the preview leaves back to the shared dialog', () => {
+  assert.doesNotMatch(PAGE, /pushState|popstate|ppPreview/);
 });
