@@ -1,8 +1,14 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.56 (12/11/2026)
+   Version: v1.57 (13/11/2026)
 
+   v1.57 — Two doors, one mode (13/11/2026). NL.codeGate: the gate offers
+           "Have an NL Tools account? Sign in" under the code; resume says
+           which door (session.mode 'account' | 'code'); an account session
+           gets the NL Tools top bar in place of the club bar
+           (NL.codeGate.accountBar, opts.account). Cache-bust nl-utils
+           ?v=60 -> ?v=61, in lockstep.
    v1.56 — Live grants: who a tool opens to is saved at
    access-grants/<toolKey> and replaces the registry's grants where present
    (NL.pass.withLive, withLiveAll, cleanGrants, loadRegistry). Edited in the
@@ -2286,6 +2292,14 @@
   /* Past this, a check that is still running should say it is still running. */
   var SLOW_MS = 3000;
 
+  /* The email of an NL Tools account signed in in this browser, or ''. */
+  function signedInAs() {
+    try {
+      var u = typeof firebase !== 'undefined' && firebase.auth().currentUser;
+      return (u && u.email) || '';
+    } catch (e) { return ''; }
+  }
+
   function codeGateOpen(opts) {
     opts = opts || {};
     var mount = opts.mount || document.body;
@@ -2313,6 +2327,19 @@
             'maxlength="' + len + '" placeholder="' + new Array(len + 1).join('•') + '" ' +
             'aria-label="' + esc(opts.inputLabel || (len + '-character code')) + '">' +
           '<div class="gate__err" data-err role="alert"></div>' +
+          /* v1.57: one mode per browser. Someone already signed in to NL
+             Tools (a League account, so no club here) is told what a code
+             would cost them before they type one: it replaces their sign-in. */
+          (signedInAs() ? '<div class="gate__alt">You are signed in to NL Tools as ' + esc(signedInAs()) +
+            '. A code here signs you out of NL Tools in this browser.' +
+            (opts.staffUrl ? ' <a href="' + esc(opts.staffUrl) + '">Open the League page</a>' : '') + '</div>' :
+          /* v1.57: the second door, quieter than the first. Club codes stay
+             the main way in; someone with an NL Tools account signs in and
+             comes back here (the sign-in page honours ?next=). */
+          opts.signIn === false ? '' :
+            '<div class="gate__alt"><a href="/?next=' +
+              esc(encodeURIComponent(location.pathname + location.search)) +
+              '">Have an NL Tools account? Sign in</a></div>') +
         '</div></div>';
       var card = host.firstElementChild;
       mount.innerHTML = '';
@@ -2396,9 +2423,14 @@
       var off = firebase.auth().onAuthStateChanged(function (user) {
         off();
         if (!user || user.isAnonymous) { resolve(null); return; }
+        /* mode (v1.57): 'account' for an NL Tools sign-in (it has an email),
+           'code' for a code session (a custom token, no email). One browser
+           is in one mode: both live on the same Firebase sign-in, so entering
+           a code ends an account session and signing in ends a code one. */
+        var mode = user.email ? 'account' : 'code';
         function read(t) {
           var c = (t && t.claims) || {};
-          return c[claim] ? { role: c[claim], name: c[claim + 'Name'] || '' } : null;
+          return c[claim] ? { role: c[claim], name: c[claim + 'Name'] || '', mode: mode } : null;
         }
         /* v1.55, club logins: a signed-in account (it has an email; a code
            session does not) whose Club card was issued after its token was
@@ -2484,18 +2516,51 @@
       });
     }).then(function (g) {
       return firebase.auth().signInWithCustomToken(g.customToken).then(function () {
-        return { role: g.role, name: g.name };
+        return { role: g.role, name: g.name, mode: 'code' };
       });
     });
+  }
+
+  /* v1.57 — the page says which door you came in by. Signed in to NL Tools,
+     a club page wears the NL Tools top bar (your initials, Portal, Sign out
+     in its menu), as every page behind an account does: the club's white
+     .nl-idbar is for a code session, and the brand ruling (nl-brand v2.51) is
+     that the bar's colour says whether an NL account is behind the page.
+     Needs nl-topbar.js on the page and `account: { title, toolKey }` in the
+     options; without either it changes nothing. */
+  function codeGateAccountBar(account) {
+    if (!account || !window.NL.renderTopbar || typeof firebase === 'undefined') return Promise.resolve();
+    var user = firebase.auth().currentUser;
+    if (!user || !user.email) return Promise.resolve();
+    return firebase.database().ref('users/' + user.uid).once('value').then(function (snap) {
+      var u = snap.val() || {};
+      var bar = document.querySelector('.nl-idbar');
+      var slot = document.getElementById('nlTopbar');
+      if (!slot) {
+        slot = document.createElement('div');
+        slot.id = 'nlTopbar';
+        if (bar && bar.parentNode) bar.parentNode.insertBefore(slot, bar);
+        else document.body.insertBefore(slot, document.body.firstChild);
+      }
+      if (bar) bar.hidden = true;
+      window.NL_TOOL = window.NL_TOOL || { title: account.title, toolKey: account.toolKey };
+      window.NL.renderTopbar({
+        uid: user.uid, email: user.email, name: u.name || user.email,
+        role: u.role || '', club: u.club || (u.pass && u.pass.club) || '', pass: u.pass || null
+      });
+    })['catch'](function () { /* the club bar stays: still correct, only plainer */ });
   }
 
   window.NL.codeGate = {
     open: codeGateOpen,
     resume: codeGateResume,
-    /* Resume if we can, gate if we cannot — what every caller actually wants. */
+    accountBar: codeGateAccountBar,
+    /* Resume if we can, gate if we cannot — what every caller actually wants.
+       An account session also gets the NL Tools top bar (opts.account). */
     ensure: function (opts) {
       opts = opts || {};
       return codeGateResume(opts.claim).then(function (s) {
+        if (s && s.mode === 'account') return codeGateAccountBar(opts.account).then(function () { return s; });
         return s || codeGateOpen(opts);
       });
     },
