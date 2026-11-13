@@ -88,6 +88,7 @@ rather than relying on someone noticing.
 3. Every action on the thing lives in the dialog's bottom bar, never in the body. **[new]**
 4. A mode (Correct, Postpone) opens as its own dialog, titled with the mode: "Correct: Bath City v Truro City". **[new]**
 5. Saving is explicit. Nothing changes until Save is pressed, except a single tick or toggle that says so. **[new]**
+6. Back closes the dialog on top: a phone's back button, a swipe or the browser's arrow, never the page behind it. Every `NL.modal` does this (nl-utils v1.66); a dialog that must not be dismissed is the exception. **[law] [check]**
 
 ## 8. Manage
 
