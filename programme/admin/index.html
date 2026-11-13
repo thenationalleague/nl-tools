@@ -4,7 +4,8 @@
   Version: v1.11 (13/11/2026) — the console asks for its all-clubs session
            only at Manage (session.toolLevel 'admin'). Below that, one line
            says who runs it, instead of showing the server's refusal as an
-           error.
+           error. The Library opens as soon as the session is in (it waited
+           for a tab click), and the loading state is one quiet line.
   Version: v1.10 (13/11/2026) — tabs: Library first, then Removed files,
            Audit and Manage: passcodes, usage and sizes are for running the
            tool, so they sit last. A club's Open shows its library in the
@@ -95,7 +96,7 @@
       {
         date: '13/11/2026',
         version: 'v1.11',
-        items: [ 'Without Manage, the console says who runs it instead of showing an error.' ]
+        items: [ 'The Library opens straight away.', 'Without Manage, the console says who runs it instead of showing an error.' ]
       },
       {
         date: '28/10/2026',
@@ -233,8 +234,7 @@
 
   /* Boot/loading state. A pane must never sit empty with no explanation: every
      RTDB listener below has an error callback that writes into it. */
-  .boot { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 22px; text-align: center; color: var(--text-muted); font-size: var(--text-sm); }
+  .boot { margin: 24px 0; text-align: center; color: var(--text-muted); font-size: var(--text-sm); }
 
   /* The Library tab's frame: the library page itself in master mode. Tall
      enough that the folder surface, not the frame, is what scrolls. */
@@ -301,9 +301,8 @@
      denied read — or a passcode exchange that never came back — left the panes
      blank forever with nothing in the console. Every path below ends in either
      content or a visible message. */
-  function status(title, detail) {
-    paneEl().innerHTML = '<div class="boot"><strong>' + esc(title) + '</strong>' +
-      (detail ? '<div style="margin-top:6px">' + esc(detail) + '</div>' : '') + '</div>';
+  function status(text, detail) {
+    paneEl().innerHTML = '<p class="boot">' + esc(text) + (detail ? '<br>' + esc(detail) : '') + '</p>';
   }
 
   function fail(where, e) {
@@ -322,7 +321,7 @@
         'The Programme Packs console is run by League Media and League Commercial</div></div>';
       return;
     }
-    status('Connecting…', 'Verifying your access with the National League.');
+    status('Opening the console…');
 
     /* Exchange the portal session for a pClub:'*' token on the NAMED app.
        Everything below reads/writes through that — the rules never see the
@@ -331,12 +330,15 @@
        an RTDB round-trip to the programmeAuth trigger, so it takes seconds. */
     PP.enterAsAdmin().then(function () {
       ready = true;
-      status('Loading…', 'Access confirmed. Fetching the club roster.');
+      /* The Library needs nothing but the session, so it opens now; the
+         other tabs draw once the roster is in. */
+      if (tab === 'library') render(); else status('Opening the console…');
       return NL.clubs.forSeason();
     }).then(function (clubs) {
       ROSTER = clubs;
       BY_CODE = {};
       clubs.forEach(function (c) { BY_CODE[c.code] = c; });
+      render();
 
       /* Re-render only the tab a change can affect. An audit write used to
          redraw the access table, which threw away its horizontal scroll
