@@ -54,7 +54,6 @@ files if a diff is ever needed.
 | `Notifications.js` | 159 | Request-flow email: `notifyAdmin`, `confirmRequest`, `sendApproval`, `sendRejection`. |
 | `Emails.js` | 138 | HTML email templates used by the above. |
 | `Vacancies.js` | 244 | Vacancy submission verification + notification email. |
-| `FixtureSync.js` | 428 | Time-driven NLS → RTDB fixture sync (see below). |
 | `Tests.js` | 46 | Manual test functions, run from the editor. Never web-facing. |
 | `appsscript.json` | — | The manifest. A change to scopes or runtime is exactly the drift worth seeing. |
 
@@ -97,19 +96,12 @@ reason — see `system/retired/live-blog-and-transfer-centre.md`.
 authorization fix for the invite / approval actions: a shared `verifyCaller_` in
 `Utils.js`, plus role gates on `sendInvite`, `sendApproval`, `sendRejection`.
 
-## `FixtureSync.js` — NLS fixture sync (Attendance)
+## `FixtureSync.js` — retired 13/11/2026
 
-Time-driven. Pulls the fixture schedule from the **NLS API** and writes each
-match to RTDB `app-data/ops-attendance/fixtures/<matchID>`. Four competitions by
-id — NL Prem (89), North (373), South (372) and **NL Cup (1275)** — each record
-tagged with `competitionKey` (`nl-cup` for the Cup), teams by name
-(`homeTeamName`/`awayTeamName`), date in `kickoffUTC`. Additive +
-diff-before-write; it never touches `/submissions/` and ignores NLS attendance
-figures (attendance is 100% manual club submission).
-
-Secrets (`RTDB_URL`, `RTDB_SECRET`, `ATT_SEASON_ID`) live in Script Properties,
-not in the file. This node is the shared source both the **Attendance** tool and
-the **Cup Footage** fixture importer read from.
+It copied NLS fixtures into `app-data/ops-attendance/fixtures` four times a
+day for Attendance. Fixture Management's record is now Attendance's only
+fixture list, so the file, its timer and the copied list are gone. See
+`system/retired/fixture-sync.md`.
 
 ## Changing the backend
 
