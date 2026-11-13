@@ -1,7 +1,19 @@
 /*
  * auth-guard.js — NL Tools v2
  * File: /system/auth-guard.js
- * Version: v16.2 (13/11/2026)
+ * Version: v16.3 (13/11/2026)
+ *
+ * v16.3: The pass decides everywhere (Roadmap, Now). Someone with an issued
+ *       pass is decided by NL.pass.explain alone (decideByPass). The two
+ *       checks that ran ahead of it go by the pass now: the superadmin role
+ *       no longer opens every tool (the Skeleton key does that), and "League
+ *       only" reads the pass's card, not the old role, so a League pass
+ *       with an old club or blank role is no longer refused at a door the
+ *       portal shows. Kept: a Club card at a League tool's staff page goes
+ *       to its club page or is refused; and the superadmin role always opens
+ *       Access (ops-people) at Manage, the way back in from a wrong pass,
+ *       logged as access_way_back. People without a pass: unchanged.
+ *       Cache-bust ?v=21 -> ?v=22, in lockstep with every page.
  *
  * v16.2: A Club card holder who lands on a tool's staff page (an /admin/
  *       address) is sent to the tool's club page (`clubUrl`) when their pass
@@ -474,7 +486,15 @@
       return;
     }
 
-    /* Superadmin: always granted, and always at the top level. */
+    /* v16.3: someone with an issued pass is decided by it and nothing else
+       (decideByPass below). Only people without a pass reach the old checks
+       that follow. */
+    if (PASS_DECIDES && window.NL && NL.pass && NL.pass.isIssued(session.pass)) {
+      decideByPass(session, toolData);
+      return;
+    }
+
+    /* No pass yet. Superadmin: always granted, and always at the top level. */
     if (session.role === 'superadmin') {
       session.toolLevel = 'admin';
       notePassFinding(session, toolData, 'admin');
@@ -521,23 +541,9 @@
        inline fallback covers a head that has drifted rather than trusting it,
        because failing open here would grant access. */
     var rawEntry = session.tools ? session.tools[NL_TOOL_KEY] : undefined;
-    var oldLevel = (window.NL && NL.resolveToolLevel)
+    var level = (window.NL && NL.resolveToolLevel)
       ? NL.resolveToolLevel(rawEntry, toolData, session.role)
       : 'off';
-
-    /* v16.0: someone with an issued pass is decided by it (NL.pass.explain:
-       card, keys, the tool's grants, Skeleton key, Sandbox, end dates).
-       Someone without one — a new invite, an account nobody has looked at
-       yet — keeps the old answer, so nobody is shut out for lacking a pass.
-       The superadmin role and the audience gate above stay ahead of the
-       pass: the first so no pass mistake can lock out whoever fixes it, the
-       second until club logins (step 7). Manage is the old 'admin'. */
-    var level = oldLevel;
-    var byPass = PASS_DECIDES && window.NL && NL.pass && NL.pass.isIssued(session.pass);
-    if (byPass) {
-      var ex = NL.pass.explain(session.pass, toolData);
-      level = ex.level === 'manage' ? 'admin' : ex.level;
-    }
 
     /* Hand the resolved level to the page (v6.5). This is the ONLY value a
        tool should read to decide what the user may do: it already accounts
@@ -546,9 +552,6 @@
        misses all that and is how three tools disagreed with their own
        registry. */
     session.toolLevel = level;
-    /* Findings now mean drift: the per-tool entries the database reads no
-       longer match the pass (People and cards → Manage → Apply passes). */
-    notePassFinding(session, toolData, oldLevel);
 
     if (level === 'access' || level === 'admin') {
       grantAccess(session);
@@ -557,8 +560,71 @@
          identical to the user: a tool not published to the registry yet, and
          a person without a grant. */
       if (toClubPage(session, toolData)) return;
-      showUnavailable(session, !toolData ? 'not in the registry' : (byPass ? 'no access (pass)' : 'no access'));
+      showUnavailable(session, !toolData ? 'not in the registry' : 'no access');
     }
+  }
+
+  /* ── The pass decides (v16.3) ──────────────────────────────────────────
+     For anyone with an issued pass, NL.pass.explain is the answer: card,
+     keys, the tool's grants (live ones from Access included), Skeleton key,
+     Sandbox, end dates. Until v16.2 two older checks ran first and could
+     overrule it: the superadmin ROLE (in everywhere, whatever the pass said)
+     and the "League only" check, which looked at the old ROLE, so someone
+     with a League pass and an old club or blank role saw a tool's card on
+     the portal and was refused at its door. Both now go by the pass.
+
+     Two things are kept, both deliberate:
+     · A Club card at a League tool's staff page goes to the tool's club
+       page if its pass opens one, else is refused. The staff page shows
+       every club's data, and clubs come in through their own page. This
+       reads the pass's card, not the role.
+     · The way back in: the superadmin role always opens Access (the tool
+       that issues passes) at Manage, so a mistake on a Skeleton key holder's
+       own pass can be fixed by them. It opens nothing else, and every use is
+       in the audit log. */
+  var ACCESS_TOOL = 'ops-people';
+
+  function decideByPass(session, toolData) {
+    var ex = NL.pass.explain(session.pass, toolData);
+    var level = ex.level === 'manage' ? 'admin' : ex.level;
+
+    var aud = toolData && toolData.audience;
+    var leagueTool = aud === 'league' || aud === 'staff' || aud === 'meta';
+    if (session.pass.base === 'club' && leagueTool && ex.reason !== 'skeleton') {
+      if (toClubPage(session, toolData)) return;
+      level = 'off';
+    }
+
+    if (NL_TOOL_KEY === ACCESS_TOOL && session.role === 'superadmin' && level !== 'admin') {
+      level = 'admin';
+      try {
+        if (!NL.session) NL.session = session;
+        if (NL.writeAudit) NL.writeAudit('access_way_back', '[' + NL_TOOL_KEY + '] opened by the superadmin role; the pass gives ' + ex.level);
+      } catch (e) {}
+    }
+
+    session.toolLevel = level;
+    /* Findings mean drift: the per-tool entries the database still reads no
+       longer match the pass (Access → Manage → Apply passes). */
+    notePassFinding(session, toolData, oldDoorLevel(session, toolData));
+
+    if (level === 'access' || level === 'admin') {
+      grantAccess(session);
+    } else {
+      if (toClubPage(session, toolData)) return;
+      showUnavailable(session, !toolData ? 'not in the registry' : 'no access (pass)');
+    }
+  }
+
+  /* What the database's old per-person entries and role give, for the drift
+     finding only. Never decides anything. */
+  function oldDoorLevel(session, toolData) {
+    if (session.role === 'superadmin') return 'admin';
+    var aud = toolData && toolData.audience;
+    var LEAGUE = { admin: true, staff: true };
+    if ((aud === 'league' || aud === 'staff' || aud === 'meta') && !LEAGUE[session.role]) return 'off';
+    var entry = session.tools ? session.tools[NL_TOOL_KEY] : undefined;
+    return (window.NL && NL.resolveToolLevel) ? NL.resolveToolLevel(entry, toolData, session.role) : 'off';
   }
 
   function grantAccess(session) {
