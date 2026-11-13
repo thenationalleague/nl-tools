@@ -623,9 +623,22 @@ Where it differs from step 4 as planned:
   the door; now both say yes. A Club card at a League tool's staff page
   still goes to the tool's club page, or is refused.
 - People without a pass are decided exactly as before.
-- Still to do under this heading: Attendance and the Handbook decide who can
-  edit by role, on the page and in the database rules. Moving them to the
-  pass needs their Manage level built, so it is its own pull request.
+- **Attendance (v2.15.0) and the Handbook (v0.67) followed the same day.**
+  Both offer Manage now. Attendance's page reads one `who()` from the pass:
+  League view and export for a League card; fixtures, neutral venues and any
+  club's figures for League + Manage (League Operations); a club's own
+  figures for its Club card + Manage (Club Operations, Club Media); archived
+  seasons and season admin for the Skeleton key. The Handbook edits and
+  publishes at Manage (League Operations) and seeds with the Skeleton key.
+  Their rules come from `scripts/rtdb-level-rule.mjs`: submissions at
+  Manage; Attendance's fixtures and audit logs, and every Handbook write, at
+  League + Manage, using the new `leagueRule()` (first written by hand for
+  Commercial Benchmarking, which it reproduces exactly). Writes kept for the
+  superadmin role: Attendance's archive and audit-log writes, until step 5.
+- Behaviour that changed: League staff without the Operations key no longer
+  submit attendance or edit the Handbook, whatever their old role (the
+  grants agreed 12/11). A club secretary with no pass still submits
+  (club-admin default raised to Manage).
 
 ### Until club logins: a Club card is held to the club role (12/11/2026)
 
