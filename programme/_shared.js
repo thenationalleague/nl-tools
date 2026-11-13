@@ -1,5 +1,10 @@
 /*
   Programme Packs — shared runtime for the library + admin console
+  Version: v2.1 (13/11/2026) — the default app is created when this file
+           loads, before the named app (the code door signs in on it). The
+           first try of the shared door here was refused at
+           club-codes/authGrants; nl-utils v1.62 also makes the exchange wait
+           for the database to see the new sign-in.
   Version: v2.0 (13/11/2026) — one club code door. A club's passcode is
            checked by the shared clubCodeAuth (app-data/club-codes, through
            NL.codeGate.viaFunction), the same door as every other club page,
@@ -159,6 +164,11 @@
      self-skips when there's no default app; on the admin console the default
      app DOES exist (auth-guard), so this family keeps its own audit trail
      under app-data/media-programme/audit either way. */
+  /* v2.1: the default app first, as every other club page has it from its
+     head. The club code door signs in on it (NL.codeGate); left until the
+     first sign-in, it was created after the named app below, the one
+     difference from the pages where the door already worked. */
+  ensureDefaultApp();
   var app = firebase.initializeApp(FB_CONFIG, 'nlProgramme');
 
   /* ── Pure helpers ──────────────────────────────────────────────────────
