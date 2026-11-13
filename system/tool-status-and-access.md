@@ -93,8 +93,10 @@ themselves, not inferred from the registry defaults.
 ### URL shape for a tool clubs use (settled 15/10/2026, Richard)
 
 **The tool's own address is the club's page; the League's console is
-`/admin/` on top.** Programme Packs is the model: `/programme/` for clubs by
-access code, `/programme/admin/` for staff behind auth-guard. When clubs later
+`/admin/` on top.** (Superseded for new tools by `system/one-address-plan.md`:
+one address, and Programme Packs became one page on 13/11/2026.) Programme
+Packs was the model: `/programme/` for clubs by access code, `/programme/admin/`
+for staff behind auth-guard. When clubs later
 reach a tool through the portal instead of a code, the root page takes a
 portal session as well, and the address clubs hold never changes.
 

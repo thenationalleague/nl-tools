@@ -8,7 +8,9 @@ retired — see [Cutover](#cutover).
 |---|---|---|---|
 | `/programme/` | **The 72 clubs** | their 6-character passcode | Browse and download **every** club's folder. Upload, organise into folders, and remove files **in their own folder only** |
 | `/programme/` | **NL commercial** | the 73rd (National League) passcode | Everything a club can do, in the **National League** folder |
-| `/programme/admin/` | **NL admin/superadmin** | **portal login** (auth-guard, `media-programme`) | Everything, everywhere: the **Library** tab is the club page in master mode — browse and manage all 73 folders. Plus: seed/sync the roster, see and regenerate every passcode, export the access CSV, restore or permanently delete removed files, generate previews for images uploaded before previews existed, read the audit trail |
+| `/programme/` | **The League with Manage** (admin/superadmin, or a League pass with Manage here) | **NL Tools sign-in** | Everything, everywhere: the **Library** tab is all 73 folders to browse and manage. Plus the tabs **Removed files**, **Audit** and **Manage**: seed/sync the roster, see and regenerate every passcode, export the access CSV, restore or permanently delete removed files, generate previews for older images, read the audit trail |
+
+`/programme/admin/` forwards to `/programme/` (one page since 13/11/2026, `system/one-address-plan.md`).
 
 ## The model
 
@@ -177,21 +179,19 @@ killed it for video previews, which happen constantly. Here it runs on a gate a
 device hits once every 30 days, behind a spinner that says so after 3s. The
 client gives up at 60s.
 
-**The master view** (`/programme/?master=1`) is the library's third door,
-beside the passcode and the remembered device: an NL admin gets the console's
-`'*'` session on the club page itself, so all 73 folders browse **and**
-manage in one place — `canWrite()` and both rulesets already understood
-`'*'`; only the entry path was missing. The console's **Library** tab embeds
-exactly this (`&embed=1` drops the idbar and keeps folder navigation out of
-the console's history). The flag grants nothing: it needs a **live portal
-sign-in on every boot** — a persisted `'*'` session on a machine whose portal
-login has gone is signed out, not adopted — and the role check happens
-server-side in `programmeAuth`. With a live portal session, a persisted `'*'`
-is adopted to skip the ~15-20s Eventarc exchange, but only by the portal user
-it was minted for (`pp-admin-<uid>`): anyone else at that keyboard goes back
-through the exchange under their own name and their own role check, so the
-audit can never carry the previous admin's identity. Master actions audit as
-`master`, unlike **Open as**, which acts as the club (marked `viaAdmin`).
+**The League's door** is the library's third, beside the passcode and the
+remembered device: someone signed in to NL Tools with no club on their card
+gets the `'*'` session on this page, so all 73 folders browse **and** manage
+in one place, with the League tabs (`_console.js`, loaded only for them)
+beside the Library. The page checks the same thing `programmeAuth` checks
+before asking, so anyone without Manage is told at once; the server still
+decides. It needs a **live NL Tools sign-in on every boot** — a persisted
+`'*'` session on a machine whose sign-in has gone is signed out, not adopted.
+With a live sign-in, a persisted `'*'` is adopted to skip the ~15-20s Eventarc
+exchange, but only by the user it was minted for (`pp-admin-<uid>`): anyone
+else at that keyboard goes back through the exchange under their own name, so
+the audit can never carry the previous admin's identity. These actions audit
+as `master`, unlike **Open as**, which acts as the club (marked `viaAdmin`).
 
 This is the one deliberate difference from `/uw-promo/`, where passcodes are
 world-readable and compared client-side. With anonymous auth the token carries
@@ -289,7 +289,7 @@ Rules: `system/rtdb/rules.snapshot.json` (`app-data/media-programme`) and
 4. **Tool registry** — paste the `media-programme` entry from
    `system/rtdb/tools-registry.snapshot.json` into RTDB `tools/`
 
-Then open `/programme/admin/` and press **Seed roster**. That mints a passcode
+Then open `/programme/`, signed in to NL Tools, go to **Manage** and press **Seed roster**. That mints a passcode
 for each of the current 72 clubs plus the National League, and is
 additive and idempotent — re-running after promotion/relegation picks up new
 clubs without touching an existing passcode.
