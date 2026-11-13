@@ -203,8 +203,12 @@ test('.nl-select exists and redraws the dropdown arrow itself', () => {
   const body = ruleBody('.nl-select');
   assert.match(body, /(^|[;{\s])appearance:\s*none/, 'native arrow must be removed');
   assert.match(body, /-webkit-appearance:\s*none/);
-  assert.match(body, /background-image:\s*linear-gradient/, 'arrow must be redrawn');
-  assert.match(body, /var\(--text-muted\)/, 'redrawn arrow uses the brand muted ink');
+  /* v2.81: the filter button's chevron, as an SVG, not two gradients. */
+  assert.match(body, /background-image:\s*url\("data:image\/svg\+xml/, 'arrow must be redrawn');
+  assert.match(body, /M2 4l4 4 4-4/, 'the same path as NL.filterButton and NL.clubPicker');
+  /* A data URI cannot read a token, so the hex must stay equal to it. */
+  const muted = css.match(/--text-muted:\s*(#[0-9a-fA-F]{6})/)[1].toLowerCase();
+  assert.ok(body.toLowerCase().includes("stroke='%23" + muted.slice(1)), 'redrawn arrow uses the brand muted ink');
 });
 
 /* Width is layout, not identity — nls-monitor's 15rem stayed tool-local and
