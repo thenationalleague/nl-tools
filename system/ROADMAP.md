@@ -96,10 +96,6 @@ Why: The colour lives on the sticker, not the whole pass, so every pass looks li
 - The white circle stops a crest disappearing into its own colour (Kidderminster on orange).
 - Built together: the new front and the flip are one piece of work.
 
-### Zones
-What: On screen, the stickers on the pass are called zones, not keys.
-Why: It matches the accreditation-pass idea. Only the word on screen changes.
-
 ### Claudio's leftovers
 What: Delete everything left of the old Claudio assistant, its chat history included.
 Why: The tool is gone and the history may hold questions nobody should keep.
