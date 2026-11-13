@@ -1440,3 +1440,17 @@ test('no button types an arrow character where the sprite has an icon', () => {
   });
   assert.deepEqual(bad, [], 'use the sprite icon (icon-back / icon-forward) instead of a typed arrow:\n  ' + bad.join('\n  '));
 });
+
+/* ── The club picker sits with the filter buttons (nl-brand v2.80, nl-utils
+   v1.63). It typed a ▾ and went red when open; Richard: "the picker feels a
+   little different" (Attendance, 13/11/2026). */
+test('the club picker draws its chevron and goes navy, like a filter button', () => {
+  const utils = readFileSync(join(REPO, 'system/nl-utils.js'), 'utf8');
+  assert.doesNotMatch(utils, /club-picker__chevron'; chev\.textContent/, 'no typed chevron');
+  assert.match(utils, /createElementNS\(SVGNS, 'svg'\);\s*chev\.setAttribute\('class', 'club-picker__chevron'\)/, 'an SVG chevron');
+  assert.match(utils, /'M2 4l4 4 4-4'/, 'the filter button\'s path');
+  assert.match(ruleBody('.club-picker__wrap:focus-within'), /border-color:\s*var\(--navy\)/);
+  assert.match(ruleBody('.club-picker--select .club-picker__wrap:focus-visible'), /border-color:\s*var\(--navy\)/);
+  assert.match(ruleBody('.club-picker--select.is-open .club-picker__wrap'), /border-color:\s*var\(--navy\)/);
+  assert.doesNotMatch(ruleBody('.club-picker__wrap:focus-within'), /--primary/, 'red is for where you are, not what you chose');
+});
