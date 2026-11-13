@@ -57,7 +57,7 @@ simple first). Real life has now asked:
 
 | Word | What it is | Values |
 |---|---|---|
-| **Card** (the base) | Where a person belongs. Exactly one each. | Club · League · External (parked) |
+| **Card** (the base) | Where a person belongs. Exactly one each. | Club · League · External (decided 13/11, built after club logins – see "External passes") |
 | **Club** | Which club. Club card only. | one of the 72 |
 | **Key** | An extra job, held on top of the card. Any number. | League: Operations, Media, Commercial, Finance, Senior leadership, Tester. Club: Operations, Media, Commercial, Finance. |
 | **Level** | What a person can do on one tool. | Off · Access · Manage |
@@ -172,8 +172,8 @@ of the canvas are the reference; boards 1–5 were the earlier concepts.
 - **Where it lives:** its own page, **`nl.tools/pass`**. Reached from the
   small pass and the "My pass" item in the menu under the circle, and from
   the Access denied page ("see your pass"). Shows only your own pass;
-  anyone else's is "View as". Keep it separate from any existing account
-  page (name, password) and link between them.
+  anyone else's is "View as". Since 13/11 it is also the account page:
+  password and sign-in settings sit at its foot (see "Your account").
 - **The pass:** strap and metal clip threaded through a slot; header band in
   the club's (or League's) colour with the crest on a white seat; name and job
   title; a sticker for each key held, with its code (OPS, MED…) and name; keys
@@ -254,6 +254,83 @@ Codes are retired, not kept:
    keep exactly their current powers); **codes off on a fixed date.**
 5. The public Vacancies form retires on the same date; clubs submit from
    inside NL Tools.
+
+### How people arrive (decided 13/11)
+
+- **Clubs ask; everyone else is invited.** A club secretary shares one
+  sign-up link with their staff. The link carries the club, so the person
+  gives name, job title, zones wanted and a one-line reason. League
+  Operations approve, seeing what each zone opens. League Operations can
+  also invite club staff directly.
+- **League staff and externals are invite-only.** The invite sets card,
+  zones and job title; the person accepts and sets a password.
+- While waiting, a club person sees a "pending" page.
+- **Everyone signs in with email and password**, two-step later. No
+  passwordless emailed sign-in links: every sign-in would depend on the
+  person's inbox.
+- **Email safety nets:** the sent log in Access's Audit tab, a **Resend**
+  button on invites and approvals, and **Copy link** so an invite can be
+  sent another way if the email never arrives.
+
+## Your account (decided 13/11)
+
+- **My pass is the account page.** An Account section at its foot: email,
+  **Change password** (current password, then the new one twice), and later
+  two-step sign-in. An "Account" item in the menu under the circle jumps to
+  it. (This replaces "keep it separate from any account page" under The
+  pass.)
+- **Nobody sets or sees anyone else's password**, Skeleton key included.
+  Access has a **Send reset link** button per person, which sends the same
+  Firebase reset email as "Forgot password" on the sign-in page. Each send is
+  written to the audit log (who, to whom, when).
+- Point Firebase's reset email at an NL sender address so it isn't treated
+  as spam.
+
+## External passes (decided 13/11, built after club logins)
+
+For organisations outside the League and its clubs: DAZN, the Trust,
+agencies, freelancers.
+
+- **An organisation record** is set up first, in a new **Externals** tab in
+  Access: name, colours and a logo. Logos are uploaded to Firebase Storage in
+  their own folder (empty to start; the sponsor logos already in the repo stay
+  where they are), so changing one is an upload, not a pull request.
+- **Zones belong to the organisation and are designed for it.** Each has a
+  plain name, a three-letter code (suggested from the name, editable,
+  unique across all zones) and its tools with a level. League and Club
+  zones stay fixed; only external zones are custom.
+- **Per-person differences come from zones, never per-person grants.** The
+  "no overrides" rule holds: if one person needs more, their organisation
+  gets another zone.
+- **A pass needs at least one zone.** The External card itself opens
+  nothing; Access refuses to issue an external pass with no zones.
+- **Invite-only**, as above. Only the Skeleton key runs the Externals tab to
+  begin with.
+- **Closed by default.** A tool record carries an `externals` setting; absent
+  means closed, and a new tool starts closed. A forgotten setting can only
+  keep someone out.
+- **Access is the ceiling** unless the tool was built for externals to
+  change things (Programme Packs uploads).
+- **Never the League view.** The tool's `externals` setting also says what an
+  external sees of club data; if it says nothing, they see nothing.
+- **Sensitive tools are a hard lock**, never a flag: Club Codes, Commercial
+  and Financial Benchmarking, Responsibilities, Access (the registry's
+  `sensitive` flag). Enforced three times: Access doesn't offer them in the
+  zone editor; `NL.pass` returns Off for an External card on a sensitive
+  tool whatever the data says; the database rules refuse an External card on
+  those paths. Changing the sensitive list is a pull request.
+- **First tools:** Programme Packs (programme editors see every club's
+  library: it is a shared working space) and Fixture Management (Access,
+  view only).
+- **First organisation:** the Trust – Content Plan (Access), Document
+  Library, Graphics (making its own posts only). If it ever needs the
+  League's view across clubs, it becomes its own card, not a wider external.
+- **Later candidates:** Brand Exposure (a sponsor sees only its own boards;
+  needs that tool finished first), Matchday Live, Graphics for freelance
+  designers, Content Plan for agencies.
+- **The pass:** same NL lanyard, a third header colour, the organisation's
+  logo as the big sticker, zone stickers stacked beneath, each with its plain
+  name.
 
 ## Approvals and notifications
 
@@ -651,9 +728,13 @@ kilobytes of rules against a 256KB limit.
 
 ## Still open
 
-1. **External** (DAZN, the Trust, agencies): parked until after club logins.
-2. **Clubs managing their own staff:** later, once logins have bedded in.
-3. **Rebuilding tools under `nl.tools/portal/`** for the new model:
+1. **Clubs managing their own staff:** later, once logins have bedded in.
+2. **Rebuilding tools under `nl.tools/portal/`** for the new model:
    considering, not decided (29/10/2026).
-4. **Key or zone?** The pass is settled; whether the stickers are called
-   "keys" or "zones" on screen is not.
+3. **The new pass front:** one lanyard for all, red header for League, navy
+   for Club, a third colour for External, a big sticker (crest or logo) with
+   zones stacked beneath (13/11). The League layout and the External colour
+   are settled when it is sketched, alongside turning the pass over.
+
+Settled since: External passes (13/11, above); "zones" is the word on screen
+for keys (13/11, see the Roadmap).
