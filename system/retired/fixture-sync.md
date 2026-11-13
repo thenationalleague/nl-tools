@@ -60,4 +60,22 @@ the Fixtures dataset, one fixture list. Planned in
 
 ## Cleared
 
-To be filled in after the run: when, how many fixtures, and the bucket path.
+13/11/2026, 16:14, by the one-off `Button · Retire Attendance fixture copy`
+(PR #1530; removed in the next PR after its run). 3,462 copied fixtures
+(1.2 MB; the job only ever added, so several seasons' worth), none typed in
+by hand, and no 2026-27 submissions depending on them. The node was saved
+first to the private bucket at
+`nl-tools-monthly-backups/retired/2026-11-13/attendance-fixture-copy.json`,
+then deleted, checked gone, and an audit line written
+(`attendance_fixture_copy_retired`).
+
+`Button · Publish Apps Script` ran at 16:10 and removed `FixtureSync.js` from
+the live project. It first needed the Apps Script sign-in the GitHub jobs use
+(`CLASP_CREDENTIALS`) renewing: it had been refused since 30/10 with
+`invalid_grant … invalid_rapt`, the Google Cloud session-control
+reauthentication policy expiring the token, so the daily backup had failed
+quietly for two weeks. Fixed by a fresh `clasp login` (copied from Cloud
+Shell's editor, not the terminal, which wraps long lines into the token),
+**Exempt Trusted Apps** ticked under Google Cloud session control, and clasp
+(OAuth client `1072944905499-vm2v2i5dvn0a0d2o4ca36i1vge8cvbn0`, public)
+marked Trusted in API controls.
