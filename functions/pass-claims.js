@@ -26,6 +26,15 @@
  * on the club's name as the pass carries it. No key, no claim: logged, never
  * guessed.
  *
+ * PROGRAMME PACKS WRITES (13/11/2026): `pClub` lets a session READ its club's
+ * library; uploading, moving and deleting also need `pManage`. A club code
+ * mints it (codes keep Manage, Richard 13/11/2026); a Club card gets it only
+ * when the pass gives Manage on Programme Packs (the club Media key, by the
+ * registry's grants), so the rest of a club's people read without writing.
+ * Worked out with the door's own resolver (NL.pass, functions/canon.js). A
+ * change to Programme Packs' grants in Access re-runs this for every Club card
+ * (programmeClaims, below).
+ *
  * NOT INSTANT: a claim reaches the browser at the next token refresh (up to an
  * hour), or at once when NL.codeGate.resume asks for a fresh token, which it
  * does for a signed-in account that has no club claim yet (nl-utils v1.55).
@@ -35,7 +44,7 @@ const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
 
 const CODES = "app-data/club-codes";
-const CLUB_CLAIMS = ["club", "clubName", "pClub", "pClubName"];
+const CLUB_CLAIMS = ["club", "clubName", "pClub", "pClubName", "pManage"];
 
 const OPTS = {
   ref: "/users/{uid}/pass",
@@ -61,9 +70,9 @@ function clubKeyFor(name, clubs) {
 }
 
 /* The account's custom claims after this pass: every other claim kept, the
-   four club claims replaced — set from an issued Club card whose club has a
-   key, removed otherwise. */
-function nextClaims(existing, pass, clubs) {
+   club claims replaced — set from an issued Club card whose club has a key,
+   removed otherwise. `manage`: the pass gives Manage on Programme Packs. */
+function nextClaims(existing, pass, clubs, manage) {
   const out = Object.assign({}, existing || {});
   CLUB_CLAIMS.forEach((k) => { delete out[k]; });
   if (!pass || !pass.issued || pass.base !== "club") return out;
@@ -72,6 +81,7 @@ function nextClaims(existing, pass, clubs) {
   if (!key) return out;
   out.club = key; out.clubName = name;
   out.pClub = key; out.pClubName = name;
+  if (manage) out.pManage = true;
   return out;
 }
 
@@ -91,11 +101,25 @@ async function readClubs(db) {
   return (wrapped && wrapped.clubs) || {};
 }
 
-exports.passClaims = onValueWritten(OPTS, async (event) => {
-  const uid = event.params.uid;
-  const after = event.data && event.data.after;
-  const pass = after && after.exists() ? after.val() : null;
+const { loadCanon } = require("./canon");
+const PROGRAMME = "media-programme";
 
+/* Does this pass give Manage on Programme Packs? The registry record with its
+   live grants (Access), resolved as the door resolves it. */
+async function programmeManage(db, pass) {
+  if (!pass || !pass.issued || pass.base !== "club") return false;
+  const [rec, live] = await Promise.all([
+    db.ref("tools/" + PROGRAMME).once("value"),
+    db.ref("access-grants/" + PROGRAMME).once("value"),
+  ]);
+  if (!rec.exists()) return false;
+  const NL = loadCanon();
+  const tool = NL.pass.withLive(rec.val(), live.val());
+  return NL.pass.explain(pass, tool).level === "manage";
+}
+
+/* Bring one account's club claims in line with its pass. */
+async function applyClaims(db, uid, pass, clubs) {
   let user;
   try {
     user = await admin.auth().getUser(uid);
@@ -103,10 +127,8 @@ exports.passClaims = onValueWritten(OPTS, async (event) => {
     logger.warn("passClaims: no sign-in account for this pass", { uid, message: err && err.message });
     return;
   }
-
-  const clubs = await readClubs(admin.database());
   const before = user.customClaims || {};
-  const next = nextClaims(before, pass, clubs);
+  const next = nextClaims(before, pass, clubs, await programmeManage(db, pass));
   if (sameClaims(before, next)) return;
 
   if (pass && pass.base === "club" && !next.club) {
@@ -115,6 +137,29 @@ exports.passClaims = onValueWritten(OPTS, async (event) => {
     logger.warn("passClaims: no club key for this Club card", { club: String(pass.club || "") });
   }
   await admin.auth().setCustomUserClaims(uid, Object.keys(next).length ? next : null);
-  logger.info("passClaims: club claims " + (next.club ? "set" : "cleared"), { uid, club: next.club || null });
+  logger.info("passClaims: club claims " + (next.club ? "set" : "cleared"), { uid, club: next.club || null, manage: !!next.pManage });
+}
+
+exports.passClaims = onValueWritten(OPTS, async (event) => {
+  const uid = event.params.uid;
+  const after = event.data && event.data.after;
+  const pass = after && after.exists() ? after.val() : null;
+  const db = admin.database();
+  await applyClaims(db, uid, pass, await readClubs(db));
 });
 
+/* Programme Packs' grants changed in Access: every Club card's write claim
+   follows. */
+exports.programmeClaims = onValueWritten(Object.assign({}, OPTS, { ref: "/access-grants/" + PROGRAMME }), async () => {
+  const db = admin.database();
+  const [users, clubs] = await Promise.all([db.ref("users").once("value"), readClubs(db)]);
+  const all = users.val() || {};
+  let n = 0;
+  for (const uid of Object.keys(all)) {
+    const pass = all[uid] && all[uid].pass;
+    if (!pass || !pass.issued || pass.base !== "club") continue;
+    await applyClaims(db, uid, pass, clubs);
+    n++;
+  }
+  logger.info("programmeClaims: Club cards checked", { n });
+});

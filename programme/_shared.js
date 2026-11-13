@@ -1,5 +1,9 @@
 /*
   Programme Packs — shared runtime for the library + admin console
+  Version: v1.8 (13/11/2026) — a Club card writes only with Manage: the
+           session carries canWrite from the pManage claim, which a club code
+           always mints and a Club card gets only with Manage on Programme
+           Packs. The rules check the same claim.
   Version: v1.7 (13/11/2026) — the club card door: PP.enterAsCard opens the
            library with the person's own NL Tools sign-in when their Club card
            has put their club on the account (functions/pass-claims.js), with
@@ -500,9 +504,12 @@
       }).then(function (c) {
         if (!c) return null;
         app = ensureDefaultApp();
+        /* canWrite: the pass gives Manage here (the pManage claim). Without
+           it the card reads its club's library and writes nothing; the rules
+           say the same, this only keeps the buttons honest. */
         session = {
           code: c.pClub, name: c.pClubName || c.pClub, division: '',
-          isNL: c.pClub === 'NL', isAdmin: false, viaCard: true
+          isNL: c.pClub === 'NL', isAdmin: false, viaCard: true, canWrite: c.pManage === true
         };
         PP.session = session;
         audit('sign-in', { via: 'card' });

@@ -306,7 +306,16 @@ exports.programmeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
         (await db.ref("users/" + uid + "/role").once("value")).val() || ""
       ).toLowerCase();
 
-      if (role !== "admin" && role !== "superadmin") {
+      /* Or a LEAGUE pass that gives Manage on Programme Packs: the per-tool
+         entry, kept in step with the pass on the server (pass-entries.js).
+         League only: a club's Manage is its own folder (pManage on its own
+         account), never this '*' session over all 73. */
+      const [entry, base] = await Promise.all([
+        db.ref("users/" + uid + "/tools/media-programme").once("value"),
+        db.ref("users/" + uid + "/pass/base").once("value"),
+      ]);
+      const leagueManage = base.val() === "league" && entry.val() === "admin";
+      if (role !== "admin" && role !== "superadmin" && !leagueManage) {
         logger.warn("programmeAuth: admin claim refused", { uid, role });
         return grant({ ok: false, error: "Programme Packs administration is admin-only." });
       }
@@ -361,7 +370,9 @@ exports.programmeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
            into one identity, and a rename must not orphan the trail. */
         hit.userId ? "pp-" + hit.key + "-" + hit.userId : "pp-" + hit.key,
         (() => {
-          const c = { pClub: hit.key, club: hit.key };
+          /* pManage: codes keep Manage in the library (13/11/2026); the
+             rules ask for it on every write. */
+          const c = { pClub: hit.key, club: hit.key, pManage: true };
           if (hit.who) c.who = hit.who;
           return c;
         })()

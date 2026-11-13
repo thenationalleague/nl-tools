@@ -448,9 +448,13 @@ exports.clubCodeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
        club must not collapse into one identity, and a rename must not orphan
        the trail behind it. */
     const uidFor = hit.userId ? "cc-" + hit.key + "-" + hit.userId : "cc-" + hit.key;
+    /* pManage: a code holder writes into their club's Programme Packs
+       library, as codes always have (Richard, 13/11/2026: codes keep Manage).
+       A Club card gets it only with Manage on the tool (pass-claims.js). */
     const claims = {
       club: hit.key, pClub: hit.key,
       clubName: clubName, pClubName: clubName,
+      pManage: true,
     };
     if (hit.who) claims.who = hit.who;
 
