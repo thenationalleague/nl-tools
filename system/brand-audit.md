@@ -277,6 +277,10 @@ Club Codes, Club Kits admin, Fixtures admin); 404.
 ## Suggested order
 
 Step 0: the full review of the principles, and an agreed moment to start.
+Within it, test before changing (style principles 1.8): give five people
+(two League staff, three from clubs) the same few real tasks on the
+worst-ranked club-facing pages, watch without helping, and note where each
+one gets stuck. What they stumble on decides what the sweep changes first.
 
 1. **Canon, wave 1** (one PR each): C1 dialog bar, C2 dates, C9 audit
    words, C10 top bar, C11 backlog clean-up. Small, and every later fix
