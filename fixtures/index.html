@@ -10,6 +10,13 @@
     entered here. Postpone and Abandon were already on every dated game.
     The International windows panel's two column headings are canon field
     labels (the local .fm-intl__h is gone).
+    Move: a game that changes date or kick-off without being postponed (a
+    broadcast pick, a mutual change). The bottom bar's Move asks for the new
+    date and kick-off and a reason (the 'rescheduled' reasons from
+    postponement-reasons.json first); the old date is kept as 'moved' with
+    that reason, and the audit log says it in words (fixtures_move). A
+    dated game's date is now a value in its window, changed only by Move.
+    A move made in Rearrangements asks the same reason.
 
   v4.3 (13/11/2026) — Brought to the style principles (system/style-principles.md).
     · Manage: each part of a section is a canon .form-panel with its navy
@@ -104,7 +111,10 @@
       {
         date: '13/11/2026',
         version: 'v4.4',
-        items: [ 'Amend replaces Correct, and works the same on every game.' ]
+        items: [
+          'Amend replaces Correct, and works the same on every game.',
+          'Move changes a game’s date or kick-off without postponing it, and records why.'
+        ]
       },
       {
         date: '13/11/2026',
@@ -238,6 +248,8 @@
   .fm-edit .fm-team { min-height: 42px; }
   .fm-edit .fm-team .fm-name { font-size: var(--text-sm); }
   .fm-foot-start { margin-right: auto; }
+  .fm-stack { display: grid; gap: 14px; }
+  .fm-edit .fm-value { min-height: 42px; display: flex; align-items: center; font-size: var(--text-sm); }
   .fm-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .fm-check { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
   .fm-edit .fm-check__words { display: inline; margin: 0; font-size: var(--text-sm); font-weight: 400; font-variation-settings: 'wght' 400; text-transform: none; letter-spacing: 0; color: var(--text); }
@@ -729,7 +741,8 @@
         S.meta = r[0];
         S.guests = r[1] || [];
         ((r[2] && r[2].names) || []).forEach(function (n) { S.crests[n] = true; });
-        S.reasons = ((r[3] && r[3].reasons) || []).map(function (x) { return x.label; });
+        S.reasonList = (r[3] && r[3].reasons) || [];
+        S.reasons = S.reasonList.map(function (x) { return x.label; });
         S.current = NL.season.current(S.meta) || String(NL.season.fromDate());
         S.picker = NL.clubPicker('#fmClub', {
           mode: 'search', season: 'all', clearable: true, extraClubs: S.guests,
@@ -1964,12 +1977,37 @@
     });
   }
 
+  /* A dated game moved from Rearrangements asks why, as Move does. */
+  function askMoveReason(rec, date, ko) {
+    if (!rec.date) return Promise.resolve('');
+    return new Promise(function (resolve) {
+      var wrap = document.createElement('div');
+      wrap.className = 'fm-edit fm-stack';
+      wrap.innerHTML =
+        '<div class="form-group"><label for="fmaReason">Reason</label><select id="fmaReason" class="fm-move-reason">' + moveReasonOptions() + '</select></div>' +
+        '<div class="form-group"><label for="fmaNote">Note</label><input id="fmaNote" class="fm-move-note" type="text"></div>';
+      var done = false;
+      NL.modal({
+        title: 'Why is it moving to ' + dayKo(date, ko) + '?', body: wrap, size: 'sm',
+        onClose: function () { if (!done) resolve(null); },
+        buttons: [{ label: 'Move', className: 'btn--primary', onClick: function (m) {
+          var reason = reasonFrom(wrap);
+          if (!reason) return;
+          done = true; resolve(reason); m.close();
+        } }]
+      });
+    });
+  }
+
   function confirmDate(rec, date, ko, modal) {
     article48(rec, date, ko).then(function (ok) {
-      if (!ok) return;
+      if (!ok) return null;
+      return askMoveReason(rec, date, ko);
+    }).then(function (reason) {
+      if (reason == null) return;
       var moved = !!rec.date;
-      var next = X.unpencil(F.setDate(rec, date, ko, now()));
-      save(next).then(function () {
+      var go = moved ? saveMove(rec, date, ko, reason) : save(X.unpencil(F.setDate(rec, date, ko, now())));
+      go.then(function () {
         NL.toast((moved ? 'Moved to ' : 'Rescheduled for ') + dayKo(date, ko), 'success');
         /* The save has already redrawn the tab (the listener fires first),
            so redraw again now the selection is reset; otherwise the next
@@ -2397,8 +2435,11 @@
           '<input id="fmeRound" type="text" value="' + esc(rec && rec.round || '') + '"' + dis + '></div>' +
         '<div class="form-group"><label>Home</label><div id="fmeHome"></div></div>' +
         '<div class="form-group"><label>Away</label><div id="fmeAway"></div></div>' +
+        /* A dated game's date is a value: it changes only through Move,
+           which asks why and keeps the old date (v4.4). */
         '<div class="form-group"><label for="fmeDate">Date</label>' +
-          '<div class="datetime-row"><input id="fmeDate" type="date" value="' + esc(rec && rec.date || '') + '"' + dis + '>' +
+          (rec && rec.date ? '<div class="fm-value">' + esc(dayKo(rec.date, rec.ko)) + '</div>' : '') +
+          '<div class="datetime-row"' + (rec && rec.date ? ' hidden' : '') + '><input id="fmeDate" type="date" value="' + esc(rec && rec.date || '') + '"' + dis + '>' +
           '<input id="fmeKo" type="time" value="' + esc(rec && rec.ko || '15:00') + '"' + dis + '></div>' +
           (rec && F.awaiting(rec) ? '<div class="form-hint">Awaiting a date. Set one here once it is agreed.</div>' : '') + '</div>' +
         '<div class="form-group" id="fmeOptaWrap"><label for="fmeOpta">Opta ID</label>' +
@@ -2455,20 +2496,22 @@
     var buttons = [];
     /* The bottom bar (style principles 6 and 7): Remove apart on the left,
        then the other actions on the game, then Save on the right. No Cancel:
-       the × and Esc close it, and nothing saves until Save. */
+       the × and Esc close it, and nothing saves until Save. Small buttons,
+       so the six fit on one line on the common screen. */
     if (!ro && rec) {
-      buttons.push({ label: 'Remove', className: 'btn--danger fm-foot-start', onClick: function (m) { removeFixture(rec, m); } });
+      buttons.push({ label: 'Remove', className: 'btn--danger btn--sm fm-foot-start', onClick: function (m) { removeFixture(rec, m); } });
     }
     if (!ro && rec && fixedTeams) {
-      buttons.push({ label: 'Amend', className: 'btn--ghost', onClick: function (m) { m.close(); openEdit(rec, { correct: true }); } });
+      buttons.push({ label: 'Amend', className: 'btn--ghost btn--sm', onClick: function (m) { m.close(); openEdit(rec, { correct: true }); } });
     }
     if (!ro && rec && rec.date) {
-      buttons.push({ label: 'Postpone', className: 'btn--ghost', onClick: function (m) { openLose(rec, 'postponed', m); } });
-      buttons.push({ label: 'Abandon', className: 'btn--ghost', onClick: function (m) { openLose(rec, 'abandoned', m); } });
+      buttons.push({ label: 'Move', className: 'btn--ghost btn--sm', onClick: function (m) { openMove(rec, m); } });
+      buttons.push({ label: 'Postpone', className: 'btn--ghost btn--sm', onClick: function (m) { openLose(rec, 'postponed', m); } });
+      buttons.push({ label: 'Abandon', className: 'btn--ghost btn--sm', onClick: function (m) { openLose(rec, 'abandoned', m); } });
     }
-    if (ro) buttons.push({ label: 'Close', className: 'btn--ghost', onClick: function (m) { m.close(); } });
+    if (ro) buttons.push({ label: 'Close', className: 'btn--ghost btn--sm', onClick: function (m) { m.close(); } });
     if (!ro) {
-      buttons.push({ label: isNew ? 'Add tie' : 'Save', className: 'btn--primary', onClick: function (m) {
+      buttons.push({ label: isNew ? 'Add tie' : 'Save', className: 'btn--primary btn--sm', onClick: function (m) {
         submit(rec, wrap, homePick, awayPick).then(function (ok) { if (ok) m.close(); });
       }});
     }
@@ -2498,6 +2541,68 @@
             .then(function () { NL.toast('Lost date removed', 'success'); ctrl.close(); })
             .catch(function (e2) { NL.toast('Save failed: ' + e2.message, 'error'); });
         });
+    });
+  }
+
+  /* Reasons for a move: the ones typically used when a game is moved
+     ('rescheduled' or 'either' in postponement-reasons.json) first, then
+     the rest, since any reason may be used on any event. */
+  function moveReasonOptions() {
+    var list = S.reasonList || [];
+    var first = list.filter(function (r) { return r.typical === 'rescheduled' || r.typical === 'either'; });
+    var rest = list.filter(function (r) { return first.indexOf(r) === -1; });
+    var opt = function (r) { return '<option>' + esc(r.label) + '</option>'; };
+    return '<option value="">Choose</option>' + first.map(opt).join('') +
+      (rest.length ? '<optgroup label="Other reasons">' + rest.map(opt).join('') + '</optgroup>' : '');
+  }
+  function reasonFrom(wrap) {
+    var reason = wrap.querySelector('.fm-move-reason').value;
+    var note = wrap.querySelector('.fm-move-note').value.trim();
+    if (!reason) { NL.toast('Choose a reason', 'error'); return null; }
+    if (reason === 'Other' && !note) { NL.toast('Say what the other reason is', 'error'); return null; }
+    return note ? reason + ': ' + note : reason;
+  }
+  /* The moved date keeps its reason, and the audit log says so in words. */
+  function saveMove(rec, date, ko, reason) {
+    var next = F.setDate(rec, date, ko, now());
+    var last = next.attempts && next.attempts[next.attempts.length - 1];
+    if (last && last.outcome === 'moved') last.reason = reason;
+    if (X && X.unpencil) next = X.unpencil(next);
+    NL.writeAudit('fixtures_move', rec.key + ': ' + rec.home.name + ' v ' + rec.away.name + ', ' +
+      dayKo(rec.date, rec.ko) + ' → ' + dayKo(date, ko) + ' (' + reason + ')');
+    return save(next);
+  }
+
+  /* Move: a game keeps its fixture but changes date or kick-off, without
+     being postponed (a broadcast pick, a mutual change). The old date is
+     kept as 'moved', with why. */
+  function openMove(rec, parent) {
+    var wrap = document.createElement('div');
+    wrap.className = 'fm-edit fm-stack';
+    wrap.innerHTML =
+      '<div class="form-group"><label>Now</label><div class="fm-value">' + esc(dayKo(rec.date, rec.ko)) + '</div></div>' +
+      '<div class="form-group"><label for="fmmDate">Moves to</label>' +
+        '<div class="datetime-row"><input id="fmmDate" type="date" value="' + esc(rec.date) + '">' +
+        '<input id="fmmKo" type="time" value="' + esc(rec.ko || '15:00') + '"></div></div>' +
+      '<div class="form-group"><label for="fmmReason">Reason</label><select id="fmmReason" class="fm-move-reason">' + moveReasonOptions() + '</select></div>' +
+      '<div class="form-group"><label for="fmmNote">Note</label><input id="fmmNote" class="fm-move-note" type="text"></div>';
+    NL.modal({
+      title: 'Move ' + rec.home.name + ' v ' + rec.away.name,
+      body: wrap, size: 'sm',
+      buttons: [{ label: 'Move', className: 'btn--primary', onClick: function (m) {
+        var date = wrap.querySelector('#fmmDate').value, ko = wrap.querySelector('#fmmKo').value || null;
+        if (!date) { NL.toast('Choose the new date', 'error'); return; }
+        if (date === rec.date && (ko || null) === (rec.ko || null)) { NL.toast('That is the date it already has', 'error'); return; }
+        var reason = reasonFrom(wrap);
+        if (!reason) return;
+        article48(rec, date, ko).then(function (ok) {
+          if (!ok) return;
+          saveMove(rec, date, ko, reason).then(function () {
+            NL.toast('Moved to ' + dayKo(date, ko), 'success');
+            m.close(); if (parent) parent.close();
+          }).catch(function (e) { NL.toast('Save failed: ' + e.message, 'error'); });
+        });
+      } }]
     });
   }
 
