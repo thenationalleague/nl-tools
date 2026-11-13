@@ -81,10 +81,6 @@ What: Password reset emails come from Firebase's own address. Point them at an N
 Why: A reset email that lands in spam is a locked-out person phoning you.
 Waiting on: you
 
-### Claudio's leftovers
-What: Delete everything left of the old Claudio assistant, its chat history included.
-Why: The tool is gone and the history may hold questions nobody should keep.
-
 ### A slimmer league table snapshot
 What: Keep the daily table snapshot, but save only positions and points, and keep it in the database or the backup bucket instead of GitHub.
 Why: Today it is 2.4 MB a day, and GitHub keeps every copy forever.
@@ -145,6 +141,19 @@ Why: It protects every account, not only the two that open everything.
 What: Redesign Club Kits around using the kits, not collecting them. It was built to gather every club's kit colours; that job is done, and it stayed because the kits are useful, but the page is still shaped like a collection console.
 Why: The data is worth more as something people look things up in than as a form that has done its job.
 
-### A new assistant
-What: One chatbot connected to the data tools, where each person's zones decide what it can reach.
-Why: Claudio's idea was right; the build wasn't.
+### Full league history beyond the National League
+What: Add every club's Football League results to our own history, so a club's whole league story sits on one timeline and head-to-heads span both: every league meeting between two clubs, wherever it was played. Two public datasets cover England's top four divisions from 1888 (engsoccerdata, and a database built on it that is kept up to date); our EFL connector only goes back to 2021.
+Why: Many of our clubs had Football League years, and clubs want their whole history, not the part since they joined us.
+- Ask both compilers first, and credit them on every answer: one dataset is marked for non-commercial use with credit, the other states no terms.
+- Built in advance, not in the live database: each club's history and each head-to-head worked out ahead, like the results archive, so searches are instant and free.
+- The real work is which club is which. A list to check and sign off, linking each Football League name to one of our clubs, with phoenix clubs, renames and mergers marked (the old Aldershot is not Aldershot Town). Never combined without asking.
+- A short list of adjustments beside the results, so every table matches the record books: points awarded for a game never played (Scunthorpe v Exeter, 1974), points deducted, and seasons wiped from the record (1939/40).
+- Not covered: history in the leagues below us before 1979.
+
+### A new assistant, for clubs first
+What: A chat with Claude on API credit, with a team of agents, each with its own voice, typeface, character and skill set, answering questions through connectors such as the NL Data MCP. Clubs first, starting with the League's history: "when did we last beat Yeovil away?", "our record against Gateshead", head-to-heads for programme notes. A Club card already knows which club is asking. Each person's zones decide what it can reach.
+Why: Clubs can't easily get the League's history anywhere else, and programme editors need head-to-heads every week. Claudio's idea was right; the build wasn't. The shape is kept in system/retired/claudio.md.
+- Every answer comes from the results archive, never the model's memory, and says plainly what the archive doesn't hold (attendances, referees, goalscorers, managers, grounds). Clubs print what they're given.
+- Answers cost almost nothing: the connector works the answer out and the model only words it, repeated questions are answered from a store, and only the agent's own tools go with each message.
+- Our own site is a research source too: the Website Archive's articles, searched in advance, so an answer can add what we wrote at the time, with a link to it. Only our own words; other publications stay out.
+- Programme Packs is a natural home, as the programme editors are already there.
