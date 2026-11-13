@@ -102,10 +102,7 @@ Each one became a prompt rule above. Mark got `getStaff` because of the first.
 
 ## What stays behind
 
-**RTDB data, being deleted (13/11/2026).** The one-off **Button · Retire Claudio's data** reports the three nodes below, then saves them to the private bucket (`retired/<date>/claudio-data.json`) and deletes them. Its rules block left the snapshot in the same pull request, so the next rules run removes it.
-- `app-data/staff-claudio/conversations/<uid>/<conversationId>`: every user's chat history (title, persona, timestamps, messages). It may include HR questions, so treat it as personal data.
-- `app-data/staff-claudio/usage/<uid>/...`: read by the page and never written by anything, so probably empty.
-- `claudio/usage/<uid>/<yyyy-mm-dd>` **at the database root**: the real daily counts, costs and token figures, written by Apps Script with the legacy secret. No rules entry covers it, so only the console can reach it.
+**RTDB data: none left (13/11/2026).** A one-off report (Button · Retire Claudio's data, removed after it ran) counted the three places Claudio wrote and found all of them empty: no conversations, no usage figures at either path, 0 KB. Nothing was saved or deleted, because there was nothing to keep. The places it checked were `app-data/staff-claudio/conversations`, `app-data/staff-claudio/usage` and `claudio/usage` at the database root.
 
 **Rules.** The `app-data/staff-claudio` block stays in the deployed rules until the next **Button · Publish database rules** run. It gives conversations owner read/write for superadmin, admin and staff roles, and usage owner read with no writes. The role check was written by hand; a rebuild should generate it with `scripts/rtdb-level-rule.mjs`.
 
