@@ -137,12 +137,17 @@ Why: Delivery you can see, and no Gmail limits. Not now: it adds a service and a
 What: After the Skeleton key accounts, offer two-step sign-in to everyone.
 Why: It protects every account, not only the two that open everything.
 
+### Club Kits as a tool people use
+What: Redesign Club Kits around using the kits, not collecting them. It was built to gather every club's kit colours; that job is done, and it stayed because the kits are useful, but the page is still shaped like a collection console.
+Why: The data is worth more as something people look things up in than as a form that has done its job.
+
 ### Full league history beyond the National League
 What: Add every club's Football League results to our own history, so a club's whole league story sits on one timeline and head-to-heads span both: every league meeting between two clubs, wherever it was played. Two public datasets cover England's top four divisions from 1888 (engsoccerdata, and a database built on it that is kept up to date); our EFL connector only goes back to 2021.
 Why: Many of our clubs had Football League years, and clubs want their whole history, not the part since they joined us.
 - Ask both compilers first, and credit them on every answer: one dataset is marked for non-commercial use with credit, the other states no terms.
 - Built in advance, not in the live database: each club's history and each head-to-head worked out ahead, like the results archive, so searches are instant and free.
 - The real work is which club is which. A list to check and sign off, linking each Football League name to one of our clubs, with phoenix clubs, renames and mergers marked (the old Aldershot is not Aldershot Town). Never combined without asking.
+- A short list of adjustments beside the results, so every table matches the record books: points awarded for a game never played (Scunthorpe v Exeter, 1974), points deducted, and seasons wiped from the record (1939/40).
 - Not covered: history in the leagues below us before 1979.
 
 ### A new assistant, for clubs first
