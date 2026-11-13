@@ -153,7 +153,7 @@ test('the new grants sit beside the old access fields, not over them', () => {
   assert.deepEqual(REGISTRY['ops-attendance'].levels, ['off', 'access']);
   assert.equal(REGISTRY['ops-attendance'].defaults.staff, 'access');
   assert.equal(REGISTRY['media-programme'].shelf, 'club');
-  assert.equal(REGISTRY['ops-fan-widgets'].shelf, 'website');
+  /* ops-fan-widgets' shelf: 'website' went on 13/11/2026 (Sandbox now). */
 });
 
 test('rule 1: the League card opens anything for looking at; making tools belong to their team', () => {
@@ -163,7 +163,8 @@ test('rule 1: the League card opens anything for looking at; making tools belong
     'staff-travel-planner', 'staff-website-archive', 'media-programme']) {
     assert.equal(level(card, key), 'access', key);
   }
-  for (const key of ['staff-graphics', 'ops-fan-widgets', 'staff-newsletter']) {
+  /* Fan Widgets left this list for Sandbox on 13/11/2026. */
+  for (const key of ['staff-graphics', 'staff-newsletter']) {
     assert.equal(level(card, key), 'off', `${key} is for making things`);
     assert.notEqual(level(league('league-media'), key), 'off', `${key} belongs to Media`);
   }
@@ -438,7 +439,7 @@ test('withLiveAll applies only where there is a live entry', () => {
    one, named the same on both pages. */
 test('shelves: the portal order, and every tool on one shelf', () => {
   const P = NL.pass;
-  assert.equal(P.SHELVES.map((s) => s.label).join(' | '), 'Staff Tools | Club Tools | Website | Sandbox | Control');
+  assert.equal(P.SHELVES.map((s) => s.label).join(' | '), 'League Tools | Club Tools | Sandbox | Control');
   const ids = P.SHELVES.map((s) => s.id);
   for (const [key, rec] of Object.entries(REGISTRY)) {
     assert.ok(ids.includes(P.shelfOf(rec)), `${key} is on a shelf`);
@@ -447,6 +448,27 @@ test('shelves: the portal order, and every tool on one shelf', () => {
   }
   assert.equal(P.shelfOf({ audience: 'league', status: 'wip', permissions: { shelf: 'main' } }), 'sandbox', 'not launched yet is Sandbox');
   assert.equal(P.shelfOf({ audience: 'league', clubUrl: '/x/', permissions: { shelf: 'main' } }), 'club', 'a club page makes it a club tool');
-  assert.equal(P.shelfOf({ audience: 'league', shelf: 'website' }), 'website');
-  assert.equal(P.shelfOf({ audience: 'league' }), 'staff');
+  assert.equal(P.shelfOf({ audience: 'league', shelf: 'website' }), 'league', 'no Website shelf since v1.60');
+  assert.equal(P.shelfOf({ audience: 'league' }), 'league');
+});
+
+/* 13/11/2026 (Richard): a Sandbox tool carries the grants it will launch
+   with, clubs included; Sandbox itself is the gate until then. */
+test('Sandbox: launch grants are set, and nobody but testers gets in yet', () => {
+  const want = [
+    ['ops-brand-exposure', 'club-commercial', 'access'],
+    ['media-local-media', 'club-media', 'manage'],
+    ['media-matchday-live', 'club-media', 'manage'],
+  ];
+  for (const [key, k, lv] of want) {
+    const p = REGISTRY[key].permissions;
+    assert.equal(p.shelf, 'sandbox', `${key} is in Sandbox`);
+    assert.equal(p.for, 'both', `${key} is built for clubs too`);
+    assert.equal(p.grants.key[k], lv, `${key}: ${k} at ${lv} on launch`);
+    assert.equal(level(club('Woking', k), key), 'off', `${key}: no club in before launch`);
+    assert.equal(level(league('league-media', 'league-commercial'), key), 'off', `${key}: no League key either`);
+  }
+  assert.equal(REGISTRY['ops-fan-widgets'].permissions.shelf, 'sandbox', 'Fan Widgets waits in Sandbox');
+  assert.equal(REGISTRY['ops-fixture-management'].status, undefined, 'Fixture Management is launched');
+  assert.equal(P.shelfOf(REGISTRY['ops-fixture-management']), 'league');
 });
