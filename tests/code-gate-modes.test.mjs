@@ -121,3 +121,15 @@ test('a League account at a club page is warned that a code would sign it out', 
     assert.match(readFileSync(join(REPO, d, 'index.html'), 'utf8'), /staffUrl: '\/[a-z-]+\/admin\/'/, d);
   }
 });
+
+/* v1.61 (13/11/2026): a League account at a club code door is sent to the
+   League page instead of being shown the code card. */
+test('a League account at a code door goes to the League page', () => {
+  const utils = readFileSync(join(REPO, 'system/nl-utils.js'), 'utf8');
+  const open = utils.slice(utils.indexOf('function codeGateOpen('), utils.indexOf('function codeGateResume('));
+  assert.match(open, /if \(signedInAs\(\) && opts\.staffUrl\) \{\s*location\.replace\(opts\.staffUrl\);/);
+  const dir = readFileSync(join(REPO, 'club-directory/index.html'), 'utf8');
+  assert.match(dir, /staffUrl: '\/club-directory\/admin\/'/);
+  const pp = readFileSync(join(REPO, 'programme/index.html'), 'utf8');
+  assert.match(pp, /location\.replace\('\/programme\/admin\/'\)/);
+});

@@ -1,8 +1,14 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.60 (13/11/2026)
+   Version: v1.61 (13/11/2026)
 
+   v1.61 — A League account at a club code door goes straight to the
+           tool's League page (opts.staffUrl) instead of being shown the
+           code card with "a code here signs you out" (Richard, 13/11/2026:
+           "I should have just got in"). The warning stays only where a door
+           has no League page to send them to. Cache-bust nl-utils
+           ?v=64 -> ?v=65, in lockstep.
    v1.60 — The Website shelf goes: its one tool, Fan Widgets, moved to
            Sandbox, and Staff Tools is League Tools (id 'league'), the word
            the cards use (Richard, 13/11/2026). NL.pass.SHELVES is League
@@ -2328,6 +2334,14 @@
     var verify = opts.verify;
     if (typeof verify !== 'function') {
       throw new Error('NL.codeGate: a verify(code) function is required.');
+    }
+
+    /* v1.61: signed in to NL Tools with no club on the account, at a door
+       that has a League page: go there. The page behind it decides access,
+       so a League account without the tool hears that there, plainly. */
+    if (signedInAs() && opts.staffUrl) {
+      location.replace(opts.staffUrl);
+      return new Promise(function () {});
     }
 
     return new Promise(function (resolve) {
