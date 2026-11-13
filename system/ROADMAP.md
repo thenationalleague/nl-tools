@@ -137,6 +137,9 @@ Why: Delivery you can see, and no Gmail limits. Not now: it adds a service and a
 What: After the Skeleton key accounts, offer two-step sign-in to everyone.
 Why: It protects every account, not only the two that open everything.
 
-### A new assistant
-What: A chat with Claude on API credit, with a team of agents, each with its own voice, typeface, character and skill set, answering questions through connectors such as the NL Data MCP. Each person's zones decide what it can reach.
-Why: Claudio's idea was right; the build wasn't. The shape is kept in system/retired/claudio.md.
+### A new assistant, for clubs first
+What: A chat with Claude on API credit, with a team of agents, each with its own voice, typeface, character and skill set, answering questions through connectors such as the NL Data MCP. Clubs first, starting with the League's history: "when did we last beat Yeovil away?", "our record against Gateshead", head-to-heads for programme notes. A Club card already knows which club is asking. Each person's zones decide what it can reach.
+Why: Clubs can't easily get the League's history anywhere else, and programme editors need head-to-heads every week. Claudio's idea was right; the build wasn't. The shape is kept in system/retired/claudio.md.
+- Every answer comes from the results archive, never the model's memory, and says plainly what the archive doesn't hold (attendances, referees, goalscorers, managers, grounds). Clubs print what they're given.
+- Answers cost almost nothing: the connector works the answer out and the model only words it, repeated questions are answered from a store, and only the agent's own tools go with each message.
+- Programme Packs is a natural home, as the programme editors are already there.
