@@ -163,6 +163,15 @@ out only when a specific person needs one sub-tool alone).
 4. Clubs only ever edit in place, and only their own things; they never see a
    Manage tab. Club Directory, Attendance, Programme Packs and Save of the
    Month need both styles.
+5. **What goes in the Manage tab** (agreed 13/11). One tab, called Manage,
+   last, carrying a count of anything waiting. Inside, up to five sections,
+   always in this order, and a tool shows only the ones it has:
+   **Pending** (requests and anything waiting for a decision),
+   **Settings** (how the tool behaves, which rarely changes),
+   **Import** (bringing data in), **Removed** (things taken out, kept so they
+   can be put back) and **History** (what changed, and who did it).
+   Exports belong to Access, beside what they export. Seasons are not
+   archived: every season stays editable in place at Manage.
 
 ## The pass (design locked 12/11)
 
@@ -627,8 +636,10 @@ Where it differs from step 4 as planned:
   Both offer Manage now. Attendance's page reads one `who()` from the pass:
   League view and export for a League card; fixtures, neutral venues and any
   club's figures for League + Manage (League Operations); a club's own
-  figures for its Club card + Manage (Club Operations, Club Media); archived
-  seasons and season admin for the Skeleton key. The Handbook edits and
+  figures for its Club card + Manage (Club Operations, Club Media). Past
+  seasons were the Skeleton key's until later that day: Season admin went
+  (every season is stored under its own key from the start) and any season
+  is editable at Manage, as its rules already allowed. The Handbook edits and
   publishes at Manage (League Operations) and seeds with the Skeleton key.
   Their rules come from `scripts/rtdb-level-rule.mjs`: submissions at
   Manage; Attendance's fixtures and audit logs, and every Handbook write, at
@@ -650,6 +661,17 @@ Where it differs from step 4 as planned:
   submit attendance or edit the Handbook, whatever their old role (the
   grants agreed 12/11). A club secretary with no pass still submits
   (club-admin default raised to Manage).
+- **DAZN Viewership and Club Codes** gained Manage the same day, the last
+  tools granted it except Programme Packs. DAZN's Admin tab is now Manage
+  (its one section is Import), decided by the pass instead of the old role,
+  and Edit games moved under the club's report on the Club tab, so there is
+  one club picker. Club Codes is the Codes tab in Access: it follows the
+  person's own level on `ops-club-codes` (`NL.pass.explain` with the live
+  grants), hidden at Off, look-only at Access, issue and reset at Manage.
+  Both read at League + Access and write at League + Manage, generated;
+  Club Codes keeps the Programme Packs console's `pClub: '*'` token beside
+  that until Programme Packs gets its Manage. DAZN's club code reads (own
+  club, the averages) are unchanged.
 
 ### Until club logins: a Club card is held to the club role (12/11/2026)
 

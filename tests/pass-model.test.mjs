@@ -186,8 +186,7 @@ test('rule 2: sensitive tools are keys-only; clubs only ever read benchmarking',
 });
 
 test('rule 4: Club Codes – League Operations manage, nobody else opens it', () => {
-  assert.equal(level(league('league-operations'), 'ops-club-codes'), 'access',
-    'Manage is granted but not yet in the code (plan: tools needing Manage added) – capped');
+  assert.equal(level(league('league-operations'), 'ops-club-codes'), 'manage', 'the Codes tab offers Manage since 13/11/2026');
   assert.equal(REGISTRY['ops-club-codes'].permissions.grants.key['league-operations'], 'manage');
   for (const id of ['league-media', 'league-commercial', 'league-finance', 'league-senior']) {
     assert.equal(level(league(id), 'ops-club-codes'), 'off', id);
@@ -257,11 +256,12 @@ test('the import turns the prototype\'s dotted keys into Firebase-safe ones and 
 });
 
 test('who can open this is worked out from the grants, capped, and hides the club side of a League tool', () => {
-  /* Club Kits got its Manage on 13/11/2026, so the capped example is Club
-     Codes, granted Manage and not offering it yet. */
+  /* Every tool granted Manage offers it since 13/11/2026, so the capped
+     example is made up: granted Manage, offering only Access. */
   const kits = P.whoCanOpen(REGISTRY['ops-club-kits']);
   assert.deepEqual(plain(kits.rows).map((r) => [r.id, r.level]), [['league', 'access'], ['league-operations', 'manage']]);
-  const w = P.whoCanOpen(REGISTRY['ops-club-codes']);
+  const w = P.whoCanOpen({ label: 'Capped', audience: 'league', permissions: { levels: ['off', 'access'],
+    grants: { base: { league: 'off', club: 'off' }, key: { 'league-operations': 'manage' } } } });
   assert.deepEqual(plain(w.rows).map((r) => [r.id, r.level]), [['league-operations', 'access']]);
   assert.equal(w.rows[0].granted, 'manage', 'the agreed Manage is kept for the panel to mention');
   assert.equal(P.whoCanOpen({ label: 'x' }), null);
