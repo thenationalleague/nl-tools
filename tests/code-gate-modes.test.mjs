@@ -130,8 +130,10 @@ test('a League account at a code door goes to the League page', () => {
   assert.match(open, /if \(signedInAs\(\) && opts\.staffUrl\) \{\s*location\.replace\(opts\.staffUrl\);/);
   const dir = readFileSync(join(REPO, 'club-directory/index.html'), 'utf8');
   assert.match(dir, /staffUrl: '\/club-directory\/admin\/'/);
+  /* Programme Packs is one page (v1.32): a League account opens the
+     all-clubs library here instead of being sent to a second page. */
   const pp = readFileSync(join(REPO, 'programme/index.html'), 'utf8');
-  assert.match(pp, /location\.replace\('\/programme\/admin\/'\)/);
+  assert.match(pp, /if \(me && me\.email\) \{ enterLeague\(me\); return; \}/);
 });
 
 /* 13/11/2026: one club code door. Programme Packs checks a club's passcode
@@ -144,9 +146,10 @@ test('Programme Packs: club codes through the shared door, no remembered passcod
   assert.doesNotMatch(enter, /requestGrant/, 'the club door no longer uses programmeAuth');
   assert.doesNotMatch(pp, /localStorage\.setItem\(REMEMBER_KEY/, 'no passcode kept on the device');
   assert.doesNotMatch(pp, /handOff:/, 'no handOff export');
-  const admin = readFileSync(join(REPO, 'programme/admin/index.html'), 'utf8');
-  assert.match(admin, /data-tab="library">Library<\/button>[\s\S]*data-tab="access">Manage<\/button>/, 'Library first, Manage last');
-  assert.match(admin, /\/programme\/\?master=1#\//, 'Open shows the master view at that club');
+  const page = readFileSync(join(REPO, 'programme/index.html'), 'utf8');
+  assert.match(page, /data-tab="library">Library<\/button>[\s\S]*data-tab="access">Manage<\/button>/, 'Library first, Manage last');
+  const con = readFileSync(join(REPO, 'programme/_console.js'), 'utf8');
+  assert.match(con, /'\/programme\/#\/' \+ encodeURIComponent\(code\)/, 'Open shows that club in the Library');
 });
 
 test('the Handbook reader has both doors', () => {

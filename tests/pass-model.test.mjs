@@ -324,10 +324,19 @@ test('club colours: the pair is kept where it reads, swapped off near-white, nev
     if (!col) continue;
     assert.ok(P.contrast(col.band, '#ffffff') >= 1.5, `${c.name}: band is not near-white`);
     assert.ok(P.contrast(col.sticker, '#ffffff') >= 1.5, `${c.name}: sticker is not near-white`);
-    assert.ok(P.contrast(col.band, col.bandText) >= 4.5 || P.contrast(col.band, col.bandText) >= 3.5,
-      `${c.name}: band type reads (${P.contrast(col.band, col.bandText).toFixed(2)}:1)`);
-    assert.ok(P.contrast(col.sticker, col.stickerText) >= 3.5, `${c.name}: sticker type reads`);
+    const t = c.colors.tertiary;
+    /* On the primary, the writing is the club's tertiary (v1.65); anywhere
+       else it has to read. */
+    if (col.band === c.colors.primary) assert.equal(col.bandText, t, `${c.name}: tertiary on the primary`);
+    else assert.ok(P.contrast(col.band, col.bandText) >= 3.5, `${c.name}: band type reads (${P.contrast(col.band, col.bandText).toFixed(2)}:1)`);
+    if (col.sticker === c.colors.primary) assert.equal(col.stickerText, t, `${c.name}: tertiary on the primary sticker`);
+    else assert.ok(P.contrast(col.sticker, col.stickerText) >= 3.5, `${c.name}: sticker type reads`);
+    assert.ok(P.contrast(col.band, col.bandText) >= 1.5 && P.contrast(col.sticker, col.stickerText) >= 1.5, `${c.name}: never invisible`);
   }
+  const kid = P.clubColours(byName('Kidderminster Harriers'));
+  assert.equal(kid.bandText.toUpperCase(), '#FFFFFF', 'Kidderminster: white on orange, as on its kit');
+  const gat = P.clubColours(byName('Gateshead'));
+  assert.equal(gat.bandText.toLowerCase(), '#ffffff', 'Gateshead: a white primary falls to black, so the black tertiary is not used on it');
   assert.equal(P.clubColours({ colors: { primary: '#FFFFFF', secondary: '#FEFEFE' } }), null);
 });
 

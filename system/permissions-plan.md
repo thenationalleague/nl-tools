@@ -171,7 +171,8 @@ out only when a specific person needs one sub-tool alone).
    **Import** (bringing data in), **Removed** (things taken out, kept so they
    can be put back) and **History** (what changed, and who did it).
    Exports belong to Access, beside what they export. Seasons are not
-   archived: every season stays editable in place at Manage.
+   archived: every season stays editable in place at Manage. Each part of
+   a section is a canon `.form-panel` with its navy head (13/11).
 
 ## The pass (design locked 12/11)
 
@@ -662,7 +663,10 @@ Where it differs from step 4 as planned:
   grants agreed 12/11). A club secretary with no pass still submits
   (club-admin default raised to Manage).
 - **DAZN Viewership and Club Codes** gained Manage the same day, the last
-  tools granted it except Programme Packs. DAZN's Admin tab is now Manage
+  tools granted it (Programme Packs got its Manage that morning, in the
+  claims: a League pass at Manage opens the all-clubs console, and the
+  console now shows one line below Manage instead of the server's
+  refusal). DAZN's Admin tab is now Manage
   (its one section is Import), decided by the pass instead of the old role,
   and Edit games moved under the club's report on the Club tab, so there is
   one club picker. Club Codes is the Codes tab in Access: it follows the
@@ -799,7 +803,7 @@ Settled since: External passes (13/11, above); "zones" is the word on screen
 for keys (13/11, see the Roadmap); the new pass front (13/11, "The new pass
 front" below).
 
-## The new pass front (decided 13/11, not built)
+## The new pass front (decided 13/11, built 13/11)
 
 Replaces the club-coloured header band in "The pass" above. Built together
 with turning the pass over.

@@ -103,7 +103,7 @@ export const stubEl = (tag) => {
    "same structure but not reference-equal". When a helper returns literals
    (e.g. NL.csvParse), normalise with JSON.parse(JSON.stringify(v)) in the test
    rather than loosening the assertion. */
-export function freshCanon() {
+export function freshCanon(extra) {
   const sandbox = {
     console, setTimeout, clearTimeout, setInterval, clearInterval,
     Date, Math, JSON, Object, Array, String, Number, Boolean, RegExp, Error,
@@ -138,6 +138,9 @@ export function freshCanon() {
       return Promise.reject(new Error('unstubbed fetch in test sandbox: ' + url));
     },
   };
+  /* extra: globals a test needs that the default sandbox leaves out on
+     purpose (history and window events, for the dialog's back step). */
+  Object.assign(sandbox, extra || {});
   sandbox.window = sandbox;
   sandbox.globalThis = sandbox;
 
