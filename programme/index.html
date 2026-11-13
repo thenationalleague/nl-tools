@@ -3,6 +3,11 @@
 <head>
 <!--
   Programme Packs — club library (standalone, passcode; ?master=1 for admins)
+  Version: v1.30 (13/11/2026) - Upload is a button in the folder's head, as
+    in any file manager, beside Folder (both with their icons). The whole
+    folder surface still takes a drop; the dashed drop box shows only in an
+    empty folder of your own, as its empty state, and its hint line goes.
+    Upload progress sits at the top of the folder.
   Version: v1.29 (13/11/2026) - the selection bar sticks flush under the
     identity bar, at that bar's real height (it wraps on a phone), and at
     the very top inside the console, where the bar is hidden. Its buttons
@@ -17,10 +22,6 @@
     (_shared.js v2.0, ?v=10).
   Version: v1.26 (13/11/2026) - a League account at the passcode gate goes
     straight to the console (/programme/admin/), as every code door now does.
-  Version: v1.25 (13/11/2026) - two doors, one mode: the gate offers "Have an
-           NL Tools account? Sign in" under the code; signed in on a Club card,
-           the page wears the NL Tools top bar (sign out from its menu), and a
-           remembered code is cleared (_shared.js v1.9).
   File: /programme/index.html
 
   Standalone (NO auth-guard) — named Firebase app + a passcode-minted custom
@@ -73,7 +74,7 @@
 <script src="/programme/_shared.js?v=11"></script>
 <!-- GA4 for nl.tools — cookieless, no banner, no identity. See system/nl-analytics.js -->
 <script src="/system/nl-analytics.js?v=1"></script>
-<link rel="stylesheet" href="/programme/_shared.css?v=7">
+<link rel="stylesheet" href="/programme/_shared.css?v=8">
 </head>
 <body>
 
@@ -698,8 +699,12 @@
        is the count. */
     var leftBtns = '', rightBtns = '';
     if (writable) {
+      /* Upload sits with the folder's name, where file managers put it; the
+         whole folder surface also takes a drop, so no box is needed for
+         that once the folder holds anything. */
+      leftBtns += '<button class="btn btn--ghost btn--sm" id="uploadBtn">' + iconHtml('upload') + 'Upload</button>';
       leftBtns += '<button class="btn btn--ghost btn--sm" id="addFolder" title="' +
-        (here ? 'Add a folder inside ' + esc(here.name) : 'Add a folder') + '">+ Folder</button>';
+        (here ? 'Add a folder inside ' + esc(here.name) : 'Add a folder') + '">' + iconHtml('add') + 'Folder</button>';
       if (here) {
         leftBtns += '<button class="btn btn--ghost btn--sm" id="renameFolder">Rename</button>';
         /* Empty subfolders no longer hide this - they are deleted with it. */
@@ -729,6 +734,8 @@
       (leftBtns ? '<span class="fold__acts">' + leftBtns + '</span>' : '') +
       (tail ? '<span class="fold__tail">' + tail + '</span>' : '') +
       '</div><div class="fold__body">';
+    /* Upload progress first, so it is in view whatever the folder holds. */
+    if (writable) html += '<input type="file" id="fileInput" multiple style="display:none"><div id="uploads"></div>';
 
     /* Above both grids, because it governs both. It is always here once the
        folder holds anything, with its buttons disabled until something is
@@ -777,23 +784,18 @@
        its subfolders, so a club could not drop a file at the top of its own
        pack without inventing a folder to put it in \u2014 and the root files the
        data model already allowed had nowhere to appear. */
-    if (writable) {
-      /* Kept deliberately, unlike the other notices that went: a club has to
-         know at the point of upload that this folder is readable by all 72.
-         One quiet line rather than a bordered callout. */
+    /* An empty folder of your own is the one place a drop box helps: it is
+       the empty state, and says what to do with it. */
+    if (writable && !files.length && !subs.length) {
       html += '<div class="drop" id="drop" tabindex="0" role="button">' +
-        '<strong>Drop files or a folder here</strong> or click to choose' +
-        '<div class="drop__hint">' + (subs.length ? 'or drop onto a folder above \u00b7 ' : '') +
-        'visible to all 72 clubs \u00b7 nothing confidential</div></div>' +
-        '<input type="file" id="fileInput" multiple style="display:none">' +
-        '<div id="uploads"></div>';
+        '<strong>Drop files or a folder here</strong>, or click to choose</div>';
     }
 
     if (files.length) {
       html += '<div class="tiles">' + files.map(function (f) { return fileTile(f, code, writable, isNL); }).join('') + '</div>';
     } else if (!subs.length && !writable) {
-      /* Only for a visitor. For the club itself the drop zone above already
-         says the place is empty, and says what to do about it. */
+      /* Only for a visitor. For the club itself the drop box says the
+         place is empty, and what to do about it. */
       html += '<div class="empty-state"><div class="empty-state__title">Nothing here yet</div></div>';
     }
 
@@ -1079,11 +1081,12 @@
       b.onclick = function () { removeFile(code, b.getAttribute('data-del')); };
     });
 
-    var drop = el('drop'), input = el('fileInput');
+    var drop = el('drop'), input = el('fileInput'), up = el('uploadBtn');
+    if (input) input.onchange = function () { uploadAll(code, input.files); input.value = ''; };
+    if (up) up.onclick = function () { input.click(); };
     if (drop) {
       drop.onclick = function () { input.click(); };
       drop.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); } };
-      input.onchange = function () { uploadAll(code, input.files); input.value = ''; };
     }
     wireDrag(root, code);
   }
@@ -1593,8 +1596,8 @@
     var elsewhere = target !== (view.folderId || PP.ROOT_FOLDER)
       ? (folderById(code, target) || {}).name : null;
     Array.prototype.forEach.call(fileList, function (file) { enqueueUpload(code, target, file); });
-    /* Progress rows appear under the drop zone, not inside the folder the files
-       are heading for, so say where they are going. */
+    /* Progress rows appear at the top of the folder you are in, not inside
+       the folder the files are heading for, so say where they are going. */
     if (elsewhere) NL.toast('Uploading to ' + elsewhere, 'info');
   }
 
