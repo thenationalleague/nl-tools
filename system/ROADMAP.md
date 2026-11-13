@@ -59,10 +59,6 @@ What: Go through NL Tools as League staff with no zones, a League Operations zon
 Why: Everything so far has been checked on made-up data. This is the check with real sign-ins.
 Waiting on: you
 
-### The new season checklist
-What: One written list for 1 July: what the season job does by itself, and what has to be done by hand. Clubs coming in and going out, their codes, crests, club data, the new handbook edition, ECAL and anything else tied to the season.
-Why: It runs once a year, so nobody will remember it. The season job has never run for real.
-
 ### A weekly note when something fails
 What: One plain-English note a week to a work inbox: which background jobs failed and what that means. Failing jobs also show as "Needs a look" in Estate.
 Why: Failure emails went to a personal inbox in a form nobody could read, so a daily backup failed for ten weeks unnoticed.

@@ -222,6 +222,7 @@ which is why work gets re-planned from scratch. Check here first.
 | `system/deployer-migration.md` | **Parked.** Every deploy in this repo authenticates as `nl-archive-ga-reader` — named for the GA pipeline, and now the deployer for rules, functions, the registry, Apps Script and the scan container. The rename is cosmetic; the point is that nobody knows what roles it holds or why. Has the safe migration order, and the one zero-risk proof step. |
 | `system/brand-v3-scale-plan.md` | Parked type/scale pass. |
 | `system/rtdb/README.md` | The RTDB snapshot contract — which files are deployed vs reference. |
+| `system/new-season-checklist.md` | **The 1 July list.** What the season job does by itself (only `seasons.current`), what must be done by hand, and the one thing that empties every tool if missed: each club's division for the new season in clubs-meta, before the job runs. Read in June. |
 | `system/retired/README.md` | **Tools that have been deleted, and why.** One file each, recording the concept and the settled decisions so a rebuild starts from the answered questions. Read before proposing to build something that already existed once. |
 
 ## Branching
