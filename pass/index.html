@@ -1,8 +1,17 @@
 <!DOCTYPE html>
 <!--
   NL Tools — My pass
-  Version: v1.8 (12/11/2026)
+  Version: v1.9 (13/11/2026)
   File: /pass/index.html
+  v1.9 (13/11/2026) — On screen, keys are zones (Roadmap: "Zones"): the
+    Issue and View-as forms, the made-up passes, the withdraw message.
+    Ids and data still say key.
+    Your account (Roadmap: "Passwords and your account"): an Account
+    section at the foot of My pass (#account, linked from the menu under
+    the circle, nl-topbar v1.12) with your email and Change password. The
+    current password is asked first (Firebase re-authentication), then the
+    new one twice. Nobody can see or set anyone else's password; a reset
+    link is sent from Access instead. Logged as password_changed.
 
   Your pass: the card you belong to (League or Club), the keys you hold on
   top of it, and every tool they open, with which part of the pass opened
@@ -114,6 +123,11 @@
 
     window.NL_CHANGELOG = [
       {
+        date: '13/11/2026',
+        version: 'v1.9',
+        items: [ 'Keys are called zones.', 'An Account section at the foot of My pass, where you can change your password.' ]
+      },
+      {
         date: '12/11/2026',
         version: 'v1.6',
         items: [
@@ -176,9 +190,9 @@
   </script>
 
   <!-- NL system scripts (lint canonical: ?v=66 / ?v=1 / ?v=15 / ?v=21) -->
-  <script src="/system/nl-utils.js?v=67"></script>
+  <script src="/system/nl-utils.js?v=68"></script>
   <script src="/system/nl-analytics.js?v=1"></script>
-  <script src="/system/nl-topbar.js?v=15"></script>
+  <script src="/system/nl-topbar.js?v=16"></script>
   <script src="/system/auth-guard.js?v=22"></script>
 
 <style>
@@ -350,6 +364,10 @@
 
   /* ── The list of tools ────────────────────────────────────────────────── */
   .pass-intro { font-size: var(--text-base); color: var(--text-muted); margin: 0; max-width: 64ch; }
+  .account { display: flex; flex-direction: column; gap: 10px; scroll-margin-top: 80px; }
+  .account__email { margin: 0; font-size: var(--text-base); overflow-wrap: anywhere; }
+  .account-form { display: grid; gap: 14px; }
+  .account__actions { display: flex; gap: 10px; flex-wrap: wrap; }
   .pass-intro b { color: var(--text); font-weight: 700; font-variation-settings: 'wght' 700; }
   .pass-note { font-size: var(--text-sm); color: var(--text-muted); margin: -12px 0 0; }
   .issue-tools { display: flex; flex-direction: column; gap: 22px; margin-top: 28px; }
@@ -516,9 +534,9 @@
   var FALLBACK_CLUB = 'Forest Green Rovers';
   var MADE_UP = [
     { id: 'league-card',     name: 'League staff',           job: 'Card only',               pass: { base: 'league' } },
-    { id: 'league-ops-media', name: 'League Operations and Media', job: 'Operations and Media keys', pass: { base: 'league', keys: ['league-operations', 'league-media'] } },
-    { id: 'league-commercial', name: 'League Commercial',    job: 'Commercial key',          pass: { base: 'league', keys: ['league-commercial'] } },
-    { id: 'league-senior',   name: 'Senior leadership',      job: 'Senior leadership key',   pass: { base: 'league', keys: ['league-senior'] } },
+    { id: 'league-ops-media', name: 'League Operations and Media', job: 'Operations and Media zones', pass: { base: 'league', keys: ['league-operations', 'league-media'] } },
+    { id: 'league-commercial', name: 'League Commercial',    job: 'Commercial zone',          pass: { base: 'league', keys: ['league-commercial'] } },
+    { id: 'league-senior',   name: 'Senior leadership',      job: 'Senior leadership zone',   pass: { base: 'league', keys: ['league-senior'] } },
     { id: 'club-secretary',  name: 'Club secretary',         job: 'Club Secretary',          pass: { base: 'club', keys: ['club-operations'] } },
     { id: 'club-media',      name: 'Club media officer',     job: 'Media Officer',           pass: { base: 'club', keys: ['club-media'] } },
     { id: 'club-finance',    name: 'Club finance director',  job: 'Finance Director',        pass: { base: 'club', keys: ['club-finance', 'club-commercial'] } },
@@ -767,10 +785,91 @@
     var list = document.getElementById('listCol');
     if (!P.isIssued(s.pass)) {
       list.innerHTML = '<p class="pass-intro">Until it is, you open the same tools as before.</p>';
-      return;
+    } else {
+      list.innerHTML = listHtml(subject, { links: true });
+      wireCrests(list);
     }
-    list.innerHTML = listHtml(subject, { links: true });
-    wireCrests(list);
+    drawAccount(list);
+  }
+
+  /* ── Your account (v1.9) ────────────────────────────────────────────
+     Your email and Change password, at the foot of My pass. The menu's
+     Account item lands here (#account). Firebase asks for the current
+     password before it will change one (re-authentication), which is also
+     what stops a borrowed, signed-in laptop changing it. */
+  function drawAccount(list) {
+    var user = firebase.auth().currentUser;
+    var email = (user && user.email) || STATE.session.email || '';
+    var sec = document.createElement('section');
+    sec.className = 'account';
+    sec.id = 'account';
+    sec.innerHTML = '<div class="section-head"><h2>Account</h2></div>' +
+      '<p class="account__email">' + esc(email) + '</p>' +
+      '<div class="account__actions"><button class="btn btn--ghost btn--sm" type="button" id="accPassword">' +
+        NL.icon('edit').outerHTML + 'Change password</button></div>';
+    list.appendChild(sec);
+    sec.querySelector('#accPassword').addEventListener('click', changePassword);
+    if (location.hash === '#account') sec.scrollIntoView();
+  }
+
+  function changePassword() {
+    var user = firebase.auth().currentUser;
+    if (!user || !user.email) { NL.toast('Sign in again, then try once more', 'error'); return; }
+    var body = document.createElement('div');
+    body.className = 'account-form';
+    body.innerHTML =
+      '<div class="form-group"><label for="accCur">Current password</label>' +
+        '<input id="accCur" type="password" autocomplete="current-password"></div>' +
+      '<div class="form-group"><label for="accNew">New password</label>' +
+        '<input id="accNew" type="password" autocomplete="new-password"></div>' +
+      '<div class="form-group"><label for="accNew2">New password again</label>' +
+        '<input id="accNew2" type="password" autocomplete="new-password"></div>';
+    var busy = false;
+    NL.modal({
+      title: 'Change password', size: 'sm', body: body,
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Change password', className: 'btn--primary', onClick: function (c) {
+          if (busy) return;
+          var cur = body.querySelector('#accCur').value;
+          var nw = body.querySelector('#accNew').value;
+          if (!cur || !nw) { NL.toast('Fill in all three', 'error'); return; }
+          if (nw !== body.querySelector('#accNew2').value) { NL.toast('The new passwords don’t match', 'error'); return; }
+          if (nw === cur) { NL.toast('That is your current password', 'error'); return; }
+          busy = true;
+          var cred = firebase.auth.EmailAuthProvider.credential(user.email, cur);
+          user.reauthenticateWithCredential(cred)
+            .then(function () { return user.updatePassword(nw); })
+            .then(function () {
+              NL.writeAudit('password_changed', 'own password');
+              NL.toast('Password changed', 'success');
+              c.close();
+            })
+            .catch(function (e) {
+              busy = false;
+              NL.toast(passwordError(e), 'error');
+            });
+        } }
+      ]
+    });
+    try { body.querySelector('#accCur').focus(); } catch (e) {}
+  }
+
+  /* Firebase Auth error codes, as the compat SDK raises them. A wrong
+     current password is auth/wrong-password, or with email enumeration
+     protection on (the default for projects made since 15/09/2023) the
+     server's INVALID_LOGIN_CREDENTIALS, which @firebase/auth maps to
+     auth/invalid-credential from 10.7 (AuthErrorCode map, checked
+     13/11/2026: https://www.jsdocs.io/package/@firebase/auth, and
+     firebase-js-sdk issue 7772); older builds said
+     auth/invalid-login-credentials. */
+  function passwordError(e) {
+    var code = (e && e.code) || '';
+    if (code === 'auth/wrong-password' || code === 'auth/invalid-credential' || code === 'auth/invalid-login-credentials') return 'That isn’t your current password';
+    if (code === 'auth/weak-password') return 'Choose a longer password: at least six characters';
+    if (code === 'auth/too-many-requests') return 'Too many tries. Wait a few minutes, then try again';
+    if (code === 'auth/requires-recent-login') return 'Sign out and in again, then change it';
+    return 'Not changed: ' + ((e && e.message) || 'unknown error');
   }
 
   /* ── View: as ───────────────────────────────────────────────────────── */
@@ -808,7 +907,7 @@
         '<label><input type="radio" name="buildBase" value="league" checked> League card</label>' +
         '<label><input type="radio" name="buildBase" value="club"> Club card</label></div></div>' +
       '<div class="form-group" id="buildClubWrap" hidden><label>Club</label><div id="buildClub"></div></div>' +
-      '<div class="form-group"><label>Keys</label><div class="choice-row" id="buildKeys"></div></div>' +
+      '<div class="form-group"><label>Zones</label><div class="choice-row" id="buildKeys"></div></div>' +
       '<button class="btn btn--navy btn--sm" type="button" id="buildGo">' + icon('eye', 'icon--sm') + 'View this pass</button>' +
       '<h3>Real people</h3>' +
       '<input class="pick-search" type="search" id="realSearch" placeholder="Search by name" aria-label="Search people">' +
@@ -949,7 +1048,7 @@
             '<div class="form-group" id="issueClubWrap" hidden><label>Club</label><div id="issueClub"></div></div>' +
             '<div class="form-group"><label for="issueJob">Job title</label>' +
               '<input id="issueJob" type="text" maxlength="80" autocomplete="off"></div>' +
-            '<div class="form-group"><label>Keys</label><div id="issueKeys"></div></div>' +
+            '<div class="form-group"><label>Zones</label><div id="issueKeys"></div></div>' +
             (mayGiveSkeleton ? '<div class="form-group" id="issueSkelWrap"><label>Skeleton key</label><div class="choice-row">' +
               '<label><input type="checkbox" id="issueSkel"> Opens every tool at Manage</label></div></div>' : '') +
           '</div>' +
@@ -1059,7 +1158,7 @@
       });
       if (P.isSkeleton(p)) keys.unshift('Skeleton key');
       passText = (p.base === 'club' ? 'Club card, ' + p.club : 'League card') +
-        (keys.length ? ' · ' + keys.join(', ') : ' · no keys') +
+        (keys.length ? ' · ' + keys.join(', ') : ' · no zones') +
         (p.issued ? ' · issued ' + NL.formatDate(p.issued) + (nameOf(p.issuedBy) ? ' by ' + nameOf(p.issuedBy) : '') : '');
     }
     var rows = [
@@ -1116,7 +1215,7 @@
       var on = iss.keys.indexOf(k.id) >= 0;
       var until = iss.until[k.id];
       return '<div class="key-row"><label><input type="checkbox" value="' + esc(k.id) + '"' + (on ? ' checked' : '') + '> ' + esc(k.name) + '</label>' +
-        (on ? '<span class="key-row__until"><span>Ends</span><input type="date" data-until="' + esc(k.id) + '" aria-label="' + esc(k.name) + ' key ends"' +
+        (on ? '<span class="key-row__until"><span>Ends</span><input type="date" data-until="' + esc(k.id) + '" aria-label="' + esc(k.name) + ' zone ends"' +
           (until ? ' value="' + isoDay(until) + '"' : '') + '></span>' : '') + '</div>';
     }).join('');
   }
@@ -1172,7 +1271,7 @@
 
   function withdrawIssue() {
     var iss = STATE.issue; if (!iss.user) return;
-    NL.confirm('Withdraw ' + iss.user.name + '’s pass? They go back to having no card and no keys.', { title: 'Withdraw pass', confirmText: 'Withdraw', variant: 'danger' }).then(function (ok) {
+    NL.confirm('Withdraw ' + iss.user.name + '’s pass? They go back to having no card and no zones.', { title: 'Withdraw pass', confirmText: 'Withdraw', variant: 'danger' }).then(function (ok) {
       if (!ok) return;
       /* The entries written to match the pass go with it: no pass means the
          role's defaults, as for anyone never given one. */

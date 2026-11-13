@@ -80,13 +80,10 @@ Why: Those two accounts open everything.
 What: The tool cards and drawn icons are done (13/11/2026). Next is the page around them: the noticeboard, the header and the spacing, and the Graphics landing page as the second place the card is used.
 Why: It is the first page everyone sees. When a second page uses the card, it becomes a shared component.
 
-### Passwords and your account
-What: My pass becomes your account page. An Account section at the foot of it holds your email and a Change password button (current password, then the new one twice), with two-step sign-in added there later. An "Account" link in the menu under your circle jumps straight to it. In Access, each person gets a "Send reset link" button, which emails them the same link as "Forgot password" on the sign-in page.
-Why: If you think someone has seen your password, you should be able to change it there and then. And when someone is locked out, you can start their reset without ever knowing or choosing their password.
-- Nobody can set or see anyone else's password, Skeleton key included.
-- Every reset link sent from Access is logged: who sent it, to whom, when.
-- Reset emails come from Firebase's own address by default. Point them at an NL address so they don't land in spam.
-
+### Reset emails from an NL address
+What: Password reset emails come from Firebase's own address. Point them at an NL address so they don't land in spam. Change password (My pass → Account) and Send reset link (Access) are built (13/11/2026).
+Why: A reset email that lands in spam is a locked-out person phoning you.
+Waiting on: you
 ### The new pass, and turning it over
 What: One white NL lanyard pass for everyone. A header strip says which kind of pass it is: red for League, navy for Club, charcoal for External. Below it, one big sticker about two-thirds the width of the pass, filled with the club's or organisation's colour, with the crest or logo on a white circle that has a soft shadow. Under the name and job title, the zones sit as white stickers in two columns; zones not held are faint empty slots. Tap the pass and it turns over to show what it opens: Manage in one column, Access in the other, names only. The Skeleton key's back says "Every tool, Manage". The full list beside the pass stays.
 Why: The colour lives on the sticker, not the whole pass, so every pass looks like it came from the same desk and the club still stands out from across a room. The front says what kind of access it is; the back gives the detail.
@@ -95,10 +92,6 @@ Why: The colour lives on the sticker, not the whole pass, so every pass looks li
 - A club whose main colour is near-white uses its second colour for the sticker.
 - The white circle stops a crest disappearing into its own colour (Kidderminster on orange).
 - Built together: the new front and the flip are one piece of work.
-
-### Zones
-What: On screen, the stickers on the pass are called zones, not keys.
-Why: It matches the accreditation-pass idea. Only the word on screen changes.
 
 ### Claudio's leftovers
 What: Delete everything left of the old Claudio assistant, its chat history included.
