@@ -56,18 +56,18 @@ const fix = { kickoffUTC: 1, competitionID: 89 };
 
 /* Attendance */
 await t('League Operations edits fixtures', set(ref(db['u-ops'], A + '/fixtures/f1'), fix), true);
-await t('League Operations submits figures', set(ref(db['u-ops'], A + '/submissions/s1'), sub), true);
+await t('League Operations submits figures', set(ref(db['u-ops'], A + '/archive/2026/submissions/s1'), sub), true);
 await t('League Operations reads the audit log', get(ref(db['u-ops'], A + '/submissions-audit')), true);
 await t('a League card without a key cannot edit fixtures, whatever its old role', set(ref(db['u-staff'], A + '/fixtures/f1'), fix), false);
-await t('a League card without a key cannot submit', set(ref(db['u-staff'], A + '/submissions/s2'), sub), false);
-await t('a club Operations holder submits its figures', set(ref(db['u-cluboes'], A + '/submissions/s3'), sub), true);
+await t('a League card without a key cannot submit', set(ref(db['u-staff'], A + '/archive/2026/submissions/s2'), sub), false);
+await t('a club Operations holder submits its figures', set(ref(db['u-cluboes'], A + '/archive/2026/submissions/s3'), sub), true);
 await t('a club Operations holder cannot edit fixtures', set(ref(db['u-cluboes'], A + '/fixtures/f1'), fix), false);
 await t('a club Operations holder cannot read the audit log', get(ref(db['u-cluboes'], A + '/submissions-audit')), false);
-await t('a Club card without a key cannot submit', set(ref(db['u-clubbo'], A + '/submissions/s4'), sub), false);
+await t('a Club card without a key cannot submit', set(ref(db['u-clubbo'], A + '/archive/2026/submissions/s4'), sub), false);
 await t('superadmin edits fixtures', set(ref(db['u-sa'], A + '/fixtures/f1'), fix), true);
 await t('no pass, old admin role: still edits fixtures', set(ref(db['u-oldadm'], A + '/fixtures/f1'), fix), true);
-await t('no pass, old club secretary role: still submits', set(ref(db['u-oldclub'], A + '/submissions/s5'), sub), true);
-await t('no pass, old staff role: no longer submits', set(ref(db['u-oldstaff'], A + '/submissions/s6'), sub), false);
+await t('no pass, old club secretary role: still submits', set(ref(db['u-oldclub'], A + '/archive/2026/submissions/s5'), sub), true);
+await t('no pass, old staff role: no longer submits', set(ref(db['u-oldstaff'], A + '/archive/2026/submissions/s6'), sub), false);
 await t('fixtures stay public to read', get(ref(env.unauthenticatedContext().database(), A + '/fixtures')), true);
 
 /* Handbook */
