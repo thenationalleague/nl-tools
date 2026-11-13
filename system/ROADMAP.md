@@ -142,4 +142,5 @@ What: A chat with Claude on API credit, with a team of agents, each with its own
 Why: Clubs can't easily get the League's history anywhere else, and programme editors need head-to-heads every week. Claudio's idea was right; the build wasn't. The shape is kept in system/retired/claudio.md.
 - Every answer comes from the results archive, never the model's memory, and says plainly what the archive doesn't hold (attendances, referees, goalscorers, managers, grounds). Clubs print what they're given.
 - Answers cost almost nothing: the connector works the answer out and the model only words it, repeated questions are answered from a store, and only the agent's own tools go with each message.
+- Our own site is a research source too: the Website Archive's articles, searched in advance, so an answer can add what we wrote at the time, with a link to it. Only our own words; other publications stay out.
 - Programme Packs is a natural home, as the programme editors are already there.
