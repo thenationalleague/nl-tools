@@ -44,8 +44,8 @@ test('the pass is one white card: kind strip, big club sticker, zones, and a bac
     'the strip says the kind of pass, never the club colour');
   assert.match(pass, /class="pass__circle/, 'the crest sits on a white circle');
   assert.match(pass, /'<div class="pass__zones' \+/);
-  assert.match(pass, /var ZONE_COLOURS = \{ ops: 'var\(--blue\)'/, 'each zone has its own colour, the same on every pass');
-  assert.match(pass, /--zone:' \+ \(ZONE_COLOURS\[k\.icon\]/, 'a held zone is drawn in its colour');
+  assert.match(pass, /\.zone \{[^}]*background: var\(--band\); color: var\(--band-text\);/, 'a held zone is in the pass\'s own colours');
+  assert.doesNotMatch(pass, /ZONE_COLOURS/, 'no colour per zone');
   assert.match(pass, /Every tool, Manage/, 'the Skeleton key\'s back');
   assert.match(pass, /role="button" tabindex="0" aria-pressed="false" aria-label="Turn the pass over"/);
   assert.match(pass, /e\.key === 'Enter' \|\| e\.key === ' '/, 'turns over from the keyboard too');
