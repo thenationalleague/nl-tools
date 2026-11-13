@@ -31,7 +31,7 @@ What: Programme Packs now checks club codes through the shared door (13/11/2026)
 Why: Two copies of the code check, throttle and log is what this tidy is for.
 
 ### The pass decides everywhere
-What: Attendance and the Handbook still decide who can edit by old role. Switch them to the pass. Then remove the two checks that still sit ahead of the pass: the superadmin role and the "League only" label.
+What: Done at the door (13/11/2026): the pass alone decides who opens a tool. The superadmin role now only ever opens Access, as the way back in, and "League only" reads the pass, not the old role. Left: Attendance and the Handbook still decide who can edit by old role, on the page and in the database. Build their Manage level and move both to the pass.
 Why: Until this is done, a tool can say yes in the portal and no on the page, or the other way round.
 
 ### Manage on the nine tools granted it

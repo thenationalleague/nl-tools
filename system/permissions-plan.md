@@ -609,6 +609,24 @@ Where it differs from step 4 as planned:
   One gap until then: a key's end date closes the door on the day, but the
   entries stay until the pass is next saved or applied.
 
+
+### The pass decides everywhere (13/11/2026, auth-guard v16.3, portal v16.3)
+
+- For anyone with an issued pass, `NL.pass.explain` is the whole answer, at
+  the door (`decideByPass`) and on the portal (`getAccessLevel`).
+- **The superadmin role no longer opens every tool.** The Skeleton key does
+  that. The role keeps one power: it always opens Access (`ops-people`) at
+  Manage, so a mistake on a Skeleton key holder's own pass can be fixed by
+  them. Each use is logged as `access_way_back`.
+- **"League only" reads the pass's card, not the role.** A League pass with
+  an old club or blank role was shown a card on the portal and refused at
+  the door; now both say yes. A Club card at a League tool's staff page
+  still goes to the tool's club page, or is refused.
+- People without a pass are decided exactly as before.
+- Still to do under this heading: Attendance and the Handbook decide who can
+  edit by role, on the page and in the database rules. Moving them to the
+  pass needs their Manage level built, so it is its own pull request.
+
 ### Until club logins: a Club card is held to the club role (12/11/2026)
 
 Found the same evening, signing in as a club dummy: the pass sent a club

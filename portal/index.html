@@ -1,11 +1,16 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v16.2 (13/11/2026)
+  Version: v16.3 (13/11/2026)
   Date: 09/04/2026
   File: /portal/index.html
 
   Changelog:
+  v16.3 (13/11/2026) – The pass decides everywhere: with an issued pass,
+    getAccessLevel asks NL.pass.explain and nothing else, as the door now
+    does (auth-guard v16.3). The superadmin role no longer overrules a
+    pass, except that it always opens Access. A Club card on a League tool
+    with no club page shows no card, matching the door. auth-guard ?v=22.
   v16.2 (13/11/2026) – New tool cards (Richard, 13/11/2026): a large
     icon at full card height on the left (/assets/icons/tools.svg, one per
     tool, symbol id = tool key, drawn from the Tabler Icons outline set,
@@ -977,6 +982,11 @@
   window.NL_CHANGELOG = [
     {
       date: '13/11/2026',
+      version: 'v16.3',
+      items: [ 'The cards you see now come from your pass alone, the same answer each tool gives when you open it.' ]
+    },
+    {
+      date: '13/11/2026',
       version: 'v16.2',
       items: [ 'New tool cards: an icon for every tool, four to a row, every card the same size.' ]
     },
@@ -1241,7 +1251,7 @@
 <!-- GA4 for nl.tools — cookieless, no banner, no identity. See system/nl-analytics.js -->
 <script src="/system/nl-analytics.js?v=1"></script>
 <script src="/system/nl-topbar.js?v=15"></script>
-<script src="/system/auth-guard.js?v=21"></script>
+<script src="/system/auth-guard.js?v=22"></script>
 
 <link rel="stylesheet" href="/system/nl-brand.css?v=76">
 
@@ -1722,22 +1732,25 @@ var STATE = {
 /* ---- Helpers ------------------------------------------------------------- */
 /* ---- Access level helpers ------------------------------------------------ */
 function getAccessLevel(uid, toolKey) {
-  if (STATE.isSuperAdmin && uid === STATE.uid) return 'admin';
   var ud = (uid === STATE.uid) ? STATE.userData : null;
   if (!ud) return 'off';
+  /* v16.3: with an issued pass, the pass alone decides, as at the door
+     (auth-guard v16.3). The superadmin role no longer overrules it, except
+     that it always opens Access, the way back in when a pass is wrong. */
+  if (window.nlPassDecides && NL.pass && NL.pass.isIssued(ud.pass)) {
+    var rec = STATE.tools[toolKey];
+    var lv = NL.pass.explain(ud.pass, rec).level;
+    var aud = rec && rec.audience;
+    if (ud.pass.base === 'club' && !NL.pass.isSkeleton(ud.pass) && (aud === 'league' || aud === 'staff' || aud === 'meta') && !(rec && rec.clubUrl)) lv = 'off';
+    if (toolKey === 'ops-people' && ud.role === 'superadmin') lv = 'manage';
+    return lv === 'manage' ? 'admin' : lv;
+  }
   if (ud.role === 'superadmin') return 'admin';
   /* The same resolver auth-guard uses (v5.125). This used to be its own copy,
      and it disagreed with the guard on two inputs: a legacy {access,admin}
      object and a stored `false` both fell through to the role default here,
      while the guard read them as written. Either one showed a card whose
      tool then turned the user away. One answer, from one place. */
-  /* v15.6: with an issued pass, the pass decides, as auth-guard v16.0 does
-     at the door (window.nlPassDecides is its switch), so a card shows only
-     where the door will open. Manage is the old 'admin'. */
-  if (window.nlPassDecides && NL.pass && NL.pass.isIssued(ud.pass)) {
-    var lv = NL.pass.level(ud.pass, STATE.tools[toolKey]);
-    return lv === 'manage' ? 'admin' : lv;
-  }
   var entry = ud.tools ? ud.tools[toolKey] : undefined;
   return NL.resolveToolLevel(entry, STATE.tools[toolKey], ud.role);
 }
