@@ -1,7 +1,16 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.61 (13/11/2026)
+   Version: v1.62 (13/11/2026)
+
+   v1.62 — The code exchange waits until the database knows who is asking.
+           Straight after the anonymous sign-in, the database can still be
+           holding the previous (signed-out) identity for a moment, and the
+           first read of authGrants/<uid> came back permission_denied
+           (Programme Packs, 13/11/2026). It now reads its own request node
+           until the database answers as the new uid (a few tries, a short
+           wait between), then listens. Cache-bust nl-utils ?v=65 -> ?v=66,
+           in lockstep.
 
    v1.61 — A League account at a club code door goes straight to the
            tool's League page (opts.staffUrl) instead of being shown the
@@ -2504,9 +2513,29 @@
     };
   }
 
+  /* v1.62: resolve once the database answers as this uid. A read of the
+     caller's own request node is allowed only to that uid, so success means
+     the new identity has reached the database. Only permission_denied is
+     retried; anything else, or the last try, carries on and lets the
+     listener report it. */
+  function codeGateDbReady(db, path) {
+    return new Promise(function (resolve) {
+      var tries = 0;
+      (function attempt() {
+        db.ref(path).once('value').then(function () { resolve(); }, function (e) {
+          var denied = /permission/i.test(String((e && (e.code || e.message)) || ''));
+          if (!denied || ++tries >= 6) { resolve(); return; }
+          setTimeout(attempt, 250 * tries);
+        });
+      })();
+    });
+  }
+
   function codeGateExchange(root, payload) {
     var auth = firebase.auth(), db = firebase.database();
     return auth.signInAnonymously().then(function (cred) {
+      return codeGateDbReady(db, root + '/authRequests/' + cred.user.uid).then(function () { return cred; });
+    }).then(function (cred) {
       var uid = cred.user.uid;
       var reqRef = db.ref(root + '/authRequests/' + uid);
       var grantRef = db.ref(root + '/authGrants/' + uid);
