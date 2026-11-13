@@ -3,17 +3,33 @@ name: Timer · New season
 # Flips seasons.current in clubs-meta.json to the new season each summer.
 # The file stays the single source of truth; widgets and skills derive the
 # season from it, so nothing else needs a manual edit when the season turns.
+#
+# It refuses to move the season until every division has its clubs for the
+# new year (scripts/bump-season.py), because moving it early empties every
+# club list. On Mondays in June it only checks, and fails if the clubs are
+# not in yet, so a red run (and Estate's failed-job flag) gives weeks of
+# warning. See system/new-season-checklist.md.
 
 on:
   schedule:
     # 02:00 UTC on 1 July every year — dead centre of the off-season.
     - cron: "0 2 1 7 *"
+    # 07:17 UTC on Mondays in June: check only, nothing written.
+    - cron: "17 7 * 6 1"
   workflow_dispatch:
     inputs:
       year:
         description: "Season first-year to set (blank = current UTC year)"
         required: false
         default: ""
+      check_only:
+        description: "Only check the clubs are in; change nothing"
+        type: boolean
+        default: false
+      allow_short:
+        description: "Move the season even if a division is short of clubs"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -25,14 +41,19 @@ jobs:
       - name: Check out repo
         uses: actions/checkout@v4
 
+      - name: Check the new season's clubs are in
+        if: github.event.schedule == '17 7 * 6 1' || inputs.check_only
+        env:
+          YEAR: ${{ inputs.year }}
+        run: python3 scripts/bump-season.py --check ${YEAR:+--year "$YEAR"}
+
       - name: Bump seasons.current
         id: bump
-        run: |
-          if [ -n "${{ github.event.inputs.year }}" ]; then
-            python3 scripts/bump-season.py --year "${{ github.event.inputs.year }}"
-          else
-            python3 scripts/bump-season.py
-          fi
+        if: github.event.schedule != '17 7 * 6 1' && !inputs.check_only
+        env:
+          YEAR: ${{ inputs.year }}
+          SHORT: ${{ inputs.allow_short && '--allow-short' || '' }}
+        run: python3 scripts/bump-season.py ${YEAR:+--year "$YEAR"} $SHORT
 
       - name: Commit and push if changed
         if: steps.bump.outputs.changed == 'true'
