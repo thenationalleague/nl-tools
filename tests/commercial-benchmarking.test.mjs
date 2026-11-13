@@ -232,3 +232,57 @@ test('without a roster an unknown division is still refused', () => {
   assert.equal(res.ok, false);
   assert.match(res.errors[0], /unknown division/);
 });
+
+/* ---- 13/11/2026: the private token links are retired --------------------
+   Clubs open their dashboard at /commercial-benchmarking/club/ with their
+   club code or a Club card. Nothing may read or write links/ again, and the
+   old link address must forward rather than serve a dashboard. */
+const read = (p) => readFileSync(join(REPO, p), 'utf8');
+
+test('no page reads or writes the retired links node', () => {
+  for (const p of ['commercial-benchmarking/index.html', 'commercial-benchmarking/dashboard.js',
+    'commercial-benchmarking/club/index.html', 'commercial-benchmarking/link.html']) {
+    const src = read(p);
+    assert.doesNotMatch(src, /ROOT \+ 'links|\/links\/' \+|writeLink|tokenByClub/, `${p} still touches links/`);
+  }
+  const rules = JSON.parse(read('system/rtdb/rules.snapshot.json'));
+  assert.equal(rules.rules['app-data']['ops-commercial-benchmarking'].links, undefined, 'links/ has no rules, so nobody reads it');
+});
+
+test('link.html only forwards to the club page', () => {
+  const src = read('commercial-benchmarking/link.html');
+  assert.doesNotMatch(src, /firebase|dashboard\.js/, 'the stub loads nothing');
+  assert.match(src, /location\.replace\('\/commercial-benchmarking\/club\/'/);
+  assert.match(src, /view=check/, 'the old Proof link lands on Your figures');
+});
+
+test('the club page is a two-door code page that confirms on the club record', () => {
+  const src = read('commercial-benchmarking/club/index.html');
+  assert.match(src, /NL\.codeGate\.ensure\(/);
+  assert.match(src, /viaFunction\('app-data\/club-codes', \{ tool: 'commercial-benchmarking' \}\)/);
+  assert.match(src, /staffUrl: '\/commercial-benchmarking\/'/);
+  assert.match(src, /account: \{ title: 'Commercial Benchmarking', toolKey: 'ops-commercial-benchmarking' \}/);
+  assert.match(src, /'clubs\/' \+ S\.key \+ '\/confirm'/);
+  assert.doesNotMatch(src, /auth-guard\.js/, 'entered by code, so no auth-guard');
+  const reg = JSON.parse(read('system/rtdb/tools-registry.snapshot.json'));
+  assert.equal(reg['ops-commercial-benchmarking'].clubUrl, '/commercial-benchmarking/club/');
+});
+
+test('the club page finds its row by name, trimmed and case-folded (as the rules do)', () => {
+  const src = read('commercial-benchmarking/club/index.html');
+  const body = src.slice(src.indexOf('function fold('), src.indexOf('window.CB_CLUB'));
+  const box = {}; vm.createContext(box);
+  vm.runInContext(body + ';this.rowKey = rowKey;', box);
+  const roster = [{ club: 'Testham Town' }, { club: 'Otherby Rovers' }];
+  assert.equal(box.rowKey(roster, 'testham town'), 'Testham Town');
+  assert.equal(box.rowKey(roster, ' Otherby Rovers '), 'Otherby Rovers');
+  assert.equal(box.rowKey(roster, 'Nowhere FC'), null);
+  assert.equal(box.rowKey(roster, ''), null);
+  assert.equal(box.rowKey(null, 'Testham Town'), null);
+});
+
+test('the staff save leaves a club’s own confirmation alone', () => {
+  const src = read('commercial-benchmarking/index.html');
+  assert.match(src, /k !== 'confirm'/, 'save skips confirm');
+  assert.match(src, /clubsUpd\[c\.club \+ '\/' \+ k\]/, 'save writes field by field, not the whole row');
+});

@@ -4,47 +4,32 @@ Reads the cleaned survey workbook (Data sheet) and produces ONE JSON file to
 import into Firebase RTDB at  app-data/ops-commercial-benchmarking  :
 
     { "aggregates": {...},          # anonymised: stats + sorted `values`
-      "dash":      { "<token>": {...} } }   # one node per club, capability-keyed
+      "clubs":     { "<club name>": {...} } }   # one node per club
 
 NOTHING here is committed to the repo. The repo is a PUBLIC GitHub Pages site,
 so all survey-derived data (anonymised aggregates included) is served from RTDB
 at runtime, never baked into a committed file. Personal data was already
 stripped by clean-survey-export.py (raw SurveyMonkey export -> this cleaned
-layout); this script additionally never emits a club name into the
-`aggregates` block — only the club's own `links/<token>` node names it.
+layout); this script additionally never emits a club's figures into the
+`aggregates` block — only the club's own `clubs/<club>` node holds them.
+
+13/11/2026: the private token links (links/<token>, link.html?t=…) are
+retired. Clubs open their dashboard at /commercial-benchmarking/club/ with
+their club code, so this script no longer makes tokens or a links CSV.
 
 Late returns after the seed do NOT come through here: see
 build-benchmark-rows.py and the tool's admin Import rows.
 
 Usage:
-    python scripts/build-benchmarks.py <cleaned.xlsx> <out-rtdb-import.json> [links.csv]
-
-The links CSV (club, division, url) is the list of per-club dashboard links to
-send to clubs. Tokens are unguessable; treat the CSV as confidential.
+    python scripts/build-benchmarks.py <cleaned.xlsx> <out-rtdb-import.json> [sector-patch.json]
 """
-import sys, os, json, secrets, csv, re, hmac, hashlib, base64, datetime
+import sys, os, json, re, datetime
 import openpyxl
 
 SRC = sys.argv[1] if len(sys.argv) > 1 else 'Commercial_Benchmarking_Cleaned_v5.0.xlsx'
 OUT = sys.argv[2] if len(sys.argv) > 2 else 'commercial-benchmarking-rtdb-import.json'
-LINKS = sys.argv[3] if len(sys.argv) > 3 else 'commercial-benchmarking-links.csv'
-PATCH = sys.argv[4] if len(sys.argv) > 4 else 'commercial-benchmarking-sector-patch.json'
-BASE_URL = 'https://nl.tools/commercial-benchmarking/link.html?t='
+PATCH = sys.argv[3] if len(sys.argv) > 3 else 'commercial-benchmarking-sector-patch.json'
 DIVS = ['National', 'North', 'South']
-
-# Capability tokens are derived deterministically from the club name + a secret
-# salt, so re-running this (e.g. after a data correction) yields the SAME tokens
-# and never breaks links already sent to clubs. Keep CB_TOKEN_SALT secret and
-# constant. With no salt set, tokens are random (NOT stable) — fine for a
-# throwaway run, never for one whose links get distributed.
-SALT = os.environ.get('CB_TOKEN_SALT', '').encode('utf-8')
-
-
-def make_token(club):
-    if not SALT:
-        return secrets.token_urlsafe(24)
-    dig = hmac.new(SALT, club.encode('utf-8'), hashlib.sha256).digest()
-    return base64.urlsafe_b64encode(dig).decode('ascii').rstrip('=')[:32]
 
 # Categorical profile chips: (key, label, column header)
 CHIP_FIELDS = [
@@ -417,13 +402,9 @@ def main():
             'divN': {d: sum(1 for r in data if r[1] == d) for d in DIVS}}
     aggregates = {'meta': meta, 'aggregates': agg, 'chips': chips, 'sectors': sectors}
 
-    # ---- per-club payloads, served two ways ----
-    #   clubs/<club name>   read by logged-in staff (all) or the matching club
-    #   links/<token>       public read at the known token path (no login)
-    # Both carry the same payload so each access path is self-contained.
+    # ---- per-club payloads ----
+    #   clubs/<club name>   read by NL staff (all) or the matching club
     clubs = {}
-    links = {}
-    link_rows = []
     # Additive merge-patch: only the NEW keys (sectors, standCount metric,
     # per-club sector fields + standCount). Applied with a single RTDB update()
     # it adds these without overwriting any figures corrected live in the tool.
@@ -448,10 +429,7 @@ def main():
         extra = {k: payload[k] for k in ('bsSponsor', 'slSponsor', 'fsSector', 'bsSector', 'slSector',
                                           'fsStart', 'bsStart', 'slStart', 'stands', 'standSectors')}
         clubs[club] = payload
-        token = make_token(club)
-        links[token] = payload
-        link_rows.append((club, div, BASE_URL + token))
-        for base in ('clubs/' + club, 'links/' + token):
+        for base in ('clubs/' + club,):
             patch[base + '/metrics/standCount'] = metrics['standCount']
             for sk, sv in extra.items():
                 patch[base + '/' + sk] = sv
@@ -475,21 +453,14 @@ def main():
     aggregates['roster'] = roster
     patch['aggregates/roster'] = roster
 
-    out = {'aggregates': aggregates, 'clubs': clubs, 'links': links}
+    out = {'aggregates': aggregates, 'clubs': clubs}
     with open(OUT, 'w') as f:
         json.dump(out, f, ensure_ascii=False, indent=1)
     with open(PATCH, 'w') as f:
         json.dump(patch, f, ensure_ascii=False, indent=1)
-    with open(LINKS, 'w', newline='') as f:
-        w = csv.writer(f)
-        w.writerow(['Club', 'Division', 'Dashboard link (no login)'])
-        for row in sorted(link_rows, key=lambda x: (DIVS.index(x[1]), x[0])):
-            w.writerow(row)
 
     print('Wrote %s  (%d metrics, %d clubs)' % (OUT, len(METRICS), len(clubs)))
     print('Wrote %s  (edit-safe additive patch, %d paths)' % (PATCH, len(patch)))
-    print('Wrote %s' % LINKS)
-    print('Tokens: %s' % ('STABLE (salted)' if SALT else 'RANDOM — set CB_TOKEN_SALT for stable links'))
     print('Import at RTDB node: app-data/ops-commercial-benchmarking')
 
 
