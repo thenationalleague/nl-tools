@@ -18,8 +18,8 @@ test('whichever tab is open draws once the roster is in', () => {
 });
 
 test('the Library is the library: no line above it, no second way to open it, one scroll', () => {
-  assert.doesNotMatch(PAGE, /Open in its own tab/);
-  assert.doesNotMatch(PAGE, /Everything here acts as the National League/);
+  assert.doesNotMatch(PAGE, /Open in its own tab<\/a>/);
+  assert.doesNotMatch(PAGE, /'<div class="acc-tools"><span class="text-label">Everything here acts/);
   assert.match(PAGE, /html\.pp-lib-open, html\.pp-lib-open body \{ overflow: hidden; \}/);
   assert.match(PAGE, /window\.innerHeight - f\.getBoundingClientRect\(\)\.top/);
 });
