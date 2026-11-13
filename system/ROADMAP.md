@@ -108,11 +108,6 @@ Why: The tool is gone and the history may hold questions nobody should keep.
 What: Keep the daily table snapshot, but save only positions and points, and keep it in the database or the backup bucket instead of GitHub.
 Why: Today it is 2.4 MB a day, and GitHub keeps every copy forever.
 
-### Wellbeing posters
-What: Check by hand that the printed Wellbeing Hub and Trident posters match their pages, and remake the PDFs if not.
-Why: The pages were changed after the PDFs were made.
-Waiting on: you
-
 ## Later
 
 ### External passes
