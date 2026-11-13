@@ -3,10 +3,13 @@
 <head>
 <!--
   NL Tools — Login Page
-  Version: v5.1 (16/08/2026)
+  Version: v5.2 (13/11/2026)
   File: /index.html
 
   CHANGELOG
+  v5.2 (13/11/2026) — ?next=: after signing in, go back to the page that
+    sent you (a club page's sign-in link), not the portal. Same-site paths
+    only.
   v5.1 (16/08/2026) — Deleted the private copy of .club-picker; canon's block
     in nl-brand.css applies as-is. The local copy predated the extraction its
     own TODO asked for, and had drifted (rgba() focus shadow, off-token px
@@ -110,13 +113,13 @@
   <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
 
-<link rel="stylesheet" href="/system/nl-brand.css?v=74">
+<link rel="stylesheet" href="/system/nl-brand.css?v=75">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 
-<script src="/system/nl-utils.js?v=60"></script>
+<script src="/system/nl-utils.js?v=61"></script>
 <!-- GA4 for nl.tools — cookieless, no banner, no identity. See system/nl-analytics.js -->
 <script src="/system/nl-analytics.js?v=1"></script>
 
@@ -560,6 +563,17 @@ var auth = firebase.auth();
 var db   = firebase.database();
 
 var PORTAL_URL     = '/portal/';
+/* v5.2: ?next=/some/page/ — a club page's "Have an NL Tools account? Sign in"
+   (NL.codeGate, nl-utils v1.57) sends people here and expects them back.
+   Same-site paths only ("/x", never "//host" or a full URL), so the
+   parameter cannot be used to bounce someone to another site. */
+var NEXT_URL = (function () {
+  try {
+    var n = new URLSearchParams(location.search).get('next') || '';
+    return (/^\/(?![\/\\])/.test(n)) ? n : '';
+  } catch (e) { return ''; }
+})();
+var AFTER_SIGN_IN = NEXT_URL || PORTAL_URL;
 var NL_GAS_URL     = NL.endpoints.gas;
 /* Cloud Functions callable base (region europe-west2 — see functions/index.js).
    Page-local for now: the login page is the only Functions caller. Promote to
@@ -745,7 +759,7 @@ auth.onAuthStateChanged(function(user) {
     var ud = snap.val();
     if (ud.rejected)    { showPanel('panelRejected'); }
     else if (ud.pending){ showPanel('panelPending'); startPendingListener(user.uid); }
-    else                { window.location.replace(PORTAL_URL); }
+    else                { window.location.replace(AFTER_SIGN_IN); }
   }).catch(function() { auth.signOut(); });
 });
 

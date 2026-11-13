@@ -1,5 +1,7 @@
 /*
   Programme Packs — shared runtime for the library + admin console
+  Version: v1.9 (13/11/2026) — the card door clears a remembered code: one
+           mode per browser.
   Version: v1.8 (13/11/2026) — a Club card writes only with Manage: the
            session carries canWrite from the pManage claim, which a club code
            always mints and a Club card gets only with Manage on Programme
@@ -503,6 +505,10 @@
         return read(t) || u.getIdTokenResult(true).then(read);
       }).then(function (c) {
         if (!c) return null;
+        /* One mode per browser (13/11/2026): signed in, a code remembered on
+           this device is cleared, so a shared office machine does not keep a
+           club's code behind someone's own account. */
+        forget();
         app = ensureDefaultApp();
         /* canWrite: the pass gives Manage here (the pManage claim). Without
            it the card reads its club's library and writes nothing; the rules
