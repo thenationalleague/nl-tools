@@ -1,7 +1,14 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.62 (13/11/2026)
+   Version: v1.63 (13/11/2026)
+
+   v1.63 — NL.clubPicker (select mode) draws its chevron as an SVG, the same
+           path as NL.filterButton's, instead of typing a ▾ character. The
+           brand file had described an SVG chevron since v2.18; the code
+           never matched it. With nl-brand v2.80 the two dropdowns on a page
+           now look like one family. Cache-bust nl-utils ?v=66 -> ?v=67, in
+           lockstep with nl-brand ?v=76 -> ?v=77.
 
    v1.62 — The code exchange waits until the database knows who is asking.
            Straight after the anonymous sign-in, the database can still be
@@ -3697,7 +3704,16 @@
       valueSpan = document.createElement('span');
       valueSpan.className = 'club-picker__value club-picker__value--placeholder';
       valueSpan.textContent = opt.placeholder;
-      var chev = document.createElement('span'); chev.className = 'club-picker__chevron'; chev.textContent = '▾';
+      /* The filter button's chevron, drawn, not typed (v1.63). */
+      var SVGNS = 'http://www.w3.org/2000/svg';
+      var chev = document.createElementNS(SVGNS, 'svg');
+      chev.setAttribute('class', 'club-picker__chevron');
+      chev.setAttribute('viewBox', '0 0 12 12'); chev.setAttribute('aria-hidden', 'true');
+      var chevPath = document.createElementNS(SVGNS, 'path');
+      chevPath.setAttribute('d', 'M2 4l4 4 4-4'); chevPath.setAttribute('fill', 'none');
+      chevPath.setAttribute('stroke', 'currentColor'); chevPath.setAttribute('stroke-width', '1.8');
+      chevPath.setAttribute('stroke-linecap', 'round'); chevPath.setAttribute('stroke-linejoin', 'round');
+      chev.appendChild(chevPath);
       wrap.appendChild(crest); wrap.appendChild(valueSpan); wrap.appendChild(chev);
     } else {
       input = document.createElement('input');
