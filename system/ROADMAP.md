@@ -166,5 +166,5 @@ What: After the Skeleton key accounts, offer two-step sign-in to everyone.
 Why: It protects every account, not only the two that open everything.
 
 ### A new assistant
-What: One chatbot connected to the data tools, where each person's zones decide what it can reach.
-Why: Claudio's idea was right; the build wasn't.
+What: A chat with Claude on API credit, with a team of agents, each with its own voice, typeface, character and skill set, answering questions through connectors such as the NL Data MCP. Each person's zones decide what it can reach.
+Why: Claudio's idea was right; the build wasn't. The shape is kept in system/retired/claudio.md.

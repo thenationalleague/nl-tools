@@ -2,6 +2,16 @@
 
 The tool is deleted: `claudio/index.html`, `gas/ClaudioChat.js`, `gas/ClaudioStats.js`, its avatar `assets/icons/claudio.svg`, and its parked registry record. This file records what it was for and what was already decided, so a rebuild starts from the answered questions. **Nothing here is built.** Last version in git: commit `6a0ae99` (`git checkout 6a0ae99 -- claudio gas/ClaudioChat.js gas/ClaudioStats.js`).
 
+## The shape to keep (Richard, 13/11/2026)
+
+The chat history and the code are not worth keeping; the shape and the principles are. A rebuild is:
+
+- **A chat with Claude, paid for by API credit.**
+- **A team of agents, not one assistant.** Each has its own voice, typeface and character, and above all its own skill set: the job it does and the tools it may use.
+- **Connectors, not hand-written tools.** Agents answer questions by reaching data through connectors such as MCP servers (the NL Data MCP already serves fixtures, results, tables, matches and scorers). Claudio's 25-plus Apps Script tools were the same idea built by hand.
+
+Everything below is the detail behind that, and the problems a rebuild should not repeat.
+
 ## What it did
 
 It was an AI assistant for NL staff, at `/claudio/` (`staff-claudio`). Staff chatted with a small "team" of personas, and each persona had its own job, voice and set of data tools. It answered questions on National League history from 1979-80 onwards and on the current season from the live NLS feed. It drafted emails and statements, and answered HR questions from the staff Company Handbook and the user's own holiday and lieu records. Conversations were saved per user and could be reopened, renamed and deleted.
