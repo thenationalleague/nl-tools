@@ -30,7 +30,7 @@ test('Correct opens the clubs and competition and never changes the key', () => 
 
 test('Remove is for every fixture, typed, refused with a crowd, and kept for Restore', () => {
   assert.ok(!/label: 'Delete'/.test(PAGE), 'no hard delete left');
-  assert.match(PAGE, /if \(!ro && rec\) \{\n\s+buttons\.push\(\{ label: 'Remove'/);
+  assert.match(PAGE, /if \(!ro && rec && !correct\) \{\n\s+buttons\.push\(\{ label: 'Remove'/);
   const fn = PAGE.slice(PAGE.indexOf('function removeFixture'), PAGE.indexOf('function restoreFixture'));
   const guard = fn.indexOf('if (S.crowds[rec.key]) {');
   assert.ok(guard > 0 && guard < fn.indexOf('NL.prompt'), 'a crowd stops it before anything is asked');
@@ -54,9 +54,18 @@ test('a division of 24 clubs should hold 552 league games', () => {
 
 test('Move: a dated game changes date only through Move, which asks why and keeps the old date', () => {
   assert.match(PAGE, /buttons\.push\(\{ label: 'Move', className: 'btn--ghost btn--sm', onClick: function \(m\) \{ openMove\(rec, m\); \} \}\);/);
-  assert.match(PAGE, /'<div class="datetime-row"' \+ \(rec && rec\.date \? ' hidden' : ''\)/, 'the window shows a dated game\'s date as a value');
+  assert.match(PAGE, /'<div class="datetime-row"' \+ \(rec && rec\.date && !correct \? ' hidden' : ''\)/, 'the window shows a dated game\'s date as a value');
   const fn = PAGE.slice(PAGE.indexOf('function saveMove'), PAGE.indexOf('function openMove'));
   assert.match(fn, /if \(last && last\.outcome === 'moved'\) last\.reason = reason;/);
   assert.match(fn, /NL\.writeAudit\('fixtures_move'/);
   assert.match(PAGE, /return askMoveReason\(rec, date, ko\);/, 'a move in Rearrangements asks why too');
+});
+
+test('Amend puts a wrong date right with no move recorded; Move records a real one', () => {
+  const fn = PAGE.slice(PAGE.indexOf('function submit('));
+  assert.match(fn, /if \(corr && date && rec && rec\.date\) \{/);
+  const block = fn.slice(fn.indexOf('if (corr && date && rec && rec.date) {'), fn.indexOf('} else if (date) next = F.setDate'));
+  assert.ok(!/setDate|attempts/.test(block), 'no moved entry when amending');
+  assert.match(PAGE, /'<div class="datetime-row"' \+ \(rec && rec\.date && !correct \? ' hidden' : ''\)/, 'Amend shows the date and kick-off boxes');
+  assert.match(PAGE, /if \(!ro && rec && rec\.date && !correct\) \{\n\s+buttons\.push\(\{ label: 'Move'/, 'no Move inside Amend');
 });

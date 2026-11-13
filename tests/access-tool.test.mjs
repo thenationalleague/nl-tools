@@ -71,3 +71,10 @@ test('the Codes tab follows the person\'s level on Club Codes, and starts only w
     assert.ok(PAGE.includes('.cc-ro ' + a), a + ' is hidden at Access');
   }
 });
+
+test('Send reset link: Firebase\'s own reset email, never for yourself, and logged', () => {
+  assert.match(PAGE, /if \(edit && u\.email && u\.uid !== S\.session\.uid\) passBtns \+= '<button[^']*id="pcReset">/);
+  const fn = PAGE.slice(PAGE.indexOf('function sendReset'));
+  assert.match(fn, /firebase\.auth\(\)\.sendPasswordResetEmail\(u\.email\)/);
+  assert.match(fn, /NL\.writeAudit\('password_reset_sent', u\.name \|\| u\.uid, u\.uid\)/);
+});

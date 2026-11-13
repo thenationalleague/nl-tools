@@ -1,8 +1,15 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixture Management
-  Version: v4.4 (13/11/2026)
+  Version: v4.5 (13/11/2026)
   File: /fixtures/index.html
+
+  v4.5 (13/11/2026) — Amend covers the whole game: the date and kick-off
+    too. A date put right in Amend changes as if it had always been so: no
+    'moved' entry, and the original date follows when it was the same wrong
+    one. Move stays the way to record a real change. Amend's window carries
+    only Save, and one line says the difference. The audit line for an
+    amend includes the date before and after.
 
   v4.4 (13/11/2026) — Every game is treated the same: the clubs and
     competition of any game in the list change only through Amend (was
@@ -54,12 +61,6 @@
   behind it, is system/fixture-management-plan.md.
 
   CHANGELOG
-    v4.0 (12/11/2026) — One address: the console moves from /fixtures/admin/
-      to /fixtures/, where nothing lived (nl.tools/fixtures/ was a 404).
-      /fixtures/admin/ forwards here, keeping any query or hash. The
-      forward-facing view the plan reserved /fixtures/ for, if it is built,
-      becomes a view of this page decided by the person's pass, not a
-      second page.
     (Older entries: git history. Style principle 12.5 keeps the last five.)
 -->
 <html lang="en">
@@ -110,6 +111,11 @@
     window.NL_CHANGELOG = [
       {
         date: '13/11/2026',
+        version: 'v4.5',
+        items: [ 'Amend can put a wrong date or kick-off right without recording a move.' ]
+      },
+      {
+        date: '13/11/2026',
         version: 'v4.4',
         items: [
           'Amend replaces Correct, and works the same on every game.',
@@ -138,11 +144,6 @@
         date: '13/11/2026',
         version: 'v4.1',
         items: [ 'Crowds are read from the same place for every season.' ]
-      },
-      {
-        date: '12/11/2026',
-        version: 'v4.0',
-        items: [ 'Fixture Management now lives at nl.tools/fixtures/. Old links still work.' ]
       }
     ];
 
@@ -161,12 +162,12 @@
   </script>
 
   <!-- NL system scripts (lint canonical: ?v=49 / ?v=1 / ?v=10 / ?v=17) -->
-  <script src="/system/nl-utils.js?v=67"></script>
+  <script src="/system/nl-utils.js?v=69"></script>
   <!-- GA4, one property for all of nl.tools. Cookieless, so no consent
        banner on any page; page views by path, no identity. Tool events go
        through NL.track(). See system/nl-analytics.js. -->
   <script src="/system/nl-analytics.js?v=1"></script>
-  <script src="/system/nl-topbar.js?v=15"></script>
+  <script src="/system/nl-topbar.js?v=16"></script>
   <script src="/system/auth-guard.js?v=22"></script>
 
   <!-- Tool data layer (pure; tested in tests/fixture-management.test.mjs) -->
@@ -2435,13 +2436,15 @@
           '<input id="fmeRound" type="text" value="' + esc(rec && rec.round || '') + '"' + dis + '></div>' +
         '<div class="form-group"><label>Home</label><div id="fmeHome"></div></div>' +
         '<div class="form-group"><label>Away</label><div id="fmeAway"></div></div>' +
-        /* A dated game's date is a value: it changes only through Move,
-           which asks why and keeps the old date (v4.4). */
+        /* A dated game's date is a value in its window. Move changes it and
+           records why (v4.4); Amend puts a wrong one right with no record of
+           a move (v4.5). */
         '<div class="form-group"><label for="fmeDate">Date</label>' +
-          (rec && rec.date ? '<div class="fm-value">' + esc(dayKo(rec.date, rec.ko)) + '</div>' : '') +
-          '<div class="datetime-row"' + (rec && rec.date ? ' hidden' : '') + '><input id="fmeDate" type="date" value="' + esc(rec && rec.date || '') + '"' + dis + '>' +
+          (rec && rec.date && !correct ? '<div class="fm-value">' + esc(dayKo(rec.date, rec.ko)) + '</div>' : '') +
+          '<div class="datetime-row"' + (rec && rec.date && !correct ? ' hidden' : '') + '><input id="fmeDate" type="date" value="' + esc(rec && rec.date || '') + '"' + dis + '>' +
           '<input id="fmeKo" type="time" value="' + esc(rec && rec.ko || '15:00') + '"' + dis + '></div>' +
-          (rec && F.awaiting(rec) ? '<div class="form-hint">Awaiting a date. Set one here once it is agreed.</div>' : '') + '</div>' +
+          (rec && F.awaiting(rec) ? '<div class="form-hint">Awaiting a date. Set one here once it is agreed.</div>' : '') +
+          (correct && rec.date ? '<div class="form-hint">Puts a mistake right, as if it had always been so. If the game has really moved, use Move.</div>' : '') + '</div>' +
         '<div class="form-group" id="fmeOptaWrap"><label for="fmeOpta">Opta ID</label>' +
           '<input id="fmeOpta" type="text" placeholder="g2660046" value="' + esc(rec && rec.optaID || '') + '"' + dis + '></div>' +
         '<div class="form-group"><label>Score</label><div class="fm-score">' +
@@ -2498,13 +2501,15 @@
        then the other actions on the game, then Save on the right. No Cancel:
        the × and Esc close it, and nothing saves until Save. Small buttons,
        so the six fit on one line on the common screen. */
-    if (!ro && rec) {
+    /* Amend's own window carries only Save: it is for putting details
+       right, not for acting on the game. */
+    if (!ro && rec && !correct) {
       buttons.push({ label: 'Remove', className: 'btn--danger btn--sm fm-foot-start', onClick: function (m) { removeFixture(rec, m); } });
     }
     if (!ro && rec && fixedTeams) {
       buttons.push({ label: 'Amend', className: 'btn--ghost btn--sm', onClick: function (m) { m.close(); openEdit(rec, { correct: true }); } });
     }
-    if (!ro && rec && rec.date) {
+    if (!ro && rec && rec.date && !correct) {
       buttons.push({ label: 'Move', className: 'btn--ghost btn--sm', onClick: function (m) { openMove(rec, m); } });
       buttons.push({ label: 'Postpone', className: 'btn--ghost btn--sm', onClick: function (m) { openLose(rec, 'postponed', m); } });
       buttons.push({ label: 'Abandon', className: 'btn--ghost btn--sm', onClick: function (m) { openLose(rec, 'abandoned', m); } });
@@ -2744,7 +2749,7 @@
       broadcast: { availability: comp.fa ? 'cup' : compKey === 'nl-cup' ? 'worldwide' : 'tbc', enhanced: false, daznMove: false, ami: false },
       wentThrough: null, result: null
     };
-    var before = rec ? rec.home.name + ' v ' + rec.away.name + ' (' + rec.comp + ')' : null;
+    var before = rec ? rec.home.name + ' v ' + rec.away.name + ' (' + rec.comp + ', ' + dayKo(rec.date, rec.ko) + ')' : null;
     if (corr) {
       next.comp = compKey;
       if (!comp.league) next.playoff = null;
@@ -2759,7 +2764,16 @@
     if (neutral && !venue) return no('Name the neutral venue');
     next.neutral = neutral || null;
     next.venue = neutral ? venue : null;
-    if (date) next = F.setDate(next, date, ko, now());
+    /* Amend puts a mistake right: the date and kick-off change as if they
+       had always been so, with no 'moved' entry (v4.5). Move is for a game
+       that really changes. */
+    if (corr && date && rec && rec.date) {
+      if (next.original && next.original.date === rec.date && (next.original.ko || null) === (rec.ko || null)) {
+        next.original = { date: date, ko: ko || null };
+      }
+      next.date = date;
+      next.ko = ko || null;
+    } else if (date) next = F.setDate(next, date, ko, now());
     if (!next.original) next.original = { date: next.date, ko: next.ko };
 
     if (!res.result || !rec || !F.sameResult(res.result, rec.result)) next.result = res.result;
@@ -2778,7 +2792,7 @@
     var crowd = rec && rec.date ? crowdFromForm(wrap) : { ok: true, change: false };
     if (!crowd.ok) return no(crowd.msg);
 
-    var after = next.home.name + ' v ' + next.away.name + ' (' + next.comp + ')';
+    var after = next.home.name + ' v ' + next.away.name + ' (' + next.comp + ', ' + dayKo(next.date, next.ko) + ')';
     if (corr && before !== after) NL.writeAudit('fixtures_correct', next.key + ': ' + before + ' → ' + after);
     return save(next)
       .then(function () { return crowd.change ? saveCrowd(next, crowd) : null; })
