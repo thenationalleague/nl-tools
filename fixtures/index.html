@@ -1,8 +1,23 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixture Management
-  Version: v4.1 (13/11/2026)
+  Version: v4.2 (13/11/2026)
   File: /fixtures/index.html
+
+  v4.2 (13/11/2026) — Corrections, and the Manage tab.
+    · Settings is now Manage, laid out to the access plan's standard:
+      Settings (ruled-out days, international windows), Import (results,
+      cup ties, the workbook, Attendance) and Removed.
+    · Correct: any fixture, imported or not, can have its clubs or
+      competition put right (a misspelt outside club, a wrong division).
+      Its key does not change, so its crowd and broadcast stay with it.
+    · Remove replaces Delete, for every fixture, not only hand-entered
+      ties. Typing REMOVE confirms it; a game with an attendance figure
+      cannot be removed until the figure is cleared. A removed game is
+      kept at removed/<key> and Restore puts it back under the same key.
+    · League count: each division should hold n × (n − 1) league games
+      (552 for 24 clubs), counted from clubs-meta. Any division off shows
+      in Import, and the Manage tab carries the count.
 
   v4.1 (13/11/2026) — Crowds for the live season are read and written at
     app-data/ops-attendance/archive/<season>/submissions, like every past
@@ -269,6 +284,16 @@
     var NL_TOOL_KEY = 'ops-fixture-management';
 
     window.NL_CHANGELOG = [
+      {
+        date: '13/11/2026',
+        version: 'v4.2',
+        items: [
+          'Settings is now Manage.',
+          'Correct fixes a fixture’s clubs or competition without changing the game.',
+          'Remove takes a game out and keeps it under Manage, where Restore puts it back.',
+          'Manage shows when a division does not hold 552 league games.'
+        ]
+      },
       {
         date: '13/11/2026',
         version: 'v4.1',
@@ -593,6 +618,10 @@
   .fm-score .fm-dash { color: var(--text-muted); }
   .fm-history li { display: flex; gap: 10px; align-items: baseline; }
   .fm-section { margin: 18px 0 6px; }
+  /* A heading inside a Manage section (v4.2): below .section-head's h2,
+     above a table's own labels. */
+  .fm-comp-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .fm-sub { margin: 4px 0 10px; font-size: var(--text-base); font-weight: 700; color: var(--navy); }
 
   .fm-paste { width: 100%; min-height: 120px; font-family: var(--font-mono); font-size: var(--text-xs); }
   .fm-history { margin: 0; padding-left: 18px; font-size: var(--text-sm); }
@@ -925,7 +954,7 @@
         <button class="tab active" type="button" role="tab" data-tab="fixtures">Fixtures</button>
         <button class="tab" type="button" role="tab" data-tab="rearrange">Rearrangements <span class="tab__count" id="fmRrCount" hidden></span></button>
         <button class="tab" type="button" role="tab" data-tab="broadcast">Broadcast</button>
-        <button class="tab" type="button" role="tab" data-tab="settings" id="fmSettingsTab" hidden>Settings</button>
+        <button class="tab" type="button" role="tab" data-tab="manage" id="fmManageTab" hidden>Manage <span class="tab__count" id="fmManageCount" hidden></span></button>
       </div>
     </div>
 
@@ -950,7 +979,16 @@
       <div id="fmRrBody"></div>
     </section>
 
-    <section data-panel="settings" hidden>
+    <section data-panel="manage" hidden>
+      <!-- Manage, to the access plan's standard: Settings, Import, Removed. -->
+      <div class="section-head"><h2>Settings</h2></div>
+      <h3 class="fm-sub">Ruled-out days</h3>
+      <div id="fmRuled"></div>
+      <h3 class="fm-sub fm-gap">International windows</h3>
+      <div id="fmIntl"></div>
+
+      <div class="section-head fm-gap"><h2>Import</h2></div>
+      <div id="fmCounts"></div>
       <div class="fm-settings">
         <div class="fm-setting">
           <button class="btn btn--navy btn--sm fm-setting__btn" type="button" id="fmResults">Results</button>
@@ -969,10 +1007,9 @@
           <span>A past season from Attendance’s own record, when there is no sheet.</span>
         </div>
       </div>
-      <div class="section-head fm-gap"><h2>Ruled-out days</h2></div>
-      <div id="fmRuled"></div>
-      <div class="section-head fm-gap"><h2>International windows</h2></div>
-      <div id="fmIntl"></div>
+
+      <div class="section-head fm-gap"><h2>Removed</h2></div>
+      <div id="fmRemoved"></div>
     </section>
 
   </div>
@@ -1052,7 +1089,7 @@
     stick();
     window.addEventListener('resize', stick);
     S.canEdit = session.toolLevel === 'admin';
-    document.getElementById('fmSettingsTab').hidden = !S.canEdit;
+    document.getElementById('fmManageTab').hidden = !S.canEdit;
     renderComps();
     wireStatic();
 
@@ -1120,7 +1157,7 @@
     S.unavRef.on('value', function (snap) {
       S.unavail = snap.val() || {};
       if (S.tab === 'rearrange') renderRearrange();
-      if (S.tab === 'settings') renderRuled();
+      if (S.tab === 'manage') renderRuled();
     });
     if (S.intlRef) S.intlRef.off();
     S.intl = {};
@@ -1128,8 +1165,15 @@
     S.intlRef.on('value', function (snap) {
       S.intl = snap.val() || {};
       if (S.tab === 'rearrange') renderRearrange();
-      if (S.tab === 'settings') renderIntl();
+      if (S.tab === 'manage') renderIntl();
     });
+    if (S.removedRef) S.removedRef.off();
+    S.removed = {};
+    S.removedRef = ref('removed');
+    S.removedRef.on('value', function (snap) {
+      S.removed = snap.val() || {};
+      if (S.tab === 'manage') renderRemoved();
+    }, function () { /* no Removed list is not an error */ });
     S.listen = ref('fixtures');
     S.listen.on('value', function (snap) {
       S.fixtures = snap.val() || {};
@@ -1293,8 +1337,8 @@
     /* Import only into an empty season: it replaces every fixture, so
        once a season holds any, it is gone (Richard, 04/11/2026). */
     document.getElementById('fmImportRow').hidden = !S.canEdit || Object.keys(S.fixtures).length > 0;
-    if (S.tab === 'settings') { renderRuled(); renderIntl(); }
-    if (S.tab === 'settings') return;
+    renderManageCount();
+    if (S.tab === 'manage') { renderRuled(); renderIntl(); renderCounts(); renderRemoved(); return; }
     var t = today();
     var all = Object.keys(S.fixtures).map(function (k) { return S.fixtures[k]; });
     var bc = S.tab === 'broadcast';
@@ -2689,10 +2733,14 @@
     return '<input id="' + id + '" type="number" min="0" inputmode="numeric" value="' + (v == null ? '' : v) + '"' + dis + '>';
   }
 
-  function openEdit(rec) {
+  /* opts.correct: the clubs and competition open up, for putting right a
+     mistake on an imported game (v4.2). The key never changes. */
+  function openEdit(rec, opts) {
+    opts = opts || {};
     var isNew = !rec;
+    var correct = !isNew && !!opts.correct && S.canEdit;
     var comp = rec ? F.COMP_BY_KEY[rec.comp] : F.COMP_BY_KEY['fa-cup'];
-    var fixedTeams = !isNew && (comp.league || rec.source === 'import');
+    var fixedTeams = !isNew && !correct && (comp.league || rec.source === 'import');
     var ro = !S.canEdit;
     var dis = ro ? ' disabled' : '';
     var res = (rec && rec.result) || {};
@@ -2714,7 +2762,12 @@
       '<div class="form-grid">' +
         '<div class="form-group"><label for="fmeComp">Competition</label>' +
           (isNew ? '<select id="fmeComp">' + compOpts + '</select>'
-                 : '<div>' + compPill(rec.comp) + '</div>') + '</div>' +
+           : correct ? '<select id="fmeCorrComp">' + F.COMPS.map(function (c) {
+               return '<option value="' + c.key + '"' + (c.key === rec.comp ? ' selected' : '') + '>' + esc(c.label) + '</option>';
+             }).join('') + '</select>'
+           : '<div class="fm-comp-row">' + compPill(rec.comp) +
+               (fixedTeams && !ro ? '<button class="btn btn--ghost btn--sm" type="button" id="fmeCorrect">' +
+                 NL.icon('edit').outerHTML + 'Correct clubs or competition</button>' : '') + '</div>') + '</div>' +
         '<div class="form-group"><label for="fmeRound">Round</label>' +
           '<input id="fmeRound" type="text" value="' + esc(rec && rec.round || '') + '"' + dis + '></div>' +
         '<div class="form-group"><label>Home</label><div id="fmeHome"></div></div>' +
@@ -2765,7 +2818,8 @@
     }
 
     function syncComp() {
-      var key = isNew ? handOf(wrap.querySelector('#fmeComp').value).comp : rec.comp;
+      var key = isNew ? handOf(wrap.querySelector('#fmeComp').value).comp
+        : correct ? wrap.querySelector('#fmeCorrComp').value : rec.comp;
       var fa = F.COMP_BY_KEY[key].fa;
       wrap.querySelector('#fmeOptaWrap').hidden = fa;
       wrap.querySelector('#fmeResultWrap').hidden = !fa;
@@ -2773,17 +2827,8 @@
 
     var ctrl;
     var buttons = [];
-    if (!ro && rec && rec.source === 'manual') {
-      buttons.push({ label: 'Delete', className: 'btn--danger', onClick: function (m) {
-        NL.confirm('Delete ' + rec.home.name + ' v ' + rec.away.name + '?', { title: 'Delete tie', confirmText: 'Delete', variant: 'danger' })
-          .then(function (yes) {
-            if (!yes) return;
-            var up = {}; up['fixtures/' + rec.key] = null; up['public/' + rec.key] = null;
-            NL.ensureAuth().then(function () { return ref().update(up); })
-              .then(function () { NL.toast('Deleted', 'success'); m.close(); })
-              .catch(function (e) { NL.toast('Delete failed: ' + e.message, 'error'); });
-          });
-      }});
+    if (!ro && rec) {
+      buttons.push({ label: 'Remove', className: 'btn--danger', onClick: function (m) { removeFixture(rec, m); } });
     }
     if (!ro && rec && rec.date) {
       buttons.push({ label: 'Postpone', className: 'btn--ghost', onClick: function (m) { openLose(rec, 'postponed', m); } });
@@ -2797,7 +2842,7 @@
     }
 
     ctrl = NL.modal({
-      title: isNew ? 'Add cup tie' : rec.home.name + ' v ' + rec.away.name,
+      title: isNew ? 'Add cup tie' : (correct ? 'Correct: ' : '') + rec.home.name + ' v ' + rec.away.name,
       body: wrap,
       width: 'wide',
       buttons: buttons
@@ -2805,6 +2850,9 @@
     pickers();
     if (rec) wrap.querySelector('#fmeWent').value = rec.wentThrough || '';
     if (isNew) wrap.querySelector('#fmeComp').addEventListener('change', syncComp);
+    if (correct) wrap.querySelector('#fmeCorrComp').addEventListener('change', syncComp);
+    var corrBtn = wrap.querySelector('#fmeCorrect');
+    if (corrBtn) corrBtn.addEventListener('click', function () { ctrl.close(); openEdit(rec, { correct: true }); });
     syncComp();
 
     wrap.addEventListener('click', function (e) {
@@ -2930,7 +2978,8 @@
   function submit(rec, wrap, homePick, awayPick) {
     var isNew = !rec;
     var hand = isNew ? handOf(wrap.querySelector('#fmeComp').value) : null;
-    var compKey = isNew ? hand.comp : rec.comp;
+    var corr = wrap.querySelector('#fmeCorrComp');
+    var compKey = isNew ? hand.comp : corr ? corr.value : rec.comp;
     var comp = F.COMP_BY_KEY[compKey];
     var homeName = homePick ? homePick.getValue() : rec.home.name;
     var awayName = awayPick ? awayPick.getValue() : rec.away.name;
@@ -2960,6 +3009,12 @@
       broadcast: { availability: comp.fa ? 'cup' : compKey === 'nl-cup' ? 'worldwide' : 'tbc', enhanced: false, daznMove: false, ami: false },
       wentThrough: null, result: null
     };
+    var before = rec ? rec.home.name + ' v ' + rec.away.name + ' (' + rec.comp + ')' : null;
+    if (corr) {
+      next.comp = compKey;
+      if (!comp.league) next.playoff = null;
+      if (comp.fa) next.optaID = null;
+    }
     next.round = round;
     next.home = clubOf(homeName) || { name: homeName.trim() };
     next.away = clubOf(awayName) || { name: awayName.trim() };
@@ -2988,10 +3043,112 @@
     var crowd = rec && rec.date ? crowdFromForm(wrap) : { ok: true, change: false };
     if (!crowd.ok) return no(crowd.msg);
 
+    var after = next.home.name + ' v ' + next.away.name + ' (' + next.comp + ')';
+    if (corr && before !== after) NL.writeAudit('fixtures_correct', next.key + ': ' + before + ' → ' + after);
     return save(next)
       .then(function () { return crowd.change ? saveCrowd(next, crowd) : null; })
       .then(function () { NL.toast(isNew ? 'Tie added' : 'Saved', 'success'); return true; })
       .catch(function (e) { NL.toast('Save failed: ' + e.message, 'error'); return false; });
+  }
+
+  /* ── Remove and restore (v4.2) ──────────────────────────────────────
+     Removing is for a game that should never have been in the list. It
+     is made a little harder on purpose: REMOVE is typed, and a game with
+     an attendance figure is refused, so a figure is never left without
+     its game. The record moves to removed/<key>, whole, and Restore puts
+     it back under the same key. */
+  function removeFixture(rec, parent) {
+    var name = rec.home.name + ' v ' + rec.away.name;
+    if (S.crowds[rec.key]) {
+      NL.alert(name + ' has an attendance figure. Clear it first, then remove the game.', { title: 'Can’t remove yet' });
+      return;
+    }
+    NL.prompt('Type REMOVE to take ' + name + ' out of the fixture list. It can be restored from Manage.',
+      { title: 'Remove fixture', confirmText: 'Remove', placeholder: 'REMOVE' })
+      .then(function (typed) {
+        if (typed == null) return;
+        if (String(typed).trim().toUpperCase() !== 'REMOVE') { NL.toast('Not removed', 'info'); return; }
+        var up = {};
+        up['removed/' + rec.key] = { fixture: clean(rec), at: now(), by: (S.session && (S.session.name || S.session.uid)) || null };
+        up['fixtures/' + rec.key] = null;
+        up['public/' + rec.key] = null;
+        NL.writeAudit('fixtures_remove', rec.key + ': ' + name + ' (' + rec.comp + ')');
+        NL.ensureAuth().then(function () { return ref().update(up); })
+          .then(function () { NL.toast('Removed', 'success'); if (parent) parent.close(); })
+          .catch(function (e) { NL.toast('Remove failed: ' + e.message, 'error'); });
+      });
+  }
+  function restoreFixture(key) {
+    var item = S.removed[key];
+    if (!item || !item.fixture) return;
+    if (S.fixtures[key]) { NL.toast('A fixture with that key is already in the list', 'error'); return; }
+    var rec = clean(item.fixture);
+    rec.key = key;
+    var up = {};
+    up['removed/' + key] = null;
+    patch(up, rec);
+    NL.writeAudit('fixtures_restore', key + ': ' + rec.home.name + ' v ' + rec.away.name);
+    NL.ensureAuth().then(function () { return ref().update(up); })
+      .then(function () { NL.toast('Restored', 'success'); })
+      .catch(function (e) { NL.toast('Restore failed: ' + e.message, 'error'); });
+  }
+  function renderRemoved() {
+    var host = document.getElementById('fmRemoved');
+    if (!host) return;
+    var keys = Object.keys(S.removed || {}).filter(function (k) { return S.removed[k] && S.removed[k].fixture; })
+      .sort(function (a, b) { return String(S.removed[b].at).localeCompare(String(S.removed[a].at)); });
+    if (!keys.length) { host.innerHTML = '<p class="fm-tally">Nothing removed this season.</p>'; return; }
+    host.innerHTML = '<div class="table-wrap"><table class="table table--compact"><thead><tr>' +
+      '<th>Date</th><th>Game</th><th>Competition</th><th>Removed</th><th></th></tr></thead><tbody>' +
+      keys.map(function (k) {
+        var x = S.removed[k], r = x.fixture;
+        return '<tr><td>' + esc(r.date ? NL.formatDateShort(r.date) : '–') + '</td>' +
+          '<td>' + esc(r.home.name + ' v ' + r.away.name) + '</td>' +
+          '<td>' + compPill(r.comp) + '</td>' +
+          '<td>' + esc(NL.formatDateShort(x.at) + (x.by ? ' · ' + x.by : '')) + '</td>' +
+          '<td class="ta-right"><button class="btn btn--ghost btn--sm" type="button" data-restore="' + esc(k) + '">' +
+            NL.icon('refresh').outerHTML + 'Restore</button></td></tr>';
+      }).join('') + '</tbody></table></div>';
+    Array.prototype.forEach.call(host.querySelectorAll('[data-restore]'), function (b) {
+      b.addEventListener('click', function () { restoreFixture(b.getAttribute('data-restore')); });
+    });
+  }
+
+  /* ── League count (v4.2) ────────────────────────────────────────────
+     Each division plays n × (n − 1) league games: 552 for 24 clubs. n is
+     the division's clubs that season, from clubs-meta. Play-offs are not
+     counted. A division that is off shows here and on the Manage tab. */
+  function leagueCounts() {
+    var clubs = NL.season.clubsFor(S.meta, S.season);
+    return F.COMPS.filter(function (c) { return c.league; }).map(function (c) {
+      var n = clubs.filter(function (x) { return x.division === c.label; }).length;
+      var held = Object.keys(S.fixtures).filter(function (k) {
+        var r = S.fixtures[k]; return r.comp === c.key && !r.playoff;
+      }).length;
+      return { key: c.key, label: c.label, held: held, want: n * (n - 1) };
+    });
+  }
+  function countsOff() {
+    if (!S.meta || !Object.keys(S.fixtures).length) return [];
+    return leagueCounts().filter(function (c) { return c.want && c.held !== c.want; });
+  }
+  function renderManageCount() {
+    var el = document.getElementById('fmManageCount');
+    if (!el) return;
+    var n = S.canEdit ? countsOff().length : 0;
+    el.textContent = num(n);
+    el.hidden = !n;
+  }
+  function renderCounts() {
+    var host = document.getElementById('fmCounts');
+    if (!host) return;
+    if (!S.meta || !Object.keys(S.fixtures).length) { host.innerHTML = ''; return; }
+    var all = leagueCounts(), off = all.filter(function (c) { return c.want && c.held !== c.want; });
+    host.innerHTML = off.length
+      ? '<div class="banner banner--amber">' + off.map(function (c) {
+          return '<strong>' + esc(c.label) + '</strong> has ' + num(c.held) + ' league games; it should have ' + num(c.want) + '.';
+        }).join(' ') + '</div>'
+      : '<p class="fm-tally">League games: ' + all.map(function (c) { return esc(c.label) + ' ' + num(c.held); }).join(' · ') + '.</p>';
   }
 
   /* ── Results ─────────────────────────────────────────────────────────
