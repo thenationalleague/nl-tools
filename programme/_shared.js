@@ -68,8 +68,8 @@
   Version: v1.0 (03/08/2026) — initial build.
   File: /programme/_shared.js
 
-  Loaded by /programme/ (club + directory view) and /programme/admin/ (NL
-  console), AFTER the Firebase compat SDKs and BEFORE nl-utils.js.
+  Loaded by /programme/ (the club library, and for the League its console
+  tabs via _console.js; /programme/admin/ only forwards there), AFTER the Firebase compat SDKs and BEFORE nl-utils.js.
 
   Initialises the NAMED Firebase app ('nlProgramme') so this family's sign-in
   can never clobber a portal login open in another tab — the same isolation
@@ -101,7 +101,8 @@
                                       codes; console reads/writes only)
     PP.enter(code)                    → Promise<session>  (club/NL passcode)
     PP.enterAsAdmin()                 → Promise<session>  (portal admin → '*')
-    PP.enterMaster()                  → Promise<session>  (library ?master=1;
+    PP.enterMaster()                  → Promise<session>  (the League's door on
+                                        /programme/;
                                         rejects pp/no-portal without a portal login)
     PP.resume()                       → Promise<session|null> (remembered device)
     PP.forget()                       clear the remembered passcode
@@ -448,8 +449,8 @@
 
   /* ── Master entry (the library page, opened by an NL admin) ───────────
      The library's third door, beside the passcode and the remembered device:
-     an admin arrives from the console (?master=1) and gets the same '*'
-     session the console holds, so every folder is browsable AND writable —
+     someone signed in to NL Tools with Manage and no club gets the '*'
+     session, so every folder is browsable AND writable —
      canWrite() and the rules both already understand '*'; only this entry
      path was missing.
 

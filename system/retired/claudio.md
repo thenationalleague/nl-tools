@@ -2,6 +2,16 @@
 
 The tool is deleted: `claudio/index.html`, `gas/ClaudioChat.js`, `gas/ClaudioStats.js`, its avatar `assets/icons/claudio.svg`, and its parked registry record. This file records what it was for and what was already decided, so a rebuild starts from the answered questions. **Nothing here is built.** Last version in git: commit `6a0ae99` (`git checkout 6a0ae99 -- claudio gas/ClaudioChat.js gas/ClaudioStats.js`).
 
+## The shape to keep (Richard, 13/11/2026)
+
+The chat history and the code are not worth keeping; the shape and the principles are. A rebuild is:
+
+- **A chat with Claude, paid for by API credit.**
+- **A team of agents, not one assistant.** Each has its own voice, typeface and character, and above all its own skill set: the job it does and the tools it may use.
+- **Connectors, not hand-written tools.** Agents answer questions by reaching data through connectors such as MCP servers (the NL Data MCP already serves fixtures, results, tables, matches and scorers). Claudio's 25-plus Apps Script tools were the same idea built by hand.
+
+Everything below is the detail behind that, and the problems a rebuild should not repeat.
+
 ## What it did
 
 It was an AI assistant for NL staff, at `/claudio/` (`staff-claudio`). Staff chatted with a small "team" of personas, and each persona had its own job, voice and set of data tools. It answered questions on National League history from 1979-80 onwards and on the current season from the live NLS feed. It drafted emails and statements, and answered HR questions from the staff Company Handbook and the user's own holiday and lieu records. Conversations were saved per user and could be reopened, renamed and deleted.
@@ -92,10 +102,7 @@ Each one became a prompt rule above. Mark got `getStaff` because of the first.
 
 ## What stays behind
 
-**RTDB data, not deleted.** Export or delete it from the Firebase console.
-- `app-data/staff-claudio/conversations/<uid>/<conversationId>`: every user's chat history (title, persona, timestamps, messages). It may include HR questions, so treat it as personal data.
-- `app-data/staff-claudio/usage/<uid>/...`: read by the page and never written by anything, so probably empty.
-- `claudio/usage/<uid>/<yyyy-mm-dd>` **at the database root**: the real daily counts, costs and token figures, written by Apps Script with the legacy secret. No rules entry covers it, so only the console can reach it.
+**RTDB data: none left (13/11/2026).** A one-off report (Button · Retire Claudio's data, removed after it ran) counted the three places Claudio wrote and found all of them empty: no conversations, no usage figures at either path, 0 KB. Nothing was saved or deleted, because there was nothing to keep. The places it checked were `app-data/staff-claudio/conversations`, `app-data/staff-claudio/usage` and `claudio/usage` at the database root.
 
 **Rules.** The `app-data/staff-claudio` block stays in the deployed rules until the next **Button · Publish database rules** run. It gives conversations owner read/write for superadmin, admin and staff roles, and usage owner read with no writes. The role check was written by hand; a rebuild should generate it with `scripts/rtdb-level-rule.mjs`.
 
