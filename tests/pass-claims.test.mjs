@@ -24,7 +24,7 @@ function lift(names) {
     }
     return SRC.slice(i, j);
   });
-  const consts = 'const CLUB_CLAIMS = ["club", "clubName", "pClub", "pClubName"];';
+  const consts = SRC.match(/const CLUB_CLAIMS = \[[^\]]*\];/)[0];
   return eval('(function(){' + consts + bodies.join('\n') + '\nreturn {' + names.join(',') + '};})()');
 }
 const { clubKeyFor, nextClaims, sameClaims } = lift(['clubKeyFor', 'nextClaims', 'sameClaims']);
@@ -74,4 +74,20 @@ test('the claim names match what the club code door mints', () => {
   for (const name of ['club', 'clubName', 'pClub', 'pClubName']) {
     assert.ok(new RegExp('\\b' + name + ':').test(cc), 'club-code.js mints ' + name);
   }
+});
+
+test('Programme Packs: a Club card writes only with Manage there', () => {
+  assert.equal(nextClaims({}, clubPass('Woking'), CLUBS, true).pManage, true);
+  assert.ok(!('pManage' in nextClaims({}, clubPass('Woking'), CLUBS, false)));
+  /* Manage gone from the pass: the write claim goes with it. */
+  assert.ok(!('pManage' in nextClaims({ pClub: 'wok', pManage: true }, clubPass('Woking'), CLUBS, false)));
+  /* No club key, no write, whatever the pass says. */
+  assert.ok(!('pManage' in nextClaims({}, clubPass('Nowhere FC'), CLUBS, true)));
+});
+
+test('a club code always mints Programme Packs writes (codes keep Manage)', () => {
+  const pp = readFileSync(join(REPO, 'functions/programme.js'), 'utf8');
+  assert.match(pp, /const c = \{ pClub: hit\.key, club: hit\.key, pManage: true \};/);
+  const cc = readFileSync(join(REPO, 'functions/club-code.js'), 'utf8');
+  assert.match(cc, /pManage: true/);
 });
