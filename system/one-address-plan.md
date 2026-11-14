@@ -34,7 +34,7 @@ and the two-door shape at the top of `system/fixture-management-plan.md`.
 | Financial Benchmarking | one page | forwards | **Done** (14/11/2026): the code door stays for clubs; a Club card opens its own figures; a League account sees every club at its level, and imports at Manage (`NL.codeGate.door`) |
 | Local Media | public form | console | No: the form is public |
 | Programme Packs | one page | forwards | **Done** (13/11/2026): the passcode door stays beside sign-in; a Club card opens its club; the League with Manage gets every folder plus Removed files, Audit and Manage as tabs |
-| Save of the Month | club page, by code | console | No: clubs nominate by code |
+| Save of the Month | one page | forwards | **Done** (14/11/2026): the code door stays for clubs; a Club card nominates for its club; a League account has the console at its level (`NL.codeGate.door`) |
 | UW Promo | partner page | console (not a registry tool) | No: the partner uses it |
 
 ## Club logins have started (12/11/2026)

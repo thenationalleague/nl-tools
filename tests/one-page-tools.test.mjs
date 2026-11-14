@@ -11,6 +11,7 @@ const REG = JSON.parse(read('system/rtdb/tools-registry.snapshot.json'));
 const TOOLS = [
   { dir: 'financial-benchmarking', key: 'ops-financial-benchmarking' },
   { dir: 'dazn', key: 'media-dazn' },
+  { dir: 'save-of-the-month', key: 'media-save-of-the-month' },
 ];
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
 

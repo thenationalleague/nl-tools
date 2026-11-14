@@ -118,7 +118,7 @@ test('a League account at a club page is warned that a code would sign it out', 
   assert.match(src, /\(signedInAs\(\) \? '<div class="gate__alt">You are signed in to NL Tools as '/);
   assert.match(src, /A code here signs you out of NL Tools in this browser\./);
   /* Document Library is one page (14/11/2026): no League page to send to. */
-  for (const d of ['save-of-the-month', 'commercial-compliance']) {
+  for (const d of ['commercial-compliance']) {
     assert.match(readFileSync(join(REPO, d, 'index.html'), 'utf8'), /staffUrl: '\/[a-z-]+\/admin\/'/, d);
   }
 });

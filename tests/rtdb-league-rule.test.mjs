@@ -86,7 +86,7 @@ test('batch 1: the pages decide by the level, not the role', () => {
   const read = (f) => readFileSync(join(REPO, f), 'utf8');
   assert.match(read('newsletter/index.html'), /session\.toolLevel !== 'admin'/);
   assert.match(read('club-kits/index.html'), /S\.canManage = !!\(session && session\.toolLevel === 'admin'\)/);
-  assert.match(read('save-of-the-month/admin/index.html'), /S\.canManage = !!\(session && session\.toolLevel === 'admin'\)/);
+  assert.match(read('save-of-the-month/index.html'), /S\.canManage = !!\(session && session\.toolLevel === 'admin'\)/);
   const be = read('brand-exposure/index.html');
   assert.doesNotMatch(be, /canScan = !!\(session && session\.role === 'superadmin'\);/, 'the scanner asks the pass');
   assert.match(be, /NL\.pass\.isSkeleton\(bePass\)/);
