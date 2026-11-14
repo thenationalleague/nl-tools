@@ -43,7 +43,7 @@ Why: This is the last part of the new model people actually meet. Without it, ne
 ## Next
 
 ### One address for each tool
-What: Merge the remaining two-page tools (a code page plus an /admin/ page) into one page each, where the pass decides the view. Then delete the "League only" label from the registry.
+What: The merges are done: every two-page tool is one page now, where the pass decides the view, and the old /admin/ addresses forward. Left: delete the "League only" label from the registry.
 Why: People type one address. Two pages per tool means two places to keep in step.
 
 ### Private and Public shelves, and guest links
@@ -56,18 +56,16 @@ Why: Everything so far has been checked on made-up data. This is the check with 
 Waiting on: you
 
 ### A weekly note when something fails
-What: One plain-English note a week to a work inbox: which background jobs failed and what that means. Estate already marks a GitHub job whose last run failed (13/11/2026); the weekly note, and the same check for the cloud jobs, are still to do.
-Waiting on: you (which inbox)
+What: Built (14/11/2026). Once a day, Timer · Background job check asks GitHub and Google which background jobs failed in the last seven days. Estate marks a cloud job whose last run failed, as it already did for GitHub jobs. Every Monday a plain-English note goes to the media inbox: what failed, whether it is still failing, and what each job does.
 Why: Failure emails went to a personal inbox in a form nobody could read, so a daily backup failed for ten weeks unnoticed.
+- Jobs that only run when someone presses a button are left out: the person who pressed it saw it fail.
+- The first run says whether the check is allowed to read Google's cloud jobs. If it isn't, the note says so and the run log has the one-off fix.
+Waiting on: you (publish Apps Script, then one test run)
 
 ### Prove a backup restores
 What: A button that restores a database backup into a spare test database and compares it with the live one.
 Why: A backup that has never been restored is a hope, not a backup.
 Waiting on: you (one press)
-
-### Two-step sign-in for the Skeleton key
-What: Turn on two-step sign-in (a code from a phone app) for the two Skeleton key accounts first.
-Why: Those two accounts open everything.
 
 ### The rest of the portal
 What: The tool cards and drawn icons are done (13/11/2026). Next is the page around them: the noticeboard, the header and the spacing, and the Graphics landing page as the second place the card is used.
@@ -79,6 +77,17 @@ Why: A reset email that lands in spam is a locked-out person phoning you.
 Waiting on: you
 
 ## Later
+
+### Two-step sign-in for the Skeleton key
+What: Turn on two-step sign-in (a code from a phone app) for the two Skeleton key accounts first.
+Why: Those two accounts open everything.
+
+### Public pages under /public/
+What: Every page with no door lives at nl.tools/public/<name>/. Four already do (Academy & Alliance, Article Composer, Fixtures Graphic, Trust Cup). The two that don't, the open Club Directory and the open Handbook, move there, and their old addresses forward. One rule in the site's settings covers the whole folder, and a test fails any page with no door outside it.
+Why: The address alone tells anyone whether a page is safe to send outside the League.
+- The handbook PDF stays where it is: a PDF cannot forward, so moving it breaks links already sent.
+- Club Directory and Handbook are hidden from Google on purpose; one rule for the folder would hide the other four too.
+Waiting on: you – should everything under /public/ be hidden from Google?
 
 ### External passes
 What: A third kind of pass, for organisations outside the League and its clubs: DAZN, the Trust, agencies, freelancers. In Access, a new Externals tab: you set up the organisation first (name, colours and an uploaded logo), then its zones, then invite its people. Each zone has a plain name ("Broadcast"), a three-letter code (suggested from the name, changeable, never a duplicate) and the tools it opens. Each person holds one or more of their organisation's zones.

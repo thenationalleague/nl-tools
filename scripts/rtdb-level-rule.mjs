@@ -43,11 +43,17 @@ function q(s) {
   return `'${s}'`;
 }
 
-export function levelRule(toolKey, min) {
+export function levelRule(toolKey, min, offered) {
   if (min !== 'access' && min !== 'admin') throw new Error(`levelRule: min must be access or admin, not ${min}`);
   const E = `${U}.child('tools').child(${q(toolKey)})`;
   const D = (role) => `root.child('tools').child(${q(toolKey)}).child('defaults').child(${role})`;
-  const levels = min === 'admin' ? ['admin'] : ['access', 'admin'];
+  /* A tool that offers no Manage (`levels` off/access in its registry
+     record) never asks for 'admin': the portal cannot give it, and
+     tests/rules-follow-portal.test.mjs refuses a rule that asks (14/11/2026,
+     Estate's job check). The CLI passes the record's levels. */
+  const levels = (min === 'admin' ? ['admin'] : ['access', 'admin'])
+    .filter((L) => !offered || offered.includes(L));
+  if (!levels.length) throw new Error(`levelRule: ${toolKey} offers no ${min}`);
 
   /* The entry, when there is one. */
   const entryIs = (L) => {
@@ -99,5 +105,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.error('       node scripts/rtdb-level-rule.mjs league');
     process.exit(2);
   }
-  console.log(levelRule(key, min));
+  const { readFileSync } = await import('node:fs');
+  const reg = JSON.parse(readFileSync(new URL('../system/rtdb/tools-registry.snapshot.json', import.meta.url), 'utf8'));
+  console.log(levelRule(key, min, (reg[key] || {}).levels));
 }
