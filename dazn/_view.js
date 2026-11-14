@@ -81,7 +81,7 @@
      v12.0 (12/10/2026) — Sortable games, stacked bars, INT for International.
      v3.0  (12/10/2026) — First build.
 
-   The club page (/dazn/) and the staff page (/dazn/admin/) both call this,
+   The club side and the League side of /dazn/ both call this,
    so a club and the League see the same numbers drawn the same way.
 
    CANON USED: .filter-bar / .filter-label / NL.filterButton / .nl-select /
