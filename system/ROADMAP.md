@@ -42,10 +42,6 @@ Why: This is the last part of the new model people actually meet. Without it, ne
 
 ## Next
 
-### One address for each tool
-What: The merges are done: every two-page tool is one page now, where the pass decides the view, and the old /admin/ addresses forward. Left: delete the "League only" label from the registry.
-Why: People type one address. Two pages per tool means two places to keep in step.
-
 ### Private and Public shelves, and guest links
 What: One-off tools for your own use move to /private/, on a shelf only the Skeleton key sees. Each shows its age and has a Retire button. A guest link lets one named person open one private tool, with an end date, a switch-off and a log of every open. Broadcast Travel moves first, with its old staff code door removed. The Trust Cup frame moves to Graphics.
 Why: You can see what has been built, and clear it away when its job is done, instead of it living on forever.
@@ -115,6 +111,7 @@ Why: Partners and freelancers need one or two tools each, with a name on every s
 ### Clear away the old access fields
 What: Once nothing reads them, remove the per-person tool entries and the jobs that keep them in step (Apply passes), the old roles, the per-role defaults on every tool, and the forwarding pages kept for old bookmarks.
 Why: Two ways of deciding access is twice the chance of them disagreeing.
+- The "League only" label (`audience` on each tool) goes here too. It still decides for anyone without a pass, and keeps a Club card off League tools until club logins, so it cannot go before then. (One address for each tool is done: every two-page tool is one page, 14/11/2026.)
 
 ### Rename the tools in the database
 What: Drop the old "ops-", "media-" and "staff-" starts from every tool's name in the database. A list of old and new names kept forever, a report-first copy, one switch-over, and the old copies deleted weeks later.
