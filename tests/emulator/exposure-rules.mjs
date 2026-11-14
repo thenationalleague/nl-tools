@@ -14,7 +14,8 @@
 
    ops-club-kits/submissions was readable by anyone at all, for the public
    kit form retired 15/10/2026, and a League edit stamps the editor's
-   address into the record. It now needs the same as the Club Kits console. */
+   address into the record. It now needs a League card and Access on Club
+   Kits (manage-batch1-rules.mjs checks Access still reads it). */
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -31,7 +32,10 @@ await env.withSecurityRulesDisabled(async (ctx) => {
   await set(ref(ctx.database(), 'admin/invites-pending/k1'), { email: 'someone@example.invalid', token: 't-made-up', role: 'staff' });
   await set(ref(ctx.database(), 'app-data/ops-club-kits/submissions/X'), { outfield: [], editedBy: 'someone@example.invalid' });
 });
-const db = (uid, claims) => env.authenticatedContext(uid, claims).database();
+/* One context per person: asking twice re-initialises the app, which the
+   emulator refuses. */
+const ctxs = {};
+const db = (uid, claims) => (ctxs[uid] ||= env.authenticatedContext(uid, claims).database());
 const anon = env.unauthenticatedContext().database();
 
 let pass = 0, fail = 0;
