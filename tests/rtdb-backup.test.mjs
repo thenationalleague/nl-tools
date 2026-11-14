@@ -9,7 +9,9 @@
      backup names → YYYY-MM-DDTHH:MM:SSZ_<DATABASE_NAME>_data.json[.gz]
                                         https://firebase.google.com/docs/database/backups
      RTDB REST GET <path>.json → the value, or null when absent
-                                        https://firebase.google.com/docs/reference/rest/database */
+                                        https://firebase.google.com/docs/reference/rest/database
+     instances.get / instances.create → DatabaseInstance { databaseUrl, state }
+                                        https://firebase.google.com/docs/reference/rest/database/database-management/rest/v1beta/projects.locations.instances */
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -131,23 +133,41 @@ function fakeCloud(state) {
       }
       const up = u.pathname.match(/^\/upload\/storage\/v1\/b\/([^/]+)\/o$/);
       if (up) { (state.buckets[up[1]] ||= {})[u.searchParams.get('name')] = Buffer.from(body); return send(200, {}); }
-      if (u.pathname.startsWith('/db/')) {
-        const path = u.pathname.slice(4).replace(/\.json$/, '').split('/').map(decodeURIComponent);
+      const inst = u.pathname.match(/^\/fdb\/v1beta\/projects\/[^/]+\/locations\/[^/]+\/instances(?:\/(.+))?$/);
+      if (inst) {
+        if (req.method === 'POST') {
+          state.created = u.searchParams.get('databaseId');
+          state.inst = { databaseUrl: `http://${req.headers.host}/drill`, state: 'ACTIVE', type: 'USER_DATABASE' };
+          return send(200, state.inst);
+        }
+        return state.inst ? send(200, state.inst) : send(404, { error: { code: 404 } });
+      }
+      if (u.pathname === '/drill/.settings/rules.json') { state.drillRules = JSON.parse(body); return send(200, {}); }
+      const tree = u.pathname.startsWith('/db/') ? 'db' : u.pathname.startsWith('/drill/') ? 'drill' : null;
+      if (tree) {
+        const path = u.pathname.slice(tree.length + 2).replace(/\.json$/, '').split('/').filter(Boolean).map(decodeURIComponent);
         if (req.method === 'PUT') {
-          state.writes.push(path.join('/'));
-          let o = state.db;
+          const v = JSON.parse(body);
+          if (tree === 'db') state.writes.push(path.join('/'));
+          else (state.drillWrites ||= []).push(path.join('/'));
+          if (!path.length) { state[tree] = v || {}; return send(200, {}); }
+          let o = (state[tree] ||= {});
           path.slice(0, -1).forEach((k) => { o = (o[k] ||= {}); });
-          o[path[path.length - 1]] = JSON.parse(body);
+          o[path[path.length - 1]] = v;
           return send(200, {});
         }
-        return send(200, path.reduce((o, k) => (o == null ? null : (o[k] ?? null)), state.db));
+        let v = path.reduce((o, k) => (o == null ? null : (o[k] ?? null)), state[tree] || null);
+        if (v && typeof v === 'object' && !Object.keys(v).length) v = null;
+        if (v && u.searchParams.get('shallow') === 'true' && typeof v === 'object') v = Object.fromEntries(Object.keys(v).map((k) => [k, true]));
+        if (state.spoil && tree === 'drill' && path[0] === state.spoil && v) v = { ...v, broken: 1 };
+        return send(200, v);
       }
       send(404, { error: 'unknown ' + u.pathname });
     });
   });
 }
 
-async function runRestore(env, state) {
+async function runRestore(env, state, cmd = 'restore') {
   const srv = fakeCloud(state);
   await new Promise((r) => srv.listen(0, r));
   const base = `http://127.0.0.1:${srv.address().port}`;
@@ -158,13 +178,14 @@ async function runRestore(env, state) {
      fetch rewritten, in a child so the real module is what runs. */
   const shim = join(dir, 'shim.mjs');
   writeFileSync(shim, `const f = globalThis.fetch;
-globalThis.fetch = (url, o) => f(String(url).replace('https://storage.googleapis.com', '${base}'), o);
+globalThis.fetch = (url, o) => f(String(url).replace('https://storage.googleapis.com', '${base}').replace('https://firebasedatabase.googleapis.com', '${base}/fdb'), o);
 await import(${JSON.stringify(join(REPO, 'scripts/rtdb-backup.mjs'))});`);
   /* spawn, not spawnSync: a blocked event loop could not answer the
      child's requests to the server above. */
   const r = await new Promise((resolve) => {
-    const child = spawn(process.execPath, ['-e', `process.argv[1]=${JSON.stringify(join(REPO, 'scripts/rtdb-backup.mjs'))};process.argv[2]='restore';import(${JSON.stringify(shim)})`], {
-      env: { ...process.env, TOKEN: 't', DB: base + '/db', SOURCE_BUCKET: 'daily', SAVE_BUCKET: 'monthly', GITHUB_STEP_SUMMARY: sumFile, ...env }
+    const child = spawn(process.execPath, ['-e', `process.argv[1]=${JSON.stringify(join(REPO, 'scripts/rtdb-backup.mjs'))};process.argv[2]=${JSON.stringify(cmd)};import(${JSON.stringify(shim)})`], {
+      env: { ...process.env, TOKEN: 't', DB: base + '/db', SOURCE_BUCKET: 'daily', SAVE_BUCKET: 'monthly', DAILY: 'daily',
+        PROJECT_NUMBER: '1', LOCATION: 'europe-west1', DRILL_ID: 'nl-tools-restore-drill', GITHUB_STEP_SUMMARY: sumFile, ...env }
     });
     let stdout = '', stderr = '';
     child.stdout.on('data', (d) => { stdout += d; });
@@ -219,4 +240,48 @@ test('asks for a club or a path, not both', async () => {
   const r = await runRestore({ CLUB: 'Barnet', PATHS: 'users', MODE: 'report' }, cloudWith());
   assert.equal(r.status, 1);
   assert.match(r.stdout, /either the club or the path/);
+});
+
+/* ------------------------------------------------ the drill (v1.1) */
+
+test('the drill splits only what is too big for one write', () => {
+  const tree = { small: { a: 1 }, big: { x: 'y'.repeat(50), z: { q: 'w'.repeat(50) } } };
+  const plan = B.planWrites(tree, 60);
+  assert.deepEqual(plan.map((w) => w[0]), ['small', 'big/x', 'big/z']);
+  assert.deepEqual(B.planWrites(tree, 1e6).map((w) => w[0]), [''], 'small enough: one write');
+});
+
+test('the drill restores the whole backup into the spare, proves it, empties it, and never writes live', async () => {
+  const state = cloudWith();
+  state.db.users = { u1: { name: 'Pat Example' } };
+  const r = await runRestore({ WRITE_LIMIT: '80' }, state, 'drill');
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(state.created, 'nl-tools-restore-drill', 'the spare was created on the first run');
+  assert.deepEqual(state.drillRules, { rules: { '.read': false, '.write': false } }, 'no browser can read it');
+  assert.ok(state.drillWrites.length > 2, 'big parts went in several writes');
+  assert.deepEqual(state.writes, [], 'live was not written');
+  assert.ok(!state.drill || !Object.keys(state.drill).length, 'the spare is empty again');
+  assert.match(r.summary, /\*\*Passed\.\*\*/);
+  assert.match(r.summary, /\| app-data \| \d+ values \| identical \|/);
+  assert.match(r.summary, /\| users \| 0 values \| identical \| 1 values \(1 added/);
+  for (const secret of [PRIVATE_EMAIL, 'pat@example.invalid', 'Pat Example', 'BAR', 'Barnet']) {
+    assert.ok(!(r.stdout + r.summary).includes(secret), `the public log shows ${secret}`);
+  }
+});
+
+test('the drill fails loudly when the spare does not read back as the backup, and still empties it', async () => {
+  const state = cloudWith();
+  state.spoil = 'app-data';
+  const r = await runRestore({}, state, 'drill');
+  assert.equal(r.status, 1);
+  assert.match(r.summary, /\*\*Failed\.\*\*/);
+  assert.ok(!state.drill || !Object.keys(state.drill).length, 'the spare is empty again');
+});
+
+test('the drill workflow: monthly and by button, and it reads live only', () => {
+  const wf = readFileSync(join(REPO, '.github/workflows/rtdb-restore-drill.yml'), 'utf8');
+  assert.match(wf, /^name: Timer · /m);
+  assert.match(wf, /workflow_dispatch:/);
+  assert.match(wf, /node scripts\/rtdb-backup\.mjs drill/);
+  assert.match(wf, /DRILL_ID: nl-tools-restore-drill/);
 });

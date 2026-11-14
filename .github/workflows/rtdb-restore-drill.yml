@@ -1,0 +1,50 @@
+name: Timer · Prove a backup restores
+
+# A backup nobody has restored is a hope. Once a month, and whenever the
+# button is pressed, the newest daily backup is restored WHOLE into a spare
+# database (nl-tools-restore-drill), read back and compared value by value,
+# and the spare is emptied again. Live is only read, never written.
+#
+# The spare is created on the first run; its rules refuse every browser.
+# The run's summary is a table of the database's top-level parts, in
+# counts: the log is public (this repo is public), so nothing from inside
+# the database is ever printed.
+#
+# A failure turns up in the weekly background-job note like any other.
+# The work is in scripts/rtdb-backup.mjs (drill).
+
+on:
+  schedule:
+    - cron: '23 5 3 * *'   # 05:23 UTC on the 3rd, after the monthly copy on the 1st
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: rtdb-restore-drill
+  cancel-in-progress: false
+
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DAILY: nl-tools-default-rtdb-backups
+      DB: https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app
+      PROJECT_NUMBER: '801354670005'
+      LOCATION: europe-west1
+      DRILL_ID: nl-tools-restore-drill
+      NODE_OPTIONS: --max-old-space-size=6144
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      - name: Restore the newest backup into the spare, compare, empty it
+        run: |
+          set -euo pipefail
+          TOKEN=$(gcloud auth print-access-token) node scripts/rtdb-backup.mjs drill

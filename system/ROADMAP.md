@@ -68,8 +68,10 @@ Why: Every sign-in is a long Cloud Shell routine, and a backup that stops silent
 Waiting on: you (two Admin console screenshots)
 
 ### Prove a backup restores
-What: A button that restores a database backup into a spare test database and compares it with the live one.
+What: Built (14/11/2026). Timer · Prove a backup restores puts the newest daily backup, whole, into a spare database, reads every value back, compares it with the backup, and empties the spare again. It runs on the 3rd of each month and by button, and only ever reads live. Its summary is a table of the database's parts: values in the backup, whether they came back identical, and how far live has moved since.
 Why: A backup that has never been restored is a hope, not a backup.
+- The spare is created on the first run and no browser can read it.
+- If it fails, the Monday note says so.
 Waiting on: you (one press)
 
 ### The rest of the portal
