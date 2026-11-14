@@ -1,7 +1,12 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.66 (13/11/2026)
+   Version: v1.67 (14/11/2026)
+   v1.67 — NL.accountLevel: an NL Tools account's level on a tool, for a
+     page that does not use auth-guard (a club code door that also takes
+     sign-ins). The answer auth-guard gives, in its order: the pass first,
+     then the superadmin role, then the old entry or role default.
+     Promoted from Commercial Benchmarking for Document Library.
    v1.66 — Back closes a dialog. Every NL.modal (so NL.confirm, NL.prompt
      and NL.alert too) that can be dismissed takes a history step for the
      same address while it is open, and back (the phone's button, a swipe,
@@ -3466,6 +3471,66 @@
       contrast: contrast,
       clubColours: clubColours
     };
+  })();
+
+  /* ===================================================================
+     NL.accountLevel — an NL Tools account's level on a tool, worked out
+     by a page that does not use auth-guard (v1.67)
+     A club page is a code door, and auth-guard would send a code holder to
+     the sign-in page, so a tool whose one page serves clubs by code and the
+     League by sign-in works the level out itself. This gives the answer
+     auth-guard's checkAccess gives, in the same order:
+       1. an issued pass decides, by NL.pass.explain, and nothing else does
+          (auth-guard v16.3); a Club card on a League-only tool is Off;
+       2. with no pass, the superadmin role is Manage;
+       3. with no pass, a League-only tool is Off for a club role;
+       4. otherwise the old per-person entry or the role default
+          (NL.resolveToolLevel).
+     The tool's live grants from Access (access-grants/<toolKey>) are
+     applied first (NL.pass.withLive), as auth-guard does.
+     Levels: 'off' | 'access' | 'manage'.
+     Promoted from Commercial Benchmarking's own copy when Document Library
+     became the second page to need it (14/11/2026). */
+  (function () {
+    var LEAGUE_ROLES = { superadmin: true, admin: true, staff: true };
+    function leagueTool(tool) {
+      var aud = tool && tool.audience;
+      return aud === 'league' || aud === 'staff' || aud === 'meta';
+    }
+    function isLeague(user) {
+      user = user || {};
+      if (window.NL.pass && window.NL.pass.isIssued(user.pass)) return user.pass.base === 'league';
+      return !!LEAGUE_ROLES[user.role];
+    }
+    function from(user, tool, toolKey) {
+      user = user || {};
+      if (!tool) return 'off';
+      if (window.NL.pass && window.NL.pass.isIssued(user.pass)) {
+        var ex = window.NL.pass.explain(user.pass, tool);
+        if (user.pass.base === 'club' && leagueTool(tool) && ex.reason !== 'skeleton') return 'off';
+        return ex.level === 'manage' ? 'manage' : (ex.level === 'access' ? 'access' : 'off');
+      }
+      if (user.role === 'superadmin') return 'manage';
+      if (leagueTool(tool) && !LEAGUE_ROLES[user.role]) return 'off';
+      var old = window.NL.resolveToolLevel((user.tools || {})[toolKey], tool, user.role);
+      return old === 'admin' ? 'manage' : (old === 'access' ? 'access' : 'off');
+    }
+    /* Reads users/<uid>, tools/<toolKey> and access-grants/<toolKey>.
+       Resolves { user, league, level }. */
+    function load(uid, toolKey, db) {
+      db = db || firebase.database();
+      return Promise.all([
+        db.ref('users/' + uid).once('value'),
+        db.ref('tools/' + toolKey).once('value'),
+        db.ref('access-grants/' + toolKey).once('value')['catch'](function () { return null; })
+      ]).then(function (r) {
+        var user = r[0].val() || {}, tool = r[1].val() || null;
+        var live = r[2] && r[2].exists() ? r[2].val() : null;
+        if (tool && live && window.NL.pass && window.NL.pass.withLive) tool = window.NL.pass.withLive(tool, live);
+        return { user: user, league: isLeague(user), level: from(user, tool, toolKey) };
+      });
+    }
+    window.NL.accountLevel = { from: from, isLeague: isLeague, load: load };
   })();
 
   /* ===================================================================

@@ -107,7 +107,7 @@ portal session as well, and the address clubs hold never changes.
 | Handbook | **as it is for now; planned, not scheduled** (Richard, 15/10/2026): the full portal tool moves to `/admin/`; `/reader/` retires into a redirect. `/public/` (open, noindex) is unaffected. What then sits at the root is the club's page. |
 | Club Directory | **Done 11/11/2026.** `/club-directory/` is the club's page (club code); `/club-directory/admin/` is the staff page behind the login; anyone with Manage edits and publishes there with its Edit button (the editor is `_editor.js`, merged in 11/11/2026). `/reader/`, `/editor/` and `/admin/edit/` forward. `/public/` unchanged. The Directory's own editor and reader codes, `_gate.js` and `clubDirectoryAuth` were retired 11/11/2026 (`system/retired/club-directory-codes.md`): clubs sign in with club codes only. |
 | Responsibilities (`/view/`), UW Promo | kept as they are, by decision |
-| Document Library | follows it from the start (28/10/2026): `/document-library/` for clubs by access code, read-only; `/document-library/admin/` the console. |
+| Document Library | one page since 14/11/2026 (`system/one-address-plan.md`): `/document-library/` for clubs by access code or Club card, read-only, and for the League at its level; `/document-library/admin/` forwards there. |
 | Local Media | follows it from the start (29/10/2026): `/local-media/` is the clubs' page – an open form, no code – and `/local-media/admin/` the console. |
 | Commercial Compliance | follows it (15/10/2026): the root is the club page (club access code; own obligations; submit a note, link and files per period), `/admin/` the console, which approves or rejects. |
 

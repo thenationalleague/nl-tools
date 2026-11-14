@@ -278,22 +278,17 @@ test('one page: a code door for clubs, the pass for League accounts', () => {
 /* The page works the level out as auth-guard does; run it against NL.pass. */
 test('the page reads the level as auth-guard would', async () => {
   const { NL } = await import('./load-canon.mjs');
-  const src = read('commercial-benchmarking/index.html');
-  const body = src.slice(src.indexOf('function levelFrom('), src.indexOf('function levelFor('));
-  const box = { NL, KEY: 'ops-commercial-benchmarking', LEAGUE_ROLES: { superadmin: true, admin: true, staff: true } };
-  vm.createContext(box);
-  vm.runInContext(body + ';this.levelFrom = levelFrom; this.isLeague = isLeague;', box);
   const tool = JSON.parse(read('system/rtdb/tools-registry.snapshot.json'))['ops-commercial-benchmarking'];
   const K = (...k) => Object.fromEntries(k.map((x) => [x, { given: 1, by: 'x' }]));
   const league = (...k) => ({ role: 'staff', pass: { base: 'league', issued: 1, keys: K(...k) } });
-  assert.equal(box.levelFrom({ role: 'superadmin' }, tool), 'manage');
-  assert.equal(box.levelFrom(league('league-commercial'), tool), 'manage');
-  assert.equal(box.levelFrom(league('league-finance'), tool), 'access');
-  assert.equal(box.levelFrom(league('league-operations'), tool), 'off', 'Operations does not get in');
-  assert.equal(box.levelFrom(league(), tool), 'off');
-  assert.equal(box.levelFrom({ role: 'staff' }, tool), 'off', 'no pass: the role default, now off');
-  assert.equal(box.isLeague(league()), true);
-  assert.equal(box.isLeague({ role: 'staff', pass: { base: 'club', club: 'Testham Town', issued: 1 } }), false, 'a Club card is the club side, whatever the old role');
+  assert.equal(NL.accountLevel.from({ role: 'superadmin' }, tool, 'ops-commercial-benchmarking'), 'manage');
+  assert.equal(NL.accountLevel.from(league('league-commercial'), tool), 'manage');
+  assert.equal(NL.accountLevel.from(league('league-finance'), tool), 'access');
+  assert.equal(NL.accountLevel.from(league('league-operations'), tool), 'off', 'Operations does not get in');
+  assert.equal(NL.accountLevel.from(league(), tool), 'off');
+  assert.equal(NL.accountLevel.from({ role: 'staff' }, tool), 'off', 'no pass: the role default, now off');
+  assert.equal(NL.accountLevel.isLeague(league()), true);
+  assert.equal(NL.accountLevel.isLeague({ role: 'staff', pass: { base: 'club', club: 'Testham Town', issued: 1 } }), false, 'a Club card is the club side, whatever the old role');
 });
 
 test('the club side finds its row by name, trimmed and case-folded (as the rules do)', () => {

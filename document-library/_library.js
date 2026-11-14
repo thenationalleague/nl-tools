@@ -14,9 +14,9 @@
   Version: v1.0 (28/10/2026) — initial build.
   File: /document-library/_library.js
 
-  One browser, two doors:
-    /document-library/        clubs, by club code — browse, preview, download
-    /document-library/admin/  NL admins, by portal login — all of that, plus
+  One browser, one page (/document-library/, since 14/11/2026):
+    clubs, by club code or Club card — browse, preview, download
+    the League at Manage, by NL Tools sign-in — all of that, plus
                               upload, new folder, rename, move and remove
 
   The page decides which by passing `writable`. That flag only draws the
