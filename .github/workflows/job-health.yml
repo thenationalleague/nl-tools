@@ -1,0 +1,59 @@
+name: Timer · Background job check
+
+# Once a day: which background jobs (GitHub and Google cloud) failed in the
+# last seven days, written to app-data/ops-estate/job-health for Estate.
+# On Mondays it also asks Apps Script to email the week's note to the media
+# inbox (gas/JobHealth.js). scripts/job-health.mjs says where every shape
+# comes from. The log prints counts only: the repo is public.
+#
+# Run by hand: "report" writes nothing; "check" writes the result; "check
+# and send the note" writes it and sends the note now.
+
+on:
+  schedule:
+    - cron: '47 6 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'What to do'
+        type: choice
+        default: report
+        options: [report, check, check and send the note]
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      - name: Check the last seven days
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MODE: ${{ github.event.inputs.mode || 'check' }}
+        run: |
+          set -euo pipefail
+          export GCP_TOKEN=$(gcloud auth print-access-token)
+          ARGS=""
+          if [ "$MODE" != "report" ]; then ARGS="--write"; fi
+          if [ "$MODE" = "check and send the note" ]; then ARGS="$ARGS --note"; fi
+          node scripts/job-health.mjs $ARGS
+      - name: Send the note if it is due
+        if: github.event.inputs.mode != 'report'
+        run: |
+          set -euo pipefail
+          # Apps Script sends only when the result just written says the
+          # note is due, then clears it; asking twice sends once.
+          GAS=$(grep -o "https://script.google.com/macros/s/[A-Za-z0-9_-]*/exec" system/nl-utils.js | head -1)
+          curl -sS -L -X POST -H 'Content-Type: text/plain' \
+            --data '{"action":"jobHealth_send"}' "$GAS" | head -c 200
+          echo

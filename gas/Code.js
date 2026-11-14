@@ -1,10 +1,15 @@
 /**
  * NL Tools — Consolidated GAS
- * Version: v2.6 (30/10/2026)
+ * Version: v2.7 (14/11/2026)
  *
  * The shared Apps Script ROUTER — the doGet/doPost entry points that dispatch
  * to the per-tool handlers. gas/ is the source of truth and deploys from the
  * repo (see gas/README.md); it is no longer a mirror to keep in lockstep.
+ *
+ * v2.7 (14/11/2026) — jobHealth_send (JobHealth.js): emails the weekly
+ * background-job note to the media inbox when Timer · Background job check
+ * has marked it due. Reads the note from the database; the request carries
+ * nothing.
  *
  * v2.6 (30/10/2026) — Claudio retired (system/retired/claudio.md):
  * ClaudioChat.js and ClaudioStats.js deleted, the commented-out claudio
@@ -200,6 +205,8 @@ function doPost(e) {
     /* Vacancies */
     if (action === 'uwPromo_uploadNotify')   return respond(uwPromoUploadNotify(body));
     if (action === 'uwPromo_overdueDigest')  return respond(uwPromoOverdueDigest());
+    /* The weekly background-job note (job-health.yml) */
+    if (action === 'jobHealth_send')         return respond(jobHealthSend());
 
     if (action === 'vacancies_requestCode')  return vacRequestCode(body);
     if (action === 'vacancies_validateCode') return vacValidateCode(body);

@@ -56,9 +56,11 @@ Why: Everything so far has been checked on made-up data. This is the check with 
 Waiting on: you
 
 ### A weekly note when something fails
-What: One plain-English note a week to a work inbox: which background jobs failed and what that means. Estate already marks a GitHub job whose last run failed (13/11/2026); the weekly note, and the same check for the cloud jobs, are still to do.
-Waiting on: you (which inbox)
+What: Built (14/11/2026). Once a day, Timer · Background job check asks GitHub and Google which background jobs failed in the last seven days. Estate marks a cloud job whose last run failed, as it already did for GitHub jobs. Every Monday a plain-English note goes to the media inbox: what failed, whether it is still failing, and what each job does.
 Why: Failure emails went to a personal inbox in a form nobody could read, so a daily backup failed for ten weeks unnoticed.
+- Jobs that only run when someone presses a button are left out: the person who pressed it saw it fail.
+- The first run says whether the check is allowed to read Google's cloud jobs. If it isn't, the note says so and the run log has the one-off fix.
+Waiting on: you (publish Apps Script, then one test run)
 
 ### Prove a backup restores
 What: A button that restores a database backup into a spare test database and compares it with the live one.
