@@ -23,14 +23,15 @@ import { ref, get, set } from 'firebase/database';
 
 const env = await initializeTestEnvironment({ projectId: 'demo-exp', database: { rules: readFileSync(join(process.env.NL_REPO || '..', 'system/rtdb/rules.snapshot.json'), 'utf8'), host: '127.0.0.1', port: 9000 } });
 await env.withSecurityRulesDisabled(async (ctx) => {
-  await set(ref(ctx.database(), 'users'), {
+  const root = ctx.database();   /* once: a second database() call re-initialises */
+  await set(ref(root, 'users'), {
     sa: { role: 'superadmin' },
     ad: { role: 'admin', pass: { base: 'league' } },
     st: { role: 'staff', pass: { base: 'league' } },
     cl: { role: 'club-admin', club: 'X', pass: { base: 'club', club: 'X' } }
   });
-  await set(ref(ctx.database(), 'admin/invites-pending/k1'), { email: 'someone@example.invalid', token: 't-made-up', role: 'staff' });
-  await set(ref(ctx.database(), 'app-data/ops-club-kits/submissions/X'), { outfield: [], editedBy: 'someone@example.invalid' });
+  await set(ref(root, 'admin/invites-pending/k1'), { email: 'someone@example.invalid', token: 't-made-up', role: 'staff' });
+  await set(ref(root, 'app-data/ops-club-kits/submissions/X'), { outfield: [], editedBy: 'someone@example.invalid' });
 });
 /* One context per person: asking twice re-initialises the app, which the
    emulator refuses. */
