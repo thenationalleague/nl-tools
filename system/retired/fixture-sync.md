@@ -69,8 +69,14 @@ first to the private bucket at
 then deleted, checked gone, and an audit line written
 (`attendance_fixture_copy_retired`).
 
-`Button · Publish Apps Script` ran at 16:10 and removed `FixtureSync.js` from
-the live project. It first needed the Apps Script sign-in the GitHub jobs use
+`Button · Publish Apps Script` ran at 16:10 but did **not** remove
+`FixtureSync.js` from the live project: `clasp push` only uploads files the
+repo has changed, and a deleted file is not a change, so it reported "Script
+is already up to date." The next morning's backup found it live and copied it
+back into `gas/`. Publish now sends the whole of `gas/`, which replaces the
+project's contents, and checks live afterwards
+(`scripts/gas-push-all.mjs`, 14/11/2026); the file was removed again then.
+The trigger had already gone, so the file never ran in between. It first needed the Apps Script sign-in the GitHub jobs use
 (`CLASP_CREDENTIALS`) renewing: it had been refused since 30/10 with
 `invalid_grant … invalid_rapt`, the Google Cloud session-control
 reauthentication policy expiring the token, so the daily backup had failed

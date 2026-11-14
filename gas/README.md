@@ -103,6 +103,14 @@ day for Attendance. Fixture Management's record is now Attendance's only
 fixture list, so the file, its timer and the copied list are gone. See
 `system/retired/fixture-sync.md`.
 
+## Deleting a file
+
+Delete it here and publish. Publish sends the whole of `gas/` and the live
+project is replaced with it (`scripts/gas-push-all.mjs`), then it pulls live
+back and fails if anything differs. Until 14/11/2026 it used `clasp push`,
+which only uploads changed files: a deleted file never counted as a change,
+so it stayed live and the next backup copied it back into the repo.
+
 ## Changing the backend
 
 1. Edit the `.js` file here and open a PR. It reviews like any other diff.
@@ -129,5 +137,5 @@ Two things the workflow protects that are easy to get wrong by hand:
   change appears to do nothing while reporting success. The workflow deploys to
   the ID read out of `NL.endpoints.gas`, so it can only target what the site
   actually calls, and it checks that ID exists before deploying.
-- **Someone else's editor change.** `clasp push` overwrites everything. The
+- **Someone else's editor change.** The push replaces everything. The
   workflow pulls and diffs first, and refuses rather than guessing.
