@@ -1,7 +1,11 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.67 (14/11/2026)
+   Version: v1.68 (14/11/2026)
+   v1.68 — NL.codeGate.door: one page, two doors. A League account at its
+     level (NL.accountLevel) gets the NL Tools bar and the tool's League
+     view; anyone else the code door. For the two-page tools moving to one
+     address (system/one-address-plan.md).
    v1.67 — NL.accountLevel: an NL Tools account's level on a tool, for a
      page that does not use auth-guard (a club code door that also takes
      sign-ins). The answer auth-guard gives, in its order: the pass first,
@@ -2742,6 +2746,72 @@
         if (s && s.mode === 'account') return codeGateAccountBar(opts.account).then(function () { return s; });
         return s || codeGateOpen(opts);
       });
+    },
+    /* One page, two doors (v1.68): a tool whose one address serves clubs by
+       code (or Club card) and the League by NL Tools sign-in
+       (system/one-address-plan.md). Decides once, at load:
+         · signed in to NL Tools with a League account → its level
+           (NL.accountLevel): Off shows "isn't available", as auth-guard
+           does; Access or Manage draws the NL Tools bar, installs the audit
+           hook, sets NL.session (auth-guard's shape, toolLevel 'access' or
+           'admin') and calls opts.league(session);
+         · anyone else (signed out, a code, a Club card) → the code door,
+           NL.codeGate.ensure(opts.code), then opts.club(session).
+       opts: { toolKey, title, code: {…ensure options}, league(session),
+               club(session), off(session)?, showCode()? }
+       The rules stay the boundary; this only decides what is drawn. */
+    door: function (opts) {
+      var once = false, stop = null;
+      /* ensure, with one hook: opts.showCode() runs only when the code card
+         itself is about to show, so a page can reveal its club bar then and
+         a resumed Club card never sees it flash. */
+      function codeDoor() {
+        var c = opts.code || {};
+        return codeGateResume(c.claim).then(function (s) {
+          if (s && s.mode === 'account') return codeGateAccountBar(c.account).then(function () { return s; });
+          if (s) return s;
+          if (opts.showCode) opts.showCode();
+          return codeGateOpen(c);
+        }).then(opts.club);
+      }
+      stop = firebase.auth().onAuthStateChanged(function (user) {
+        if (once) return;
+        once = true;
+        if (stop) stop();
+        if (!user || !user.email) { codeDoor(); return; }
+        window.NL.accountLevel.load(user.uid, opts.toolKey).then(function (who) {
+          if (!who.league) { codeDoor(); return; }
+          var u = who.user || {};
+          var session = {
+            uid: user.uid, name: u.name || '', email: u.email || user.email || '', role: u.role || '',
+            org: u.org || '', club: u.club || '', jobTitle: u.jobTitle || '', pending: !!u.pending,
+            tools: u.tools || {}, pass: u.pass || null, mode: 'account',
+            toolLevel: who.level === 'manage' ? 'admin' : (who.level === 'access' ? 'access' : 'off')
+          };
+          window.NL.session = session;
+          return codeGateAccountBar({ title: opts.title, toolKey: opts.toolKey }).then(function () {
+            if (session.toolLevel === 'off') {
+              if (opts.off) return opts.off(session);
+              /* Straight under the NL Tools bar: whatever else the page
+                 holds is still hidden. A page can draw its own (opts.off). */
+              var m = document.createElement('main');
+              m.className = 'page';
+              m.innerHTML = '<div class="empty-state"><div class="empty-state__title">This tool isn’t available</div>' +
+                '<div class="empty-state__text">Please contact media@thenationalleague.org.uk.</div></div>';
+              var bar = document.getElementById('nlTopbar');
+              if (bar && bar.parentNode) bar.parentNode.insertBefore(m, bar.nextSibling);
+              else document.body.appendChild(m);
+              return;
+            }
+            if (window.NL.installAuditHook) { try { window.NL.installAuditHook(); } catch (e) {} }
+            return opts.league(session);
+          });
+        })['catch'](function (e) {
+          console.error('[codeGate.door]', e);
+          if (window.NL.toast) window.NL.toast('Could not open this page. Reload to try again.', 'error');
+        });
+      });
+      if (once && stop) stop();
     },
     viaFunction: codeGateViaFunction,
     /* The master-key route: uses the caller's existing auth-guard session
