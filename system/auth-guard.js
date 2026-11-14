@@ -1,7 +1,12 @@
 /*
  * auth-guard.js — NL Tools v2
  * File: /system/auth-guard.js
- * Version: v16.3 (13/11/2026)
+ * Version: v16.4 (14/11/2026)
+ *
+ * v16.4: Signed out at a tool, you are sent to sign in with ?next= set to
+ *       the page you asked for, and sign-in brings you back there instead
+ *       of to the portal. Cache-bust ?v=22 -> ?v=23, in lockstep with every
+ *       page.
  *
  * v16.3: The pass decides everywhere (Roadmap, Now). Someone with an issued
  *       pass is decided by NL.pass.explain alone (decideByPass). The two
@@ -715,7 +720,10 @@
         /* No Firebase Auth user. Either truly signed out, or session has
            expired / been revoked since the cache was written. */
         nlSession.clear();
-        window.location.replace(LOGIN_URL);
+        /* v16.4: carry the page asked for, so sign-in brings them back to
+           it (index.html reads ?next=, same-site paths only). */
+        window.location.replace(LOGIN_URL + '?next=' +
+          encodeURIComponent(location.pathname + location.search + location.hash));
         return;
       }
 
