@@ -28,7 +28,12 @@ await env.withSecurityRulesDisabled(async (ctx) => {
     sa: { role: 'superadmin' },
     ad: { role: 'admin', pass: { base: 'league' } },
     st: { role: 'staff', pass: { base: 'league' } },
-    cl: { role: 'club-admin', club: 'X', pass: { base: 'club', club: 'X' } }
+    cl: { role: 'club-admin', club: 'X', pass: { base: 'club', club: 'X' } },
+    /* A sign-up waiting for approval, as account.js writes it since
+       14/11/2026, and as it wrote it before (the shape the one-off tidy
+       clears). */
+    wt: { role: 'pending', pending: true, tools: {} },
+    old: { role: 'club', club: 'X', pending: true, tools: { 'ops-club-codes': 'access' } }
   });
   await set(ref(root, 'admin/invites-pending/k1'), { email: 'someone@example.invalid', token: 't-made-up', role: 'staff' });
   await set(ref(root, 'app-data/ops-club-kits/submissions/X'), { outfield: [], editedBy: 'someone@example.invalid' });
@@ -58,6 +63,21 @@ await t('the superadmin role reads kit submissions', get(ref(db('sa'), KITS)), t
 await t('a club account cannot', get(ref(db('cl'), KITS)), false);
 await t('a club code session cannot', get(ref(db('code1', { club: 'X' }), KITS)), false);
 await t('signed out cannot', get(ref(anon, KITS)), false);
+
+const DIR = 'app-data/ops-club-directory/clubs/X';
+const CB = 'app-data/ops-commercial-benchmarking/clubs/X';
+await t('a waiting sign-up cannot read a club\'s directory entry', get(ref(db('wt'), DIR)), false);
+await t('a waiting sign-up cannot read a club\'s benchmarking', get(ref(db('wt'), CB)), false);
+await t('the old waiting shape could (so the tidy is needed)', get(ref(db('old'), DIR)), true);
+
+const AUD = 'admin/audit/';
+await t('anyone signed in logs their own action', set(ref(db('st'), AUD + 'k1'), { uid: 'st', action: 'x' }), true);
+await t('nobody logs an action as someone else', set(ref(db('st'), AUD + 'k2'), { uid: 'sa', action: 'x' }), false);
+await t('a code session cannot log as a person', set(ref(db('code1', { club: 'X' }), AUD + 'k3'), { uid: 'sa', action: 'x' }), false);
+await t('an action about someone files under them too', set(ref(db('ad'), 'admin/audit-by-user/cl/k4'), { uid: 'ad', targetUid: 'cl', action: 'x' }), true);
+await t('but not under a third person', set(ref(db('ad'), 'admin/audit-by-user/st/k5'), { uid: 'ad', targetUid: 'cl', action: 'x' }), false);
+await t('the old tool requests node is closed', set(ref(db('st'), 'admin/tool-requests/k6'), { x: 1 }), false);
+await t('the old notifications node is closed', set(ref(db('st'), 'admin/notifications/sa/k7'), { x: 1 }), false);
 
 await env.cleanup();
 console.log(`\n${pass} passed, ${fail} failed`);

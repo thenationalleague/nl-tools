@@ -1,10 +1,14 @@
 /**
  * NL Tools — Consolidated GAS
- * Version: v2.7 (14/11/2026)
+ * Version: v2.8 (14/11/2026)
  *
  * The shared Apps Script ROUTER — the doGet/doPost entry points that dispatch
  * to the per-tool handlers. gas/ is the source of truth and deploys from the
  * repo (see gas/README.md); it is no longer a mirror to keep in lockstep.
+ *
+ * v2.8 (14/11/2026) — notifyAdmin and confirmRequest need the requester's
+ * own sign-in and take their details from the database, not the request
+ * (Notifications.js).
  *
  * v2.7 (14/11/2026) — jobHealth_send (JobHealth.js): emails the weekly
  * background-job note to the media inbox when Timer · Background job check

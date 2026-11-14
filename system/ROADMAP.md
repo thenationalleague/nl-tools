@@ -30,9 +30,9 @@ Why: One way in for clubs. It waits for launch because the personal links are pa
 What: Programme Packs now checks club codes through the shared door (13/11/2026). After a week with no club using the old route, remove the club-passcode half of programmeAuth, leaving only the console's sign-in.
 Why: Two copies of the code check, throttle and log is what this tidy is for.
 
-### League files kept from club accounts
-What: File storage tells League staff apart by "has an email address", which every club account now has too. So a club account could read League-only files (the website figures, the newsletter library, partner logos, Brand Exposure frames) and every club's Save of the Month and Matchday Live clips. Change those rules to "an email address and no club" and test each one before publishing.
-Why: Club logins are opening; this must be shut before Sign-up and approvals lets clubs in at scale. Today only test club accounts exist.
+### League files only for League accounts
+What: File storage tells League staff apart by "has an email address". Every account has one, including club accounts and anyone who signs up. Give League accounts a mark of their own, set by the server from their pass, then change the file rules to ask for that mark. Done in three steps so nobody loses their files: the mark is added, every account gets it, then the rules switch.
+Why: It is the same mistake the database had on 14/11/2026, in the one place that fix did not reach.
 
 ### Sign-up and approvals
 What: Club people ask; everyone else is invited. A club secretary shares one sign-up link with their staff. The link already names the club, so each person adds their name, job title and the zones they need, with a one-line reason, and League Operations approves, usually within a day. League Operations can also invite club staff directly. League staff and externals never ask: they are invited, and the invite sets their card and zones. A Pending list and a bell show what is waiting. People can ask for an extra zone later.
@@ -45,6 +45,7 @@ Why: This is the last part of the new model people actually meet. Without it, ne
 - Email stays in Apps Script for now. The log records that an email was sent, not whether it arrived.
 
 ## Next
+- The invite form still offers the old roles (Club Admin and so on). It should offer a card and zones, the same words as the rest of Access.
 
 ### Private and Public shelves, and guest links
 What: One-off tools for your own use move to /private/, on a shelf only the Skeleton key sees. Each shows its age and has a Retire button. A guest link lets one named person open one private tool, with an end date, a switch-off and a log of every open. Broadcast Travel moves first, with its old staff code door removed. The Trust Cup frame moves to Graphics.

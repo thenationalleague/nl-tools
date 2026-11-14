@@ -9,9 +9,10 @@
  *                           unused, unexpired), then writes the user record
  *                           with the role the ADMIN put on the invite.
  *   submitAccessRequest   — club request-access flow. Creates the user record
- *                           with role hard-coded to 'club' + pending:true and
- *                           queues the admin/requests entry. The client can no
- *                           longer choose its own role.
+ *                           with role 'pending' + pending:true and queues the
+ *                           admin/requests entry, which alone carries the club
+ *                           and the tools asked for. The client chooses no role,
+ *                           no club and no tools of its own.
  *   withdrawAccessRequest — a PENDING requester withdraws: deletes their user
  *                           record, their requests entries, and their Auth
  *                           account. Active (approved) users cannot self-delete.
@@ -173,7 +174,9 @@ exports.submitAccessRequest = onCall(CALL_OPTS, async (request) => {
   }
 
   // Requested tools: keys sanitised, values forced to 'access' — the client
-  // cannot request admin. Admins grant levels on approval.
+  // cannot request admin. They go on the REQUEST only (14/11/2026): on the
+  // user record they were per-person grants, which the database rules obey
+  // whether or not the person was ever approved.
   const tools = {};
   const rawTools = data.tools && typeof data.tools === "object" ? data.tools : {};
   Object.keys(rawTools).slice(0, 50).forEach((k) => {
@@ -189,16 +192,23 @@ exports.submitAccessRequest = onCall(CALL_OPTS, async (request) => {
   // (existing && pending===true) falls through: idempotent retry of a
   // partially-completed submission.
 
+  /* A person waiting for approval holds NOTHING the database rules read
+     (14/11/2026). Anyone on the internet can sign up and call this, so the
+     record must not carry a club (club-scoped rules read users/<uid>/club),
+     a club role (the registry's club defaults apply to it) or any tools
+     (per-person grants). 'pending' is a role no rule and no registry
+     default names, so it resolves to Off everywhere; a missing role would
+     read as staff. The club, title and tools asked for live on the request,
+     and Access writes the real ones on approval. */
   await uref.set({
     name,
     email: caller.email,
-    role: "club", // hard-coded server-side — never taken from the client
+    role: "pending",
     org: "",
-    orgKey: "club",
-    club,
+    orgKey: "",
     jobTitle,
     pending: true,
-    tools,
+    tools: {},
   });
 
   // Ensure exactly one open admin/requests entry for this uid.
@@ -216,7 +226,7 @@ exports.submitAccessRequest = onCall(CALL_OPTS, async (request) => {
       club,
       jobTitle,
       tools,
-      role: "club",
+      role: "club-staff",
       status: "pending",
       createdAt: Date.now(),
     });
