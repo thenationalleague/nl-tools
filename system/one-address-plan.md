@@ -33,7 +33,7 @@ and the two-door shape at the top of `system/fixture-management-plan.md`.
 | Document Library | club page, by code | console | No: clubs read by code |
 | Financial Benchmarking | club page, by code | console | No: clubs submit by code |
 | Local Media | public form | console | No: the form is public |
-| Programme Packs | club library, by passcode | console | No: clubs download by passcode |
+| Programme Packs | one page | forwards | **Done** (13/11/2026): the passcode door stays beside sign-in; a Club card opens its club; the League with Manage gets every folder plus Removed files, Audit and Manage as tabs |
 | Save of the Month | club page, by code | console | No: clubs nominate by code |
 | UW Promo | partner page | console (not a registry tool) | No: the partner uses it |
 
@@ -65,6 +65,7 @@ its own passcode route (`programmeAuth`) and keeps those sessions apart from
 real accounts by design, so the club claim on a signed-in account is not
 read there. Merging its two pages, with `programmeAuth` taught to accept a
 Club card, closes that loose end.
+**Done 13/11/2026:** one page at `/programme/`; `/programme/admin/` forwards there.
 
 **Club Codes is no longer a two-page tool to merge:** it became the Codes
 tab of Access (`/access/?tab=codes`) on 12/11/2026, and `/club-codes/`

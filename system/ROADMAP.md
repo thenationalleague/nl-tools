@@ -30,10 +30,6 @@ Why: One way in for clubs. It waits for launch because the personal links are pa
 What: Programme Packs now checks club codes through the shared door (13/11/2026). After a week with no club using the old route, remove the club-passcode half of programmeAuth, leaving only the console's sign-in.
 Why: Two copies of the code check, throttle and log is what this tidy is for.
 
-### Manage on Programme Packs
-What: Programme Packs is the last tool granted Manage without a Manage level built. Build it: Access to use the tool, Manage to run it. Every other tool got its Manage on 13/11/2026 (DAZN and Club Codes last), to the Manage tab standard in the access plan.
-Why: A grant that changes nothing on screen is a promise the tool doesn't keep.
-
 ### Sign-up and approvals
 What: Club people ask; everyone else is invited. A club secretary shares one sign-up link with their staff. The link already names the club, so each person adds their name, job title and the zones they need, with a one-line reason, and League Operations approves, usually within a day. League Operations can also invite club staff directly. League staff and externals never ask: they are invited, and the invite sets their card and zones. A Pending list and a bell show what is waiting. People can ask for an extra zone later.
 Why: This is the last part of the new model people actually meet. Without it, new people still come in the old way, and you would have to invite every member of every club by hand.
@@ -59,10 +55,6 @@ What: Go through NL Tools as League staff with no zones, a League Operations zon
 Why: Everything so far has been checked on made-up data. This is the check with real sign-ins.
 Waiting on: you
 
-### The new season checklist
-What: One written list for 1 July: what the season job does by itself, and what has to be done by hand. Clubs coming in and going out, their codes, crests, club data, the new handbook edition, ECAL and anything else tied to the season.
-Why: It runs once a year, so nobody will remember it. The season job has never run for real.
-
 ### A weekly note when something fails
 What: One plain-English note a week to a work inbox: which background jobs failed and what that means. Estate already marks a GitHub job whose last run failed (13/11/2026); the weekly note, and the same check for the cloud jobs, are still to do.
 Waiting on: you (which inbox)
@@ -81,38 +73,14 @@ Why: Those two accounts open everything.
 What: The tool cards and drawn icons are done (13/11/2026). Next is the page around them: the noticeboard, the header and the spacing, and the Graphics landing page as the second place the card is used.
 Why: It is the first page everyone sees. When a second page uses the card, it becomes a shared component.
 
-### Passwords and your account
-What: My pass becomes your account page. An Account section at the foot of it holds your email and a Change password button (current password, then the new one twice), with two-step sign-in added there later. An "Account" link in the menu under your circle jumps straight to it. In Access, each person gets a "Send reset link" button, which emails them the same link as "Forgot password" on the sign-in page.
-Why: If you think someone has seen your password, you should be able to change it there and then. And when someone is locked out, you can start their reset without ever knowing or choosing their password.
-- Nobody can set or see anyone else's password, Skeleton key included.
-- Every reset link sent from Access is logged: who sent it, to whom, when.
-- Reset emails come from Firebase's own address by default. Point them at an NL address so they don't land in spam.
-
-### The new pass, and turning it over
-What: One white NL lanyard pass for everyone. A header strip says which kind of pass it is: red for League, navy for Club, charcoal for External. Below it, one big sticker about two-thirds the width of the pass, filled with the club's or organisation's colour, with the crest or logo on a white circle that has a soft shadow. Under the name and job title, the zones sit as white stickers in two columns; zones not held are faint empty slots. Tap the pass and it turns over to show what it opens: Manage in one column, Access in the other, names only. The Skeleton key's back says "Every tool, Manage". The full list beside the pass stays.
-Why: The colour lives on the sticker, not the whole pass, so every pass looks like it came from the same desk and the club still stands out from across a room. The front says what kind of access it is; the back gives the detail.
-- Designed 13/11/2026 from sketches against real crests: Kidderminster, Hampton & Richmond, Spennymoor, Scunthorpe, Hebburn, Telford, Fylde, Yeovil.
-- League: the rose on red, six zones in three rows. Club: four zones in two rows. External: as many as its organisation has.
-- A club whose main colour is near-white uses its second colour for the sticker.
-- The white circle stops a crest disappearing into its own colour (Kidderminster on orange).
-- Built together: the new front and the flip are one piece of work.
-
-### Zones
-What: On screen, the stickers on the pass are called zones, not keys.
-Why: It matches the accreditation-pass idea. Only the word on screen changes.
-
-### Claudio's leftovers
-What: Delete everything left of the old Claudio assistant, its chat history included.
-Why: The tool is gone and the history may hold questions nobody should keep.
+### Reset emails from an NL address
+What: Password reset emails come from Firebase's own address. Point them at an NL address so they don't land in spam. Change password (My pass → Account) and Send reset link (Access) are built (13/11/2026).
+Why: A reset email that lands in spam is a locked-out person phoning you.
+Waiting on: you
 
 ### A slimmer league table snapshot
 What: Keep the daily table snapshot, but save only positions and points, and keep it in the database or the backup bucket instead of GitHub.
 Why: Today it is 2.4 MB a day, and GitHub keeps every copy forever.
-
-### Wellbeing posters
-What: Check by hand that the printed Wellbeing Hub and Trident posters match their pages, and remake the PDFs if not.
-Why: The pages were changed after the PDFs were made.
-Waiting on: you
 
 ## Later
 
@@ -166,6 +134,23 @@ Why: Delivery you can see, and no Gmail limits. Not now: it adds a service and a
 What: After the Skeleton key accounts, offer two-step sign-in to everyone.
 Why: It protects every account, not only the two that open everything.
 
-### A new assistant
-What: One chatbot connected to the data tools, where each person's zones decide what it can reach.
-Why: Claudio's idea was right; the build wasn't.
+### Club Kits as a tool people use
+What: Redesign Club Kits around using the kits, not collecting them. It was built to gather every club's kit colours; that job is done, and it stayed because the kits are useful, but the page is still shaped like a collection console.
+Why: The data is worth more as something people look things up in than as a form that has done its job.
+
+### Full league history beyond the National League
+What: Add every club's Football League results to our own history, so a club's whole league story sits on one timeline and head-to-heads span both: every league meeting between two clubs, wherever it was played. Two public datasets cover England's top four divisions from 1888 (engsoccerdata, and a database built on it that is kept up to date); our EFL connector only goes back to 2021.
+Why: Many of our clubs had Football League years, and clubs want their whole history, not the part since they joined us.
+- Ask both compilers first, and credit them on every answer: one dataset is marked for non-commercial use with credit, the other states no terms.
+- Built in advance, not in the live database: each club's history and each head-to-head worked out ahead, like the results archive, so searches are instant and free.
+- The real work is which club is which. A list to check and sign off, linking each Football League name to one of our clubs, with phoenix clubs, renames and mergers marked (the old Aldershot is not Aldershot Town). Never combined without asking.
+- A short list of adjustments beside the results, so every table matches the record books: points awarded for a game never played (Scunthorpe v Exeter, 1974), points deducted, and seasons wiped from the record (1939/40).
+- Not covered: history in the leagues below us before 1979.
+
+### A new assistant, for clubs first
+What: A chat with Claude on API credit, with a team of agents, each with its own voice, typeface, character and skill set, answering questions through connectors such as the NL Data MCP. Clubs first, starting with the League's history: "when did we last beat Yeovil away?", "our record against Gateshead", head-to-heads for programme notes. A Club card already knows which club is asking. Each person's zones decide what it can reach.
+Why: Clubs can't easily get the League's history anywhere else, and programme editors need head-to-heads every week. Claudio's idea was right; the build wasn't. The shape is kept in system/retired/claudio.md.
+- Every answer comes from the results archive, never the model's memory, and says plainly what the archive doesn't hold (attendances, referees, goalscorers, managers, grounds). Clubs print what they're given.
+- Answers cost almost nothing: the connector works the answer out and the model only words it, repeated questions are answered from a store, and only the agent's own tools go with each message.
+- Our own site is a research source too: the Website Archive's articles, searched in advance, so an answer can add what we wrote at the time, with a link to it. Only our own words; other publications stay out.
+- Programme Packs is a natural home, as the programme editors are already there.

@@ -18,11 +18,26 @@ Design notes:
     untouched.
   * Formatting is preserved (2-space indent, UTF-8, trailing newline) so the
     commit diff is limited to the lines that actually change.
+  * It refuses to move the season until the season is ready (13/11/2026).
+    Every tool asks "which clubs play this season?" from each club's own
+    `seasons` map, so moving `current` before each club has an entry for the
+    new year would leave every club list empty. Ready means each division
+    (National, North, South) has its shape written for the new year in
+    competitions-meta.json (clubs, promoted, play-offs, relegated), and
+    exactly that many clubs entered for the year in clubs-meta.
+    A short division stops the run, writes nothing, and fails the job, so it
+    shows red in Actions and in Estate. --allow-short overrides a short
+    division, for a season that genuinely starts a club short; nothing
+    overrides a missing shape.
+  * --check reports readiness only and fails if not ready. The workflow runs
+    it on Mondays in June, so a missing club shows up weeks before 1 July.
 
 Usage:
     python3 scripts/bump-season.py                 # target = current UTC year
     python3 scripts/bump-season.py --year 2027     # explicit target (testing)
     python3 scripts/bump-season.py --dry-run       # show what would change
+    python3 scripts/bump-season.py --check         # is the new season ready?
+    python3 scripts/bump-season.py --allow-short   # move it anyway
     python3 scripts/bump-season.py --file path/to/clubs-meta.json
 """
 import argparse
@@ -32,6 +47,8 @@ import os
 import sys
 
 DEFAULT_FILE = "assets/data/clubs-meta.json"
+DEFAULT_COMPS = "assets/data/competitions-meta.json"
+DIVISIONS = ("National", "North", "South")
 
 
 def season_label(year: int) -> str:
@@ -39,13 +56,56 @@ def season_label(year: int) -> str:
     return f"{year}-{(year + 1) % 100:02d}"
 
 
+def readiness(data: dict, year_s: str) -> dict:
+    """Clubs per division for the season, from each club's own seasons map."""
+    counts = {d: 0 for d in DIVISIONS}
+    for club in data.get("clubs", []):
+        div = (club.get("seasons") or {}).get(year_s) if isinstance(club.get("seasons"), dict) else None
+        if div in counts:
+            counts[div] += 1
+    return counts
+
+
+def structures(comps: dict, year_s: str) -> dict:
+    """Each division's shape for the season from competitions-meta, or None."""
+    out = {d: None for d in DIVISIONS}
+    for c in comps.get("competitions", []):
+        if c.get("competition") in out:
+            out[c["competition"]] = (c.get("structure") or {}).get(year_s)
+    return out
+
+
+def report(counts: dict, shapes: dict, year: int):
+    """Print what is in and what is missing, in plain words.
+    Returns (ready, shape_missing)."""
+    ok = True
+    missing = [d for d, s in shapes.items() if not s or not s.get("clubs")]
+    if missing:
+        ok = False
+        print(f"No {season_label(year)} shape in competitions-meta for: "
+              f"{', '.join(missing)} (clubs, promoted, play-offs, relegated).")
+    parts = []
+    for d, n in counts.items():
+        need = (shapes.get(d) or {}).get("clubs")
+        parts.append(f"{d} {n}" + (f" of {need}" if need else ""))
+        if need and n != need:
+            ok = False
+    print(f"Clubs for {season_label(year)} in clubs-meta: {', '.join(parts)}.")
+    return ok, bool(missing)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Bump seasons.current in clubs-meta.json")
     ap.add_argument("--file", default=DEFAULT_FILE, help="path to clubs-meta.json")
+    ap.add_argument("--comps", default=DEFAULT_COMPS, help="path to competitions-meta.json")
     ap.add_argument("--year", type=int, default=None,
                     help="target season first-year (default: current UTC year)")
     ap.add_argument("--dry-run", action="store_true",
                     help="print the change but do not write")
+    ap.add_argument("--check", action="store_true",
+                    help="report whether the season's clubs are in; fail if not")
+    ap.add_argument("--allow-short", action="store_true",
+                    help="move the season even if a division is short")
     args = ap.parse_args()
 
     year = args.year if args.year is not None else datetime.datetime.now(datetime.timezone.utc).year
@@ -54,6 +114,26 @@ def main() -> int:
     with open(args.file, encoding="utf-8") as fh:
         original = fh.read()
     data = json.loads(original)
+
+    with open(args.comps, encoding="utf-8") as fh:
+        comps = json.load(fh)
+    ready, shape_missing = report(readiness(data, year_s), structures(comps, year_s), year)
+    if args.check:
+        if ready:
+            print("Ready: the season can move on 1 July.")
+            return 0
+        print("::error::Not ready. Before 1 July, write the new season's shape in "
+              "competitions-meta and every club's division in clubs-meta "
+              "(system/new-season-checklist.md).")
+        return 1
+    # allow short covers a division a club short, never a missing shape.
+    if not ready and (shape_missing or not args.allow_short):
+        print("::error::Season not moved: the new season's shape or clubs are "
+              "missing, and moving it would empty every club list. Add them "
+              "(competitions-meta and clubs-meta), then run this job again, or "
+              "tick allow short if a division really starts a club short.")
+        _emit_output(changed=False, current=data.get("seasons", {}).get("current", ""))
+        return 1
 
     seasons = data.setdefault("seasons", {})
     slist = seasons.setdefault("list", {})
