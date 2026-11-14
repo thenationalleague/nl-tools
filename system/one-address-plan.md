@@ -26,7 +26,7 @@ and the two-door shape at the top of `system/fixture-management-plan.md`.
 |---|---|---|---|
 | Fixture Management | none, until 12/11/2026 | the console | **Done** (12/11/2026) |
 | Club Kits | the console | forwards | **Done** (15/10/2026) |
-| Club Directory | the directory, by code | editor | No: the code door is how clubs read it |
+| Club Directory | one page | forwards | **Done** (14/11/2026): the code door stays for clubs and reads the published copy; a Club card the same; a League account has Directory, Mailing lists and Admin at its level, and Edit at Manage (`NL.codeGate.door`). `/admin/`, `/admin/edit/`, `/editor/` and `/reader/` forward |
 | Commercial Compliance | club page, by code | console | No: clubs submit by code |
 | Commercial Benchmarking | one page | none | **Done** (13/11/2026): a code or a Club card shows that club; a League account sees every club at its level. Built without auth-guard, which would send a code holder to sign in |
 | DAZN Viewership | one page | forwards | **Done** (14/11/2026): the code door stays for clubs; a Club card opens its own figures; a League account sees every club at its level, and imports and edits at Manage (`NL.codeGate.door`) |

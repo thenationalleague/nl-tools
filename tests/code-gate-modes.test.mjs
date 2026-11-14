@@ -129,8 +129,9 @@ test('a League account at a code door goes to the League page', () => {
   const utils = readFileSync(join(REPO, 'system/nl-utils.js'), 'utf8');
   const open = utils.slice(utils.indexOf('function codeGateOpen('), utils.indexOf('function codeGateResume('));
   assert.match(open, /if \(signedInAs\(\) && opts\.staffUrl\) \{\s*location\.replace\(opts\.staffUrl\);/);
+  /* Club Directory is one page (14/11/2026): the League side is here. */
   const dir = readFileSync(join(REPO, 'club-directory/index.html'), 'utf8');
-  assert.match(dir, /staffUrl: '\/club-directory\/admin\/'/);
+  assert.ok(!/staffUrl/.test(dir), 'Club Directory still sends League accounts away');
   /* Programme Packs is one page (v1.32): a League account opens the
      all-clubs library here instead of being sent to a second page. */
   const pp = readFileSync(join(REPO, 'programme/index.html'), 'utf8');

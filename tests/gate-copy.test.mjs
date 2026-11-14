@@ -70,7 +70,7 @@ test('the Club Directory has one door, so only the club-code door speaks', () =>
      codes behind it were retired on 11/11/2026, and with them the fallback:
      the page now hands codeGate the club-code verify and nothing else. */
   const src = strip(read('club-directory/index.html'));
-  assert.match(src, /verify: clubVerify\s*\}/);
+  assert.match(src, /verify: clubVerify[,\s]/);
   assert.ok(!/dirVerify|NLGate/.test(src), 'the retired Directory door is wired back in');
 });
 
@@ -98,7 +98,7 @@ test('every codeGate caller passes its own sub', () => {
   const callers = ['club-directory/index.html', 'handbook/_reader.js'];
   for (const f of callers) {
     const src = read(f);
-    assert.match(src, /NL\.codeGate\.(open|ensure)\(\{[\s\S]{0,1200}?sub: '/,
+    assert.match(src, /NL\.codeGate\.(open|ensure|door)\(\{[\s\S]{0,1200}?sub: '/,
       `${f} calls the gate without a sub`);
   }
 });
