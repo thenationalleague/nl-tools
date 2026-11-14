@@ -116,7 +116,7 @@ test('a name is set as its owner writes it', () => {
    tidier changed, what the League added and whether somebody had signed the
    club off, and to lock a signed-off club. Richard: "this is now a live doc".
    The changes are still logged — read in Change log — but not on the page. */
-const STAFF = readFileSync(join(REPO, 'club-directory/admin/index.html'), 'utf8');
+const STAFF = readFileSync(join(REPO, 'club-directory/index.html'), 'utf8');
 
 test('the staff page chooses a club with the canon picker, not a bare <select>', () => {
   assert.match(JS, /function picker\(mount, opts\)/);
@@ -198,9 +198,9 @@ test('the editor is a module the page drives, not a page', () => {
   }
 });
 
-test('the old edit addresses forward to the staff page in editing', () => {
+test('the old edit addresses forward to the one page in editing', () => {
   for (const src of [EDIT_STUB, readFileSync(join(REPO, 'club-directory/editor/index.html'), 'utf8')]) {
-    assert.match(src, /location\.replace\('\/club-directory\/admin\/\?edit' \+ location\.hash\)/);
+    assert.match(src, /location\.replace\('\/club-directory\/\?edit' \+ location\.hash\)/);
     assert.ok(!/auth-guard/.test(src), 'a redirect stub waits on nothing');
   }
 });

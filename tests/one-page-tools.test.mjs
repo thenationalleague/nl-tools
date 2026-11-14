@@ -11,6 +11,8 @@ const REG = JSON.parse(read('system/rtdb/tools-registry.snapshot.json'));
 const TOOLS = [
   { dir: 'financial-benchmarking', key: 'ops-financial-benchmarking' },
   { dir: 'dazn', key: 'media-dazn' },
+  { dir: 'save-of-the-month', key: 'media-save-of-the-month' },
+  { dir: 'club-directory', key: 'ops-club-directory' },
 ];
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
 
@@ -32,10 +34,20 @@ for (const { dir, key } of TOOLS) {
     assert.doesNotMatch(page, /staffUrl/);
     assert.doesNotMatch(page, new RegExp(`href="/${esc(dir)}/admin/"`));
     assert.doesNotMatch(page, /_toolDeferredSession/);
-    assert.match(page, /<header class="nl-idbar" hidden>/);
-    assert.match(page, /showCode: function \(\) \{ document\.querySelector\('\.nl-idbar'\)\.hidden = false; \}/);
+    /* The club bar starts hidden and shows only for a code session. */
+    assert.match(page, /<(header|div) class="nl-idbar" hidden>/);
+    assert.match(page, /showCode: function \(\) \{ document\.querySelector\('\.nl-idbar'\)\.hidden = false; \}|mode !== 'account'\) document\.querySelector\('#rdApp \.nl-idbar'\)\.hidden = false;/);
     assert.match(page, /\$\('pageWrap'\)\.style\.display = 'block';\s*window\.TOOL\.boot\(session\);/);
     assert.match(page, /<div id="pageWrap">/);
-    assert.match(page, /window\.TOOL\.boot = function \(session\)/);
+    assert.match(page, /window\.TOOL\.boot = function \(session\)|window\.TOOL = \(function \(\) \{[\s\S]*return \{ boot: boot \};/);
+  });
+
+  test(`${dir}: no element id is used twice on the one page`, () => {
+    const page = read(`${dir}/index.html`).replace(/<!--[\s\S]*?-->/g, '');
+    const html = page.replace(/<script>[\s\S]*?<\/script>/g, '');
+    const seen = {};
+    for (const m of html.matchAll(/\sid="([^"]+)"/g)) seen[m[1]] = (seen[m[1]] || 0) + 1;
+    const twice = Object.keys(seen).filter((k) => seen[k] > 1);
+    assert.deepEqual(twice, [], 'ids used twice: ' + twice.join(', '));
   });
 }

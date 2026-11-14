@@ -26,7 +26,7 @@ and the two-door shape at the top of `system/fixture-management-plan.md`.
 |---|---|---|---|
 | Fixture Management | none, until 12/11/2026 | the console | **Done** (12/11/2026) |
 | Club Kits | the console | forwards | **Done** (15/10/2026) |
-| Club Directory | the directory, by code | editor | No: the code door is how clubs read it |
+| Club Directory | one page | forwards | **Done** (14/11/2026): the code door stays for clubs and reads the published copy; a Club card the same; a League account has Directory, Mailing lists and Admin at its level, and Edit at Manage (`NL.codeGate.door`). `/admin/`, `/admin/edit/`, `/editor/` and `/reader/` forward |
 | Commercial Compliance | club page, by code | console | No: clubs submit by code |
 | Commercial Benchmarking | one page | none | **Done** (13/11/2026): a code or a Club card shows that club; a League account sees every club at its level. Built without auth-guard, which would send a code holder to sign in |
 | DAZN Viewership | one page | forwards | **Done** (14/11/2026): the code door stays for clubs; a Club card opens its own figures; a League account sees every club at its level, and imports and edits at Manage (`NL.codeGate.door`) |
@@ -34,7 +34,7 @@ and the two-door shape at the top of `system/fixture-management-plan.md`.
 | Financial Benchmarking | one page | forwards | **Done** (14/11/2026): the code door stays for clubs; a Club card opens its own figures; a League account sees every club at its level, and imports at Manage (`NL.codeGate.door`) |
 | Local Media | public form | console | No: the form is public |
 | Programme Packs | one page | forwards | **Done** (13/11/2026): the passcode door stays beside sign-in; a Club card opens its club; the League with Manage gets every folder plus Removed files, Audit and Manage as tabs |
-| Save of the Month | club page, by code | console | No: clubs nominate by code |
+| Save of the Month | one page | forwards | **Done** (14/11/2026): the code door stays for clubs; a Club card nominates for its club; a League account has the console at its level (`NL.codeGate.door`) |
 | UW Promo | partner page | console (not a registry tool) | No: the partner uses it |
 
 ## Club logins have started (12/11/2026)
