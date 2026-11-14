@@ -30,6 +30,10 @@ Why: One way in for clubs. It waits for launch because the personal links are pa
 What: Programme Packs now checks club codes through the shared door (13/11/2026). After a week with no club using the old route, remove the club-passcode half of programmeAuth, leaving only the console's sign-in.
 Why: Two copies of the code check, throttle and log is what this tidy is for.
 
+### League files kept from club accounts
+What: File storage tells League staff apart by "has an email address", which every club account now has too. So a club account could read League-only files (the website figures, the newsletter library, partner logos, Brand Exposure frames) and every club's Save of the Month and Matchday Live clips. Change those rules to "an email address and no club" and test each one before publishing.
+Why: Club logins are opening; this must be shut before Sign-up and approvals lets clubs in at scale. Today only test club accounts exist.
+
 ### Sign-up and approvals
 What: Club people ask; everyone else is invited. A club secretary shares one sign-up link with their staff. The link already names the club, so each person adds their name, job title and the zones they need, with a one-line reason, and League Operations approves, usually within a day. League Operations can also invite club staff directly. League staff and externals never ask: they are invited, and the invite sets their card and zones. A Pending list and a bell show what is waiting. People can ask for an extra zone later.
 Why: This is the last part of the new model people actually meet. Without it, new people still come in the old way, and you would have to invite every member of every club by hand.
