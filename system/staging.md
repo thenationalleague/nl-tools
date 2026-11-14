@@ -54,7 +54,7 @@ accidentally read staging data either, because there is none to read.
 that is a separate, explicit migration run once against live at promotion.
 
 Revisit only if a change genuinely cannot be judged without saving. If it is
-ever built, it redirects `app-data/<toolKey>/` to a Manage-only path and is
+ever built, it redirects `app-data/<toolKey>/` to a path only testers and the Skeleton key can reach and is
 thrown away at promotion, never merged.
 
 ## The contract
@@ -70,14 +70,34 @@ thrown away at promotion, never merged.
      refused with a "Staging: not saved" toast. The audit hook already proxies
      these in `NL.installAuditHook`; the refusal goes in the same place.
    - Firebase Storage uploads are refused the same way.
-   - `auth-guard.js` admits only people whose pass gives **Manage** on that
-     tool (`NL.pass`; at minimum the Skeleton key holders), whatever it would
-     otherwise open to.
+   - `auth-guard.js` opens it only to **testers and the Skeleton key**, the
+     same people Sandbox opens to (see "Who can open a staging copy" below).
    - the topbar shows a STAGING badge, and the head gets
      `<meta name="robots" content="noindex">`.
 
    Open point for the build: whether `admin/audit` should still record
    staging visits, tagged as staging. Default: no writes at all.
+
+   **Who can open a staging copy** (decided 14/11/2026). A staging copy has
+   no tool key or registry record of its own: it is the live tool's page with
+   the marker, so it uses the live tool's key. On top of the usual
+   `NL.pass` level for that key:
+
+   ```
+   staging(person, tool) =
+     skeleton key                                → Manage
+     holds Tester and level(person, tool) >= Access
+                                                 → level(person, tool)
+     otherwise                                   → Off
+   ```
+
+   Why both conditions, not Tester alone: a staging copy reads **live** data.
+   Tester alone would show a tester the confidential data of a tool their pass
+   does not open (Commercial Benchmarking, say), and the database rules would
+   refuse those reads anyway, so the page would just break. Giving the tester
+   their live level means they see the tool exactly as they would on launch,
+   with every save still refused. A tool marked `testers: false` (Matchday Live)
+   is Skeleton key only in staging too.
 
 3. **Going live is one PR that does three things together:** copy
    `staging/<slug>/` over `<slug>/`, remove the marker, delete `staging/<slug>/`.
