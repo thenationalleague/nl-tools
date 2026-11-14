@@ -67,10 +67,6 @@ What: A button that restores a database backup into a spare test database and co
 Why: A backup that has never been restored is a hope, not a backup.
 Waiting on: you (one press)
 
-### Two-step sign-in for the Skeleton key
-What: Turn on two-step sign-in (a code from a phone app) for the two Skeleton key accounts first.
-Why: Those two accounts open everything.
-
 ### The rest of the portal
 What: The tool cards and drawn icons are done (13/11/2026). Next is the page around them: the noticeboard, the header and the spacing, and the Graphics landing page as the second place the card is used.
 Why: It is the first page everyone sees. When a second page uses the card, it becomes a shared component.
@@ -81,6 +77,10 @@ Why: A reset email that lands in spam is a locked-out person phoning you.
 Waiting on: you
 
 ## Later
+
+### Two-step sign-in for the Skeleton key
+What: Turn on two-step sign-in (a code from a phone app) for the two Skeleton key accounts first.
+Why: Those two accounts open everything.
 
 ### Public pages under /public/
 What: Every page with no door lives at nl.tools/public/<name>/. Four already do (Academy & Alliance, Article Composer, Fixtures Graphic, Trust Cup). The two that don't, the open Club Directory and the open Handbook, move there, and their old addresses forward. One rule in the site's settings covers the whole folder, and a test fails any page with no door outside it.
