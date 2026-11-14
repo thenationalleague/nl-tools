@@ -78,10 +78,6 @@ What: Password reset emails come from Firebase's own address. Point them at an N
 Why: A reset email that lands in spam is a locked-out person phoning you.
 Waiting on: you
 
-### A slimmer league table snapshot
-What: Keep the daily table snapshot, but save only positions and points, and keep it in the database or the backup bucket instead of GitHub.
-Why: Today it is 2.4 MB a day, and GitHub keeps every copy forever.
-
 ## Later
 
 ### External passes
