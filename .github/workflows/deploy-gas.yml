@@ -26,7 +26,7 @@ name: Button · Publish Apps Script
 #
 # THE GUARD THAT MAKES TWO-WAY SAFE
 # ---------------------------------
-# `clasp push` overwrites every file in the project. If someone edited the live
+# The push replaces every file in the project. If someone edited the live
 # project since the last sync, pushing would silently revert their work — the
 # same class of loss this workflow exists to prevent, pointed the other way.
 #
@@ -206,9 +206,36 @@ jobs:
 
       - name: Push gas/ into the project
         run: |
+          # Not `clasp push`: it only uploads when a repo file changed, so a
+          # file deleted from gas/ stays in the live project ("Script is
+          # already up to date."). This sends the whole of gas/, which
+          # replaces the project's contents, deletions included.
+          # See scripts/gas-push-all.mjs.
           printf '{"scriptId":"%s","rootDir":"gas"}\n' "$GAS_SCRIPT_ID" > .clasp.json
-          clasp push --force
+          node scripts/gas-push-all.mjs
           rm -f .clasp.json
+
+      - name: Check live now holds exactly gas/
+        run: |
+          gas_fingerprint() {
+            ( cd "$1" 2>/dev/null || exit 0
+              find . -maxdepth 1 -type f \( -name '*.js' -o -name 'appsscript.json' \) \
+                | sed 's|^\./||' | LC_ALL=C sort \
+                | while read -r f; do printf '%s %s\n' "$f" "$(sha256sum "$f" | cut -d' ' -f1)"; done
+            ) | sha256sum | cut -d' ' -f1
+          }
+          rm -rf /tmp/gas-after && mkdir -p /tmp/gas-after
+          printf '{"scriptId":"%s","rootDir":"/tmp/gas-after"}\n' "$GAS_SCRIPT_ID" > .clasp.json
+          clasp pull
+          rm -f .clasp.json
+          if [ "$(gas_fingerprint /tmp/gas-after)" = "$(gas_fingerprint gas)" ]; then
+            echo "Live holds exactly what is in gas/."
+          else
+            echo "::error::The push did not take: live still differs from gas/."
+            diff -rq --exclude='*.md' --exclude='.deployed' /tmp/gas-after gas || true
+            echo "  Nothing has been redeployed, so the /exec URL serves the previous version."
+            exit 1
+          fi
 
       # ── Redeploy the EXISTING web app, never a new one ─────────────────────
       - name: Redeploy the existing Web App deployment
