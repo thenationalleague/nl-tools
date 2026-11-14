@@ -62,6 +62,11 @@ Why: Failure emails went to a personal inbox in a form nobody could read, so a d
 - The first run says whether the check is allowed to read Google's cloud jobs. If it isn't, the note says so and the run log has the one-off fix.
 Waiting on: you (publish Apps Script, then one test run)
 
+### Apps Script sign-in keeps expiring
+What: The sign-in that lets GitHub publish and back up Apps Script runs out about every 16 hours: Google's Cloud session limit, which the 13/11/2026 exemption did not lift. Find which setting did not stick, fix it, and sign in one last time. Until then Apps Script cannot be published or backed up, and the Monday note cannot be sent.
+Why: Every sign-in is a long Cloud Shell routine, and a backup that stops silently is the failure the weekly note exists to catch.
+Waiting on: you (two Admin console screenshots)
+
 ### Prove a backup restores
 What: A button that restores a database backup into a spare test database and compares it with the live one.
 Why: A backup that has never been restored is a hope, not a backup.
