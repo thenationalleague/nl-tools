@@ -5,8 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Travel Planner – NL Tools</title>
 <!--
-  NL Travel Planner v40.7
+  NL Travel Planner v40.8
   Changelog (last five versions; git holds the rest):
+  v40.8| 14/11/2026 | Each journey says what it means ("Departs 1h 32min
+       |            | before full time", "Only 12min to spare") instead of
+       |            | a bare label. The red cross is a see-through overlay
+       |            | on top of the journey, so it shows and stays readable.
   v40.7| 14/11/2026 | Four states per journey, same rule both ways: safe
        |            | (green), tight (amber), overnight (black), can't make
        |            | it (pink). Return adds "last way home that night",
@@ -29,13 +33,6 @@
        |            | Canon: rgba overlays to the shade ladder; dates via
        |            | NL.formatDateTime; escaping via NL.escHtml + NL.escJ;
        |            | changelogs trimmed to five.
-  v40.4| 16/08/2026 | Durations delegate to the canon: fmtDur() now wraps
-       |            | NL.formatDuration (nl-utils v1.33), whose compound
-       |            | "1h 30min" convention was lifted from this very helper
-       |            | (second caller: nls-monitor, PR #808). One behaviour
-       |            | tightening: exact hours render "1h" not "1h 0min", and
-       |            | unparseable input renders the canon '—' rather than
-       |            | echoing the raw string.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=78">
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -46,11 +43,11 @@
   window.NL_TOOL={title:'Travel Planner',toolKey:'staff-travel-planner'};
   var NL_TOOL_KEY='staff-travel-planner';
   window.NL_CHANGELOG=[
+    {date:'14 Nov 2026',version:'v4.8',items:['Each journey now says what it means, such as “Departs 1h 32min before full time” or “Only 12min to spare”.','Journeys you can’t make are crossed out in red without hiding their times.']},
     {date:'14 Nov 2026',version:'v4.7',items:['Each journey is now one of four colours: green is safe, amber is tight, black means an overnight trip, pink means you can’t make it. The rule is shown above the options.','Return journeys also show the last way home that night. If it leaves before the final whistle, it appears in the list crossed out.','The journey you’re looking at is outlined, so its colour still shows.']},
     {date:'14 Nov 2026',version:'v4.6',items:['Up to ten journeys instead of four, each coloured: light blue if it works (there 30 minutes before kick-off, leaving after 6am; home by 1am), light pink if not.','Icons instead of emoji throughout.']},
     {date:'14 Nov 2026',version:'v4.5',items:['Try another kick-off: pick a fixture, then move it to another broadcast slot (Friday night, 12.30, 3pm, 5.30pm, 7.45pm or the following Tuesday) and the journey re-plans straight away. The link keeps the moved time, so it can be shared.']},
     {date:'16 Aug 2026',version:'v4.4',items:['Journey durations now come from the shared National League duration formatter — same “1h 30min” style, and exact hours read “1h” instead of “1h 0min”.']},
-    {date:'16 Aug 2026',version:'v4.3',items:['Times (kick-off, departures, ETAs) now come from the shared National League time formatter — same display, consistent with every other tool.']},
   ];
 </script>
 <script src="/system/nl-utils.js?v=72"></script>
@@ -231,11 +228,11 @@
   .tp__alt-chip--tight{background:var(--amber-light);border-color:var(--amber-light)}
   .tp__alt-chip--overnight{background:var(--navy-900);border-color:var(--navy-900);color:var(--white)}
   .tp__alt-chip--overnight .chip-time{color:var(--white)}.tp__alt-chip--overnight .chip-time .dur,.tp__alt-chip--overnight .chip-modes,.tp__alt-chip--overnight .chip-buf{color:var(--navy-200)}
-  .tp__alt-chip--late{border-color:var(--primary-100);background:
+  .tp__alt-chip--late{position:relative;background:var(--primary-100);border-color:var(--primary)}
+  .tp__alt-chip--late::after{content:'';position:absolute;inset:0;border-radius:8px;pointer-events:none;opacity:.45;background:
     linear-gradient(to top right,transparent calc(50% - 1.5px),var(--primary) calc(50% - 1.5px),var(--primary) calc(50% + 1.5px),transparent calc(50% + 1.5px)),
-    linear-gradient(to bottom right,transparent calc(50% - 1.5px),var(--primary) calc(50% - 1.5px),var(--primary) calc(50% + 1.5px),transparent calc(50% + 1.5px)),
-    var(--primary-100)}
-  .tp__alt-chip--late .chip-time,.tp__alt-chip--late .chip-modes,.tp__alt-chip--late .chip-buf,.tp__alt-chip--late .chip-state{position:relative;background:var(--primary-100);border-radius:4px;padding:0 3px}
+    linear-gradient(to bottom right,transparent calc(50% - 1.5px),var(--primary) calc(50% - 1.5px),var(--primary) calc(50% + 1.5px),transparent calc(50% + 1.5px))}
+  .tp__alt-chip--late .chip-state{font-weight:800}
   .chip-state{display:block;font-size:var(--text-xs);margin-top:1px}
   .tp__alt-chip--safe .chip-state{color:var(--green)}.tp__alt-chip--tight .chip-state{color:var(--amber)}.tp__alt-chip--late .chip-state{color:var(--primary)}.tp__alt-chip--overnight .chip-state{color:var(--white)}
   .tp__alts-key i.k-safe{background:var(--green-light);border:1px solid var(--green)}.tp__alts-key i.k-tight{background:var(--amber-light);border:1px solid var(--amber)}
@@ -840,6 +837,21 @@ function verdict(r){
   if(b!==null&&b<TP_MARGIN)return{state:'tight',home:a};
   return{state:'safe',home:a};
 }
+function mins(m){return NL.formatDuration(Math.abs(m)*60)}
+// What each journey means, in one line: "Departs 1h 32min before full time".
+function reasonText(r,v){
+  var b=bufMins(r);if(!v||b===null)return v?TP_STATE_LABEL[v.state]:'';
+  if(searchCtx.dir==='to'){
+    var d=firstDepTime(r),dep=d?new Date(d):null;
+    if(v.state==='late')return'Arrives '+mins(b)+' after kick-off';
+    if(v.state==='overnight')return'Leaves the day before';
+    if(v.state==='tight')return b<TP_MARGIN?'Only '+mins(b)+' to spare':'Leaves at '+ft(dep);
+    return mins(b)+' before kick-off';
+  }
+  if(v.state==='late')return'Departs '+mins(b)+' before full time';
+  if(v.state==='overnight')return'Home the next day';
+  return'Departs '+mins(b)+' after full time';
+}
 function ruleText(){
   if(!searchCtx)return'';
   return searchCtx.dir==='to'
@@ -873,7 +885,7 @@ function lastHomeHTML(){
   if(!searchCtx||searchCtx.dir!=='from'||lh===undefined)return'';
   if(!lh)return'<div class="tp__kobuf tp__kobuf--overnight"><span class="big">No way home the same night</span><span class="sub">Nothing gets back by '+TP_HOME_BY+'am, whenever you leave</span></div>';
   var m=Math.round((lh.dep-searchCtx.ftEst)/6e4);
-  var when=m<0?(-m)+' min before full time':m+' min after full time';
+  var when='Departs '+mins(m)+(m<0?' before':' after')+' full time';
   return'<div class="tp__kobuf tp__kobuf--'+(m<0?'late':m<TP_MARGIN?'tight':'ok')+'"><span class="big">Last way home that night: leave '+ft(lh.dep)+', home '+ft(lh.home)+'</span><span class="sub">'+when+'</span></div>';
 }
 
@@ -914,14 +926,8 @@ function homeStripHTML(r){
   var nextDay=v.home.toDateString()!==searchCtx.ko.toDateString();
   var b=bufMins(r),cls={safe:'ok',tight:'tight',overnight:'overnight',late:'late'}[v.state];
   var big='Home '+ft(v.home)+(nextDay&&v.state==='overnight'?' the next day':'');
-  var sub={safe:'Leaves '+b+' min after full time',tight:'Leaves '+b+' min after full time: a dash from the ground',overnight:'No way back the same night',late:'Leaves before full time'}[v.state];
+  var sub={safe:'Departs '+mins(b)+' after full time',tight:'Departs '+mins(b)+' after full time: a dash from the ground',overnight:'No way back the same night',late:'Departs '+mins(b)+' before full time'}[v.state];
   return'<div class="tp__kobuf tp__kobuf--'+cls+'"><span class="big">'+big+'</span><span class="sub">'+sub+' · Assumes a 2-hour match</span></div>';
-}
-function bufChipHTML(r){
-  if(!searchCtx||searchCtx.dir!=='to')return'';
-  var b=bufMins(r);if(b===null)return'';
-  var cls=b>=TP_MARGIN?'ok':b>=0?'tight':'late';
-  return'<span class="chip-buf chip-buf--'+cls+'">'+(b>=0?'KO −'+b+'m':'KO +'+(-b)+'m')+'</span>';
 }
 
 // ── Driving search ──
@@ -1317,7 +1323,7 @@ function render(routes,idx,oL,dL){
       var rd=rt.duration?fmtDur(rt.duration):'',chip='Route '+(i+1);
       if(rt.legs&&rt.legs[0]&&rt.legs[0].steps){for(var j=0;j<rt.legs[0].steps.length;j++){var st=rt.legs[0].steps[j];if(st.transitDetails&&st.transitDetails.stopDetails&&st.transitDetails.stopDetails.departureTime){chip=fI(st.transitDetails.stopDetails.departureTime);break}}}
       var mNames=routeModeNames(rt);
-      h+='<div class="tp__alt-chip'+vcls+(i===idx?' active':'')+'" role="button" tabindex="0" onclick="sw('+i+',\''+esc(oL)+'\',\''+esc(dL)+'\')"><div class="chip-time">'+chip+(rd?' <span class="dur">'+rd+'</span>':'')+'</div>'+(mNames?'<div class="chip-modes">'+mNames+'</div>':'')+bufChipHTML(rt)+(vd&&vd.home?'<span class="chip-buf">Home '+ft(vd.home)+'</span>':'')+(vd?'<span class="chip-state">'+TP_STATE_LABEL[vd.state]+'</span>':'')+'</div>';
+      h+='<div class="tp__alt-chip'+vcls+(i===idx?' active':'')+'" role="button" tabindex="0" onclick="sw('+i+',\''+esc(oL)+'\',\''+esc(dL)+'\')"><div class="chip-time">'+chip+(rd?' <span class="dur">'+rd+'</span>':'')+'</div>'+(mNames?'<div class="chip-modes">'+mNames+'</div>':'')+(vd&&vd.home?'<span class="chip-buf">Home '+ft(vd.home)+'</span>':'')+(vd?'<span class="chip-state">'+reasonText(rt,vd)+'</span>':'')+'</div>';
     });
     h+='</div>';
   }
