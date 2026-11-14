@@ -20,6 +20,34 @@ invites). The two databases are correctly split. No genuinely-private key ships
 to a browser. Everything below is low severity — accepted trade-offs and
 documentation, not holes.
 
+**14/11/2026 sweep: that verdict had stopped being true.** The tools had
+grown around it. What was found, and fixed:
+
+- **"Signed in" is anyone.** Anonymous sign-in (the code doors) and email
+  sign-up (the request form) are both open, so a rule of `auth != null`, or
+  one that asks for an email address, admits anybody on the internet.
+  `tests/open-reads.test.mjs` now lists every database read open to anyone
+  signed in, each with its reason, and fails on a new one.
+- **A sign-up held access before approval.** The request wrote the person's
+  record with a club role, the club they typed and the tools they ticked, all
+  of which the rules read. Waiting people now hold nothing (role `pending`);
+  declined ones hold nothing (role `rejected`). A one-off tidy found no
+  existing record carrying any of it.
+- **Files treated an email address as League staff.** They now ask for the
+  League mark, `league: true`, which only the server sets
+  (`functions/pass-claims.js`).
+- **Cross-club writes enforced only by the page.** UW tills could read and
+  change every club's voucher codes; a club could rewrite any club's
+  attendance. Both are now enforced by the rules, with emulator tests.
+- **Smaller:** pending invites (with their tokens) and Club Kits submissions
+  were readable by anyone signed in, or anyone at all; audit lines could be
+  written in someone else's name; two unused nodes were writable; the
+  request emails could be sent by anyone to any address with any link; the
+  retired footage folder took uploads from anyone.
+
+The emulator tests that pin each of these run on every rules pull request
+(Auto · Test database rules).
+
 ## The rule this register enforces
 
 A gated tool ships its HTML/JS to the browser **before** auth-guard reveals the
@@ -45,17 +73,22 @@ trade-off or verification task, no code fix required now.
 | `ops-handbook/editions` + `publishedEditionId` | Published handbook (public by intent). | Safe |
 | `ops-commercial-benchmarking/aggregates` | Anonymised aggregates and the club roster (names only). The per-club token links (`links/$token`) were retired 13/11/2026; a club reads its own row by club code (`clubName` claim). | Safe |
 | `ops-club-data`, `ops-club-contacts`, `ops-club-signoff` | Retired token-link flows; token rules removed 15/10/2026, admin read only. | Closed |
-| Cloud Functions (`consumeInvite`, `submitAccessRequest`, `withdrawAccessRequest`) | Require a verified Firebase token; role server-minted from the invite, never from the request body. | Safe |
+| Cloud Functions (`consumeInvite`, `submitAccessRequest`, `withdrawAccessRequest`) | Require a verified Firebase token; role server-minted from the invite, never from the request body. Since 14/11/2026 a waiting request holds no club, club role or tools (`tests/access-sweep.test.mjs`). | Safe |
 | Cloud Functions (`programmeAuth`, `clubDirectoryAuth`, `uwPromoAuth`, `fanWidgetsAuth`) | RTDB-triggered; mint scoped claims after a server-side passcode/role check. | Safe |
-| Storage `data/**`, `programme/{club}/**`, catch-all | Reads require an email/club claim; writes own-prefix or false; the anonymous-signin `programme` hole was explicitly closed. | Safe |
+| Storage `data/**`, `programme/{club}/**`, catch-all | Since 14/11/2026 League reads and writes need the League mark (`league: true`, server-set), not an email address, which every account has; club paths need the club's own claim. `tests/emulator/storage-league-rules.mjs`. | Safe |
+| Storage `footage/**` (retired) | No uploads; reads need the League mark (14/11/2026). Files to be cleared. | Closed |
 | Embeds (motm, score-predictor, judgements, vidiprinter) | Fan devices, no NL auth; SSO custom-token + App Check (reCAPTCHA v3) on the write-capable ones; judgements embed reads the public node only, no writes. | Safe |
 | Firebase web API keys / reCAPTCHA site keys in source | Public-by-design client keys, not secrets. | Safe |
 | `wellbeing/index.html` | A named support contact's phone/email, published on a deliberately-public page. | Review — see PII note |
 | `admin/invites/$token` (`.read:true`) | Invite name/email/role, readable with the UUID token. | Review (low) |
 | `ops-vacancies/analytics` (`.write:true`) | World-writable anonymous click node. | Review (low) |
-| `ops-club-kits/submissions` | Public read; write admin-only since 15/10/2026, when the public form was retired (colours only). | Closed |
-| `admin/tool-requests` (`.write:"auth != null"`) | Any signed-in user can write the request queue. | Review (low) |
-| `ops-attendance/submissions` + `archive` (`.read:"auth != null"`) | Any authenticated principal can read across clubs. | Review (low) |
+| `ops-club-kits/submissions` | Write admin-only since 15/10/2026; read League card and Access since 14/11/2026 (a League edit stamped the editor's address into the record). | Closed |
+| `admin/invites-pending` | Read as `admin/requests` is, superadmin or admin role, since 14/11/2026 (it holds every unused invite's token). | Closed |
+| UW `codes` | A till or manager reads its own club's codes, or one code by its text; writes only its own club's (14/11/2026, `tests/emulator/uw-codes-rules.mjs`). | Safe |
+| Attendance `archive/<season>/submissions` | A club writes only its own home matches; the whole node is League and Manage (14/11/2026). | Safe |
+| `admin/tool-requests`, `admin/notifications` | Unused; closed 14/11/2026. | Closed |
+| `ops-attendance/submissions` + `archive` (`.read:"auth != null"`) | Any signed-in session, which is anyone, can read every club's figures. | Review: to decide (League only, or each club its own?) |
+| `ops-handbook/draft` (`.read:"auth != null"`) | The unpublished handbook, readable by anyone signed in. | Review: to decide |
 | nl-widgets `users`/`predictions`/`motm` per `$jwtId` (`.read:"auth != null"`) | A fan can read another fan's forename/initial/team/prediction if they know the jwtId. | Review (low, minor PII) |
 | `travel-planner` Google Maps key | Billable client key — abuse if unrestricted. | Review — verify referrer lock in GCP |
 | `media-local-media/submissions/$id` (anonymous create, 29/10/2026) | Nothing readable: no public `.read` anywhere in the block. Write is **create-only** – `!data.exists() && newData.exists()` with `uid === auth.uid`, so no overwrite or delete by the public, and no other node (`status`, `manual`) is writable by them. Every field shape- and length-capped (names, organisation, club ≤ 120; email ≤ 254 and `a@b.c` shaped; phone ≤ 40; `type` one of nine values; push-id keys; `$other: false` at every level). Form at `/local-media/`, console at `/local-media/admin/`. | Review (low) |
@@ -84,9 +117,8 @@ None is critical. Most are already-accepted trade-offs needing only a record.
    arbitrary data, not just counts — a pollution/quota vector. Accepted. *Fix
    shape if abused: a `.validate` shape/size cap, or move tracking behind a
    callable.*
-5. **`admin/tool-requests` writable by any authenticated user.** Signup is open,
-   so "authenticated" ≈ "anyone." Low impact — admins drain the queue. *Fix
-   shape: `.validate` the entry shape / match writer uid.*
+5. ~~`admin/tool-requests` writable by any authenticated user.~~ Closed
+   14/11/2026: nothing used it.
 6. **Broad `auth != null` reads** — `ops-attendance/submissions`+`archive` and
    the nl-widgets per-`$jwtId` fan records. Cross-principal reads are possible
    given the child key. Minor PII at most; acceptable under the two-database

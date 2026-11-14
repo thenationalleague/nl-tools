@@ -1,0 +1,48 @@
+name: Button · Refresh account marks
+
+# Puts the League mark (`league: true`) on every League account and takes
+# it off everyone else, through the claimsRefresh cloud job
+# (functions/pass-claims.js). The file rules ask for the mark, so run this
+# once after the cloud jobs that set it are live, and BEFORE the file rules
+# that ask for it are published. After that the mark follows each account
+# by itself; run this again only if in doubt.
+#
+# A browser picks up a new mark within the hour. The log prints counts only.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DB: https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      - name: Ask, and wait for the answer
+        run: |
+          set -euo pipefail
+          TOKEN=$(gcloud auth print-access-token)
+          AT=$(date +%s%3N)
+          curl -sS -f -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+            --data "{\"at\":$AT}" "$DB/admin/claims-refresh.json?print=silent"
+          for i in $(seq 1 60); do
+            sleep 10
+            R=$(curl -sS -f -H "Authorization: Bearer $TOKEN" "$DB/admin/claims-refresh.json")
+            DONE=$(echo "$R" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("done") or 0)')
+            if [ "$DONE" -ge "$AT" ]; then
+              echo "$R" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("Accounts checked: %s. League accounts marked: %s." % (d.get("accounts"), d.get("league")))' | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          done
+          echo "::error::No answer in ten minutes. Is the claimsRefresh cloud job deployed? See Actions → Publish cloud jobs."
+          exit 1

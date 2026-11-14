@@ -23,6 +23,14 @@
 //   matchday-live/<ymd>/<contributorId>/  Matchday Live contributor clips
 //   save-of-the-month/<CODE>/<YYYY-MM>/  Save of the Month club clips, per-club
 //   document-library/**   League documents for every club, written by NL staff
+//
+// WHO IS LEAGUE (14/11/2026). Every rule below that means "League staff" asks
+// for the League mark, `league: true`, set on the account by the server
+// (functions/pass-claims.js, NL.accountLevel.isLeague) and never by the
+// person. Until then they asked for an email address, which every account
+// has: a club account, and anyone who signs up. `.get('league', false)`
+// because a token without the claim must read as false, not as an error.
+// Comments below that still say "an email claim" mean the League mark.
 
 rules_version = '2';
 service firebase.storage {
@@ -40,7 +48,7 @@ service firebase.storage {
     // already open the tool. The anonymous capability sessions (programme, and
     // formerly footage) carry no email claim and so cannot touch it.
     match /data/{file} {
-      allow read:  if request.auth != null && request.auth.token.email != null;
+      allow read:  if request.auth != null && request.auth.token.get('league', false) == true;
       allow write: if false;
     }
 
@@ -53,18 +61,20 @@ service firebase.storage {
     match /footage/{allPaths=**} {
       // Club + producer capability pages signed in anonymously: any signed-in
       // user may read, and producers could CREATE new files.
-      allow read:   if request.auth != null;
-      allow create: if request.auth != null;
+      allow read:   if request.auth != null && request.auth.token.get('league', false) == true;
+      // Closed 14/11/2026: nothing uploads here any more, and "signed in" is
+      // anyone who signs in anonymously.
+      allow create: if false;
       // Overwriting or deleting existing footage needs a real (email) account —
       // blocks anonymous vandalism; the master console runs on portal logins.
-      allow update, delete: if request.auth != null && request.auth.token.email != null;
+      allow update, delete: if request.auth != null && request.auth.token.get('league', false) == true;
     }
 
     match /newsletter/library/{file} {
       // Staff tool — anonymous tokens (which exist in this project for the
       // footage/UW capability pages) carry no email claim, so require one.
-      allow read:  if request.auth != null && request.auth.token.email != null;
-      allow write: if request.auth != null && request.auth.token.email != null
+      allow read:  if request.auth != null && request.auth.token.get('league', false) == true;
+      allow write: if request.auth != null && request.auth.token.get('league', false) == true
         && request.resource.size < 5 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }
@@ -74,8 +84,8 @@ service firebase.storage {
     // as the newsletter library. Anonymous capability tokens carry no email
     // claim and are excluded. Referenced by download URL from the tool page.
     match /partner-logos/{file} {
-      allow read:  if request.auth != null && request.auth.token.email != null;
-      allow write: if request.auth != null && request.auth.token.email != null
+      allow read:  if request.auth != null && request.auth.token.get('league', false) == true;
+      allow write: if request.auth != null && request.auth.token.get('league', false) == true
         && request.resource.size < 1 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }
@@ -91,7 +101,7 @@ service firebase.storage {
     // there leaves a dead link rather than rewriting what was judged.
     match /commercial-compliance/{club}/{allPaths=**} {
       allow read: if request.auth != null
-        && (request.auth.token.email != null || request.auth.token.club == club);
+        && (request.auth.token.get('league', false) == true || request.auth.token.club == club);
       allow create: if request.auth != null && request.auth.token.club == club
         && request.resource.size < 10 * 1024 * 1024
         && (request.resource.contentType.matches('image/.*')
@@ -100,7 +110,7 @@ service firebase.storage {
         // the bucket's own origin (the programme block below says the same).
         && !request.resource.contentType.matches('image/svg.*');
       allow delete: if request.auth != null
-        && (request.auth.token.email != null || request.auth.token.club == club);
+        && (request.auth.token.get('league', false) == true || request.auth.token.club == club);
     }
 
     // ── Save of the Month — club clips ────────────────────────────────────
@@ -113,13 +123,13 @@ service firebase.storage {
     // month's clips once it is done with them.
     match /save-of-the-month/{club}/{month}/{file} {
       allow read: if request.auth != null
-        && (request.auth.token.email != null || request.auth.token.club == club);
+        && (request.auth.token.get('league', false) == true || request.auth.token.club == club);
       allow create: if request.auth != null && request.auth.token.club == club
         && month.matches('^[0-9]{4}-(0[1-9]|1[0-2])$')
         && request.resource.size < 250 * 1024 * 1024
         && request.resource.contentType.matches('video/.*');
       allow delete: if request.auth != null
-        && (request.auth.token.email != null || request.auth.token.club == club);
+        && (request.auth.token.get('league', false) == true || request.auth.token.club == club);
     }
 
     // ── Brand Exposure ────────────────────────────────────────────────────
@@ -142,9 +152,9 @@ service firebase.storage {
     //     It carries no email claim, which is exactly why the catch-all at the
     //     foot of this file does not quietly cover it.
     match /brand-exposure/{matchId}/{file} {
-      allow read: if request.auth != null && request.auth.token.email != null;
+      allow read: if request.auth != null && request.auth.token.get('league', false) == true;
       allow write: if request.auth != null
-        && (request.auth.token.email != null || request.auth.token.be == matchId)
+        && (request.auth.token.get('league', false) == true || request.auth.token.be == matchId)
         && request.resource.size < 600 * 1024 * 1024
         && (request.resource.contentType.matches('video/mp4')
             || request.resource.contentType.matches('application/json'));
@@ -163,20 +173,20 @@ service firebase.storage {
     // partners/<Sponsor>/ is searched at every ground,
     // clubs/<Club>/<Sponsor>/ only at that one (load_tree's contract).
     match /brand-exposure/refs/partners/{sponsor}/{file} {
-      allow read: if request.auth != null && request.auth.token.email != null;
+      allow read: if request.auth != null && request.auth.token.get('league', false) == true;
       allow create, update: if request.auth != null
-        && request.auth.token.email != null
+        && request.auth.token.get('league', false) == true
         && request.resource.size < 5 * 1024 * 1024
         && request.resource.contentType.matches('image/png');
-      allow delete: if request.auth != null && request.auth.token.email != null;
+      allow delete: if request.auth != null && request.auth.token.get('league', false) == true;
     }
     match /brand-exposure/refs/clubs/{club}/{sponsor}/{file} {
-      allow read: if request.auth != null && request.auth.token.email != null;
+      allow read: if request.auth != null && request.auth.token.get('league', false) == true;
       allow create, update: if request.auth != null
-        && request.auth.token.email != null
+        && request.auth.token.get('league', false) == true
         && request.resource.size < 5 * 1024 * 1024
         && request.resource.contentType.matches('image/png');
-      allow delete: if request.auth != null && request.auth.token.email != null;
+      allow delete: if request.auth != null && request.auth.token.get('league', false) == true;
     }
 
     // ── Brand Exposure — source footage drop ──────────────────────────────
@@ -199,8 +209,8 @@ service firebase.storage {
     // (request.resource is null on delete), which is intended — cleanup is
     // the function's job, through the Admin SDK.
     match /uploads/{file} {
-      allow read:  if request.auth != null && request.auth.token.email != null;
-      allow write: if request.auth != null && request.auth.token.email != null
+      allow read:  if request.auth != null && request.auth.token.get('league', false) == true;
+      allow write: if request.auth != null && request.auth.token.get('league', false) == true
         && request.resource.contentType.matches('video/.*');
     }
 
@@ -250,13 +260,13 @@ service firebase.storage {
       // A contributor may read back their own objects: the capture page's
       // retry asks "is my upload already there?" before marking a clip sent.
       allow read: if request.auth != null
-        && (request.auth.token.email != null || request.auth.token.mdl == contributorId);
+        && (request.auth.token.get('league', false) == true || request.auth.token.mdl == contributorId);
       allow create: if request.auth != null
         && request.auth.token.mdl == contributorId
         && resource == null
         && request.resource.size < 40 * 1024 * 1024
         && request.resource.contentType.matches('video/.*');
-      allow delete: if request.auth != null && request.auth.token.email != null;
+      allow delete: if request.auth != null && request.auth.token.get('league', false) == true;
     }
 
     match /programme/{club}/{allPaths=**} {
@@ -322,9 +332,9 @@ service firebase.storage {
     // nodes. Accepted.
     match /document-library/{allPaths=**} {
       allow read: if request.auth != null
-        && (request.auth.token.club != null || request.auth.token.email != null);
+        && (request.auth.token.club != null || request.auth.token.get('league', false) == true);
       allow create: if request.auth != null
-        && request.auth.token.email != null
+        && request.auth.token.get('league', false) == true
         && resource == null
         && request.resource.size < 100 * 1024 * 1024
         // What executes when a browser opens the download URL inline from
@@ -335,14 +345,14 @@ service firebase.storage {
         && !request.resource.contentType.matches('.*javascript.*')
         && !request.resource.contentType.matches('image/svg.*');
       allow update: if request.auth != null
-        && request.auth.token.email != null
+        && request.auth.token.get('league', false) == true
         && request.resource.md5Hash == resource.md5Hash
         && request.resource.contentType == resource.contentType;
-      allow delete: if request.auth != null && request.auth.token.email != null;
+      allow delete: if request.auth != null && request.auth.token.get('league', false) == true;
     }
 
     match /{allPaths=**} {
-      allow read:  if request.auth != null && request.auth.token.email != null;
+      allow read:  if request.auth != null && request.auth.token.get('league', false) == true;
       allow write: if false;
     }
   }

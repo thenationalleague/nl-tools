@@ -38,6 +38,20 @@
  * NOT INSTANT: a claim reaches the browser at the next token refresh (up to an
  * hour), or at once when NL.codeGate.resume asks for a fresh token, which it
  * does for a signed-in account that has no club claim yet (nl-utils v1.55).
+ *
+ * THE LEAGUE MARK (14/11/2026): `league: true` on every League account, the
+ * one the file rules ask for (system/storage/rules.snapshot.rules). They
+ * used to ask for an email address, which every account has, including
+ * anyone who signs up. Who is League is NL.accountLevel.isLeague, the
+ * door's own answer (the pass's card, or with no pass a League role), and
+ * never someone waiting for approval or declined. Worked out from the
+ * account's record as it stands, read fresh, so the three triggers below
+ * that can fire together all come to the same claims:
+ *   passClaims   users/<uid>/pass written
+ *   leagueClaims users/<uid>/role written (approval, decline, role edits)
+ *   claimsRefresh admin/claims-refresh written, by Button · Refresh account
+ *                marks: every account, once (the first time, and whenever
+ *                in doubt)
  */
 const { onValueWritten } = require("firebase-functions/v2/database");
 const logger = require("firebase-functions/logger");
@@ -45,6 +59,19 @@ const admin = require("firebase-admin");
 
 const CODES = "app-data/club-codes";
 const CLUB_CLAIMS = ["club", "clubName", "pClub", "pClubName", "pManage"];
+
+/* The League mark, set or removed from the account's whole record. */
+function withLeague(claims, league) {
+  const out = Object.assign({}, claims || {});
+  delete out.league;
+  if (league) out.league = true;
+  return out;
+}
+
+function isLeagueAccount(NL, user) {
+  if (!user || user.pending === true || user.rejected === true) return false;
+  return NL.accountLevel.isLeague(user);
+}
 
 const OPTS = {
   ref: "/users/{uid}/pass",
@@ -118,8 +145,10 @@ async function programmeManage(db, pass) {
   return NL.pass.explain(pass, tool).level === "manage";
 }
 
-/* Bring one account's club claims in line with its pass. */
-async function applyClaims(db, uid, pass, clubs) {
+/* Bring one account's claims in line with its record, read fresh. */
+async function applyClaims(db, uid, clubs) {
+  const record = (await db.ref("users/" + uid).once("value")).val();
+  const pass = record && record.pass ? record.pass : null;
   let user;
   try {
     user = await admin.auth().getUser(uid);
@@ -128,7 +157,8 @@ async function applyClaims(db, uid, pass, clubs) {
     return;
   }
   const before = user.customClaims || {};
-  const next = nextClaims(before, pass, clubs, await programmeManage(db, pass));
+  const next = withLeague(nextClaims(before, pass, clubs, await programmeManage(db, pass)),
+    isLeagueAccount(loadCanon(), record));
   if (sameClaims(before, next)) return;
 
   if (pass && pass.base === "club" && !next.club) {
@@ -137,15 +167,36 @@ async function applyClaims(db, uid, pass, clubs) {
     logger.warn("passClaims: no club key for this Club card", { club: String(pass.club || "") });
   }
   await admin.auth().setCustomUserClaims(uid, Object.keys(next).length ? next : null);
-  logger.info("passClaims: club claims " + (next.club ? "set" : "cleared"), { uid, club: next.club || null, manage: !!next.pManage });
+  logger.info("passClaims: claims updated", { uid, club: next.club || null, manage: !!next.pManage, league: !!next.league });
 }
 
 exports.passClaims = onValueWritten(OPTS, async (event) => {
-  const uid = event.params.uid;
-  const after = event.data && event.data.after;
-  const pass = after && after.exists() ? after.val() : null;
   const db = admin.database();
-  await applyClaims(db, uid, pass, await readClubs(db));
+  await applyClaims(db, event.params.uid, await readClubs(db));
+});
+
+exports.leagueClaims = onValueWritten(Object.assign({}, OPTS, { ref: "/users/{uid}/role" }), async (event) => {
+  const db = admin.database();
+  await applyClaims(db, event.params.uid, await readClubs(db));
+});
+
+/* Every account, once. Written by Button · Refresh account marks with the
+   deploy account's own credentials; no browser can write admin/. */
+exports.claimsRefresh = onValueWritten(Object.assign({}, OPTS, { ref: "/admin/claims-refresh", timeoutSeconds: 540 }), async (event) => {
+  if (!(event.data && event.data.after && event.data.after.exists())) return;
+  /* Its own "done" write fires this again: only a fresh request runs. */
+  const ask = event.data.after.val() || {};
+  if (ask.done && ask.done >= (ask.at || 0)) return;
+  const db = admin.database();
+  const [users, clubs] = await Promise.all([db.ref("users").once("value"), readClubs(db)]);
+  let n = 0, league = 0;
+  for (const uid of Object.keys(users.val() || {})) {
+    await applyClaims(db, uid, clubs);
+    n++;
+    if (isLeagueAccount(loadCanon(), (users.val() || {})[uid])) league++;
+  }
+  await db.ref("admin/claims-refresh").update({ done: Date.now(), accounts: n, league });
+  logger.info("claimsRefresh: every account checked", { n, league });
 });
 
 /* Programme Packs' grants changed in Access: every Club card's write claim
@@ -158,7 +209,7 @@ exports.programmeClaims = onValueWritten(Object.assign({}, OPTS, { ref: "/access
   for (const uid of Object.keys(all)) {
     const pass = all[uid] && all[uid].pass;
     if (!pass || !pass.issued || pass.base !== "club") continue;
-    await applyClaims(db, uid, pass, clubs);
+    await applyClaims(db, uid, clubs);
     n++;
   }
   logger.info("programmeClaims: Club cards checked", { n });

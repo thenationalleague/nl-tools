@@ -66,7 +66,7 @@ async function seed() {
 const contrib = (id = 'c1', gen = GEN) =>
   env.authenticatedContext('mdl-' + id, { mdl: id, mdlGen: gen }).database();
 const user = (uid, extra = {}) =>
-  env.authenticatedContext(uid, Object.assign({ email: uid + '@example.test' }, extra)).database();
+  env.authenticatedContext(uid, Object.assign({ email: uid + '@example.test', league: true }, extra)).database();
 const anon = () => env.unauthenticatedContext().database();
 
 function clipUpdate(id, clipId, extra = {}) {
@@ -262,7 +262,7 @@ test('storage: contributor creates own video only, once', async () => {
 test("storage: staff read, signed-out and other contributors do not", async () => {
   await env.withSecurityRulesDisabled((ctx) => ctx.storage().ref(path('c1', 'k9.mp4')).put(vid, { contentType: 'video/mp4' }));
   await assertFails(env.authenticatedContext('mdl-c2', { mdl: 'c2', mdlGen: GEN }).storage().ref(path('c1', 'k9.mp4')).getMetadata());
-  await assertSucceeds(env.authenticatedContext('la', { email: 'la@example.test' }).storage().ref(path('c1', 'k9.mp4')).getDownloadURL());
+  await assertSucceeds(env.authenticatedContext('la', { email: 'la@example.test', league: true }).storage().ref(path('c1', 'k9.mp4')).getDownloadURL());
   await assertFails(env.unauthenticatedContext().storage().ref(path('c1', 'k9.mp4')).getDownloadURL());
   await assertFails(env.authenticatedContext('anon', {}).storage().ref(path('c1', 'k9.mp4')).getDownloadURL());
 });

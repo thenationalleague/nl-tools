@@ -91,3 +91,41 @@ test('a club code always mints Programme Packs writes (codes keep Manage)', () =
   const cc = readFileSync(join(REPO, 'functions/club-code.js'), 'utf8');
   assert.match(cc, /pManage: true/);
 });
+
+/* ---- The League mark (14/11/2026) ---------------------------------------
+   The file rules ask for `league: true`; only the server sets it, from the
+   door's own answer (NL.accountLevel.isLeague). */
+import { NL as CANON } from './load-canon.mjs';
+const L = lift(['withLeague', 'isLeagueAccount']);
+
+test('the League mark goes on League accounts only', () => {
+  const yes = [
+    { role: 'staff', pass: { base: 'league', issued: 1 } },
+    { role: 'admin' },                                   // no pass, League role
+    { role: 'superadmin' }
+  ];
+  const no = [
+    { role: 'club-admin', club: 'Woking' },
+    { role: 'staff', pass: { base: 'club', club: 'Woking', issued: 1 } }, // a Club card, whatever the old role
+    { role: 'pending', pending: true },
+    { role: 'staff', pending: true },                    // waiting, whatever the role says
+    { role: 'admin', rejected: true },
+    null
+  ];
+  for (const u of yes) assert.equal(L.isLeagueAccount(CANON, u), true, JSON.stringify(u));
+  for (const u of no) assert.equal(L.isLeagueAccount(CANON, u), false, JSON.stringify(u));
+});
+
+test('the mark is added or taken off, and nothing else moves', () => {
+  assert.deepEqual(L.withLeague({ club: 'wok' }, false), { club: 'wok' });
+  assert.deepEqual(L.withLeague({ league: true, dir: 'x' }, false), { dir: 'x' });
+  assert.deepEqual(L.withLeague({}, true), { league: true });
+});
+
+test('the file rules ask for the mark by the name the server sets', () => {
+  const rules = readFileSync(join(REPO, 'system/storage/rules.snapshot.rules'), 'utf8');
+  assert.match(SRC, /out\.league = true/);
+  assert.ok(rules.includes("request.auth.token.get('league', false) == true"));
+  const live = rules.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  assert.ok(!/token\.email != null/.test(live), 'a file rule still treats an email address as League');
+});

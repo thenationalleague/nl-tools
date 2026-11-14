@@ -15,7 +15,6 @@ import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import Module from 'node:module';
 import { REPO } from './load-canon.mjs';
-import { plan } from '../scripts/tidy-waiting-accounts.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -83,19 +82,12 @@ test('approving writes the club from the request and the tools whole; declining 
   for (const k of ["'/role'] = 'rejected'", "'/club'] = null", "'/tools'] = null"]) assert.ok(reject.includes(k), k);
 });
 
-test('the one-off tidy clears waiting and declined accounts, and nobody else', () => {
-  const { updates, n } = plan({
-    a: { pending: true, role: 'club', club: 'Testham Town', tools: { x: 'access' } },
-    b: { pending: true, role: 'pending', tools: {} },
-    c: { rejected: true, role: 'club', club: 'Testham Town' },
-    d: { role: 'staff', club: '', tools: { y: 'admin' } },
-    e: { pending: false, rejected: false, role: 'club-admin', club: 'Testham Town' }
-  });
-  assert.deepEqual(n, { waiting: 2, declined: 1, waitingFixed: 1, declinedFixed: 1, withPass: 0 });
-  assert.deepEqual(updates, {
-    'users/a/role': 'pending', 'users/a/club': null, 'users/a/tools': null,
-    'users/c/role': 'rejected', 'users/c/club': null, 'users/c/tools': null
-  });
+/* The one-off tidy (Button · Tidy waiting and declined accounts) ran on
+   14/11/2026, found nothing to tidy, and was removed in the next PR. */
+test('the one-off tidy is gone', () => {
+  for (const f of ['scripts/tidy-waiting-accounts.mjs', '.github/workflows/tidy-waiting-accounts.yml']) {
+    assert.throws(() => readFileSync(join(REPO, f)), f + ' is back');
+  }
 });
 
 test('the request emails need the requester\'s own sign-in and take nothing from the request', () => {

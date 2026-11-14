@@ -23,15 +23,15 @@ const A = 'app-data/' + ATT, H = 'app-data/' + HB;
 /* One database() per context: a second call re-points a running instance at
    the emulator and the SDK throws. */
 const as = (uid, claims) => env.authenticatedContext(uid, claims).database();
-const person = (base, entries, role) => ({ role: role || 'staff', pass: { base, issued: 1 }, tools: entries || {} });
+const person = (base, entries, role, club) => ({ role: role || 'staff', pass: Object.assign({ base, issued: 1 }, club ? { club } : {}), tools: entries || {} });
 const users = {
   'u-ops':     person('league', { [ATT]: 'admin', [HB]: 'admin' }),          // League Operations
   'u-staff':   person('league', { [ATT]: 'access', [HB]: 'access' }, 'admin'), // League card, no key; old role admin
-  'u-cluboes': person('club', { [ATT]: 'admin', [HB]: 'access' }, 'club-admin'), // Club Operations
+  'u-cluboes': person('club', { [ATT]: 'admin', [HB]: 'access' }, 'club-admin', 'Testham Town'), // Club Operations
   'u-clubbo':  person('club', { [ATT]: 'access', [HB]: 'access' }, 'club-staff'), // Club card, no key
   'u-sa':      { role: 'superadmin' },
   'u-oldadm':  { role: 'admin' },        // no pass, old League admin role
-  'u-oldclub': { role: 'club-admin' },   // no pass, old club secretary role
+  'u-oldclub': { role: 'club-admin', club: 'Testham Town' },   // no pass, old club secretary role
   'u-oldstaff':{ role: 'staff' },        // no pass, old League staff role
 };
 const db = Object.fromEntries(Object.keys(users).map((u) => [u, as(u)]));
@@ -44,6 +44,10 @@ await env.withSecurityRulesDisabled(async (ctx) => {
   for (const [uid, u] of Object.entries(users)) await set(ref(d, 'users/' + uid), u);
   await set(ref(d, H + '/editions/e1'), { title: 'x' });
   await set(ref(d, H + '/publishedEditionId'), 'e0');
+  /* Whose home match each submission is (14/11/2026: a club submits its
+     own home matches only). */
+  for (const id of ['s1', 's2', 's3', 's4', 's5', 's6']) await set(ref(d, A + '/archive/2026/fixtures/' + id), { homeTeamName: 'Testham Town' });
+  await set(ref(d, A + '/archive/2026/fixtures/s7'), { homeTeamName: 'Elsewhere United' });
 });
 
 let pass = 0, fail = 0;
@@ -68,6 +72,10 @@ await t('superadmin edits fixtures', set(ref(db['u-sa'], A + '/fixtures/f1'), fi
 await t('no pass, old admin role: still edits fixtures', set(ref(db['u-oldadm'], A + '/fixtures/f1'), fix), true);
 await t('no pass, old club secretary role: still submits', set(ref(db['u-oldclub'], A + '/archive/2026/submissions/s5'), sub), true);
 await t('no pass, old staff role: no longer submits', set(ref(db['u-oldstaff'], A + '/archive/2026/submissions/s6'), sub), false);
+await t('a club Operations holder cannot submit another club\'s home match', set(ref(db['u-cluboes'], A + '/archive/2026/submissions/s7'), sub), false);
+await t('no pass, old club secretary role: not another club\'s either', set(ref(db['u-oldclub'], A + '/archive/2026/submissions/s7'), sub), false);
+await t('League Operations submits any club\'s', set(ref(db['u-ops'], A + '/archive/2026/submissions/s7'), sub), true);
+await t('a club cannot wipe every club\'s figures at once', set(ref(db['u-cluboes'], A + '/archive/2026/submissions'), null), false);
 await t('fixtures stay public to read', get(ref(env.unauthenticatedContext().database(), A + '/fixtures')), true);
 
 /* Handbook */

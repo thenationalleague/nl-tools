@@ -91,14 +91,16 @@ test('there is exactly one Storage rules file', () => {
   }
 });
 
-test('the data/ prefix is readable only by real accounts and writable by none', () => {
+test('the data/ prefix is readable only by League accounts and writable by none', () => {
   const rules = read('system/storage/rules.snapshot.rules');
   // Slice from the block's opening brace, not from `match` — the path pattern
   // `/data/{file}` contains a closing brace of its own.
   const open = rules.indexOf('{', rules.indexOf('match /data/{file}') + 18);
   const body = rules.slice(open, rules.indexOf('}', open));
-  assert.match(body, /allow read:\s*if request\.auth != null && request\.auth\.token\.email != null/,
-    'read must require an email claim — anonymous capability sessions must not reach data/');
+  /* An email claim was the rule until 14/11/2026; anyone who signs up has
+     one. The League mark is set by the server (functions/pass-claims.js). */
+  assert.match(body, /allow read:\s*if request\.auth != null && request\.auth\.token\.get\('league', false\) == true/,
+    'read must require the League mark — club sessions and sign-ups must not reach data/');
   assert.match(body, /allow write:\s*if false/,
     'write must be false — uploads come from a service account, which bypasses rules');
 });

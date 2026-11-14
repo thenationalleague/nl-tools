@@ -31,8 +31,9 @@ What: Programme Packs now checks club codes through the shared door (13/11/2026)
 Why: Two copies of the code check, throttle and log is what this tidy is for.
 
 ### League files only for League accounts
-What: File storage tells League staff apart by "has an email address". Every account has one, including club accounts and anyone who signs up. Give League accounts a mark of their own, set by the server from their pass, then change the file rules to ask for that mark. Done in three steps so nobody loses their files: the mark is added, every account gets it, then the rules switch.
-Why: It is the same mistake the database had on 14/11/2026, in the one place that fix did not reach.
+What: Built (14/11/2026). File storage asks for a League mark, set by the server from each person's pass, instead of an email address (which everyone has). Three steps, in order, so nobody loses their files: the cloud job that sets the mark goes live, Button · Refresh account marks puts it on every account, and an hour later the file rules are published.
+Why: Anyone who signed up could read, and in places delete, League files.
+Waiting on: you (three presses, an hour apart at the end)
 
 ### Sign-up and approvals
 What: Club people ask; everyone else is invited. A club secretary shares one sign-up link with their staff. The link already names the club, so each person adds their name, job title and the zones they need, with a one-line reason, and League Operations approves, usually within a day. League Operations can also invite club staff directly. League staff and externals never ask: they are invited, and the invite sets their card and zones. A Pending list and a bell show what is waiting. People can ask for an extra zone later.
