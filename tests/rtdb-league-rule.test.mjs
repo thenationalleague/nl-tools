@@ -18,15 +18,20 @@ test('Commercial Benchmarking still uses the generated League check', () => {
   assert.ok(RULES['ops-commercial-benchmarking'].clubs['.read'].includes(leagueRule()));
 });
 
-test('Attendance: fixtures and audit logs are League and Manage; submissions are Manage', () => {
+test('Attendance: fixtures and audit logs are League and Manage; submissions are League and Manage, or Manage on a club\'s own home match', () => {
   const a = RULES['ops-attendance'];
   assert.equal(a.fixtures['.write'], leagueManage('ops-attendance'));
   assert.equal(a['fixtures-audit']['.read'], leagueManage('ops-attendance'));
   assert.equal(a['submissions-audit']['.read'], leagueManage('ops-attendance'));
   /* Every season's figures live under archive/<season>/ (Attendance
-     v2.18.0); the old root submissions node keeps its rule until it goes. */
-  assert.equal(a.archive.$season.submissions['.write'], levelRule('ops-attendance', 'admin'));
-  assert.equal(a.submissions['.write'], levelRule('ops-attendance', 'admin'));
+     v2.18.0). The whole node is League and Manage; a club at Manage writes
+     one match, and only when the fixture's home club is theirs (14/11/2026:
+     before, a club could rewrite every club's figures). */
+  assert.equal(a.archive.$season.submissions['.write'], leagueManage('ops-attendance'));
+  const own = a.archive.$season.submissions.$matchID['.write'];
+  assert.ok(own.startsWith('(' + levelRule('ops-attendance', 'admin') + ') && '), 'Manage first');
+  assert.match(own, /child\('fixtures'\)\.child\(\$matchID\)\.child\('homeTeamName'\)\.val\(\) === root\.child\('users'\)\.child\(auth\.uid\)\.child\('pass'\)\.child\('club'\)\.val\(\)/);
+  assert.equal(a.submissions['.write'], leagueManage('ops-attendance'));
 });
 
 test('Handbook: every write is League and Manage', () => {

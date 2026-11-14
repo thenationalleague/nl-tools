@@ -43,11 +43,11 @@ await env.withSecurityRulesDisabled(async (ctx) => {
   await set(ref(db, B + 'trash/-D0'), { name: 'Old.pdf', deletedAt: 1 });
 });
 
-const admin = env.authenticatedContext('admin1', { email: 'a@example.test' });
-const granted = env.authenticatedContext('granted1', { email: 'g@example.test' });
-const staff = env.authenticatedContext('staff1', { email: 's@example.test' });
-const viewer = env.authenticatedContext('viewer1', { email: 'v@example.test' });
-const denied = env.authenticatedContext('denied1', { email: 'd@example.test' });
+const admin = env.authenticatedContext('admin1', { email: 'a@example.test', league: true });
+const granted = env.authenticatedContext('granted1', { email: 'g@example.test', league: true });
+const staff = env.authenticatedContext('staff1', { email: 's@example.test', league: true });
+const viewer = env.authenticatedContext('viewer1', { email: 'v@example.test', league: true });
+const denied = env.authenticatedContext('denied1', { email: 'd@example.test', league: true });
 const club = env.authenticatedContext('cc-SOL', { club: 'SOL' });
 const nlCode = env.authenticatedContext('cc-NL', { club: 'NL' });
 const anon = env.authenticatedContext('anon1', {});

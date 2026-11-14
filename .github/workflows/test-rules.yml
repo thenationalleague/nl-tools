@@ -19,6 +19,7 @@ on:
   pull_request:
     paths:
       - system/rtdb/rules.snapshot.json
+      - system/storage/rules.snapshot.rules
       - tests/emulator/**
       - .github/workflows/test-rules.yml
   workflow_dispatch:
@@ -31,7 +32,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      TESTS: access-grants-rules.mjs users-rules.mjs programme-rules.mjs commercial-benchmarking-rules.mjs attendance-handbook-rules.mjs manage-batch1-rules.mjs manage-batch2-rules.mjs exposure-rules.mjs
+      STORAGE_TESTS: storage-league-rules.mjs
+      TESTS: access-grants-rules.mjs users-rules.mjs programme-rules.mjs commercial-benchmarking-rules.mjs attendance-handbook-rules.mjs manage-batch1-rules.mjs manage-batch2-rules.mjs exposure-rules.mjs uw-codes-rules.mjs
     steps:
       - uses: actions/checkout@v4
 
@@ -49,7 +51,10 @@ jobs:
           mkdir -p "$RUNNER_TEMP/emu" && cd "$RUNNER_TEMP/emu"
           npm init -y >/dev/null
           npm i --no-audit --no-fund firebase-tools@13 @firebase/rules-unit-testing@3 firebase@10 >/dev/null
-          printf '{"emulators":{"database":{"port":9000},"ui":{"enabled":false}}}' > firebase.json
+          printf '{"emulators":{"database":{"port":9000},"storage":{"port":9199},"ui":{"enabled":false}},"storage":{"rules":"storage.rules"}}' > firebase.json
+          # The storage emulator will not start without a rules file named in
+          # firebase.json; each test loads the real rules itself.
+          cp "$GITHUB_WORKSPACE/system/storage/rules.snapshot.rules" storage.rules
 
       - name: Run the rules tests
         run: |
@@ -60,6 +65,13 @@ jobs:
             echo "::group::$f"
             NL_REPO="$GITHUB_WORKSPACE" npx firebase emulators:exec --project demo-rules \
               --only database "node $f" || status=1
+            echo "::endgroup::"
+          done
+          for f in $STORAGE_TESTS; do
+            cp "$GITHUB_WORKSPACE/tests/emulator/$f" .
+            echo "::group::$f"
+            NL_REPO="$GITHUB_WORKSPACE" npx firebase emulators:exec --project demo-rules \
+              --only database,storage "node $f" || status=1
             echo "::endgroup::"
           done
           exit $status
