@@ -31,7 +31,7 @@ and the two-door shape at the top of `system/fixture-management-plan.md`.
 | Commercial Benchmarking | one page | none | **Done** (13/11/2026): a code or a Club card shows that club; a League account sees every club at its level. Built without auth-guard, which would send a code holder to sign in |
 | DAZN Viewership | club page, by code | console | No: clubs read by code |
 | Document Library | one page | forwards | **Done** (14/11/2026): the code door stays for clubs; a Club card opens it read-only; a League account sees it at its level, with Activity, and at Manage the Bin and every change |
-| Financial Benchmarking | club page, by code | console | No: clubs submit by code |
+| Financial Benchmarking | one page | forwards | **Done** (14/11/2026): the code door stays for clubs; a Club card opens its own figures; a League account sees every club at its level, and imports at Manage (`NL.codeGate.door`) |
 | Local Media | public form | console | No: the form is public |
 | Programme Packs | one page | forwards | **Done** (13/11/2026): the passcode door stays beside sign-in; a Club card opens its club; the League with Manage gets every folder plus Removed files, Audit and Manage as tabs |
 | Save of the Month | club page, by code | console | No: clubs nominate by code |

@@ -18,9 +18,8 @@
        number, how far it sits from the median, and every club in the
        comparison as a nameless bar with the club's own bar in red.
 
-   Used by the club page (/financial-benchmarking/) and by the staff page's
-   "as the club sees it" view (/financial-benchmarking/admin/), so the two
-   cannot drift apart.
+   Used by the club side of /financial-benchmarking/ and by the League
+   side's "as the club sees it" view, so the two cannot drift apart.
 
    NO VERDICT (settled 10/11/2026). The words say how far a figure is from
    the median, and every figure carries its place by size ("16th of 24 by

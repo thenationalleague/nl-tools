@@ -1,28 +1,43 @@
 <!DOCTYPE html>
 <!--
-  NL Tools — Financial Benchmarking (club page)
-  Version: v0.6 (13/11/2026)
-    Two doors, one mode: signed in to NL Tools, this page wears the NL Tools
-    top bar (sign out from its menu); by club code, the club bar as before.
-    The code screen offers "Have an NL Tools account? Sign in" (NL.codeGate,
-    nl-utils v1.57).
-  Was: v0.5 (11/11/2026)
+  NL Tools — Financial Benchmarking
+  Version: v1.0 (14/11/2026)
+    One address. The League's page moves here from
+    /financial-benchmarking/admin/ (which now forwards): a League account
+    sees every club, and at Manage imports returns. Clubs are as before.
+  Was: v0.6 (13/11/2026) club page, v0.8 (11/11/2026) staff page
   File: /financial-benchmarking/index.html
 
   CHANGELOG
+    v1.0 (14/11/2026) — One page for clubs and the League
+      (NL.codeGate.door, nl-utils v1.68).
+    v0.6 (13/11/2026) — Signed in to NL Tools, the NL Tools top bar; by
+      club code, the club bar (NL.codeGate, nl-utils v1.57).
     v0.5 (11/11/2026) — Finance's review (_data v0.4, _view v0.4): a National
       club's return is the SCMP; charts retitled and reordered; every figure
       shows its place by size.
-    v0.4 (11/11/2026) — Canon sweep (_view v0.3): control titles are canon
-      .filter-label, the two panels canon .form-panel.
-    v0.3 (10/11/2026) — Picks up the weighted club view (_view.js v0.2):
-      squad cost against income leads, then each budget with its progress;
-      budgets show their place by size; bars or slider.
-    v0.2 (10/11/2026) — Picks up _data.js v0.2: club names as the returns
-      sheet writes them ("Utd") are recognised on import.
-    v0.1 (10/11/2026) — First build. A club enters its access code and sees
-      its own figures from the financial return, each against the nameless
-      figures of the clubs it is compared with.
+    v0.4 (11/11/2026) — Canon sweep (_view v0.3).
+    v0.3 (10/11/2026) — The weighted club view (_view.js v0.2).
+
+  WHO SEES WHAT (the pass decides, system/one-address-plan.md):
+    · not signed in       → the club code door; a code opens that club's own
+                            figures against the nameless comparison lists
+    · a Club card         → the same, with no code
+    · a League account at Access → every club's figures by name, the
+                            ranked chart, one club as that club sees it
+    · a League account at Manage → all that, plus Import
+    · a League account at Off    → "isn't available", as auth-guard says
+  The level is NL.accountLevel by way of NL.codeGate.door: auth-guard's
+  answer, worked out here because auth-guard would send a code holder to
+  the sign-in page.
+
+  Storage (RTDB), all under app-data/ops-financial-benchmarking:
+    index/<season>/<quarter>                    { at, clubs } — which returns exist
+    returns/<season>/<quarter>/clubs/<CODE>     { div, v: { <field>: number } }
+    returns/<season>/<quarter>/bench/<division> { <metric>: [sorted figures] }
+
+  THE FIGURES ARE NEVER IN THIS REPO. It is public. A return is pasted into
+  the Import tab by someone at Manage and goes straight to the database.
 
   THE GATE. The one club access code, checked SERVER-SIDE:
   NL.codeGate.viaFunction posts it to the clubCodeAuth trigger under
@@ -43,9 +58,9 @@
   a club's row.
 
   A League holder of an access code (claim "NL") or a staff token ("*") has
-  no club row to read, so it is pointed at the staff page instead.
+  no club row to read, so it is asked to sign in to NL Tools instead.
 
-  No auth-guard: that gates NL accounts, and this page is entered by code.
+  No auth-guard: it would send a code holder to the sign-in page.
 -->
 <html lang="en">
 <head>
@@ -72,8 +87,19 @@
       messagingSenderId: "801354670005",
       appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
     });
+    var db = firebase.database();
+    window.NL_CHANGELOG = [
+      { date: '14/11/2026', version: 'v1.0', items: [ 'One address for clubs and the League: /financial-benchmarking/.' ] },
+      { date: '11/11/2026', version: 'v0.8', items: [ 'Download CSV, Check, Import and Delete carry their icons.' ] },
+      { date: '11/11/2026', version: 'v0.7', items: [
+        'National: the return is the SCMP; income to date sits beside the budget; wages are a share of budgeted income; two charts to a row.',
+        'North and South: Income and Playing squad first, the two squad spend ratios below, every chart titled in full.',
+        'Every figure shows its place by size.' ] },
+      { date: '11/11/2026', version: 'v0.6', items: [ 'The club card at the top of one club’s view is now the shared club header used across NL Tools.' ] },
+      { date: '11/11/2026', version: 'v0.5', items: [ 'One club’s view opens with a club card: crest, name, division and return, trimmed in the club’s colours.' ] }
+    ];
   </script>
-  <script src="/system/nl-utils.js?v=71"></script>
+  <script src="/system/nl-utils.js?v=72"></script>
   <!-- An NL Tools sign-in wears the NL Tools top bar (NL.codeGate.accountBar). -->
   <script src="/system/nl-topbar.js?v=16"></script>
   <!-- GA4 for nl.tools — cookieless, no banner, no identity. See system/nl-analytics.js -->
@@ -81,10 +107,52 @@
   <link rel="stylesheet" href="/financial-benchmarking/_view.css?v=4">
   <script src="/financial-benchmarking/_data.js?v=4"></script>
   <script src="/financial-benchmarking/_view.js?v=4"></script>
+<style>
+  /* #pageWrap default hide is in nl-brand.css; the League door reveals it
+     with style.display = 'block'. Don't clear with '' — would re-trigger
+     the brand rule and re-hide the page. */
+  /* Layout comes from canon (.toolbar, .tabs, NL.filterButton, .table,
+     .form-panel, .form-group); the club view's own styles are in _view.css. */
+  .fba-section { margin-top: 16px; }
+  #fbaTable th[data-sort] { cursor: pointer; white-space: nowrap; }
+  #fbaTable th[aria-sort="ascending"]::after { content: ' ↑'; }
+  #fbaTable th[aria-sort="descending"]::after { content: ' ↓'; }
+  #fbaTable tbody tr { cursor: pointer; }
+  #fbaTable td.ta-right { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #fbaTable td:first-child { white-space: nowrap; }
+  /* The ranked chart: one row per club, named, high to low. Local: canon has
+     no ranked-bar component. Bars are var(--navy); nothing is coloured good
+     or bad. */
+  .fba-rank { margin-bottom: 28px; padding: 16px 18px; background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+  .fba-rank .fb-range { margin: 0 0 14px; max-width: 520px; }
+  .fba-rank__row { display: grid; grid-template-columns: 200px minmax(0, 1fr) 110px; align-items: center; gap: 12px; width: 100%; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+  .fba-rank__row:hover .fba-rank__name { color: var(--primary); }
+  .fba-rank__row:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .fba-rank__name { font-size: var(--text-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fba-rank__track { position: relative; height: 26px; }
+  .fba-rank__track > i { position: absolute; top: 4px; bottom: 4px; background: var(--navy); border-radius: 2px; }
+  .fba-rank__med, .fba-rank__zero { position: absolute; top: 0; bottom: 0; width: 0; }
+  .fba-rank__med { border-left: 1px dashed var(--primary); }
+  .fba-rank__zero { border-left: 1px solid var(--navy-300); }
+  .fba-rank__val { font-size: var(--text-sm); font-weight: 700; font-variation-settings: 'wght' 700; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .fba-rank__val.is-none { font-weight: 400; font-variation-settings: 'wght' 400; color: var(--text-muted); }
+  @media (max-width: 720px) {
+    .fba-rank__row { grid-template-columns: 110px minmax(0, 1fr) 84px; gap: 8px; }
+  }
+  .fba-import textarea { min-height: 180px; font-family: var(--font-mono); font-size: var(--text-xs); }
+  .fba-preview:empty { display: none; }
+  .fba-preview > * + * { margin-top: 12px; }
+  .fba-unmatched { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 12px; align-items: center; max-width: 560px; }
+  .fba-onfile td:last-child { text-align: right; }
+</style>
 </head>
 <body>
-  <!-- White bar: no NL account is behind this page. -->
-  <header class="nl-idbar">
+  <!-- The NL Tools bar, for anyone signed in (a Club card or the League). -->
+  <div id="nlTopbar"></div>
+
+  <!-- White bar for a club code: hidden until the code door is chosen, so a
+       signed-in visitor never sees it flash. -->
+  <header class="nl-idbar" hidden>
     <img class="nl-idbar__crest" id="fbCrest" src="/assets/crests/National%20League%20rose.png"
          alt="" width="42" height="42">
     <div class="nl-idbar__id">
@@ -101,6 +169,67 @@
   <main class="page" id="fbShell" hidden>
     <div id="fbBody"></div>
   </main>
+
+  <!-- The League side, revealed by the door at Access or Manage. -->
+<div id="pageWrap">
+  <div class="page">
+
+    <!-- Two jobs, two tabs (a closed set, so canon .tabs). Import shows only
+         to someone who may write. -->
+    <div class="tabs" id="fbaTabs" role="tablist">
+      <button class="tab active" type="button" role="tab" data-pane="figures">Figures</button>
+      <button class="tab" type="button" role="tab" data-pane="import" id="fbaTabImport" hidden>Import</button>
+    </div>
+
+    <div data-pane-body="figures">
+      <div class="toolbar" id="fbaBar" hidden>
+        <div class="toolbar__left">
+          <span class="filter-label">Return</span>
+          <select class="nl-select" id="fbaReturn" aria-label="Return"></select>
+          <div id="fbaDivs"></div>
+          <div id="fbaMetric"></div>
+        </div>
+        <div class="toolbar__right">
+          <button class="btn btn--ghost btn--sm" id="fbaCsv" type="button"><svg class="icon icon--sm" aria-hidden="true"><use href="/assets/icons/sprites.svg#icon-download"></use></svg> Download CSV</button>
+        </div>
+      </div>
+      <div id="fbaRank"></div>
+      <div id="fbaBody"></div>
+      <div id="fbaClub" hidden>
+        <!-- One club's heading: canon .nl-club-header, drawn by openClub(). -->
+        <div id="fbaClubHead"></div>
+        <div id="fbaClubBody"></div>
+      </div>
+    </div>
+
+    <div data-pane-body="import" hidden>
+      <section class="form-panel fba-import">
+        <div class="form-panel__head">Import a return</div>
+        <div class="form-panel__body">
+          <div class="toolbar">
+            <div class="toolbar__left">
+              <span class="filter-label">Season</span>
+              <select class="nl-select" id="fbaSeason" aria-label="Season"></select>
+              <div id="fbaQuarter"></div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="fbaPaste">National sheet, or North and South sheet</label>
+            <textarea id="fbaPaste" spellcheck="false" placeholder="Select the sheet with its headings, copy, paste here"></textarea>
+          </div>
+          <div class="fba-preview" id="fbaPreview"></div>
+        </div>
+        <div class="form-panel__foot">
+          <button class="btn btn--ghost" id="fbaCheck" type="button"><svg class="icon icon--sm" aria-hidden="true"><use href="/assets/icons/sprites.svg#icon-search"></use></svg> Check</button>
+          <button class="btn btn--primary" id="fbaSave" type="button" disabled><svg class="icon icon--sm" aria-hidden="true"><use href="/assets/icons/sprites.svg#icon-upload"></use></svg> Import</button>
+        </div>
+      </section>
+
+      <section class="fba-section" id="fbaOnFile"></section>
+    </div>
+
+  </div>
+</div>
 
 <script>
 (function () {
@@ -173,12 +302,12 @@
   function start(session) {
     $('fbGate').hidden = true;
     $('fbShell').hidden = false;
-    $('fbOut').hidden = false;
+    if (session.mode !== 'account') $('fbOut').hidden = false;
 
     var code = session && session.role;
     if (!code || code === '*' || code === 'NL') {
       message('This page shows a club’s own figures',
-        'League staff: every club is on <a href="/financial-benchmarking/admin/">the staff page</a>.');
+        'League staff: <a href="/?next=%2Ffinancial-benchmarking%2F">sign in to NL Tools</a> to see every club.');
       return;
     }
     S.code = code;
@@ -212,17 +341,529 @@
     NL.codeGate.signOut().then(function () { location.reload(); });
   });
 
-  NL.codeGate.ensure({
-    mount: $('fbGate'),
+  /* One page, two doors (nl-utils v1.68): a League account goes to the
+     League side at its level; anyone else to the code door, which resumes
+     a code or a Club card's claim by itself. */
+  NL.codeGate.door({
+    toolKey: 'ops-financial-benchmarking',
     title: 'Financial Benchmarking',
-    sub: 'Enter your access code.',
-    numeric: false,
-    verify: NL.codeGate.viaFunction('app-data/club-codes', { tool: 'financial-benchmarking' }),
-    claim: 'club',
-    staffUrl: '/financial-benchmarking/admin/',
-    account: { title: 'Financial Benchmarking', toolKey: 'ops-financial-benchmarking' }
-  }).then(start);
+    code: {
+      mount: $('fbGate'),
+      title: 'Financial Benchmarking',
+      sub: 'Enter your access code.',
+      numeric: false,
+      verify: NL.codeGate.viaFunction('app-data/club-codes', { tool: 'financial-benchmarking' }),
+      claim: 'club',
+      account: { title: 'Financial Benchmarking', toolKey: 'ops-financial-benchmarking' }
+    },
+    showCode: function () { document.querySelector('.nl-idbar').hidden = false; },
+    club: function (session) {
+      if (session.mode !== 'account') document.querySelector('.nl-idbar').hidden = false;
+      start(session);
+    },
+    off: function () {
+      $('fbGate').hidden = true;
+      $('fbShell').hidden = false;
+      message('This tool isn’t available', 'Please contact media@thenationalleague.org.uk.');
+    },
+    league: function (session) {
+      $('fbGate').hidden = true;
+      $('pageWrap').style.display = 'block';
+      window.TOOL.boot(session);
+    }
+  });
 })();
 </script>
+<!-- The League side: every club, and at Manage the import -->
+<script>
+(function () {
+  'use strict';
+
+  var BASE = 'app-data/ops-financial-benchmarking';
+  var D = window.FBData;
+  var DIVS = ['National', 'North', 'South'];
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return NL.escHtml(s == null ? '' : String(s)); };
+
+  var S = {
+    canWrite: false, meta: null, clubs: [], resolve: null,
+    index: {}, returns: [], current: null, data: null,
+    div: 'National', metric: null, sort: { key: 'name', dir: 1 }, open: null,
+    impQuarter: 'q1', pending: null
+  };
+
+  function nameOf(code) {
+    var c = NL.clubs.byCode(code);
+    return c ? c.name : code;
+  }
+  function bothNames(q) { return D.quarterLabel(q, 'step2') + ' / ' + D.quarterLabel(q, 'national'); }
+  function returnLabel(id, set) {
+    var p = id.split('/');
+    /* Named for the division in view: FQR for North and South, SCMP for
+       National. With no division (the list of returns on file, which holds
+       both), it carries both names. */
+    var q = set ? D.quarterLabel(p[1], set) : bothNames(p[1]);
+    return NL.season.label(S.meta, p[0]) + ' · ' + q;
+  }
+  function note(text) {
+    $('fbaBody').innerHTML = '<div class="empty-state"><div class="empty-state__title">' + esc(text) + '</div></div>';
+  }
+
+  /* ---- Panes --------------------------------------------------------- */
+  function showPane(name) {
+    if (name === 'import' && !S.canWrite) name = 'figures';
+    document.querySelectorAll('#fbaTabs .tab').forEach(function (t) {
+      var on = t.getAttribute('data-pane') === name;
+      t.classList.toggle('active', on);
+      t.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    document.querySelectorAll('[data-pane-body]').forEach(function (p) {
+      p.hidden = p.getAttribute('data-pane-body') !== name;
+    });
+  }
+
+  /* ---- Returns on file ----------------------------------------------- */
+  function loadIndex() {
+    return db.ref(BASE + '/index').once('value').then(function (snap) {
+      S.index = snap.val() || {};
+      S.returns = [];
+      Object.keys(S.index).sort().reverse().forEach(function (season) {
+        Object.keys(S.index[season] || {}).sort().reverse().forEach(function (q) {
+          S.returns.push(season + '/' + q);
+        });
+      });
+      drawOnFile();
+      $('fbaBar').hidden = !S.returns.length;
+      if (!S.returns.length) {
+        S.current = null; S.data = null;
+        closeClub();
+        $('fbaRank').innerHTML = '';
+        note(S.canWrite ? 'No returns imported yet' : 'No figures yet');
+        return;
+      }
+      $('fbaReturn').innerHTML = S.returns.map(function (id) {
+        return '<option value="' + esc(id) + '" data-id="' + esc(id) + '">' + esc(returnLabel(id)) + '</option>';
+      }).join('');
+      var want = S.returns.indexOf(S.current) !== -1 ? S.current : S.returns[0];
+      $('fbaReturn').value = want;
+      return showReturn(want);
+    });
+  }
+
+  function showReturn(id) {
+    S.current = id;
+    note('Loading…');
+    return db.ref(BASE + '/returns/' + id).once('value').then(function (snap) {
+      S.data = snap.val() || {};
+      S.data.clubs = S.data.clubs || {};
+      /* The comparison lists are rebuilt from the rows every time, so this
+         page never shows a stale one. If the stored copy — the one clubs
+         read — is behind (a figure added since the import), someone who may
+         write puts it right here, without a re-import. */
+      var fresh = D.benchAll(S.data.clubs);
+      var behind = JSON.stringify(fresh) !== JSON.stringify(benchOf(S.data.bench));
+      S.data.bench = fresh;
+      if (behind && S.canWrite && Object.keys(S.data.clubs).length) {
+        db.ref(BASE + '/returns/' + id + '/bench').set(fresh)['catch'](function (e) {
+          console.error('[financial-benchmarking] comparison lists not refreshed', e);
+        });
+      }
+      var have = {};
+      Object.keys(S.data.clubs).forEach(function (c) { have[S.data.clubs[c].div] = true; });
+      if (!have[S.div]) S.div = DIVS.filter(function (d) { return have[d]; })[0] || 'National';
+      S.sort = { key: 'name', dir: 1 };
+      if (S.open && S.data.clubs[S.open]) openClub(S.open); else { closeClub(); draw(); }
+    });
+  }
+
+  /* The stored lists in the shape benchAll makes them, for comparing. */
+  function benchOf(stored) {
+    var out = {};
+    Object.keys(stored || {}).forEach(function (d) {
+      out[d] = {};
+      Object.keys(stored[d] || {}).forEach(function (k) { out[d][k] = D.list(stored[d][k]); });
+    });
+    return out;
+  }
+
+  /* The Return picker names each return for the division on screen. */
+  function nameReturns(div) {
+    var set = D.setFor(div);
+    $('fbaReturn').querySelectorAll('option').forEach(function (o) {
+      o.textContent = returnLabel(o.value, set);
+    });
+  }
+
+  /* ---- The named table ------------------------------------------------ */
+  function rowsFor(div) {
+    var set = D.setFor(div);
+    return Object.keys(S.data.clubs).filter(function (code) {
+      return S.data.clubs[code].div === div;
+    }).map(function (code) {
+      return { code: code, name: nameOf(code), f: D.figures(set, S.data.clubs[code].v) };
+    });
+  }
+
+  function sorted(rows) {
+    var k = S.sort.key, dir = S.sort.dir;
+    return rows.sort(function (a, b) {
+      if (k === 'name') return dir * a.name.localeCompare(b.name);
+      var x = a.f[k], y = b.f[k];
+      /* A club with no figure goes last whichever way the column runs. */
+      if (x == null || y == null) return (x == null ? 1 : 0) - (y == null ? 1 : 0);
+      return dir * (x - y);
+    });
+  }
+
+  function draw() {
+    if (!S.data) return;
+    S.divPick.set(S.div);
+    nameReturns(S.div);
+    drawRank();
+
+    var metrics = D.metricsOf(D.setFor(S.div));
+    var q = D.quarterLabel(S.current.split('/')[1], D.setFor(S.div));
+    var rows = sorted(rowsFor(S.div));
+    if (!rows.length) { $('fbaRank').innerHTML = ''; note('No ' + S.div + ' figures in this return'); return; }
+
+    var th = function (key, label, cls) {
+      var on = S.sort.key === key;
+      return '<th scope="col" class="' + (cls || '') + '" data-sort="' + key + '" tabindex="0"' +
+        (on ? ' aria-sort="' + (S.sort.dir > 0 ? 'ascending' : 'descending') + '"' : '') + '>' + esc(label) + '</th>';
+    };
+    $('fbaBody').innerHTML =
+      '<div class="table-wrap"><table class="table" id="fbaTable"><thead><tr>' +
+        th('name', 'Club') +
+        metrics.map(function (m) { return th(m.key, m.label.replace(/\{Q\}/g, q), 'ta-right'); }).join('') +
+      '</tr></thead><tbody>' +
+        rows.map(function (r) {
+          return '<tr data-code="' + esc(r.code) + '"><td>' + esc(r.name) + '</td>' +
+            metrics.map(function (m) { return '<td class="ta-right">' + esc(D.format(m.kind, r.f[m.key])) + '</td>'; }).join('') +
+          '</tr>';
+        }).join('') +
+      '</tbody></table></div>';
+  }
+
+  /* ---- The ranked chart ------------------------------------------------- */
+  /* One figure at a time, every club in the division by name, high to low,
+     with the median marked. This is the staff benchmark: the club view shows
+     the same bars without the names. */
+  function drawRank() {
+    var metrics = D.metricsOf(D.setFor(S.div));
+    var q = D.quarterLabel(S.current.split('/')[1], D.setFor(S.div));
+    if (!metrics.some(function (m) { return m.key === S.metric; })) S.metric = metrics[0].key;
+    S.metricPick.setOptions(metrics.map(function (m) {
+      return { value: m.key, label: m.label.replace(/\{Q\}/g, q) };
+    }));
+    S.metricPick.set(S.metric);
+
+    var m = metrics.filter(function (x) { return x.key === S.metric; })[0];
+    var rows = rowsFor(S.div).sort(function (a, b) {
+      var x = a.f[m.key], y = b.f[m.key];
+      if (x == null || y == null) return (x == null ? 1 : 0) - (y == null ? 1 : 0) || a.name.localeCompare(b.name);
+      return y - x || a.name.localeCompare(b.name);
+    });
+    var vals = rows.map(function (r) { return r.f[m.key]; }).filter(function (n) { return n != null; })
+      .sort(function (a, b) { return a - b; });
+    if (!vals.length) { $('fbaRank').innerHTML = ''; return; }
+
+    var lo = Math.min(0, vals[0]), hi = Math.max(0, vals[vals.length - 1]);
+    if (hi === lo) hi = lo + 1;
+    var span = hi - lo, med = D.median(vals);
+    var x = function (v) { return ((v - lo) / span * 100).toFixed(2); };
+    var marks = '<span class="fba-rank__med" style="left:' + x(med) + '%"></span>' +
+      (lo < 0 ? '<span class="fba-rank__zero" style="left:' + x(0) + '%"></span>' : '');
+
+    $('fbaRank').innerHTML = '<div class="fba-rank">' +
+      '<dl class="fb-range">' +
+        '<div><dt>Lowest</dt><dd>' + esc(D.format(m.kind, vals[0])) + '</dd></div>' +
+        '<div><dt>Median</dt><dd>' + esc(D.format(m.kind, med)) + '</dd></div>' +
+        '<div><dt>Highest</dt><dd>' + esc(D.format(m.kind, vals[vals.length - 1])) + '</dd></div>' +
+      '</dl>' +
+      rows.map(function (r) {
+        var v = r.f[m.key];
+        var bar = v == null ? '' : '<i style="left:' + x(Math.min(v, 0)) + '%;width:' +
+          Math.max(Math.abs(v) / span * 100, 0.4).toFixed(2) + '%"></i>';
+        return '<button type="button" class="fba-rank__row" data-code="' + esc(r.code) + '">' +
+          '<span class="fba-rank__name">' + esc(r.name) + '</span>' +
+          '<span class="fba-rank__track">' + bar + marks + '</span>' +
+          '<span class="fba-rank__val' + (v == null ? ' is-none' : '') + '">' +
+            esc(v == null ? 'No figure' : D.format(m.kind, v)) + '</span>' +
+        '</button>';
+      }).join('') + '</div>';
+  }
+
+  function sortBy(key) {
+    if (S.sort.key === key) S.sort.dir = -S.sort.dir;
+    else S.sort = { key: key, dir: key === 'name' ? 1 : -1 };
+    draw();
+  }
+
+  function downloadCsv() {
+    if (!S.data) return;
+    var metrics = D.metricsOf(D.setFor(S.div));
+    var q = D.quarterLabel(S.current.split('/')[1], D.setFor(S.div));
+    var rows = [['Club'].concat(metrics.map(function (m) { return m.label.replace(/\{Q\}/g, q); }))];
+    sorted(rowsFor(S.div)).forEach(function (r) {
+      rows.push([r.name].concat(metrics.map(function (m) {
+        var n = r.f[m.key];
+        return n == null ? '' : (m.kind === 'pct' ? Math.round(n * 10) / 10 : Math.round(n));
+      })));
+    });
+    NL.download('financial-benchmarking-' + S.current.replace('/', '-') + '-' + S.div.toLowerCase() + '.csv',
+      NL.csv(rows, { bom: true }), 'text/csv');
+  }
+
+  /* ---- One club, as that club sees it --------------------------------- */
+  function openClub(code) {
+    var club = S.data && S.data.clubs[code];
+    if (!club) return;
+    S.open = code;
+    $('fbaBody').hidden = true;
+    $('fbaRank').hidden = true;
+    $('fbaMetric').hidden = true;
+    $('fbaDivs').hidden = true;
+    $('fbaCsv').hidden = true;
+    $('fbaClub').hidden = false;
+    var name = nameOf(code);
+    var head = $('fbaClubHead');
+    nameReturns(club.div);
+    head.innerHTML = NL.clubs.headerHtml(name, {
+      sub: club.div + ' · ' + returnLabel(S.current, D.setFor(club.div)),
+      actionsHtml: '<button class="btn btn--ghost btn--sm" id="fbaBack" type="button">All clubs</button>'
+    });
+    NL.clubs.wireCrestImgs(head);   /* medium → full → rose, same tick as insertion */
+    var back = $('fbaBack');
+    back.insertBefore(NL.icon('back', 'sm'), back.firstChild);
+    back.onclick = function () { closeClub(); draw(); };
+    FBView.render($('fbaClubBody'), {
+      div: club.div, v: club.v, benches: S.data.bench || {},
+      quarter: S.current.split('/')[1]
+    });
+  }
+  function closeClub() {
+    S.open = null;
+    $('fbaClub').hidden = true;
+    $('fbaBody').hidden = false;
+    $('fbaRank').hidden = false;
+    $('fbaMetric').hidden = false;
+    $('fbaDivs').hidden = false;
+    $('fbaCsv').hidden = false;
+  }
+
+  /* ---- Import --------------------------------------------------------- */
+  function drawImportControls() {
+    var keys = NL.season.keys(S.meta);
+    var cur = NL.season.current(S.meta) || String(NL.season.fromDate());
+    if (keys.indexOf(cur) === -1) keys.unshift(cur);
+    $('fbaSeason').innerHTML = keys.map(function (k) {
+      return '<option value="' + esc(k) + '"' + (k === cur ? ' selected' : '') + '>' + esc(NL.season.label(S.meta, k)) + '</option>';
+    }).join('');
+    drawQuarter();
+  }
+  function drawQuarter() {
+    var pick = NL.filterButton($('fbaQuarter'), {
+      label: 'Return', multiple: false, search: false,
+      options: D.QUARTERS.map(function (q) { return { value: q, label: bothNames(q) }; }),
+      value: S.impQuarter,
+      /* A return is always for one quarter: clearing it leaves it as it was. */
+      onChange: function (v) { if (v == null) pick.set(S.impQuarter); else S.impQuarter = v; }
+    });
+  }
+
+  function stale() {
+    S.pending = null;
+    $('fbaSave').disabled = true;
+  }
+
+  function check() {
+    var p = D.parsePaste($('fbaPaste').value, S.resolve);
+    var html = '';
+    if (p.errors.length) {
+      html += '<div class="banner banner--error">' + p.errors.map(esc).join('<br>') + '</div>';
+    }
+    if (p.set && !p.errors.length) {
+      var setName = p.set === 'national' ? 'National' : 'North and South';
+      html += '<div class="banner banner--info">' + setName + ' return: ' + p.rows.length +
+        (p.rows.length === 1 ? ' club' : ' clubs') + ' recognised.</div>';
+      if (p.unmatched.length) {
+        var taken = {};
+        p.rows.forEach(function (r) { taken[r.code] = true; });
+        var divs = D.SETS[p.set].divisions;
+        var opts = S.clubs.filter(function (c) {
+          return divs.indexOf(c.division) !== -1 && !taken[c.code];
+        }).map(function (c) { return '<option value="' + esc(c.code) + '">' + esc(c.name) + '</option>'; }).join('');
+        html += '<div class="banner banner--amber">Not recognised. Choose the club, or the row is left out.</div>' +
+          '<div class="fba-unmatched">' + p.unmatched.map(function (u, i) {
+            return '<span>' + esc(u.name) + '</span>' +
+              '<select class="nl-select" data-unmatched="' + i + '" aria-label="Club for ' + esc(u.name) + '">' +
+              '<option value="">Leave out</option>' + opts + '</select>';
+          }).join('') + '</div>';
+      }
+    }
+    $('fbaPreview').innerHTML = html;
+    var ok = p.set && !p.errors.length && (p.rows.length || p.unmatched.length);
+    S.pending = ok ? p : null;
+    $('fbaSave').disabled = !ok;
+  }
+
+  /* The rows to save: recognised ones, plus any the admin has named. */
+  function chosenRows() {
+    var p = S.pending, rows = p.rows.slice(), seen = {}, clash = null;
+    rows.forEach(function (r) { seen[r.code] = true; });
+    document.querySelectorAll('#fbaPreview [data-unmatched]').forEach(function (sel) {
+      if (!sel.value) return;
+      var c = NL.clubs.byCode(sel.value), u = p.unmatched[+sel.getAttribute('data-unmatched')];
+      if (!c || !u) return;
+      if (seen[c.code]) { clash = c.name; return; }
+      seen[c.code] = true;
+      rows.push({ name: c.name, code: c.code, div: c.division, v: u.v });
+    });
+    return clash ? { error: clash + ' has been chosen twice.' } : { rows: rows };
+  }
+
+  function save() {
+    if (!S.pending) return;
+    var picked = chosenRows();
+    if (picked.error) { NL.toast(picked.error, 'error'); return; }
+    if (!picked.rows.length) { NL.toast('No clubs to import.', 'error'); return; }
+
+    var season = $('fbaSeason').value, q = S.impQuarter, id = season + '/' + q;
+    var here = BASE + '/returns/' + id;
+    $('fbaSave').disabled = true;
+
+    /* The other divisions' rows for this return stay as they are — the
+       National and the North and South sheets arrive separately — and every
+       comparison list is rebuilt from the whole return, not just this paste. */
+    NL.ensureAuth().then(function () {
+      return db.ref(here + '/clubs').once('value');
+    }).then(function (snap) {
+      var all = snap.val() || {}, patch = {};
+      picked.rows.forEach(function (r) {
+        all[r.code] = { div: r.div, v: r.v };
+        patch['returns/' + id + '/clubs/' + r.code] = all[r.code];
+      });
+      patch['returns/' + id + '/bench'] = D.benchAll(all);
+      patch['index/' + season + '/' + q] = {
+        at: firebase.database.ServerValue.TIMESTAMP,
+        clubs: Object.keys(all).length
+      };
+      /* Counts only in the audit line: the figures stay in their own node. */
+      NL.writeAudit('financial_return_import', { ret: id, set: S.pending.set, clubs: picked.rows.length });
+      return db.ref(BASE).update(patch);
+    }).then(function () {
+      NL.toast(picked.rows.length + (picked.rows.length === 1 ? ' club' : ' clubs') + ' imported.', 'success');
+      $('fbaPaste').value = '';
+      $('fbaPreview').innerHTML = '';
+      S.pending = null;
+      S.current = id;
+      return loadIndex();
+    }).then(function () { showPane('figures'); })['catch'](function (e) {
+      console.error('[financial-benchmarking]', e);
+      NL.toast('Could not import: ' + e.message, 'error');
+      $('fbaSave').disabled = false;
+    });
+  }
+
+  function drawOnFile() {
+    if (!S.canWrite || !S.returns.length) { $('fbaOnFile').innerHTML = ''; return; }
+    $('fbaOnFile').innerHTML =
+      '<div class="section-head"><h2>Returns on file</h2></div>' +
+      '<div class="table-wrap"><table class="table fba-onfile"><tbody>' + S.returns.map(function (id) {
+        var p = id.split('/'), rec = (S.index[p[0]] || {})[p[1]] || {};
+        return '<tr><td>' + esc(returnLabel(id)) + '</td>' +
+          '<td>' + esc(rec.clubs || 0) + ' clubs</td>' +
+          '<td>' + esc(rec.at ? 'Imported ' + NL.formatDateShort(rec.at) : '') + '</td>' +
+          '<td><button class="btn btn--danger btn--sm" type="button" data-drop="' + esc(id) + '"><svg class="icon icon--sm" aria-hidden="true"><use href="/assets/icons/sprites.svg#icon-delete"></use></svg> Delete</button></td></tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+
+  function drop(id) {
+    NL.confirm('Delete ' + returnLabel(id) + '? Every club’s figures for this return are removed, and clubs stop seeing it.',
+      { title: 'Delete this return', confirmText: 'Delete', variant: 'danger' })
+      .then(function (ok) {
+        if (!ok) return;
+        var p = id.split('/'), patch = {};
+        patch['returns/' + id] = null;
+        patch['index/' + p[0] + '/' + p[1]] = null;
+        NL.writeAudit('financial_return_delete', { ret: id });
+        return db.ref(BASE).update(patch).then(function () {
+          NL.toast('Return deleted.', 'success');
+          return loadIndex();
+        });
+      })['catch'](function (e) { NL.toast('Could not delete: ' + e.message, 'error'); });
+  }
+
+  /* ---- Wiring ---------------------------------------------------------- */
+  $('fbaTabs').addEventListener('click', function (e) {
+    var t = e.target.closest('.tab');
+    if (t) showPane(t.getAttribute('data-pane'));
+  });
+  $('fbaReturn').addEventListener('change', function () { showReturn(this.value); });
+  $('fbaBody').addEventListener('click', function (e) {
+    var th = e.target.closest('th[data-sort]');
+    if (th) { sortBy(th.getAttribute('data-sort')); return; }
+    var tr = e.target.closest('tr[data-code]');
+    if (tr) openClub(tr.getAttribute('data-code'));
+  });
+  $('fbaRank').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-code]');
+    if (b) openClub(b.getAttribute('data-code'));
+  });
+  $('fbaBody').addEventListener('keydown', function (e) {
+    var th = e.target.closest('th[data-sort]');
+    if (th && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); sortBy(th.getAttribute('data-sort')); }
+  });
+  $('fbaCsv').addEventListener('click', downloadCsv);
+  $('fbaPaste').addEventListener('input', stale);
+  $('fbaCheck').addEventListener('click', check);
+  $('fbaSave').addEventListener('click', save);
+  $('fbaOnFile').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-drop]');
+    if (b) drop(b.getAttribute('data-drop'));
+  });
+
+  /* ---- Boot ------------------------------------------------------------ */
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function (session) {
+    /* The door's resolved level (NL.codeGate.door, auth-guard's answer):
+       Manage is the one that writes. */
+    S.canWrite = !!session && session.toolLevel === 'admin';
+    $('fbaTabImport').hidden = !S.canWrite;
+    note('Loading…');
+    S.divPick = NL.filterButton($('fbaDivs'), {
+      label: 'Division', multiple: false, search: false,
+      options: DIVS.map(function (d) { return { value: d, label: d }; }),
+      value: S.div,
+      /* The table is always one division: clearing it leaves it as it was. */
+      onChange: function (v) {
+        if (v == null) { S.divPick.set(S.div); return; }
+        S.div = v; S.sort = { key: 'name', dir: 1 }; draw();
+      }
+    });
+    S.metricPick = NL.filterButton($('fbaMetric'), {
+      label: 'Figure', multiple: false, search: false, options: [], value: null,
+      /* The chart is always of one figure: clearing it leaves it as it was. */
+      onChange: function (v) {
+        if (v == null) { S.metricPick.set(S.metric); return; }
+        S.metric = v; drawRank();
+      }
+    });
+    NL.clubs.load().then(function (meta) {
+      S.meta = meta;
+      S.clubs = (meta.clubs || []).filter(function (c) { return c.code && D.setFor(c.division); })
+        .sort(function (a, b) { return a.name.localeCompare(b.name); });
+      S.resolve = D.resolver(S.clubs);
+      if (S.canWrite) drawImportControls();
+      return NL.ensureAuth();
+    }).then(loadIndex)['catch'](function (e) {
+      console.error('[financial-benchmarking]', e);
+      note('Figures could not be loaded. Reload the page to try again.');
+    });
+  };
+})();
+</script>
+
+
 </body>
 </html>

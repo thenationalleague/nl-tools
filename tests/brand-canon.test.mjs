@@ -1398,7 +1398,7 @@ test('the Style Guide shows the club header live, and no page keeps a private on
   /* The three it replaced. A copy coming back is the drift it was promoted
      to stop. */
   const gone = [
-    ['financial-benchmarking/admin/index.html', /\.fba-club(card|id)\s*\{/],
+    ['financial-benchmarking/index.html', /\.fba-club(card|id)\s*\{/],
     ['programme/_shared.css', /\.own(__\w+)?\s*\{/],
     ['attendance/index.html', /\.club-strip[\w-]*\s*\{/],
   ];

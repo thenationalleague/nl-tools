@@ -243,11 +243,11 @@ test('no club path can be written by a club', () => {
   assert.ok(!text.includes('.write'), 'the only write rule is the staff one at the top');
 });
 
-test('registry: admins by default, staff and club accounts off, card opens the staff page', () => {
+test('registry: admins by default, staff and club accounts off, card opens the one page', () => {
   const rec = registry[KEY];
   assert.equal(JSON.stringify(rec.defaults), JSON.stringify({
     superadmin: 'admin', admin: 'admin', staff: 'off', 'club-admin': 'off', 'club-staff': 'off',
   }));
-  assert.equal(rec.url, '/financial-benchmarking/admin/');
+  assert.equal(rec.url, '/financial-benchmarking/');
   assert.ok(rec.levels.includes('access') && rec.levels.includes('admin'));
 });
