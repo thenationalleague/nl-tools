@@ -30,6 +30,10 @@ Why: One way in for clubs. It waits for launch because the personal links are pa
 What: Programme Packs now checks club codes through the shared door (13/11/2026). After a week with no club using the old route, remove the club-passcode half of programmeAuth, leaving only the console's sign-in.
 Why: Two copies of the code check, throttle and log is what this tidy is for.
 
+### League files kept from club accounts
+What: File storage tells League staff apart by "has an email address", which every club account now has too. So a club account could read League-only files (the website figures, the newsletter library, partner logos, Brand Exposure frames) and every club's Save of the Month and Matchday Live clips. Change those rules to "an email address and no club" and test each one before publishing.
+Why: Club logins are opening; this must be shut before Sign-up and approvals lets clubs in at scale. Today only test club accounts exist.
+
 ### Sign-up and approvals
 What: Club people ask; everyone else is invited. A club secretary shares one sign-up link with their staff. The link already names the club, so each person adds their name, job title and the zones they need, with a one-line reason, and League Operations approves, usually within a day. League Operations can also invite club staff directly. League staff and externals never ask: they are invited, and the invite sets their card and zones. A Pending list and a bell show what is waiting. People can ask for an extra zone later.
 Why: This is the last part of the new model people actually meet. Without it, new people still come in the old way, and you would have to invite every member of every club by hand.
@@ -41,10 +45,6 @@ Why: This is the last part of the new model people actually meet. Without it, ne
 - Email stays in Apps Script for now. The log records that an email was sent, not whether it arrived.
 
 ## Next
-
-### One address for each tool
-What: The merges are done: every two-page tool is one page now, where the pass decides the view, and the old /admin/ addresses forward. Left: delete the "League only" label from the registry.
-Why: People type one address. Two pages per tool means two places to keep in step.
 
 ### Private and Public shelves, and guest links
 What: One-off tools for your own use move to /private/, on a shelf only the Skeleton key sees. Each shows its age and has a Retire button. A guest link lets one named person open one private tool, with an end date, a switch-off and a log of every open. Broadcast Travel moves first, with its old staff code door removed. The Trust Cup frame moves to Graphics.
@@ -115,6 +115,7 @@ Why: Partners and freelancers need one or two tools each, with a name on every s
 ### Clear away the old access fields
 What: Once nothing reads them, remove the per-person tool entries and the jobs that keep them in step (Apply passes), the old roles, the per-role defaults on every tool, and the forwarding pages kept for old bookmarks.
 Why: Two ways of deciding access is twice the chance of them disagreeing.
+- The "League only" label (`audience` on each tool) goes here too. It still decides for anyone without a pass, and keeps a Club card off League tools until club logins, so it cannot go before then. (One address for each tool is done: every two-page tool is one page, 14/11/2026.)
 
 ### Rename the tools in the database
 What: Drop the old "ops-", "media-" and "staff-" starts from every tool's name in the database. A list of old and new names kept forever, a report-first copy, one switch-over, and the old copies deleted weeks later.
