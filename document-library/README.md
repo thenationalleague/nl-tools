@@ -3,11 +3,18 @@
 Where the League keeps documents for clubs: rules, guidance, templates, forms.
 One library for everyone. There is no per-club folder and no club filter.
 
-| Page | Who | Gets in via | Can do |
-|---|---|---|---|
-| `/document-library/` | **every club**, and anyone holding the League's own code | their access code (the one credential, `functions/club-code.js`) | Browse, search, preview and download everything. Change nothing |
-| `/document-library/admin/` at **Manage** | admins and superadmins by default, anyone else set to Manage in the portal | portal login (auth-guard, `ops-document-library`) | Everything: upload files and whole folders, new folder, rename, move, remove to the Bin, restore, delete for good, and read the Activity log |
-| `/document-library/admin/` at **Use** | anyone set to Use in the portal | portal login | Browse, search, preview, download and read the Activity log. No Bin, no changes |
+One page, `/document-library/`, since 14/11/2026. Who gets what:
+
+| Who | Gets in via | Can do |
+|---|---|---|
+| **every club**, and anyone holding the League's own code | their access code (the one credential, `functions/club-code.js`), or a Club card | Browse, search, preview and download everything. Change nothing |
+| a League account at **Manage** (Operations by default, superadmin with no pass) | NL Tools sign-in | Everything: upload files and whole folders, new folder, rename, move, remove to the Bin, restore, delete for good, and read the Activity log |
+| a League account at **Access** | NL Tools sign-in | Browse, search, preview, download and read the Activity log. No Bin, no changes |
+
+The level is `NL.accountLevel` (nl-utils v1.67), the answer auth-guard gives,
+worked out on the page because auth-guard would send a code holder to sign
+in. The League's Bin and Activity are `_console.js`, loaded only for them.
+`/document-library/admin/` forwards here.
 
 ## The name on screen is the name on disk
 

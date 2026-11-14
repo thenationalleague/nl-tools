@@ -1,30 +1,40 @@
 <!DOCTYPE html>
 <!--
-  Document Library — the club page (standalone, club code)
+  Document Library — one page for clubs and the League
+  Version: v2.0 (14/11/2026) – one address. The League's console moves here
+    from /document-library/admin/ (which now forwards): a League account
+    sees the library at its level, with Activity, and at Manage the Bin and
+    every change. Clubs are as before: a club code or a Club card, read-only.
   Version: v1.4 (13/11/2026) – Two doors, one mode: signed in to NL Tools, this page wears the NL Tools top bar (sign out from its menu); by club code, the club bar as before. The code screen offers "Have an NL Tools account? Sign in" (NL.codeGate, nl-utils v1.57).
   Version: v1.3 (30/10/2026) – loads _library v1.3: List / Thumbnails are tabs.
   Version: v1.2 (28/10/2026) — loads _library.js v1.2 (the view switch's icons show).
   Version: v1.1 (28/10/2026) — the tidier head (_library v1.1).
-  Version: v1.0 (28/10/2026) — initial build.
   File: /document-library/index.html
 
   Where the League keeps documents for clubs. Every club sees the same
-  library — there is no per-club folder and no club filter. Clubs browse,
-  search, preview and download; only NL admins change anything, from
-  /document-library/admin/.
+  library — there is no per-club folder and no club filter.
 
-  The door is the club code (NL.codeGate.viaFunction → app-data/club-codes →
-  functions/club-code.js), which mints a token carrying `club: '<KEY>'`. The
-  rules on app-data/ops-document-library/{folders,files} and on
-  document-library/** in Storage read that claim. This page enforces nothing
-  itself — `writable: false` only means no management controls are drawn.
+  Who sees what (the pass decides, system/one-address-plan.md):
+    · not signed in   → the club code door; a code opens the library to
+                        browse, search, preview and download
+    · a Club card     → the same, no code (the pass puts the club's claim on
+                        the account)
+    · a League account at Access → the library read-only, plus Activity
+    · a League account at Manage → upload, new folder, rename, move,
+                        remove, plus the Bin and Activity
+    · a League account at Off → "isn't available", as auth-guard says it
+  The level is NL.accountLevel (nl-utils v1.67): the answer auth-guard
+  gives, worked out here because auth-guard would send a code holder to the
+  sign-in page. The rules are the boundary either way; `writable` only says
+  which controls are drawn.
 
-  A club's downloads are logged (audit/, action 'download') so the console's
-  Activity tab can answer "has anyone opened this". Previews are not.
+  The club door is the club code (NL.codeGate.viaFunction → app-data/club-codes
+  → functions/club-code.js), which mints a token carrying `club: '<KEY>'`.
+  A club's downloads are logged (audit/, action 'download') so Activity can
+  answer "has anyone opened this". Previews are not.
 
-  It deliberately does NOT use auth-guard — that is for NL accounts, and this
-  page is entered by code. The browser is /document-library/_library.js,
-  shared with the console.
+  The browser is /document-library/_library.js; the League's Bin and
+  Activity are /document-library/_console.js, loaded only for the League.
 -->
 <html lang="en">
 <head>
@@ -43,6 +53,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
   <script>
     firebase.initializeApp({
       apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -54,7 +65,7 @@
       appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
     });
   </script>
-  <script src="/system/nl-utils.js?v=70"></script>
+  <script src="/system/nl-utils.js?v=71"></script>
   <!-- An NL Tools sign-in wears the NL Tools top bar (NL.codeGate.accountBar). -->
   <script src="/system/nl-topbar.js?v=16"></script>
   <!-- GA4 for nl.tools — cookieless, no banner, no identity. See system/nl-analytics.js -->
@@ -62,9 +73,23 @@
   <link rel="stylesheet" href="/document-library/_library.css?v=3">
   <script src="/document-library/_library.js?v=4"></script>
 </head>
+<style>
+  .dla-pane[hidden] { display: none; }
+  .dla-tail { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: 10px; font-size: var(--text-sm); }
+  .dla-count { margin-right: auto; }
+  .dla-muted { color: var(--text-muted); }
+  .dla-acts { text-align: right; white-space: nowrap; }
+  .dla-btns { display: inline-flex; gap: 6px; }
+</style>
+</head>
 <body>
-  <!-- White bar: no NL account is behind this page (nl-brand v2.51). -->
-  <header class="nl-idbar">
+  <!-- The NL Tools bar, for anyone signed in (a Club card or the League):
+       a direct child of body, drawn before the page shows. Empty for a code. -->
+  <div id="nlTopbar"></div>
+
+  <!-- White bar for a club code: hidden until the code door is chosen, so a
+       signed-in visitor never sees it flash (nl-brand v2.51). -->
+  <header class="nl-idbar" hidden>
     <img class="nl-idbar__crest" id="dlCrest" src="/assets/crests/National%20League%20rose.png"
          alt="" width="42" height="42">
     <div class="nl-idbar__id">
@@ -78,19 +103,41 @@
 
   <div class="gate" id="dlGate"></div>
 
-  <main class="dl-page" id="dlShell" hidden></main>
+  <main class="dl-page" id="dlMain" hidden>
+    <div class="tabs" role="tablist" id="dlTabs" hidden>
+      <button class="tab active" type="button" role="tab" data-tab="library" aria-selected="true">Library</button>
+      <button class="tab" type="button" role="tab" data-tab="bin" aria-selected="false" hidden>Bin</button>
+      <button class="tab" type="button" role="tab" data-tab="activity" aria-selected="false">Activity</button>
+    </div>
+    <section class="dla-pane" id="dlShell"></section>
+    <section class="dla-pane" id="paneBin" hidden></section>
+    <section class="dla-pane" id="paneActivity" hidden></section>
+    <div id="dlMsg" hidden></div>
+  </main>
 
 <script>
 (function () {
   'use strict';
+  var KEY = 'ops-document-library';
   var $ = function (id) { return document.getElementById(id); };
+  var db = firebase.database();
 
-  function start(session) {
+  function message(title, text) {
+    $('dlGate').hidden = true;
+    $('dlMain').hidden = false;
+    $('dlShell').hidden = true;
+    $('dlMsg').hidden = false;
+    $('dlMsg').innerHTML = '<div class="empty-state"><div class="empty-state__title">' + NL.escHtml(title) +
+      '</div>' + (text ? '<div class="empty-state__text">' + NL.escHtml(text) + '</div>' : '') + '</div>';
+  }
+
+  /* ── Club side: a code or a Club card, read-only ────────────────────── */
+  function startClub(session) {
     var key = (session && session.role) || '';
     var name = (session && session.name) || 'The National League';
     $('dlGate').hidden = true;
-    $('dlShell').hidden = false;
-    $('dlOut').hidden = false;
+    $('dlMain').hidden = false;
+    if (session.mode !== 'account') $('dlOut').hidden = false;
     $('dlWho').textContent = name;
 
     /* The club's crest in the bar, from the claim. The League's own code
@@ -107,7 +154,7 @@
 
     DocLib.create({
       mount: $('dlShell'),
-      db: firebase.database(),
+      db: db,
       writable: false,
       actor: key ? 'club:' + key : '',
       who: name,
@@ -115,20 +162,108 @@
     });
   }
 
+  function codeDoor() {
+    document.querySelector('.nl-idbar').hidden = false;
+    NL.codeGate.ensure({
+      mount: $('dlGate'),
+      title: 'Document Library',
+      sub: 'Enter your access code.',
+      numeric: false,
+      verify: NL.codeGate.viaFunction('app-data/club-codes', { tool: 'document-library' }),
+      claim: 'club',
+      account: { title: 'Document Library', toolKey: KEY }
+    }).then(startClub);
+  }
+
   $('dlOut').addEventListener('click', function () {
     NL.codeGate.signOut().then(function () { location.reload(); });
   });
 
-  NL.codeGate.ensure({
-    mount: $('dlGate'),
-    title: 'Document Library',
-    sub: 'Enter your access code.',
-    numeric: false,
-    verify: NL.codeGate.viaFunction('app-data/club-codes', { tool: 'document-library' }),
-    claim: 'club',
-    staffUrl: '/document-library/admin/',
-    account: { title: 'Document Library', toolKey: 'ops-document-library' }
-  }).then(start);
+  /* ── League side: Access views and reads Activity; Manage changes ───── */
+  var TABS = ['library', 'bin', 'activity'];
+  function showTab(t) {
+    if (TABS.indexOf(t) === -1 || document.querySelector('[data-tab="' + t + '"]').hidden) t = 'library';
+    Array.prototype.forEach.call(document.querySelectorAll('[data-tab]'), function (b) {
+      var on = b.getAttribute('data-tab') === t;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    $('dlShell').hidden = t !== 'library';
+    $('paneBin').hidden = t !== 'bin';
+    $('paneActivity').hidden = t !== 'activity';
+    var q = new URLSearchParams(location.search);
+    if (t === 'library') q['delete']('tab'); else q.set('tab', t);
+    var qs = q.toString();
+    history.replaceState(history.state, '', location.pathname + (qs ? '?' + qs : '') + location.hash);
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('[data-tab]'), function (b) {
+    b.onclick = function () { showTab(b.getAttribute('data-tab')); };
+  });
+
+  function loadScript(src) {
+    return new Promise(function (resolve, reject) {
+      var js = document.createElement('script');
+      js.src = src; js.onload = resolve; js.onerror = function () { reject(new Error('Could not load ' + src)); };
+      document.head.appendChild(js);
+    });
+  }
+
+  function startLeague(user, who) {
+    var me = { uid: user.uid, email: user.email, name: who.user.name || '', role: who.user.role || '',
+      pass: who.user.pass || null, toolLevel: who.level === 'manage' ? 'admin' : 'access' };
+    NL.session = me;
+    $('dlGate').hidden = true;
+    if (NL.installAuditHook) { try { NL.installAuditHook(); } catch (e) {} }
+    var manage = who.level === 'manage';
+    document.querySelector('[data-tab="bin"]').hidden = !manage;
+    Promise.all([
+      NL.codeGate.accountBar({ title: 'Document Library', toolKey: KEY }),
+      loadScript('/document-library/_console.js?v=1')
+    ]).then(function () {
+      var con = DocLibConsole.start({ manage: manage, me: me, bin: $('paneBin'), activity: $('paneActivity') });
+      var lib = DocLib.create({
+        mount: $('dlShell'),
+        db: db,
+        storage: firebase.storage(),
+        writable: manage,
+        onChange: function () { con.libChanged(); },
+        actor: 'staff:' + me.uid,
+        who: me.name || me.email || ''
+      });
+      DocLibConsole.attach(lib);
+      $('dlTabs').hidden = false;
+      $('dlMain').hidden = false;
+      showTab(new URLSearchParams(location.search).get('tab') || 'library');
+    })['catch'](function (e) {
+      console.error('[doclib]', e);
+      message('The library could not be opened', 'Reload the page to try again.');
+    });
+  }
+
+  /* ── Which door ───────────────────────────────────────────────────────
+     A League account goes straight to the League view at its level; anyone
+     else (signed out, a code, a Club card) to the code door, which resumes
+     a code or a Club card's claim by itself. */
+  var decided = false, off = null;
+  off = firebase.auth().onAuthStateChanged(function (user) {
+    if (decided) return;
+    decided = true;
+    if (off) off();
+    if (!user || !user.email) { codeDoor(); return; }
+    NL.accountLevel.load(user.uid, KEY, db).then(function (who) {
+      if (!who.league) { codeDoor(); return; }
+      if (who.level === 'off') {
+        NL.codeGate.accountBar({ title: 'Document Library', toolKey: KEY });
+        message('This tool isn’t available', 'Please contact media@thenationalleague.org.uk.');
+        return;
+      }
+      startLeague(user, who);
+    })['catch'](function (e) {
+      console.error('[doclib]', e);
+      message('The library could not be opened', 'Reload the page to try again.');
+    });
+  });
+  if (decided && off) off();
 })();
 </script>
 </body>
