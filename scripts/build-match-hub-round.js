@@ -143,16 +143,15 @@ const seasonStartYear = s => Number(String(s).slice(0, 4)); // "2003-04" → 200
   // OFFICIAL baseline preferred: if the nightly archive holds this exact date,
   // its table wins (deductions included); derived stands for older dates.
   let official = null;
-  const blFile = path.join(REPO, "assets", "data", "table-baselines.json");
+  const blFile = path.join(REPO, "assets", "data", "table-baselines", `${DATE}.json`);
   if (fs.existsSync(blFile)) {
     try {
-      const bl = JSON.parse(fs.readFileSync(blFile, "utf8"));
-      const bd = bl.days && bl.days[DATE];
+      const bd = JSON.parse(fs.readFileSync(blFile, "utf8"));
       const bc = bd && String(bd.season) === String(SEASON) && bd.competitions && bd.competitions[args.comp || "nl"];
       if (bc && bc.rows && bc.rows.length >= 20) {
         official = bc.rows;
         official.forEach(r => { pos[r.teamID] = r.pos; });
-        console.error(`Using OFFICIAL baseline table for ${DATE} (table-baselines.json)`);
+        console.error(`Using OFFICIAL baseline table for ${DATE} (table-baselines/${DATE}.json)`);
       }
     } catch (e) { console.error("WARN: baseline archive unreadable — derived table stands"); }
   }
