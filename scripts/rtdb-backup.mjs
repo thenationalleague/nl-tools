@@ -2,12 +2,29 @@
 /* =========================================================================
    NL Tools — database backups: check, monthly copy, restore
    File: scripts/rtdb-backup.mjs
-   Version: v1.0 (11/11/2026)
+   Version: v1.1 (14/11/2026)
 
-   Run by three workflows, never by hand:
+   Run by four workflows, never by hand:
      Timer · Check last night's backup   (rtdb-backup-check.yml)   → check
      Timer · Monthly database copy       (rtdb-backup-monthly.yml) → monthly
      Recovery · Restore from backup      (rtdb-restore.yml)        → restore
+     Timer · Prove a backup restores     (rtdb-restore-drill.yml)  → drill
+
+   THE DRILL (v1.1, 14/11/2026)
+   A backup nobody has restored is a hope. Once a month (or by button) the
+   newest daily backup is restored WHOLE into a spare database,
+   nl-tools-restore-drill, read back, and compared value by value; then
+   the spare is emptied again. Live is only read. The spare is created on
+   the first run if it is not there, and its rules refuse every browser
+   (only this job's Google credentials reach it).
+   Instance management, https://firebase.google.com/docs/reference/rest/database/database-management/rest/v1beta/projects.locations.instances
+   (checked 14/11/2026): GET .../instances/<id> → DatabaseInstance with
+   databaseUrl and state; POST .../instances?databaseId=<id> creates one
+   (Blaze plan only, needs firebasedatabase.instances.create). Rules over
+   REST: PUT <databaseUrl>/.settings/rules.json,
+   https://firebase.google.com/docs/reference/rest/database (checked
+   14/11/2026). Reads use format=export, so a value stored with a priority
+   comes back in the shape the backup holds it.
 
    WHERE THE BACKUPS ARE
    Firebase's own daily backup of the nl-tools database writes one file a day
@@ -226,6 +243,17 @@ async function copy(srcBucket, src, dstBucket, dst) {
   }
 }
 
+/* Writes for the drill, each small enough for one request: a node whose
+   JSON is over `limit` characters is split into its children. Pure, so it
+   is tested without a network. */
+export function planWrites(value, limit, path = '') {
+  const size = JSON.stringify(value === undefined ? null : value).length;
+  if (size <= limit || !value || typeof value !== 'object' || Array.isArray(value)) return [[path, value]];
+  const out = [];
+  for (const k of Object.keys(value)) out.push(...planWrites(value[k], limit, path ? path + '/' + k : k));
+  return out;
+}
+
 const dbUrl = (path) => `${process.env.DB}/${path.split('/').map(enc).join('/')}.json`;
 
 async function dbGet(path) {
@@ -365,11 +393,92 @@ async function cmdRestore() {
   summary(lines);
 }
 
-const COMMANDS = { check: cmdCheck, monthly: cmdMonthly, restore: cmdRestore };
+async function drillInstance() {
+  const { FDB_API = 'https://firebasedatabase.googleapis.com', PROJECT_NUMBER, LOCATION, DRILL_ID } = process.env;
+  const parent = `${FDB_API}/v1beta/projects/${PROJECT_NUMBER}/locations/${LOCATION}/instances`;
+  try {
+    return { inst: await (await api(`${parent}/${DRILL_ID}`)).json(), created: false };
+  } catch (e) {
+    if (e.status !== 404) throw e;
+  }
+  const inst = await (await api(`${parent}?databaseId=${enc(DRILL_ID)}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'USER_DATABASE' })
+  })).json();
+  return { inst, created: true };
+}
+
+async function cmdDrill() {
+  const { DAILY, DB, DRILL_ID } = process.env;
+  const limit = Number(process.env.WRITE_LIMIT || 32 * 1048576);
+  const lines = ['## Prove a backup restores', ''];
+  const file = pick(await listBucket(DAILY), '');
+  if (!file) throw new Error('No backup in the daily bucket to restore.');
+  const raw = await download(DAILY, file.name);
+  const tree = JSON.parse(raw.toString('utf8'));
+  lines.push(`- Backup: ${file.stamp}, ${humanBytes(raw.length)} unpacked.`);
+
+  let got;
+  try { got = await drillInstance(); }
+  catch (e) {
+    if (e.status === 403) {
+      console.log('This job may not create or read the spare database. Fix, once: IAM → nl-archive-ga-reader →');
+      console.log('add the role Firebase Realtime Database Admin:');
+      console.log('  https://console.cloud.google.com/iam-admin/iam?project=nl-tools&authuser=media%40thenationalleague.org.uk');
+    }
+    throw e;
+  }
+  const spare = String(got.inst.databaseUrl || '').replace(/\/$/, '');
+  if (!spare) throw new Error('The spare database has no address yet. Run this again in a few minutes.');
+  lines.push(`- Spare database: ${DRILL_ID}${got.created ? ', created on this run' : ''}.`);
+
+  const put = (path, value) => api(`${spare}/${path ? path.split('/').map(enc).join('/') : ''}.json?print=silent`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value === undefined ? null : value) });
+  const get = async (base, path) => (await api(`${base}/${path.split('/').map(enc).join('/')}.json?format=export`)).json();
+
+  /* No browser may read the spare, ever: it holds a whole copy for a few
+     minutes, and an empty database for the rest of the month. */
+  await api(`${spare}/.settings/rules.json`, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rules: { '.read': false, '.write': false } }) });
+
+  const started = Date.now();
+  let ok = true;
+  try {
+    await put('', null);
+    const plan = planWrites(tree, limit);
+    for (const [p, v] of plan) await put(p, v);
+    lines.push(`- Restored the whole backup into the spare in ${plan.length} writes, ${Math.round((Date.now() - started) / 1000)} seconds.`);
+
+    lines.push('', '| Part | In the backup | Read back from the spare | Live now |', '|---|---|---|---|');
+    const live = (await (await api(`${DB}/.json?shallow=true`)).json()) || {};
+    const parts = [...new Set([...Object.keys(tree), ...Object.keys(live)])].sort();
+    for (const k of parts) {
+      const back = compare(tree[k], await get(spare, k));
+      const now = compare(tree[k], await get(DB, k));
+      if (!back.same) ok = false;
+      lines.push(`| ${k} | ${back.backupValues} values | ${back.same ? 'identical' : `**${back.onlyBackup} missing, ${back.differ} different**`} | ` +
+        (now.same ? 'unchanged since' : `${now.liveValues} values (${now.onlyLive} added, ${now.differ} changed, ${now.onlyBackup} gone since)`) + ' |');
+    }
+  } catch (e) { ok = false; throw e; }
+  finally {
+    await put('', null);
+    const left = (await (await api(`${spare}/.json?shallow=true`)).json());
+    lines.push('', left == null ? '- The spare is empty again.' : '- **The spare could not be emptied. Run this again.**');
+    if (left != null) ok = false;
+    lines.push('', ok ? `**Passed.** The backup of ${file.stamp} restores whole and reads back value for value.`
+      : '**Failed.** See above.');
+    summary(lines);
+  }
+  if (!ok) {
+    console.log('::error::The backup did not restore cleanly into the spare database. See the summary.');
+    process.exitCode = 1;
+  }
+}
+
+const COMMANDS = { check: cmdCheck, monthly: cmdMonthly, restore: cmdRestore, drill: cmdDrill };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const run = COMMANDS[process.argv[2]];
-  if (!run) { console.error('usage: node scripts/rtdb-backup.mjs check|monthly|restore'); process.exit(2); }
+  if (!run) { console.error('usage: node scripts/rtdb-backup.mjs check|monthly|restore|drill'); process.exit(2); }
   run().catch((e) => {
     console.log('::error::' + String((e && e.message) || e).replace(/\n/g, ' '));
     process.exit(1);
