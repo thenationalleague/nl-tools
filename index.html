@@ -3,10 +3,12 @@
 <head>
 <!--
   NL Tools — Login Page
-  Version: v5.3 (14/11/2026)
+  Version: v5.4 (14/11/2026)
   File: /index.html
 
   CHANGELOG
+  v5.4 (14/11/2026) — The request emails carry the person's sign-in, so
+    Apps Script sends only to them and to the admins, with its own details.
   v5.3 (14/11/2026) — Tools send you here with ?next= when you are signed
     out, and you go back there after signing in. Also after your access
     request is approved. Changelog trimmed to the last five versions.
@@ -31,14 +33,6 @@
       failure); consumeInvite never overwrites an existing user record.
     - Withdrawal no longer needs recent-login (Auth delete happens server-side).
     See system/rtdb/SECURITY-role-self-grant.md.
-  v4.7 (17/07/2026) — Reverted the v4.6 GAS consumeInvite call: this Workspace
-    blocks anonymous Apps Script web apps at the org level, so invitees not
-    signed into Google (esp. club users) could not reach GAS during signup
-    ("Sorry, unable to open the file"). Restored the client-side write so invite
-    acceptance works for everyone again. The takeover vector stays closed by the
-    RTDB users/$uid .validate rule; the durable server-side role write moves to
-    a Firebase Function (no Google access gate). See
-    system/rtdb/SECURITY-role-self-grant.md.
 -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -871,9 +865,15 @@ function doSubmitRequest() {
       }).then(function() { return auth.currentUser.uid; });
     })
     .then(function(uid) {
-      var portalUrl = window.location.origin + '/portal/';
-      fetch(NL_GAS_URL + '?cb=' + Date.now(), { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ action: 'notifyAdmin', name: name, email: email, club: club, jobTitle: jobTitle, tools: selectedTools, portalUrl: portalUrl }) }).catch(function() {});
-      fetch(NL_GAS_URL + '?cb=' + Date.now(), { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ action: 'confirmRequest', name: name, email: email, club: club }) }).catch(function() {});
+      /* v5.4: the two emails carry the person's own sign-in. Apps Script
+         takes the address, name and club from its own records, not from
+         this request (gas/Notifications.js). The other fields stay until
+         the Apps Script that ignores them is live. */
+      auth.currentUser.getIdToken().then(function (idToken) {
+        var portalUrl = window.location.origin + '/portal/';
+        fetch(NL_GAS_URL + '?cb=' + Date.now(), { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ action: 'notifyAdmin', idToken: idToken, name: name, email: email, club: club, jobTitle: jobTitle, tools: selectedTools, portalUrl: portalUrl }) }).catch(function() {});
+        fetch(NL_GAS_URL + '?cb=' + Date.now(), { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ action: 'confirmRequest', idToken: idToken, name: name, email: email, club: club }) }).catch(function() {});
+      }).catch(function () {});
       showPanel('panelPending');
       startPendingListener(uid);
     })

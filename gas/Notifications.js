@@ -1,25 +1,54 @@
 /* =========================================================================
    notifications.gs — Email notifications for request flow
    AuthZ: sendApproval / sendRejection require a verified league admin (they
-   are admin decisions). notifyAdmin / confirmRequest are the pre-registration
-   request flow (requester has no account yet) and stay open. verifyCaller_
+   are admin decisions). notifyAdmin / confirmRequest need the requester's
+   own sign-in and send only to addresses and with details from the server's
+   records (14/11/2026). verifyCaller_
    lives in utils.gs.
    ========================================================================= */
 
-/* ---- Notify all admins of new request ------------------------------------ */
-function notifyAdmin(body) {
-  var name      = String(body.name     || '').trim();
-  var email     = String(body.email    || '').trim();
-  var club      = String(body.club     || '').trim();
-  var clubRole  = String(body.clubRole || '').trim();
-  var tools     = body.tools || {};
-  var portalUrl = String(body.portalUrl || '').trim();
-
-  if (!email) return { ok: false, error: 'Email required.' };
-
+/* ---- The request flow: who is asking, from the server's records --------
+   Since 14/11/2026 both emails below need the requester's own sign-in
+   (idToken), and take nothing else from the request. Before, anyone could
+   call them with any name, any address and any link, and have the League's
+   address send it: confirmRequest to any inbox, notifyAdmin to every admin
+   with a "Review" button pointing wherever the caller liked. Now the address
+   is the verified one, the name, club and title come from the person's
+   record and their admin/requests entry (written by submitAccessRequest),
+   the link is fixed, and each is sent once per person per six hours. */
+function requester_(body) {
+  var who = verifyIdentity_(body && body.idToken);
+  if (!who.ok) return { ok: false, error: who.error };
   var config = getConfig();
   if (!config.rtdbUrl)     return { ok: false, error: 'RTDB_URL not set.' };
   if (!config.senderAlias) return { ok: false, error: 'SENDER_ALIAS not set.' };
+  var u = rtdbRead(config.rtdbUrl + '/users/' + who.uid + '.json', config.rtdbSecret);
+  if (!u.ok || !u.data || u.data.pending !== true) return { ok: false, error: 'No request is waiting.' };
+  var reqs = rtdbRead(config.rtdbUrl + '/admin/requests.json', config.rtdbSecret);
+  var req = {};
+  Object.keys((reqs.ok && reqs.data) || {}).forEach(function (k) {
+    var r = reqs.data[k];
+    if (r && r.uid === who.uid && r.status === 'pending') req = r;
+  });
+  return { ok: true, config: config, uid: who.uid, email: String(who.email || '').toLowerCase(),
+    name: String(u.data.name || ''), club: String(req.club || ''), jobTitle: String(req.jobTitle || ''),
+    tools: req.tools || {} };
+}
+
+function onceFor_(what, uid) {
+  var cache = CacheService.getScriptCache();
+  var key = what + '_' + uid;
+  if (cache.get(key)) return false;
+  cache.put(key, '1', 6 * 60 * 60);
+  return true;
+}
+
+/* ---- Notify all admins of new request ------------------------------------ */
+function notifyAdmin(body) {
+  var r = requester_(body);
+  if (!r.ok) return r;
+  if (!onceFor_('notified', r.uid)) return { ok: true, notified: 0 };
+  var config = r.config;
 
   /* Fetch all admin/superadmin users from RTDB dynamically */
   var adminEmails = getAdminEmails(config);
@@ -28,46 +57,39 @@ function notifyAdmin(body) {
     Logger.log('No admin users found -- falling back to SENDER_ALIAS');
   }
 
-  var toolList  = Object.keys(tools).filter(function(k) { return tools[k] === 'access' || tools[k] === 'admin'; });
-  /* Append tab param so portal auto-opens Pending Requests tab */
-  var baseLink  = portalUrl || 'https://nl.tools/portal/';
-  var link      = baseLink.replace(/\/?$/, '/') + '?tab=requests';
-  var subject   = '[NL Tools] New access request \u2014 ' + name + (club ? ' (' + club + ')' : '');
-  var htmlBody  = buildAdminNotifyEmail(name, email, club, clubRole, toolList, link);
-  var textBody  =
+  var toolList = Object.keys(r.tools).filter(function(k) { return r.tools[k] === 'access' || r.tools[k] === 'admin'; });
+  var link     = 'https://nl.tools/access/?tab=requests';
+  var subject  = '[NL Tools] New access request — ' + r.name + (r.club ? ' (' + r.club + ')' : '');
+  var htmlBody = buildAdminNotifyEmail(r.name, r.email, r.club, r.jobTitle, toolList, link);
+  var textBody =
     'A new access request has been submitted.\n\n' +
-    'Name:      ' + name     + '\n' +
-    'Email:     ' + email    + '\n' +
-    (club     ? 'Club:      ' + club     + '\n' : '') +
-    (clubRole ? 'Role:      ' + clubRole + '\n' : '') +
+    'Name:      ' + r.name     + '\n' +
+    'Email:     ' + r.email    + '\n' +
+    (r.club     ? 'Club:      ' + r.club     + '\n' : '') +
+    (r.jobTitle ? 'Role:      ' + r.jobTitle + '\n' : '') +
     (toolList.length ? 'Tools:     ' + toolList.join(', ') + '\n' : '') +
     'Time:      ' + new Date().toLocaleString('en-GB') + '\n\n' +
-    'Review in the admin panel:\n' + link;
+    'Review it in Access:\n' + link;
 
   adminEmails.forEach(function(adminEmail) {
     try {
       MailApp.sendEmail({ to: adminEmail, subject: subject, body: textBody, htmlBody: htmlBody, name: config.senderName, from: config.senderAlias });
-      Logger.log('Admin notification sent to ' + adminEmail);
     } catch(err) {
-      Logger.log('Failed to notify ' + adminEmail + ': ' + err.message);
+      Logger.log('Failed to notify an admin: ' + err.message);
     }
   });
-
   return { ok: true, notified: adminEmails.length };
 }
 
 /* ---- Confirm request receipt to user ------------------------------------- */
 function confirmRequest(body) {
-  var name  = String(body.name  || '').trim();
-  var email = String(body.email || '').trim().toLowerCase();
-
-  if (!email) return { ok: false, error: 'Email required.' };
-
-  var config    = getConfig();
-  var firstName = name ? name.split(' ')[0] : 'there';
-
+  var r = requester_(body);
+  if (!r.ok) return r;
+  if (!onceFor_('confirmed', r.uid)) return { ok: true, sent: 0 };
+  var config    = r.config;
+  var firstName = r.name ? r.name.split(' ')[0] : 'there';
   MailApp.sendEmail({
-    to:       email,
+    to:       r.email,
     subject:  'Your NL Tools request has been received',
     body:     'Hi ' + firstName + ',\n\nThanks for requesting access to NL Tools.\n\n' +
               'Your request is being reviewed and you\'ll hear back shortly.\n\n' +
@@ -76,9 +98,7 @@ function confirmRequest(body) {
     name:     config.senderName,
     from:     config.senderAlias
   });
-
-  Logger.log('Request confirmation sent to ' + email);
-  return { ok: true };
+  return { ok: true, sent: 1 };
 }
 
 /* ---- Send approval email ------------------------------------------------- */
