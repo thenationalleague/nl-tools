@@ -43,7 +43,7 @@ Why: This is the last part of the new model people actually meet. Without it, ne
 ## Next
 
 ### One address for each tool
-What: Merge the remaining two-page tools (a code page plus an /admin/ page) into one page each, where the pass decides the view. Then delete the "League only" label from the registry.
+What: The merges are done: every two-page tool is one page now, where the pass decides the view, and the old /admin/ addresses forward. Left: delete the "League only" label from the registry.
 Why: People type one address. Two pages per tool means two places to keep in step.
 
 ### Private and Public shelves, and guest links
@@ -79,6 +79,13 @@ Why: A reset email that lands in spam is a locked-out person phoning you.
 Waiting on: you
 
 ## Later
+
+### Public pages under /public/
+What: Every page with no door lives at nl.tools/public/<name>/. Four already do (Academy & Alliance, Article Composer, Fixtures Graphic, Trust Cup). The two that don't, the open Club Directory and the open Handbook, move there, and their old addresses forward. One rule in the site's settings covers the whole folder, and a test fails any page with no door outside it.
+Why: The address alone tells anyone whether a page is safe to send outside the League.
+- The handbook PDF stays where it is: a PDF cannot forward, so moving it breaks links already sent.
+- Club Directory and Handbook are hidden from Google on purpose; one rule for the folder would hide the other four too.
+Waiting on: you – should everything under /public/ be hidden from Google?
 
 ### External passes
 What: A third kind of pass, for organisations outside the League and its clubs: DAZN, the Trust, agencies, freelancers. In Access, a new Externals tab: you set up the organisation first (name, colours and an uploaded logo), then its zones, then invite its people. Each zone has a plain name ("Broadcast"), a three-letter code (suggested from the name, changeable, never a duplicate) and the tools it opens. Each person holds one or more of their organisation's zones.
