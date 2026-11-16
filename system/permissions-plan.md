@@ -905,8 +905,12 @@ kilobytes of rules against a 256KB limit.
   organisation and zones, and offers no legacy role or issue form for it;
   `/pass/` draws it charcoal with the organisation's colour and zones; the
   portal and `NL.codeGate.door` let it in at its level.
-- **Still to do:** a logo upload; the pair ("All clubs · Access") on My pass
-  and in "who can open this"; One club rules for a tool that offers it.
+- **Still to do:** the pair ("All clubs · Access") on My pass and in "who
+  can open this"; One club rules for a tool that offers it. (The logo upload
+  landed 16/11: Access → Externals → Edit, stored at
+  `externals/<org>/logo-<time>.<ext>` in file storage, added never replaced,
+  and pointed at from `externals/<org>/logo`, which only the Skeleton key
+  sets and which must point into that organisation's own folder.)
 
 ### External passes, second batch (16/11/2026)
 
@@ -928,10 +932,35 @@ kilobytes of rules against a 256KB limit.
   whose server-written `pass.ext` gives this tool All clubs), **and** the
   level as before. Reads only; no write changes. The only place the rules
   read `pass.ext`.
-- **The server writes the tool entries** (`users/<uid>/tools`) for an
-  External card in the same update as `pass.ext`
-  (`functions/externals-core.js`, `extUpdate`, from `NL.pass.toOld`), so a
-  zone change reaches the data without Apply passes.
+- **The tool entries** (`users/<uid>/tools`) follow by themselves:
+  `passEntries` (functions/pass-entries.js) runs on every write under
+  `users/<uid>/pass`, `pass.ext` included, so a zone change reaches the
+  data without Apply passes. (A second writer added to `extUpdate` the same
+  day was taken out again: one writer.)
+
+### Chosen clubs for externals (asked 16/11/2026, planned, not built)
+
+Richard: a zone should be able to give one club, or several clubs but not
+all, and it must be enforced by the database rules, not just the screen.
+
+- **One view, not three.** Replace One club with **Chosen clubs**: the zone
+  names one or more clubs from a picker limited to the clubs that exist
+  (canon club picker, several allowed). One club is Chosen clubs with one in
+  it. All clubs, named stays as it is.
+- **Stored** on the zone's tool as `view: 'some', clubs: { <club key>: true }`,
+  copied by the server into `pass.ext[<tool>].clubs`. Nobody writes their own.
+- **Enforced per club in the rules**, beside the club-code route each tool
+  already has: a club's row reads if `pass.ext[<tool>].view === 'some' &&
+  pass.ext[<tool>].clubs[$club] === true`. The every-club node stays League,
+  All clubs externals and nothing else, so a Chosen clubs pass can only ask
+  for its clubs one at a time.
+- **Pages** read row by row for a Chosen clubs pass, with the club picker
+  limited to its clubs: the club's own view, as a club sees it, for each.
+- **Per tool**, because each keys its clubs differently (Financial
+  Benchmarking by club code, Commercial Benchmarking by club name, the
+  directory by name). Financial and Commercial Benchmarking first; each
+  with emulator tests that a Chosen clubs pass reads its clubs and no
+  other, and never the every-club node.
 
 ## Safety rails
 
