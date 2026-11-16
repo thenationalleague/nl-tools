@@ -1,4 +1,4 @@
-/* NL Tools — Access: the Externals tab (v2.7, 16/11/2026)
+/* NL Tools — Access: the Externals tab (v2.8, 16/11/2026: canon sweep)
 
    Organisations outside the League and its clubs, set up here and nowhere
    else (permissions plan, "External passes" and "Club views"). Skeleton key
@@ -104,17 +104,29 @@
     if (!ids.length) {
       html += '<div class="empty-state"><div class="empty-state__title">No organisations yet</div></div>';
     } else {
-      html += '<div class="table-wrap"><table class="table"><thead><tr><th>Organisation</th><th>Zones</th><th>People</th><th aria-label="Actions"></th></tr></thead><tbody>' +
+      html += '<div class="table-wrap"><table class="table"><thead><tr><th>Organisation</th><th>Zones</th><th>People</th></tr></thead><tbody>' +
         ids.map(function (id) {
           var o = X.orgs[id] || {}, zones = Object.keys(o.zones || {});
-          return '<tr><td><span class="ex-org">' + swatch(o) + '<a class="pc-link" href="?tab=externals&org=' + encodeURIComponent(id) + '" data-org="' + esc(id) + '">' + esc(o.name || id) + '</a></span></td>' +
+          return '<tr class="ex-row" data-org="' + esc(id) + '" tabindex="0"><td><span class="ex-org">' + swatch(o) + esc(o.name || id) + '</span></td>' +
             '<td>' + zones.map(function (z) { return '<span class="pill pill--info">' + esc(o.zones[z].code) + '</span>'; }).join(' ') + '</td>' +
-            '<td>' + people(id).length + '</td>' +
-            '<td><span class="pc-actions"><a class="btn btn--ghost btn--sm" href="?tab=externals&org=' + encodeURIComponent(id) + '" data-org="' + esc(id) + '">' + C.icon('edit') + 'Open</a></span></td></tr>';
+            '<td>' + people(id).length + '</td></tr>';
         }).join('') + '</tbody></table></div>';
     }
     box.innerHTML = html;
     $('exAddOrg').onclick = addOrg;
+    rowsOpen(box, '[data-org]', function (el) { openOrg(el.getAttribute('data-org')); });
+  }
+  /* A date as Sat 14 Nov 2026 (style principles 5.5). The canon has the
+     weekday only on formatDateTime for now (brand audit, Part 1), so the
+     time is cut off it. */
+  function day(ms) { return NL.formatDateTime(ms, { weekday: true }).split(',')[0]; }
+  /* Rows open on a click, or Enter (style principles 9.5). A link inside a
+     row still goes where it says. */
+  function rowsOpen(box, sel, fn) {
+    box.querySelectorAll('tr' + sel).forEach(function (tr) {
+      tr.addEventListener('click', function (e) { if (!e.target.closest('a')) fn(tr); });
+      tr.addEventListener('keydown', function (e) { if (e.key === 'Enter') fn(tr); });
+    });
   }
   function swatch(o) {
     var a = hex(o.colours && o.colours.primary), b = hex(o.colours && o.colours.secondary);
@@ -149,11 +161,9 @@
     var zones = o.zones || {};
     var html = '<div class="pc-back"><button class="btn btn--ghost btn--sm" type="button" id="exBack">' + C.icon('back') + 'Organisations</button></div>';
 
-    html += '<section class="form-panel ex-gap"><div class="form-panel__head">' + esc(o.name || id) + '</div><div class="form-panel__body"><div class="form-grid">' +
-      '<div class="form-group"><label for="exName">Name</label><input type="text" id="exName" maxlength="120" value="' + esc(o.name || '') + '"></div>' +
-      '<div class="form-group"><label for="exC1">Main colour</label><input type="color" class="ex-colour" id="exC1" value="' + (hex(o.colours && o.colours.primary) || '#333333') + '"></div>' +
-      '<div class="form-group"><label for="exC2">Second colour</label><input type="color" class="ex-colour" id="exC2" value="' + (hex(o.colours && o.colours.secondary) || '#ffffff') + '"></div>' +
-      '</div></div><div class="form-panel__foot pc-foot"><button class="btn btn--primary" type="button" id="exSaveOrg">Save</button></div></section>';
+    html += '<section class="form-panel ex-gap"><div class="form-panel__head">Organisation</div><div class="form-panel__body">' +
+      '<span class="ex-org">' + swatch(o) + esc(o.name || id) + '</span></div>' +
+      '<div class="form-panel__foot pc-foot"><button class="btn btn--ghost btn--sm" type="button" id="exEditOrg">' + C.icon('edit') + 'Edit</button></div></section>';
 
     html += '<div class="section-head"><h2>Zones</h2><span class="pc-actions"><button class="btn btn--ghost btn--sm" type="button" id="exAddZone">' + C.icon('add') + 'Add zone</button></span></div>';
     var zids = Object.keys(zones).sort(function (a, b) { return String(zones[a].name).localeCompare(String(zones[b].name)); });
@@ -162,16 +172,16 @@
 
     var ppl = people(id);
     html += '<div class="section-head"><h2>People</h2></div>';
-    html += ppl.length ? '<div class="table-wrap ex-gap"><table class="table"><thead><tr><th>Person</th><th>Zones</th><th aria-label="Actions"></th></tr></thead><tbody>' +
+    html += ppl.length ? '<div class="table-wrap ex-gap"><table class="table"><thead><tr><th>Person</th><th>Zones</th><th>Ends</th></tr></thead><tbody>' +
       ppl.map(function (u) {
-        var keys = (u.pass && u.pass.keys) || {};
-        return '<tr><td><span class="pc-who"><a class="pc-who__name pc-link" href="?person=' + encodeURIComponent(u.uid) + '">' + esc(u.name || '(no name)') + '</a>' +
+        var keys = (u.pass && u.pass.keys) || {}, until = null;
+        Object.keys(keys).forEach(function (z) { if (keys[z] && typeof keys[z].until === 'number') until = keys[z].until; });
+        return '<tr class="ex-row" data-zones="' + esc(u.uid) + '" tabindex="0"><td><span class="pc-who"><a class="pc-who__name pc-link" href="?person=' + encodeURIComponent(u.uid) + '">' + esc(u.name || '(no name)') + '</a>' +
           '<span class="pc-who__sub">' + esc(u.email) + '</span></span></td>' +
           '<td>' + Object.keys(keys).map(function (z) {
-            var zone = zones[z], until = keys[z] && keys[z].until;
-            return '<span class="pill pill--info">' + esc(zone ? zone.code : z) + (until ? ' · to ' + esc(NL.formatDateShort(until)) : '') + '</span>';
+            return '<span class="pill pill--info">' + esc(zones[z] ? zones[z].code : z) + '</span>';
           }).join(' ') + '</td>' +
-          '<td><span class="pc-actions"><button class="btn btn--ghost btn--sm" type="button" data-zones="' + esc(u.uid) + '">' + C.icon('edit') + 'Zones</button></span></td></tr>';
+          '<td>' + (until ? esc(day(until)) : 'When removed') + '</td></tr>';
       }).join('') + '</tbody></table></div>' : '<p class="pc-muted">Nobody yet.</p>';
 
     html += '<section class="form-panel ex-gap"><div class="form-panel__head">Add person</div><div class="form-panel__body"><div class="form-grid">' +
@@ -180,19 +190,23 @@
       '<div class="form-group"><label for="exPJob">Job title</label><input type="text" id="exPJob" autocomplete="off" maxlength="80"></div>' +
       '<div class="form-group"><label for="exPUntil">Access ends</label><input type="date" id="exPUntil"><p class="form-hint">Leave empty to keep it until removed.</p></div>' +
       '<div class="form-group span2"><label>Zones</label><div class="pc-roles" id="exPZones">' +
-        (zids.length ? zids.map(function (z) {
-          return '<label class="pc-role"><input type="checkbox" value="' + esc(z) + '"><span><b>' + esc(zones[z].code) + '</b> ' + esc(zones[z].name) + '</span></label>';
-        }).join('') : '<span class="pc-muted">Add a zone first.</span>') + '</div></div>' +
+        (zids.length ? zids.map(function (z) { return zoneTick(z, zones[z], false); }).join('') : '<span class="pc-muted">Add a zone first.</span>') + '</div></div>' +
       '</div><p class="form-hint">They get an email from NL Tools to set their password.</p></div>' +
-      '<div class="form-panel__foot pc-foot"><button class="btn btn--primary" type="button" id="exPAdd"' + (zids.length ? '' : ' disabled') + '>' + C.icon('send') + 'Set up and email</button></div></section>';
+      (zids.length ? '<div class="form-panel__foot pc-foot"><button class="btn btn--primary" type="button" id="exPAdd">Set up and email' + C.icon('send') + '</button></div>' : '') + '</section>';
 
     $('exBody').innerHTML = html;
     $('exBack').onclick = function () { X.org = null; try { history.replaceState(null, '', '?tab=externals'); } catch (e) {} drawList(); };
-    $('exSaveOrg').onclick = saveOrg;
+    $('exEditOrg').onclick = editOrg;
     $('exAddZone').onclick = function () { editZone(null); };
-    $('exPAdd').onclick = addPerson;
+    if ($('exPAdd')) $('exPAdd').onclick = addPerson;
     $('exBody').querySelectorAll('[data-zone]').forEach(function (b) { b.onclick = function () { editZone(b.getAttribute('data-zone')); }; });
-    $('exBody').querySelectorAll('[data-zones]').forEach(function (b) { b.onclick = function () { editPersonZones(b.getAttribute('data-zones')); }; });
+    rowsOpen($('exBody'), '[data-zones]', function (el) { editPersonZones(el.getAttribute('data-zones')); });
+  }
+  /* A zone as a tick box: the zone's name, its code beneath. One control
+     (style principles 5.4). */
+  function zoneTick(id, z, checked) {
+    return '<label class="pc-role"><input type="checkbox" value="' + esc(id) + '"' + (checked ? ' checked' : '') + '>' +
+      '<span><span class="pc-role__name">' + esc(z.name) + '</span><span class="pc-role__grant">' + esc(z.code) + '</span></span></label>';
   }
 
   function zoneHtml(id, z) {
@@ -211,17 +225,29 @@
       '<div class="form-panel__foot pc-foot"><button class="btn btn--ghost btn--sm" type="button" data-zone="' + esc(id) + '">' + C.icon('edit') + 'Edit zone</button></div></section>';
   }
 
-  function saveOrg() {
-    var name = $('exName').value.trim();
-    if (!name) return NL.toast('A name is needed', 'error');
+  /* The organisation's name and colours, in a dialog titled with its name
+     (style principles 7.2). The colours are its identity: the pass and its
+     zones wear them. */
+  function editOrg() {
     var o = X.orgs[X.org];
-    var patch = { name: name.slice(0, 120), colours: { primary: $('exC1').value, secondary: $('exC2').value } };
-    C.db.ref('externals/' + X.org).update(patch).then(function () {
-      Object.assign(o, patch);
-      NL.writeAudit('external_org_changed', 'Changed ' + patch.name);
-      NL.toast('Saved', 'success');
-      drawOrg();
-    })['catch'](function (e) { NL.toast('Could not save: ' + (e && e.message || e), 'error'); });
+    var wrap = document.createElement('div');
+    wrap.innerHTML = '<div class="form-grid">' +
+      '<div class="form-group span2"><label for="exName">Name</label><input type="text" id="exName" maxlength="120" value="' + esc(o.name || '') + '"></div>' +
+      '<div class="form-group"><label for="exC1">Main colour</label><input type="color" class="ex-colour" id="exC1" value="' + (hex(o.colours && o.colours.primary) || '#374151') + '"></div>' +
+      '<div class="form-group"><label for="exC2">Second colour</label><input type="color" class="ex-colour" id="exC2" value="' + (hex(o.colours && o.colours.secondary) || '#ffffff') + '"></div>' +
+      '</div>';
+    NL.modal({ title: o.name || X.org, body: wrap, buttons: [{ label: 'Save', className: 'btn--primary', onClick: function (c) {
+      var name = wrap.querySelector('#exName').value.trim();
+      if (!name) return NL.toast('A name is needed', 'error');
+      var patch = { name: name.slice(0, 120), colours: { primary: wrap.querySelector('#exC1').value, secondary: wrap.querySelector('#exC2').value } };
+      C.db.ref('externals/' + X.org).update(patch).then(function () {
+        Object.assign(o, patch);
+        NL.writeAudit('external_org_changed', 'Changed ' + patch.name);
+        c.close();
+        NL.toast('Saved', 'success');
+        drawOrg();
+      })['catch'](function (e) { NL.toast('Could not save: ' + (e && e.message || e), 'error'); });
+    } }] });
   }
 
   /* ── A zone: its name, code, and what it opens ──────────────────────── */
@@ -241,11 +267,11 @@
           var view = hasClubData(t.rec) ? '<div class="form-group"><label>Clubs</label><select class="nl-select" data-view="' + esc(t.key) + '">' + views.map(function (v) {
               return '<option value="' + esc(v) + '"' + (cur.view === v ? ' selected' : '') + '>' + esc(C.P.VIEWS[v] || v) + '</option>';
             }).join('') + '</select></div>' + (views.indexOf('one') >= 0 ? '<div class="form-group"><label>Club code</label><input type="text" data-club="' + esc(t.key) + '" maxlength="12" value="' + esc(cur.club || '') + '"></div>' : '') : '';
-          return '<fieldset class="ex-tool"><legend>' + esc(t.label) + '</legend><div class="form-grid">' +
-            '<div class="form-group"><label>Gives</label><select class="nl-select" data-level="' + esc(t.key) + '">' + levels + '</select></div>' +
+          return '<div class="form-grid ex-tool">' +
+            '<div class="form-group"><label>' + esc(t.label) + '</label><select class="nl-select" data-level="' + esc(t.key) + '">' + levels + '</select></div>' +
             view +
             '<div class="form-group span2"><label>Why</label><input type="text" data-reason="' + esc(t.key) + '" maxlength="300" value="' + esc(cur.reason || '') + '"></div>' +
-            '</div></fieldset>';
+            '</div>';
         }).join('') : '<p class="pc-muted">No tool offers itself to externals yet. A tool is opened to them in its registry record, by pull request.</p>');
     var nameIn = wrap.querySelector('#exZName'), codeIn = wrap.querySelector('#exZCode');
     nameIn.addEventListener('input', function () {
@@ -253,8 +279,8 @@
     });
     codeIn.addEventListener('input', function () { codeIn.dataset.touched = '1'; });
 
-    var buttons = [{ label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } }];
-    if (zid) buttons.unshift({ label: 'Delete zone', className: 'btn--danger', onClick: function (c) { c.close(); deleteZone(zid); } });
+    var buttons = [];
+    if (zid) buttons.push({ label: 'Delete zone', className: 'btn--danger', onClick: function (c) { c.close(); deleteZone(zid); } });
     buttons.push({ label: 'Save', className: 'btn--primary', onClick: function (c) {
       var next = readZone(wrap, z, zid);
       if (next.error) return NL.toast(next.error, 'error');
@@ -269,7 +295,8 @@
         drawOrg();
       })['catch'](function (e) { NL.toast('Could not save: ' + (e && e.message || e), 'error'); });
     } });
-    NL.modal({ title: zid ? 'Edit zone' : 'Add zone', width: 'wide', body: wrap, buttons: buttons });
+    var ctrl = NL.modal({ title: zid ? z.code + ' · ' + z.name : 'Add zone', width: 'wide', body: wrap, buttons: buttons, footerSplit: !!zid });
+    dangerIcon(ctrl);
   }
 
   /* The zone as the form says, checked: a name, a free three-letter code,
@@ -314,17 +341,38 @@
   function deleteZone(zid) {
     var o = X.orgs[X.org], z = o.zones[zid];
     var holders = people(X.org).filter(function (u) { return u.pass.keys && u.pass.keys[zid]; }).length;
-    NL.confirm('Delete ' + z.code + ' ' + z.name + '?' + (holders ? ' ' + holders + (holders === 1 ? ' person holds' : ' people hold') + ' it; they lose what it opens.' : ''),
-      { title: 'Delete zone', confirmText: 'Delete', variant: 'danger' }).then(function (ok) {
-      if (!ok) return;
-      return C.db.ref('externals/' + X.org + '/zones/' + zid).remove().then(function () {
+    /* Can't be undone, so the zone's code is typed before the button wakes
+       (style principles 11.1). NL.prompt has no danger button and no way to
+       hold OK back, hence a modal here: a canon candidate (NL.confirm with a
+       typed word) if a second tool wants it. Flagged 16/11/2026. */
+    var wrap = document.createElement('div');
+    wrap.innerHTML = '<p class="confirm-text">' + (holders ? esc(holders + (holders === 1 ? ' person holds' : ' people hold') + ' it and will lose what it opens. ') : '') +
+      'Type <b>' + esc(z.code) + '</b> to delete it.</p><input type="text" class="modal__input" maxlength="3" autocomplete="off" aria-label="Zone code">';
+    var input = wrap.querySelector('input');
+    var ctrl = NL.modal({ title: 'Delete ' + z.code + ' · ' + z.name, size: 'sm', body: wrap, buttons: [{ label: 'Delete zone', className: 'btn--danger', onClick: function (c) {
+      if (input.value.trim().toUpperCase() !== z.code) return;
+      C.db.ref('externals/' + X.org + '/zones/' + zid).remove().then(function () {
         delete o.zones[zid];
         NL.writeAudit('external_zone_deleted', (o.name || X.org) + ': ' + z.code + ' ' + z.name);
+        c.close();
         NL.toast('Zone deleted', 'success');
         drawOrg();
-      });
-    })['catch'](function (e) { NL.toast('Could not delete: ' + (e && e.message || e), 'error'); });
+      })['catch'](function (e) { NL.toast('Could not delete: ' + (e && e.message || e), 'error'); });
+    } }] });
+    var go = dangerIcon(ctrl);
+    function sync() { if (go) go.disabled = input.value.trim().toUpperCase() !== z.code; }
+    input.addEventListener('input', sync);
+    sync();
+    try { input.focus(); } catch (e) {}
   }
+  /* NL.modal sets button text, not markup, so the delete icon goes in after
+     (the icon sits before the words, as on every destructive button). */
+  function dangerIcon(ctrl) {
+    var b = ctrl && ctrl.el && ctrl.el.querySelector('.modal__footer .btn--danger');
+    if (b && !b.querySelector('svg')) b.insertAdjacentHTML('afterbegin', C.icon('delete'));
+    return b;
+  }
+
 
   /* ── People ─────────────────────────────────────────────────────────── */
   function addPerson() {
@@ -376,12 +424,9 @@
     var firstUntil = null;
     Object.keys(keys).forEach(function (k) { if (keys[k] && typeof keys[k].until === 'number') firstUntil = keys[k].until; });
     var wrap = document.createElement('div');
-    wrap.innerHTML = '<div class="pc-roles">' + Object.keys(zones).map(function (z) {
-        return '<label class="pc-role"><input type="checkbox" value="' + esc(z) + '"' + (keys[z] ? ' checked' : '') + '><span><b>' + esc(zones[z].code) + '</b> ' + esc(zones[z].name) + '</span></label>';
-      }).join('') + '</div>' +
+    wrap.innerHTML = '<div class="pc-roles">' + Object.keys(zones).map(function (z) { return zoneTick(z, zones[z], !!keys[z]); }).join('') + '</div>' +
       '<div class="form-group"><label for="exEUntil">Access ends</label><input type="date" id="exEUntil" value="' + dateInput(firstUntil) + '"><p class="form-hint">Leave empty to keep it until removed. Clear every zone to remove their access.</p></div>';
     NL.modal({ title: u.name || u.email, size: 'sm', body: wrap, buttons: [
-      { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
       { label: 'Save', className: 'btn--primary', onClick: function (c) {
         var until = dateMs(wrap.querySelector('#exEUntil').value);
         var next = {};
@@ -397,7 +442,7 @@
         C.db.ref().update(updates).then(function () {
           NL.writeAudit('external_zones_changed', (o.name || X.org) + ': ' +
             (Object.keys(next).map(function (z) { return zones[z].code; }).join(', ') || 'no zones') +
-            (until ? ', to ' + NL.formatDateShort(until) : ''), { uid: uid, name: u.name, email: u.email });
+            (until ? ', to ' + day(until) : ''), { uid: uid, name: u.name, email: u.email });
           c.close();
           NL.toast('Saved', 'success');
           return C.refreshPeople().then(drawOrg);
