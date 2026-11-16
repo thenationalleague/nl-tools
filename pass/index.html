@@ -1,8 +1,13 @@
 <!DOCTYPE html>
 <!--
   NL Tools — My pass
-  Version: v2.5 (16/11/2026)
+  Version: v2.6 (16/11/2026)
   File: /pass/index.html
+  v2.6 (16/11/2026) — An External card: charcoal, the organisation's name
+    and colour on the big sticker, and its own zones as the stickers. Its
+    tool list is charcoal too. The organisation is read from
+    externals/<org>. The issue form never offers an External card; it is
+    changed in Access, Externals.
   v2.5 (16/11/2026) — The tool list is in the card's colour: red for a
     League pass, navy for a Club pass, whatever the club's own colours.
     Access strips are the colour itself, Manage a deeper shade. The
@@ -18,11 +23,6 @@
     strap and the clip turn over with the pass.
   v2.2 (13/11/2026) — The zones take the pass's own colours, the same as
     the big sticker, instead of a colour per zone.
-  v2.1 (13/11/2026) — A wider pass (400px, closer to an event pass than a
-    strip), and the zones in colour: each zone has its own canon hue on
-    every pass (Operations blue, Media purple, Commercial green, Finance
-    amber, Senior leadership navy, Tester red), three to a row, or two by
-    two for a Club pass's four.
 
   Your pass: the card you belong to (League or Club), the keys you hold on
   top of it, and every tool they open, with which part of the pass opened
@@ -100,6 +100,11 @@
     window.NL_CHANGELOG = [
       {
         date: '16/11/2026',
+        version: 'v2.6',
+        items: [ 'Passes for organisations outside the League: charcoal, with their own zones.' ]
+      },
+      {
+        date: '16/11/2026',
         version: 'v2.5',
         items: [ 'Your tools are listed in red for a League pass and navy for a Club pass.', 'Bigger zone stickers.' ]
       },
@@ -117,11 +122,6 @@
         date: '13/11/2026',
         version: 'v2.2',
         items: [ 'The zones are in your club\u2019s colours.' ]
-      },
-      {
-        date: '13/11/2026',
-        version: 'v2.1',
-        items: [ 'A wider pass.' ]
       }
     ];
 
@@ -137,10 +137,10 @@
   </script>
 
   <!-- NL system scripts (lint canonical: ?v=66 / ?v=1 / ?v=15 / ?v=21) -->
-  <script src="/system/nl-utils.js?v=72"></script>
+  <script src="/system/nl-utils.js?v=73"></script>
   <script src="/system/nl-analytics.js?v=1"></script>
   <script src="/system/nl-topbar.js?v=16"></script>
-  <script src="/system/auth-guard.js?v=23"></script>
+  <script src="/system/auth-guard.js?v=24"></script>
 
 <style>
   /* The pass is an illustration of a real lanyard pass (boards 6–10), so a
@@ -263,6 +263,7 @@
   }
   .pass__circle img { width: 80%; height: 80%; object-fit: contain; }
   .pass__circle--round img { width: 70%; height: 70%; }
+  .pass__circle--initials { color: var(--band); font-size: 38px; font-weight: 800; font-variation-settings: 'wght' 800; letter-spacing: .02em; }
   .pass__bigname { font-size: 16px; line-height: 1.1; font-weight: 800; font-variation-settings: 'wght' 800; }
   .pass--v2 .pass__who { padding: 14px 20px 0; display: block; text-align: center; }
   /* Zones: stickers in three columns, in the pass's own colours, the same
@@ -567,6 +568,7 @@
     registry: {},
     users: null,
     subject: null,      /* { name, pass, uid?, made? } — whose pass is drawn */
+    orgs: {},           /* externals/<org> for an External card, once read */
     dropped: false,     /* the pass falls in once per page view, not on every redraw */
     issue: null         /* the issue form's working state */
   };
@@ -597,8 +599,19 @@
   /* ── Colours ────────────────────────────────────────────────────────── */
   /* League: red band, navy stickers, navy strap. Club: the club's pair
      (NL.pass.clubColours), strap in the band colour. */
+  /* An External card (v2.6): charcoal, the organisation's own colour on its
+     big sticker and zones where one is set. Its name and zones come from
+     externals/<org>, which its people may read (STATE.orgs). */
+  var EXTERNAL = 'var(--proj-8)'; /* charcoal. Canon candidate: a --card-external token */
+  function orgOf(pass) { return (pass && P.isExternal(pass) && STATE.orgs[pass.org]) || null; }
+  function hexOr(v, fallback) { return /^#[0-9a-fA-F]{6}$/.test(String(v || '')) ? v : fallback; }
   function colours(pass) {
     var league = { band: 'var(--primary)', bandText: 'var(--white)', sticker: 'var(--navy)', stickerText: 'var(--white)', strap: 'var(--navy)', strapText: 'var(--white)', club: false };
+    if (pass && P.isExternal(pass)) {
+      var o = orgOf(pass), band = hexOr(o && o.colours && o.colours.primary, '#374151');
+      var text = P.contrast(band, '#ffffff') >= P.contrast(band, '#000000') ? 'var(--white)' : '#000000';
+      return { band: band, bandText: text, sticker: band, stickerText: text, strap: EXTERNAL, strapText: 'var(--white)', club: false, external: true };
+    }
     if (!pass || pass.base !== 'club') return league;
     var c = P.clubColours(NL.clubs.byName(pass.club));
     if (!c) return Object.assign({}, league, { club: true });
@@ -611,7 +624,21 @@
   function crestFor(pass) {
     return pass && pass.base === 'club' ? NL.clubs.crestUrl(pass.club, 'medium') : NL.clubs.ROSE;
   }
-  function orgName(pass) { return pass && pass.base === 'club' ? pass.club : 'The National League'; }
+  function orgName(pass) {
+    if (pass && P.isExternal(pass)) { var o = orgOf(pass); return (o && o.name) || 'Organisation'; }
+    return pass && pass.base === 'club' ? pass.club : 'The National League';
+  }
+  /* An External card's zones, as the slots on its pass: the organisation's
+     zones, A–Z, held ones lit. */
+  function externalSlots(pass) {
+    var o = orgOf(pass), z = (o && o.zones) || {};
+    return Object.keys(z).sort(function (a, b) { return String(z[a].name).localeCompare(String(z[b].name)); })
+      .map(function (id) { return { id: id, code: z[id].code, name: z[id].name }; });
+  }
+  function holdsZone(pass, id) {
+    var k = pass.keys && pass.keys[id];
+    return !!k && !(typeof k.until === 'number' && k.until <= Date.now());
+  }
 
   /* ── Icons ──────────────────────────────────────────────────────────── */
   function icon(name, cls) {
@@ -665,6 +692,7 @@
 
   /* The kind of pass, for the strip at the top. */
   function kindOf(pass) {
+    if (P.isExternal(pass)) return { label: 'External', colour: EXTERNAL };
     return pass.base === 'club' ? { label: 'Club', colour: 'var(--navy)' } : { label: 'League', colour: 'var(--primary)' };
   }
   /* Round crests need a little less so the white ring shows all the way
@@ -674,19 +702,24 @@
   /* v2.0: the new front (system/permissions-plan.md, "The new pass front"). */
   function cardFrontHtml(subject) {
     var pass = subject.pass, c = colours(pass), kind = kindOf(pass);
+    var external = P.isExternal(pass);
     var round = pass.base !== 'club' || ROUND_CRESTS[pass.club];
     var vars = '--kind:' + kind.colour + ';--band:' + c.band + ';--band-text:' + c.bandText;
-    var zones = '', t = 1, slots = P.slots(pass), n = slots.length;
+    var zones = '', t = 1, slots = external ? externalSlots(pass) : P.slots(pass), n = slots.length;
     slots.forEach(function (k) {
-      zones += P.holds(pass, k.id)
+      var held = external ? holdsZone(pass, k.id) : P.holds(pass, k.id);
+      zones += held
         ? '<div class="zone" style="--tilt:' + (TILTS[t++ % TILTS.length] / 2) + 'deg"><span class="zone__code">' + esc(k.code) + '</span><span class="zone__name">' + esc(k.name) + '</span></div>'
-        : '<div class="zone zone--empty" role="img" aria-label="' + esc(k.name) + ' – not held">' + slotIcon(k.icon) + '</div>';
+        : '<div class="zone zone--empty" role="img" aria-label="' + esc(k.name) + ' – not held">' + (external ? '' : slotIcon(k.icon)) + '</div>';
     });
+    var face = external
+      ? '<span class="pass__circle pass__circle--round pass__circle--initials">' + esc(initials(orgName(pass))) + '</span>'
+      : '<span class="pass__circle' + (round ? ' pass__circle--round' : '') + '">' +
+        '<img src="' + esc(crestFor(pass)) + '" alt="' + esc(orgName(pass)) + ' crest" data-crest="' + esc(pass.base === 'club' ? pass.club : '') + '"></span>';
     return '<div class="pass pass--v2" style="' + vars + '">' +
       '<div class="pass__slot"></div>' +
       '<div class="pass__kind">' + esc(kind.label) + '</div>' +
-      '<div class="pass__big"><span class="pass__circle' + (round ? ' pass__circle--round' : '') + '">' +
-        '<img src="' + esc(crestFor(pass)) + '" alt="' + esc(orgName(pass)) + ' crest" data-crest="' + esc(pass.base === 'club' ? pass.club : '') + '"></span>' +
+      '<div class="pass__big">' + face +
         '<span class="pass__bigname">' + esc(orgName(pass)) + '</span></div>' +
       '<div class="pass__who"><div class="pass__name">' + esc(subject.name || '') + '</div>' +
         (pass.jobTitle ? '<div class="pass__job">' + esc(pass.jobTitle) + '</div>' : '') + '</div>' +
@@ -792,6 +825,10 @@
     } else if (part === 'card') {
       face = '<span class="mini__face"><img src="' + esc(crestFor(pass)) + '" alt="" data-crest="' + esc(pass.base === 'club' ? pass.club : '') + '"></span>';
       title = 'Everyone at ' + orgName(pass);
+    } else if (P.isExternal(pass)) {
+      var zone = ((orgOf(pass) || {}).zones || {})[part] || { code: '?', name: part };
+      face = '<span class="mini__face">' + esc(zone.code) + '</span>';
+      title = zone.name;
     } else {
       face = '<span class="mini__face">' + esc(P.KEY[part].code) + '</span>';
       title = P.KEY[part].name;
@@ -815,10 +852,17 @@
        Club list is Access), Manage a deeper shade of it, and the chip at the
        end says which in words. */
     var manage = result === 'manage';
-    var hue = pass.base === 'club' ? 'navy' : 'primary';
-    var bg = manage ? 'var(--' + hue + '-700)' : 'var(--' + hue + ')';
-    var style = ' style="--strip:' + bg + ';--strip-text:var(--white);--strip-edge:var(--' + hue + (manage ? '-900' : '-700') + ');' +
-      '--mini-text:var(--' + hue + ');--badge:var(--' + hue + ');--badge-text:var(--white)"';
+    var style;
+    if (P.isExternal(pass)) {
+      /* An External card's list is charcoal, Manage a shade deeper. */
+      style = ' style="--strip:' + (manage ? 'var(--navy-900)' : EXTERNAL) + ';--strip-text:var(--white);--strip-edge:var(--navy-900);' +
+        '--mini-text:' + EXTERNAL + ';--badge:' + EXTERNAL + ';--badge-text:var(--white)"';
+    } else {
+      var hue = pass.base === 'club' ? 'navy' : 'primary';
+      var bg = manage ? 'var(--' + hue + '-700)' : 'var(--' + hue + ')';
+      style = ' style="--strip:' + bg + ';--strip-text:var(--white);--strip-edge:var(--' + hue + (manage ? '-900' : '-700') + ');' +
+        '--mini-text:var(--' + hue + ');--badge:var(--' + hue + ');--badge-text:var(--white)"';
+    }
     var tag = link ? 'a' : 'div';
     /* A Club card goes to the tool's club page where it has one (club logins:
        the pass's club claim opens it, showing that club). */
@@ -838,8 +882,11 @@
     var pass = subject.pass;
     if (!P.isIssued(pass)) return '';
     var items = P.summary(pass, STATE.registry);
-    var columns = P.isSkeleton(pass) ? ['skeleton'] : ['card'].concat(P.keysHeld(pass));
-    var mark = pass.base === 'club'
+    var external = P.isExternal(pass);
+    var columns = P.isSkeleton(pass) ? ['skeleton'] : external ? externalSlots(pass).map(function (z) { return z.id; }).filter(function (id) { return holdsZone(pass, id); })
+      : ['card'].concat(P.keysHeld(pass));
+    var mark = external ? 'Each sticker is a zone of ' + esc(orgName(pass)) + '.'
+      : pass.base === 'club'
       ? 'The crest means everyone at ' + esc(pass.club) + ' has it.'
       : 'The rose means everyone at the League has it.';
     var html = '<p class="pass-intro"><b>Access</b> lets you look. <b>Manage</b> lets you change what other people see. ' + mark + '</p>';
@@ -1103,7 +1150,15 @@
   function setSubject(subject) {
     STATE.subject = subject;
     STATE.dropped = false; /* a new person's pass falls in */
-    renderAs();
+    withOrg(subject && subject.pass).then(renderAs);
+  }
+  /* An External card's organisation, read once (members read their own;
+     the Skeleton key any). Unreadable: drawn without its name. */
+  function withOrg(pass) {
+    if (!pass || !P.isExternal(pass) || pass.org in STATE.orgs) return Promise.resolve();
+    return db.ref('externals/' + pass.org).once('value')
+      .then(function (s) { STATE.orgs[pass.org] = s.val() || null; })
+      ['catch'](function () { STATE.orgs[pass.org] = null; });
   }
 
   /* Everyone with an account, A–Z. League roles can read users/ today; the
@@ -1144,6 +1199,7 @@
   /* Can I issue to this person? League Operations reach club people only:
      not anyone on a League card, nor a League role waiting for one. */
   function canIssueTo(u) {
+    if (u.pass && P.isExternal(u.pass)) return false;   /* changed in Access, Externals */
     var r = myRights();
     if (r.league) return true;
     if (!r.club) return false;
@@ -1442,7 +1498,7 @@
         return loadUsers().then(function (users) {
           var u = users.filter(function (x) { return x.uid === asUid; })[0];
           if (u) STATE.subject = { name: u.name, pass: u.pass, uid: u.uid };
-          renderAs();
+          return withOrg(STATE.subject.pass).then(renderAs);
         });
       } else if (STATE.view === 'issue') {
         if (!mayIssueHere()) return renderRefusal('Issuing passes is for the Skeleton key and League Operations.');
@@ -1454,7 +1510,7 @@
           if (u && canIssueTo(u)) choosePerson(u);
         });
       } else {
-        renderMine();
+        withOrg(session.pass).then(renderMine);
       }
     }).catch(function (e) {
       document.getElementById('listCol').innerHTML = '<div class="banner banner--error">The page could not load: ' + esc(e && e.message || String(e)) + '</div>';

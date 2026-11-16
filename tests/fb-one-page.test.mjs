@@ -37,7 +37,8 @@ test('the club bar starts hidden and shows only with the code card or a code ses
 test('the door: a League account at its level, anyone else the code door', () => {
   const door = UTILS.slice(UTILS.indexOf('    door: function (opts) {'), UTILS.indexOf('    viaFunction: codeGateViaFunction,'));
   assert.match(door, /window\.NL\.accountLevel\.load\(user\.uid, opts\.toolKey\)/);
-  assert.match(door, /if \(!who\.league\) \{ codeDoor\(\); return; \}/);
+  assert.match(door, /var external = window\.NL\.pass && window\.NL\.pass\.isExternal\(who\.user && who\.user\.pass\);/);
+  assert.match(door, /if \(!who\.league && !external\) \{ codeDoor\(\); return; \}/);
   assert.match(door, /toolLevel: who\.level === 'manage' \? 'admin' : \(who\.level === 'access' \? 'access' : 'off'\)/);
   assert.match(door, /if \(session\.toolLevel === 'off'\)/);
   assert.match(door, /if \(opts\.showCode\) opts\.showCode\(\);\s*return codeGateOpen\(c\);/);

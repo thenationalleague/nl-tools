@@ -50,7 +50,7 @@ Why: This is the last part of the new model people actually meet. Without it, ne
 What: Every tool with club data gives each person a pair: which clubs (One club, or All clubs, named) and what they can do (Access or Manage). League cards get All clubs, named; Club cards get One club. An External card can be given one view on a tool that offers it, with a reason, an end date, and who gave it and when. First case: the Independent Football Regulator sees Financial Benchmarking as League staff do.
 Why: The regulator already receives these figures, so showing them the same page is safer than emailing spreadsheets, and the rule covers the next case (an analyst working for one club) without another exception.
 - Built 16/11: Financial Benchmarking's League view picks a club from a list or by clicking it, and shows it in its own colour with every other club in grey.
-- Then the smallest External pass that serves the regulator: the organisation, one zone, invites, its pass, the grant and database rules for this one tool.
+- Built 16/11: External passes, set up in Access → Externals (organisation, zones, people, optional end date), with the charcoal pass on My pass. Once published, the regulator is set up there by you.
 - Then the pair on My pass and in Access: "All clubs · Manage" instead of "Manage".
 - The organisation, its zones and its people are all set up in Access, never in code. An end date is optional; without one, access lasts until removed.
 - Before the regulator's pass: how many logins, and every season or the latest only.
