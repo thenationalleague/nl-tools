@@ -23,6 +23,7 @@
 //   matchday-live/<ymd>/<contributorId>/  Matchday Live contributor clips
 //   save-of-the-month/<CODE>/<YYYY-MM>/  Save of the Month club clips, per-club
 //   document-library/**   League documents for every club, written by NL staff
+//   externals/<org>/**    an external organisation's logo, added in Access
 //
 // WHO IS LEAGUE (14/11/2026). Every rule below that means "League staff" asks
 // for the League mark, `league: true`, set on the account by the server
@@ -349,6 +350,26 @@ service firebase.storage {
         && request.resource.md5Hash == resource.md5Hash
         && request.resource.contentType == resource.contentType;
       allow delete: if request.auth != null && request.auth.token.get('league', false) == true;
+    }
+
+    // ── External organisations' logos (16/11/2026) ───────────────────────
+    // Uploaded in Access → Externals (Skeleton key only on screen). Storage
+    // rules cannot read the database, so the write asks for the League mark
+    // and the safety is elsewhere: a file is only ever ADDED (a new name each
+    // time, never replacing or deleting one), and what a pass shows is the
+    // address in externals/<org>/logo, which only the Skeleton key may set
+    // (database rules) and which must point into this organisation's own
+    // folder. A League account could add a file nobody points at; it could
+    // not change any organisation's logo. The external's pass shows the logo
+    // by its download address, so the read here is the League's only.
+    // Pictures only, no SVG (it can carry script), under 500 KB.
+    match /externals/{org}/{file} {
+      allow read: if request.auth != null && request.auth.token.get('league', false) == true;
+      allow create: if request.auth != null && request.auth.token.get('league', false) == true
+        && resource == null
+        && request.resource.size < 512 * 1024
+        && request.resource.contentType.matches('image/(png|jpeg|webp)');
+      allow update, delete: if false;
     }
 
     match /{allPaths=**} {

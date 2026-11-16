@@ -77,6 +77,12 @@ await t('but a note, when there is one, is words', set(ref(skel, 'externals/bad'
 await t('a tool in a zone needs a level', set(ref(skel, 'externals/bad'), { name: 'Bad', zones: { z: { name: 'Z', code: 'ZZZ', tools: { [FB]: { reason: 'r' } } } } }), false);
 await t('another organisation may use the same code', set(ref(skel, 'externals/samecode'), { name: 'Same code', zones: { z: { name: 'Finance', code: 'FIN' } } }), true);
 await t('no level beyond Manage', set(ref(skel, 'externals/bad'), { name: 'Bad', zones: { z: { name: 'Z', code: 'ZZZ', tools: { [FB]: { level: 'owner', reason: 'r' } } } } }), false);
+const LOGO = 'https://firebasestorage.googleapis.com/v0/b/nl-tools.firebasestorage.app/o/externals%2Freg%2Flogo-1.png?alt=media&token=t';
+await t('logo: the Skeleton key points at a file in the organisation\'s own folder', set(ref(skel, 'externals/reg/logo'), LOGO), true);
+await t('logo: not at another organisation\'s folder', set(ref(skel, 'externals/reg/logo'), LOGO.replace('externals%2Freg%2F', 'externals%2Fother%2F')), false);
+await t('logo: nor anywhere else on the web', set(ref(skel, 'externals/reg/logo'), 'https://example.org/x.png'), false);
+await t('logo: League staff cannot set it', set(ref(staff, 'externals/reg/logo'), LOGO), false);
+await t('logo: nor can a member', set(ref(ext1, 'externals/reg/logo'), LOGO), false);
 await t('a member reads its own organisation', get(ref(ext1, 'externals/reg')), true);
 await t('not another organisation', get(ref(ext1, 'externals/other')), false);
 await t('not the list of organisations', get(ref(ext1, 'externals')), false);

@@ -32,27 +32,12 @@ test('extUpdate clears ext when nothing is open any more, or the card is not Ext
   assert.deepEqual(extUpdate(NL, 'u3', { base: 'club', club: 'X', issued: 1 }, null, REG, NOW), {});
 });
 
-test('extUpdate writes an External card\'s tool entries from the same answer, and only what its zones open', () => {
-  const CB = 'ops-commercial-benchmarking', JD = 'ops-judgements';
-  const org = { name: 'Made-up Regulator', zones: {
-    fin: ORG.zones.fin,
-    com: { name: 'Commercial', code: 'COM', tools: {
-      [CB]: { level: 'manage', view: 'all', reason: 'r', by: 'u0', at: 1 },
-      [JD]: { level: 'access', reason: 'r', by: 'u0', at: 1 } } } } };
-  const pass = { base: 'external', org: 'made-up', issued: 1, keys: { fin: { given: 1 }, com: { given: 1 } } };
-  const u = extUpdate(NL, 'u1', pass, org, REG, NOW, null);
-  assert.deepEqual(u['users/u1/tools'], { [FB]: 'access', [CB]: 'access', [JD]: 'access' }, 'Manage asked for, Access given: the tool does not offer externals Manage');
-  /* In step: nothing to write. */
-  assert.deepEqual(extUpdate(NL, 'u1', Object.assign({}, pass, { ext: u['users/u1/pass/ext'] }), org, REG, NOW, u['users/u1/tools']), {});
-  /* A zone taken away takes its tools with it; an entry nobody gave goes. */
-  const less = Object.assign({}, pass, { keys: { fin: { given: 1 } }, ext: u['users/u1/pass/ext'] });
-  const v = extUpdate(NL, 'u1', less, org, REG, NOW, Object.assign({ 'ops-people': 'admin' }, u['users/u1/tools']));
-  assert.deepEqual(v['users/u1/tools'], { [FB]: 'access' });
-  /* Every zone ended: no entries at all. */
-  const ended = { base: 'external', org: 'made-up', issued: 1, keys: { fin: { given: 1, until: NOW - 1 } } };
-  assert.deepEqual(extUpdate(NL, 'u1', ended, org, REG, NOW, { [FB]: 'access' })['users/u1/tools'], null);
-  /* Not an External card: its tool entries are never touched here. */
-  assert.deepEqual(extUpdate(NL, 'u2', { base: 'league', issued: 1 }, null, REG, NOW, { [CB]: 'admin' }), {});
+test('the tool entries are passEntries\' to write, not extUpdate\'s: one writer', () => {
+  /* functions/pass-entries.js runs on every write under users/<uid>/pass,
+     pass/ext included, and writes the entries from NL.pass.toOld. A second
+     writer here would only race it to the same answer. */
+  const pass = { base: 'external', org: 'made-up', issued: 1, keys: { fin: { given: 1 } } };
+  assert.deepEqual(Object.keys(extUpdate(NL, 'u1', pass, ORG, REG, NOW, null)), ['users/u1/pass/ext'], 'even when handed their entries');
 });
 
 test('checkInvite: the request must name a person, a real email, and the organisation\'s own zones', () => {

@@ -26,7 +26,8 @@ const files = {
   'document-library/f1/a.pdf': 'application/pdf',
   'save-of-the-month/ABC/2026-11/a.mp4': 'video/mp4',
   'save-of-the-month/XYZ/2026-11/b.mp4': 'video/mp4',
-  'footage/national-league-cup/a.mp4': 'video/mp4'
+  'footage/national-league-cup/a.mp4': 'video/mp4',
+  'externals/reg/logo-1.png': 'image/png'
 };
 await env.withSecurityRulesDisabled(async (ctx) => {
   for (const [p, type] of Object.entries(files)) await ctx.storage().ref(p).put(bytes, { contentType: type });
@@ -59,6 +60,17 @@ await t('a League account reads any club\'s clip', league.ref('save-of-the-month
 await t('nobody uploads to the retired footage folder', anon.ref('footage/national-league-cup/x.mp4').put(bytes, { contentType: 'video/mp4' }), false);
 await t('nor does a League account', league.ref('footage/national-league-cup/y.mp4').put(bytes, { contentType: 'video/mp4' }), false);
 await t('an anonymous session reads no footage', anon.ref('footage/national-league-cup/a.mp4').getMetadata(), false);
+
+/* External organisations' logos (16/11/2026): added, never replaced */
+await t('logo: a League account adds one', league.ref('externals/reg/logo-2.png').put(bytes, { contentType: 'image/png' }), true);
+await t('logo: but never over an existing one', league.ref('externals/reg/logo-1.png').put(bytes, { contentType: 'image/png' }), false);
+await t('logo: nor deletes one', league.ref('externals/reg/logo-1.png').delete(), false);
+await t('logo: pictures only, no SVG', league.ref('externals/reg/logo-3.svg').put(bytes, { contentType: 'image/svg+xml' }), false);
+await t('logo: nor anything else', league.ref('externals/reg/logo-4.html').put(bytes, { contentType: 'text/html' }), false);
+await t('logo: under 500 KB', league.ref('externals/reg/logo-5.png').put(new Uint8Array(600 * 1024), { contentType: 'image/png' }), false);
+await t('logo: a sign-up adds none', signup.ref('externals/reg/logo-6.png').put(bytes, { contentType: 'image/png' }), false);
+await t('logo: nor does a Club card', card.ref('externals/reg/logo-7.png').put(bytes, { contentType: 'image/png' }), false);
+await t('logo: a Club card reads none by the rules', card.ref('externals/reg/logo-1.png').getMetadata(), false);
 
 await env.cleanup();
 console.log(`\n${pass} passed, ${fail} failed`);

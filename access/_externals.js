@@ -1,4 +1,4 @@
-/* NL Tools — Access: the Externals tab (v2.10, 16/11/2026: tick to open)
+/* NL Tools — Access: the Externals tab (v2.11, 16/11/2026: the organisation's header and logo)
 
    Organisations outside the League and its clubs, set up here and nowhere
    else (permissions plan, "External passes" and "Club views"). Skeleton key
@@ -105,7 +105,7 @@
       html += '<div class="table-wrap"><table class="table"><thead><tr><th>Organisation</th><th>Zones</th><th>People</th></tr></thead><tbody>' +
         ids.map(function (id) {
           var o = X.orgs[id] || {}, zones = Object.keys(o.zones || {});
-          return '<tr class="ex-row" data-org="' + esc(id) + '" tabindex="0"><td><span class="ex-org">' + swatch(o) + esc(o.name || id) + '</span></td>' +
+          return '<tr class="ex-row" data-org="' + esc(id) + '" tabindex="0"><td><span class="ex-org">' + orgMark(o) + esc(o.name || id) + '</span></td>' +
             '<td>' + zones.map(function (z) { return '<span class="pill pill--info">' + esc(o.zones[z].code) + '</span>'; }).join(' ') + '</td>' +
             '<td>' + people(id).length + '</td></tr>';
         }).join('') + '</tbody></table></div>';
@@ -126,11 +126,24 @@
       tr.addEventListener('keydown', function (e) { if (e.key === 'Enter') fn(tr); });
     });
   }
-  function swatch(o) {
-    var a = hex(o.colours && o.colours.primary), b = hex(o.colours && o.colours.secondary);
-    if (!a) return '';
-    return '<span class="ex-swatch" aria-hidden="true"><i style="background:' + a + '"></i>' + (b ? '<i style="background:' + b + '"></i>' : '') + '</span>';
+  /* An organisation's mark: its logo where one is uploaded, else its
+     initials on its main colour. `size` is the canon --crest-size. */
+  var LOGO_URL = /^https:\/\/firebasestorage\.googleapis\.com\//;
+  /* The same two letters My pass prints on the card: first and last word. */
+  function initialsOf(name) {
+    var parts = String(name || '?').trim().split(/\s+/);
+    return parts.length > 1 ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase() : parts[0].charAt(0).toUpperCase();
   }
+
+  function orgMark(o, cls) {
+    if (o && LOGO_URL.test(String(o.logo || ''))) {
+      return '<img class="nl-crest ex-logo ' + (cls || '') + '" src="' + esc(o.logo) + '" alt="">';
+    }
+    var bg = hex(o && o.colours && o.colours.primary) || NL.projColours[7];
+    var ink = C.P.contrast(bg, '#ffffff') >= C.P.contrast(bg, '#000000') ? 'var(--white)' : 'var(--text)';
+    return '<span class="nl-crest ex-mark ' + (cls || '') + '" style="background:' + bg + ';color:' + ink + '" aria-hidden="true">' + esc(initialsOf(o && o.name)) + '</span>';
+  }
+
 
   function addOrg() {
     NL.prompt('', { title: 'Add organisation', placeholder: 'Its name, as it should appear on passes', confirmText: 'Add' }).then(function (name) {
@@ -159,14 +172,22 @@
     var zones = o.zones || {};
     var html = '<div class="pc-back"><button class="btn btn--ghost btn--sm" type="button" id="exBack">' + C.icon('back') + 'Organisations</button></div>';
 
-    html += '<section class="form-panel ex-gap"><div class="form-panel__head">Organisation</div><div class="form-panel__body">' +
-      '<span class="ex-org">' + swatch(o) + esc(o.name || id) + '</span></div>' +
-      '<div class="form-panel__foot pc-foot"><button class="btn btn--ghost btn--sm" type="button" id="exEditOrg">' + C.icon('edit') + 'Edit</button></div></section>';
+    /* The organisation is the subject of this view, so it takes the canon
+       subject header (.nl-club-header): its mark, its name, its colours as
+       the trim. Written out rather than by NL.clubs.headerHtml, which draws a
+       club crest; a mark slot on headerHtml is a canon candidate. */
+    var nP = people(id).length, nZ = Object.keys(zones).length;
+    html += '<div class="nl-club-header">' + orgMark(o, 'nl-club-header__crest ex-mark--lg') +
+      '<div class="nl-club-header__id"><h2 class="nl-club-header__name">' + esc(o.name || id) + '</h2>' +
+      '<p class="nl-club-header__sub">' + nZ + (nZ === 1 ? ' zone' : ' zones') + ' · ' + nP + (nP === 1 ? ' person' : ' people') + '</p></div>' +
+      '<div class="nl-club-header__actions"><button class="btn btn--ghost btn--sm" type="button" id="exEditOrg">' + C.icon('edit') + 'Edit</button></div>' +
+      NL.clubs.bandsHtml({ colors: { primary: hex(o.colours && o.colours.primary) || NL.projColours[7], secondary: hex(o.colours && o.colours.secondary) || hex(o.colours && o.colours.primary) || NL.projColours[7] } }, { lg: true }) +
+      '</div>';
 
     html += '<div class="section-head"><h2>Zones</h2><span class="pc-actions"><button class="btn btn--ghost btn--sm" type="button" id="exAddZone">' + C.icon('add') + 'Add zone</button></span></div>';
     var zids = Object.keys(zones).sort(function (a, b) { return String(zones[a].name).localeCompare(String(zones[b].name)); });
     html += zids.length ? zids.map(function (z) { return zoneHtml(z, zones[z]); }).join('') :
-      '<p class="ex-empty">No zones yet. A person needs at least one.</p>';
+      '<div class="ex-none ex-gap">No zones yet. A person needs at least one.</div>';
 
     var ppl = people(id);
     html += '<div class="section-head"><h2>People</h2></div>';
@@ -180,7 +201,7 @@
             return '<span class="pill pill--info">' + esc(zones[z] ? zones[z].code : z) + '</span>';
           }).join(' ') + '</td>' +
           '<td>' + (until ? esc(day(until)) : 'When removed') + '</td></tr>';
-      }).join('') + '</tbody></table></div>' : '<p class="ex-empty">Nobody yet.</p>';
+      }).join('') + '</tbody></table></div>' : '<div class="ex-none ex-gap">Nobody yet.</div>';
 
     html += '<section class="form-panel ex-gap"><div class="form-panel__head">Add person</div><div class="form-panel__body"><div class="form-grid">' +
       '<div class="form-group"><label for="exPEmail">Email</label><input type="email" id="exPEmail" autocomplete="off"></div>' +
@@ -234,26 +255,56 @@
      (style principles 7.2). The colours are its identity: the pass and its
      zones wear them. */
   function editOrg() {
-    var o = X.orgs[X.org];
+    var o = X.orgs[X.org], file = null, drop = false;
     var wrap = document.createElement('div');
     wrap.innerHTML = '<div class="form-grid">' +
       '<div class="form-group span2"><label for="exName">Name</label><input type="text" id="exName" maxlength="120" value="' + esc(o.name || '') + '"></div>' +
-      '<div class="form-group"><label for="exC1">Main colour</label><input type="color" class="ex-colour" id="exC1" value="' + (hex(o.colours && o.colours.primary) || '#374151') + '"></div>' +
+      '<div class="form-group"><label for="exC1">Main colour</label><input type="color" class="ex-colour" id="exC1" value="' + (hex(o.colours && o.colours.primary) || NL.projColours[7]) + '"></div>' +
       '<div class="form-group"><label for="exC2">Second colour</label><input type="color" class="ex-colour" id="exC2" value="' + (hex(o.colours && o.colours.secondary) || '#ffffff') + '"></div>' +
+      '<div class="form-group span2"><label for="exLogo">Logo</label><div class="ex-logo-row"><span id="exLogoMark"></span>' +
+        '<input type="file" id="exLogo" accept="image/png,image/jpeg,image/webp">' +
+        '<button class="btn btn--ghost btn--sm" type="button" id="exLogoOff"' + (o.logo ? '' : ' hidden') + '>' + C.icon('delete') + 'Remove logo</button></div>' +
+        '<p class="form-hint">PNG, JPEG or WebP, square, under 500 KB. It shows on their pass and here.</p></div>' +
       '</div>';
+    var mark = wrap.querySelector('#exLogoMark'), input = wrap.querySelector('#exLogo'), off = wrap.querySelector('#exLogoOff');
+    function preview() {
+      var look = { name: wrap.querySelector('#exName').value || o.name, colours: { primary: wrap.querySelector('#exC1').value }, logo: drop ? '' : o.logo };
+      mark.innerHTML = orgMark(look, 'ex-logo-row__mark');
+      if (file) { var img = document.createElement('img'); img.className = 'nl-crest ex-logo ex-logo-row__mark'; img.alt = ''; img.src = URL.createObjectURL(file); mark.innerHTML = ''; mark.appendChild(img); }
+    }
+    input.addEventListener('change', function () {
+      var f = input.files && input.files[0];
+      if (f && (!/^image\/(png|jpeg|webp)$/.test(f.type) || f.size >= 512 * 1024)) { NL.toast('A PNG, JPEG or WebP under 500 KB', 'error'); input.value = ''; return; }
+      file = f || null; drop = false; off.hidden = !file && !o.logo; preview();
+    });
+    off.addEventListener('click', function () { file = null; drop = true; input.value = ''; off.hidden = true; preview(); });
+    wrap.querySelector('#exC1').addEventListener('input', preview);
+    preview();
     NL.modal({ title: o.name || X.org, body: wrap, buttons: [{ label: 'Save', className: 'btn--primary', onClick: function (c) {
       var name = wrap.querySelector('#exName').value.trim();
       if (!name) return NL.toast('A name is needed', 'error');
       var patch = { name: name.slice(0, 120), colours: { primary: wrap.querySelector('#exC1').value, secondary: wrap.querySelector('#exC2').value } };
-      C.db.ref('externals/' + X.org).update(patch).then(function () {
-        Object.assign(o, patch);
-        NL.writeAudit('external_org_changed', 'Changed ' + patch.name);
+      /* A logo is a new file every time (the storage rules allow adding, never
+         replacing), and the organisation record points at it. */
+      var up = file ? uploadLogo(X.org, file) : Promise.resolve(drop ? null : undefined);
+      up.then(function (url) {
+        if (url !== undefined) patch.logo = url;
+        return C.db.ref('externals/' + X.org).update(patch);
+      }).then(function () {
+        Object.keys(patch).forEach(function (k) { if (patch[k] === null) delete o[k]; else o[k] = patch[k]; });
+        NL.writeAudit('external_org_changed', 'Changed ' + patch.name + (file ? ' (new logo)' : drop ? ' (logo removed)' : ''));
         c.close();
         NL.toast('Saved', 'success');
         drawOrg();
       })['catch'](function (e) { NL.toast('Could not save: ' + (e && e.message || e), 'error'); });
     } }] });
   }
+  function uploadLogo(orgId, f) {
+    var ext = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }[f.type];
+    var ref = firebase.storage().ref('externals/' + orgId + '/logo-' + Date.now() + '.' + ext);
+    return ref.put(f, { contentType: f.type }).then(function () { return ref.getDownloadURL(); });
+  }
+
 
   /* ── A zone: its name, code, and what it opens ──────────────────────── */
   /* What ticking a tool gives, in words: View or Manage, and for a tool

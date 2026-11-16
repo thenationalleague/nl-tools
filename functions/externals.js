@@ -21,9 +21,7 @@
  *
  * pass.ext is what the zones open, worked out by NL.pass.extFor (one copy,
  * system/nl-utils.js via canon.js). The door reads it (NL.pass.explain);
- * the per-tool entries the database rules read (users/<uid>/tools) are
- * written from it in the same update (NL.pass.toOld), so nobody has to press
- * Apply passes after a zone changes.
+ * passEntries turns it into the per-tool entries the database rules read.
  * Only the server writes it, and the resolver checks it against the tool's
  * record again, so a hand-edited ext cannot open what the tool does not
  * offer.
@@ -55,14 +53,13 @@ function auditLine(db, action, detail, by, target) {
 }
 
 async function syncOne(db, NL, uid, registry, orgs) {
-  const [passSnap, toolsSnap] = await Promise.all([db.ref("users/" + uid + "/pass").once("value"), db.ref("users/" + uid + "/tools").once("value")]);
-  const pass = passSnap.val(), tools = toolsSnap.val();
+  const pass = (await db.ref("users/" + uid + "/pass").once("value")).val();
   let org = null;
   if (NL.pass.isExternal(pass)) {
     if (!(pass.org in orgs)) orgs[pass.org] = (await db.ref("externals/" + pass.org).once("value")).val();
     org = orgs[pass.org];
   }
-  const u = extUpdate(NL, uid, pass, org, registry, Date.now(), tools);
+  const u = extUpdate(NL, uid, pass, org, registry, Date.now());
   if (Object.keys(u).length) await db.ref().update(u);
   return Object.keys(u).length;
 }
