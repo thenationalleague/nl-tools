@@ -149,7 +149,7 @@
     var zones = o.zones || {};
     var html = '<div class="pc-back"><button class="btn btn--ghost btn--sm" type="button" id="exBack">' + C.icon('back') + 'Organisations</button></div>';
 
-    html += '<section class="form-panel"><div class="form-panel__head">' + esc(o.name || id) + '</div><div class="form-panel__body"><div class="form-grid">' +
+    html += '<section class="form-panel ex-gap"><div class="form-panel__head">' + esc(o.name || id) + '</div><div class="form-panel__body"><div class="form-grid">' +
       '<div class="form-group"><label for="exName">Name</label><input type="text" id="exName" maxlength="120" value="' + esc(o.name || '') + '"></div>' +
       '<div class="form-group"><label for="exC1">Main colour</label><input type="color" class="ex-colour" id="exC1" value="' + (hex(o.colours && o.colours.primary) || '#333333') + '"></div>' +
       '<div class="form-group"><label for="exC2">Second colour</label><input type="color" class="ex-colour" id="exC2" value="' + (hex(o.colours && o.colours.secondary) || '#ffffff') + '"></div>' +
@@ -162,7 +162,7 @@
 
     var ppl = people(id);
     html += '<div class="section-head"><h2>People</h2></div>';
-    html += ppl.length ? '<div class="table-wrap"><table class="table"><thead><tr><th>Person</th><th>Zones</th><th aria-label="Actions"></th></tr></thead><tbody>' +
+    html += ppl.length ? '<div class="table-wrap ex-gap"><table class="table"><thead><tr><th>Person</th><th>Zones</th><th aria-label="Actions"></th></tr></thead><tbody>' +
       ppl.map(function (u) {
         var keys = (u.pass && u.pass.keys) || {};
         return '<tr><td><span class="pc-who"><a class="pc-who__name pc-link" href="?person=' + encodeURIComponent(u.uid) + '">' + esc(u.name || '(no name)') + '</a>' +
@@ -174,7 +174,7 @@
           '<td><span class="pc-actions"><button class="btn btn--ghost btn--sm" type="button" data-zones="' + esc(u.uid) + '">' + C.icon('edit') + 'Zones</button></span></td></tr>';
       }).join('') + '</tbody></table></div>' : '<p class="pc-muted">Nobody yet.</p>';
 
-    html += '<section class="form-panel"><div class="form-panel__head">Add person</div><div class="form-panel__body"><div class="form-grid">' +
+    html += '<section class="form-panel ex-gap"><div class="form-panel__head">Add person</div><div class="form-panel__body"><div class="form-grid">' +
       '<div class="form-group"><label for="exPEmail">Email</label><input type="email" id="exPEmail" autocomplete="off"></div>' +
       '<div class="form-group"><label for="exPName">Full name</label><input type="text" id="exPName" autocomplete="off"></div>' +
       '<div class="form-group"><label for="exPJob">Job title</label><input type="text" id="exPJob" autocomplete="off" maxlength="80"></div>' +
@@ -205,7 +205,7 @@
         (gives ? '' : ' <span class="pill pill--rejected" title="The tool does not offer this to externals now">Not open</span>') + '</td>' +
         '<td class="pc-muted">' + esc(t.reason || '') + '</td></tr>';
     }).join('');
-    return '<section class="form-panel"><div class="form-panel__head">' + esc(z.code) + ' · ' + esc(z.name) + '</div>' +
+    return '<section class="form-panel ex-gap"><div class="form-panel__head">' + esc(z.code) + ' · ' + esc(z.name) + '</div>' +
       '<div class="form-panel__body">' + (rows ? '<table class="table table--compact"><thead><tr><th>Tool</th><th>Gives</th><th>Why</th></tr></thead><tbody>' + rows + '</tbody></table>' :
         '<p class="pc-muted">Opens nothing yet.</p>') + '</div>' +
       '<div class="form-panel__foot pc-foot"><button class="btn btn--ghost btn--sm" type="button" data-zone="' + esc(id) + '">' + C.icon('edit') + 'Edit zone</button></div></section>';
