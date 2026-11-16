@@ -375,10 +375,15 @@ database checks, in the same words, so the two cannot drift apart.
   - One club names the club (for example, an analyst working for one club);
   - each grant carries **a reason** (for the IFR: "already receives these
     figures directly"), **who gave it** and **when** (both filled in), and
-    **an end date**. There is no sign-off field for now; the reason says why.
-  - The grant is written to the audit log, shown in the tool's "who can open
-    this" panel, and stops on its end date by itself, with a reminder a few
-    weeks before.
+    **an end date if one is wanted**; without one it lasts until removed
+    (Richard, 16/11). There is no sign-off field for now; the reason says why.
+  - The grant is written to the audit log and shown in the tool's "who can
+    open this" panel. One with an end date stops on that date by itself,
+    with a reminder a few weeks before.
+  - **Set up in Access, never in code** (Richard, 16/11): a Skeleton key
+    holder adds the organisation, its zones and their tools and views, and
+    invites its people, all in Access's Externals tab. Nothing about any one
+    organisation is written into the repo.
 - **Which tools offer a view to externals** is part of the tool's record
   (`externals`), and changing it is a pull request, never a switch in Access.
   Financial Benchmarking offers All clubs, named first. Absent means none.
@@ -400,7 +405,8 @@ Financial Benchmarking view, for League staff first; (3) the smallest
 External pass that serves the IFR (organisation record, one zone, invites,
 the charcoal pass, the grant with its record, database rules for this one
 tool); (4) the pair on `/pass/` and in Access. Before (3): how many IFR
-logins, the end date, and whether they see every season or the latest only.
+logins, and whether they see every season or the latest only. The end date
+is optional (16/11).
 
 ## Clearing the old model (started 16/11)
 

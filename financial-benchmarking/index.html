@@ -1,14 +1,19 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Financial Benchmarking
-  Version: v1.0 (14/11/2026)
-    One address. The League's page moves here from
+  Version: v1.1 (16/11/2026)
+    Pick a club, from the Club list or by clicking its bar or its row, and
+    it shows in its own colour with every other club in grey. "As the club
+    sees it" opens the club's own view from there. This is the All clubs,
+    named view (system/permissions-plan.md, "Club views").
+  Was: v1.0 (14/11/2026) — One address. The League's page moves here from
     /financial-benchmarking/admin/ (which now forwards): a League account
     sees every club, and at Manage imports returns. Clubs are as before.
   Was: v0.6 (13/11/2026) club page, v0.8 (11/11/2026) staff page
   File: /financial-benchmarking/index.html
 
   CHANGELOG
+    v1.1 (16/11/2026) — Pick a club to see it in its colour.
     v1.0 (14/11/2026) — One page for clubs and the League
       (NL.codeGate.door, nl-utils v1.68).
     v0.6 (13/11/2026) — Signed in to NL Tools, the NL Tools top bar; by
@@ -16,8 +21,6 @@
     v0.5 (11/11/2026) — Finance's review (_data v0.4, _view v0.4): a National
       club's return is the SCMP; charts retitled and reordered; every figure
       shows its place by size.
-    v0.4 (11/11/2026) — Canon sweep (_view v0.3).
-    v0.3 (10/11/2026) — The weighted club view (_view.js v0.2).
 
   WHO SEES WHAT (the pass decides, system/one-address-plan.md):
     · not signed in       → the club code door; a code opens that club's own
@@ -89,14 +92,14 @@
     });
     var db = firebase.database();
     window.NL_CHANGELOG = [
+      { date: '16/11/2026', version: 'v1.1', items: [ 'Pick a club from the list, or click its bar or row, and it shows in its own colour with the rest in grey.' ] },
       { date: '14/11/2026', version: 'v1.0', items: [ 'One address for clubs and the League: /financial-benchmarking/.' ] },
       { date: '11/11/2026', version: 'v0.8', items: [ 'Download CSV, Check, Import and Delete carry their icons.' ] },
       { date: '11/11/2026', version: 'v0.7', items: [
         'National: the return is the SCMP; income to date sits beside the budget; wages are a share of budgeted income; two charts to a row.',
         'North and South: Income and Playing squad first, the two squad spend ratios below, every chart titled in full.',
         'Every figure shows its place by size.' ] },
-      { date: '11/11/2026', version: 'v0.6', items: [ 'The club card at the top of one club’s view is now the shared club header used across NL Tools.' ] },
-      { date: '11/11/2026', version: 'v0.5', items: [ 'One club’s view opens with a club card: crest, name, division and return, trimmed in the club’s colours.' ] }
+      { date: '11/11/2026', version: 'v0.6', items: [ 'The club card at the top of one club’s view is now the shared club header used across NL Tools.' ] }
     ];
   </script>
   <script src="/system/nl-utils.js?v=72"></script>
@@ -131,6 +134,16 @@
   .fba-rank__name { font-size: var(--text-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .fba-rank__track { position: relative; height: 26px; }
   .fba-rank__track > i { position: absolute; top: 4px; bottom: 4px; background: var(--navy); border-radius: 2px; }
+  /* A club picked (v1.1): its bar in its own colour, every other bar grey.
+     The colour is the club's band (NL.pass.clubColours), checked as a hex
+     literal before it goes inline. */
+  .fba-rank.has-pick .fba-rank__track > i { background: var(--navy-200); }
+  .fba-rank.has-pick .fba-rank__row.is-picked .fba-rank__track > i { background: var(--pick, var(--navy)); }
+  .fba-rank__row.is-picked .fba-rank__name { font-weight: 700; font-variation-settings: 'wght' 700; }
+  #fbaTable tbody tr.is-picked td { background: var(--navy-50); font-weight: 700; font-variation-settings: 'wght' 700; }
+  #fbaTable tbody tr.is-picked td:first-child { box-shadow: inset 4px 0 0 var(--pick, var(--navy)); }
+  #fbaPicked:empty { display: none; }
+  #fbaPicked { margin-bottom: 16px; }
   .fba-rank__med, .fba-rank__zero { position: absolute; top: 0; bottom: 0; width: 0; }
   .fba-rank__med { border-left: 1px dashed var(--primary); }
   .fba-rank__zero { border-left: 1px solid var(--navy-300); }
@@ -188,11 +201,13 @@
           <select class="nl-select" id="fbaReturn" aria-label="Return"></select>
           <div id="fbaDivs"></div>
           <div id="fbaMetric"></div>
+          <div id="fbaPick"></div>
         </div>
         <div class="toolbar__right">
           <button class="btn btn--ghost btn--sm" id="fbaCsv" type="button"><svg class="icon icon--sm" aria-hidden="true"><use href="/assets/icons/sprites.svg#icon-download"></use></svg> Download CSV</button>
         </div>
       </div>
+      <div id="fbaPicked"></div>
       <div id="fbaRank"></div>
       <div id="fbaBody"></div>
       <div id="fbaClub" hidden>
@@ -388,7 +403,7 @@
   var S = {
     canWrite: false, meta: null, clubs: [], resolve: null,
     index: {}, returns: [], current: null, data: null,
-    div: 'National', metric: null, sort: { key: 'name', dir: 1 }, open: null,
+    div: 'National', metric: null, sort: { key: 'name', dir: 1 }, open: null, pick: null,
     impQuarter: 'q1', pending: null
   };
 
@@ -404,6 +419,37 @@
        both), it carries both names. */
     var q = set ? D.quarterLabel(p[1], set) : bothNames(p[1]);
     return NL.season.label(S.meta, p[0]) + ' · ' + q;
+  }
+  /* The picked club's colour: its band on a pass (NL.pass.clubColours), as
+     a hex literal or nothing, so a bad record cannot reach the style. */
+  function pickColour(code) {
+    var c = NL.clubs.byCode(code), cc = c && NL.pass.clubColours(c);
+    return cc && /^#[0-9a-fA-F]{3,8}$/.test(String(cc.band)) ? cc.band : null;
+  }
+  function pickStyle() {
+    var hex = S.pick && pickColour(S.pick);
+    return hex ? ' style="--pick:' + hex + '"' : '';
+  }
+  /* Pick a club, or the same one again to let it go. */
+  function pick(code) {
+    S.pick = code && code !== S.pick && S.data && S.data.clubs[code] ? code : null;
+    draw();
+  }
+  function drawPicked() {
+    var code = S.pick, club = code && S.data && S.data.clubs[code];
+    if (S.pickBtn) {
+      S.pickBtn.setOptions(rowsFor(S.div).sort(function (a, b) { return a.name.localeCompare(b.name); })
+        .map(function (r) { return { value: r.code, label: r.name }; }));
+      S.pickBtn.set(club ? code : null);
+    }
+    if (!club) { $('fbaPicked').innerHTML = ''; return; }
+    var head = $('fbaPicked');
+    head.innerHTML = NL.clubs.headerHtml(nameOf(code), {
+      sub: club.div + ' · ' + returnLabel(S.current, D.setFor(club.div)),
+      actionsHtml: '<button class="btn btn--ghost btn--sm" id="fbaSeeAs" type="button">As the club sees it</button>'
+    });
+    NL.clubs.wireCrestImgs(head);
+    $('fbaSeeAs').onclick = function () { openClub(code); };
   }
   function note(text) {
     $('fbaBody').innerHTML = '<div class="empty-state"><div class="empty-state__title">' + esc(text) + '</div></div>';
@@ -519,6 +565,8 @@
     if (!S.data) return;
     S.divPick.set(S.div);
     nameReturns(S.div);
+    if (S.pick && (!S.data.clubs[S.pick] || S.data.clubs[S.pick].div !== S.div)) S.pick = null;
+    drawPicked();
     drawRank();
 
     var metrics = D.metricsOf(D.setFor(S.div));
@@ -537,7 +585,7 @@
         metrics.map(function (m) { return th(m.key, m.label.replace(/\{Q\}/g, q), 'ta-right'); }).join('') +
       '</tr></thead><tbody>' +
         rows.map(function (r) {
-          return '<tr data-code="' + esc(r.code) + '"><td>' + esc(r.name) + '</td>' +
+          return '<tr data-code="' + esc(r.code) + '"' + (r.code === S.pick ? ' class="is-picked"' + pickStyle() : '') + '><td>' + esc(r.name) + '</td>' +
             metrics.map(function (m) { return '<td class="ta-right">' + esc(D.format(m.kind, r.f[m.key])) + '</td>'; }).join('') +
           '</tr>';
         }).join('') +
@@ -574,7 +622,7 @@
     var marks = '<span class="fba-rank__med" style="left:' + x(med) + '%"></span>' +
       (lo < 0 ? '<span class="fba-rank__zero" style="left:' + x(0) + '%"></span>' : '');
 
-    $('fbaRank').innerHTML = '<div class="fba-rank">' +
+    $('fbaRank').innerHTML = '<div class="fba-rank' + (S.pick ? ' has-pick' : '') + '"' + pickStyle() + '>' +
       '<dl class="fb-range">' +
         '<div><dt>Lowest</dt><dd>' + esc(D.format(m.kind, vals[0])) + '</dd></div>' +
         '<div><dt>Median</dt><dd>' + esc(D.format(m.kind, med)) + '</dd></div>' +
@@ -584,7 +632,8 @@
         var v = r.f[m.key];
         var bar = v == null ? '' : '<i style="left:' + x(Math.min(v, 0)) + '%;width:' +
           Math.max(Math.abs(v) / span * 100, 0.4).toFixed(2) + '%"></i>';
-        return '<button type="button" class="fba-rank__row" data-code="' + esc(r.code) + '">' +
+        return '<button type="button" class="fba-rank__row' + (r.code === S.pick ? ' is-picked' : '') + '" data-code="' + esc(r.code) + '"' +
+          ' aria-pressed="' + (r.code === S.pick ? 'true' : 'false') + '">' +
           '<span class="fba-rank__name">' + esc(r.name) + '</span>' +
           '<span class="fba-rank__track">' + bar + marks + '</span>' +
           '<span class="fba-rank__val' + (v == null ? ' is-none' : '') + '">' +
@@ -621,6 +670,8 @@
     S.open = code;
     $('fbaBody').hidden = true;
     $('fbaRank').hidden = true;
+    $('fbaPicked').hidden = true;
+    $('fbaPick').hidden = true;
     $('fbaMetric').hidden = true;
     $('fbaDivs').hidden = true;
     $('fbaCsv').hidden = true;
@@ -646,6 +697,8 @@
     $('fbaClub').hidden = true;
     $('fbaBody').hidden = false;
     $('fbaRank').hidden = false;
+    $('fbaPicked').hidden = false;
+    $('fbaPick').hidden = false;
     $('fbaMetric').hidden = false;
     $('fbaDivs').hidden = false;
     $('fbaCsv').hidden = false;
@@ -804,11 +857,11 @@
     var th = e.target.closest('th[data-sort]');
     if (th) { sortBy(th.getAttribute('data-sort')); return; }
     var tr = e.target.closest('tr[data-code]');
-    if (tr) openClub(tr.getAttribute('data-code'));
+    if (tr) pick(tr.getAttribute('data-code'));
   });
   $('fbaRank').addEventListener('click', function (e) {
     var b = e.target.closest('[data-code]');
-    if (b) openClub(b.getAttribute('data-code'));
+    if (b) pick(b.getAttribute('data-code'));
   });
   $('fbaBody').addEventListener('keydown', function (e) {
     var th = e.target.closest('th[data-sort]');
@@ -848,6 +901,10 @@
         if (v == null) { S.metricPick.set(S.metric); return; }
         S.metric = v; drawRank();
       }
+    });
+    S.pickBtn = NL.filterButton($('fbaPick'), {
+      label: 'Club', multiple: false, search: true, options: [], value: null,
+      onChange: function (v) { S.pick = v || null; draw(); }
     });
     NL.clubs.load().then(function (meta) {
       S.meta = meta;
