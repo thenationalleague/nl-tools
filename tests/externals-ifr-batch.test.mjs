@@ -49,5 +49,20 @@ test('Club Directory and Handbook send an External card to the published copy', 
   assert.match(page('club-directory/index.html'), /isExternal\(session\.pass\)\) \{ location\.replace\('\/club-directory\/public\/'\); return; \}/);
   const hb = page('handbook/index.html');
   const boot = hb.slice(hb.indexOf('window.TOOL.boot = function (session) {'));
-  assert.match(boot.slice(0, 400), /isExternal\(session && session\.pass\)\) \{ location\.replace\('\/handbook\/public\/'\); return; \}/, 'before anything reads the draft');
+  assert.match(boot.slice(0, 600), /var where = draftReader\(session\);\s*if \(where\) \{ location\.replace\(where \+ location\.hash\); return; \}/, 'before anything reads the draft');
+});
+
+test('Handbook: only the League stays on the draft page; a Club card goes to the reader, anyone else to the open page', () => {
+  const hb = page('handbook/index.html');
+  const src = hb.slice(hb.indexOf('function draftReader(session) {'), hb.indexOf('window.HB_DRAFT_READER'));
+  const draftReader = new Function('NL', 'location', src + '; return draftReader;')(NL, {});
+  const p = (base, extra) => Object.assign({ base, issued: 1 }, extra || {});
+  assert.equal(draftReader({ role: 'staff', pass: p('league') }), null);
+  assert.equal(draftReader({ role: 'admin' }), null, 'no pass, League role');
+  assert.equal(draftReader({ role: 'superadmin' }), null);
+  assert.equal(draftReader({ role: 'club-staff', pass: p('club', { club: 'Testham Town' }) }), '/handbook/reader/');
+  assert.equal(draftReader({ role: 'staff', pass: p('club', { club: 'Testham Town' }) }), '/handbook/reader/', 'the card decides, not an old role');
+  assert.equal(draftReader({ role: 'external', pass: p('external', { org: 'o', keys: { z: { given: 1 } } }) }), '/handbook/public/');
+  assert.equal(draftReader({ role: 'club-admin' }), '/handbook/public/', 'no pass, old club role');
+  assert.equal(draftReader({}), '/handbook/public/');
 });

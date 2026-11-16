@@ -12,7 +12,9 @@
    a club code could have taken a League invite) and
    app-data/ops-club-kits/submissions (open to the world for a form retired
    on 15/10/2026). tests/emulator/exposure-rules.mjs checks both against the
-   emulator. */
+   emulator. app-data/ops-handbook/draft (the working draft) was closed to
+   the League on 16/11/2026; tests/emulator/attendance-handbook-rules.mjs
+   checks it. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -38,7 +40,6 @@ const OPEN = {
   '/app-data/ops-club-directory/published/orgs': 'the open directory\'s organisations',
   '/app-data/ops-club-directory/published/clubs/$club': 'the open directory: only what clubs agreed to publish',
   '/app-data/ops-commercial-benchmarking/aggregates': 'averages across clubs, with no club named',
-  '/app-data/ops-handbook/draft': 'TO DECIDE: the handbook draft, readable by any club session',
   '/app-data/ops-handbook/publishedEditionId': 'which handbook edition is current'
 };
 
