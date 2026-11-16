@@ -1,4 +1,4 @@
-/* NL Tools — Access: the Externals tab (v2.8, 16/11/2026: canon sweep)
+/* NL Tools — Access: the Externals tab (v2.9, 16/11/2026: quiet empty lines)
 
    Organisations outside the League and its clubs, set up here and nowhere
    else (permissions plan, "External passes" and "Club views"). Skeleton key
@@ -168,7 +168,7 @@
     html += '<div class="section-head"><h2>Zones</h2><span class="pc-actions"><button class="btn btn--ghost btn--sm" type="button" id="exAddZone">' + C.icon('add') + 'Add zone</button></span></div>';
     var zids = Object.keys(zones).sort(function (a, b) { return String(zones[a].name).localeCompare(String(zones[b].name)); });
     html += zids.length ? zids.map(function (z) { return zoneHtml(z, zones[z]); }).join('') :
-      '<p class="pc-muted">No zones yet. A person needs at least one.</p>';
+      '<p class="ex-empty">No zones yet. A person needs at least one.</p>';
 
     var ppl = people(id);
     html += '<div class="section-head"><h2>People</h2></div>';
@@ -182,7 +182,7 @@
             return '<span class="pill pill--info">' + esc(zones[z] ? zones[z].code : z) + '</span>';
           }).join(' ') + '</td>' +
           '<td>' + (until ? esc(day(until)) : 'When removed') + '</td></tr>';
-      }).join('') + '</tbody></table></div>' : '<p class="pc-muted">Nobody yet.</p>';
+      }).join('') + '</tbody></table></div>' : '<p class="ex-empty">Nobody yet.</p>';
 
     html += '<section class="form-panel ex-gap"><div class="form-panel__head">Add person</div><div class="form-panel__body"><div class="form-grid">' +
       '<div class="form-group"><label for="exPEmail">Email</label><input type="email" id="exPEmail" autocomplete="off"></div>' +
@@ -190,7 +190,7 @@
       '<div class="form-group"><label for="exPJob">Job title</label><input type="text" id="exPJob" autocomplete="off" maxlength="80"></div>' +
       '<div class="form-group"><label for="exPUntil">Access ends</label><input type="date" id="exPUntil"><p class="form-hint">Leave empty to keep it until removed.</p></div>' +
       '<div class="form-group span2"><label>Zones</label><div class="pc-roles" id="exPZones">' +
-        (zids.length ? zids.map(function (z) { return zoneTick(z, zones[z], false); }).join('') : '<span class="pc-muted">Add a zone first.</span>') + '</div></div>' +
+        (zids.length ? zids.map(function (z) { return zoneTick(z, zones[z], false); }).join('') : '<span class="ex-empty">Add a zone first.</span>') + '</div></div>' +
       '</div><p class="form-hint">They get an email from NL Tools to set their password.</p></div>' +
       (zids.length ? '<div class="form-panel__foot pc-foot"><button class="btn btn--primary" type="button" id="exPAdd">Set up and email' + C.icon('send') + '</button></div>' : '') + '</section>';
 
@@ -221,7 +221,7 @@
     }).join('');
     return '<section class="form-panel ex-gap"><div class="form-panel__head">' + esc(z.code) + ' · ' + esc(z.name) + '</div>' +
       '<div class="form-panel__body">' + (rows ? '<table class="table table--compact"><thead><tr><th>Tool</th><th>Gives</th><th>Why</th></tr></thead><tbody>' + rows + '</tbody></table>' :
-        '<p class="pc-muted">Opens nothing yet.</p>') + '</div>' +
+        '<p class="ex-empty">Opens nothing yet.</p>') + '</div>' +
       '<div class="form-panel__foot pc-foot"><button class="btn btn--ghost btn--sm" type="button" data-zone="' + esc(id) + '">' + C.icon('edit') + 'Edit zone</button></div></section>';
   }
 
@@ -272,7 +272,7 @@
             view +
             '<div class="form-group span2"><label>Why</label><input type="text" data-reason="' + esc(t.key) + '" maxlength="300" value="' + esc(cur.reason || '') + '"></div>' +
             '</div>';
-        }).join('') : '<p class="pc-muted">No tool offers itself to externals yet. A tool is opened to them in its registry record, by pull request.</p>');
+        }).join('') : '<p class="ex-empty">No tool offers itself to externals yet. A tool is opened to them in its registry record, by pull request.</p>');
     var nameIn = wrap.querySelector('#exZName'), codeIn = wrap.querySelector('#exZCode');
     nameIn.addEventListener('input', function () {
       if (!zid && !codeIn.dataset.touched) codeIn.value = suggestCode(nameIn.value, codesTaken(X.org, zid));
