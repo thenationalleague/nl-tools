@@ -880,7 +880,10 @@ kilobytes of rules against a 256KB limit.
 - **The card:** `users/<uid>/pass` = `{ base: 'external', org, keys: { <zoneId>:
   { given, by, until? } }, jobTitle, issued, issuedBy }`, role `external` (no
   role defaults anywhere). `NL.pass.isIssued` counts it; `accountLevel.isLeague`
-  never does; the issue form refuses it both ways.
+  never does. Since 16/11 (nl-utils v1.71) the one issue form on /pass/
+  issues it too, Skeleton key only: the organisation and its zones as
+  ticks. A pass never crosses the External line either way; that is a
+  different account. Externals in Access keeps organisations and zones.
 - **The organisation:** `externals/<org>` (rules: Skeleton key writes and reads
   all; a member reads its own; nobody else), with its zones and each zone's
   tools `{ level, view?, club?, reason?, by, at }` (the note optional since

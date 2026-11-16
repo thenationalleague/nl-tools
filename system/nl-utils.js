@@ -1,7 +1,12 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.70 (16/11/2026)
+   Version: v1.71 (16/11/2026)
+   v1.71 — NL.pass.build issues an External card too: the organisation and
+     its zones ticked, from the one issue form on /pass/ (Richard: "external
+     to merge into here and be a tick box"). A card stays on its side: an
+     External pass stays External, a League or Club one never becomes one.
+     pass.ext is still the server's alone.
    v1.70 — NL.infoTip: the (i). A small round button beside a label, a
      heading or a key that opens a short explanation on a tap or a click and
      closes on a tap elsewhere, Esc, or the (i) again: the detail someone
@@ -2116,6 +2121,7 @@
       external_org_added: 'Organisation added', external_org_changed: 'Organisation changed',
       external_zone_saved: 'Zone saved', external_zone_deleted: 'Zone deleted',
       external_invited: 'External account set up', external_zones_changed: 'Zones changed',
+      name_changed: 'Name changed',
       fixtures_correct: 'Fixture corrected', fixtures_remove: 'Fixture removed', fixtures_restore: 'Fixture restored',
       attendance_submit: 'Attendance submitted', attendance_edit: 'Attendance edited',
       add_cup_fixture: 'Cup fixture added', edit_cup_fixture: 'Cup fixture edited',
@@ -3589,10 +3595,15 @@
        none. Keys from the other side and unknown ids are dropped; the
        Skeleton key goes only on a League card. */
     function build(input, by, now, previous) {
-      /* An External pass is set up in Access's Externals tab, never by this
-         form: re-saving one here would turn it into a League card. */
-      if (input && input.base === 'external') throw new Error('An External pass is set up in Access, Externals.');
-      if (previous && previous.base === 'external') throw new Error('This is an External pass. Change it in Access, Externals.');
+      /* v1.71: the issue form issues every card. An External card stays
+         External and a League or Club card stays off External: moving
+         between them is a different account (role external, its
+         organisation), set up by invite, never a click on this form. */
+      var wasExt = !!(previous && previous.base === 'external'), isExt = !!(input && input.base === 'external');
+      if (previous && isIssued(previous) && wasExt !== isExt) {
+        throw new Error(wasExt ? 'This is an External pass: it stays External.' : 'An External pass is for an External account.');
+      }
+      if (isExt) return buildExternal(input, by, nowOr(now), previous);
       now = nowOr(now);
       var base = input.base === 'club' ? 'club' : 'league';
       var prevKeys = (previous && previous.base === base && previous.keys) || {};
@@ -3619,6 +3630,38 @@
       if (base === 'league' && input.skeleton) {
         pass.skeleton = (previous && previous.skeleton) || { given: now, by: by };
       }
+      return pass;
+    }
+
+    /* An External card: the organisation, and the zones of it ticked. Which
+       zones exist is the organisation's (externals/<org>), so the caller
+       passes only ids it offered; anything that is not a plain id is
+       dropped. What the zones open (pass.ext) is the server's to write
+       (functions/externals.js) and is never built here. */
+    function buildExternal(input, by, now, previous) {
+      var org = String(input.org || '').trim();
+      if (!/^[a-z0-9][a-z0-9-]{0,59}$/.test(org)) throw new Error('Choose the organisation first.');
+      var same = previous && previous.base === 'external' && previous.org === org;
+      var prevKeys = (same && previous.keys) || {};
+      var keys = {}, until = input.until || {};
+      (input.keys || []).forEach(function (id) {
+        id = String(id);
+        if (!/^[a-z0-9][a-z0-9-]{0,59}$/.test(id)) return;
+        var old = prevKeys[id];
+        var k = old ? { given: old.given, by: old.by } : { given: now, by: by };
+        if (typeof until[id] === 'number' && isFinite(until[id])) k.until = until[id];
+        keys[id] = k;
+      });
+      var pass = {
+        base: 'external',
+        org: org,
+        jobTitle: String(input.jobTitle || '').trim().slice(0, 80),
+        issued: (previous && previous.issued) || now,
+        issuedBy: (previous && previous.issuedBy) || by,
+        updated: now,
+        updatedBy: by
+      };
+      if (Object.keys(keys).length) pass.keys = keys;
       return pass;
     }
 

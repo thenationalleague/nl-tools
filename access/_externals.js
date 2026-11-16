@@ -1,4 +1,4 @@
-/* NL Tools — Access: the Externals tab (v2.11, 16/11/2026: the organisation's header and logo)
+/* NL Tools — Access: the Externals tab (v2.12, 16/11/2026: people's passes on the one issue form)
 
    Organisations outside the League and its clubs, set up here and nowhere
    else (permissions plan, "External passes" and "Club views"). Skeleton key
@@ -219,7 +219,9 @@
     $('exAddZone').onclick = function () { editZone(null); };
     if ($('exPAdd')) $('exPAdd').onclick = addPerson;
     $('exBody').querySelectorAll('[data-zone]').forEach(function (b) { b.onclick = function () { editZone(b.getAttribute('data-zone')); }; });
-    rowsOpen($('exBody'), '[data-zones]', function (el) { editPersonZones(el.getAttribute('data-zones')); });
+    /* A person's pass, name and zones are changed on the one issue form,
+       as everyone's are (v2.12). */
+    rowsOpen($('exBody'), '[data-zones]', function (el) { location.href = '/pass/?view=issue&uid=' + encodeURIComponent(el.getAttribute('data-zones')); });
   }
   /* A zone as a tick box: its name, and beneath it the code and what
      ticking it opens, so the box says what it gives (style principles 5.4). */
@@ -511,40 +513,6 @@
 
   /* Change which zones a person holds, and when their access ends. Keeps
      when each zone they keep was given, and by whom. */
-  function editPersonZones(uid) {
-    var u = (C.S.users || []).filter(function (x) { return x.uid === uid; })[0];
-    if (!u) return;
-    var o = X.orgs[X.org], zones = o.zones || {}, keys = (u.pass && u.pass.keys) || {};
-    var firstUntil = null;
-    Object.keys(keys).forEach(function (k) { if (keys[k] && typeof keys[k].until === 'number') firstUntil = keys[k].until; });
-    var wrap = document.createElement('div');
-    wrap.innerHTML = '<div class="form-group"><label>Zones</label><div class="pc-roles ex-ticks">' + Object.keys(zones).map(function (z) { return zoneTick(z, zones[z], !!keys[z]); }).join('') + '</div></div>' +
-      '<div class="form-group"><label for="exEUntil">Access ends</label><input type="date" id="exEUntil" value="' + dateInput(firstUntil) + '"><p class="form-hint">Leave empty to keep it until removed. Clear every zone to remove their access.</p></div>';
-    NL.modal({ title: u.name || u.email, size: 'sm', body: wrap, buttons: [
-      { label: 'Save', className: 'btn--primary', onClick: function (c) {
-        var until = dateMs(wrap.querySelector('#exEUntil').value);
-        var next = {};
-        wrap.querySelectorAll('input[type=checkbox]:checked').forEach(function (i) {
-          var z = i.value, old = keys[z];
-          next[z] = old ? { given: old.given, by: old.by } : { given: Date.now(), by: C.S.session.uid };
-          if (until) next[z].until = until;
-        });
-        var updates = {};
-        updates['users/' + uid + '/pass/keys'] = Object.keys(next).length ? next : null;
-        updates['users/' + uid + '/pass/updated'] = Date.now();
-        updates['users/' + uid + '/pass/updatedBy'] = C.S.session.uid;
-        C.db.ref().update(updates).then(function () {
-          NL.writeAudit('external_zones_changed', (o.name || X.org) + ': ' +
-            (Object.keys(next).map(function (z) { return zones[z].code; }).join(', ') || 'no zones') +
-            (until ? ', to ' + day(until) : ''), { uid: uid, name: u.name, email: u.email });
-          c.close();
-          NL.toast('Saved', 'success');
-          return C.refreshPeople().then(drawOrg);
-        })['catch'](function (e) { NL.toast('Could not save: ' + (e && e.message || e), 'error'); });
-      } }
-    ] });
-  }
-
   window.ACCESS_EXTERNALS = {
     init: function (ctx, orgId) {
       C = ctx;

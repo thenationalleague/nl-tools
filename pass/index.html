@@ -1,8 +1,14 @@
 <!DOCTYPE html>
 <!--
   NL Tools — My pass
-  Version: v2.10 (16/11/2026)
+  Version: v2.11 (16/11/2026)
   File: /pass/index.html
+  v2.11 (16/11/2026) — One issue form for every card. An External account
+    takes an External card here (Skeleton key only): its organisation and
+    that organisation's zones as ticks, each saying what it opens, with an
+    end date each, previewed as it will be. The form also changes a
+    person's name. Organisations and their zones are still set up in
+    Access → Externals.
   v2.10 (16/11/2026) — The key ends in the canon (i) (NL.infoTip): what
     Access, Manage and the small stickers mean, on a tap.
   v2.9 (16/11/2026) — The paragraph above the tools is a key: the Access and
@@ -12,11 +18,6 @@
     big sticker when one is uploaded (Access, Externals), else its initials.
   v2.7 (16/11/2026) — Canon sweep of the External card: the initials take
     the display type size, and the fallback colour comes from the brand.
-  v2.6 (16/11/2026) — An External card: charcoal, the organisation's name
-    and colour on the big sticker, and its own zones as the stickers. Its
-    tool list is charcoal too. The organisation is read from
-    externals/<org>. The issue form never offers an External card; it is
-    changed in Access, Externals.
 
   Your pass: the card you belong to (League or Club), the keys you hold on
   top of it, and every tool they open, with which part of the pass opened
@@ -94,6 +95,11 @@
     window.NL_CHANGELOG = [
       {
         date: '16/11/2026',
+        version: 'v2.11',
+        items: [ 'Issue a pass covers organisations outside the League: tick their zones here. You can also change a person\'s name.' ]
+      },
+      {
+        date: '16/11/2026',
         version: 'v2.10',
         items: [ 'Tap the (i) beside the key for what Access, Manage and the stickers mean.' ]
       },
@@ -111,11 +117,6 @@
         date: '16/11/2026',
         version: 'v2.7',
         items: [ 'Tidier type on an organisation\'s pass.' ]
-      },
-      {
-        date: '16/11/2026',
-        version: 'v2.6',
-        items: [ 'Passes for organisations outside the League: charcoal, with their own zones.' ]
       }
     ];
 
@@ -131,7 +132,7 @@
   </script>
 
   <!-- NL system scripts (lint canonical: ?v=66 / ?v=1 / ?v=15 / ?v=21) -->
-  <script src="/system/nl-utils.js?v=74"></script>
+  <script src="/system/nl-utils.js?v=75"></script>
   <script src="/system/nl-analytics.js?v=1"></script>
   <script src="/system/nl-topbar.js?v=16"></script>
   <script src="/system/auth-guard.js?v=24"></script>
@@ -522,6 +523,8 @@
   .key-row { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; min-height: 40px; }
   .key-row label { display: inline-flex; align-items: center; gap: 8px; font-size: var(--text-sm); color: var(--text); text-transform: none; letter-spacing: 0; font-weight: 400; font-variation-settings: 'wght' 400; margin: 0; min-width: 160px; }
   .key-row input[type="checkbox"] { width: auto; padding: 0; margin: 0; }
+  .key-row__opens { font-size: var(--text-xs); color: var(--text-muted); flex: 1 1 200px; }
+  .key-row__none { margin: 0; font-size: var(--text-sm); color: var(--text-muted); }
   .key-row__until { display: inline-flex; align-items: center; gap: 8px; font-size: var(--text-xs); color: var(--text-muted); }
   .key-row__until input[type="date"] { width: auto; padding: 6px 10px; }
   .issue-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
@@ -1164,6 +1167,10 @@
 
   function passLine(pass) {
     if (!P.isIssued(pass)) return 'No pass yet';
+    if (P.isExternal(pass)) {
+      var zs = (orgOf(pass) || {}).zones || {};
+      return [orgName(pass), pass.jobTitle, Object.keys(pass.keys || {}).map(function (z) { return (zs[z] && zs[z].code) || z; }).join(' ')].filter(Boolean).join(' · ');
+    }
     var bits = [pass.base === 'club' ? pass.club : 'League'];
     if (pass.jobTitle) bits.push(pass.jobTitle);
     var keys = P.keysHeld(pass).map(function (id) { return P.KEY[id].code; });
@@ -1195,7 +1202,7 @@
       STATE.users = Object.keys(all).filter(function (uid) { return all[uid] && !all[uid].rejected; }).map(function (uid) {
         var u = all[uid];
         return { uid: uid, name: u.name || u.email || '', email: u.email || '', role: u.role || '', club: u.club || '',
-          jobTitle: u.jobTitle || '', createdAt: u.createdAt || null, pending: !!u.pending, pass: u.pass || null };
+          jobTitle: u.jobTitle || '', createdAt: u.createdAt || null, pending: !!u.pending, pass: u.pass || null, orgKey: u.orgKey || '' };
       }).sort(function (a, b) { return a.name.localeCompare(b.name); });
       return STATE.users;
     });
@@ -1224,8 +1231,10 @@
   /* Can I issue to this person? League Operations reach club people only:
      not anyone on a League card, nor a League role waiting for one. */
   function canIssueTo(u) {
-    if (u.pass && P.isExternal(u.pass)) return false;   /* changed in Access, Externals */
     var r = myRights();
+    /* An External account (role external) is the Skeleton key's alone, on
+       this form since v2.11. */
+    if ((u.pass && P.isExternal(u.pass)) || u.role === 'external') return !!r.skeleton;
     if (r.league) return true;
     if (!r.club) return false;
     if (u.uid === STATE.session.uid) return false;
@@ -1245,10 +1254,15 @@
           '<div class="form-group"><label for="issueSearch">Person</label>' +
             '<div id="issuePerson"></div></div>' +
           '<div id="issueFields" class="issue-fields" hidden>' +
+            '<div class="form-group"><label for="issueName">Full name</label>' +
+              '<input id="issueName" type="text" maxlength="120" autocomplete="off"></div>' +
             '<div class="form-group"><label>Card</label><div class="choice-row" id="issueBase">' +
               '<label><input type="radio" name="issueBase" value="league"' + (rights.league ? '' : ' disabled') + '> League card</label>' +
-              '<label><input type="radio" name="issueBase" value="club"> Club card</label></div></div>' +
+              '<label><input type="radio" name="issueBase" value="club"> Club card</label>' +
+              (rights.skeleton ? '<label><input type="radio" name="issueBase" value="external" disabled> External card</label>' : '') +
+            '</div></div>' +
             '<div class="form-group" id="issueClubWrap" hidden><label>Club</label><div id="issueClub"></div></div>' +
+            '<div class="form-group" id="issueOrgWrap" hidden><label for="issueOrg">Organisation</label><select class="nl-select" id="issueOrg"></select></div>' +
             '<div class="form-group"><label for="issueJob">Job title</label>' +
               '<input id="issueJob" type="text" maxlength="80" autocomplete="off"></div>' +
             '<div class="form-group"><label>Zones</label><div id="issueKeys"></div></div>' +
@@ -1264,7 +1278,7 @@
       '</div>' +
       '<div class="issue-tools" id="issueTools"></div>';
 
-    STATE.issue = { user: null, base: rights.league ? 'league' : 'club', club: FALLBACK_CLUB, jobTitle: '', keys: [], until: {}, skeleton: false };
+    STATE.issue = { user: null, base: rights.league ? 'league' : 'club', club: FALLBACK_CLUB, org: '', name: '', jobTitle: '', keys: [], until: {}, skeleton: false };
     if (clubNames().indexOf(FALLBACK_CLUB) < 0) STATE.issue.club = clubNames()[0] || FALLBACK_CLUB;
     drawPersonPicker();
     drawIssuePreview();
@@ -1275,6 +1289,20 @@
       drawIssueKeys(); drawIssuePreview();
     });
     list.querySelector('#issueJob').addEventListener('input', function (e) { STATE.issue.jobTitle = e.target.value; drawIssuePreview(); });
+    list.querySelector('#issueName').addEventListener('input', function (e) { STATE.issue.name = e.target.value; drawIssuePreview(); });
+    list.querySelector('#issueOrg').addEventListener('change', function (e) {
+      STATE.issue.org = e.target.value; STATE.issue.keys = []; STATE.issue.until = {};
+      drawIssueKeys(); drawIssuePreview();
+    });
+    /* Every organisation, for the External card's picker: the Skeleton
+       key reads them all (externals/ rules). */
+    if (rights.skeleton) {
+      NL.ensureAuth().then(function () { return db.ref('externals').once('value'); }).then(function (s) {
+        var all = s.val() || {};
+        Object.keys(all).forEach(function (id) { STATE.orgs[id] = all[id]; });
+        drawOrgOptions();
+      })['catch'](function () {});
+    }
     list.querySelector('#issueKeys').addEventListener('change', function (e) {
       var iss = STATE.issue;
       if (e.target.matches('input[type="date"]')) {
@@ -1354,6 +1382,8 @@
     var p = u.pass, passText;
     if (!P.isIssued(p)) {
       passText = 'Not issued yet';
+    } else if (P.isExternal(p)) {
+      passText = 'External card, ' + passLine(p);
     } else {
       var keys = P.keysHeld(p).map(function (id) {
         var until = p.keys[id].until;
@@ -1386,16 +1416,26 @@
   function choosePerson(u) {
     var p = u.pass, iss = STATE.issue;
     iss.user = u;
-    iss.base = (p && p.base) || (NL.isClubUser(u.role) ? 'club' : 'league');
+    /* An External account takes an External card and nothing else; anyone
+       else never takes one (NL.pass.build refuses the crossing too). */
+    var external = (p && P.isExternal(p)) || u.role === 'external';
+    iss.base = external ? 'external' : (p && p.base) || (NL.isClubUser(u.role) ? 'club' : 'league');
     if (p && p.club) iss.club = p.club;
+    iss.org = external ? ((p && p.org) || u.orgKey || '') : '';
+    iss.name = u.name || '';
     iss.jobTitle = (p && p.jobTitle) || u.jobTitle || '';
-    if (!myRights().league) iss.base = 'club';
-    iss.keys = p ? P.keysHeld(p) : [];
+    if (!external && !myRights().league) iss.base = 'club';
+    iss.keys = !p ? [] : external ? Object.keys(p.keys || {}) : P.keysHeld(p);
     iss.until = {};
     iss.keys.forEach(function (id) { var u0 = p.keys[id] && p.keys[id].until; if (typeof u0 === 'number') iss.until[id] = u0; });
-    iss.skeleton = P.isSkeleton(p);
+    iss.skeleton = !external && P.isSkeleton(p);
     var root = document.getElementById('listCol');
+    root.querySelectorAll('input[name="issueBase"]').forEach(function (r) {
+      r.disabled = external ? r.value !== 'external' : (r.value === 'external' || (r.value === 'league' && !myRights().league));
+    });
     root.querySelector('input[name="issueBase"][value="' + iss.base + '"]').checked = true;
+    root.querySelector('#issueName').value = iss.name;
+    drawOrgOptions();
     root.querySelector('#issueJob').value = iss.jobTitle;
     var skel = root.querySelector('#issueSkel'); if (skel) skel.checked = iss.skeleton;
     root.querySelector('#issueWithdraw').hidden = !P.isIssued(p);
@@ -1411,16 +1451,42 @@
   function drawIssueKeys() {
     var root = document.getElementById('listCol'), iss = STATE.issue;
     root.querySelector('#issueClubWrap').hidden = iss.base !== 'club';
+    root.querySelector('#issueOrgWrap').hidden = iss.base !== 'external';
     var sw = root.querySelector('#issueSkelWrap'); if (sw) sw.hidden = iss.base !== 'league';
-    /* One row per key: tick to give it; once ticked, an optional end date
-       (holiday cover, a short project). The key goes on that date. */
-    root.querySelector('#issueKeys').innerHTML = P.KEYS.filter(function (k) { return k.base === iss.base; }).map(function (k) {
+    /* One row per zone: tick to give it; once ticked, an optional end date
+       (holiday cover, a short project). The zone goes on that date. An
+       External card's zones are its organisation's, set up in Access →
+       Externals, each saying what it opens. */
+    var rows = iss.base === 'external' ? orgZones(iss.org) : P.KEYS.filter(function (k) { return k.base === iss.base; });
+    root.querySelector('#issueKeys').innerHTML = rows.length ? rows.map(function (k) {
       var on = iss.keys.indexOf(k.id) >= 0;
       var until = iss.until[k.id];
-      return '<div class="key-row"><label><input type="checkbox" value="' + esc(k.id) + '"' + (on ? ' checked' : '') + '> ' + esc(k.name) + '</label>' +
+      return '<div class="key-row"><label><input type="checkbox" value="' + esc(k.id) + '"' + (on ? ' checked' : '') + '> ' + esc(k.name) +
+          (k.code && iss.base === 'external' ? ' · ' + esc(k.code) : '') + '</label>' +
+        (k.opens ? '<span class="key-row__opens">' + esc(k.opens) + '</span>' : '') +
         (on ? '<span class="key-row__until"><span>Ends</span><input type="date" data-until="' + esc(k.id) + '" aria-label="' + esc(k.name) + ' zone ends"' +
           (until ? ' value="' + isoDay(until) + '"' : '') + '></span>' : '') + '</div>';
+    }).join('') : '<p class="key-row__none">' + (iss.org ? 'This organisation has no zones yet: add them in Access → Externals.' : 'Choose the organisation first.') + '</p>';
+  }
+
+  /* The organisation's zones as rows for the form, A–Z, each with what it
+     opens. */
+  function orgZones(orgId) {
+    var o = STATE.orgs[orgId], z = (o && o.zones) || {}, reg = STATE.registry || {};
+    return Object.keys(z).map(function (id) {
+      var names = Object.keys(z[id].tools || {}).map(function (k) { return (reg[k] && reg[k].label) || k; }).sort();
+      return { id: id, name: z[id].name || id, code: z[id].code || '', opens: names.length ? 'Opens ' + names.join(', ') : 'Opens nothing yet' };
+    }).sort(function (a, b) { return a.name.localeCompare(b.name); });
+  }
+  function drawOrgOptions() {
+    var sel = document.getElementById('issueOrg'), iss = STATE.issue;
+    if (!sel) return;
+    var ids = Object.keys(STATE.orgs).filter(function (id) { return STATE.orgs[id]; })
+      .sort(function (a, b) { return String(STATE.orgs[a].name || a).localeCompare(String(STATE.orgs[b].name || b)); });
+    sel.innerHTML = '<option value="">Choose…</option>' + ids.map(function (id) {
+      return '<option value="' + esc(id) + '"' + (id === iss.org ? ' selected' : '') + '>' + esc(STATE.orgs[id].name || id) + '</option>';
     }).join('');
+    if (iss.user) { drawIssueKeys(); drawIssuePreview(); }
   }
 
   function isoDay(ms) {
@@ -1430,8 +1496,18 @@
 
   function issuedPass() {
     var iss = STATE.issue;
-    return P.build({ base: iss.base, club: iss.club, jobTitle: iss.jobTitle, keys: iss.keys, until: iss.until, skeleton: iss.skeleton },
+    return P.build({ base: iss.base, club: iss.club, org: iss.org, jobTitle: iss.jobTitle, keys: iss.keys, until: iss.until, skeleton: iss.skeleton },
       STATE.session.uid, Date.now(), iss.user && iss.user.pass);
+  }
+  /* The pass as it will open things: for an External card, what its zones
+     give (NL.pass.extFor, the server's own sum) is added for the preview
+     only. The server writes the real one after the save. */
+  function previewPass() {
+    var iss = STATE.issue;
+    if (iss.base === 'external' && !iss.org) return null;
+    var pass = issuedPass();
+    if (P.isExternal(pass)) pass.ext = P.extFor(pass, STATE.orgs[pass.org] || null, STATE.registry, Date.now());
+    return pass;
   }
 
   function drawIssuePreview() {
@@ -1441,7 +1517,7 @@
       if (tools) tools.innerHTML = '';
       return;
     }
-    var subject = { name: iss.user.name, pass: issuedPass() };
+    var subject = { name: iss.name || iss.user.name, pass: previewPass() };
     drawPass(subject, false);
     /* What this pass opens, and what it does not, as it stands in the form. */
     if (tools) { tools.innerHTML = listHtml(subject, { links: false, all: true }); wireCrests(tools); }
@@ -1450,18 +1526,35 @@
   function saveIssue() {
     var iss = STATE.issue; if (!iss.user) return;
     if (iss.base === 'club' && !iss.club) { NL.toast('Choose the club first', 'error'); return; }
-    var pass = issuedPass();
+    if (iss.base === 'external' && !iss.org) { NL.toast('Choose the organisation first', 'error'); return; }
+    var name = String(iss.name || '').trim().slice(0, 120);
+    if (!name) { NL.toast('A name is needed', 'error'); return; }
+    var pass;
+    try { pass = issuedPass(); } catch (e) { NL.toast(e.message, 'error'); return; }
     var btn = document.getElementById('issueSave'); btn.disabled = true;
     /* v1.5: the pass and the per-tool entries the database reads go in one
-       write, so both locks agree the moment it saves (NL.pass.toOld). */
+       write, so both locks agree the moment it saves (NL.pass.toOld). An
+       External card's entries follow from what its zones open, which the
+       server works out after the save (externalPasses, then passEntries). */
     var updates = {}, base = 'users/' + iss.user.uid + '/';
     updates[base + 'pass'] = pass;
-    var old = P.toOld(pass, STATE.registry, iss.user.role);
-    Object.keys(old).forEach(function (k) { updates[base + 'tools/' + k] = old[k]; });
+    if (P.isExternal(pass)) {
+      var o = STATE.orgs[pass.org] || {};
+      updates[base + 'org'] = String(o.name || '').slice(0, 120);
+      updates[base + 'orgKey'] = pass.org;
+      updates[base + 'jobTitle'] = pass.jobTitle || null;
+    } else {
+      var old = P.toOld(pass, STATE.registry, iss.user.role);
+      Object.keys(old).forEach(function (k) { updates[base + 'tools/' + k] = old[k]; });
+    }
+    var renamed = name !== (iss.user.name || '');
+    if (renamed) updates[base + 'name'] = name;
     NL.ensureAuth().then(function () {
       return db.ref().update(updates);
     }).then(function () {
-      NL.writeAudit('pass_issued', iss.user.name + ': ' + passLine(pass));
+      if (renamed) NL.writeAudit('name_changed', (iss.user.name || '') + ' → ' + name, { uid: iss.user.uid, name: name, email: iss.user.email });
+      iss.user.name = name;
+      NL.writeAudit('pass_issued', name + ': ' + passLine(pass));
       iss.user.pass = pass;
       if (iss.user.uid === STATE.session.uid) STATE.session.pass = pass;
       document.getElementById('issueWithdraw').hidden = false;
