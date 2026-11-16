@@ -1,8 +1,13 @@
 <!DOCTYPE html>
 <!--
   NL Tools — My pass
-  Version: v2.11 (16/11/2026)
+  Version: v2.12 (16/11/2026)
   File: /pass/index.html
+  v2.12 (16/11/2026) — Approving an access request is issuing the pass:
+    Review in Access opens this form with the request above it and its club,
+    job title and zones filled in; Approve and issue pass writes the pass,
+    sets the legacy role from the card and marks the request approved. The
+    club picker now shows the chosen person's club.
   v2.11 (16/11/2026) — One issue form for every card. An External account
     takes an External card here (Skeleton key only): its organisation and
     that organisation's zones as ticks, each saying what it opens, with an
@@ -16,8 +21,6 @@
     View as bar puts the name on its own line when the buttons crowd it.
   v2.8 (16/11/2026) — An External card shows its organisation's logo on the
     big sticker when one is uploaded (Access, Externals), else its initials.
-  v2.7 (16/11/2026) — Canon sweep of the External card: the initials take
-    the display type size, and the fallback colour comes from the brand.
 
   Your pass: the card you belong to (League or Club), the keys you hold on
   top of it, and every tool they open, with which part of the pass opened
@@ -95,6 +98,11 @@
     window.NL_CHANGELOG = [
       {
         date: '16/11/2026',
+        version: 'v2.12',
+        items: [ 'Access requests are approved here: the request fills the form, and saving the pass approves it.' ]
+      },
+      {
+        date: '16/11/2026',
         version: 'v2.11',
         items: [ 'Issue a pass covers organisations outside the League: tick their zones here. You can also change a person\'s name.' ]
       },
@@ -112,11 +120,6 @@
         date: '16/11/2026',
         version: 'v2.8',
         items: [ 'An organisation\'s logo on its pass.' ]
-      },
-      {
-        date: '16/11/2026',
-        version: 'v2.7',
-        items: [ 'Tidier type on an organisation\'s pass.' ]
       }
     ];
 
@@ -520,6 +523,9 @@
     .issue-person__facts dd { margin-bottom: 8px; }
   }
   .issue-back { align-self: flex-start; }
+  .issue-request { padding: 14px 16px; border: 1px solid var(--navy-300); border-radius: var(--radius); background: var(--navy-50); }
+  .issue-request[hidden] { display: none; }
+  .issue-request__head { font-size: var(--text-sm); font-weight: 700; font-variation-settings: 'wght' 700; color: var(--navy); margin-bottom: 8px; }
   .key-row { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; min-height: 40px; }
   .key-row label { display: inline-flex; align-items: center; gap: 8px; font-size: var(--text-sm); color: var(--text); text-transform: none; letter-spacing: 0; font-weight: 400; font-variation-settings: 'wght' 400; margin: 0; min-width: 160px; }
   .key-row input[type="checkbox"] { width: auto; padding: 0; margin: 0; }
@@ -1251,6 +1257,7 @@
       '<div class="form-panel issue-panel">' +
         '<div class="form-panel__head">Issue a pass</div>' +
         '<div class="form-panel__body issue-fields">' +
+          '<div class="issue-request" id="issueRequest" hidden></div>' +
           '<div class="form-group"><label for="issueSearch">Person</label>' +
             '<div id="issuePerson"></div></div>' +
           '<div id="issueFields" class="issue-fields" hidden>' +
@@ -1319,7 +1326,7 @@
     });
     var skel = list.querySelector('#issueSkel');
     if (skel) skel.addEventListener('change', function () { STATE.issue.skeleton = skel.checked; drawIssuePreview(); });
-    NL.clubPicker(list.querySelector('#issueClub'), {
+    STATE.issuePicker = NL.clubPicker(list.querySelector('#issueClub'), {
       mode: 'select', value: STATE.issue.club, clearable: false,
       onSelect: function (sel) { if (sel && sel.name) { STATE.issue.club = sel.name; drawIssuePreview(); } }
     });
@@ -1429,6 +1436,18 @@
     iss.until = {};
     iss.keys.forEach(function (id) { var u0 = p.keys[id] && p.keys[id].until; if (typeof u0 === 'number') iss.until[id] = u0; });
     iss.skeleton = !external && P.isSkeleton(p);
+    /* An access request: a Club card for the club asked for, with the
+       zones asked for ticked to start. Untick or add before approving. */
+    var req = iss.request && iss.request.uid === u.uid ? iss.request : null;
+    if (req) {
+      iss.base = 'club';
+      iss.club = req.club || iss.club;
+      iss.jobTitle = req.jobTitle || iss.jobTitle;
+      iss.keys = Object.keys(req.zones || {}).filter(function (z) { return req.zones[z] === true && P.KEY[z] && P.KEY[z].base === 'club'; });
+      iss.until = {};
+      iss.skeleton = false;
+    }
+    drawRequest(req);
     var root = document.getElementById('listCol');
     root.querySelectorAll('input[name="issueBase"]').forEach(function (r) {
       r.disabled = external ? r.value !== 'external' : (r.value === 'external' || (r.value === 'league' && !myRights().league));
@@ -1438,8 +1457,28 @@
     drawOrgOptions();
     root.querySelector('#issueJob').value = iss.jobTitle;
     var skel = root.querySelector('#issueSkel'); if (skel) skel.checked = iss.skeleton;
-    root.querySelector('#issueWithdraw').hidden = !P.isIssued(p);
+    root.querySelector('#issueWithdraw').hidden = !P.isIssued(p) || !!req;
+    root.querySelector('#issueSave').textContent = req ? 'Approve and issue pass' : 'Save pass';
+    /* The club picker shows the person's club (or the one asked for). */
+    if (iss.club && STATE.issuePicker && STATE.issuePicker.setValue) STATE.issuePicker.setValue(iss.club);
     drawPersonPicker(); drawIssueKeys(); showFields(true); drawIssuePreview();
+  }
+
+  /* The request being approved, above the form: what they asked for, in
+     their words, and when. */
+  function drawRequest(req) {
+    var box = document.getElementById('issueRequest');
+    if (!box) return;
+    box.hidden = !req;
+    if (!req) { box.innerHTML = ''; return; }
+    var asked = Object.keys(req.zones || {}).filter(function (z) { return P.KEY[z]; })
+      .map(function (z) { return P.KEY[z].name + ' · ' + P.KEY[z].code; });
+    box.innerHTML = '<div class="issue-request__head">Access request' + (req.createdAt ? ' · ' + esc(NL.formatDateTime(req.createdAt, { weekday: true })) : '') + '</div>' +
+      '<dl class="issue-person__facts">' +
+        '<dt>Club</dt><dd>' + esc(req.club || '—') + '</dd>' +
+        '<dt>Zones asked for</dt><dd>' + esc(asked.length ? asked.join(', ') : 'None: the Club card only') + '</dd>' +
+        (req.reason ? '<dt>Why</dt><dd>' + esc(req.reason) + '</dd>' : '') +
+      '</dl>';
   }
 
   function showFields(on) {
@@ -1549,17 +1588,46 @@
     }
     var renamed = name !== (iss.user.name || '');
     if (renamed) updates[base + 'name'] = name;
+    /* Approving an access request (v2.12): the pass is the approval. The
+       legacy role is set from the card, never chosen (a few database rules
+       still read it): Club Admin with the Operations zone, else Club Staff.
+       The entries the database reads are worked out with that role. */
+    var req = iss.request && iss.request.uid === iss.user.uid ? iss.request : null;
+    if (req) {
+      var role = P.holds(pass, 'club-operations') ? 'club-admin' : 'club-staff';
+      updates[base + 'pending'] = false;
+      updates[base + 'rejected'] = false;
+      updates[base + 'role'] = role;
+      updates[base + 'club'] = pass.club || '';
+      updates[base + 'jobTitle'] = pass.jobTitle || null;
+      var entries = P.toOld(pass, STATE.registry, role), keep = {};
+      Object.keys(entries).forEach(function (k) { if (entries[k] != null) keep[k] = entries[k]; });
+      Object.keys(updates).forEach(function (k) { if (k.indexOf(base + 'tools/') === 0) delete updates[k]; });
+      updates[base + 'tools'] = keep;
+      updates['admin/requests/' + req._key + '/status'] = 'approved';
+      updates['admin/requests/' + req._key + '/approvedBy'] = STATE.session.uid;
+      updates['admin/requests/' + req._key + '/approvedAt'] = Date.now();
+    }
     NL.ensureAuth().then(function () {
       return db.ref().update(updates);
     }).then(function () {
       if (renamed) NL.writeAudit('name_changed', (iss.user.name || '') + ' → ' + name, { uid: iss.user.uid, name: name, email: iss.user.email });
       iss.user.name = name;
+      if (req) {
+        NL.writeAudit('request_approved', name + (pass.club ? ' (' + pass.club + ')' : '') + ': ' + passLine(pass),
+          { uid: iss.user.uid, name: name, email: iss.user.email });
+        NL.gas.fetch({ action: 'sendApproval', name: name, email: iss.user.email || '', club: pass.club || '' })['catch'](function () {});
+        iss.request = null;
+        iss.user.pending = false;
+        drawRequest(null);
+        document.getElementById('issueSave').textContent = 'Save pass';
+      }
       NL.writeAudit('pass_issued', name + ': ' + passLine(pass));
       iss.user.pass = pass;
       if (iss.user.uid === STATE.session.uid) STATE.session.pass = pass;
       document.getElementById('issueWithdraw').hidden = false;
       drawPersonPicker();
-      NL.toast('Pass saved for ' + iss.user.name, 'success');
+      NL.toast((req ? 'Approved, and pass issued for ' : 'Pass saved for ') + iss.user.name, 'success');
     }).catch(function (e) {
       NL.toast('The pass could not be saved: ' + (e && e.message || e), 'error');
     }).then(function () { btn.disabled = false; });
@@ -1621,11 +1689,19 @@
       } else if (STATE.view === 'issue') {
         if (!mayIssueHere()) return renderRefusal('Issuing passes is for the Skeleton key and League Operations.');
         renderIssue();
-        /* Arrived from People and cards with someone chosen. */
-        var uid = new URLSearchParams(location.search).get('uid');
-        if (uid) loadUsers().then(function (users) {
-          var u = users.filter(function (x) { return x.uid === uid; })[0];
-          if (u && canIssueTo(u)) choosePerson(u);
+        /* Arrived from People and cards with someone chosen, or from
+           Requests with an access request to approve (v2.12): the request
+           fills the form, and saving the pass is the approval. */
+        var q = new URLSearchParams(location.search), uid = q.get('uid'), reqKey = q.get('request');
+        var reqP = reqKey && /^[A-Za-z0-9_-]{1,40}$/.test(reqKey)
+          ? db.ref('admin/requests/' + reqKey).once('value').then(function (s) { return s.val(); })['catch'](function () { return null; })
+          : Promise.resolve(null);
+        if (uid) Promise.all([loadUsers(), reqP]).then(function (r) {
+          var u = r[0].filter(function (x) { return x.uid === uid; })[0], req = r[1];
+          if (!u || !canIssueTo(u)) return;
+          if (req && req.uid === uid && req.status === 'pending') STATE.issue.request = Object.assign({ _key: reqKey }, req);
+          else if (reqKey) NL.toast('That request is no longer waiting', 'info');
+          choosePerson(u);
         });
       } else {
         withOrg(session.pass).then(renderMine);

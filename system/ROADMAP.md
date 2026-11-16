@@ -44,13 +44,17 @@ Why: This is the last part of the new model people actually meet. Without it, ne
 - The request email stops saying "admin panel".
 - Everyone signs in with email and password. No emailed sign-in links each time (decided 13/11): they hang every sign-in on someone's inbox.
 - Email stays in Apps Script for now. The log records that an email was sent, not whether it arrived.
-- The invite form still offers the old roles (Club Admin and so on). It should offer a card and zones, the same words as the rest of Access.
+- Built 16/11: a request asks for Club zones (each saying what it adds to the Club card) and one line on why, never tools or a role. Review in Access → Requests opens Issue a pass with the request filled in, and saving the pass is the approval, so nobody is approved without one. The old role is set from the card behind the scenes (a few database rules still read it) and is never chosen.
+- Next: invites through the same Issue a pass form, League, Club and External alike, so the invite form stops offering the old roles (Club Admin and so on).
+- The request email from Apps Script still lists tools, so it shows none until Apps Script is published again.
 
 ### Club views, and the regulator
 What: Every tool with club data gives each person a pair: which clubs (One club, or All clubs, named) and what they can do (Access or Manage). League cards get All clubs, named; Club cards get One club. An External card can be given one view on a tool that offers it, with a reason, an end date, and who gave it and when. First case: the Independent Football Regulator sees Financial Benchmarking as League staff do.
 Why: The regulator already receives these figures, so showing them the same page is safer than emailing spreadsheets, and the rule covers the next case (an analyst working for one club) without another exception.
 - Built 16/11: Financial Benchmarking's League view picks a club from a list or by clicking it, and shows it in its own colour with every other club in grey.
-- Built 16/11: External passes, set up in Access → Externals (organisation, zones, people, optional end date), with the charcoal pass on My pass. Once published, the regulator is set up there by you.
+- Built 16/11: External passes. Organisations (name, colours, uploaded logo) and their zones are set up in Access → Externals, a zone opening tools by ticking them; a person's External pass (zones, end dates, name and job title) is issued on the same Issue a pass form as everyone's.
+- Built 16/11: Judgements, Club Directory, Handbook and Commercial Benchmarking open to externals as well as Financial Benchmarking, all view only and every club, named. Club Directory and Handbook show them the published copies. Opening them found the Handbook's working draft readable by every signed-in session, club codes included: it is League only now.
+- Next: Chosen clubs. A zone gives one club or several, picked from the club list, and the database checks every club separately, so a pass can never read a club it was not given. Financial and Commercial Benchmarking first.
 - Then the pair on My pass and in Access: "All clubs · Manage" instead of "Manage".
 - The organisation, its zones and its people are all set up in Access, never in code. An end date is optional; without one, access lasts until removed.
 - Before the regulator's pass: how many logins, and every season or the latest only.
@@ -109,7 +113,7 @@ Why: The address alone tells anyone whether a page is safe to send outside the L
 Waiting on: you – should everything under /public/ be hidden from Google?
 
 ### External passes
-What: A third kind of pass, for organisations outside the League and its clubs: DAZN, the Trust, agencies, freelancers. In Access, a new Externals tab: you set up the organisation first (name, colours and an uploaded logo), then its zones, then invite its people. Each zone has a plain name ("Broadcast"), a three-letter code (suggested from the name, changeable, never a duplicate) and the tools it opens. Each person holds one or more of their organisation's zones.
+What: A third kind of pass, for organisations outside the League and its clubs: DAZN, the Trust, agencies, freelancers. Built 16/11 for the regulator (see "Club views, and the regulator"): organisations and zones in Access → Externals, people's passes on Issue a pass. What is left is opening more tools and more organisations. Each zone has a plain name ("Broadcast"), a three-letter code (suggested from the name, changeable, unique within its organisation) and the tools it opens. Each person holds one or more of their organisation's zones.
 Why: Partners and freelancers need one or two tools each, with a name on every sign-in, not a shared code. After club logins, as planned.
 - Invite-only. There is no way for an external to ask for access.
 - A pass needs at least one zone: the External card opens nothing by itself.

@@ -3,10 +3,13 @@
 <head>
 <!--
   NL Tools — Login Page
-  Version: v5.4 (14/11/2026)
+  Version: v5.5 (16/11/2026)
   File: /index.html
 
   CHANGELOG
+  v5.5 (16/11/2026) — Asking for access asks for zones, not tools: the four
+    Club zones as ticks, each saying what it opens beyond the Club card, and
+    one line on why. League Operations issue the pass on approval.
   v5.4 (14/11/2026) — The request emails carry the person's sign-in, so
     Apps Script sends only to them and to the admins, with its own details.
   v5.3 (14/11/2026) — Tools send you here with ?next= when you are signed
@@ -20,19 +23,6 @@
     own TODO asked for, and had drifted (rgba() focus shadow, off-token px
     sizes). Visual deltas: focus ring is the brand's, crest 32→28px, minor
     padding — all convergence to how vacancies already renders it.
-  v5.0 (25/07/2026) — Server-minted roles (the durable self-grant fix):
-    - Invite acceptance, club access requests, and request withdrawal now call
-      Cloud Functions (consumeInvite / submitAccessRequest /
-      withdrawAccessRequest in functions/account.js) via the callable HTTPS
-      protocol (local fnCall helper — no functions SDK needed). The client no
-      longer writes users/<uid> at all; roles are minted server-side with the
-      Admin SDK. Enables RTDB rules to forbid client self-creates entirely,
-      closing the self-signup-as-staff gap left by the v4.7 revert.
-    - email-already-in-use on accept/request now signs in and lets the
-      idempotent function finish (fixes the stuck state after a partial
-      failure); consumeInvite never overwrites an existing user record.
-    - Withdrawal no longer needs recent-login (Auth delete happens server-side).
-    See system/rtdb/SECURITY-role-self-grant.md.
 -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -251,36 +241,12 @@ body {
   padding-right: 4px;
 }
 
-/* Tool picker (request access) */
-.tool-group { margin-bottom: 18px; }
-.tool-group__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-.tool-group__label {
-  font-size: var(--text-xs);
-  font-weight: 800;
-  font-variation-settings: 'wght' 800;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--navy);
-}
-.tool-group__select-all {
-  font-size: var(--text-xs);
-  color: var(--primary);
-  font-weight: 700;
-  font-variation-settings: 'wght' 700;
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-family: var(--font);
-  text-decoration: underline;
-  padding: 0;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
+/* Zones asked for (request access, v5.5) */
+.req-lead { font-size: var(--text-xs); color: var(--text-muted); margin: 0 0 16px; line-height: 1.5; }
+.req-loading { font-size: var(--text-sm); color: var(--text-muted); text-align: center; padding: 20px 0; margin: 0; }
+.req-why { margin-top: 16px; }
+
+/* Zone ticks (request access) */
 .tool-checkboxes { display: flex; flex-direction: column; gap: 6px; }
 .tool-checkbox {
   display: flex;
@@ -422,7 +388,7 @@ body {
         </div>
         <div class="btn-row">
           <button class="btn btn--ghost" id="reqBackBtn">Back</button>
-          <button class="btn btn--navy" id="reqNextBtn">Next - Select tools</button>
+          <button class="btn btn--navy" id="reqNextBtn">Next: zones</button>
         </div>
       </div>
       <div id="reqStep2" style="display:none;">
@@ -430,10 +396,14 @@ body {
           <div class="step-dot done"></div>
           <div class="step-dot active"></div>
         </div>
-        <p style="font-size:var(--text-xs);color:var(--text-muted);margin-bottom:16px;font-weight:600;font-variation-settings:'wght' 600;line-height:1.5;">Select the tools you'd like access to. Leave blank for general access only.</p>
+        <p class="req-lead">Everyone at your club gets the tools on the Club card. Tick any zones your job needs on top.</p>
         <div class="msg" id="reqMsg2"></div>
-        <div class="signup-scroll" id="reqToolContainer">
-          <p style="font-size:var(--text-sm);color:var(--text-muted);text-align:center;padding:20px 0;">Loading available tools...</p>
+        <div class="tool-checkboxes" id="reqZoneContainer">
+          <p class="req-loading">Loading zones…</p>
+        </div>
+        <div class="form-group req-why">
+          <label for="reqReason">Why you need them</label>
+          <input type="text" id="reqReason" maxlength="300" placeholder="e.g. I run the club's social media">
         </div>
         <div class="btn-row" style="margin-top:16px;">
           <button class="btn btn--ghost" id="reqStep2BackBtn">Back</button>
@@ -617,7 +587,7 @@ function showPanel(id) {
     document.getElementById('pageSubtitle').innerHTML = info.sub;
   }
   if (id === 'panelRequest') {
-    loadReqTools();
+    loadReqZones();
     if (!reqClubPicker && window.NL && NL.clubPicker) {
       reqClubPicker = NL.clubPicker('#reqClubPicker', { season: 'current', freetext: false, placeholder: 'Search club name...' });
     }
@@ -842,8 +812,10 @@ function doSubmitRequest() {
   var pass     = document.getElementById('reqPassword').value;
   var club     = (reqClubPicker && reqClubPicker.getValue() || '').trim();
   var jobTitle = document.getElementById('reqClubRole').value.trim();
-  var selectedTools = {};
-  document.querySelectorAll('#reqToolContainer input[name="reqTool"]:checked').forEach(function(cb) { selectedTools[cb.value] = 'access'; });
+  var zones = {};
+  document.querySelectorAll('#reqZoneContainer input[name="reqZone"]:checked').forEach(function(cb) { zones[cb.value] = true; });
+  var reason = document.getElementById('reqReason').value.trim();
+  if (Object.keys(zones).length && !reason) { showMsg('reqMsg2', 'Say in a line why you need the zones you ticked.', 'error'); return; }
   setBtnLoading('reqSubmitBtn', true);
   showMsg('reqMsg2', 'Creating your account...', 'info');
   /* v5.0: the user record + request entry are written SERVER-SIDE by the
@@ -861,7 +833,7 @@ function doSubmitRequest() {
     })
     .then(function() {
       return fnCall('submitAccessRequest', {
-        name: name, club: club, jobTitle: jobTitle, tools: selectedTools
+        name: name, club: club, jobTitle: jobTitle, zones: zones, reason: reason
       }).then(function() { return auth.currentUser.uid; });
     })
     .then(function(uid) {
@@ -871,7 +843,7 @@ function doSubmitRequest() {
          the Apps Script that ignores them is live. */
       auth.currentUser.getIdToken().then(function (idToken) {
         var portalUrl = window.location.origin + '/portal/';
-        fetch(NL_GAS_URL + '?cb=' + Date.now(), { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ action: 'notifyAdmin', idToken: idToken, name: name, email: email, club: club, jobTitle: jobTitle, tools: selectedTools, portalUrl: portalUrl }) }).catch(function() {});
+        fetch(NL_GAS_URL + '?cb=' + Date.now(), { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ action: 'notifyAdmin', idToken: idToken, name: name, email: email, club: club, jobTitle: jobTitle, portalUrl: portalUrl }) }).catch(function() {});
         fetch(NL_GAS_URL + '?cb=' + Date.now(), { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ action: 'confirmRequest', idToken: idToken, name: name, email: email, club: club }) }).catch(function() {});
       }).catch(function () {});
       showPanel('panelPending');
@@ -921,57 +893,33 @@ function doWithdraw() {
    (loadReqClubs/initReqClubPicker/renderReqClubList/selectReqClub/setReqCrest)
    and the local clubs-meta fetch were removed in the migration. */
 
-var reqToolsLoaded = false;
-function loadReqTools() {
-  if (reqToolsLoaded) return;
-  db.ref('tools').once('value').then(function(snap) {
-    reqToolsLoaded = true;
-    var container = document.getElementById('reqToolContainer');
-    if (!snap.exists()) { container.innerHTML = '<p style="font-size:var(--text-sm);color:var(--text-muted);text-align:center;padding:16px 0;">No tools available.</p>'; return; }
-    var tools = snap.val();
-    var groups = {};
-    Object.keys(tools).forEach(function(key) {
-      var t = tools[key];
-      if (t.placeholder) return;
-      if (t.department === 'staff') return;
-      var clubDefault = t.defaults && t.defaults['club'];
-      if (!clubDefault || clubDefault === 'hidden') return;
-      var dept = t.department || 'General';
-      if (!groups[dept]) groups[dept] = [];
-      groups[dept].push({ key: key, label: t.label || key, description: t.description || '', icon: t.icon || '' });
-    });
-    var depts = Object.keys(groups).sort();
-    if (!depts.length) { container.innerHTML = '<p style="font-size:var(--text-sm);color:var(--text-muted);text-align:center;padding:16px 0;">No tools available for club sign-up.</p>'; return; }
-    var html = '';
-    depts.forEach(function(dept) {
-      var deptId = dept.replace(/[^a-z0-9]/gi, '_');
-      html += '<div class="tool-group"><div class="tool-group__header">';
-      html += '<span class="tool-group__label">' + NL.escHtml(dept) + '</span>';
-      html += '<button type="button" class="tool-group__select-all" data-dept="' + NL.escHtml(deptId) + '">Select all</button>';
-      html += '</div><div class="tool-checkboxes" id="reqDept_' + NL.escHtml(deptId) + '">';
-      groups[dept].forEach(function(t) {
-        html += '<label class="tool-checkbox"><input type="checkbox" name="reqTool" value="' + NL.escHtml(t.key) + '">';
-        html += '<span class="tool-checkbox__text"><span class="tool-checkbox__name">' + NL.escHtml((t.icon ? t.icon + '  ' : '') + t.label) + '</span>';
-        if (t.description) html += '<span class="tool-checkbox__desc">' + NL.escHtml(t.description) + '</span>';
-        html += '</span></label>';
-      });
-      html += '</div></div>';
-    });
-    container.innerHTML = html;
-    container.querySelectorAll('.tool-group__select-all').forEach(function(btn) {
-      btn.addEventListener('click', function() { reqSelectAll(btn.dataset.dept); });
-    });
-  }).catch(function() {
-    document.getElementById('reqToolContainer').innerHTML = '<p style="font-size:var(--text-sm);color:var(--text-muted);text-align:center;padding:16px 0;">Could not load tools. You can still submit your request.</p>';
+/* The zones a club person can ask for (v5.5): the four Club zones, each
+   with what it opens beyond the Club card itself, worked out from the
+   registry and the live grants by the same resolver the door uses
+   (NL.pass.summary). Asking gives nothing: League Operations issue the
+   pass on approval. */
+var reqZonesLoaded = false;
+function loadReqZones() {
+  if (reqZonesLoaded) return;
+  var box = document.getElementById('reqZoneContainer');
+  Promise.all([db.ref('tools').once('value'), db.ref('access-grants').once('value').catch(function () { return null; })]).then(function (r) {
+    reqZonesLoaded = true;
+    var P = NL.pass, reg = r[0].val() || {}, live = r[1] && r[1].exists() ? r[1].val() : null;
+    if (live && P.withLiveAll) reg = P.withLiveAll(reg, live);
+    var card = { base: 'club', club: 'x', issued: 1 };
+    var level = function (pass) { var o = {}; P.summary(pass, reg).forEach(function (t) { o[t.key] = t.explain.level; }); return o; };
+    var base = level(card);
+    box.innerHTML = P.KEYS.filter(function (k) { return k.base === 'club'; }).map(function (k) {
+      var withKey = level(Object.assign({}, card, { keys: (function () { var o = {}; o[k.id] = { given: 1 }; return o; })() }));
+      var adds = Object.keys(withKey).filter(function (t) { return P.rank(withKey[t]) > P.rank(base[t] || 'off'); })
+        .map(function (t) { return (reg[t] && reg[t].label) || t; }).sort();
+      return '<label class="tool-checkbox"><input type="checkbox" name="reqZone" value="' + NL.escHtml(k.id) + '">' +
+        '<span class="tool-checkbox__text"><span class="tool-checkbox__name">' + NL.escHtml(k.name) + ' · ' + NL.escHtml(k.code) + '</span>' +
+        '<span class="tool-checkbox__desc">' + NL.escHtml(adds.length ? 'Adds ' + adds.join(', ') : 'Adds nothing yet') + '</span></span></label>';
+    }).join('');
+  }).catch(function () {
+    box.innerHTML = '<p class="req-loading">Zones could not be loaded. You can still send your request.</p>';
   });
-}
-
-function reqSelectAll(deptId) {
-  var c = document.getElementById('reqDept_' + deptId);
-  if (!c) return;
-  var boxes = c.querySelectorAll('input[type="checkbox"]');
-  var all = Array.prototype.every.call(boxes, function(b) { return b.checked; });
-  boxes.forEach(function(b) { b.checked = !all; });
 }
 </script>
 </body>

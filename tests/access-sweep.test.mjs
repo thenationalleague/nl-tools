@@ -59,7 +59,8 @@ test('a sign-up request leaves the person holding nothing the rules read', async
   const { submitAccessRequest } = loadAccount(fakeDb(tree));
   await submitAccessRequest({
     auth: { uid: 'u-new', token: { email: 'someone@example.invalid' } },
-    data: { name: 'Pat Example', club: 'Testham Town', jobTitle: 'Secretary',
+    data: { name: 'Pat Example', club: 'Testham Town', jobTitle: 'Secretary', reason: ' Runs our social media ',
+      zones: { 'club-media': true, 'club-finance': 'yes', 'league-operations': true, 'skeleton': true },
       tools: { 'ops-financial-benchmarking': 'admin', 'ops-people': 'access' } }
   });
   const u = tree.users['u-new'];
@@ -69,15 +70,29 @@ test('a sign-up request leaves the person holding nothing the rules read', async
   assert.equal(u.pending, true);
   const req = Object.values(tree.admin.requests)[0];
   assert.equal(req.club, 'Testham Town', 'the club asked for lives on the request');
-  assert.deepEqual(req.tools, { 'ops-financial-benchmarking': 'access', 'ops-people': 'access' });
+  /* 16/11/2026: a request asks for Club zones and says why. Only the four
+     Club zones, and only when ticked (true); tools are no longer asked for. */
+  assert.deepEqual(req.zones, { 'club-media': true });
+  assert.equal(req.reason, 'Runs our social media');
+  assert.equal(req.tools, undefined, 'tools are not asked for');
+  assert.equal(req.role, undefined, 'nor a role');
 });
 
-test('approving writes the club from the request and the tools whole; declining clears all three', () => {
+test('approving is issuing the pass: club and role from the card, tools written whole; declining clears all three', () => {
+  /* 16/11/2026: Review opens Issue a pass with the request in it; saving
+     the pass is the approval (pass/index.html, saveIssue). */
   const src = readFileSync(join(REPO, 'access/index.html'), 'utf8');
-  const approve = src.slice(src.indexOf('function doApprove('), src.indexOf('function rejectRequest('));
-  assert.match(approve, /updates\[base \+ 'club'\] = r\.club \|\| '';/);
+  assert.doesNotMatch(src, /function doApprove\(|function approveRequest\(/, 'no approval without a pass');
+  assert.match(src, /href="\/pass\/\?view=issue&uid=' \+ encodeURIComponent\(r\.uid\) \+ '&request=' \+ encodeURIComponent\(r\._key\) \+ '"/);
+  const page = readFileSync(join(REPO, 'pass/index.html'), 'utf8');
+  const save = page.slice(page.indexOf('function saveIssue('), page.indexOf('function withdrawIssue('));
+  const approve = save.slice(save.indexOf('if (req) {'), save.indexOf('}', save.indexOf("'/approvedAt']")));
+  assert.match(approve, /var role = P\.holds\(pass, 'club-operations'\) \? 'club-admin' : 'club-staff';/, 'the role follows the card, never chosen');
+  assert.match(approve, /updates\[base \+ 'club'\] = pass\.club \|\| '';/);
   assert.match(approve, /updates\[base \+ 'tools'\] = keep;/);
-  assert.ok(!/updates\[base \+ 'tools\/' \+ k\]/.test(approve), 'tools are written whole, not merged');
+  assert.match(approve, /delete updates\[k\]/, 'tools are written whole, not merged');
+  assert.match(approve, /'\/status'\] = 'approved'/);
+  assert.match(save, /NL\.writeAudit\('request_approved'/);
   const reject = src.slice(src.indexOf('function rejectRequest('), src.indexOf('function rejectRequest(') + 1400);
   for (const k of ["'/role'] = 'rejected'", "'/club'] = null", "'/tools'] = null"]) assert.ok(reject.includes(k), k);
 });
