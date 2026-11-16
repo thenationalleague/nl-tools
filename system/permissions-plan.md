@@ -874,6 +874,38 @@ kilobytes of rules against a 256KB limit.
   roles where tools still hand-write role checks; Manage on the tools that
   have none; stop Access users writing where a tool lets them.
 
+### External passes, first part (16/11/2026, PR "External passes")
+
+- **The card:** `users/<uid>/pass` = `{ base: 'external', org, keys: { <zoneId>:
+  { given, by, until? } }, jobTitle, issued, issuedBy }`, role `external` (no
+  role defaults anywhere). `NL.pass.isIssued` counts it; `accountLevel.isLeague`
+  never does; the issue form refuses it both ways.
+- **The organisation:** `externals/<org>` (rules: Skeleton key writes and reads
+  all; a member reads its own; nobody else), with its zones and each zone's
+  tools `{ level, view?, club?, reason, by, at }`.
+- **What the zones open** is `pass.ext`, written only by the server
+  (`functions/externals.js`: on a pass change, an organisation change, and
+  nightly for ended zones) from `NL.pass.extFor`. `explain` (which now takes
+  the tool's key) reads it and checks it against the tool's `externals`
+  offer again, so a hand-edited ext opens nothing the tool does not offer.
+- **The database:** `NL.pass.toOld` gives an External card per-tool entries
+  for what it opens, League-only tools included, and `passEntries` writes
+  them, so the existing level rules open Financial Benchmarking to it with no
+  rules change for that tool. One club for an external needs its own rule
+  per tool and is not offered yet (Financial Benchmarking offers All clubs,
+  named only).
+- **Accounts:** Access → Externals → Add person writes
+  `admin/external-invites/<id>`; `externalInvites` (Skeleton key checked
+  again on the server) makes the Auth account and the record, and the page
+  sends Firebase's set-a-password email. A trigger, not a callable (org
+  policy).
+- **Screens:** Access's Externals tab; People shows an External card as its
+  organisation and zones, and offers no legacy role or issue form for it;
+  `/pass/` draws it charcoal with the organisation's colour and zones; the
+  portal and `NL.codeGate.door` let it in at its level.
+- **Still to do:** a logo upload; the pair ("All clubs · Access") on My pass
+  and in "who can open this"; One club rules for a tool that offers it.
+
 ## Safety rails
 
 - Report before switch; run both and compare; a way back at every step.

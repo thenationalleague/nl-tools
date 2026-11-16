@@ -1,8 +1,14 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Access
-  Version: v2.6 (14/11/2026)
+  Version: v2.7 (16/11/2026)
   File: /access/index.html
+  v2.7 (16/11/2026) — Externals tab (Skeleton key only): organisations
+  outside the League and its clubs, their zones and what each opens, with
+  the club view and the reason for each tool, and their people, added here
+  and emailed a set-a-password link (access/_externals.js). People shows an
+  External card as its organisation and zones; its pass and zones are
+  changed in Externals, never by the issue form or the legacy role.
   v2.6 (14/11/2026) — Approving a request writes the club and title from
   the request, and the tools whole; declining one clears the role, club
   and tools, so a declined account opens nothing.
@@ -21,7 +27,6 @@
   v2.3 (13/11/2026) — The Tools grid is grouped into the portal's shelves
     (NL.pass.SHELVES / shelfOf, nl-utils v1.59), under a heading row each,
     instead of a shelf name under every tool and a Shelf filter.
-  v2.2 (13/11/2026) — The Structure shelf is called Control.
 
   Who gets in: everyone with an account and their pass, invites, sign-up
   requests, who each tool opens to, and the audit log. One tool for the
@@ -124,6 +129,11 @@
 
     window.NL_CHANGELOG = [
       {
+        date: '16/11/2026',
+        version: 'v2.7',
+        items: [ 'Externals: set up an organisation, its zones and what each opens, and add its people.' ]
+      },
+      {
         date: '14/11/2026',
         version: 'v2.6',
         items: [ 'Approving a request sets the club and title from the request. A declined account opens nothing.' ]
@@ -142,11 +152,6 @@
         date: '13/11/2026',
         version: 'v2.3',
         items: [ 'Tools are grouped into the portal\u2019s shelves.' ]
-      },
-      {
-        date: '13/11/2026',
-        version: 'v2.2',
-        items: [ 'The Structure shelf is called Control.' ]
       }
     ];
 
@@ -197,6 +202,12 @@
   #pcRows .pc-who__sub { overflow-wrap: normal; }
   #pcRows .pc-pass, #pcRows .pc-actions { flex-wrap: nowrap; }
   .pc-muted { color: var(--text-muted); }
+  /* Externals (v2.7) */
+  .ex-org { display: inline-flex; align-items: center; gap: 8px; }
+  .ex-swatch { display: inline-flex; border-radius: 3px; overflow: hidden; box-shadow: 0 0 0 1px var(--border); }
+  .ex-swatch i { display: block; width: 10px; height: 18px; }
+  .ex-tools input[type=text] { width: 100%; }
+  .ex-tools .ex-club { margin-top: 6px; max-width: 120px; }
   .pc-actions { display: flex; gap: 6px; justify-content: flex-end; align-items: center; flex-wrap: wrap; }
   .pc-invite { margin-bottom: 24px; }
   .pc-roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
@@ -528,6 +539,7 @@
       <button class="tab" type="button" role="tab" data-pane="requests">Requests <span class="tab__count" id="pcRequestCount" hidden></span></button>
       <button class="tab" type="button" role="tab" data-pane="codes" id="pcTabCodes" hidden>Codes</button>
       <button class="tab" type="button" role="tab" data-pane="tools">Tools</button>
+      <button class="tab" type="button" role="tab" data-pane="externals">Externals</button>
       <button class="tab" type="button" role="tab" data-pane="audit">Audit</button>
       <button class="tab" type="button" role="tab" data-pane="manage">Manage</button>
     </div>
@@ -626,6 +638,11 @@
       </div>
     </section>
 
+    <!-- Organisations outside the League and its clubs: access/_externals.js -->
+    <section data-pane-body="externals" hidden>
+      <div id="exBody"></div>
+    </section>
+
     <section data-pane-body="tool" hidden>
       <div class="pc-back"><button class="btn btn--ghost btn--sm" type="button" id="tlBack"></button></div>
       <div id="tlTool"></div>
@@ -705,6 +722,7 @@
     return NL.roles.realm(u.role) !== 'league';
   }
   function canEdit(u) {
+    if (P.isExternal(u.pass)) return false;   /* changed in Externals */
     var r = rights();
     if (r.league) return true;
     if (!r.club || u.uid === S.session.uid) return false;
@@ -726,6 +744,7 @@
   /* Who someone is with: their pass's card, else their role today. */
   function orgOf(u) {
     var p = u.pass;
+    if (P.isExternal(p)) return u.org || p.org;
     if (P.isIssued(p)) return p.base === 'club' ? (p.club || '') : LEAGUE;
     return NL.isClubUser(u.role) ? (u.club || '') : LEAGUE;
   }
@@ -762,8 +781,18 @@
      key's code, with its end date if it has one. */
   /* The pass, in one line: the card's badge (the rose, or the club's
      crest), then a three-letter tag per key — AAA for the Skeleton key. */
+  function extOrgName(p) {
+    var n = window.ACCESS_EXTERNALS && window.ACCESS_EXTERNALS.orgName(p.org);
+    var u = S.users && S.users.filter(function (x) { return x.pass === p; })[0];
+    return n || (u && u.org) || p.org;
+  }
   function passHtml(p, label) {
     if (!P.isIssued(p)) return '<span class="pc-muted">Not issued</span>';
+    if (P.isExternal(p)) {
+      var codes = Object.keys(p.keys || {}).length;
+      return '<span class="pc-pass"><span class="pill pill--expired">External</span><span>' + esc(extOrgName(p)) + '</span>' +
+        '<span class="pc-muted">' + codes + (codes === 1 ? ' zone' : ' zones') + '</span></span>';
+    }
     var html = crestHtml(p.base === 'club' ? p.club : LEAGUE) + (label ? '<span>' + esc(label) + '</span>' : '');
     if (P.isSkeleton(p)) html += '<span class="pill pill--info" title="Skeleton key">AAA</span>';
     P.keysHeld(p).forEach(function (id) {
@@ -774,6 +803,7 @@
     return '<span class="pc-pass">' + html + '</span>';
   }
   function passText(p) {
+    if (P.isExternal(p)) return 'External card, ' + extOrgName(p);
     var bits = [p.base === 'club' ? 'Club card, ' + p.club : 'League card'];
     if (P.isSkeleton(p)) bits.push('Skeleton key');
     P.keysHeld(p).forEach(function (id) { bits.push(P.KEY[id].name); });
@@ -802,6 +832,7 @@
       if (canPerson(u)) acts += '<a class="btn btn--ghost btn--sm" href="?person=' + encodeURIComponent(u.uid) + '" data-person="' + esc(u.uid) + '">' + icon('edit') + 'Edit</a>';
       if (view) acts += '<a class="btn btn--ghost btn--sm" href="/pass/?view=as&uid=' + encodeURIComponent(u.uid) + '">' + icon('eye') + 'View pass</a>';
       if (canEdit(u)) acts += '<a class="btn btn--ghost btn--sm" href="/pass/?view=issue&uid=' + encodeURIComponent(u.uid) + '">' + icon('edit') + (P.isIssued(u.pass) ? 'Edit pass' : 'Issue pass') + '</a>';
+      if (P.isExternal(u.pass) && sk()) acts += '<a class="btn btn--ghost btn--sm" href="?tab=externals&org=' + encodeURIComponent(u.pass.org) + '">' + icon('edit') + 'Zones</a>';
       return '<tr>' +
         '<td><span class="pc-who"><a class="pc-who__name pc-link" href="?person=' + encodeURIComponent(u.uid) + '" data-person="' + esc(u.uid) + '">' + esc(u.name || '(no name)') + '</a>' +
           (jobOf(u) ? '<span class="pc-who__job">' + esc(jobOf(u)) + '</span>' : '') +
@@ -1341,7 +1372,15 @@
         '<span class="pc-legacy">Legacy role: ' + esc(roleText(u)) + '</span></div>' +
       '</div><div class="pc-actions">' + passBtns + '</div></div>';
 
-    if (!edit) {
+    if (P.isExternal(u.pass)) {
+      /* An External card: its zones and end date are changed in Externals;
+         the legacy role and tool settings are not offered, so a slip here
+         can never turn it into a League account. */
+      edit = false;
+      html += '<p class="pc-note">On an External card for ' + esc(orgOf(u)) + '. ' +
+        (sk() ? '<a class="pc-link" href="?tab=externals&org=' + encodeURIComponent(u.pass.org) + '">Change their zones in Externals</a>.' : 'Only the Skeleton key changes it.') + '</p>';
+      if (sk()) html += '<div class="pc-foot pc-foot--split"><button class="btn btn--danger" type="button" id="pcExRemove">' + icon('delete') + 'Remove user</button></div>';
+    } else if (!edit) {
       html += '<p class="pc-note">' + (u.role === 'superadmin' ? 'A superadmin account is not edited here.' : 'This request is waiting in Requests.') + '</p>';
     } else {
       html += '<div class="form-panel pc-panel pc-open">' +
@@ -1396,6 +1435,7 @@
       document.getElementById('pcEdRemove').addEventListener('click', removePerson);
       drawExceptions();
     }
+    if (document.getElementById('pcExRemove')) document.getElementById('pcExRemove').addEventListener('click', removePerson);
     var rb = document.getElementById('pcReset');
     if (rb) rb.addEventListener('click', function () { sendReset(u); });
     if (sk()) loadHistory(u.uid);
@@ -2013,7 +2053,7 @@
   }
 
   /* ── Tabs ───────────────────────────────────────────────────────────── */
-  var SK_TABS = ['tools', 'audit', 'manage'];
+  var SK_TABS = ['tools', 'externals', 'audit', 'manage'];
   function showTab(name, opts) {
     if (SK_TABS.indexOf(name) >= 0 && !sk()) name = 'people';
     if (name === 'codes' && codesLevel() === 'off') name = 'people';
@@ -2034,6 +2074,9 @@
     if (name === 'audit') initAudit(opts && opts.uid);
     var qs = name === 'people' ? location.pathname : '?tab=' + name + (name === 'audit' && AL.uid ? '&uid=' + encodeURIComponent(AL.uid) : '');
     try { history.replaceState(null, '', qs); } catch (e) {}
+    if (name === 'externals' && window.ACCESS_EXTERNALS) {
+      window.ACCESS_EXTERNALS.init({ S: S, P: P, db: db, esc: esc, icon: icon, refreshPeople: refreshPeople }, opts && opts.org);
+    }
   }
 
   /* Everyone with an account, A–Z. A rejected request keeps its account
@@ -2129,6 +2172,7 @@
       if (q.get('person')) openPerson(q.get('person'));
       else if (q.get('tool') && sk()) openTool(q.get('tool'));
       else if (tab === 'audit') showTab('audit', { uid: q.get('uid') || null });
+      else if (tab === 'externals') showTab('externals', { org: q.get('org') || null });
       else if (['invites', 'requests', 'codes', 'manage', 'tools'].indexOf(tab) >= 0) showTab(tab);
     }).catch(function (e) {
       document.getElementById('pcRows').innerHTML = '<tr><td colspan="4">People could not be loaded: ' + esc(e && e.message || String(e)) + '</td></tr>';
@@ -2730,5 +2774,6 @@
 })();
 </script>
 
+<script src="/access/_externals.js?v=1"></script>
 </body>
 </html>
