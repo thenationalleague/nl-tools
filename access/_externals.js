@@ -151,8 +151,8 @@
 
     html += '<section class="form-panel"><div class="form-panel__head">' + esc(o.name || id) + '</div><div class="form-panel__body"><div class="form-grid">' +
       '<div class="form-group"><label for="exName">Name</label><input type="text" id="exName" maxlength="120" value="' + esc(o.name || '') + '"></div>' +
-      '<div class="form-group"><label for="exC1">Main colour</label><input type="color" id="exC1" value="' + (hex(o.colours && o.colours.primary) || '#333333') + '"></div>' +
-      '<div class="form-group"><label for="exC2">Second colour</label><input type="color" id="exC2" value="' + (hex(o.colours && o.colours.secondary) || '#ffffff') + '"></div>' +
+      '<div class="form-group"><label for="exC1">Main colour</label><input type="color" class="ex-colour" id="exC1" value="' + (hex(o.colours && o.colours.primary) || '#333333') + '"></div>' +
+      '<div class="form-group"><label for="exC2">Second colour</label><input type="color" class="ex-colour" id="exC2" value="' + (hex(o.colours && o.colours.secondary) || '#ffffff') + '"></div>' +
       '</div></div><div class="form-panel__foot pc-foot"><button class="btn btn--primary" type="button" id="exSaveOrg">Save</button></div></section>';
 
     html += '<div class="section-head"><h2>Zones</h2><span class="pc-actions"><button class="btn btn--ghost btn--sm" type="button" id="exAddZone">' + C.icon('add') + 'Add zone</button></span></div>';
@@ -234,20 +234,19 @@
         '<div class="form-group"><label for="exZName">Zone name</label><input type="text" id="exZName" maxlength="60" value="' + esc(z.name) + '"></div>' +
         '<div class="form-group"><label for="exZCode">Code</label><input type="text" id="exZCode" maxlength="3" value="' + esc(z.code) + '" style="text-transform:uppercase"></div>' +
       '</div>' +
-      (tools.length ? '<table class="table table--compact ex-tools"><thead><tr><th>Tool</th><th>Gives</th><th>View</th><th>Why (kept with the grant)</th></tr></thead><tbody>' +
-        tools.map(function (t) {
+      (tools.length ? tools.map(function (t) {
           var cur = (z.tools || {})[t.key] || {}, x = t.rec.externals || {}, views = (x.views || []);
           var levels = '<option value="off">Off</option><option value="access"' + (cur.level === 'access' ? ' selected' : '') + '>Access</option>' +
             (x.manage ? '<option value="manage"' + (cur.level === 'manage' ? ' selected' : '') + '>Manage</option>' : '');
-          var view = hasClubData(t.rec) ? '<select class="nl-select" data-view="' + esc(t.key) + '">' + views.map(function (v) {
+          var view = hasClubData(t.rec) ? '<div class="form-group"><label>Clubs</label><select class="nl-select" data-view="' + esc(t.key) + '">' + views.map(function (v) {
               return '<option value="' + esc(v) + '"' + (cur.view === v ? ' selected' : '') + '>' + esc(C.P.VIEWS[v] || v) + '</option>';
-            }).join('') + '</select>' + (views.indexOf('one') >= 0 ? '<input type="text" class="ex-club" data-club="' + esc(t.key) + '" placeholder="Club code" maxlength="12" value="' + esc(cur.club || '') + '">' : '') :
-            '<span class="pc-muted">No club data</span>';
-          return '<tr><td>' + esc(t.label) + '</td>' +
-            '<td><select class="nl-select" data-level="' + esc(t.key) + '">' + levels + '</select></td>' +
-            '<td>' + view + '</td>' +
-            '<td><input type="text" data-reason="' + esc(t.key) + '" maxlength="300" value="' + esc(cur.reason || '') + '"></td></tr>';
-        }).join('') + '</tbody></table>' : '<p class="pc-muted">No tool offers itself to externals yet. A tool is opened to them in its registry record, by pull request.</p>');
+            }).join('') + '</select></div>' + (views.indexOf('one') >= 0 ? '<div class="form-group"><label>Club code</label><input type="text" data-club="' + esc(t.key) + '" maxlength="12" value="' + esc(cur.club || '') + '"></div>' : '') : '';
+          return '<fieldset class="ex-tool"><legend>' + esc(t.label) + '</legend><div class="form-grid">' +
+            '<div class="form-group"><label>Gives</label><select class="nl-select" data-level="' + esc(t.key) + '">' + levels + '</select></div>' +
+            view +
+            '<div class="form-group span2"><label>Why</label><input type="text" data-reason="' + esc(t.key) + '" maxlength="300" value="' + esc(cur.reason || '') + '"></div>' +
+            '</div></fieldset>';
+        }).join('') : '<p class="pc-muted">No tool offers itself to externals yet. A tool is opened to them in its registry record, by pull request.</p>');
     var nameIn = wrap.querySelector('#exZName'), codeIn = wrap.querySelector('#exZCode');
     nameIn.addEventListener('input', function () {
       if (!zid && !codeIn.dataset.touched) codeIn.value = suggestCode(nameIn.value, codesTaken(X.org, zid));
@@ -270,7 +269,7 @@
         drawOrg();
       })['catch'](function (e) { NL.toast('Could not save: ' + (e && e.message || e), 'error'); });
     } });
-    NL.modal({ title: zid ? 'Edit zone' : 'Add zone', size: 'lg', body: wrap, buttons: buttons });
+    NL.modal({ title: zid ? 'Edit zone' : 'Add zone', width: 'wide', body: wrap, buttons: buttons });
   }
 
   /* The zone as the form says, checked: a name, a free three-letter code,
