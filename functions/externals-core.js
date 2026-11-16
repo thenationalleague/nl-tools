@@ -14,14 +14,28 @@ function stable(v) {
 
 /* The write that brings one person's pass.ext in line with their
    organisation's zones, as { path: value }, or {} when it already is.
-   Someone not on an External card holds no ext at all. */
-function extUpdate(NL, uid, pass, org, registry, now) {
+   Someone not on an External card holds no ext at all.
+
+   For an External card it also writes their tool entries
+   (users/<uid>/tools, what the database rules read) from the same answer,
+   NL.pass.toOld on the pass with its new ext, so a zone change reaches the
+   data without anyone pressing Apply passes (16/11/2026). `tools` is what
+   they hold now; left out, the entries are not looked at. */
+function extUpdate(NL, uid, pass, org, registry, now, tools) {
   const path = "users/" + uid + "/pass/ext";
   const have = pass && pass.ext ? pass.ext : null;
   if (!NL.pass.isExternal(pass)) return have ? { [path]: null } : {};
   const want = NL.pass.extFor(pass, org || null, registry || {}, now);
   const next = Object.keys(want).length ? JSON.parse(JSON.stringify(want)) : null;
-  return stable(next) === stable(have) ? {} : { [path]: next };
+  const out = stable(next) === stable(have) ? {} : { [path]: next };
+  if (tools !== undefined) {
+    const old = NL.pass.toOld(Object.assign({}, pass, { ext: next || undefined }), registry || {}, "external", now);
+    const entries = {};
+    Object.keys(old).forEach((k) => { if (old[k] != null) entries[k] = old[k]; });
+    const wantTools = Object.keys(entries).length ? entries : null;
+    if (stable(wantTools) !== stable(tools || null)) out["users/" + uid + "/tools"] = wantTools;
+  }
+  return out;
 }
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

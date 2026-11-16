@@ -1,9 +1,14 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Commercial Benchmarking
-  Version: v2.1 (14/11/2026)
+  Version: v2.2 (16/11/2026)
   File: /commercial-benchmarking/index.html
 
+  v2.2 (16/11/2026): an External card this tool opens to sees every club,
+    named, at Access, as League staff at Access do. The tool offers externals
+    All clubs, named (registry `externals`); the rules read the server's
+    entry for it (externalAllRule in scripts/rtdb-level-rule.mjs). An
+    External card it does not open to is told the tool isn't available.
   v2.1 (14/11/2026): an account's level comes from the shared
     NL.accountLevel, which also follows auth-guard in letting a pass decide
     before the superadmin role.
@@ -18,6 +23,8 @@
                                tool: Access views, Manage edits, imports,
                                sees Confirmations and exports
       · a League account at Off → "isn't available", as auth-guard says it
+      · an External card     → every club by name at Access, if its zones
+                               give it the tool (v2.2); else "isn't available"
     No auth-guard: it gates NL accounts and would send a club with a code to
     the sign-in page. The level is worked out here the way auth-guard works
     it out (NL.accountLevel, promoted to canon 14/11/2026 when Document
@@ -35,11 +42,6 @@
     first in the opened list; on the ring the club's share of Other is a
     solid red slice sized to its count, just before the grey Other arc.
     dashboard.js/.css ?v=59.
-  v1.13 (16/09/2026): the club's own sector is matched by normalised label
-    and, for stands, read from the stand rows themselves — a stale summary
-    string could leave it inside Other unmarked. Inside an opened Other
-    list an own row now carries the "you" pill as well. Brand red leaves the
-    sector palette: only the club's own slices are red. dashboard.js/.css ?v=58.
 
   Storage (RTDB):
     app-data/ops-commercial-benchmarking/aggregates    anonymised stats,
@@ -88,6 +90,11 @@
 
     window.NL_CHANGELOG = [
       {
+        date: '16/11/2026',
+        version: 'v2.2',
+        items: [ 'Organisations outside the League can be given every club, named, to view.' ]
+      },
+      {
         date: '14/11/2026',
         version: 'v2.1',
         items: [ 'Who sees what is worked out the same way as every other tool.' ]
@@ -110,11 +117,6 @@
         date: '16/09/2026',
         version: 'v1.14',
         items: [ 'Sector cards: your free-text sector lives inside Other — open it and yours is marked; on the ring your share of Other is red.' ]
-      },
-      {
-        date: '16/09/2026',
-        version: 'v1.13',
-        items: [ 'Sector cards: your own sector is matched more robustly and is labelled inside Other too.', 'Only your own slices are red; the sector palette no longer uses it.' ]
       }
     ];
   </script>
@@ -391,8 +393,10 @@
   });
 
   /* Which door: a League account goes straight to the League view at its
-     level; anyone else (signed out, a code, a Club card) to the code door,
-     which resumes a code or a Club card's claim by itself. */
+     level, and so does an External card (v2.2), whose level is only what its
+     zones give and never Manage; anyone else (signed out, a code, a Club
+     card) to the code door, which resumes a code or a Club card's claim by
+     itself. */
   var decided = false, off = null;
   off = firebase.auth().onAuthStateChanged(function (user) {
     if (decided) return;
@@ -400,7 +404,8 @@
     if (off) off();
     if (!user || !user.email) { codeDoor(); return; }
     levelFor(user.uid).then(function (who) {
-      if (!who.league) { codeDoor(); return; }
+      var external = NL.pass && NL.pass.isExternal(who.user && who.user.pass);
+      if (!who.league && !external) { codeDoor(); return; }
       if (who.level === 'off') {
         NL.codeGate.accountBar({ title: 'Commercial Benchmarking', toolKey: KEY });
         message('This tool isn’t available', 'Please contact media@thenationalleague.org.uk.');
