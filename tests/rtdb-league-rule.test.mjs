@@ -40,6 +40,8 @@ test('Handbook: every write is League and Manage', () => {
     assert.equal(w, leagueManage('ops-handbook'));
   }
   assert.ok(h.editions['.read'].includes('auth.token.club != null'), 'club codes still read past editions');
+  /* The working draft: League and Access, never a club or an External card. */
+  assert.equal(h.draft['.read'], A + leagueRule() + ' && ' + levelRule('ops-handbook', 'access').slice(A.length));
 });
 
 test('both tools offer Manage, so the pass can give it', () => {

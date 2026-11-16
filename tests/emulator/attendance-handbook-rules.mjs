@@ -33,6 +33,9 @@ const users = {
   'u-oldadm':  { role: 'admin' },        // no pass, old League admin role
   'u-oldclub': { role: 'club-admin', club: 'Testham Town' },   // no pass, old club secretary role
   'u-oldstaff':{ role: 'staff' },        // no pass, old League staff role
+  'u-ext':     { role: 'external', pass: { base: 'external', org: 'o', issued: 1, keys: { z: { given: 1 } },
+                 ext: { [HB]: { level: 'access', zones: ['z'] } } }, tools: { [HB]: 'access' } },
+  'u-leagueoff': person('league', { [HB]: 'off' }),                    // League card set to Off on the Handbook
 };
 const db = Object.fromEntries(Object.keys(users).map((u) => [u, as(u)]));
 const codeOnly = as('cc-tst', { club: 'TST', clubName: 'Testham Town' });
@@ -89,6 +92,23 @@ await t('no pass, old admin role: still saves the draft', set(ref(db['u-oldadm']
 await t('a club code reads past editions', get(ref(codeOnly, H + '/editions')), true);
 await t('League Operations reads past editions', get(ref(db['u-ops'], H + '/editions')), true);
 await t('a League card without a key cannot list past editions', get(ref(db['u-staff'], H + '/editions')), false);
+
+/* The working draft is the League's (16/11/2026). Before, any signed-in
+   session read it: a club code, a Club card, an External card. */
+await t('draft: superadmin reads it', get(ref(db['u-sa'], H + '/draft')), true);
+await t('draft: no pass, old League staff role reads it', get(ref(db['u-oldstaff'], H + '/draft')), true);
+await t('draft: a League card set to Off does not', get(ref(db['u-leagueoff'], H + '/draft')), false);
+await t('draft: a club code does not', get(ref(codeOnly, H + '/draft')), false);
+await t('draft: nor one clause of it', get(ref(codeOnly, H + '/draft/x')), false);
+await t('draft: a Club card at Manage on Attendance does not', get(ref(db['u-cluboes'], H + '/draft')), false);
+await t('draft: a Club card does not', get(ref(db['u-clubbo'], H + '/draft')), false);
+await t('draft: no pass, old club role does not', get(ref(db['u-oldclub'], H + '/draft')), false);
+await t('draft: an External card does not', get(ref(db['u-ext'], H + '/draft')), false);
+await t('draft: a plain anonymous session does not', get(ref(env.unauthenticatedContext().database(), H + '/draft')), false);
+await t('published: a club code reads the published edition', get(ref(codeOnly, H + '/editions/e1')), true);
+await t('published: so does a Club card', get(ref(db['u-clubbo'], H + '/editions/e1')), true);
+await t('published: and an External card', get(ref(db['u-ext'], H + '/editions/e1')), true);
+await t('published: and anyone, signed in or not', get(ref(env.unauthenticatedContext().database(), H + '/publishedEditionId')), true);
 
 await env.cleanup();
 console.log(`\n${pass} passed, ${fail} failed`);
