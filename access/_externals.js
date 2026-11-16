@@ -1,4 +1,4 @@
-/* NL Tools — Access: the Externals tab (v2.11, 16/11/2026: the organisation's header and logo)
+/* NL Tools — Access: the Externals tab (v2.12, 16/11/2026: a person's name and job title)
 
    Organisations outside the League and its clubs, set up here and nowhere
    else (permissions plan, "External passes" and "Club views"). Skeleton key
@@ -517,12 +517,22 @@
     var o = X.orgs[X.org], zones = o.zones || {}, keys = (u.pass && u.pass.keys) || {};
     var firstUntil = null;
     Object.keys(keys).forEach(function (k) { if (keys[k] && typeof keys[k].until === 'number') firstUntil = keys[k].until; });
+    /* Name and job title as well as zones (v2.12): an External person is
+       changed here and nowhere else, so this dialog is the whole of it. The
+       email is their sign-in and is not changed here. */
+    var job = (u.pass && u.pass.jobTitle) || u.jobTitle || '';
     var wrap = document.createElement('div');
-    wrap.innerHTML = '<div class="form-group"><label>Zones</label><div class="pc-roles ex-ticks">' + Object.keys(zones).map(function (z) { return zoneTick(z, zones[z], !!keys[z]); }).join('') + '</div></div>' +
+    wrap.innerHTML = '<div class="form-group"><label for="exEName">Full name</label><input type="text" id="exEName" maxlength="120" autocomplete="off" value="' + esc(u.name || '') + '"></div>' +
+      '<div class="form-group"><label for="exEJob">Job title</label><input type="text" id="exEJob" maxlength="80" autocomplete="off" value="' + esc(job) + '"></div>' +
+      '<div class="form-group"><label>Email</label><p class="ex-fixed">' + esc(u.email || '') + '</p></div>' +
+      '<div class="form-group"><label>Zones</label><div class="pc-roles ex-ticks">' + Object.keys(zones).map(function (z) { return zoneTick(z, zones[z], !!keys[z]); }).join('') + '</div></div>' +
       '<div class="form-group"><label for="exEUntil">Access ends</label><input type="date" id="exEUntil" value="' + dateInput(firstUntil) + '"><p class="form-hint">Leave empty to keep it until removed. Clear every zone to remove their access.</p></div>';
     NL.modal({ title: u.name || u.email, size: 'sm', body: wrap, buttons: [
       { label: 'Save', className: 'btn--primary', onClick: function (c) {
         var until = dateMs(wrap.querySelector('#exEUntil').value);
+        var name = wrap.querySelector('#exEName').value.trim().slice(0, 120);
+        var title = wrap.querySelector('#exEJob').value.trim().slice(0, 80);
+        if (!name) return NL.toast('A name is needed', 'error');
         var next = {};
         wrap.querySelectorAll('input[type=checkbox]:checked').forEach(function (i) {
           var z = i.value, old = keys[z];
@@ -533,10 +543,21 @@
         updates['users/' + uid + '/pass/keys'] = Object.keys(next).length ? next : null;
         updates['users/' + uid + '/pass/updated'] = Date.now();
         updates['users/' + uid + '/pass/updatedBy'] = C.S.session.uid;
+        var renamed = name !== (u.name || '') || title !== job;
+        if (renamed) {
+          updates['users/' + uid + '/name'] = name;
+          updates['users/' + uid + '/jobTitle'] = title || null;
+          updates['users/' + uid + '/pass/jobTitle'] = title || null;
+        }
+        var zonesBefore = Object.keys(keys).sort().join(','), zonesAfter = Object.keys(next).sort().join(',');
+        var untilBefore = null;
+        Object.keys(keys).forEach(function (k) { if (keys[k] && typeof keys[k].until === 'number') untilBefore = keys[k].until; });
         C.db.ref().update(updates).then(function () {
-          NL.writeAudit('external_zones_changed', (o.name || X.org) + ': ' +
+          if (renamed) NL.writeAudit('external_person_edited', (o.name || X.org) + ': ' + (u.name || '') + ' → ' + name + (title !== job ? ' (' + (title || 'no job title') + ')' : ''),
+            { uid: uid, name: name, email: u.email });
+          if (zonesBefore !== zonesAfter || (untilBefore || null) !== (until || null)) NL.writeAudit('external_zones_changed', (o.name || X.org) + ': ' +
             (Object.keys(next).map(function (z) { return zones[z].code; }).join(', ') || 'no zones') +
-            (until ? ', to ' + day(until) : ''), { uid: uid, name: u.name, email: u.email });
+            (until ? ', to ' + day(until) : ''), { uid: uid, name: name, email: u.email });
           c.close();
           NL.toast('Saved', 'success');
           return C.refreshPeople().then(drawOrg);
