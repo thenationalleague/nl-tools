@@ -11,8 +11,10 @@
  *   submitAccessRequest   — club request-access flow. Creates the user record
  *                           with role 'pending' + pending:true and queues the
  *                           admin/requests entry, which alone carries the club
- *                           and the tools asked for. The client chooses no role,
- *                           no club and no tools of its own.
+ *                           and the Club zones asked for, with a reason. The
+ *                           client chooses no role, no club and no tools of
+ *                           its own; the pass is issued on approval (Issue a
+ *                           pass, /pass/?view=issue&request=).
  *   withdrawAccessRequest — a PENDING requester withdraws: deletes their user
  *                           record, their requests entries, and their Auth
  *                           account. Active (approved) users cannot self-delete.
@@ -173,15 +175,16 @@ exports.submitAccessRequest = onCall(CALL_OPTS, async (request) => {
     throw new HttpsError("invalid-argument", "Name, club and role at club are required.");
   }
 
-  // Requested tools: keys sanitised, values forced to 'access' — the client
-  // cannot request admin. They go on the REQUEST only (14/11/2026): on the
-  // user record they were per-person grants, which the database rules obey
-  // whether or not the person was ever approved.
-  const tools = {};
-  const rawTools = data.tools && typeof data.tools === "object" ? data.tools : {};
-  Object.keys(rawTools).slice(0, 50).forEach((k) => {
-    if (k && k.length <= 60 && !BAD_KEY.test(k)) tools[k] = "access";
-  });
+  // The zones asked for (16/11/2026), not tools: a person asks for the
+  // stickers they need on their Club card and says why, and League
+  // Operations issue the pass. Only the four Club zones can be asked for;
+  // anything else is dropped. They go on the REQUEST only: nothing on the
+  // user record is read by the database rules until someone approves it.
+  const CLUB_ZONES = ["club-operations", "club-media", "club-commercial", "club-finance"];
+  const zones = {};
+  const rawZones = data.zones && typeof data.zones === "object" ? data.zones : {};
+  CLUB_ZONES.forEach((z) => { if (rawZones[z] === true) zones[z] = true; });
+  const reason = cleanStr(data.reason, 300);
 
   const db = admin.database();
   const uref = db.ref("users/" + caller.uid);
@@ -225,8 +228,8 @@ exports.submitAccessRequest = onCall(CALL_OPTS, async (request) => {
       email: caller.email,
       club,
       jobTitle,
-      tools,
-      role: "club-staff",
+      zones,
+      reason,
       status: "pending",
       createdAt: Date.now(),
     });

@@ -1,8 +1,12 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Access
-  Version: v2.12 (16/11/2026)
+  Version: v2.13 (16/11/2026)
   File: /access/index.html
+  v2.13 (16/11/2026) — Requests ask for Club zones and say why. Review opens
+  Issue a pass with the request filled in; saving the pass approves it, so
+  nobody is approved without one, and the legacy role is set from the card,
+  never chosen. The old Approve dialog is gone.
   v2.12 (16/11/2026) — An External person's pass is changed on the one
   issue form (/pass/?view=issue), like everyone's: Edit pass on their page,
   and their row in Externals opens it. Externals keeps organisations and
@@ -17,10 +21,6 @@
   unused in its own organisation.
   v2.9 (16/11/2026) — Externals: an empty zone, people list or tool list
   says so in one small grey line, not body-size type.
-  v2.8 (16/11/2026) — Externals, canon sweep: rows open on a click, an
-  organisation's name and colours are changed in a dialog, deleting a zone
-  asks for its code to be typed, dates carry the weekday, and the dialogs
-  lose Cancel.
 
   Who gets in: everyone with an account and their pass, invites, sign-up
   requests, who each tool opens to, and the audit log. One tool for the
@@ -126,6 +126,11 @@
     window.NL_CHANGELOG = [
       {
         date: '16/11/2026',
+        version: 'v2.13',
+        items: [ 'Requests show the zones asked for and why. Review opens Issue a pass; saving it approves the request.' ]
+      },
+      {
+        date: '16/11/2026',
         version: 'v2.12',
         items: [ 'An External person\'s pass is changed on Issue a pass, like everyone\'s.' ]
       },
@@ -143,11 +148,6 @@
         date: '16/11/2026',
         version: 'v2.9',
         items: [ 'Externals: empty lines are small and grey.' ]
-      },
-      {
-        date: '16/11/2026',
-        version: 'v2.8',
-        items: [ 'Externals: click a row to open it, and type a zone\'s code to delete it.' ]
       }
     ];
 
@@ -186,8 +186,6 @@
   .pc-crest { --crest-size: 24px; }
   .pc-legacy { font-size: var(--text-sm); color: var(--text-muted); }
   .pc-head__line .pc-legacy { margin-left: 6px; }
-  .pc-approve__who { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-  .pc-approve__who .pc-crest { --crest-size: 40px; }
   .pc-gap { margin-top: 16px; }
   .pc-opens { margin: 0; padding-left: 18px; font-size: var(--text-sm); columns: 2; }
   .pc-off { display: inline-flex; align-items: center; gap: 3px; font-size: var(--text-xs); color: var(--amber); white-space: nowrap; }
@@ -1133,17 +1131,24 @@
       box.innerHTML = items.length
         ? '<div class="table-wrap"><table class="table"><thead><tr><th>Person</th><th>Club</th><th>Asked for</th><th>Received</th><th aria-label="Actions"></th></tr></thead><tbody>' +
           items.map(function (r) {
-            var asked = Object.keys((r.tools && typeof r.tools === 'object' && !Array.isArray(r.tools)) ? r.tools : {})
+            /* v2.13: a request asks for Club zones and says why. Older
+               requests asked for tools; they are shown as they were. */
+            var asked = Object.keys(r.zones || {}).filter(function (z) { return P.KEY[z]; })
+              .map(function (z) { return P.KEY[z].name + ' · ' + P.KEY[z].code; });
+            if (!asked.length) asked = Object.keys((r.tools && typeof r.tools === 'object' && !Array.isArray(r.tools)) ? r.tools : {})
               .map(function (k) { return (S.registry[k] && S.registry[k].label) || k; });
+            /* Review opens Issue a pass with the request filled in: the pass
+               is the approval, so nobody is approved without one. */
             var acts = (r.uid
-              ? '<button class="btn btn--navy btn--sm" type="button" data-act="approve">' + icon('tick') + 'Approve</button>' +
+              ? '<a class="btn btn--navy btn--sm" href="/pass/?view=issue&uid=' + encodeURIComponent(r.uid) + '&request=' + encodeURIComponent(r._key) + '">Review' + icon('forward') + '</a>' +
                 '<button class="btn btn--ghost btn--sm" type="button" data-act="reject">Reject</button>'
               : '<span class="pc-muted">No linked account</span> ') +
               '<button class="btn btn--ghost btn--sm" type="button" data-act="dismiss">' + icon('delete') + 'Dismiss</button>';
             return '<tr data-key="' + esc(r._key) + '">' +
               '<td><span class="pc-who"><span class="pc-who__name">' + esc(r.name || '(no name)') + '</span><span class="pc-who__sub">' + esc(r.email || '') + '</span></span></td>' +
               '<td>' + esc(r.club || '') + (r.jobTitle ? '<div class="pc-who__sub">' + esc(r.jobTitle) + '</div>' : '') + '</td>' +
-              '<td>' + (asked.length ? esc(asked.join(', ')) : '<span class="pc-muted">Nothing extra</span>') + '</td>' +
+              '<td>' + (asked.length ? esc(asked.join(', ')) : '<span class="pc-muted">The Club card only</span>') +
+                (r.reason ? '<div class="pc-who__sub">' + esc(r.reason) + '</div>' : '') + '</td>' +
               '<td>' + (r.createdAt ? esc(NL.formatDateTime(r.createdAt)) : '') + '</td>' +
               '<td><span class="pc-actions">' + acts + '</span></td></tr>';
           }).join('') + '</tbody></table></div>'
@@ -1154,98 +1159,11 @@
         if (!r) return;
         var act = b.getAttribute('data-act');
         b.disabled = true;
-        (act === 'approve' ? approveRequest : act === 'reject' ? rejectRequest : dismissRequest)(r)
+        (act === 'reject' ? rejectRequest : dismissRequest)(r)
           .catch(function (err) { NL.toast('Failed: ' + (err && err.message || err), 'error'); b.disabled = false; });
       };
     }).catch(function (err) {
       box.innerHTML = '<p class="pc-muted">Requests could not be loaded: ' + esc(err && err.message || String(err)) + '</p>';
-    });
-  }
-
-  /* Approve shows what is being issued before anything is written: the
-     role (Club Admin or Club Staff — the request's own is chosen to start
-     with), the pass that goes with it (their club's card, and the Club
-     Operations key for a Club Admin) and every tool they will open, at
-     what level. Approving writes all three, then sends the approval email. */
-  function passFor(r, role) {
-    return P.build({ base: 'club', club: r.club || '', jobTitle: r.jobTitle || '',
-      keys: role === 'club-admin' ? ['club-operations'] : [] }, S.session.uid);
-  }
-  /* What the new pass opens, as the door will answer it: the pass, less
-     League tools (a club role never opens those until club logins). */
-  function opensFor(r, role) {
-    return P.summary(passFor(r, role), S.registry).filter(function (x) { return !gatedFor({ role: role }, x.key); })
-      .map(function (x) { return { label: x.label, level: x.explain.level === 'manage' ? 'admin' : 'access' }; });
-  }
-  function approveRequest(r) {
-    var start = NL.roles.norm(r.role || 'club-staff');
-    if (start !== 'club-admin') start = 'club-staff';
-    var role = start;
-    var body = document.createElement('div');
-    function draw() {
-      var opens = opensFor(r, role);
-      body.innerHTML =
-        '<div class="pc-approve__who">' + crestHtml(r.club || '') +
-          '<span class="pc-who"><span class="pc-who__name">' + esc(r.name || r.email || '') + '</span>' +
-          (r.jobTitle ? '<span class="pc-who__job">' + esc(r.jobTitle) + '</span>' : '') +
-          '<span class="pc-who__sub">' + esc(r.email || '') + '</span></span></div>' +
-        (r.club ? '' : '<p class="pc-off">' + icon('warning') + 'No club on this request</p>') +
-        '<div class="pc-label">Role</div><div class="pc-roles">' +
-          ['club-admin', 'club-staff'].map(function (x) {
-            return '<label class="pc-role"><input type="radio" name="pcApRole" value="' + x + '"' + (x === role ? ' checked' : '') + '>' +
-              '<span><span class="pc-role__name">' + esc(NL.roles.label(x)) + '</span><span class="pc-role__grant">' + esc(NL.roles.grant(x)) + '</span></span></label>';
-          }).join('') + '</div>' +
-        '<div class="pc-label pc-gap">Pass</div>' + passHtml(passFor(r, role), 'Club card') + offSeason(r.club) +
-        '<div class="pc-label pc-gap">Opens</div>' +
-        (opens.length
-          ? '<ul class="pc-opens">' + opens.map(function (o) {
-              return '<li>' + esc(o.label) + ' <span class="pc-muted">' + (o.level === 'admin' ? 'Manage' : 'Access') + '</span></li>';
-            }).join('') + '</ul>'
-          : '<p class="pc-muted">Nothing yet.</p>');
-      wireCrests(body);
-    }
-    body.addEventListener('change', function (e) { if (e.target.name === 'pcApRole') { role = e.target.value; draw(); } });
-    draw();
-    return new Promise(function (resolve) {
-      NL.modal({
-        title: 'Approve request', body: body, onClose: function () { resolve(); loadRequests(); },
-        buttons: [
-          { label: 'Cancel', onClick: function (m) { m.close(); } },
-          { label: 'Approve and email', className: 'btn--primary', onClick: function (m) {
-              var btns = m.el.querySelectorAll('.modal__footer .btn');
-              btns.forEach(function (b) { b.disabled = true; });
-              doApprove(r, role).then(function () { m.close(); }).catch(function (err) {
-                btns.forEach(function (b) { b.disabled = false; });
-                NL.toast('Failed: ' + (err && err.message || err), 'error');
-              });
-            } }
-        ]
-      });
-    });
-  }
-  function doApprove(r, role) {
-    var updates = {}, base = 'users/' + r.uid + '/';
-    updates[base + 'pending'] = false;
-    updates[base + 'rejected'] = false;
-    updates[base + 'role'] = role;
-    /* The club and title come from the request: a waiting person's own
-       record carries no club (account.js, 14/11/2026). Tools are written
-       whole, so nothing asked for at sign-up survives approval unless the
-       pass gives it. */
-    updates[base + 'club'] = r.club || '';
-    if (r.jobTitle) updates[base + 'jobTitle'] = r.jobTitle;
-    updates[base + 'pass'] = passFor(r, role);
-    var tools = P.toOld(passFor(r, role), S.registry, role), keep = {};
-    Object.keys(tools).forEach(function (k) { if (tools[k] != null) keep[k] = tools[k]; });
-    updates[base + 'tools'] = keep;
-    updates['admin/requests/' + r._key + '/status'] = 'approved';
-    NL.writeAudit('request_approved', (r.name || r.email || '') + (r.club ? ' (' + r.club + ')' : '') +
-      ' as ' + NL.roles.label(role) + ', Club card' + (role === 'club-admin' ? ' with Operations' : ''),
-      { uid: r.uid, name: r.name || '', email: r.email || '' });
-    return db.ref().update(updates).then(function () {
-      NL.gas.fetch({ action: 'sendApproval', name: r.name || '', email: r.email || '', club: r.club || '' }).catch(function () {});
-      NL.toast('Approved — ' + (r.name || r.email || ''), 'success');
-      return refreshPeople();
     });
   }
 

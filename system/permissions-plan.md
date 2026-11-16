@@ -418,7 +418,7 @@ it go. Nothing is removed until the **old access report** (Actions →
 
 | Old part | Where | Still read by | Goes when |
 |---|---|---|---|
-| Roles (`superadmin`, `admin`, `staff`, `club-admin`, `club-staff`, legacy `club`, `club-viewer`) | `users/<uid>/role` | auth-guard for anyone without a pass; the database rules' default lookup; `NL.roles` in a few tools | every account has a pass (report: "accounts without a pass" is 0), then step 9 |
+| Roles (`superadmin`, `admin`, `staff`, `club-admin`, `club-staff`, legacy `club`, `club-viewer`) | `users/<uid>/role` | auth-guard for anyone without a pass; the database rules' default lookup; `NL.roles` in a few tools | every account has a pass (report: "accounts without a pass" is 0), then step 9. Since 16/11 a request is approved only by issuing a pass, and the role is set from the card, never chosen (Club Admin with the Club Operations zone, else Club Staff); invites next |
 | Per-person tool entries | `users/<uid>/tools/<key>` | the database rules (`rtdb-level-rule.mjs`) | the rules read the pass instead; the cloud jobs keep them in step until then |
 | Old entry shapes (`{access, admin}`, `true`, `"hidden"`) | same | the same rules, for old data | the report shows none; then the rules and `NL.resolveToolLevel` stop accepting them |
 | Entries for tools that no longer exist | same | nothing | now: the report counts them; a one-off clear follows the retiring order |
