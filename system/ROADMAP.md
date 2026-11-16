@@ -44,9 +44,18 @@ Why: This is the last part of the new model people actually meet. Without it, ne
 - The request email stops saying "admin panel".
 - Everyone signs in with email and password. No emailed sign-in links each time (decided 13/11): they hang every sign-in on someone's inbox.
 - Email stays in Apps Script for now. The log records that an email was sent, not whether it arrived.
+- The invite form still offers the old roles (Club Admin and so on). It should offer a card and zones, the same words as the rest of Access.
+
+### Club views, and the regulator
+What: Every tool with club data gives each person a pair: which clubs (One club, or All clubs, named) and what they can do (Access or Manage). League cards get All clubs, named; Club cards get One club. An External card can be given one view on a tool that offers it, with a reason, an end date, and who gave it and when. First case: the Independent Football Regulator sees Financial Benchmarking as League staff do.
+Why: The regulator already receives these figures, so showing them the same page is safer than emailing spreadsheets, and the rule covers the next case (an analyst working for one club) without another exception.
+- First, Financial Benchmarking's League view: pick a club from a list or by clicking it, and it shows in its own colour with every other club in grey. League staff get it straight away.
+- Then the smallest External pass that serves the regulator: the organisation, one zone, invites, its pass, the grant and database rules for this one tool.
+- Then the pair on My pass and in Access: "All clubs · Manage" instead of "Manage".
+- Before the regulator's pass: how many logins, the end date, and every season or the latest only.
+Waiting on: you (the three answers above)
 
 ## Next
-- The invite form still offers the old roles (Club Admin and so on). It should offer a card and zones, the same words as the rest of Access.
 
 ### Private and Public shelves, and guest links
 What: One-off tools for your own use move to /private/, on a shelf only the Skeleton key sees. Each shows its age and has a Retire button. A guest link lets one named person open one private tool, with an end date, a switch-off and a log of every open. Broadcast Travel moves first, with its old staff code door removed. The Trust Cup frame moves to Graphics.
@@ -106,17 +115,19 @@ Why: Partners and freelancers need one or two tools each, with a name on every s
 - Fine-grained by zones, never by person. If one person needs more, their organisation gets another zone ("DAZN Reporting" beside "DAZN Broadcast"). When someone leaves, removing their pass leaves nothing behind.
 - Every tool is closed to externals unless its record switches it on, and a new tool starts closed, so forgetting only ever keeps someone out.
 - Access is the most an external gets, unless the tool was built for more (uploading to Programme Packs).
-- Externals never get the League's view across all 72 clubs. Each tool says what an external sees there; if it says nothing, they see nothing.
-- Sensitive tools can never be opened to externals: Club Codes, both benchmarking tools, Responsibilities and Access. That is locked three times: Access doesn't offer them, the pass refuses them, and the database rules refuse anyone on an External card. Changing which tools are sensitive is a pull request, not a tickbox.
+- Externals see no club data unless a tool offers them a club view and the grant says why (see "Club views, and the regulator").
+- Sensitive tools stay shut to externals except through such a grant: Club Codes, Responsibilities and Access offer none, so they never open. That is locked three times: Access doesn't offer them, the pass refuses them, and the database rules refuse anyone on an External card. Changing which tools are sensitive, or which offer a view, is a pull request, not a tickbox.
 - Logos live in file storage in their own folder, starting empty, so changing one is an upload, not a pull request.
 - Only the Skeleton key runs the Externals tab to begin with.
 - First tools: Programme Packs (freelance programme editors see every club's library; it is a shared working space) and Fixture Management (view only).
-- First organisation: the Trust, with Content Plan (view only), Document Library and Graphics (making its own posts, nothing more). If the Trust ever needs to see across every club like League staff, it becomes its own card instead.
+- First organisations: the regulator (above), then the Trust, with Content Plan (view only), Document Library and Graphics (making its own posts, nothing more).
 - Later candidates: Brand Exposure (a sponsor sees only its own boards, once that tool is finished), Matchday Live for freelance reporters, Graphics for freelance designers, Content Plan for agencies.
 
 ### Clear away the old access fields
 What: Once nothing reads them, remove the per-person tool entries and the jobs that keep them in step (Apply passes), the old roles, the per-role defaults on every tool, and the forwarding pages kept for old bookmarks.
 Why: Two ways of deciding access is twice the chance of them disagreeing.
+- Each old part, what still reads it and what lets it go is listed in the permissions plan ("Clearing the old model"). Nothing goes until the Old access report button shows nothing depends on it.
+- Gone 16/11: three registry fields nothing needed (the tool "type", "visible to all" and "placeholder").
 - The "League only" label (`audience` on each tool) goes here too. It still decides for anyone without a pass, and keeps a Club card off League tools until club logins, so it cannot go before then. (One address for each tool is done: every two-page tool is one page, 14/11/2026.)
 
 ### Rename the tools in the database

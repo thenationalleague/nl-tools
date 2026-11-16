@@ -1,0 +1,45 @@
+name: Button · Old access report
+
+# Counts how much still depends on the old access model (roles, per-person
+# tool entries, per-role defaults, the "League only" label), so each part is
+# removed when the count says it can be. The parts, and what each count
+# decides, are in system/permissions-plan.md ("Clearing the old model").
+#
+# Reads only; writes nothing. The log prints counts, role names and tool
+# keys, never a name, email or uid: this repo's Actions logs are public.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DB: https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      - name: Read and count
+        run: |
+          set -euo pipefail
+          TOKEN=$(gcloud auth print-access-token)
+          W=$(mktemp -d)
+          trap 'rm -rf "$W"' EXIT
+          for node in users tools access-grants; do
+            code=$(curl -sS -o "$W/$node.json" -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$DB/$node.json")
+            if [ "$code" != "200" ]; then echo "::error::Reading $node gave HTTP $code."; exit 1; fi
+          done
+          node scripts/old-access-report.mjs "$W/users.json" "$W/tools.json" "$W/access-grants.json" > "$W/out.txt"
+          grep -v '^JSON ' "$W/out.txt" | tee -a "$GITHUB_STEP_SUMMARY"

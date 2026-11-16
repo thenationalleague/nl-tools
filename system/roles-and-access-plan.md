@@ -1,5 +1,11 @@
 # Roles & access — plan of action
 
+> **Superseded 16/11/2026 by `system/permissions-plan.md`** (cards, zones,
+> levels, and the club views: One club or All clubs, named). Kept until the
+> old model is cleared away ("Clearing the old model" in that plan); read it
+> only for how the old roles worked. Where the two disagree, the permissions
+> plan wins.
+
 > **Vocabulary reconciled — 16/08/2026.** The settled model has **two realms
 > that log in** and **five roles**: League (`superadmin`, `admin`, `staff`) and
 > Club (`club-admin`, `club-staff`). The old **external realm and its

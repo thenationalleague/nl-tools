@@ -321,11 +321,16 @@ agencies, freelancers.
   keep someone out.
 - **Access is the ceiling** unless the tool was built for externals to
   change things (Programme Packs uploads).
-- **Never the League view.** The tool's `externals` setting also says what an
-  external sees of club data; if it says nothing, they see nothing.
+- **Never the League view, unless granted.** The tool's `externals` setting
+  also says what an external sees of club data; if it says nothing, they see
+  nothing. Since 16/11 a tool may offer an External card one of the two club
+  views, by a recorded grant: see "Club views" below.
 - **Sensitive tools are a hard lock**, never a flag: Club Codes, Commercial
   and Financial Benchmarking, Responsibilities, Access (the registry's
-  `sensitive` flag). Enforced three times: Access doesn't offer them in the
+  `sensitive` flag). The one way through (16/11): a club view the tool
+  offers to externals, given by a recorded grant ("Club views" below). Club
+  Codes, Responsibilities and Access offer none, so they stay shut. Enforced
+  three times: Access doesn't offer them in the
   zone editor; `NL.pass` returns Off for an External card on a sensitive
   tool whatever the data says; the database rules refuse an External card on
   those paths. Changing the sensitive list is a pull request.
@@ -334,13 +339,89 @@ agencies, freelancers.
   view only).
 - **First organisation:** the Trust – Content Plan (Access), Document
   Library, Graphics (making its own posts only). If it ever needs the
-  League's view across clubs, it becomes its own card, not a wider external.
+  League's view across clubs, that is a club-view grant ("Club views" below).
 - **Later candidates:** Brand Exposure (a sponsor sees only its own boards;
   needs that tool finished first), Matchday Live, Graphics for freelance
   designers, Content Plan for agencies.
 - **The pass:** the same white pass with a charcoal header; the big sticker
   in the organisation's colour with its logo on a white panel; zone stickers
   beneath, each with its plain name (see "The new pass front").
+
+## Club views: which clubs, and what you can do (decided 16/11)
+
+Every tool that holds club data gives each person a pair: **which clubs**
+and **what they can do**. The pair is what the screen says and what the
+database checks, in the same words, so the two cannot drift apart.
+
+| | **Access** (look) | **Manage** (change) |
+|---|---|---|
+| **One club** | A club's own figures and records. Other clubs appear as the tool's club data setting says: not at all, unnamed, or shown to read. | A club changes its own: its directory entry, its programme files, its attendance. |
+| **All clubs, named** | Every club, by name. What League staff see today. | Runs the tool for every club: imports, publishing, putting anyone's record right. |
+
+- **Off** is still the third answer: no pair, nothing opens.
+- **The views are not new.** "All clubs, named" is the name for what a League
+  card already sees in any tool with club data; "One club" is what a Club card
+  sees, with the existing club data setting (Own club only; Own club, others
+  anonymous; Every club, changes own) saying how the other clubs look.
+- **The card sets the view; the level comes from the grants, as now.** A Club
+  card gets One club, its own. A League card gets All clubs, named. A tool
+  with no club data (Graphics, Newsletter) has a level and nothing else.
+- **The Skeleton key is not a cell.** It is the way back in when something has
+  gone wrong, not "All clubs · Manage". The table describes ordinary work.
+- **An External card gets no view by default.** It can be given one, on a tool
+  that offers that view to externals:
+  - only by a Skeleton key holder;
+  - at Access, unless the tool was built for outsiders to change things;
+  - One club names the club (for example, an analyst working for one club);
+  - each grant carries **a reason** (for the IFR: "already receives these
+    figures directly"), **who gave it** and **when** (both filled in), and
+    **an end date**. There is no sign-off field for now; the reason says why.
+  - The grant is written to the audit log, shown in the tool's "who can open
+    this" panel, and stops on its end date by itself, with a reminder a few
+    weeks before.
+- **Which tools offer a view to externals** is part of the tool's record
+  (`externals`), and changing it is a pull request, never a switch in Access.
+  Financial Benchmarking offers All clubs, named first. Absent means none.
+
+**On screen**, the pair replaces the bare level wherever a level is shown: the
+chip at the end of each tool on `/pass/` reads "All clubs · Manage" or "One
+club · Access", and Access's "who can open this" panel says the same.
+
+**First case: the Independent Football Regulator.** An External card for the
+IFR, opening Financial Benchmarking with All clubs, named, at Access. The
+figures are ones the League reports to the IFR directly, which is the reason
+the grant records. The IFR sees the same page League staff see: pick a club
+from a list, or by clicking it in a chart, and it shows in its own colour
+with every other club in grey. Two-step sign-in is wanted but not a
+condition of starting.
+
+**Build order:** (1) this section and the clear-up below; (2) the shared
+Financial Benchmarking view, for League staff first; (3) the smallest
+External pass that serves the IFR (organisation record, one zone, invites,
+the charcoal pass, the grant with its record, database rules for this one
+tool); (4) the pair on `/pass/` and in Access. Before (3): how many IFR
+logins, the end date, and whether they see every season or the latest only.
+
+## Clearing the old model (started 16/11)
+
+Two ways of deciding access is twice the chance of them disagreeing. Every
+part of the old model is listed here with what still reads it and what lets
+it go. Nothing is removed until the **old access report** (Actions →
+`Button · Old access report`, counts only) shows nothing depends on it.
+
+| Old part | Where | Still read by | Goes when |
+|---|---|---|---|
+| Roles (`superadmin`, `admin`, `staff`, `club-admin`, `club-staff`, legacy `club`, `club-viewer`) | `users/<uid>/role` | auth-guard for anyone without a pass; the database rules' default lookup; `NL.roles` in a few tools | every account has a pass (report: "accounts without a pass" is 0), then step 9 |
+| Per-person tool entries | `users/<uid>/tools/<key>` | the database rules (`rtdb-level-rule.mjs`) | the rules read the pass instead; the cloud jobs keep them in step until then |
+| Old entry shapes (`{access, admin}`, `true`, `"hidden"`) | same | the same rules, for old data | the report shows none; then the rules and `NL.resolveToolLevel` stop accepting them |
+| Entries for tools that no longer exist | same | nothing | now: the report counts them; a one-off clear follows the retiring order |
+| Per-role defaults | `tools/<key>/defaults` | auth-guard and the rules, for anyone without a pass | with the roles |
+| "League only" | `tools/<key>/audience` | auth-guard, for anyone without a pass; keeps a Club card off League tools until club logins | club logins, then with the roles |
+| `type`, `visibleToAll`, `placeholder` | `tools/<key>` | nothing (`placeholder` was false on every tool) | **removed 16/11** from the registry snapshot |
+| The "Apply passes" button | Access | Skeleton key, by hand | the cloud jobs have been the only writer for a month |
+| `PASS_DECIDES` | auth-guard | the way back | a month after the last account has a pass |
+| Forwarding pages for old addresses | `*/admin/`, `/people/`, `/audit/` | old bookmarks | a quarter after the move |
+| Plans the model replaced | `roles-and-access-plan.md`, `staff-club-audience-plan.md`, `tool-status-and-access.md`, `third-party-access-plan.md`, `guest-pass-plan.md` | sessions that read them | marked superseded 16/11; deleted at step 9 with the rest |
 
 ## Approvals and notifications
 
