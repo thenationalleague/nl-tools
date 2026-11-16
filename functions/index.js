@@ -8,6 +8,10 @@
  *                       fan data live without mirroring it. See fan-widgets.js.
  *   passClaims        — a Club card puts its club on the account (club logins,
  *                       step 7): the claims a club code gives. See pass-claims.js.
+ *   externalInvites,  — External passes: accounts for an organisation's people,
+ *   externalPasses,     set up from Access by the Skeleton key, and what their
+ *   externalOrgs,       zones open, kept in step. See externals.js.
+ *   externalNightly
  *   passEntries,      — the database follows the pass: per-tool entries worked
  *   grantEntries,       out on the server from the pass and live grants, and
  *   keyEndings          keys that end overnight. See pass-entries.js.
@@ -91,6 +95,14 @@ Object.assign(exports, require("./pass-claims"));
 // a day for keys that have ended. Same resolver as the door, loaded from
 // system/nl-utils.js (canon.js). See pass-entries.js.
 Object.assign(exports, require("./pass-entries"));
+
+// External passes (externalInvites, externalPasses, externalOrgs,
+// externalNightly): an organisation set up in Access, an account made for
+// each of its people on request from a Skeleton key holder, and what their
+// zones open (pass.ext) kept in step with the organisation and the tools.
+// Request-record triggers, not callables, for the org-policy reason above.
+// See externals.js.
+Object.assign(exports, require("./externals"));
 
 // Brand Exposure ingest key → a `be: <matchId>` claim (brandExposureIngest).
 // Fifth instance of the same shape, and the first whose client is a Python

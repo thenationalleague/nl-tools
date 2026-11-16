@@ -1,7 +1,12 @@
 /*
  * auth-guard.js — NL Tools v2
  * File: /system/auth-guard.js
- * Version: v16.4 (14/11/2026)
+ * Version: v16.5 (16/11/2026)
+ *
+ * v16.5: The tool's key travels with its record into the pass's resolver
+ *       (NL.pass.explain), which an External card needs: what its zones
+ *       open is kept by tool key. Cache-bust ?v=23 -> ?v=24, in lockstep
+ *       with nl-utils ?v=72 -> ?v=73 and every page.
  *
  * v16.4: Signed out at a tool, you are sent to sign in with ?next= set to
  *       the page you asked for, and sign-in brings you back there instead
@@ -747,6 +752,7 @@
         var toolData = snaps[1].exists() ? snaps[1].val() : null;
         var live = snaps[2] && snaps[2].exists() ? snaps[2].val() : null;
         if (toolData && live && window.NL && NL.pass && NL.pass.withLive) toolData = NL.pass.withLive(toolData, live);
+        if (toolData && !toolData.key) toolData = Object.assign({ key: NL_TOOL_KEY }, toolData);
 
         /* Refresh cache so portal / other tools see the latest values. */
         nlSession.write(user.uid, userData);

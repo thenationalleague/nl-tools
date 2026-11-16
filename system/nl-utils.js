@@ -1,7 +1,16 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.68 (14/11/2026)
+   Version: v1.69 (16/11/2026)
+   v1.69 — External passes (permissions plan, "External passes" and "Club
+     views"). A third card, base 'external', for one organisation set up in
+     Access (externals/<org>), holding that organisation's zones. What a
+     zone opens is worked out on the server into the pass (pass.ext, by
+     NL.pass.extFor) and read by explain, which now takes the tool's key.
+     A tool is closed to externals unless its record offers them
+     (`externals`); a tool with club data opens only through a club view it
+     offers, and a sensitive one only that way. explain also reports the
+     club view each card gets (One club, All clubs, named).
    v1.68 — NL.codeGate.door: one page, two doors. A League account at its
      level (NL.accountLevel) gets the NL Tools bar and the tool's League
      view; anyone else the code door. For the two-page tools moving to one
@@ -2780,7 +2789,11 @@
         if (stop) stop();
         if (!user || !user.email) { codeDoor(); return; }
         window.NL.accountLevel.load(user.uid, opts.toolKey).then(function (who) {
-          if (!who.league) { codeDoor(); return; }
+          /* v1.69: an External card that this tool opens to goes through the
+             League side too, at its own level and view (never Manage unless
+             the tool offers it); one it does not open to is told so. */
+          var external = window.NL.pass && window.NL.pass.isExternal(who.user && who.user.pass);
+          if (!who.league && !external) { codeDoor(); return; }
           var u = who.user || {};
           var session = {
             uid: user.uid, name: u.name || '', email: u.email || user.email || '', role: u.role || '',
@@ -3109,7 +3122,96 @@
     function nowOr(now) { return (typeof now === 'number') ? now : Date.now(); }
 
     function isIssued(pass) {
-      return !!(pass && (pass.base === 'league' || (pass.base === 'club' && pass.club)));
+      return !!(pass && (pass.base === 'league' || (pass.base === 'club' && pass.club) ||
+        (pass.base === 'external' && pass.org)));
+    }
+    function isExternal(pass) { return !!(pass && pass.base === 'external' && pass.org); }
+
+    /* ---- Club views and external passes (v1.69) -----------------------
+       Every tool with club data (permissions.clubData not 'none') gives a
+       pair: which clubs, and what you can do. A Club card sees One club, a
+       League card All clubs, named. An External card sees a view only where
+       its organisation's zone was given one, on a tool whose `externals`
+       record offers it:
+
+         tools/<key>/externals = { views: ['all'] (and/or 'one'), manage?: true }
+
+       Absent means closed to externals; `manage` lets a zone give Manage
+       (a tool built for outsiders to change things). An organisation is
+       externals/<org> = { name, colours, zones: { <zoneId>: { name, code,
+       tools: { <toolKey>: { level, view?, club?, reason, by, at } } } } };
+       a person holds zones as keys on the pass, each with an optional end
+       date. extFor works out what the zones open; the server writes it to
+       pass.ext, and explain reads that. */
+    var VIEWS = { all: 'All clubs, named', one: 'One club' };
+    function hasClubData(record) {
+      var cd = record && record.permissions && record.permissions.clubData;
+      return !!cd && cd !== 'none';
+    }
+    function offersExternals(record) {
+      var x = record && record.externals;
+      return x && typeof x === 'object' ? x : null;
+    }
+    function zoneEnded(k, now) {
+      var until = k && k.until;
+      return typeof until === 'number' && until <= nowOr(now);
+    }
+    function zonesHeld(pass, org, now) {
+      if (!isExternal(pass) || !org || !org.zones) return [];
+      return Object.keys(pass.keys || {}).filter(function (id) {
+        return org.zones[id] && !zoneEnded(pass.keys[id], now);
+      }).sort();
+    }
+    /* What one zone's entry for one tool gives, or null: closed to
+       externals, a structural or Sandbox tool, a club-data tool without a
+       view it offers, a sensitive tool without a view, or One club with no
+       club named. */
+    function zoneGives(entry, record) {
+      var x = offersExternals(record), p = record && record.permissions;
+      if (!entry || !x || !p) return null;
+      if (p.shelf === 'structural' || p.shelf === 'sandbox') return null;
+      var level = entry.level === 'manage' && x.manage ? 2 : (entry.level === 'access' || entry.level === 'manage' ? 1 : 0);
+      level = Math.min(level, cap(record));
+      if (!level) return null;
+      var views = x.views || [];
+      var view = VIEWS[entry.view] && views.indexOf(entry.view) >= 0 ? entry.view : null;
+      if (hasClubData(record) && !view) return null;
+      if (p.sensitive && !view) return null;
+      if (view === 'one' && !entry.club) return null;
+      var out = { level: byRank(level) };
+      if (view) out.view = view;
+      if (view === 'one') out.club = String(entry.club);
+      return out;
+    }
+    /* pass.ext for an External card: { <toolKey>: { level, view?, club?,
+       zones: [ids], until? } }. The highest level any held zone gives; All
+       clubs beats One club; `until` is the latest end among the zones that
+       give it, absent if any of them has none. */
+    function extFor(pass, org, registry, now) {
+      var out = {};
+      zonesHeld(pass, org, now).forEach(function (zid) {
+        var tools = (org.zones[zid] && org.zones[zid].tools) || {};
+        var until = pass.keys[zid] && pass.keys[zid].until;
+        Object.keys(tools).forEach(function (key) {
+          var g = zoneGives(tools[key], registry && registry[key]);
+          if (!g) return;
+          var cur = out[key];
+          if (!cur) {
+            cur = out[key] = { level: g.level, zones: [zid] };
+            if (g.view) cur.view = g.view;
+            if (g.club) cur.club = g.club;
+            if (typeof until === 'number') cur.until = until; else cur.forever = true;
+            return;
+          }
+          cur.zones.push(zid);
+          if (rank(g.level) > rank(cur.level)) cur.level = g.level;
+          if (g.view === 'all' && cur.view !== 'all') { cur.view = 'all'; delete cur.club; }
+          if (typeof until === 'number' && !cur.forever) cur.until = Math.max(cur.until || 0, until);
+          else { cur.forever = true; delete cur.until; }
+        });
+      });
+      Object.keys(out).forEach(function (k) { delete out[k].forever; });
+      return out;
     }
     function isSkeleton(pass) { return !!(pass && pass.skeleton); }
 
@@ -3144,9 +3246,10 @@
        because that is what the person would actually get.
        Returns the level and WHY, part by part, because every screen that
        shows a level (My pass, View as) also shows what opened it. */
-    function explain(pass, record, now) {
+    function explain(pass, record, now, key) {
       var out = { level: 'off', reason: 'nothing', parts: [], openedBy: null };
       if (!isIssued(pass)) { out.reason = 'no-pass'; return out; }
+      if (pass.base === 'external') return explainExternal(pass, record, now, key, out);
       if (isSkeleton(pass)) {
         out.level = 'manage'; out.reason = 'skeleton'; out.openedBy = 'skeleton';
         out.parts = [{ id: 'skeleton', level: 'manage' }];
@@ -3196,9 +3299,34 @@
 
       out.level = byRank(best);
       out.reason = best ? 'grants' : 'nothing';
+      if (best && hasClubData(record)) out.view = pass.base === 'club' ? 'one' : 'all';
       /* Before launch it is the Tester key that opens a Sandbox tool, never
          the card, whatever the card will give at launch. */
       if (best) out.openedBy = (p.shelf !== 'sandbox' && fromCard >= best) ? 'card' : 'key';
+      return out;
+    }
+
+    /* An External card: only what its zones were given (pass.ext, written
+       by the server from the organisation's zones), and only while the
+       tool still offers it. The Skeleton key never sits on one. */
+    function explainExternal(pass, record, now, key, out) {
+      var p = record && record.permissions;
+      if (!p || !p.grants) { out.reason = 'no-record'; return out; }
+      if (p.shelf === 'structural') { out.reason = 'structure'; return out; }
+      if (p.shelf === 'sandbox') { out.reason = 'sandbox'; return out; }
+      if (!offersExternals(record)) { out.reason = 'external-closed'; return out; }
+      var k = key || (record && record.key);
+      var e = k && pass.ext && pass.ext[k];
+      if (!e) return out;
+      if (typeof e.until === 'number' && e.until <= nowOr(now)) { out.reason = 'ended'; return out; }
+      var g = zoneGives(e, record);
+      if (!g) { out.reason = 'external-closed'; return out; }
+      out.level = g.level;
+      out.reason = 'grants';
+      out.openedBy = 'key';
+      out.parts = (e.zones || []).map(function (z) { return { id: z, level: g.level }; });
+      if (g.view) out.view = g.view;
+      if (g.club) out.club = g.club;
       return out;
     }
 
@@ -3210,7 +3338,7 @@
       Object.keys(registry || {}).forEach(function (key) {
         var rec = registry[key];
         if (!rec || rec.placeholder) return;
-        var ex = explain(pass, rec, now);
+        var ex = explain(pass, rec, now, key);
         if (ex.level !== 'off') out.push({ key: key, record: rec, label: rec.label || key, explain: ex });
       });
       return out.sort(function (a, b) { return a.label.localeCompare(b.label); });
@@ -3271,7 +3399,7 @@
         if (!rec || rec.placeholder) return;
         var withKey = Object.assign({ key: key }, rec);
         var today = todayLevel(user, withKey);
-        var pass = explain(user && user.pass, rec, now).level;
+        var pass = explain(user && user.pass, rec, now, key).level;
         if (today === pass) return;
         out.push({
           key: key, label: rec.label || key, today: today, pass: pass,
@@ -3300,10 +3428,14 @@
         var rec = registry[key];
         if (!rec || key === 'welcome') return;
         var aud = rec.audience;
+        /* An External card's entries are the only thing that opens a tool
+           to it in the database (its role has no defaults), League-only
+           tools included: what it may see was checked in extFor. */
+        var external = isExternal(pass);
         if (role === 'superadmin' ||
-            ((aud === 'league' || aud === 'staff' || aud === 'meta') && !leagueRole)) { out[key] = null; return; }
-        var bare = todayLevel({ role: role, tools: {} }, Object.assign({ key: key }, rec));
-        var want = explain(pass, rec, now).level;
+            ((aud === 'league' || aud === 'staff' || aud === 'meta') && !leagueRole && !external)) { out[key] = null; return; }
+        var bare = external ? 'off' : todayLevel({ role: role, tools: {} }, Object.assign({ key: key }, rec));
+        var want = explain(pass, rec, now, key).level;
         out[key] = want === bare ? null : (want === 'manage' ? 'admin' : want);
       });
       return out;
@@ -3357,6 +3489,10 @@
        none. Keys from the other side and unknown ids are dropped; the
        Skeleton key goes only on a League card. */
     function build(input, by, now, previous) {
+      /* An External pass is set up in Access's Externals tab, never by this
+         form: re-saving one here would turn it into a League card. */
+      if (input && input.base === 'external') throw new Error('An External pass is set up in Access, Externals.');
+      if (previous && previous.base === 'external') throw new Error('This is an External pass. Change it in Access, Externals.');
       now = nowOr(now);
       var base = input.base === 'club' ? 'club' : 'league';
       var prevKeys = (previous && previous.base === base && previous.keys) || {};
@@ -3500,7 +3636,13 @@
         });
       },
       explain: explain,
-      level: function (pass, record, now) { return explain(pass, record, now).level; },
+      level: function (pass, record, now, key) { return explain(pass, record, now, key).level; },
+      isExternal: isExternal,
+      VIEWS: VIEWS,
+      extFor: extFor,
+      zonesHeld: zonesHeld,
+      zoneGives: zoneGives,
+      offersExternals: offersExternals,
       summary: summary,
       whoCanOpen: whoCanOpen,
       fromOld: fromOld,
@@ -3576,7 +3718,7 @@
       user = user || {};
       if (!tool) return 'off';
       if (window.NL.pass && window.NL.pass.isIssued(user.pass)) {
-        var ex = window.NL.pass.explain(user.pass, tool);
+        var ex = window.NL.pass.explain(user.pass, tool, undefined, toolKey);
         if (user.pass.base === 'club' && leagueTool(tool) && ex.reason !== 'skeleton') return 'off';
         return ex.level === 'manage' ? 'manage' : (ex.level === 'access' ? 'access' : 'off');
       }
