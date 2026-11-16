@@ -1,5 +1,11 @@
 # Staff / Club audience gating — plan of action
 
+> **Superseded 16/11/2026 by `system/permissions-plan.md`** (cards, zones,
+> levels, and the club views: One club or All clubs, named). Kept until the
+> old model is cleared away ("Clearing the old model" in that plan); read it
+> only for how the old roles worked. Where the two disagree, the permissions
+> plan wins.
+
 **Status:** planned / not started.
 **Owner:** Richard.
 **Goal:** ONE unambiguous, structurally-enforced access boundary — **a club-realm

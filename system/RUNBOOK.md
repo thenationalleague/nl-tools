@@ -112,6 +112,12 @@ Check the snapshot, and if the answer matters, look in the console.**
 **A PR that changes any of these files needs one button press after merge, and
 the PR body should say so.** A PR that adds a function needs nothing.
 
+Buttons that only read, and change nothing:
+
+| What it tells you | Actions → workflow |
+|---|---|
+| How much still depends on the old access model: accounts without a pass, old roles, old entry shapes, entries for tools that are gone, per-role defaults. Each line says what its count decides. | **Button · Old access report** |
+
 ### 3. Runs itself on a schedule
 
 | Workflow | When | What it does |

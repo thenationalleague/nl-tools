@@ -1,5 +1,11 @@
 # Guest passes — scoping, not yet built
 
+> **Superseded 16/11/2026.** The case this was written for, an outsider who
+> needs one or two tools, is now an External pass with a zone, and one club's
+> figures are a "One club" club view on that pass, with a reason and an end
+> date: `system/permissions-plan.md` ("External passes" and "Club views").
+> Kept for the questions it asked; build nothing from it.
+
 **Status: scoping. Nothing here is built. Do not build it until the four open
 questions at the foot are answered.**
 

@@ -1,5 +1,11 @@
 # Tool status & access model
 
+> **Superseded 16/11/2026 by `system/permissions-plan.md`** (cards, zones,
+> levels, and the club views: One club or All clubs, named). Kept until the
+> old model is cleared away ("Clearing the old model" in that plan); read it
+> only for how the old roles worked. Where the two disagree, the permissions
+> plan wins.
+
 Which tools are live, who can open each, and what each role can do inside.
 Rewritten 17/08/2026 against `tools-registry.snapshot.json` — the previous
 version still described six roles, an external realm, and pasting the registry
