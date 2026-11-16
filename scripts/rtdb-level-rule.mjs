@@ -28,6 +28,13 @@
        normalised as NL.roles.norm does — 'club' → 'club-admin',
        'club-viewer' → 'club-staff' (falling back to the legacy key when the
        normalised one has no default), and a missing role reads as 'staff'.
+     · EXCEPT where there is no account at all (16/11/2026). A session with
+       no users/<uid> record (a club code, or any anonymous sign-in) has no
+       role, and used to read as 'staff' too, so a tool's League Staff
+       default would have opened to every code holder. A missing role now
+       reads as 'staff' only for an account that exists; no account, no
+       default. The portal never meets a session with no account, so it
+       and this still agree on every account.
 
    CLI: node scripts/rtdb-level-rule.mjs <toolKey> <access|admin>
         prints the expression, for pasting into system/rtdb/rules.snapshot.json.
@@ -37,6 +44,7 @@
 const U = "root.child('users').child(auth.uid)";
 const ROLE = `${U}.child('role').val()`;
 const HAS_ROLE = `${U}.child('role').exists()`;
+const HAS_ACCOUNT = `${U}.exists()`;
 
 function q(s) {
   if (!/^[a-z0-9-]+$/.test(s)) throw new Error(`levelRule: unsafe key ${JSON.stringify(s)}`);
@@ -72,7 +80,7 @@ export function levelRule(toolKey, min, offered) {
   const defaultIs = (L) => [
     legacy('club', 'club-admin', L),
     legacy('club-viewer', 'club-staff', L),
-    `(!${HAS_ROLE} && ${D("'staff'")}.val() === '${L}')`,
+    `(!${HAS_ROLE} && ${HAS_ACCOUNT} && ${D("'staff'")}.val() === '${L}')`,
     `(${HAS_ROLE} && ${ROLE} !== 'club' && ${ROLE} !== 'club-viewer' && ${D(ROLE)}.val() === '${L}')`,
   ].join(' || ');
 

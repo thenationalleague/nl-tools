@@ -76,6 +76,15 @@ for (const defaults of DEFAULT_SETS) {
       }
     }
   }
+  /* No account at all (a club code, an anonymous sign-in): never a role's
+     default, whatever the defaults say (16/11/2026). */
+  for (const claims of [{}, { club: 'ABC' }, { club: 'NL' }, { club: '*' }]) {
+    const db = env.authenticatedContext('noaccount' + (++n), claims).database();
+    const can = async (p) => get(ref(db, p)).then(() => true, () => false);
+    const got = (await can('probe/admin')) ? 'admin' : (await can('probe/access')) ? 'access' : 'off';
+    if (got === 'off') pass++;
+    else { fail++; console.log('XX  no account, claims=%j defaults=%j  rules=%s', claims, defaults, got); }
+  }
 }
 await env.cleanup();
 console.log(`\n${pass} combinations agree, ${fail} disagree`);
