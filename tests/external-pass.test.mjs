@@ -105,9 +105,28 @@ test('toOld: an External card gets entries only for what it opens, League-only t
   assert.equal(old[FB], 'access');
 });
 
-test('the issue form refuses an External pass, either way round', () => {
-  assert.throws(() => P.build({ base: 'external' }, 'u', NOW));
-  assert.throws(() => P.build({ base: 'league' }, 'u', NOW, pass({})));
+test('the issue form builds an External card: its organisation and the zones ticked, never ext', () => {
+  const p = P.build({ base: 'external', org: 'made-up', jobTitle: ' Analyst ', keys: ['fin', 'gov'], until: { gov: NOW + 1000 } }, 'u0', NOW);
+  assert.deepEqual(plain(p), { base: 'external', org: 'made-up', jobTitle: 'Analyst', issued: NOW, issuedBy: 'u0', updated: NOW, updatedBy: 'u0',
+    keys: { fin: { given: NOW, by: 'u0' }, gov: { given: NOW, by: 'u0', until: NOW + 1000 } } });
+  assert.equal(p.ext, undefined, 'what the zones open is the server\'s to write');
+  assert.equal(p.skeleton, undefined);
+  /* A zone kept keeps who gave it and when; an end date is the form's to set or clear. */
+  const again = P.build({ base: 'external', org: 'made-up', keys: ['fin'] }, 'u9', NOW + 5, p);
+  assert.deepEqual(plain(again.keys), { fin: { given: NOW, by: 'u0' } });
+  assert.equal(again.issued, NOW);
+  /* Another organisation starts its zones afresh. */
+  assert.deepEqual(plain(P.build({ base: 'external', org: 'other', keys: ['fin'] }, 'u9', NOW + 5, p).keys), { fin: { given: NOW + 5, by: 'u9' } });
+});
+
+test('the issue form never moves a pass across the External line, either way round', () => {
+  assert.throws(() => P.build({ base: 'league' }, 'u', NOW, pass({})), /stays External/);
+  assert.throws(() => P.build({ base: 'club', club: 'X' }, 'u', NOW, pass({})), /stays External/);
+  assert.throws(() => P.build({ base: 'external', org: 'made-up' }, 'u', NOW, { base: 'league', issued: 1 }), /External account/);
+  assert.throws(() => P.build({ base: 'external' }, 'u', NOW), /organisation/, 'no organisation, no card');
+  assert.throws(() => P.build({ base: 'external', org: '../x' }, 'u', NOW), /organisation/);
+  const p = P.build({ base: 'external', org: 'made-up', keys: ['fin', '../users', ''] }, 'u', NOW);
+  assert.deepEqual(Object.keys(p.keys), ['fin'], 'only plain zone ids');
 });
 
 test('club views: a Club card sees One club, a League card All clubs, named', () => {
