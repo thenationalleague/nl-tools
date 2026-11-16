@@ -2,7 +2,9 @@
    people, who may read it, and that an External account reaches Financial
    Benchmarking only through the entry the server writes for it. Also
    re-proves the club code route: a code session reads its own club's row
-   and nothing that names every club. Run by Auto · Test database rules
+   and nothing that names every club. Commercial Benchmarking (16/11/2026)
+   opens to an External card only with both the server's All clubs entry
+   and the tool entry Access writes. Run by Auto · Test database rules
    (tests/emulator/README.md). Made-up people, organisations and figures. */
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
 import { readFileSync } from 'node:fs';
@@ -14,17 +16,29 @@ const env = await initializeTestEnvironment({ projectId: 'demo-externals', datab
   rules: readFileSync(join(REPO, 'system/rtdb/rules.snapshot.json'), 'utf8'), host: '127.0.0.1', port: 9000 } });
 const REG = JSON.parse(readFileSync(join(REPO, 'system/rtdb/tools-registry.snapshot.json'), 'utf8'));
 const FB = 'ops-financial-benchmarking';
+const CB = 'ops-commercial-benchmarking';
+const CBALL = { [CB]: { level: 'access', view: 'all', zones: ['com'] } };
 const ORG = { name: 'Made-up Regulator', zones: { fin: { name: 'Finance', code: 'FIN',
   tools: { [FB]: { level: 'access', view: 'all', reason: 'Already receives these figures', by: 'skel', at: 1 } } } } };
 
 await env.withSecurityRulesDisabled((ctx) => set(ref(ctx.database()), {
-  tools: { [FB]: REG[FB] },
+  tools: { [FB]: REG[FB], [CB]: REG[CB] },
   users: {
     skel: { role: 'staff', name: 'S', pass: { base: 'league', issued: 1, skeleton: { given: 1 } } },
     staff: { role: 'staff', name: 'L', pass: { base: 'league', issued: 1 } },
     ext1: { role: 'external', name: 'E', org: 'Made-up Regulator', pass: { base: 'external', org: 'reg', issued: 1, keys: { fin: { given: 1 } } },
       tools: { [FB]: 'access' } },
     ext2: { role: 'external', name: 'F', pass: { base: 'external', org: 'other', issued: 1, keys: { x: { given: 1 } } } },
+    /* Commercial Benchmarking: both locks, the tool entry only, the
+       server's entry only, and the server's entry for one club. */
+    extcb: { role: 'external', name: 'G', pass: { base: 'external', org: 'reg', issued: 1, keys: { com: { given: 1 } }, ext: CBALL }, tools: { [CB]: 'access' } },
+    exttool: { role: 'external', name: 'H', pass: { base: 'external', org: 'reg', issued: 1, keys: { com: { given: 1 } } }, tools: { [CB]: 'access' } },
+    extext: { role: 'external', name: 'I', pass: { base: 'external', org: 'reg', issued: 1, keys: { com: { given: 1 } }, ext: CBALL } },
+    extone: { role: 'external', name: 'J', pass: { base: 'external', org: 'reg', issued: 1, keys: { com: { given: 1 } },
+      ext: { [CB]: { level: 'access', view: 'one', club: 'ABC', zones: ['com'] } } }, tools: { [CB]: 'access' } },
+    clubcard: { role: 'club-staff', name: 'K', pass: { base: 'club', club: 'Testham Town', issued: 1 }, tools: { [CB]: 'access' } },
+    leaguecb: { role: 'staff', name: 'P', pass: { base: 'league', issued: 1 }, tools: { [CB]: 'access' } },
+    leagueops: { role: 'admin', name: 'M', pass: { base: 'league', issued: 1, keys: { 'league-operations': { given: 1 } } } },
   },
   externals: { reg: ORG, other: { name: 'Other', zones: { x: { name: 'X', code: 'XXX' } } } },
   'app-data': { [FB]: {
@@ -32,12 +46,18 @@ await env.withSecurityRulesDisabled((ctx) => set(ref(ctx.database()), {
     returns: { '2026': { q1: {
       clubs: { ABC: { div: 'National', v: { incomeBudget: 1 } }, XYZ: { div: 'National', v: { incomeBudget: 2 } } },
       bench: { National: { incomeBudget: [1, 2] } } } } },
+  },
+  [CB]: {
+    aggregates: { roster: [{ club: 'Testham Town', data: true }, { club: 'Otherby Rovers', data: true }] },
+    clubs: { 'Testham Town': { club: 'Testham Town', metrics: { a: 1 } }, 'Otherby Rovers': { club: 'Otherby Rovers', metrics: { a: 2 } } },
   } },
 }));
 
 const ctxs = {};
 const db = (uid, claims) => (ctxs[uid] ||= (uid ? env.authenticatedContext(uid, claims) : env.unauthenticatedContext()).database());
 const skel = db('skel'), staff = db('staff'), ext1 = db('ext1'), ext2 = db('ext2');
+const extcb = db('extcb'), exttool = db('exttool'), extext = db('extext'), extone = db('extone'), clubcard = db('clubcard'), leagueops = db('leagueops'), leaguecb = db('leaguecb');
+const cbCode = db('anon-code-TST', { club: 'TST', clubName: 'Testham Town' });
 const code = db('anon-code-ABC', { club: 'ABC' });
 const anon = db('anon-plain');
 
@@ -78,6 +98,26 @@ await t('an External account cannot write the figures', set(ref(ext1, 'app-data/
 await t('nor give itself the entry', set(ref(ext2, 'users/ext2/tools/' + FB), 'access'), false);
 await t('nor change its own pass', set(ref(ext2, 'users/ext2/pass/ext'), { [FB]: { level: 'access', view: 'all' } }), false);
 await t('nor change its own zones', set(ref(ext1, 'users/ext1/pass/keys/x'), { given: 1 }), false);
+
+/* Commercial Benchmarking: All clubs, named, for an External card */
+const CBC = 'app-data/' + CB + '/clubs';
+await t('CB: an External card with both entries reads every club, named', get(ref(extcb, CBC)), true);
+await t('CB: not with the tool entry alone', get(ref(exttool, CBC)), false);
+await t('CB: not with the server\'s entry alone', get(ref(extext, CBC)), false);
+await t('CB: not with a One club entry', get(ref(extone, CBC)), false);
+await t('CB: another organisation\'s External card reads nothing', get(ref(ext2, CBC)), false);
+await t('CB: an External card never writes', set(ref(extcb, CBC + '/Testham Town/metrics/a'), 9), false);
+await t('CB: nor signs off a club\'s figures', set(ref(extcb, CBC + '/Testham Town/confirm'), { confirmed: true, at: 1 }), false);
+await t('CB: a Club card still reads no other club', get(ref(clubcard, CBC)), false);
+await t('CB: League staff at Access still read it', get(ref(leaguecb, CBC)), true);
+await t('CB: League staff at Off do not', get(ref(staff, CBC)), false);
+await t('CB: a club code reads its own row', get(ref(cbCode, CBC + '/Testham Town')), true);
+await t('CB: not another club\'s', get(ref(cbCode, CBC + '/Otherby Rovers')), false);
+await t('CB: not every club', get(ref(cbCode, CBC)), false);
+await t('CB: a plain anonymous session reads no row', get(ref(anon, CBC)), false);
+await t('CB: nobody gives themselves the server\'s entry', set(ref(exttool, 'users/exttool/pass/ext'), CBALL), false);
+await t('CB: League Operations cannot make an External card', set(ref(leagueops, 'users/newext'),
+  { role: 'external', name: 'N', pass: { base: 'external', org: 'reg', issued: 1, ext: CBALL }, tools: { [CB]: 'access' } }), false);
 
 /* The club code route, unchanged */
 await t('a club code reads its own club\'s row', get(ref(code, 'app-data/' + FB + '/returns/2026/q1/clubs/ABC')), true);

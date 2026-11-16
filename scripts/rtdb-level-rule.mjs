@@ -105,6 +105,19 @@ export function leagueRule() {
   return `(${PASS_BASE}.val() === 'league' || (!${PASS_BASE}.exists() && (${leagueRole})) || ${ROLE} === 'superadmin')`;
 }
 
+/* "This External card was given every club, named, on this tool." Reads
+   pass.ext, which only the server writes (functions/externals.js, from the
+   organisation's zones and the tool's `externals` offer); nobody can write
+   their own pass. Used beside leagueRule on a read, never a write, where a
+   tool offers externals All clubs, named, and its club data is otherwise
+   League only: `(${leagueRule()} || ${externalAllRule(key)}) && levelRule`.
+   The level check still applies, so it takes both the server's entry and
+   the tool entry Access writes from the pass. First used for Commercial
+   Benchmarking (16/11/2026). */
+export function externalAllRule(key) {
+  return `(${PASS_BASE}.val() === 'external' && ${U}.child('pass').child('ext').child('${key}').child('view').val() === 'all')`;
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   const [key, min] = process.argv.slice(2);
   if (key === 'league' && !min) { console.log(leagueRule()); process.exit(0); }

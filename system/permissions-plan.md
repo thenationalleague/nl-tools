@@ -906,6 +906,31 @@ kilobytes of rules against a 256KB limit.
 - **Still to do:** a logo upload; the pair ("All clubs · Access") on My pass
   and in "who can open this"; One club rules for a tool that offers it.
 
+### External passes, second batch (16/11/2026)
+
+- **Opened to externals, All clubs, named, at Access:** Judgements,
+  Club Directory, Handbook and Commercial Benchmarking (registry
+  `externals: { views: ['all'] }`), for the IFR first.
+- **Judgements** needs nothing else: its records are public and its page
+  goes by auth-guard's level.
+- **Club Directory and Handbook** send an External card to their open
+  pages (`/club-directory/public/`, `/handbook/public/`): the published
+  copy, which anyone may read. The staff side of the directory, its
+  club-only rows and the handbook's working draft are never theirs.
+  (The draft is still readable by any signed-in session in the rules,
+  as tests/open-reads.test.mjs records; League only is decided and waits
+  on Club cards moving to the reader.)
+- **Commercial Benchmarking** takes External cards through to the
+  every-club view. Its `clubs/` read is League **or**
+  `externalAllRule(key)` (scripts/rtdb-level-rule.mjs: an External card
+  whose server-written `pass.ext` gives this tool All clubs), **and** the
+  level as before. Reads only; no write changes. The only place the rules
+  read `pass.ext`.
+- **The server writes the tool entries** (`users/<uid>/tools`) for an
+  External card in the same update as `pass.ext`
+  (`functions/externals-core.js`, `extUpdate`, from `NL.pass.toOld`), so a
+  zone change reaches the data without Apply passes.
+
 ## Safety rails
 
 - Report before switch; run both and compare; a way back at every step.
