@@ -1,7 +1,14 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.69 (16/11/2026)
+   Version: v1.70 (16/11/2026)
+   v1.70 — NL.infoTip: the (i). A small round button beside a label, a
+     heading or a key that opens a short explanation on a tap or a click and
+     closes on a tap elsewhere, Esc, or the (i) again: the detail someone
+     needs once, kept off the screen the rest of the time. NL.infoTip.html
+     draws it; one listener on the page opens and closes every one, so
+     nothing is wired after inserting it. Paired with .info-tip in
+     nl-brand.css (v2.82). First used on My pass's key.
    v1.69 — External passes (permissions plan, "External passes" and "Club
      views"). A third card, base 'external', for one organisation set up in
      Access (externals/<org>), holding that organisation's zones. What a
@@ -1021,6 +1028,96 @@
      screen as a sheet, so it is never half off the edge. Keyboard: Enter,
      Space or ↓ opens; ↑ ↓ move; Space or Enter ticks; Escape closes and
      returns focus to the button. A tap or click outside closes it. */
+  /* ===================================================================
+     NL.infoTip — the (i): an explanation kept off the screen until asked
+     (v1.70, 16/11/2026; .info-tip in nl-brand.css v2.82)
+
+       NL.infoTip.html({ label, title, body })  → an HTML string
+
+         label  the button's name for a screen reader, e.g. "About Access
+                and Manage". Escaped. Required: an (i) with no name is a
+                button nobody can find by ear.
+         title  the panel's first, bold line. Escaped. Optional.
+         body   TRUSTED HTML: one string, or an array of strings, one per
+                paragraph. Not escaped; the caller builds it (<b>, <br>
+                and plain words) and escapes what it puts in.
+
+     WHEN: explanation someone needs once, not every visit (style
+     principles: label, don't explain). Never for something that changes
+     what they do or warns of a consequence; that stays on the screen.
+
+     HOW IT BEHAVES. A tap or a click on the (i) opens its panel beside it;
+     a tap anywhere else, Esc (focus goes back to the (i)), the (i) again,
+     a scroll or a resize closes it. One open at a time. A panel, not a
+     hover tooltip: hover does not exist on a phone. The panel is fixed and
+     placed from the button, so an overflow:hidden card or a scrolling
+     dialog cannot clip it.
+
+     ONE LISTENER, on the document and in the capture phase, so it works
+     for every (i) however and whenever it was drawn, and a click on one
+     inside a link or a clickable row opens the panel and does nothing
+     else. */
+  (function () {
+    var seq = 0, open = null;
+    function esc(s) { return window.NL.escHtml(s == null ? '' : String(s)); }
+    function html(o) {
+      o = o || {};
+      var id = 'nl-info-' + (++seq);
+      var paras = o.body == null ? [] : (Array.isArray(o.body) ? o.body : [o.body]);
+      return '<span class="info-tip">' +
+        '<button class="info-tip__btn" type="button" aria-expanded="false" aria-controls="' + id + '" aria-label="' + esc(o.label || o.title || 'More about this') + '">' +
+          '<svg class="icon" aria-hidden="true"><use href="/assets/icons/sprites.svg#icon-info"></use></svg></button>' +
+        '<span class="info-tip__pop" id="' + id + '" role="dialog" aria-label="' + esc(o.title || o.label || '') + '">' +
+          (o.title ? '<span class="info-tip__title">' + esc(o.title) + '</span>' : '') +
+          paras.map(function (p) { return '<span class="info-tip__p">' + p + '</span>'; }).join('') +
+        '</span></span>';
+    }
+    function place(btn, pop) {
+      var r = btn.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
+      var vw = document.documentElement.clientWidth, vh = window.innerHeight;
+      var top = (r.bottom + 6 + h > vh && r.top - 6 - h >= 0) ? r.top - 6 - h : r.bottom + 6;
+      pop.style.top = Math.round(top) + 'px';
+      pop.style.left = Math.round(Math.max(8, Math.min(r.left + r.width / 2 - 24, vw - w - 8))) + 'px';
+    }
+    function close(refocus) {
+      if (!open) return;
+      var o = open;
+      open = null;
+      o.pop.classList.remove('is-open');
+      o.btn.setAttribute('aria-expanded', 'false');
+      if (refocus && o.btn.focus) o.btn.focus();
+    }
+    function show(btn) {
+      var pop = document.getElementById(btn.getAttribute('aria-controls'));
+      if (!pop) return;
+      open = { btn: btn, pop: pop };
+      pop.classList.add('is-open');
+      btn.setAttribute('aria-expanded', 'true');
+      place(btn, pop);
+    }
+    if (typeof document !== 'undefined' && document.addEventListener) {
+      document.addEventListener('click', function (e) {
+        var t = e.target, at = t && t.closest ? t : null;
+        var btn = at && at.closest('.info-tip__btn');
+        if (btn) {
+          e.preventDefault(); e.stopPropagation();
+          var same = open && open.btn === btn;
+          close();
+          if (!same) show(btn);
+          return;
+        }
+        if (at && at.closest('.info-tip__pop')) { e.preventDefault(); e.stopPropagation(); return; }
+        close();
+      }, true);
+      document.addEventListener('keydown', function (e) { if (open && e.key === 'Escape') { e.preventDefault(); close(true); } });
+      if (window.addEventListener) {
+        window.addEventListener('resize', function () { close(); });
+        window.addEventListener('scroll', function () { close(); }, true);
+      }
+    }
+    window.NL.infoTip = { html: html };
+  })();
+
   window.NL.filterButton = function(mount, opts) {
     opts = opts || {};
     var host = (typeof mount === 'string') ? document.querySelector(mount) : mount;
