@@ -307,7 +307,8 @@ agencies, freelancers.
   where they are), so changing one is an upload, not a pull request.
 - **Zones belong to the organisation and are designed for it.** Each has a
   plain name, a three-letter code (suggested from the name, editable,
-  unique across all zones) and its tools with a level. League and Club
+  unique within the organisation: since 16/11 another organisation, or the
+  League, may use the same letters) and its tools with a level. League and Club
   zones stay fixed; only external zones are custom.
 - **Per-person differences come from zones, never per-person grants.** The
   "no overrides" rule holds: if one person needs more, their organisation
@@ -882,7 +883,8 @@ kilobytes of rules against a 256KB limit.
   never does; the issue form refuses it both ways.
 - **The organisation:** `externals/<org>` (rules: Skeleton key writes and reads
   all; a member reads its own; nobody else), with its zones and each zone's
-  tools `{ level, view?, club?, reason, by, at }`.
+  tools `{ level, view?, club?, reason?, by, at }` (the note optional since
+  16/11; who gave it and when are always kept).
 - **What the zones open** is `pass.ext`, written only by the server
   (`functions/externals.js`: on a pass change, an organisation change, and
   nightly for ended zones) from `NL.pass.extFor`. `explain` (which now takes

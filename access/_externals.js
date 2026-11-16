@@ -1,4 +1,4 @@
-/* NL Tools — Access: the Externals tab (v2.9, 16/11/2026: quiet empty lines)
+/* NL Tools — Access: the Externals tab (v2.10, 16/11/2026: tick to open)
 
    Organisations outside the League and its clubs, set up here and nowhere
    else (permissions plan, "External passes" and "Club views"). Skeleton key
@@ -60,15 +60,13 @@
 
   /* Every zone code in use: the League's and clubs' own, and every
      organisation's. A new one must be none of them. */
-  function codesTaken(exceptOrg, exceptZone) {
-    var taken = {};
-    (C.P.KEYS || []).forEach(function (k) { taken[k.code] = true; });
-    Object.keys(X.orgs).forEach(function (o) {
-      var z = (X.orgs[o] && X.orgs[o].zones) || {};
-      Object.keys(z).forEach(function (id) {
-        if (o === exceptOrg && id === exceptZone) return;
-        if (z[id] && z[id].code) taken[z[id].code] = true;
-      });
+  /* Codes in use in this organisation. A code is unique within its
+     organisation only (16/11/2026): an External card only ever shows its own
+     organisation's zones, so FIN can be the League's and an external's too. */
+  function codesTaken(orgId, exceptZone) {
+    var taken = {}, z = (X.orgs[orgId] && X.orgs[orgId].zones) || {};
+    Object.keys(z).forEach(function (id) {
+      if (id !== exceptZone && z[id] && z[id].code) taken[z[id].code] = true;
     });
     return taken;
   }
@@ -189,7 +187,7 @@
       '<div class="form-group"><label for="exPName">Full name</label><input type="text" id="exPName" autocomplete="off"></div>' +
       '<div class="form-group"><label for="exPJob">Job title</label><input type="text" id="exPJob" autocomplete="off" maxlength="80"></div>' +
       '<div class="form-group"><label for="exPUntil">Access ends</label><input type="date" id="exPUntil"><p class="form-hint">Leave empty to keep it until removed.</p></div>' +
-      '<div class="form-group span2"><label>Zones</label><div class="pc-roles" id="exPZones">' +
+      '<div class="form-group span2"><label>Zones</label><div class="pc-roles ex-ticks" id="exPZones">' +
         (zids.length ? zids.map(function (z) { return zoneTick(z, zones[z], false); }).join('') : '<span class="ex-empty">Add a zone first.</span>') + '</div></div>' +
       '</div><p class="form-hint">They get an email from NL Tools to set their password.</p></div>' +
       (zids.length ? '<div class="form-panel__foot pc-foot"><button class="btn btn--primary" type="button" id="exPAdd">Set up and email' + C.icon('send') + '</button></div>' : '') + '</section>';
@@ -202,25 +200,32 @@
     $('exBody').querySelectorAll('[data-zone]').forEach(function (b) { b.onclick = function () { editZone(b.getAttribute('data-zone')); }; });
     rowsOpen($('exBody'), '[data-zones]', function (el) { editPersonZones(el.getAttribute('data-zones')); });
   }
-  /* A zone as a tick box: the zone's name, its code beneath. One control
-     (style principles 5.4). */
+  /* A zone as a tick box: its name, and beneath it the code and what
+     ticking it opens, so the box says what it gives (style principles 5.4). */
   function zoneTick(id, z, checked) {
     return '<label class="pc-role"><input type="checkbox" value="' + esc(id) + '"' + (checked ? ' checked' : '') + '>' +
-      '<span><span class="pc-role__name">' + esc(z.name) + '</span><span class="pc-role__grant">' + esc(z.code) + '</span></span></label>';
+      '<span><span class="pc-role__name">' + esc(z.name) + ' · ' + esc(z.code) + '</span>' +
+      '<span class="pc-role__grant">' + esc(opensText(z)) + '</span></span></label>';
+  }
+  function opensText(z) {
+    var reg = C.S.registry || {};
+    var names = Object.keys((z && z.tools) || {}).map(function (k) { return (reg[k] && reg[k].label) || k; }).sort();
+    return names.length ? 'Opens ' + names.join(', ') : 'Opens nothing yet';
   }
 
   function zoneHtml(id, z) {
     var tools = z.tools || {}, reg = C.S.registry || {};
+    var anyWhy = Object.keys(tools).some(function (k) { return tools[k] && tools[k].reason; });
     var rows = Object.keys(tools).map(function (k) {
       var t = tools[k], rec = reg[k], label = (rec && rec.label) || k;
       var gives = rec ? C.P.zoneGives(t, rec) : null;
       var view = t.view ? ' · ' + esc(C.P.VIEWS[t.view] || t.view) + (t.club ? ' (' + esc(t.club) + ')' : '') : '';
-      return '<tr><td>' + esc(label) + '</td><td>' + (t.level === 'manage' ? 'Manage' : 'Access') + view +
+      return '<tr><td>' + esc(label) + '</td><td>' + (t.level === 'manage' ? 'Manage' : 'View') + view +
         (gives ? '' : ' <span class="pill pill--rejected" title="The tool does not offer this to externals now">Not open</span>') + '</td>' +
-        '<td class="pc-muted">' + esc(t.reason || '') + '</td></tr>';
+        (anyWhy ? '<td class="pc-muted">' + esc(t.reason || '') + '</td>' : '') + '</tr>';
     }).join('');
     return '<section class="form-panel ex-gap"><div class="form-panel__head">' + esc(z.code) + ' · ' + esc(z.name) + '</div>' +
-      '<div class="form-panel__body">' + (rows ? '<table class="table table--compact"><thead><tr><th>Tool</th><th>Gives</th><th>Why</th></tr></thead><tbody>' + rows + '</tbody></table>' :
+      '<div class="form-panel__body">' + (rows ? '<table class="table table--compact"><thead><tr><th>Tool</th><th>Gives</th>' + (anyWhy ? '<th>Why</th>' : '') + '</tr></thead><tbody>' + rows + '</tbody></table>' :
         '<p class="ex-empty">Opens nothing yet.</p>') + '</div>' +
       '<div class="form-panel__foot pc-foot"><button class="btn btn--ghost btn--sm" type="button" data-zone="' + esc(id) + '">' + C.icon('edit') + 'Edit zone</button></div></section>';
   }
@@ -251,28 +256,62 @@
   }
 
   /* ── A zone: its name, code, and what it opens ──────────────────────── */
+  /* What ticking a tool gives, in words: View or Manage, and for a tool
+     with club data, which clubs. */
+  function givesText(t, cur) {
+    var x = t.rec.externals || {}, views = x.views || [];
+    var level = cur && cur.level === 'manage' && x.manage ? 'Manage' : 'View only';
+    if (!hasClubData(t.rec)) return level;
+    var v = cur && cur.view && views.indexOf(cur.view) >= 0 ? cur.view : views[0];
+    return level + ' · ' + (C.P.VIEWS[v] || v);
+  }
+  function toolPick(t, cur) {
+    var x = t.rec.externals || {}, views = x.views || [], on = !!cur;
+    cur = cur || {};
+    var choices = '';
+    if (x.manage) {
+      choices += '<div class="form-group"><label>Level</label><select class="nl-select" data-level="' + esc(t.key) + '">' +
+        '<option value="access">View only</option><option value="manage"' + (cur.level === 'manage' ? ' selected' : '') + '>Manage</option></select></div>';
+    }
+    if (hasClubData(t.rec) && views.length > 1) {
+      choices += '<div class="form-group"><label>Clubs</label><select class="nl-select" data-view="' + esc(t.key) + '">' + views.map(function (v) {
+        return '<option value="' + esc(v) + '"' + (cur.view === v ? ' selected' : '') + '>' + esc(C.P.VIEWS[v] || v) + '</option>';
+      }).join('') + '</select></div>';
+    }
+    if (hasClubData(t.rec) && views.indexOf('one') >= 0) {
+      choices += '<div class="form-group"><label>Club code</label><input type="text" data-club="' + esc(t.key) + '" maxlength="12" value="' + esc(cur.club || '') + '"></div>';
+    }
+    return '<div class="ex-pick">' +
+      '<label class="pc-role"><input type="checkbox" data-on="' + esc(t.key) + '"' + (on ? ' checked' : '') + '>' +
+        '<span><span class="pc-role__name">' + esc(t.label) + '</span>' +
+        '<span class="pc-role__grant">' + esc(t.rec.description || '') + '</span>' +
+        '<span class="pc-role__grant ex-gives">' + esc(givesText(t, on ? cur : null)) + '</span></span></label>' +
+      '<div class="ex-pick__more" data-more="' + esc(t.key) + '"' + (on ? '' : ' hidden') + '>' +
+        (choices ? '<div class="form-grid">' + choices + '</div>' : '') +
+        '<div class="form-group"><label>Note (optional)</label><input type="text" data-reason="' + esc(t.key) + '" maxlength="300" value="' + esc(cur.reason || '') + '" placeholder="For the record"></div>' +
+      '</div></div>';
+  }
+
   function editZone(zid) {
     var o = X.orgs[X.org], zones = o.zones || {}, z = zid ? zones[zid] : { name: '', code: '', tools: {} };
     var tools = offering();
     var wrap = document.createElement('div');
+    /* One tick per tool: ticking it is what opens it. Beneath the name, what
+       the tool is and what ticking gives; the choices a tool offers (Manage,
+       which clubs) and the optional note appear only once it is ticked, and
+       only where there is a choice to make. */
     wrap.innerHTML =
       '<div class="form-grid">' +
         '<div class="form-group"><label for="exZName">Zone name</label><input type="text" id="exZName" maxlength="60" value="' + esc(z.name) + '"></div>' +
-        '<div class="form-group"><label for="exZCode">Code</label><input type="text" id="exZCode" maxlength="3" value="' + esc(z.code) + '" style="text-transform:uppercase"></div>' +
+        '<div class="form-group"><label for="exZCode">Code</label><input type="text" id="exZCode" maxlength="3" value="' + esc(z.code) + '" class="ex-code"></div>' +
       '</div>' +
-      (tools.length ? tools.map(function (t) {
-          var cur = (z.tools || {})[t.key] || {}, x = t.rec.externals || {}, views = (x.views || []);
-          var levels = '<option value="off">Off</option><option value="access"' + (cur.level === 'access' ? ' selected' : '') + '>Access</option>' +
-            (x.manage ? '<option value="manage"' + (cur.level === 'manage' ? ' selected' : '') + '>Manage</option>' : '');
-          var view = hasClubData(t.rec) ? '<div class="form-group"><label>Clubs</label><select class="nl-select" data-view="' + esc(t.key) + '">' + views.map(function (v) {
-              return '<option value="' + esc(v) + '"' + (cur.view === v ? ' selected' : '') + '>' + esc(C.P.VIEWS[v] || v) + '</option>';
-            }).join('') + '</select></div>' + (views.indexOf('one') >= 0 ? '<div class="form-group"><label>Club code</label><input type="text" data-club="' + esc(t.key) + '" maxlength="12" value="' + esc(cur.club || '') + '"></div>' : '') : '';
-          return '<div class="form-grid ex-tool">' +
-            '<div class="form-group"><label>' + esc(t.label) + '</label><select class="nl-select" data-level="' + esc(t.key) + '">' + levels + '</select></div>' +
-            view +
-            '<div class="form-group span2"><label>Why</label><input type="text" data-reason="' + esc(t.key) + '" maxlength="300" value="' + esc(cur.reason || '') + '"></div>' +
-            '</div>';
-        }).join('') : '<p class="ex-empty">No tool offers itself to externals yet. A tool is opened to them in its registry record, by pull request.</p>');
+      '<div class="form-group"><label>Opens</label>' +
+      (tools.length ? '<div class="pc-roles ex-picks">' + tools.map(function (t) { return toolPick(t, (z.tools || {})[t.key]); }).join('') + '</div>'
+        : '<p class="ex-empty">No tool is open to externals yet.</p>') + '</div>';
+    wrap.querySelectorAll('[data-on]').forEach(function (box) {
+      var more = wrap.querySelector('[data-more="' + box.getAttribute('data-on') + '"]');
+      box.addEventListener('change', function () { more.hidden = !box.checked; });
+    });
     var nameIn = wrap.querySelector('#exZName'), codeIn = wrap.querySelector('#exZCode');
     nameIn.addEventListener('input', function () {
       if (!zid && !codeIn.dataset.touched) codeIn.value = suggestCode(nameIn.value, codesTaken(X.org, zid));
@@ -299,27 +338,31 @@
     dangerIcon(ctrl);
   }
 
-  /* The zone as the form says, checked: a name, a free three-letter code,
-     and for every tool given, a reason; a club-data tool a view; One club
-     a club. An unchanged tool keeps who gave it and when. */
+  /* The zone as the form says, checked: a name, a three-letter code not
+     already used in this organisation, and for every tool ticked its level
+     (View only unless Manage is offered and chosen), a club-data tool a
+     view, One club a club. The note is optional. An unchanged tool keeps
+     who gave it and when. */
   function readZone(wrap, old, zid) {
     var name = wrap.querySelector('#exZName').value.trim();
     var code = wrap.querySelector('#exZCode').value.trim().toUpperCase();
     if (!name) return { error: 'The zone needs a name' };
     if (!/^[A-Z]{3}$/.test(code)) return { error: 'The code is three letters' };
-    if (codesTaken(X.org, zid)[code]) return { error: code + ' is already in use' };
+    if (codesTaken(X.org, zid)[code]) return { error: code + ' is already a zone here' };
     var tools = {}, err = null;
     offering().forEach(function (t) {
       if (err) return;
-      var level = wrap.querySelector('[data-level="' + t.key + '"]').value;
-      if (level === 'off') return;
+      var box = wrap.querySelector('[data-on="' + t.key + '"]');
+      if (!box || !box.checked) return;
+      var x = t.rec.externals || {}, views = x.views || [];
+      var lv = wrap.querySelector('[data-level="' + t.key + '"]');
+      var entry = { level: lv && lv.value === 'manage' && x.manage ? 'manage' : 'access' };
       var reason = wrap.querySelector('[data-reason="' + t.key + '"]').value.trim();
-      if (!reason) { err = 'Say why for ' + t.label; return; }
-      var entry = { level: level, reason: reason.slice(0, 300) };
+      if (reason) entry.reason = reason.slice(0, 300);
       if (hasClubData(t.rec)) {
         var v = wrap.querySelector('[data-view="' + t.key + '"]');
-        entry.view = v && v.value;
-        if (!entry.view) { err = t.label + ' needs a club view'; return; }
+        entry.view = v ? v.value : views[0];
+        if (!entry.view) { err = t.label + ' does not offer externals any clubs'; return; }
         if (entry.view === 'one') {
           var club = wrap.querySelector('[data-club="' + t.key + '"]');
           entry.club = club ? club.value.trim().toUpperCase() : '';
@@ -327,7 +370,7 @@
         }
       }
       var prev = (old.tools || {})[t.key];
-      var same = prev && prev.level === entry.level && prev.reason === entry.reason && (prev.view || null) === (entry.view || null) && (prev.club || null) === (entry.club || null);
+      var same = prev && prev.level === entry.level && (prev.reason || null) === (entry.reason || null) && (prev.view || null) === (entry.view || null) && (prev.club || null) === (entry.club || null);
       entry.by = same && prev.by ? prev.by : C.S.session.uid;
       entry.at = same && prev.at ? prev.at : Date.now();
       tools[t.key] = entry;
@@ -424,7 +467,7 @@
     var firstUntil = null;
     Object.keys(keys).forEach(function (k) { if (keys[k] && typeof keys[k].until === 'number') firstUntil = keys[k].until; });
     var wrap = document.createElement('div');
-    wrap.innerHTML = '<div class="pc-roles">' + Object.keys(zones).map(function (z) { return zoneTick(z, zones[z], !!keys[z]); }).join('') + '</div>' +
+    wrap.innerHTML = '<div class="form-group"><label>Zones</label><div class="pc-roles ex-ticks">' + Object.keys(zones).map(function (z) { return zoneTick(z, zones[z], !!keys[z]); }).join('') + '</div></div>' +
       '<div class="form-group"><label for="exEUntil">Access ends</label><input type="date" id="exEUntil" value="' + dateInput(firstUntil) + '"><p class="form-hint">Leave empty to keep it until removed. Clear every zone to remove their access.</p></div>';
     NL.modal({ title: u.name || u.email, size: 'sm', body: wrap, buttons: [
       { label: 'Save', className: 'btn--primary', onClick: function (c) {
