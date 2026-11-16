@@ -42,7 +42,12 @@ test('the tool entries are passEntries\' to write, not extUpdate\'s: one writer'
 
 test('checkInvite: the request must name a person, a real email, and the organisation\'s own zones', () => {
   const good = { email: ' Someone@Example.org ', name: 'A Person', zones: { fin: true }, until: NOW + 1000 };
-  assert.deepEqual(checkInvite(good, ORG, NOW).ok, { email: 'someone@example.org', name: 'A Person', jobTitle: '', zones: ['fin'], until: NOW + 1000 });
+  assert.deepEqual(checkInvite(good, ORG, NOW).ok, { email: 'someone@example.org', name: 'A Person', jobTitle: '', zones: ['fin'], until: NOW + 1000, untils: {} });
+  /* An end date per zone, for the zones asked for only. */
+  assert.deepEqual(checkInvite(Object.assign({}, good, { until: null, untils: { fin: NOW + 5, gov: NOW + 9 } }), ORG, NOW).ok.untils, { fin: NOW + 5 });
+  assert.ok(checkInvite(Object.assign({}, good, { untils: { fin: NOW - 1 } }), ORG, NOW).error);
+  const two = externalUser(checkInvite(Object.assign({}, good, { until: NOW + 1000, untils: { fin: NOW + 5 } }), ORG, NOW).ok, 'made-up', ORG, 'u0', NOW);
+  assert.equal(two.pass.keys.fin.until, NOW + 5, 'a zone\'s own end date beats the one for all');
   assert.ok(checkInvite(Object.assign({}, good, { email: 'nope' }), ORG, NOW).error);
   assert.ok(checkInvite(Object.assign({}, good, { name: ' ' }), ORG, NOW).error);
   assert.ok(checkInvite(Object.assign({}, good, { zones: { other: true } }), ORG, NOW).error);
