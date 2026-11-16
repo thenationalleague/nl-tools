@@ -72,7 +72,10 @@ await t('the Skeleton key sets up an organisation', set(ref(skel, 'externals/new
 await t('League staff cannot', set(ref(staff, 'externals/new2'), { name: 'New' }), false);
 await t('an External account cannot', update(ref(ext1, 'externals/reg/zones/fin/tools/' + FB), { level: 'manage' }), false);
 await t('a zone code is three capital letters', set(ref(skel, 'externals/bad'), { name: 'Bad', zones: { z: { name: 'Z', code: 'zz1' } } }), false);
-await t('a tool in a zone needs a reason', set(ref(skel, 'externals/bad'), { name: 'Bad', zones: { z: { name: 'Z', code: 'ZZZ', tools: { [FB]: { level: 'access' } } } } }), false);
+await t('a note on a tool is optional', set(ref(skel, 'externals/nonote'), { name: 'No note', zones: { z: { name: 'Z', code: 'ZZZ', tools: { [FB]: { level: 'access', view: 'all', by: 'skel', at: 1 } } } } }), true);
+await t('but a note, when there is one, is words', set(ref(skel, 'externals/bad'), { name: 'Bad', zones: { z: { name: 'Z', code: 'ZZZ', tools: { [FB]: { level: 'access', reason: '' } } } } }), false);
+await t('a tool in a zone needs a level', set(ref(skel, 'externals/bad'), { name: 'Bad', zones: { z: { name: 'Z', code: 'ZZZ', tools: { [FB]: { reason: 'r' } } } } }), false);
+await t('another organisation may use the same code', set(ref(skel, 'externals/samecode'), { name: 'Same code', zones: { z: { name: 'Finance', code: 'FIN' } } }), true);
 await t('no level beyond Manage', set(ref(skel, 'externals/bad'), { name: 'Bad', zones: { z: { name: 'Z', code: 'ZZZ', tools: { [FB]: { level: 'owner', reason: 'r' } } } } }), false);
 await t('a member reads its own organisation', get(ref(ext1, 'externals/reg')), true);
 await t('not another organisation', get(ref(ext1, 'externals/other')), false);
