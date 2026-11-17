@@ -1,5 +1,9 @@
 /*
   Programme Packs — shared runtime for the library + admin console
+  Version: v2.2 (17/11/2026) – a club code session from before 13/11/2026
+           carries no pManage claim, so it could read the library but not
+           upload, move or delete. It is now signed out on arrival and the
+           passcode asked for once more; the new session can.
   Version: v2.1 (13/11/2026) — the default app is created when this file
            loads, before the named app (the code door signs in on it). The
            first try of the shared door here was refused at
@@ -22,50 +26,6 @@
            session carries canWrite from the pManage claim, which a club code
            always mints and a Club card gets only with Manage on Programme
            Packs. The rules check the same claim.
-  Version: v1.7 (13/11/2026) — the club card door: PP.enterAsCard opens the
-           library with the person's own NL Tools sign-in when their Club card
-           has put their club on the account (functions/pass-claims.js), with
-           no passcode. PP.app becomes a getter, since that door switches the
-           library to the default app.
-  Version: v1.6 (28/10/2026) — the file helpers are canon (NL.files, nl-utils
-           v1.46): safeName, humanSize, uploadType, fileKind, kindIcon and
-           the preview tiers are now the canon functions under their old PP
-           names. Promoted on their second caller, the Document Library.
-           Storage paths stay here — they are this tool's data. Load order
-           flips: this file now loads AFTER nl-utils.js.
-  Version: v1.5 (21/08/2026) — PP.codesRef / PP.CODES_ROOT. The club codes
-           moved out from under this tool to app-data/club-codes: they
-           are one credential now, opening Programme Packs and the Handbook
-           on the same six characters. Only config moved — folders, files,
-           trash, audit and this tool's own authRequests/authGrants all stay
-           under ROOT — so the split is deliberate rather than a second root
-           to keep in step.
-  Version: v1.4 (17/08/2026) — video and audio are kinds of their own
-           (🎬 / 🎵 tiles), so the library page can hand them to the
-           browser's native players instead of filing them under 📎.
-  Version: v1.3 (17/08/2026) — PP.enterMaster: the library's third door. An
-           NL admin arriving with ?master=1 gets the console's '*' session on
-           the library page itself, so all 73 folders browse AND manage in
-           one place. Requires a live portal sign-in on every boot (a
-           persisted '*' session is signed out, not adopted, when the portal
-           login has gone); with one present, a persisted '*' is adopted to
-           skip the Eventarc exchange. FB config hoisted to FB_CONFIG so
-           ensureDefaultApp() can initialise the default app when auth-guard
-           hasn't.
-  Version: v1.2 (17/08/2026) — PP.previews: three sizes per image, the canon
-           crest vocabulary (thumb / medium / full). Rendered in the BROWSER
-           with a canvas, at upload time — not by a resize endpoint, because
-           the org policy that blocks public invokers on new Cloud Run
-           services rules a proxy URL out, and the RTDB-trigger workaround's
-           Eventarc latency (~15-20s) is what killed footage previews.
-           Variants live at programme/<CODE>/_previews/<fileId>-<tier>.<ext>
-           and their URLs are stored on the file record, same reason url is.
-  Version: v1.1 (16/08/2026) — local crestImgHtml(name, px) deleted; crest
-           strings come from canon NL.clubs.crestImgHtml('thumb') + a
-           NL.clubs.wireCrestImgs sweep at each render (px sizing was already
-           in CSS: .own__crest / .dir__crest / .pack__crest / .club-cell img).
-           PP.crestImgHtml is gone from the surface.
-  Version: v1.0 (03/08/2026) — initial build.
   File: /programme/_shared.js
 
   Loaded by /programme/ (the club library, and for the League its console
@@ -405,6 +365,16 @@
       return read(t) || (u.email ? u.getIdTokenResult(true).then(read) : null);
     }).then(function (c) {
       if (!c) return null;
+      /* v2.2: a code session from before codes carried Manage here (pManage,
+         13/11/2026). Its claims are fixed for as long as it lasts, so it can
+         read the library and never upload, move or delete, and nothing on the
+         page said why. Sign it out and ask for the passcode once more: the new
+         session carries Manage. An account (a Club card) is left alone, since
+         its Manage follows its pass. */
+      if (!u.email && c.pManage !== true) {
+        PP.reenter = true;
+        return NL.codeGate.signOut().then(function () { return null; }, function () { return null; });
+      }
       app = ensureDefaultApp();
       /* canWrite: the pManage claim. A club code always carries it; a Club
          card only with Manage on the tool. The rules say the same; this only
