@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Buzz
-  Version: v1.4 (18/11/2026)
+  Version: v1.5 (18/11/2026)
   File: /buzz/index.html
 
   A NON-GATED public page for a live talk: someone in the room picks their name once,
@@ -18,11 +18,11 @@
   their own name. Nothing is stored but the name chosen and any question typed.
 
   Changelog (last five)
+  v1.5 18/11/2026 – Name and club as dropdowns.
   v1.4 18/11/2026 – Buzz in, and Ask a question for later (the only one with words); buzzing in can be switched off from the deck.
   v1.3 18/11/2026 – Two plain buttons instead of the dome.
   v1.2 18/11/2026 – The phone shows the screen's reply, so people know their buzz arrived. No vibration.
   v1.1 18/11/2026 – Two buttons: BUZZ (question now) and Come back to this later.
-  v1.0 18/11/2026 – First version.
 -->
 <html lang="en-GB">
 <head>
@@ -69,7 +69,10 @@
     .bz-q { width: 100%; min-height: 80px; resize: vertical; }
     .bz-msg { min-height: 22px; text-align: center; font-size: 16px; color: var(--navy-100); }
     .bz-msg.bad { color: var(--primary-200); }
-    #buzz { display: flex; flex-direction: column; gap: 14px; }
+    #buzz, .bz-pick { display: flex; flex-direction: column; gap: 14px; }
+    .bz-l { display: flex; flex-direction: column; gap: 6px; font: 700 14px var(--font); color: var(--navy-200); letter-spacing: .02em; }
+    .bz-l[hidden] { display: none; }
+    .bz-l select, .bz-l input { font: 600 18px var(--font); padding: 14px; border-radius: 12px; border: 0; background: var(--navy-50); color: var(--navy); width: 100%; box-sizing: border-box; }
     [hidden] { display: none !important; }
   </style>
 </head>
@@ -77,12 +80,13 @@
   <main class="bz">
     <div class="bz-top"><img src="/assets/crests/thumbs/National%20League%20rose%20white.png" alt="" onerror="this.remove()"><b>Got a question?</b></div>
 
-    <section id="pick">
+    <form id="pick" class="bz-pick">
       <h2>Who are you?</h2>
-      <div class="bz-list" id="people"></div>
-      <p class="bz-g">Someone else</p>
-      <form class="bz-own" id="own"><input id="ownName" maxlength="60" placeholder="Your name" autocomplete="name"><button>OK</button></form>
-    </section>
+      <label class="bz-l">Your name<select id="nameSel"><option value="">Choose your name</option></select></label>
+      <label class="bz-l" id="ownBox" hidden>Type your name<input id="ownName" maxlength="60" autocomplete="name"></label>
+      <label class="bz-l">Your club<select id="clubSel"><option value="">The National League</option></select></label>
+      <button class="bz-send" id="ok">Continue</button>
+    </form>
 
     <section id="buzz" hidden>
       <div class="bz-me"><img id="meImg" alt=""><div><b id="meName"></b><small id="meSub"></small></div><button class="bz-change" id="change" type="button">Change</button></div>
@@ -107,24 +111,34 @@
     $('meName').textContent = p.n; $('meSub').textContent = p.c || p.r || '';
     crest($('meImg'), p.c); $('pick').hidden = true; $('buzz').hidden = false;
   }
+  /* name: the room's list (written by the deck), or Someone else; club: every club, preset from the list */
+  var ROSTER = [], nameSel = $('nameSel'), clubSel = $('clubSel');
   function draw(roster) {
-    var box = $('people'); box.innerHTML = '';
-    var last = null;
-    (roster || []).forEach(function (p) {
-      if (p.g && p.g !== last) { var g = document.createElement('p'); g.className = 'bz-g'; g.textContent = p.g; box.appendChild(g); last = p.g; }
-      var b = document.createElement('button'); b.type = 'button'; b.className = 'bz-p';
-      var img = document.createElement('img'); img.alt = ''; crest(img, p.c);
-      var t = document.createElement('span'), n = document.createElement('b'), s = document.createElement('small');
-      n.textContent = p.n; s.textContent = [p.r, p.c].filter(Boolean).join(' · ');
-      t.appendChild(n); if (s.textContent) t.appendChild(s); b.appendChild(img); b.appendChild(t);
-      b.addEventListener('click', function () { choose(p); }); box.appendChild(b);
+    ROSTER = roster || []; var groups = {};
+    ROSTER.forEach(function (p, i) {
+      var g = p.g || 'Names'; if (!groups[g]) { groups[g] = document.createElement('optgroup'); groups[g].label = g; nameSel.appendChild(groups[g]); }
+      var o = document.createElement('option'); o.value = String(i); o.textContent = p.n + (p.r ? ' – ' + p.r : ''); groups[g].appendChild(o);
     });
+    var other = document.createElement('option'); other.value = 'own'; other.textContent = 'Someone else'; nameSel.appendChild(other);
+    if (!ROSTER.length) { nameSel.value = 'own'; $('ownBox').hidden = false; }
   }
+  if (window.NL && NL.clubs && NL.clubs.all) NL.clubs.all().then(function (list) {
+    list.forEach(function (c) { var o = document.createElement('option'); o.value = c.name; o.textContent = c.name; clubSel.appendChild(o); });
+  }).catch(function () {});
+  nameSel.addEventListener('change', function () {
+    var own = nameSel.value === 'own'; $('ownBox').hidden = !own; if (own) { $('ownName').focus(); return; }
+    var p = ROSTER[+nameSel.value]; if (p) clubSel.value = p.c || '';
+  });
   fetch(DB + '/roster.json').then(function (r) { return r.ok ? r.json() : null; }).then(function (v) {
     var list = null; try { list = typeof v === 'string' ? JSON.parse(v) : null; } catch (e) {}
     draw(Array.isArray(list) ? list : []);
   }).catch(function () { draw([]); });
-  $('own').addEventListener('submit', function (e) { e.preventDefault(); var n = $('ownName').value.trim(); if (n) choose({ n: n, c: '', r: '' }); });
+  $('pick').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var p = nameSel.value === 'own' ? { n: $('ownName').value.trim(), r: '' } : ROSTER[+nameSel.value];
+    if (!p || !p.n) { (nameSel.value === 'own' ? $('ownName') : nameSel).focus(); return; }
+    choose({ n: p.n, r: p.r || '', c: clubSel.value });
+  });
   $('change').addEventListener('click', function () { $('buzz').hidden = true; $('pick').hidden = false; });
   try { var saved = JSON.parse(localStorage.getItem(LS) || 'null'); if (saved && saved.n) choose(saved); } catch (e) {}
 
