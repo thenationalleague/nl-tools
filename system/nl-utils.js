@@ -1,7 +1,12 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.71 (16/11/2026)
+   Version: v1.72 (18/11/2026)
+   v1.72 — Dates with the weekday: NL.formatDateShort(x, { weekday: true })
+     gives 'Fri 20 Nov 2026' (and year: false, 'Fri 20 Nov'), the shape the
+     brand audit asks for. A pick-one NL.filterButton (multiple: false)
+     carries .filter-btn--one, which nl-brand v2.83 draws as round radio
+     marks, so it no longer looks like a list you can tick several of.
    v1.71 — NL.pass.build issues an External card too: the organisation and
      its zones ticked, from the one issue form on /pass/ (Richard: "external
      to merge into here and be a tick box"). A card stays on its side: an
@@ -1139,7 +1144,8 @@
     if (!multiple && S.sel.length > 1) S.sel = S.sel.slice(0, 1);
 
     var root = document.createElement('div');
-    root.className = 'filter-btn';
+    /* --one: pick one, drawn with round radio marks (brand v2.83). */
+    root.className = 'filter-btn' + (multiple ? '' : ' filter-btn--one');
     var uid = 'nlfb' + (++window.NL.filterButton._seq);
     root.innerHTML =
       '<button type="button" class="filter-btn__trigger" aria-haspopup="listbox" aria-expanded="false"' +
@@ -1308,14 +1314,19 @@
     return picked.length + ' selected';
   };
 
-  /* Short format, e.g. '17 Apr 2026' */
-  window.NL.formatDateShort = function(str) {
+  var WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  /* Short format, e.g. '17 Apr 2026'. Options (v1.72):
+       weekday:true  → 'Fri 17 Apr 2026'
+       year:false    → '17 Apr' */
+  window.NL.formatDateShort = function(str, opts) {
     var d = window.NL.parseDate(str);
     if (!d) return '—';
-    return d.getDate() + ' ' + MONTHS[d.getMonth()].substring(0, 3) + ' ' + d.getFullYear();
+    opts = opts || {};
+    return (opts.weekday ? WEEKDAYS[d.getDay()] + ' ' : '') +
+      d.getDate() + ' ' + MONTHS[d.getMonth()].substring(0, 3) +
+      (opts.year === false ? '' : ' ' + d.getFullYear());
   };
-
-  var WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
 
   /* Date + time, local tz. Default '17 Apr 2026, 09:30'. Options:

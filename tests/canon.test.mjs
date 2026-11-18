@@ -58,6 +58,13 @@ test('formatDate / formatDateShort produce the canon shapes', () => {
   assert.equal(NL.formatDate('rubbish'), '—');
 });
 
+test('formatDateShort with the weekday, and without the year (v1.72)', () => {
+  assert.equal(NL.formatDateShort('2026-11-20', { weekday: true }), 'Fri 20 Nov 2026');
+  assert.equal(NL.formatDateShort('2026-11-20', { weekday: true, year: false }), 'Fri 20 Nov');
+  assert.equal(NL.formatDateShort('2026-11-20', { year: false }), '20 Nov');
+  assert.equal(NL.formatDateShort('2026-11-20'), '20 Nov 2026', 'no options: unchanged');
+});
+
 test('parseDate passes through a Date and reads an epoch-ms number', () => {
   const d = new Date(2026, 3, 17, 9, 30);
   assert.equal(NL.parseDate(d), d, 'a valid Date is returned as-is');

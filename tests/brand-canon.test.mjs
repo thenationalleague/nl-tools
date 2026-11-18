@@ -1314,6 +1314,16 @@ test('no new page uses .chip-group or .filter-pill', () => {
   assert.deepEqual(moved, [], 'these pages no longer use the old controls; take them off OLD_CONTROL_PAGES:\n  ' + moved.join('\n  '));
 });
 
+/* A pick-one filter button draws round radio marks; one that takes several
+   keeps square ticks (brand v2.83, nl-utils v1.72). */
+test('a pick-one filter button is marked --one and drawn round', () => {
+  const src = readFileSync(join(REPO, 'system/nl-utils.js'), 'utf8');
+  assert.match(src, /root\.className = 'filter-btn' \+ \(multiple \? '' : ' filter-btn--one'\)/);
+  assert.match(ruleBody('.filter-btn--one .filter-btn__tick'), /border-radius:\s*50%/);
+  assert.match(ruleBody('.filter-btn--one .filter-btn__opt.is-on .filter-btn__tick::after'), /border-radius:\s*50%/);
+  assert.doesNotMatch(ruleBody('.filter-btn__tick'), /50%/, 'several-at-once stays square');
+});
+
 test('NL.filterButton exists, and the Style Guide demonstrates it', () => {
   assert.equal(typeof NL.filterButton, 'function');
   assert.equal(typeof NL.filterButton.summarise, 'function');
