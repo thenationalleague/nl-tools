@@ -3,6 +3,11 @@
    File: /fixtures/_finder.js
    Version: v1.8 (04/11/2026)
    CHANGELOG
+     v1.9 (18/11/2026) — More than 35 days out is no longer a flag (Richard,
+       18/11/2026): a slot carries daysOut, and the page marks it with an
+       hourglass in the corner instead, so a clean date far off shows green
+       with the hourglass, not amber. It still sorts after every slot
+       inside the window.
      v1.8 (04/11/2026) — International windows flag only a game involving
        a club on the affected list (ctx.intl.clubs), and hard (red): most
        clubs lose nobody, the few that do lose players (Richard,
@@ -56,7 +61,7 @@
                  longTrip: round-trip miles, default 200 (tests only; the
                  page uses the default, Richard 28/10/2026) }
    OUTPUT
-     { slots: [{ date, day, ko, within35, flags: [{ level, cat, text, items? }], weight }],
+     { slots: [{ date, day, ko, within35, daysOut, flags: [{ level, cat, text, items? }], weight }],
      items: [{ date, text }], the games behind a flag. cat is a key of CATS.
        from, to, original }
      level 'red' | 'amber' | 'info'. Slots within 35 days of the original
@@ -78,7 +83,6 @@
   var DAY = 864e5;
   /* Flag categories, in the order the page shows them. */
   var CATS = [
-    { key: 'window', label: '35-day window' },
     { key: 'run', label: 'Consecutive games' },
     { key: 'proximity', label: 'Match proximity' },
     { key: 'cup', label: 'Cup rounds' },
@@ -343,13 +347,12 @@
 
       runFlags(game, d, dated, ctx.distances, flags, opts.longTrip || LONG_TRIP);
 
-      var within35 = !!original && gap(original, d) <= WINDOW;
-      /* Outside the window: a flag, and the first one listed. */
-      if (original && !within35) {
-        flags.unshift({ level: 'amber', cat: 'window', text: gap(original, d) + ' days from the original date' });
-      }
+      var daysOut = original ? gap(original, d) : null;
+      var within35 = !!original && daysOut <= WINDOW;
+      /* Outside the window: not a flag (v1.9). The slot says how far, and
+         sorts after every slot inside. */
       var weight = flags.reduce(function (s, f) { return s + (f.level === 'red' ? 10 : f.level === 'amber' ? 1 : 0); }, 0);
-      out.push({ date: d, day: day, ko: day === 'Sat' ? '15:00' : '19:45', within35: within35, flags: flags, weight: weight });
+      out.push({ date: d, day: day, ko: day === 'Sat' ? '15:00' : '19:45', within35: within35, daysOut: daysOut, flags: flags, weight: weight });
     }
 
     out.sort(function (a, b) {
