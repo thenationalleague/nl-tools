@@ -287,6 +287,25 @@ test('postponing takes the date off; a new date stamps the rescheduling', () => 
   assert.equal(moved.attempts[1].outcome, 'moved');
 });
 
+test('a wrong new date is undone: the game awaits a date again, as before', () => {
+  const r = build(sheet(lg({ Date: '07/11/2026', 'Home team': 'Alpha Town', 'Away team': 'Beta United', OptaID: 'g1' })));
+  const p = F.loseDate(r.fixtures.g1, { outcome: 'postponed', reason: 'Weather: Frozen', at: '2026-11-06T10:00:00.000Z' });
+  const dated = F.setDate(p, '2026-12-01', '19:45', '2026-11-10T09:00:00.000Z');
+  assert.equal(F.canUndoDate(dated), true);
+  const back = F.undoDate(dated);
+  assert.equal(back.date, null);
+  assert.equal(back.ko, null);
+  assert.equal(back.state, 'postponed');
+  assert.equal(F.awaiting(back), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(back.attempts)), JSON.parse(JSON.stringify(p.attempts)), 'history as it was before the date');
+  assert.equal(dated.date, '2026-12-01', 'the record given is not changed');
+  assert.equal(F.canUndoDate(p), false, 'nothing to undo while awaiting');
+  assert.equal(F.canUndoDate(r.fixtures.g1), false, 'a game never lost has nothing to undo');
+  const moved = F.setDate(dated, '2026-12-02', '19:45', '2026-11-11T09:00:00.000Z');
+  assert.equal(F.canUndoDate(moved), false, 'only the latest step: a game moved since is moved back, not undone');
+  assert.equal(F.undoDate(moved), null);
+});
+
 test('abandoning keeps the minute; removing a mistaken lost date gives the date back', () => {
   const r = build(sheet(lg({ Date: '24/10/2026', 'Home team': 'Alpha Town', 'Away team': 'Beta United', OptaID: 'g1' })));
   const a = F.loseDate(r.fixtures.g1, { outcome: 'abandoned', reason: 'Weather: Waterlogged', minute: 37, at: '2026-10-24T15:37:00.000Z' });

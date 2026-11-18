@@ -1,8 +1,14 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixture Management
-  Version: v5.2 (18/11/2026)
+  Version: v5.3 (18/11/2026)
   File: /fixtures/index.html
+
+  v5.3 (18/11/2026) — A wrong new date undone. Amend on a game that was
+    awaiting a date, and has been given one since, offers Back to awaiting
+    a date: the date comes off and the game is in Rearrangements again,
+    its lost date kept (_core v1.6 undoDate). Only the latest step: a game
+    moved again since is moved back instead.
 
   v5.2 (18/11/2026) — Things where you would look for them.
     · A game's broadcast decision (availability, Enhanced, Moved by DAZN,
@@ -60,20 +66,6 @@
     only Save, and one line says the difference. The audit line for an
     amend includes the date before and after.
 
-  v4.4 (13/11/2026) — Every game is treated the same: the clubs and
-    competition of any game in the list change only through Amend (was
-    "Correct", which read as "mark as correct"), league or cup, imported or
-    entered here. Postpone and Abandon were already on every dated game.
-    The International windows panel's two column headings are canon field
-    labels (the local .fm-intl__h is gone).
-    Move: a game that changes date or kick-off without being postponed (a
-    broadcast pick, a mutual change). The bottom bar's Move asks for the new
-    date and kick-off and a reason (the 'rescheduled' reasons from
-    postponement-reasons.json first); the old date is kept as 'moved' with
-    that reason, and the audit log says it in words (fixtures_move). A
-    dated game's date is now a value in its window, changed only by Move.
-    A move made in Rearrangements asks the same reason.
-
   The League's master fixture record: every game in every competition, with
   the dates each one has lost. Staff console. The plan, and every decision
   behind it, is system/fixture-management-plan.md.
@@ -129,6 +121,11 @@
     window.NL_CHANGELOG = [
       {
         date: '18/11/2026',
+        version: 'v5.3',
+        items: [ 'A wrong new date can be undone: open the game, Amend, Back to awaiting a date.' ]
+      },
+      {
+        date: '18/11/2026',
         version: 'v5.2',
         items: [
           'A game’s broadcast decision (availability, Enhanced, DAZN, AMI) is in the game’s own window.',
@@ -156,14 +153,6 @@
         date: '13/11/2026',
         version: 'v4.5',
         items: [ 'Amend can put a wrong date or kick-off right without recording a move.' ]
-      },
-      {
-        date: '13/11/2026',
-        version: 'v4.4',
-        items: [
-          'Amend replaces Correct, and works the same on every game.',
-          'Move changes a game’s date or kick-off without postponing it, and records why.'
-        ]
       }
     ];
 
@@ -191,7 +180,7 @@
   <script src="/system/auth-guard.js?v=24"></script>
 
   <!-- Tool data layer (pure; tested in tests/fixture-management.test.mjs) -->
-  <script src="/fixtures/_core.js?v=6"></script>
+  <script src="/fixtures/_core.js?v=7"></script>
   <script src="/fixtures/_finder.js?v=9"></script>
 
 <style>
@@ -2637,6 +2626,11 @@
       buttons.push({ label: 'Postpone', icon: 'calendar', className: 'btn--ghost btn--sm', onClick: function (m) { openLose(rec, 'postponed', m); } });
       buttons.push({ label: 'Abandon', icon: 'whistle-stop', className: 'btn--ghost btn--sm', onClick: function (m) { openLose(rec, 'abandoned', m); } });
     }
+    /* A wrong new date for a game that was awaiting one (v5.3): Amend puts
+       it back to awaiting a date, as if the date had never been set. */
+    if (!ro && rec && correct && F.canUndoDate(rec)) {
+      buttons.push({ label: 'Back to awaiting a date', icon: 'back', className: 'btn--ghost btn--sm', onClick: function (m) { undoNewDate(rec, m); } });
+    }
     if (ro) buttons.push({ label: 'Close', className: 'btn--ghost btn--sm', onClick: function (m) { m.close(); } });
     if (!ro) {
       buttons.push({ label: isNew ? 'Add tie' : 'Save', className: 'btn--primary btn--sm', onClick: function (m) {
@@ -2951,6 +2945,24 @@
      an attendance figure is refused, so a figure is never left without
      its game. The record moves to removed/<key>, whole, and Restore puts
      it back under the same key. */
+  function undoNewDate(rec, parent) {
+    var name = rec.home.name + ' v ' + rec.away.name;
+    var lost = (rec.attempts || [])[rec.attempts.length - 1];
+    NL.confirm(name + ' goes back to awaiting a date, and ' + dayKo(rec.date, rec.ko) +
+      ' comes off the list. Its lost date, ' + day(lost.date) + ', stays.', {
+      title: 'Back to awaiting a date', confirmText: 'Take the date off'
+    }).then(function (ok) {
+      if (!ok) return;
+      var back = F.undoDate(clean(rec));
+      if (!back) { NL.toast('This game has changed since; open it again', 'error'); return; }
+      NL.writeAudit('fixtures_undo_date', rec.key + ': ' + name + ' (' + rec.comp + ', was ' + dayKo(rec.date, rec.ko) + ')');
+      save(back).then(function () {
+        NL.toast('Back to awaiting a date', 'success');
+        if (parent) parent.close();
+      }).catch(function (e) { NL.toast('Save failed: ' + e.message, 'error'); });
+    });
+  }
+
   function removeFixture(rec, parent) {
     var name = rec.home.name + ' v ' + rec.away.name;
     if (S.crowds[rec.key]) {
