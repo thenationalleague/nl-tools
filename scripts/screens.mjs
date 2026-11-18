@@ -93,7 +93,10 @@ function serve() {
    with .key and .set() — per the v8/compat reference docs:
    https://firebase.google.com/docs/reference/js/v8/firebase.database.Reference#push
    (.set() was missing until 11/11/2026, so a page that pushes an empty key
-   and fills it later, as Club Directory's Publish does, failed here only.) */
+   and fills it later, as Club Directory's Publish does, failed here only.)
+   onAuthStateChanged calls back after it returns, as the real one does: a
+   page that unsubscribes inside its own callback (NL.codeGate) needs the
+   unsubscribe in hand first (18/11/2026). */
 const FIREBASE = `
 window.__db = window.__seed || {};
 function get(p){return p.split('/').filter(Boolean).reduce((o,k)=>o&&o[k],window.__db)}
@@ -103,8 +106,8 @@ const L=[];function fire(){L.forEach(([p,cb])=>cb(snap(p)))}
 function snap(p){return {key:p.split('/').pop(),val:()=>get(p),exists:()=>get(p)!=null,
   forEach(cb){const v=get(p)||{};Object.keys(v).forEach(k=>cb(snap(p+'/'+k)))}}}
 window.firebase={apps:[1],initializeApp(){},app(){return{}},
-  auth(){return{currentUser:{uid:'screens',email:'screens@example.invalid',getIdToken:()=>Promise.resolve('t')},
-    onAuthStateChanged(cb){cb(this.currentUser);return()=>{}}}},
+  auth(){return{currentUser:{uid:'screens',email:'screens@example.invalid',getIdToken:()=>Promise.resolve('t'),getIdTokenResult:()=>Promise.resolve({claims:{}})},
+    onAuthStateChanged(cb){const u=this.currentUser;setTimeout(()=>cb(u),0);return()=>{}}}},
   database(){return{ref(p){p=p||'';return{
     on(e,cb){L.push([p,cb]);cb(snap(p));return cb},off(){for(let i=L.length-1;i>=0;i--)if(L[i][0]===p)L.splice(i,1)},
     once(){return Promise.resolve(snap(p))},

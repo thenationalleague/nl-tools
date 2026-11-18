@@ -1,23 +1,24 @@
 <!DOCTYPE html>
 <!--
   NL Tools — DAZN Viewership
-  Version: v43.1 (18/11/2026) — By game / By month is a pick-one dropdown (_view.js v42.2).
-  Version: v43.0 (14/11/2026)
-    One address. The League's page moves here from /dazn/admin/ (which now
+  Version: v43.2 (18/11/2026)
+    v43.0: one address. The League's page moves here from /dazn/admin/ (which now
     forwards): a League account sees every club, and at Manage imports and
     edits games. Clubs are as before. /dazn/reader/ still forwards here.
   Was: v41.2 (13/11/2026) club page, v42.0 (13/11/2026) staff page
   File: /dazn/index.html
 
   CHANGELOG
+    v43.2 (18/11/2026) — Edit games moves into Manage, with its own Club
+      picker; it was a panel under the Club tab. A row's Save appears once
+      the row has a change, never greyed out.
+    v43.1 (18/11/2026) — By game / By month is a pick-one dropdown (_view v42.2).
     v43.0 (14/11/2026) — One page for clubs and the League
       (NL.codeGate.door, nl-utils v1.68).
     v41.2 (13/11/2026) — Signed in to NL Tools, the NL Tools top bar; by
       club code, the club bar (NL.codeGate, nl-utils v1.57).
     v41.1 (30/10/2026) — UK availability and Venue are filter buttons; By
       game / By month are tabs (_view v42.1).
-    v41.0 (19/10/2026) — Cards: Avg viewing time replaces Best game (_view v41.0).
-    v40.0 (16/10/2026) — Games table: kick-off in its own column (_view v40.0).
 
   WHO SEES WHAT (the pass decides, system/one-address-plan.md):
     · not signed in       → the club code door; a code opens that club's
@@ -76,6 +77,11 @@
     window.NL_CHANGELOG = [
       {
         date: '18/11/2026',
+        version: 'v43.2',
+        items: [ 'Edit games is under Manage, with its own Club picker.' ]
+      },
+      {
+        date: '18/11/2026',
         version: 'v43.1',
         items: [ 'By game or By month is a dropdown.' ]
       },
@@ -98,14 +104,6 @@
         items: [
           'Filters are now buttons that open a short list. Division takes more than one at once.',
           'By game and By month are now tabs.'
-        ]
-      },
-      {
-        date: '19/10/2026',
-        version: 'v41.0',
-        items: [
-          'New card: Avg viewing time, minutes per viewer across the games shown. Best game and the division comparison are gone.',
-          'Club tab: the season picker sits with the slicers, and the chart opens on By game.'
         ]
       }
     ];
@@ -187,18 +185,25 @@
         <div class="dz-slicer"><span class="filter-label">Club</span><div class="dza-pick" id="dzaPicker"></div></div>
       </div>
       <div class="dza-section" id="dzaClubBody"></div>
-      <!-- Edit games: Manage edits the club in front of them, in place
-           (v-next: moved from the Admin tab, which needed a second picker). -->
-      <section class="form-panel dz-panel dz-panel--flush dza-section" id="dzaEditPanel" hidden>
-        <div class="form-panel__head dz-panel__head"><span id="dzaEditTitle">Edit games</span></div>
-        <div class="form-panel__body" id="dzaEdit"></div>
-      </section>
     </div>
 
     <div data-pane-body="admin" hidden>
       <!-- Manage (the access plan's standard: Pending, Settings, Import,
-           Removed, History; a tool shows only what it has). DAZN has Import. -->
-      <div class="section-head"><h2>Import</h2></div>
+           Removed, History; a tool shows only what it has). DAZN has Edit
+           games and Import. Edit games lives here, not under the Club tab
+           (v43.2): changing figures clubs see is a Manage job, so it sits
+           behind Manage like every other change. -->
+      <div class="section-head"><h2>Edit games</h2></div>
+      <div class="filter-bar">
+        <div class="dz-slicer"><span class="filter-label">Club</span><div class="dza-pick" id="dzaEditPick"></div></div>
+      </div>
+      <!-- No panel heading: Edit games and the Club picker above already say
+           what this is. -->
+      <section class="form-panel dz-panel dz-panel--flush" id="dzaEditPanel" hidden>
+        <div class="form-panel__body" id="dzaEdit"></div>
+      </section>
+
+      <div class="section-head dza-section"><h2>Import</h2></div>
       <div id="dzaSeasons"></div>
 
       <section class="form-panel dza-import dza-section" id="dzaImport">
@@ -681,24 +686,25 @@
   function drawEdit() {
     var host = $('dzaEdit');
     if (!host) return;
-    S.editClub = S.isAdmin ? S.open : null;
+    if (!S.isAdmin) S.editClub = null;
     $('dzaEditPanel').hidden = !S.editClub;
-    if (!S.editClub) { host.innerHTML = ''; return; }
-    var code = S.editClub, F = DAZNView.fmt;   /* the club open on the Club tab */
-    $('dzaEditTitle').textContent = 'Edit games: ' + (nameOf(code) || code);
+    if (!S.editClub || !S.data) { host.innerHTML = ''; return; }
+    var code = S.editClub, F = DAZNView.fmt;   /* the club picked under Manage */
     var mine = function (m) { return m.home === code || m.away === code; };
     var rows = D.values(S.data.matches).filter(mine).map(function (m) { return { m: m, out: false }; })
       .concat(D.values(S.data.notPlayed).filter(mine).map(function (m) { return { m: m, out: true }; }))
       .sort(function (a, b) { return a.m.date < b.m.date ? -1 : a.m.date > b.m.date ? 1 : 0; });
     var idOf = function (m) { return D.matchId(m.date, m.home, m.away); };
-    /* No games: the club report above already says so. */
-    if (!rows.length) { host.innerHTML = ''; $('dzaEditPanel').hidden = true; return; }
+    if (!rows.length) {
+      host.innerHTML = '<div class="empty-state"><div class="empty-state__title">No games this season</div></div>';
+      return;
+    }
     host.innerHTML = '<div class="table-wrap"><table class="table table--compact"><thead><tr>' +
       '<th>Date</th><th>Game</th><th class="ta-right">Views</th><th>Neutral venue</th><th>Shown in UK</th><th>Counted</th><th></th></tr></thead><tbody>' +
       rows.map(function (r) {
         var m = r.m, id = idOf(m), v = m.ukViews + m.intlViews, dis = r.out ? ' disabled' : '';
         return '<tr data-id="' + esc(id) + '"' + (r.out ? ' class="is-out"' : '') + '>' +
-          '<td>' + esc(NL.formatDateShort(m.date)) + '</td>' +
+          '<td>' + esc(NL.formatDateShort(m.date, { weekday: true })) + '</td>' +
           '<td>' + esc((nameOf(m.home) || m.home) + ' v ' + (nameOf(m.away) || m.away)) + '</td>' +
           '<td class="ta-right">' + F.n0(v) + '</td>' +
           '<td><input type="checkbox" data-k="neutral" aria-label="Neutral venue"' + (m.neutral ? ' checked' : '') + dis + '></td>' +
@@ -706,14 +712,15 @@
             '<option value="uk"' + (m.avail !== 'intl' ? ' selected' : '') + '>Yes</option>' +
             '<option value="intl"' + (m.avail === 'intl' ? ' selected' : '') + '>No</option></select></td>' +
           '<td><input type="checkbox" data-k="counted" aria-label="Counted"' + (r.out ? '' : ' checked') + '></td>' +
-          '<td class="ta-right"><button type="button" class="btn btn--primary btn--sm" data-save disabled>Save</button></td>' +
+          '<td class="ta-right"><button type="button" class="btn btn--primary btn--sm" data-save hidden>Save</button></td>' +
         '</tr>';
       }).join('') + '</tbody></table></div>';
   }
 
   $('dzaEdit').addEventListener('change', function (e) {
     var tr = e.target.closest('tr[data-id]');
-    if (tr) tr.querySelector('[data-save]').disabled = false;
+    /* Save appears once the row has a change: never a greyed button. */
+    if (tr) tr.querySelector('[data-save]').hidden = false;
   });
 
   $('dzaEdit').addEventListener('click', function (e) {
@@ -731,7 +738,7 @@
       if (!!cur.neutral !== neutral) delta.neutral = neutral;
       if ((cur.avail === 'intl' ? 'intl' : 'uk') !== avail) delta.avail = avail;
     }
-    if (!Object.keys(delta).length) { b.disabled = true; return; }
+    if (!Object.keys(delta).length) { b.hidden = true; return; }
     saveEdit(id, delta, b);
   });
 
@@ -759,6 +766,7 @@
       S.overrides[id] = merged;
       S.index[key].games = up['index/' + key + '/games'];
       S.index[key].notPlayed = up['index/' + key + '/notPlayed'];
+      if (btn) { btn.hidden = true; btn.disabled = false; }
       NL.toast('Saved. Clubs see the change straight away.', 'success');
       drawClubs(); drawClub(); drawSeasons();
     }).catch(function (e) {
@@ -961,6 +969,21 @@
         }
       });
       if (S.open && NL.clubs.byCode(S.open)) S.picker.setValue(NL.clubs.byCode(S.open).name);
+      /* Manage's own club picker, for Edit games. It starts on the club
+         open on the Club tab, if any. */
+      if (S.isAdmin) {
+        S.editClub = S.open || null;
+        S.editPicker = NL.clubPicker($('dzaEditPick'), {
+          mode: 'select', season: 'current', placeholder: 'Pick a club',
+          onSelect: function (sel) {
+            var c = (sel && sel.club) || NL.clubs.byName(sel && sel.name);
+            if (!c || !c.code) return;
+            S.editClub = c.code;
+            drawEdit();
+          }
+        });
+        if (S.editClub && NL.clubs.byCode(S.editClub)) S.editPicker.setValue(NL.clubs.byCode(S.editClub).name);
+      }
       return NL.ensureAuth();
     }).then(loadIndex).catch(function (e) {
       console.error('[dazn-admin]', e);
