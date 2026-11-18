@@ -135,6 +135,10 @@ Why: Two ways of deciding access is twice the chance of them disagreeing.
 - Gone 16/11: three registry fields nothing needed (the tool "type", "visible to all" and "placeholder").
 - The "League only" label (`audience` on each tool) goes here too. It still decides for anyone without a pass, and keeps a Club card off League tools until club logins, so it cannot go before then. (One address for each tool is done: every two-page tool is one page, 14/11/2026.)
 
+### North and South on one fixtures card (parked)
+What: For a thin midweek round (say five North games and two South, after rearrangements), one fixtures or results card with a North heading over its games and a South heading over its own, instead of two near-empty cards. Offered only when the two add up to 16 games or fewer; a full Saturday keeps its two cards.
+Why: Two cards with a handful of games each look sparse, and the card already draws a heading for each day, so a heading for each division is a small change. Parked 18/11/2026.
+
 ### Rename the tools in the database
 What: Drop the old "ops-", "media-" and "staff-" starts from every tool's name in the database. A list of old and new names kept forever, a report-first copy, one switch-over, and the old copies deleted weeks later.
 Why: The starts date from an idea of shelves that was dropped. Done last, when there is least to move.
