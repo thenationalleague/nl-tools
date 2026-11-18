@@ -1,9 +1,11 @@
 /* =============================================================================
    NL Tools — DAZN Viewership: one club's season, as a dashboard
    File: /dazn/_view.js
-   Version: v42.1 (30/10/2026)
+   Version: v42.2 (18/11/2026)
 
    CHANGELOG
+     v42.2 (18/11/2026) – By game / By month is a pick-one dropdown that
+       always holds a value, not red tabs (red is the tab you are on).
      v42.1 (30/10/2026) – Off the old chip controls (Declutter). UK
        availability and Venue are canon filter buttons (NL.filterButton),
        one choice at a time, as before. By game / By month is a pair of
@@ -230,14 +232,6 @@
         }
       });
     });
-  }
-
-  function tabs(key, opts, on, aria) {
-    return '<div class="tabs" role="tablist" aria-label="' + esc(aria) + '" data-f="' + key + '" style="margin:0">' +
-      opts.map(function (o) {
-        return '<button type="button" class="tab' + (o[0] === on ? ' active' : '') + '" role="tab" data-v="' + o[0] + '"' +
-          ' aria-selected="' + (o[0] === on) + '">' + esc(o[1]) + '</button>';
-      }).join('') + '</div>';
   }
 
   function filtered(F) { return F.uk !== 'all' || F.venue !== 'all' || F.month !== 'all'; }
@@ -562,7 +556,7 @@
       '<div data-kpis></div>' +
       '<div class="dz-row">' +
         panel('Views by game', '<div data-chart></div>',
-          '<span class="dz-panel__tools">' + tabs('chart', [['game', 'By game'], ['month', 'By month']], 'game', 'Chart') + legend() + '</span>',
+          '<span class="dz-panel__tools"><span data-chartview></span>' + legend() + '</span>',
           '', 'data-chart-title') +
         panel('Top games', '<div data-top></div>', '<span class="dz-panel__ctx" data-top-ctx></span>') +
       '</div>' +
@@ -571,6 +565,15 @@
     '</div>';
 
     var q = function (sel) { return el.querySelector(sel); };
+
+    /* By game or by month: a view, always one of the two (v42.2), so a
+       pick-one that holds a value, not red tabs. */
+    window.NL.filterButton(q('[data-chartview]'), {
+      label: 'Chart', multiple: false, required: true, search: false,
+      options: [{ value: 'game', label: 'By game' }, { value: 'month', label: 'By month' }],
+      value: view,
+      onChange: function (v) { view = v; draw(); }
+    });
 
     /* A horizontal scrollbar takes its height out of the scroll box, so the
        columns' baseline rises while the y-axis beside it (outside the box)
@@ -631,14 +634,6 @@
     }
 
     el.onclick = function (e) {
-      var sw = e.target.closest('[data-f="chart"] .tab[data-v]');
-      if (sw) {
-        view = sw.getAttribute('data-v');
-        Array.prototype.forEach.call(sw.parentNode.querySelectorAll('.tab'), function (c) {
-          var on = c === sw; c.classList.toggle('active', on); c.setAttribute('aria-selected', String(on));
-        });
-        draw(); return;
-      }
       var col = e.target.closest('.dz-col[data-month]');
       if (col) { var m = col.getAttribute('data-month'); F.month = F.month === m ? 'all' : m; draw(); return; }
       if (e.target.closest('[data-reset]')) { F = { uk: 'all', venue: 'all', month: 'all' }; draw(); }
