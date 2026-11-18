@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Buzz
-  Version: v1.0 (18/11/2026)
+  Version: v1.1 (18/11/2026)
   File: /buzz/index.html
 
   A NON-GATED public page for a live talk: someone in the room picks their name once,
@@ -18,6 +18,7 @@
   their own name. Nothing is stored but the name chosen and any question typed.
 
   Changelog (last five)
+  v1.1 18/11/2026 – Two buttons: BUZZ (question now) and Come back to this later.
   v1.0 18/11/2026 – First version.
 -->
 <html lang="en-GB">
@@ -50,10 +51,22 @@
     .bz-me img { width: 46px; height: 46px; object-fit: contain; border-radius: 10px; background: var(--navy-50); padding: 4px; box-sizing: border-box; }
     .bz-me b { font-size: 19px; color: var(--navy-50); display: block; } .bz-me small { color: var(--navy-200); font-size: 14px; }
     .bz-change { margin-left: auto; background: var(--navy-600); padding: 10px 14px; font-size: 14px; }
-    .bz-btn { all: unset; align-self: center; margin: 18px 0 6px; width: min(72vw, 300px); aspect-ratio: 1; border-radius: 50%; background: var(--primary); color: var(--navy-50); display: grid; place-items: center;
-      font: 800 52px var(--font); letter-spacing: .04em; box-shadow: 0 14px 0 var(--primary-800), 0 22px 40px var(--navy-900); cursor: pointer; transition: transform 90ms, box-shadow 90ms; user-select: none; }
-    .bz-btn:active { transform: translateY(10px); box-shadow: 0 4px 0 var(--primary-800), 0 10px 24px var(--navy-900); }
-    .bz-btn[disabled] { background: var(--green); box-shadow: 0 14px 0 var(--navy-800), 0 22px 40px var(--navy-900); font-size: 30px; text-align: center; }
+    /* the buzzer: a red dome in a dark bezel that goes down when pressed */
+    .bz-pad { align-self: center; margin: 10px 0 4px; width: min(76vw, 310px); aspect-ratio: 1; border-radius: 50%; padding: 18px; box-sizing: border-box;
+      background: radial-gradient(circle at 50% 35%, var(--navy-600), var(--navy-900) 70%); box-shadow: inset 0 -6px 14px var(--navy-900), 0 18px 40px var(--navy-900); }
+    .bz-btn { all: unset; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; box-sizing: border-box; width: 100%; height: 100%; border-radius: 50%; cursor: pointer; user-select: none; -webkit-user-select: none;
+      background: radial-gradient(circle at 40% 30%, var(--primary-300) 0, var(--primary) 45%, var(--primary-800) 100%); color: var(--navy-50);
+      font: 800 50px var(--font); letter-spacing: .06em; text-shadow: 0 2px 0 var(--primary-800);
+      box-shadow: 0 16px 0 var(--primary-800), 0 18px 2px var(--navy-900), inset 0 4px 10px var(--primary-200); transform: translateY(-8px); transition: transform 70ms, box-shadow 70ms; }
+    .bz-btn:active, .bz-btn.hit { transform: translateY(8px); box-shadow: 0 0 0 var(--primary-800), 0 2px 2px var(--navy-900), inset 0 4px 10px var(--primary-200); }
+    .bz-btn small { display: block; font-size: 15px; letter-spacing: .02em; font-weight: 700; opacity: .9; }
+    .bz-btn.done { background: radial-gradient(circle at 40% 30%, var(--green-light) 0, var(--green) 50%, var(--navy-800) 100%); box-shadow: 0 16px 0 var(--navy-800), 0 18px 2px var(--navy-900); font-size: 34px; }
+    .bz-later { all: unset; align-self: stretch; text-align: center; padding: 16px; border-radius: 16px; background: var(--navy-600); color: var(--navy-50); font: 800 19px var(--font);
+      box-shadow: 0 6px 0 var(--navy-800); transform: translateY(-3px); transition: transform 70ms, box-shadow 70ms; cursor: pointer; }
+    .bz-later:active, .bz-later.hit { transform: translateY(3px); box-shadow: 0 0 0 var(--navy-800); }
+    .bz-later.done { background: var(--green); box-shadow: 0 6px 0 var(--navy-800); }
+    .bz-flash { position: fixed; inset: 0; pointer-events: none; box-shadow: inset 0 0 0 0 var(--primary); transition: box-shadow 300ms; }
+    .bz-flash.on { box-shadow: inset 0 0 0 14px var(--primary); transition: none; }
     .bz-q { width: 100%; min-height: 80px; resize: vertical; }
     .bz-msg { min-height: 22px; text-align: center; font-size: 16px; color: var(--navy-100); }
     .bz-msg.bad { color: var(--primary-200); }
@@ -74,11 +87,13 @@
 
     <section id="buzz" hidden>
       <div class="bz-me"><img id="meImg" alt=""><div><b id="meName"></b><small id="meSub"></small></div><button class="bz-change" id="change" type="button">Change</button></div>
+      <div class="bz-pad"><button class="bz-btn" id="go" type="button">BUZZ<small>Question now</small></button></div>
+      <button class="bz-later" id="later" type="button">Come back to this later</button>
+      <p class="bz-msg" id="msg"></p>
       <textarea class="bz-q" id="q" maxlength="280" placeholder="Your question (optional)"></textarea>
-      <button class="bz-btn" id="go" type="button">BUZZ</button>
-      <p class="bz-msg" id="msg">Press when you want to come back to what’s on screen.</p>
     </section>
   </main>
+  <div class="bz-flash" id="flash"></div>
 <script>
 (function () {
   var DB = 'https://nl-widgets-default-rtdb.europe-west1.firebasedatabase.app/buzz';
@@ -115,20 +130,27 @@
   $('change').addEventListener('click', function () { $('buzz').hidden = true; $('pick').hidden = false; });
   try { var saved = JSON.parse(localStorage.getItem(LS) || 'null'); if (saved && saved.n) choose(saved); } catch (e) {}
 
-  var go = $('go'), msg = $('msg'), busy = false;
-  go.addEventListener('click', function () {
-    if (busy || !me) return; busy = true; msg.classList.remove('bad');
-    var body = { n: me.n.slice(0, 60), c: (me.c || '').slice(0, 60), t: { '.sv': 'timestamp' } }, x = $('q').value.trim();
+  var go = $('go'), later = $('later'), msg = $('msg'), flash = $('flash'), busy = false;
+  var GO = go.innerHTML, LATER = later.textContent;
+  function send(kind, btn) {
+    if (busy || !me) return; busy = true; msg.classList.remove('bad'); msg.textContent = '';
+    btn.classList.add('hit'); setTimeout(function () { btn.classList.remove('hit'); }, 160);
+    if (navigator.vibrate) navigator.vibrate(kind === 'now' ? [90, 50, 160] : 50);
+    if (kind === 'now') { flash.classList.add('on'); setTimeout(function () { flash.classList.remove('on'); }, 120); }
+    var body = { n: me.n.slice(0, 60), c: (me.c || '').slice(0, 60), k: kind, t: { '.sv': 'timestamp' } }, x = $('q').value.trim();
     if (x) body.x = x.slice(0, 280);
     fetch(DB + '/q.json', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       .then(function (r) {
         if (!r.ok) throw new Error(r.status);
-        if (navigator.vibrate) navigator.vibrate(60);
-        go.disabled = true; go.textContent = 'Got it'; $('q').value = ''; msg.textContent = 'Richard will come back to it.';
-        setTimeout(function () { go.disabled = false; go.textContent = 'BUZZ'; msg.textContent = 'Press when you want to come back to what’s on screen.'; busy = false; }, 6000);
+        $('q').value = ''; btn.classList.add('done');
+        if (kind === 'now') go.innerHTML = 'Buzzed!'; else later.textContent = 'Saved for later';
+        msg.textContent = kind === 'now' ? 'It’s on the screen.' : 'Richard will come back to it.';
+        setTimeout(function () { btn.classList.remove('done'); go.innerHTML = GO; later.textContent = LATER; msg.textContent = ''; busy = false; }, 5000);
       })
       .catch(function () { busy = false; msg.classList.add('bad'); msg.textContent = 'That didn’t send. Check your signal and press again.'; });
-  });
+  }
+  go.addEventListener('click', function () { send('now', go); });
+  later.addEventListener('click', function () { send('later', later); });
 })();
 </script>
 </body>
