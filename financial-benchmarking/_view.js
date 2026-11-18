@@ -1,9 +1,11 @@
 /* =============================================================================
    NL Tools — Financial Benchmarking: the club's view
    File: /financial-benchmarking/_view.js
-   Version: v0.4 (11/11/2026)
+   Version: v0.5 (18/11/2026)
 
    CHANGELOG
+     v0.5 (18/11/2026) — Show position as is a pick-one dropdown, not red
+       tabs; it and Compare against always hold a value (no ×).
      v0.4 (11/11/2026) — Finance's review: every figure shows its place by
        size; North and South run panels first and ratios after, each chart
        titled in full; National is two charts to a row.
@@ -179,12 +181,7 @@
     /* A filter button carries its own name, so it takes no title above. */
     if (canBoth) controls += '<div class="fb-control" data-fb-compare></div>';
 
-    controls += '<div class="fb-control"><span class="filter-label">Show position as</span>' +
-      '<div class="tabs fb-viztabs" role="tablist" aria-label="Show position as">' +
-        ['bars', 'slider'].map(function (v) {
-          return '<button type="button" class="tab' + (v === vizMode ? ' active' : '') + '" role="tab" aria-selected="' +
-            (v === vizMode) + '" data-fb-viz="' + v + '">' + (v === 'bars' ? 'Bars' : 'Slider') + '</button>';
-        }).join('') + '</div></div>';
+    controls += '<div class="fb-control" data-fb-viz></div>';
 
     var n = 0;
     Object.keys(bench).forEach(function (k) { n = Math.max(n, D.list(bench[k]).length); });
@@ -228,23 +225,27 @@
 
     var sel = mount.querySelector('[data-fb-return]');
     if (sel) sel.addEventListener('change', function () { if (o.onReturn) o.onReturn(sel.value); });
-    mount.querySelectorAll('[data-fb-viz]').forEach(function (b) {
-      b.addEventListener('click', function () {
-        vizMode = b.getAttribute('data-fb-viz');
+    /* A view, always one of the two: a pick-one that holds a value (v0.5),
+       not red tabs, which mean the tab you are on. */
+    root.NL.filterButton(mount.querySelector('[data-fb-viz]'), {
+      label: 'Show position as', multiple: false, required: true, search: false,
+      options: [{ value: 'bars', label: 'Bars' }, { value: 'slider', label: 'Slider' }],
+      value: vizMode,
+      onChange: function (v) {
+        vizMode = v;
         render(mount, o);
-        var t = mount.querySelector('[data-fb-viz="' + vizMode + '"]');
+        var t = mount.querySelector('[data-fb-viz] .filter-btn__trigger');
         if (t) t.focus();
-      });
+      }
     });
     var slot = mount.querySelector('[data-fb-compare]');
     if (slot) {
       root.NL.filterButton(slot, {
-        label: 'Compare against', multiple: false, search: false,
+        label: 'Compare against', multiple: false, required: true, search: false,
         options: [{ value: 'own', label: o.div }, { value: 'both', label: 'North and South' }],
         value: both ? 'both' : 'own',
         onChange: function (v) {
-          /* Always one or the other: clearing it goes back to the club's
-             own division. */
+          /* Always one or the other. */
           compareBoth = v === 'both';
           render(mount, o);
           var t = mount.querySelector('[data-fb-compare] .filter-btn__trigger');

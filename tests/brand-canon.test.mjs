@@ -1314,6 +1314,42 @@ test('no new page uses .chip-group or .filter-pill', () => {
   assert.deepEqual(moved, [], 'these pages no longer use the old controls; take them off OLD_CONTROL_PAGES:\n  ' + moved.join('\n  '));
 });
 
+/* Red tabs mean where you are in a tool, so a page has one bar of them: its
+   sections. A choice of view (By game / By month, List / Thumbnails) is a
+   pick-one filter button with required: true (nl-utils v1.73), navy when
+   chosen. Eight second bars were moved over on 18/11/2026. A page that
+   genuinely needs a second bar of sections goes on the list with why. */
+const TWO_TAB_BARS = new Map([
+  ['brand-exposure', 'the explainer\'s two chapters are sections of a story, not a choice of view'],
+]);
+test('a page has one bar of red tabs; a choice of view is a pick-one dropdown', () => {
+  const skip = new Set(['system', 'style-guide', 'embeds', 'tests', 'scripts', 'functions', 'gas', 'node_modules', '.claude', '.github']);
+  const bars = new Map();
+  const walk = (d) => {
+    for (const e of readdirSync(join(REPO, d || '.'), { withFileTypes: true })) {
+      if (e.name.startsWith('.') && d === '') continue;
+      const p = d ? d + '/' + e.name : e.name;
+      if (e.isDirectory()) { if (!skip.has(p)) walk(p); continue; }
+      if (!/\.(html|js)$/.test(e.name)) continue;
+      const n = (readFileSync(join(REPO, p), 'utf8').match(/class=\\?"tabs[ \\"]/g) || []).length;
+      if (n) bars.set(d, (bars.get(d) || 0) + n);
+    }
+  };
+  walk('');
+  const over = [...bars].filter(([dir, n]) => n > 1 && !TWO_TAB_BARS.has(dir)).map(([dir, n]) => dir + ' (' + n + ')');
+  assert.deepEqual(over, [], 'more than one bar of tabs: make the choice a pick-one NL.filterButton with required: true:\n  ' + over.join('\n  '));
+  const stale = [...TWO_TAB_BARS.keys()].filter((dir) => (bars.get(dir) || 0) < 2);
+  assert.deepEqual(stale, [], 'these no longer have two bars; take them off TWO_TAB_BARS');
+});
+
+test('a required pick-one always holds a value and offers no clear', () => {
+  const src = readFileSync(join(REPO, 'system/nl-utils.js'), 'utf8');
+  assert.match(src, /var required = !multiple && !!opts\.required;/);
+  assert.match(src, /clearBtn\.hidden = !on \|\| required;/);
+  assert.match(src, /else if \(required && at >= 0\) \{ ctrl\.close\(\); trig\.focus\(\); return; \}/, 'choosing the chosen one keeps it');
+  assert.match(ruleBody('.filter-btn--required.is-active .filter-btn__trigger'), /border-radius:\s*var\(--radius\)/);
+});
+
 /* A pick-one filter button draws round radio marks; one that takes several
    keeps square ticks (brand v2.83, nl-utils v1.72). */
 test('a pick-one filter button is marked --one and drawn round', () => {

@@ -1,5 +1,7 @@
 /*
   Document Library — the library browser, shared by both pages
+  Version: v1.4 (18/11/2026) – List / Thumbnails is a pick-one dropdown that
+           always holds a value, not red tabs (red is the tab you are on).
   Version: v1.3 (30/10/2026) – the List / Thumbnails switch is a pair of canon
            tabs (.tabs / .tab), off the old chip control (Declutter).
   Version: v1.2 (28/10/2026) — the view switch's icons load: the sprite is
@@ -319,17 +321,10 @@
       }
       crumbs += '</nav></h2>';
 
-      var viewBtn = function (mode, icon, label) {
-        var on = view.mode === mode;
-        return '<button type="button" class="tab dl-view' + (on ? ' active' : '') + '" role="tab" data-mode="' + mode + '"' +
-          ' aria-selected="' + on + '" aria-label="' + label + '" title="' + label + '">' + iconHtml(icon) + '</button>';
-      };
       var tools = '<div class="fold__tools">' +
         '<input class="toolbar__search dl-search" type="search" data-q placeholder="Search" ' +
           'aria-label="Search every folder" value="' + esc(view.q) + '">' +
-        '<div class="tabs dl-views" role="tablist" aria-label="View">' +
-          viewBtn('list', 'list', 'List') + viewBtn('grid', 'grid', 'Thumbnails') +
-        '</div></div>';
+        '<div class="dl-views" data-viewpick></div></div>';
 
       var acts = '';
       if (writable && !searching) {
@@ -505,8 +500,15 @@
       each('[data-crumb]', function (b) {
         b.onclick = function () { navigate(b.getAttribute('data-crumb') || null); };
       });
-      each('[data-mode]', function (b) {
-        b.onclick = function () { view.mode = b.getAttribute('data-mode'); saveView(view.mode); render(); };
+      /* List or Thumbnails: a view, always one (v1.4), so a pick-one that
+         holds a value, not red tabs, which mean the tab you are on. */
+      each('[data-viewpick]', function (slot) {
+        window.NL.filterButton(slot, {
+          label: 'View', multiple: false, required: true, search: false,
+          options: [{ value: 'list', label: 'List' }, { value: 'grid', label: 'Thumbnails' }],
+          value: view.mode,
+          onChange: function (v) { view.mode = v; saveView(v); render(); }
+        });
       });
       each('[data-sort]', function (b) {
         b.onclick = function () {

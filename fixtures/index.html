@@ -1,8 +1,12 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixture Management
-  Version: v5.0 (18/11/2026)
+  Version: v5.1 (18/11/2026)
   File: /fixtures/index.html
+
+  v5.1 (18/11/2026) — Rearrangements' two jobs (Awaiting a date, Move a
+    fixture) are a pick-one dropdown that always holds a value, not a
+    second row of red tabs.
 
   v5.0 (18/11/2026) — One list, columns you choose.
     · Fixtures & Results is the one tab for the list; Broadcast is no
@@ -54,21 +58,6 @@
       two labelled boxes (Total, Away fans) with no loose "away". Neutral
       venue is a tick box sentence under a Venue label.
 
-  v4.2 (13/11/2026) — Corrections, and the Manage tab.
-    · Settings is now Manage, laid out to the access plan's standard:
-      Settings (ruled-out days, international windows), Import (results,
-      cup ties, the workbook, Attendance) and Removed.
-    · Correct: any fixture, imported or not, can have its clubs or
-      competition put right (a misspelt outside club, a wrong division).
-      Its key does not change, so its crowd and broadcast stay with it.
-    · Remove replaces Delete, for every fixture, not only hand-entered
-      ties. Typing REMOVE confirms it; a game with an attendance figure
-      cannot be removed until the figure is cleared. A removed game is
-      kept at removed/<key> and Restore puts it back under the same key.
-    · League count: each division should hold n × (n − 1) league games
-      (552 for 24 clubs), counted from clubs-meta. Any division off shows
-      in Import, and the Manage tab carries the count.
-
   The League's master fixture record: every game in every competition, with
   the dates each one has lost. Staff console. The plan, and every decision
   behind it, is system/fixture-management-plan.md.
@@ -91,7 +80,7 @@
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
 
   <!-- Brand stylesheet (lint canonical: ?v=69) -->
-  <link rel="stylesheet" href="/system/nl-brand.css?v=80">
+  <link rel="stylesheet" href="/system/nl-brand.css?v=81">
 
   <!-- Firebase 10.12.0 SDK (compat) -->
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -124,6 +113,11 @@
     window.NL_CHANGELOG = [
       {
         date: '18/11/2026',
+        version: 'v5.1',
+        items: [ 'Rearrangements: choose the job from a dropdown.' ]
+      },
+      {
+        date: '18/11/2026',
         version: 'v5.0',
         items: [
           'Fixtures & Results is one list with a Columns choice: Broadcast, Attendance, Data checks or Rearranged.',
@@ -151,16 +145,6 @@
           'Manage: each part sits in its own panel with a heading bar.',
           'In a game’s window, Correct is in the bottom bar with Postpone and Abandon, and the form reads more evenly.'
         ]
-      },
-      {
-        date: '13/11/2026',
-        version: 'v4.2',
-        items: [
-          'Settings is now Manage.',
-          'Correct fixes a fixture’s clubs or competition without changing the game.',
-          'Remove takes a game out and keeps it under Manage, where Restore puts it back.',
-          'Manage shows when a division does not hold 552 league games.'
-        ]
       }
     ];
 
@@ -179,7 +163,7 @@
   </script>
 
   <!-- NL system scripts (lint canonical: ?v=49 / ?v=1 / ?v=10 / ?v=17) -->
-  <script src="/system/nl-utils.js?v=76"></script>
+  <script src="/system/nl-utils.js?v=77"></script>
   <!-- GA4, one property for all of nl.tools. Cookieless, so no consent
        banner on any page; page views by path, no identity. Tool events go
        through NL.track(). See system/nl-analytics.js. -->
@@ -324,7 +308,6 @@
   .fm-rr-app { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 10px; height: var(--app-h, auto); }
   /* The games awaiting a date: a dropdown, so the calendar has the width. */
   .fm-rr-pick { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; min-width: 0; }
-  .fm-rr-modes { margin: 0; }
   .fm-rr-pick .fm-picker { min-width: 220px; }
   .fm-rr-v { color: var(--text-muted); }
   .fm-pen { display: inline-flex; gap: 4px; align-items: center; font-size: var(--text-sm); color: var(--text-muted); }
@@ -1433,8 +1416,6 @@
   function wireRearrange() {
     var body = document.getElementById('fmRrBody');
     body.addEventListener('click', function (e) {
-      var mode = e.target.closest('[data-rr-mode]');
-      if (mode) { S.rr.mode = mode.getAttribute('data-rr-mode'); S.rr.slot = null; renderRearrange(); return; }
       var lift = e.target.closest('[data-unavail-off]');
       if (lift) {
         NL.ensureAuth().then(function () { return ref('unavailable/' + lift.getAttribute('data-unavail-off')).remove(); })
@@ -1523,11 +1504,12 @@
     }
     var key = rec ? rec.key : null;
     var same = S.rr.drawn === key;
-    var top = '<div class="fm-rr-pick">' + modeBar(list.length) + picks + '</div>';
+    var top = '<div class="fm-rr-pick"><div id="fmRrMode"></div>' + picks + '</div>';
     var main = rec ? gameOf(rec, list, data, moving)
       : '<div class="empty-state"><div class="empty-state__title">' +
         (moving ? 'Choose the home club, then the away club' : 'Nothing awaiting a date') + '</div></div>';
     body.innerHTML = '<div class="fm-rr-app">' + top + main + '</div>';
+    mountModes(list.length);
     if (moving) mountMovePickers();
     fitRearrange();
     if (rec) wireWeeks(same ? S.rr.scroll : null);
@@ -1550,14 +1532,15 @@
   window.addEventListener('resize', function () { if (S.tab === 'rearrange') fitRearrange(); });
 
   /* Two jobs, a closed set: games that have lost their date, and any
-     fixture that has one but needs to move. */
-  function modeBar(waiting) {
-    function tab(mode, text) {
-      var on = S.rr.mode === mode;
-      return '<button class="tab' + (on ? ' active' : '') + '" type="button" role="tab" aria-selected="' + on + '" data-rr-mode="' + mode + '">' + text + '</button>';
-    }
-    return '<div class="tabs fm-rr-modes" role="tablist" aria-label="Rearrange">' +
-      tab('waiting', 'Awaiting a date (' + num(waiting) + ')') + tab('move', 'Move a fixture') + '</div>';
+     fixture that has one but needs to move. A pick-one that always holds a
+     value (v5.1), not a second row of red tabs: red is the tab you are on. */
+  function mountModes(waiting) {
+    NL.filterButton('#fmRrMode', {
+      label: 'Job', multiple: false, required: true, value: S.rr.mode,
+      options: [{ value: 'waiting', label: 'Awaiting a date', count: num(waiting) },
+        { value: 'move', label: 'Move a fixture' }],
+      onChange: function (v) { S.rr.mode = v; S.rr.slot = null; renderRearrange(); }
+    });
   }
 
   /* Move a fixture: the home club, the away club, then which of their

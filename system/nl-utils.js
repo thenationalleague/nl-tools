@@ -1,7 +1,12 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.72 (18/11/2026)
+   Version: v1.73 (18/11/2026)
+   v1.73 — NL.filterButton({ multiple: false, required: true }): a pick-one
+     that always holds a value, for a choice of view rather than a filter
+     (Rearrangements' two jobs, a dashboard's views). No ×, no Clear, and
+     choosing the one already chosen keeps it. Replaces the red tab bars
+     that were doing this job (red is for where you are in a tool).
    v1.72 — Dates with the weekday: NL.formatDateShort(x, { weekday: true })
      gives 'Fri 20 Nov 2026' (and year: false, 'Fri 20 Nov'), the shape the
      brand audit asks for. A pick-one NL.filterButton (multiple: false)
@@ -1020,6 +1025,10 @@
                                            right of the row when given
          multiple:  true,                  several at once (default). false
                                            = pick one; choosing closes it
+         required:  false,                 with multiple: false, always one
+                                           chosen (a view, not a filter): no
+                                           × or Clear; first option if none
+                                           given (v1.73)
          value:     ['dead'] | 'dead' | null,
          allLabel:  'All',                 shown when nothing is chosen
          search:    'auto',                true / false / 'auto' (= more
@@ -1134,7 +1143,11 @@
     if (!host) throw new Error('NL.filterButton: mount not found');
     var esc = window.NL.escHtml;
     var multiple = opts.multiple !== false;
+    var required = !multiple && !!opts.required;
     var S = { options: (opts.options || []).slice(), sel: [], q: '' };
+    function fill() {
+      if (required && !S.sel.length && S.options.length) S.sel = [String(S.options[0].value)];
+    }
 
     function norm(v) {
       if (v == null || v === '') return [];
@@ -1142,10 +1155,11 @@
     }
     S.sel = norm(opts.value);
     if (!multiple && S.sel.length > 1) S.sel = S.sel.slice(0, 1);
+    fill();
 
     var root = document.createElement('div');
     /* --one: pick one, drawn with round radio marks (brand v2.83). */
-    root.className = 'filter-btn' + (multiple ? '' : ' filter-btn--one');
+    root.className = 'filter-btn' + (multiple ? '' : ' filter-btn--one') + (required ? ' filter-btn--required' : '');
     var uid = 'nlfb' + (++window.NL.filterButton._seq);
     root.innerHTML =
       '<button type="button" class="filter-btn__trigger" aria-haspopup="listbox" aria-expanded="false"' +
@@ -1192,7 +1206,7 @@
       root.querySelector('.filter-btn__value').textContent = txt;
       var on = S.sel.length > 0;
       root.classList.toggle('is-active', on);
-      clearBtn.hidden = !on;
+      clearBtn.hidden = !on || required;
       trig.setAttribute('aria-label', (label ? label + ': ' : '') + txt);
     }
     function drawList() {
@@ -1217,6 +1231,7 @@
     function toggle(i) {
       var v = String(S.options[i].value), at = S.sel.indexOf(v);
       if (multiple) { if (at >= 0) S.sel.splice(at, 1); else S.sel.push(v); }
+      else if (required && at >= 0) { ctrl.close(); trig.focus(); return; }
       else S.sel = at >= 0 ? [] : [v];
       drawTrigger(); drawList(); emit();
       if (!multiple) { ctrl.close(); trig.focus(); }
@@ -1255,6 +1270,7 @@
       var li = e.target.closest('.filter-btn__opt'); if (li) toggle(+li.getAttribute('data-i'));
     });
     search.addEventListener('input', function () { S.q = search.value; drawList(); });
+    if (required) root.querySelector('.filter-btn__foot').hidden = true;
     root.querySelector('.filter-btn__reset').addEventListener('click', function () {
       S.sel = []; drawTrigger(); drawList(); emit();
     });
@@ -1263,11 +1279,12 @@
     var ctrl = {
       el: root,
       get: function () { return multiple ? S.sel.slice() : (S.sel[0] == null ? null : S.sel[0]); },
-      set: function (v) { S.sel = norm(v); if (!multiple) S.sel = S.sel.slice(0, 1); drawTrigger(); drawList(); },
+      set: function (v) { S.sel = norm(v); if (!multiple) S.sel = S.sel.slice(0, 1); fill(); drawTrigger(); drawList(); },
       setOptions: function (o) {
         S.options = (o || []).slice();
         var known = S.options.map(function (x) { return String(x.value); });
         S.sel = S.sel.filter(function (v) { return known.indexOf(v) >= 0; });
+        fill();
         drawTrigger(); drawList();
       },
       open: function () {
