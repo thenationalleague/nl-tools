@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Buzz
-  Version: v1.1 (18/11/2026)
+  Version: v1.2 (18/11/2026)
   File: /buzz/index.html
 
   A NON-GATED public page for a live talk: someone in the room picks their name once,
@@ -18,6 +18,7 @@
   their own name. Nothing is stored but the name chosen and any question typed.
 
   Changelog (last five)
+  v1.2 18/11/2026 – The phone shows the screen's reply, so people know their buzz arrived.
   v1.1 18/11/2026 – Two buttons: BUZZ (question now) and Come back to this later.
   v1.0 18/11/2026 – First version.
 -->
@@ -140,14 +141,26 @@
     var body = { n: me.n.slice(0, 60), c: (me.c || '').slice(0, 60), k: kind, t: { '.sv': 'timestamp' } }, x = $('q').value.trim();
     if (x) body.x = x.slice(0, 280);
     fetch(DB + '/q.json', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      .then(function (r) {
-        if (!r.ok) throw new Error(r.status);
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function (res) {
         $('q').value = ''; btn.classList.add('done');
-        if (kind === 'now') go.innerHTML = 'Buzzed!'; else later.textContent = 'Saved for later';
-        msg.textContent = kind === 'now' ? 'It’s on the screen.' : 'Richard will come back to it.';
-        setTimeout(function () { btn.classList.remove('done'); go.innerHTML = GO; later.textContent = LATER; msg.textContent = ''; busy = false; }, 5000);
+        if (kind === 'now') go.innerHTML = 'Buzzed!'; else later.textContent = 'Sent';
+        msg.textContent = 'Waiting for the screen…';
+        waitAck(res && res.name);
+        setTimeout(function () { btn.classList.remove('done'); go.innerHTML = GO; later.textContent = LATER; busy = false; }, 5000);
       })
       .catch(function () { busy = false; msg.classList.add('bad'); msg.textContent = 'That didn’t send. Check your signal and press again.'; });
+  }
+  /* the deck writes buzz/ack/<id> when it shows the buzz; that is what the phone reports back */
+  var es = null, ackT = 0;
+  function waitAck(id) {
+    if (es) { es.close(); es = null; } clearTimeout(ackT); if (!id || !window.EventSource) { msg.textContent = 'Sent.'; return; }
+    es = new EventSource(DB + '/ack/' + id + '.json');
+    es.addEventListener('put', function (e) {
+      var m; try { m = JSON.parse(e.data); } catch (x) { return; }
+      if (m && typeof m.data === 'string') { msg.textContent = m.data; clearTimeout(ackT); es.close(); es = null; }
+    });
+    ackT = setTimeout(function () { if (es) { es.close(); es = null; } msg.textContent = 'Sent, but the screen hasn’t picked it up yet. It will when it reconnects.'; }, 9000);
   }
   go.addEventListener('click', function () { send('now', go); });
   later.addEventListener('click', function () { send('later', later); });
