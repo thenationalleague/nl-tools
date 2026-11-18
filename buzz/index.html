@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Buzz
-  Version: v1.3 (18/11/2026)
+  Version: v1.4 (18/11/2026)
   File: /buzz/index.html
 
   A NON-GATED public page for a live talk: someone in the room picks their name once,
@@ -18,6 +18,7 @@
   their own name. Nothing is stored but the name chosen and any question typed.
 
   Changelog (last five)
+  v1.4 18/11/2026 – Buzz in, and Ask a question for later (the only one with words); buzzing in can be switched off from the deck.
   v1.3 18/11/2026 – Two plain buttons instead of the dome.
   v1.2 18/11/2026 – The phone shows the screen's reply, so people know their buzz arrived. No vibration.
   v1.1 18/11/2026 – Two buttons: BUZZ (question now) and Come back to this later.
@@ -60,6 +61,10 @@
     .bz-later { background: var(--navy-600); box-shadow: 0 6px 0 var(--navy-800); }
     .bz-now b, .bz-later b { font: 800 28px var(--font); } .bz-now span, .bz-later span { font: 600 15px var(--font); opacity: .85; }
     .bz-now:active, .bz-now.hit, .bz-later:active, .bz-later.hit { transform: translateY(6px); box-shadow: 0 0 0 transparent; }
+    .bz-now[disabled] { background: var(--navy-600); box-shadow: 0 6px 0 var(--navy-800); opacity: .55; cursor: default; }
+    .bz-ask { display: flex; flex-direction: column; gap: 10px; } .bz-ask[hidden] { display: none; }
+    .bz-send { all: unset; align-self: flex-end; padding: 14px 28px; border-radius: 14px; background: var(--primary); color: var(--navy-50); font: 800 18px var(--font); box-shadow: 0 4px 0 var(--primary-800); cursor: pointer; }
+    .bz-send:active { transform: translateY(4px); box-shadow: none; }
     .bz-now.done, .bz-later.done { background: var(--green); box-shadow: 0 6px 0 var(--navy-800); }
     .bz-q { width: 100%; min-height: 80px; resize: vertical; }
     .bz-msg { min-height: 22px; text-align: center; font-size: 16px; color: var(--navy-100); }
@@ -81,9 +86,9 @@
 
     <section id="buzz" hidden>
       <div class="bz-me"><img id="meImg" alt=""><div><b id="meName"></b><small id="meSub"></small></div><button class="bz-change" id="change" type="button">Change</button></div>
-      <textarea class="bz-q" id="q" maxlength="280" placeholder="Your question (optional)"></textarea>
-      <button class="bz-now" id="go" type="button"><b>Question now</b><span>Pops up on Richard’s screen</span></button>
-      <button class="bz-later" id="later" type="button"><b>Come back to this later</b><span>Goes on his list for the end</span></button>
+      <button class="bz-now" id="go" type="button"><b>Buzz in</b><span id="goSub">Pops up on Richard’s screen</span></button>
+      <button class="bz-later" id="later" type="button"><b>Ask a question for later</b><span>Goes on his list for the end</span></button>
+      <div class="bz-ask" id="ask" hidden><textarea class="bz-q" id="q" maxlength="280" placeholder="Your question (optional)"></textarea><button class="bz-send" id="send" type="button">Send</button></div>
       <p class="bz-msg" id="msg"></p>
     </section>
   </main>
@@ -128,7 +133,7 @@
   function send(kind, btn) {
     if (busy || !me) return; busy = true; msg.classList.remove('bad'); msg.textContent = '';
     btn.classList.add('hit'); setTimeout(function () { btn.classList.remove('hit'); }, 160);
-    var body = { n: me.n.slice(0, 60), c: (me.c || '').slice(0, 60), k: kind, t: { '.sv': 'timestamp' } }, x = $('q').value.trim();
+    var body = { n: me.n.slice(0, 60), c: (me.c || '').slice(0, 60), k: kind, t: { '.sv': 'timestamp' } }, x = kind === 'later' ? $('q').value.trim() : '';
     if (x) body.x = x.slice(0, 280);
     fetch(DB + '/q.json', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
@@ -137,7 +142,7 @@
         btn.innerHTML = '<b>Sent</b>';
         msg.textContent = 'Waiting for the screen…';
         waitAck(res && res.name);
-        setTimeout(function () { btn.classList.remove('done'); go.innerHTML = GO; later.innerHTML = LATER; busy = false; }, 5000);
+        setTimeout(function () { btn.classList.remove('done'); go.innerHTML = GO; later.innerHTML = LATER; setOpen(isOpen); busy = false; }, 5000);
       })
       .catch(function () { busy = false; msg.classList.add('bad'); msg.textContent = 'That didn’t send. Check your signal and press again.'; });
   }
@@ -152,8 +157,14 @@
     });
     ackT = setTimeout(function () { if (es) { es.close(); es = null; } msg.textContent = 'Sent, but the screen hasn’t picked it up yet. It will when it reconnects.'; }, 9000);
   }
-  go.addEventListener('click', function () { send('now', go); });
-  later.addEventListener('click', function () { send('later', later); });
+  go.addEventListener('click', function () { if (!go.disabled) send('now', go); });
+  /* later: the one place to write a question; empty is fine, it still marks the slide */
+  later.addEventListener('click', function () { var a = $('ask'); a.hidden = !a.hidden; if (!a.hidden) $('q').focus(); });
+  $('send').addEventListener('click', function () { send('later', later); $('ask').hidden = true; });
+  /* Richard can switch buzzing in off from the deck; the phone follows */
+  var isOpen = true;
+  function setOpen(on) { isOpen = on; go.disabled = !on; var sub = $('goSub'); if (sub) sub.textContent = on ? 'Pops up on Richard’s screen' : 'Off for now – ask for later instead'; }
+  if (window.EventSource) { var os = new EventSource(DB + '/open.json'); os.addEventListener('put', function (e) { try { var m = JSON.parse(e.data); if (m && m.path === '/') setOpen(m.data !== false); } catch (x) {} }); }
 })();
 </script>
 </body>
