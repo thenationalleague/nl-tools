@@ -15,6 +15,8 @@ const PAGE = readFileSync(join(REPO, 'roadmap/index.html'), 'utf8');
 const src = PAGE.slice(PAGE.indexOf('function parse(md)'), PAGE.indexOf('window.ROADMAP'));
 const box = {}; vm.createContext(box);
 vm.runInContext(src + ';this.parse = parse;', box);
+const wsrc = PAGE.slice(PAGE.indexOf('  function waitParts(w)'), PAGE.indexOf('  function who(w)'));
+vm.runInContext(wsrc + ';this.waitParts = waitParts;', box);
 const groups = JSON.parse(JSON.stringify(box.parse(MD)));
 
 test('three groups, in order: Now, Next, Later', () => {
@@ -44,4 +46,20 @@ test('the file holds no email addresses (it is public)', () => {
 test('the parser skips the header comment and reads the optional lines', () => {
   const g = JSON.parse(JSON.stringify(box.parse('<!--\n## Not a group\n-->\n## Now\n### A\nWhat: w\nWhy: y\n- p\nWaiting on: you\nstray line\n')));
   assert.deepEqual(g, [{ name: 'Now', items: [{ title: 'A', what: 'w', why: 'y', points: ['p'], waiting: 'you' }] }]);
+});
+
+/* The pill names who it waits on, nothing more: a dash once put a whole
+   question in it (18/11/2026). */
+test('the Waiting on pill holds only who, however the detail is written', () => {
+  for (const [w, who, detail] of [
+    ['you (one press)', 'you', 'one press'],
+    ['you \u2013 should everything be hidden?', 'you', 'should everything be hidden?'],
+    ['you - the date', 'you', 'the date'],
+    ['you: two screenshots', 'you', 'two screenshots'],
+    ['you', 'you', ''],
+  ]) assert.deepEqual({ ...box.waitParts(w) }, { who, detail }, w);
+  for (const g of groups) for (const it of g.items) if (it.waiting) {
+    const p = box.waitParts(it.waiting);
+    assert.ok(p.who.split(/\s+/).length <= 3 && !/[?.]/.test(p.who), `${it.title}: the pill would read "Waiting on ${p.who}"`);
+  }
 });
