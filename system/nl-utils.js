@@ -2,11 +2,16 @@
    NL Tools — Shared utilities
    File: /system/nl-utils.js
    Version: v1.73 (18/11/2026)
-   v1.73 — NL.filterButton({ multiple: false, required: true }): a pick-one
-     that always holds a value, for a choice of view rather than a filter
-     (Rearrangements' two jobs, a dashboard's views). No ×, no Clear, and
-     choosing the one already chosen keeps it. Replaces the red tab bars
-     that were doing this job (red is for where you are in a tool).
+   v1.73 — A pick-one NL.filterButton (multiple: false) is never cleared:
+     no ×, no Clear. Radio buttons always have one chosen (Richard,
+     18/11/2026: "radio buttons that can be set to clear makes little
+     sense"). Where nothing chosen meant everything, the list now starts
+     with that as a choice of its own, worded by allLabel ("All", "Any
+     club", "Whole season"); onChange still gets null for it. With
+     required: true there is no such row, for a choice of view that is
+     always one of its options (Rearrangements' jobs, List / Thumbnails),
+     which replaces the red tab bars that did this job. Choosing the one
+     already chosen keeps it.
    v1.72 — Dates with the weekday: NL.formatDateShort(x, { weekday: true })
      gives 'Fri 20 Nov 2026' (and year: false, 'Fri 20 Nov'), the shape the
      brand audit asks for. A pick-one NL.filterButton (multiple: false)
@@ -1025,10 +1030,12 @@
                                            right of the row when given
          multiple:  true,                  several at once (default). false
                                            = pick one; choosing closes it
-         required:  false,                 with multiple: false, always one
-                                           chosen (a view, not a filter): no
-                                           × or Clear; first option if none
-                                           given (v1.73)
+         required:  false,                 pick-one only. A pick-one has no
+                                           × or Clear (v1.73): its list starts
+                                           with an allLabel row (null). With
+                                           required: true there is no such
+                                           row: always one of the options
+                                           (a view), the first if none given
          value:     ['dead'] | 'dead' | null,
          allLabel:  'All',                 shown when nothing is chosen
          search:    'auto',                true / false / 'auto' (= more
@@ -1144,6 +1151,9 @@
     var esc = window.NL.escHtml;
     var multiple = opts.multiple !== false;
     var required = !multiple && !!opts.required;
+    /* A pick-one that is not required offers "nothing narrowed" as a row
+       of its own, never as a clear button (v1.73). */
+    var allRow = !multiple && !required;
     var S = { options: (opts.options || []).slice(), sel: [], q: '' };
     function fill() {
       if (required && !S.sel.length && S.options.length) S.sel = [String(S.options[0].value)];
@@ -1206,11 +1216,18 @@
       root.querySelector('.filter-btn__value').textContent = txt;
       var on = S.sel.length > 0;
       root.classList.toggle('is-active', on);
-      clearBtn.hidden = !on || required;
+      clearBtn.hidden = !on || !multiple;
       trig.setAttribute('aria-label', (label ? label + ': ' : '') + txt);
     }
     function drawList() {
       var q = S.q.trim().toLowerCase(), html = '';
+      if (allRow && !q) {
+        var none = !S.sel.length;
+        html += '<li role="option" tabindex="-1" class="filter-btn__opt filter-btn__opt--all' + (none ? ' is-on' : '') + '"' +
+          ' aria-selected="' + none + '" data-i="-1">' +
+          '<span class="filter-btn__tick" aria-hidden="true"></span>' +
+          '<span class="filter-btn__opt-label">' + esc(opts.allLabel || 'All') + '</span></li>';
+      }
       S.options.forEach(function (o, i) {
         var lab = o.label == null ? String(o.value) : String(o.label);
         if (q && lab.toLowerCase().indexOf(q) === -1) return;
@@ -1229,10 +1246,14 @@
       if (opts.onChange) opts.onChange(multiple ? S.sel.slice() : (S.sel[0] == null ? null : S.sel[0]));
     }
     function toggle(i) {
+      if (i === -1) {
+        if (!S.sel.length) { ctrl.close(); trig.focus(); return; }
+        S.sel = []; drawTrigger(); drawList(); emit(); ctrl.close(); trig.focus(); return;
+      }
       var v = String(S.options[i].value), at = S.sel.indexOf(v);
       if (multiple) { if (at >= 0) S.sel.splice(at, 1); else S.sel.push(v); }
-      else if (required && at >= 0) { ctrl.close(); trig.focus(); return; }
-      else S.sel = at >= 0 ? [] : [v];
+      else if (at >= 0) { ctrl.close(); trig.focus(); return; }
+      else S.sel = [v];
       drawTrigger(); drawList(); emit();
       if (!multiple) { ctrl.close(); trig.focus(); }
       else { var li = list.querySelector('[data-i="' + i + '"]'); if (li) li.focus(); }
@@ -1270,7 +1291,7 @@
       var li = e.target.closest('.filter-btn__opt'); if (li) toggle(+li.getAttribute('data-i'));
     });
     search.addEventListener('input', function () { S.q = search.value; drawList(); });
-    if (required) root.querySelector('.filter-btn__foot').hidden = true;
+    if (!multiple) root.querySelector('.filter-btn__foot').hidden = true;
     root.querySelector('.filter-btn__reset').addEventListener('click', function () {
       S.sel = []; drawTrigger(); drawList(); emit();
     });

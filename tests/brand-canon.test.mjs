@@ -1342,12 +1342,16 @@ test('a page has one bar of red tabs; a choice of view is a pick-one dropdown', 
   assert.deepEqual(stale, [], 'these no longer have two bars; take them off TWO_TAB_BARS');
 });
 
-test('a required pick-one always holds a value and offers no clear', () => {
+/* Radio buttons are never cleared (Richard, 18/11/2026). A pick-one has no
+   × or Clear; "All" is a row of its list unless required: true. */
+test('a pick-one is never cleared: All is a row, required has none', () => {
   const src = readFileSync(join(REPO, 'system/nl-utils.js'), 'utf8');
-  assert.match(src, /var required = !multiple && !!opts\.required;/);
-  assert.match(src, /clearBtn\.hidden = !on \|\| required;/);
-  assert.match(src, /else if \(required && at >= 0\) \{ ctrl\.close\(\); trig\.focus\(\); return; \}/, 'choosing the chosen one keeps it');
-  assert.match(ruleBody('.filter-btn--required.is-active .filter-btn__trigger'), /border-radius:\s*var\(--radius\)/);
+  assert.match(src, /var allRow = !multiple && !required;/);
+  assert.match(src, /clearBtn\.hidden = !on \|\| !multiple;/, 'no × on a pick-one');
+  assert.match(src, /if \(!multiple\) root\.querySelector\('\.filter-btn__foot'\)\.hidden = true;/, 'no Clear on a pick-one');
+  assert.match(src, /else if \(at >= 0\) \{ ctrl\.close\(\); trig\.focus\(\); return; \}/, 'choosing the chosen one keeps it');
+  assert.match(src, /data-i="-1"/, 'the All row');
+  assert.match(ruleBody('.filter-btn--one.is-active .filter-btn__trigger'), /border-radius:\s*var\(--radius\)/);
 });
 
 /* A pick-one filter button draws round radio marks; one that takes several
