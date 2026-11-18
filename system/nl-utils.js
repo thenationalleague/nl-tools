@@ -1,7 +1,13 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.73 (18/11/2026)
+   Version: v1.74 (18/11/2026)
+   v1.74 — The dialog bar carries icons (brand audit, canon change 1): an
+     NL.modal button takes icon (a sprite name) and iconAfter, so Move,
+     Postpone and Fetch wear theirs in a dialog as they do on a page. A
+     button can start hidden and be found again by id (ctrl.button(id)),
+     for a step that appears once there is something to do, never a greyed
+     button.
    v1.73 — A pick-one NL.filterButton (multiple: false) is never cleared:
      no ×, no Clear. Radio buttons always have one chosen (Richard,
      18/11/2026: "radio buttons that can be set to clear makes little
@@ -1610,9 +1616,13 @@
      NL.modal(opts) → controller { el, body, backdrop, close(result) }
        opts.title        head bar text (omit for a chromeless panel)
        opts.body         string (HTML) or a DOM Node for .modal__body
-       opts.buttons      [{ label, className, autofocus, onClick(ctrl) }]
+       opts.buttons      [{ label, className, autofocus, onClick(ctrl),
+                            icon, iconAfter, hidden, id }]
+                         icon: a sprite name ('move'), before the words, or
+                         after with iconAfter (a completion: Send). hidden
+                         starts it hidden; ctrl.button(id) finds it (v1.74).
        opts.size         'sm' (440px) — omit for the default 640px
-       opts.width        'wide' (740px)
+       opts.width        'wide' (800px)
        opts.dismissable  false disables Escape + backdrop-click (default true)
        opts.closeButton  false hides the header X (default shown when titled)
        opts.footerSplit  true → space-between footer (destructive-left layout)
@@ -1748,7 +1758,7 @@
     else if (opts.body) body.appendChild(opts.body);
     modal.appendChild(body);
 
-    var footer = null;
+    var footer = null, byId = {};
     if (opts.buttons && opts.buttons.length) {
       footer = document.createElement('div');
       footer.className = 'modal__footer' + (opts.footerSplit ? ' modal__footer--split' : '');
@@ -1756,7 +1766,13 @@
         var btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'btn ' + (b.className || 'btn--ghost');
-        btn.textContent = b.label;
+        if (b.icon) {
+          var words = document.createTextNode(b.label), ic = window.NL.icon(b.icon);
+          if (b.iconAfter) { btn.appendChild(words); btn.appendChild(ic); }
+          else { btn.appendChild(ic); btn.appendChild(words); }
+        } else btn.textContent = b.label;
+        if (b.hidden) btn.hidden = true;
+        if (b.id) byId[b.id] = btn;
         if (b.autofocus) btn.setAttribute('data-nl-autofocus', '1');
         btn.addEventListener('click', function() { if (b.onClick) b.onClick(ctrl); });
         footer.appendChild(btn);
@@ -1789,6 +1805,8 @@
     var hist = null;
     var ctrl = {
       el: modal, backdrop: backdrop, body: body,
+      /* A bar button given an id (v1.74), to show or hide it. */
+      button: function(id) { return byId[id] || null; },
       close: function(result) {
         if (closed) return;
         closed = true;

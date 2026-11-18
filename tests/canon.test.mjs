@@ -786,3 +786,13 @@ test('clubs.headerHtml still draws a club that is not in clubs-meta', async () =
   assert.ok(cold.clubs.headerHtml('AFC Fylde').includes('>AFC Fylde</h1>'), 'no load → still a card');
   assert.ok(cold.clubs.headerHtml(null).includes('<h1 class="nl-club-header__name"></h1>'), 'null → an empty card, not a throw');
 });
+
+/* The dialog bar carries icons (nl-utils v1.74, brand audit canon change 1),
+   and a bar button can start hidden and be found by id. */
+test('NL.modal bar buttons take icon, iconAfter, hidden and id', () => {
+  const src = readFileSync(join(REPO, 'system/nl-utils.js'), 'utf8');
+  assert.match(src, /if \(b\.icon\) \{\s*var words = document\.createTextNode\(b\.label\), ic = window\.NL\.icon\(b\.icon\);/);
+  assert.match(src, /if \(b\.iconAfter\) \{ btn\.appendChild\(words\); btn\.appendChild\(ic\); \}/);
+  assert.match(src, /if \(b\.hidden\) btn\.hidden = true;/);
+  assert.match(src, /button: function\(id\) \{ return byId\[id\] \|\| null; \}/);
+});

@@ -1,8 +1,11 @@
 /* =============================================================================
    NL Tools — Fixture Management: data layer
    File: /fixtures/_core.js
-   Version: v1.5 (28/10/2026)
+   Version: v1.6 (18/11/2026)
    CHANGELOG
+     v1.6 (18/11/2026) — undoDate: a wrong new date for a game that was
+       awaiting one is undone in place, so it awaits a date again
+       (canUndoDate says whether the latest step allows it).
      v1.5 (28/10/2026) — A broadcast game given a new date is marked
        broadcast.review, for the Broadcast tab's review list (plan,
        Broadcast: "its status holds until confirmed"). DAZN_MOVES, the
@@ -26,22 +29,6 @@
        games played after a club's full league season. Records carry
        neutral/venue; the public projection adds them and a numeric score,
        for Attendance to read.
-     v1.1 (28/10/2026) — Results: the sheet's goals, extra time and
-       penalties import as `result`; resultText formats them as the sheet
-       does ('0-0 (1-1 aet, 4-3 p)'); an FA tie's winner comes from the score
-       before the sheet's Result column, which says 'D Cup' for a replay won
-       in extra time. nlsResults/matchNls read an NLS season list (shape from
-       a live call, 28/10/2026) for the daily fill. loseDate / setDate /
-       dropAttempt for postponing, abandoning, rescheduling and correcting.
-       compare() orders a day by competition. The import no longer merges a
-       league pairing seen twice: a row whose teams are reversed (the return
-       fixture, per the published schedule) is turned round, anything else
-       is kept and reported.
-     v1.0 (28/10/2026) — First build. Parses the working fixtures workbook
-       (Fixtures + Rearrangements tabs, pasted from Excel), joins it to the
-       originally published schedule, and builds one record per fixture with
-       its lost dates as attempts. Also the public projection, the competition
-       list and the "needs attention" checks.
    Pure functions only, with no DOM and no Firebase, so
    tests/fixture-management.test.mjs can run them in node. The parseDate
    passed in is NL.parseDate; the browser passes the real one and the tests
@@ -600,6 +587,28 @@
     return n;
   }
 
+  /* A new date given by mistake to a game that was awaiting one: undone in
+     place, so the game is awaiting a date again, as if the date had never
+     been set (v-undo, 18/11/2026). Only the latest step: the game must
+     still be on the date it was given, with its lost date the last entry
+     in its history. Not logged as a move, since nothing moved. */
+  function canUndoDate(rec) {
+    var a = rec.attempts || [], last = a[a.length - 1];
+    return !!(rec.date && !rec.result && last && last.rescheduledAt &&
+      (last.outcome === 'postponed' || last.outcome === 'abandoned'));
+  }
+  function undoDate(rec) {
+    if (!canUndoDate(rec)) return null;
+    var n = copy(rec);
+    var last = n.attempts[n.attempts.length - 1];
+    last.rescheduledAt = null;
+    n.date = null;
+    n.ko = null;
+    n.state = last.outcome;
+    if (n.broadcast && n.broadcast.review) { n.broadcast = copy(n.broadcast); delete n.broadcast.review; }
+    return n;
+  }
+
   /* A lost date entered by mistake. Corrected in place, not logged — the
      old tool's rule for a mis-keyed record. Removing the last one of a game
      awaiting a date gives it back that date. */
@@ -947,6 +956,8 @@
     agreesWithNls: agreesWithNls,
     loseDate: loseDate,
     setDate: setDate,
+    canUndoDate: canUndoDate,
+    undoDate: undoDate,
     dropAttempt: dropAttempt,
     nlsResults: nlsResults,
     matchNls: matchNls,
