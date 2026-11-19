@@ -15,6 +15,10 @@
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
 <!--
   club-directory / index.html
+  Version: v3.4 (19/11/2026) — STAGING. The club browser (NL.clubPicker list form, .nl-browse):
+    every club down the side, the chosen one beside it; a quiet club header with People | Club
+    details (or ?details=fold); Role before Name; Mailing lists shows nothing to copy until a
+    list is chosen.
   Version: v3.3 (19/11/2026) — The page loads its own files (_directory, _editor, _tidy) by
     relative path, so a staging copy loads its own copies (system/staging.md).
   Version: v3.2 (18/11/2026) — Mailing lists: Build from is a pick-one dropdown that always holds a value, not red tabs.
@@ -45,7 +49,7 @@
   That is a curtain rather than a door; the code and the rules are the door.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=83">
-<link rel="stylesheet" href="_directory.css?v=44">
+<link rel="stylesheet" href="_directory.css?v=45">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
@@ -56,7 +60,7 @@
 <script src="/system/nl-topbar.js?v=17"></script>
 <!-- GA4 for nl.tools — cookieless, no banner, no identity. See system/nl-analytics.js -->
 <script src="/system/nl-analytics.js?v=1"></script>
-<script src="_directory.js?v=44"></script>
+<script src="_directory.js?v=45"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -78,6 +82,11 @@
     window.NL_CHANGELOG = [
       {
         date: '19/11/2026',
+        version: 'v3.4',
+        items: [ 'Every club down the side, the chosen one beside it. Club details are a switch away. Rows read Role, Name, Email, Phone.' ]
+      },
+      {
+        date: '19/11/2026',
         version: 'v3.3',
         items: [ 'Ready for a staging copy: no change on screen.' ]
       },
@@ -95,16 +104,6 @@
         date: '14/11/2026',
         version: 'v3.0',
         items: [ 'One address for clubs and the League: /club-directory/. Editing is still behind Edit, for Manage.' ]
-      },
-      {
-        date: '11/11/2026',
-        version: 'v1.23',
-        items: ['The padlock on a private detail sits after it, so private and public details line up, and the tint behind it is a little darker.']
-      },
-      {
-        date: '11/11/2026',
-        version: 'v1.21',
-        items: ['Search shows you private details too, and every private email and phone number is marked with a padlock.']
       }
     ];
 
@@ -149,11 +148,6 @@
 <style>
   #editBtn.is-busy { opacity: 0.6; pointer-events: none; }
   .cd-pickbar .cd-mode { margin: 0; }
-  .cd-mode button { min-height: 40px; padding: 0 18px; font-size: var(--text-sm); }
-  .cd-staffnote {
-    display: flex; align-items: center; gap: 8px; margin: 0 0 14px;
-    font-size: var(--text-sm); color: var(--navy-600);
-  }
 
   .ov-pane[hidden] { display: none; }
 
@@ -258,6 +252,7 @@
     border-radius: var(--radius); box-shadow: var(--shadow);
     padding: 10px 14px; margin-bottom: 12px;
   }
+  .lb-bar[hidden], .lb-include[hidden], .lb-copy[hidden] { display: none; }
   .lb-bar__count { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1 1 280px; }
   .lb-bar__text { min-width: 0; }
   .lb-bar__summary { font-size: var(--text-sm); font-variation-settings: 'wght' 700; color: var(--navy); }
@@ -432,24 +427,20 @@
 
     <!-- =========================================================== DIRECTORY -->
     <div class="ov-pane" id="pane-directory">
-      <div class="cd-pickbar">
-        <div class="cd-pick" id="pick"></div>
-        <div class="cd-vw cd-mode" id="editBtn" role="group" aria-label="View or edit" hidden>
-          <button type="button" class="is-on" data-mode="view" aria-pressed="true">View</button>
-          <button type="button" data-mode="edit" aria-pressed="false">Edit</button>
-        </div>
-        <button class="btn btn--ghost btn--sm" id="changes" type="button" hidden>Change log</button>
-        <button class="btn btn--ghost btn--sm" id="allClubs" type="button" hidden>All clubs</button>
+      <div class="nl-browse">
+        <aside class="nl-browse__side"><div id="pick"></div></aside>
+        <section class="nl-browse__main">
+          <div class="cd-pickbar cd-pickbar--acts" id="cdActs" hidden>
+            <div class="cd-vw cd-mode" id="editBtn" role="group" aria-label="View or edit" hidden>
+              <button type="button" class="is-on" data-mode="view" aria-pressed="true">View</button>
+              <button type="button" data-mode="edit" aria-pressed="false">Edit</button>
+            </div>
+            <button class="btn btn--ghost btn--sm" id="changes" type="button" hidden>Change log</button>
+          </div>
+          <div id="out"></div>
+          <div id="extra"></div>
+        </section>
       </div>
-      <div class="cd-search"><div class="cd-search__box">
-        <svg class="cd-search__icon" width="17" height="17" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
-          <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>
-        <input class="cd-search__in" id="q" placeholder="Search clubs, people and job titles"
-          aria-label="Search">
-      </div></div>
-      <div id="out"></div>
-      <div id="extra"></div>
     </div>
 
 
@@ -925,7 +916,8 @@ window.TOOL = (function () {
        mailing-list selection, or #admin — so a reload opens where you were. */
     if (which === 'lists') { writeMailHash(); }
     else if (which === 'directory' && current) {
-      history.replaceState(null, '', '#' + encodeURIComponent(current));
+      history.replaceState(null, '', location.pathname + location.search);
+      clubHash(current);
     } else if (which === 'admin') {
       history.replaceState(null, '', '#admin');
     }
@@ -1617,9 +1609,12 @@ window.TOOL = (function () {
         (dropped ? ' · ' + dropped + ' dropped <button type="button" class="btn btn--ghost btn--sm lb-putback" ' +
           'id="lbPutBack">Put ' + (dropped === 1 ? 'it' : 'all ' + dropped) + ' back</button>' : '');
 
-    document.querySelectorAll('[data-copy], #lbDownload').forEach(function (b) {
-      b.disabled = !reach.length;
-    });
+    /* Nothing to copy until a list is chosen (staging, v3.4): the bar, its
+       four buttons and Include appear once there is something to act on,
+       never greyed out (principles 5.7, 6.3). */
+    document.querySelector('.lb-bar').hidden = !picked || none;
+    document.querySelector('.lb-include').hidden = !picked || none;
+    document.querySelector('.lb-copy').hidden = !reach.length;
 
     drawWarnings();
 
@@ -1832,13 +1827,10 @@ window.TOOL = (function () {
 
   /* ------------------------------------------------------------ directory */
   function wireDirectory() {
-    /* Orgs above the clubs in the chooser; `names` itself stays alphabetical
-       for fromHash. */
-    PICK = NLDirectory.picker($('pick'), {
-      names: function () { return names; }, recOf: function (n) { return ALL[n]; },
-      onPick: function (n) { $('q').value = ''; draw(n); }
-    });
-    $('q').addEventListener('input', onSearch);
+    /* The club browser (staging, v3.4): every record down the side, the
+       League's own first, search on top. A search that matches a person
+       keeps their club in the list and shows the people beside it. */
+    PICK = directoryBrowser();
     $('editBtn').hidden = !canEdit();
     /* View / Edit, the directory's own two-way switch, the same one as
        List / Cards (v1.21): it says which mode you are in, where a lone Edit
@@ -1847,13 +1839,31 @@ window.TOOL = (function () {
       var b = e.target.closest('[data-mode]');
       if (b && (b.dataset.mode === 'edit') !== EDITING) { setEdit(b.dataset.mode === 'edit'); }
     });
-    $('allClubs').addEventListener('click', function () { $('q').value = ''; draw(''); });
-    /* No club in the address: the badge wall, the same one clubs land on. */
-    var first = fromHash();
-    /* ?edit opens straight into editing — the old edit page forwards here
-       with it, and a reload while editing keeps you editing. */
-    if (/(^|[?&])edit(=|&|$)/.test(location.search.slice(1)) && canEdit()) { setEdit(true, first); }
-    else { draw(first); }
+    /* View | Edit and Change log ride in the club header, beside People |
+       Club details, rather than taking a row of their own above it. Both
+       the reading view and the editor redraw the header, so the one set of
+       controls is carried back into each new header as it lands. */
+    var acts = $('cdActs');
+    var seat = function () {
+      var slot = $('out').querySelector('#cdHead .nl-club-header__actions');
+      if (!slot) {
+        var head = $('out').querySelector('#cdHead');
+        if (!head) { return; }
+        slot = document.createElement('div');
+        slot.className = 'nl-club-header__actions';
+        head.insertBefore(slot, head.querySelector('.nl-club-bands'));
+      }
+      if (acts.parentNode !== slot) { slot.appendChild(acts); }
+      acts.hidden = false;
+    };
+    if (canEdit()) { new MutationObserver(seat).observe($('out'), { childList: true }); }
+    PICK.ready.then(function () {
+      /* A club in the address (#club=FYL, or an old #Aldershot%20Town
+         link); otherwise the League's own record, then the first club. */
+      var first = PICK.getValue() || fromHash() || defaultClub();
+      if (/(^|[?&])edit(=|&|$)/.test(location.search.slice(1)) && canEdit()) { setEdit(true, first); }
+      else { draw(first); }
+    });
     window.addEventListener('hashchange', function () {
       var n = fromHash();
       if (n) { showPane('directory'); draw(n); return; }
@@ -1861,13 +1871,71 @@ window.TOOL = (function () {
     });
   }
 
+  function directoryBrowser() {
+    var seen = { q: null, clubs: {} };
+    var rows = function (list) {
+      return list.map(function (n) {
+        var rec = ALL[n] || {};
+        var meta = NLDirectory.isOrg(rec) ? null : NL.clubs.byName(n);
+        return { name: n, crestName: rec.crestName || n, code: meta && meta.code,
+                 division: (meta && meta.division) || '' };
+      });
+    };
+    var pk = NL.clubPicker($('pick'), {
+      mode: 'list',
+      clubs: function () { return rows(names.filter(function (n) { return !NLDirectory.isOrg(ALL[n]); })); },
+      pinned: rows(names.filter(function (n) { return NLDirectory.isOrg(ALL[n]); })),
+      placeholder: 'Search',
+      match: function (c, q) {
+        if (q !== seen.q) {
+          seen = { q: q, clubs: {} };
+          (NLDirectory.search(ALL, q) || []).forEach(function (x) { seen.clubs[x.club] = true; });
+        }
+        return !!seen.clubs[c.name];
+      },
+      onQuery: function (q) { onSearch({ target: { value: q } }); },
+      onSelect: function (sel) { draw(sel.name); window.scrollTo(0, 0); }
+    });
+    /* The editor reads the search box by id. */
+    var box = $('pick').querySelector('.club-picker__input');
+    if (box) { box.id = 'q'; }
+    return {
+      ready: pk.ready,
+      set: function (n) { if (n) { pk.setValue(n); } },
+      get: function () { return pk.getValue(); },
+      getValue: function () { return pk.getValue(); },
+      refresh: function () { return pk.refresh(); }
+    };
+  }
+  /* The club in the address while the Directory tab shows: #club=FYL, or
+     the record's name for the League's own (principle 2.7). The Mailing
+     lists tab owns the address while it shows. */
+  function clubHash(name) {
+    var m = NL.clubs.byName(name);
+    var h = '#club=' + encodeURIComponent((m && m.code) || name);
+    if (location.hash !== h) { history.replaceState(null, '', location.pathname + location.search + h); }
+  }
+  function defaultClub() {
+    var orgs = names.filter(function (n) { return NLDirectory.isOrg(ALL[n]); });
+    return orgs[0] || names[0] || '';
+  }
+
   function fromHash() {
-    var h = decodeURIComponent((location.hash || '').replace(/^#/, ''));
+    var c = NL.clubPicker.hash.get('club');
+    if (c) {
+      var m = NL.clubs.byCode(c);
+      var n = m ? m.name : c;
+      if (names.indexOf(n) > -1) { return n; }
+    }
+    /* Links made before v3.4 carry the club's name on its own. */
+    var h = '';
+    try { h = decodeURIComponent((location.hash || '').replace(/^#/, '')); } catch (e) {}
     return names.indexOf(h) > -1 ? h : '';
   }
 
   function draw(name) {
-    if (!name) { return drawIndex(); }
+    if (!name) { name = defaultClub(); }
+    if (!name) { return; }
     var rec = ALL[name];
     if (!rec) { return; }
     if (EDITING) { return NLEditor.draw(name); }
@@ -1876,39 +1944,8 @@ window.TOOL = (function () {
     $('extra').innerHTML = '';
     /* Staff see everything the League holds, private details included,
        each one marked; the line says why. */
-    $('out').innerHTML = staffNote() + NLDirectory.renderClub(rec, { showGaps: true, showHidden: true });
-    var crest = document.getElementById('cdCrest');
-    if (crest) {
-      var ck = NLDirectory.bannerCrestOf(rec);
-      crest.alt = name + ' crest';
-      crest.hidden = false;
-      NL.clubs.wireCrestImg(crest, ck, true);
-      crest.src = NL.clubs.crestUrl(ck, 'medium');
-    }
-  }
-
-  /* No club chosen: every club's badge, clubs and the League's own records,
-     exactly as clubs see it at /club-directory/. Pick one to open it. */
-  function drawIndex() {
-    current = '';
-    if (PICK) { PICK.set(''); }
-    if (location.hash) { history.replaceState(null, '', location.pathname + location.search); }
-    $('allClubs').hidden = true;
-    $('extra').innerHTML = '';
-    $('out').innerHTML = NLDirectory.renderIndex({
-      roster: ROSTER,
-      extra: names,
-      isReady: function (n) { return !!ALL[n]; },
-      orgs: names.filter(function (n) { return NLDirectory.isOrg(ALL[n]); })
-        .map(function (n) { return { name: n, crestName: ALL[n].crestName }; })
-    });
-    NLDirectory.wireIndex($('out'), function (n) { draw(n); window.scrollTo(0, 0); });
-  }
-
-  function staffNote() {
-    return '<p class="cd-staffnote"><svg class="icon icon--sm" aria-hidden="true"><use href="' +
-      '/assets/icons/sprites.svg#icon-lock"></use></svg>As League staff, you can see private ' +
-      'details for every club.</p>';
+    $('out').innerHTML = NLDirectory.renderClub(rec, { showGaps: true, showHidden: true });
+    NL.clubs.wireCrestImgs($('out'));
   }
 
   /* Whichever way a club was drawn — read or edited, from the picker, the
@@ -1916,11 +1953,8 @@ window.TOOL = (function () {
      overview row follow it. */
   function drew(name) {
     current = name;
-    $('allClubs').hidden = false;
     if (PICK) { PICK.set(name); }
-    if (location.hash !== '#' + encodeURIComponent(name)) {
-      history.replaceState(null, '', '#' + encodeURIComponent(name));
-    }
+    if (!$('pane-directory').hidden) { clubHash(name); }
     /* An edit can change what is missing, so the overview row is re-read. */
     AUDIT[name] = auditClub(name);
   }
