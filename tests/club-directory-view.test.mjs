@@ -167,8 +167,8 @@ const EDIT_STUB = readFileSync(join(REPO, 'club-directory/admin/edit/index.html'
 
 test('the staff page edits in place, behind Edit, for Manage only', () => {
   const live = strip(STAFF);
-  assert.match(live, /<script src="\/club-directory\/_editor\.js\?v=\d+"><\/script>/);
-  assert.match(live, /<link rel="stylesheet" href="\/club-directory\/_editor\.css\?v=\d+">/);
+  assert.match(live, /<script src="_editor\.js\?v=\d+"><\/script>/, "by relative path, so a staging copy loads its own (v3.3)");
+  assert.match(live, /<link rel="stylesheet" href="_editor\.css\?v=\d+">/);
   assert.match(live, /class="cd-vw cd-mode" id="editBtn"[^>]*hidden>/, 'View / Edit starts hidden');
   assert.match(live, /data-mode="view"[^>]*>View</);
   assert.match(live, /data-mode="edit"[^>]*>Edit</);
