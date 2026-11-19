@@ -22,6 +22,10 @@
 
 ## Now
 
+### Club Directory and Programme Packs on one screen
+What: The clubs listed down the left and the chosen club on the right, as in the board deck's mock-ups, tried in staging before clubs see it (Declutter browse plan). Staging is built (19/11/2026): a copy at nl.tools/staging/<slug>/ that reads live data, saves nothing, and opens only to the Skeleton key and the Tester key. Next: the club list in the shared club picker, then Club Directory in staging, then Programme Packs. Club details go in a tab or fold beside the people, to be tried both ways.
+Why: The real tools go page to page, and at the common laptop size the Directory shows nobody on its first screen.
+
 ### Matchday Live on the club code door
 What: Matchday Live's contributors use personal links today. When it leaves Sandbox, they open it the same way as every club page: a club code (named holders, so each clip still says who filed it) or a Club card with the Club Media zone.
 Why: One way in for clubs. It waits for launch because the personal links are part of the pilot.

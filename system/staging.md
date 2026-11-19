@@ -1,9 +1,29 @@
 # Staging – trying a new version of a live tool before clubs see it
 
-**Status: agreed concept, not built.** Agreed with Richard on 14/11/2026. Build
-it the first time a change actually needs it (the likely first case is the Club
-Directory's list-down-the-side layout), not before. Nothing below exists in code
-yet. When it is built, change this line and the row in `CLAUDE.md`.
+**Status: built 19/11/2026** (nl-utils v1.75 `NL.staging`, auth-guard v16.6,
+nl-topbar v1.13, `scripts/check-staging.mjs`, `tests/staging.test.mjs`).
+Agreed with Richard on 14/11/2026; first used for the Club Directory's
+list-down-the-side layout (the Declutter browse plan). Testing is League only
+for now (Richard, 19/11/2026): the Skeleton key and Tester-key holders.
+
+## Making a staging copy
+
+1. Copy the live folder: `cp -r club-directory staging/club-directory`.
+2. In **every** `index.html` of the copy (a tool's `public/` or `reader/`
+   pages too, or they would save to live), add one line in the head,
+   **before** `auth-guard.js` and `nl-utils.js` run. The staging check
+   fails a page without it:
+   `<script>window.NL_STAGING = { from: '<sha of main the copy was taken from>' };</script>`
+3. Make the changes in the copy. Never touch the live folder in the same PR.
+4. Fix any address the page builds from its own location if it must point at
+   live (rare: same-folder files load from the copy, which is what you want).
+5. `bash system/lint-tools.sh --strict` (it now runs the staging check) and
+   `npm test`, then open the copy at `nl.tools/staging/<slug>/`.
+
+The copy opens to the Skeleton key at Manage, and to Tester-key holders at
+whatever their pass gives them on the live tool. Nobody gets in by club code.
+It shows a Staging pill beside its title, is never indexed, and every save is
+refused with a "Staging: not saved" toast.
 
 ## The problem
 
@@ -75,8 +95,13 @@ thrown away at promotion, never merged.
    - the topbar shows a STAGING badge, and the head gets
      `<meta name="robots" content="noindex">`.
 
-   Open point for the build: whether `admin/audit` should still record
-   staging visits, tagged as staging. Default: no writes at all.
+   Settled at the build (19/11/2026): no writes at all. The audit hook's and
+   presence's writes are refused like any other, without a toast.
+
+   One exception, declared in canon by path (`NL.staging.ALLOW`), never by a
+   tool: the sign-in plumbing a page needs just to open. Programme Packs asks
+   for its session by writing `app-data/media-programme/authRequests/<uid>`,
+   so that path is allowed. Nothing a tool saves is on the list.
 
    **Who can open a staging copy** (decided 14/11/2026). A staging copy has
    no tool key or registry record of its own: it is the live tool's page with
@@ -120,15 +145,13 @@ thrown away at promotion, never merged.
 
 ## Things to know when building it
 
-- `lint-tools.sh` finds tool pages with `-maxdepth 3`. `staging/club-directory/`
-  is covered; `staging/graphics/totw/` is one level deeper and is not. Widen the
-  search for `staging/` when this is built.
+- `lint-tools.sh` finds staging copies one level deeper than live pages, so
+  `staging/graphics/totw/` is covered (19/11/2026).
 - A staging copy is a copy of a sibling tool, which the canon rules otherwise
   forbid. It is allowed here only because it is temporary by contract and dies at
   promotion. That is why the age check in point 4 matters.
 - The repo is public. Staging code is world-readable like everything else, and so
   is anything committed into a staging folder. Same rule as everywhere: no
   personal data in files.
-- Building it touches `nl-utils.js`, `auth-guard.js` and `nl-topbar.js`, so it
-  is a lockstep `?v=` bump across the template and every tool, with a test for
-  the write refusal.
+- The staging check compares a copy's live folder with its `from` commit, so
+  CI checks out the full history (`canon-checks.yml`, `fetch-depth: 0`).

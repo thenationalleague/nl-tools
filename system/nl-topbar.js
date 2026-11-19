@@ -1,7 +1,12 @@
 /* =========================================================================
    NL Tools — Topbar renderer
    File: /system/nl-topbar.js
-   Version: v1.12 (13/11/2026)
+   Version: v1.13 (19/11/2026)
+
+   v1.13 — Staging (system/staging.md): a page carrying window.NL_STAGING
+          shows a Staging pill beside its title and gets a noindex robots
+          tag. Cache-bust ?v=16 -> ?v=17, in lockstep with nl-utils and
+          auth-guard.
 
    v1.12 — Account in the menu, under My pass: /pass/#account, your email
           and Change password (Roadmap, "Passwords and your account").
@@ -211,6 +216,13 @@
       return !!document.querySelector('meta[name="' + name + '"]');
     }
 
+    /* v1.13: a staging copy (window.NL_STAGING) is never indexed. */
+    if (window.NL_STAGING && !hasMeta('robots')) {
+      var nr = document.createElement('meta');
+      nr.name = 'robots'; nr.content = 'noindex, nofollow';
+      head.appendChild(nr);
+    }
+
     /* Manifest */
     if (!document.querySelector('link[rel="manifest"]')) {
       var m = document.createElement('link');
@@ -293,6 +305,10 @@
     var titleWrap = el('div', { class: 'topbar__title-wrap' });
     var titleRow  = el('div', { class: 'topbar__title-row' });
     titleRow.appendChild(el('span', { class: 'topbar__title', text: opts.title }));
+    /* v1.13: a staging copy says so beside its title, for everyone. */
+    if (window.NL_STAGING) {
+      titleRow.appendChild(el('span', { class: 'pill pill--pending topbar__staging', text: 'Staging', title: 'A copy for testing: nothing you change here is saved' }));
+    }
 
     /* Version badge — clickable, opens What's new modal. League roles only:
        version/changelog detail is internal, hidden from club + third-party. */

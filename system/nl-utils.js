@@ -1,7 +1,12 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.74 (18/11/2026)
+   Version: v1.75 (19/11/2026)
+   v1.75 — NL.staging (system/staging.md): on a staging copy
+     (window.NL_STAGING) every database write and Storage upload is refused
+     with one "Staging: not saved" toast, bar a declared sign-in path; the
+     copy opens only to the Skeleton key and to Tester-key holders at their
+     own live level (NL.staging.gate), never by club code.
    v1.74 — The dialog bar carries icons (brand audit, canon change 1): an
      NL.modal button takes icon (a sprite name) and iconAfter, so Move,
      Postpone and Fetch wear theirs in a dialog as they do on a page. A
@@ -2389,6 +2394,153 @@
     window.NL._auditHookInstalled = true;
   };
 
+  /* ===================================================================
+     NL.staging — a staging copy reads live data and never writes (v1.75)
+     system/staging.md. A staging copy is a live tool's folder copied to
+     /staging/<slug>/ with one extra line in its head:
+       window.NL_STAGING = { from: '<commit sha>' };
+     Tool code never branches on it. Canon does three things:
+       · every database write (set, update, push with a value, remove,
+         transaction, and onDisconnect writes) and every Storage upload or
+         delete is refused, with one "Staging: not saved" toast. Writes the
+         audit hook and presence make are refused without one;
+       · auth-guard and NL.codeGate.door open it only to the Skeleton key
+         (Manage) and the Tester key over the person's own live level
+         (NL.staging.gate), never by club code;
+       · the topbar shows a STAGING badge and adds noindex.
+     ALLOW holds the sign-in plumbing a tool needs just to open (Programme
+     Packs asks for its session by writing a request): declared here, by
+     path, never by the tool. */
+  (function () {
+    var ALLOW = ['app-data/media-programme/authRequests/'];
+    var QUIET = /^\/?(admin(\/|$)|presence(\/|$)|\.info(\/|$))/;
+    var lastToast = 0, rtdbDone = false, storageDone = false;
+
+    function on() { return !!window.NL_STAGING; }
+    function clean(path) { return String(path || '').replace(/^\/+/, ''); }
+    function allowed(path) {
+      var p = clean(path);
+      return ALLOW.some(function (a) { return p.indexOf(a) === 0; });
+    }
+    function refusal(path) {
+      if (!QUIET.test(String(path || '')) && window.NL.toast && Date.now() - lastToast > 2000) {
+        lastToast = Date.now();
+        window.NL.toast('Staging: not saved', 'error');
+      }
+      var err = new Error('Staging: not saved');
+      err.code = 'staging';
+      var p = Promise.reject(err);
+      p['catch'](function () {});   /* callers that do not catch stay quiet */
+      return p;
+    }
+    /* A Reference's path, and for update() every path it writes. */
+    function paths(ref, values) {
+      var base = _refPath(ref);
+      if (!values || typeof values !== 'object') return [base];
+      return Object.keys(values).map(function (k) {
+        return k.indexOf('/') === 0 ? k : base.replace(/\/$/, '') + '/' + k;
+      });
+    }
+
+    function installRtdb() {
+      if (rtdbDone || !window.firebase || !firebase.database || !firebase.database.Reference) return;
+      var R = firebase.database.Reference.prototype;
+      if (!R) return;
+      rtdbDone = true;
+      ['set', 'setWithPriority', 'setPriority', 'remove', 'transaction'].forEach(function (m) {
+        var orig = R[m];
+        if (!orig) return;
+        R[m] = function () {
+          var path = _refPath(this);
+          return allowed(path) ? orig.apply(this, arguments) : refusal(path);
+        };
+      });
+      var origUpdate = R.update;
+      R.update = function (values) {
+        var ps = paths(this, values);
+        return ps.every(allowed) ? origUpdate.apply(this, arguments) : refusal(ps[0]);
+      };
+      /* push() with no value only makes a key: allowed. With a value it is
+         a write: the new reference comes back (callers read .key) but its
+         promise is the refusal. */
+      var origPush = R.push;
+      R.push = function (value) {
+        if (value === undefined || allowed(_refPath(this))) return origPush.apply(this, arguments);
+        var child = origPush.call(this);
+        var p = refusal(_refPath(child));
+        child.then = p.then.bind(p);
+        child['catch'] = p['catch'].bind(p);
+        return child;
+      };
+      var D = firebase.database.OnDisconnect && firebase.database.OnDisconnect.prototype;
+      if (D) ['set', 'setWithPriority', 'update', 'remove'].forEach(function (m) {
+        if (!D[m]) return;
+        D[m] = function () { return refusal('presence/'); };
+      });
+    }
+
+    /* An upload that never starts: on('state_changed', …, error) and then()
+       both see the refusal. */
+    function refusedTask(path) {
+      var p = refusal(path);
+      var err = new Error('Staging: not saved');
+      return {
+        on: function (evt, next, error) {
+          var fail = typeof error === 'function' ? error : (next && typeof next.error === 'function' ? next.error.bind(next) : null);
+          if (fail) setTimeout(function () { fail(err); }, 0);
+          return function () {};
+        },
+        then: p.then.bind(p), 'catch': p['catch'].bind(p),
+        cancel: function () { return false; }, pause: function () { return false; }, resume: function () { return false; },
+        snapshot: { bytesTransferred: 0, totalBytes: 0, state: 'error' }
+      };
+    }
+    function installStorage() {
+      if (storageDone || !window.firebase || !firebase.storage || !firebase.storage.Reference) return;
+      var S = firebase.storage.Reference.prototype;
+      if (!S) return;
+      storageDone = true;
+      ['put', 'putString'].forEach(function (m) {
+        if (!S[m]) return;
+        S[m] = function () { return refusedTask('storage/' + (this.fullPath || '')); };
+      });
+      ['delete', 'updateMetadata'].forEach(function (m) {
+        if (!S[m]) return;
+        S[m] = function () { return refusal('storage/' + (this.fullPath || '')); };
+      });
+    }
+
+    /* Idempotent: nl-utils calls it as it loads, auth-guard and codeGate
+       again once the page's Firebase SDKs (Storage loads late) are in. */
+    function install() {
+      if (!on()) return;
+      installRtdb();
+      installStorage();
+    }
+
+    /* Who opens a staging copy (staging.md, decided 14/11/2026):
+         Skeleton key                                   → Manage
+         Tester key, the tool open to testers, and a
+         live level of Access or more                   → that live level
+         otherwise                                      → Off
+       level: the live level in either vocabulary ('admin' or 'manage');
+       the answer comes back in the same one. Off a staging copy, level is
+       returned unchanged. */
+    function gate(pass, tool, level) {
+      if (!on()) return level;
+      var P = window.NL.pass;
+      var manage = level === 'admin' ? 'admin' : 'manage';
+      if (!P || !P.isIssued(pass)) return 'off';
+      if (P.isSkeleton(pass)) return manage;
+      var testersOk = !(tool && tool.permissions && tool.permissions.testers === false);
+      if (testersOk && P.holds(pass, 'league-tester') && level && level !== 'off') return level;
+      return 'off';
+    }
+
+    window.NL.staging = { on: on, install: install, gate: gate, allowed: allowed, ALLOW: ALLOW };
+    install();
+  })();
+
   /* ── data-audit click delegation ──────────────────────────────────────── */
   /* Any element (or ancestor) carrying data-audit="action_name" triggers an
      audit entry when clicked. Optional data-audit-detail supplies a detail
@@ -2956,17 +3108,30 @@
           return codeGateOpen(c);
         }).then(opts.club);
       }
+      /* A staging copy (v1.75): no code door, and the level goes through
+         NL.staging.gate. Writes are already refused (NL.staging.install). */
+      var staging = window.NL.staging && window.NL.staging.on();
+      if (staging) window.NL.staging.install();
+      function stagingOff() {
+        var m = document.createElement('main');
+        m.className = 'page';
+        m.innerHTML = '<div class="empty-state"><div class="empty-state__title">This is a staging copy</div>' +
+          '<div class="empty-state__text">It opens to testers signed in to NL Tools. The live version is at ' +
+          window.NL.escHtml(location.pathname.replace(/^\/staging\//, '/')) + '</div></div>';
+        document.body.appendChild(m);
+      }
       stop = firebase.auth().onAuthStateChanged(function (user) {
         if (once) return;
         once = true;
         if (stop) stop();
-        if (!user || !user.email) { codeDoor(); return; }
+        if (!user || !user.email) { if (staging) stagingOff(); else codeDoor(); return; }
         window.NL.accountLevel.load(user.uid, opts.toolKey).then(function (who) {
+          if (staging) who.level = window.NL.staging.gate(who.user && who.user.pass, who.tool, who.level);
           /* v1.69: an External card that this tool opens to goes through the
              League side too, at its own level and view (never Manage unless
              the tool offers it); one it does not open to is told so. */
           var external = window.NL.pass && window.NL.pass.isExternal(who.user && who.user.pass);
-          if (!who.league && !external) { codeDoor(); return; }
+          if (!who.league && !external) { if (staging) stagingOff(); else codeDoor(); return; }
           var u = who.user || {};
           var session = {
             uid: user.uid, name: u.name || '', email: u.email || user.email || '', role: u.role || '',
@@ -2977,6 +3142,7 @@
           window.NL.session = session;
           return codeGateAccountBar({ title: opts.title, toolKey: opts.toolKey }).then(function () {
             if (session.toolLevel === 'off') {
+              if (staging) { stagingOff(); return; }
               if (opts.off) return opts.off(session);
               /* Straight under the NL Tools bar: whatever else the page
                  holds is still hidden. A page can draw its own (opts.off). */
@@ -3949,7 +4115,7 @@
         var user = r[0].val() || {}, tool = r[1].val() || null;
         var live = r[2] && r[2].exists() ? r[2].val() : null;
         if (tool && live && window.NL.pass && window.NL.pass.withLive) tool = window.NL.pass.withLive(tool, live);
-        return { user: user, league: isLeague(user), level: from(user, tool, toolKey) };
+        return { user: user, league: isLeague(user), level: from(user, tool, toolKey), tool: tool };
       });
     }
     window.NL.accountLevel = { from: from, isLeague: isLeague, load: load };
