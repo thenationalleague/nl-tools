@@ -173,6 +173,17 @@ test('the staging check: live changed since from, a marker or link outside stagi
   assert.match(p, /staged 4\d days ago/);
 });
 
+test('the staging check: a copy that loads its live folder\'s own files fails', () => {
+  const r = repo();
+  r.put('tool/_app.js', '1');
+  r.g('add', '-A'); r.g('commit', '-qm', 'app');
+  const sha = r.g('rev-parse', 'HEAD');
+  r.put('staging/tool/index.html', `<script>window.NL_STAGING = { from: '${sha}' };</script><script src="/tool/_app.js?v=1"></script>`);
+  assert.match(check(r.dir).problems.join('\n'), /loads \/tool\/_app\.js from live/);
+  r.put('staging/tool/index.html', `<script>window.NL_STAGING = { from: '${sha}' };</script><script src="_app.js?v=1"></script><a href="/tool/">live</a>`);
+  assert.deepEqual(check(r.dir).problems, [], 'relative is fine, and so is a link to the live page');
+});
+
 test('the staging check runs in lint, and CI has the history it needs', () => {
   assert.match(readFileSync(join(REPO, 'system/lint-tools.sh'), 'utf8'), /scripts\/check-staging\.mjs" --strict \|\| staging_rc=1/);
   assert.match(readFileSync(join(REPO, '.github/workflows/canon-checks.yml'), 'utf8'), /fetch-depth: 0/);

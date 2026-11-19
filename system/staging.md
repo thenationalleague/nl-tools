@@ -15,8 +15,11 @@ for now (Richard, 19/11/2026): the Skeleton key and Tester-key holders.
    fails a page without it:
    `<script>window.NL_STAGING = { from: '<sha of main the copy was taken from>' };</script>`
 3. Make the changes in the copy. Never touch the live folder in the same PR.
-4. Fix any address the page builds from its own location if it must point at
-   live (rare: same-folder files load from the copy, which is what you want).
+4. A tool loads its own files (`_directory.js`, `_directory.css`) by
+   relative path, so the copy runs its own code. An absolute path
+   (`/club-directory/_directory.js`) would run live's; the staging check
+   fails a copy that does it, and the live tool is fixed first, in its own
+   PR, since the copy must be taken from a commit on `main`.
 5. `bash system/lint-tools.sh --strict` (it now runs the staging check) and
    `npm test`, then open the copy at `nl.tools/staging/<slug>/`.
 

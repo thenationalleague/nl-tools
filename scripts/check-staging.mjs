@@ -12,6 +12,9 @@
       fix made to live in the meantime. Bring staging up to date first.
    4. No staging copy is older than MAX_DAYS: staging is promoted or
       deleted, never left.
+   5. A staging page loads no file from its live folder by absolute path
+      (src="/club-directory/_directory.js"): it would run live's code, not
+      the copy's. A tool loads its own files by relative path.
 
    Needs the full git history (actions/checkout fetch-depth: 0); with a
    shallow clone the commit checks fail loudly rather than pass quietly.
@@ -64,6 +67,11 @@ export function check(root, now = Date.now()) {
     const live = f.replace(/^staging\//, '').replace(/\/index\.html$/, '');
     if (!from) { problems.push(`${f}: no window.NL_STAGING = { from: '<sha>' } line`); continue; }
     if (!existsSync(join(root, live))) { problems.push(`${f}: no live folder ${live}/ to stage against`); continue; }
+    const top = live.split('/')[0];
+    const own = new RegExp(`(?:src|href)=["']/${top}/[^"']*\\.(?:js|css)`, 'g');
+    for (const m of readFileSync(join(root, f), 'utf8').match(own) || []) {
+      problems.push(`${f}: loads ${m.replace(/^(?:src|href)=["']/, '')} from live; load the tool's own files by relative path`);
+    }
     try { git(root, ['cat-file', '-e', from + '^{commit}']); }
     catch { problems.push(`${f}: from ${from} is not a commit here (a shallow clone? the check needs fetch-depth: 0)`); continue; }
     try { git(root, ['diff', '--quiet', from, 'HEAD', '--', live + '/']); }
