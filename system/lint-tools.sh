@@ -151,9 +151,13 @@ cd "$REPO_ROOT" || exit 0
 # level down (graphics/totw/index.html). Anything without auth-guard.js —
 # embeds, asset index stubs — is skipped automatically by the grep below.
 # Any path segment starting with _ is skipped (system/_template, _shared).
+# Staging copies (system/staging.md) sit one level deeper again:
+# staging/club-directory/ and staging/graphics/totw/.
 mapfile -t CANDIDATES < <(
-  find . -mindepth 2 -maxdepth 3 -name index.html -not -path './.git/*' \
-    -not -path './node_modules/*' -printf '%P\n' 2>/dev/null | sort
+  { find . -mindepth 2 -maxdepth 3 -name index.html -not -path './.git/*' \
+      -not -path './node_modules/*' -not -path './staging/*' -printf '%P\n' 2>/dev/null
+    [[ -d staging ]] && find ./staging -mindepth 2 -maxdepth 3 -name index.html -printf 'staging/%P\n' 2>/dev/null
+  } | sort
 )
 
 for index in "${CANDIDATES[@]}"; do
@@ -387,7 +391,20 @@ if [[ -f "$REPO_ROOT/scripts/check-canon-overrides.js" ]] && command -v node >/d
   fi
 fi
 
-if [[ $STRICT -eq 1 && $override_rc -ne 0 ]]; then
+# Staging (system/staging.md, point 4): no marker or /staging/ link outside
+# staging/, every copy's live folder unchanged since its from commit, and no
+# copy older than four weeks.
+staging_rc=0
+if [[ -f "$REPO_ROOT/scripts/check-staging.mjs" ]] && command -v node >/dev/null 2>&1; then
+  echo
+  if [[ $STRICT -eq 1 ]]; then
+    node "$REPO_ROOT/scripts/check-staging.mjs" --strict || staging_rc=1
+  else
+    node "$REPO_ROOT/scripts/check-staging.mjs"
+  fi
+fi
+
+if [[ $STRICT -eq 1 && ( $override_rc -ne 0 || $staging_rc -ne 0 ) ]]; then
   exit 1
 fi
 

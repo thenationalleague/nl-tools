@@ -1,7 +1,12 @@
 /*
  * auth-guard.js — NL Tools v2
  * File: /system/auth-guard.js
- * Version: v16.5 (16/11/2026)
+ * Version: v16.6 (19/11/2026)
+ *
+ * v16.6: Staging (system/staging.md). On a page carrying window.NL_STAGING,
+ *       writes are refused by canon (NL.staging, nl-utils v1.75) and the
+ *       page opens only to the Skeleton key and to Tester-key holders at
+ *       their own live level. Cache-bust ?v=24 -> ?v=25, in lockstep.
  *
  * v16.5: The tool's key travels with its record into the pass's resolver
  *       (NL.pass.explain), which an External card needs: what its zones
@@ -487,6 +492,22 @@
   function checkAccess(session, toolData) {
     if (session.pending) {
       window.location.replace(PORTAL_URL + '?guard=pending');
+      return;
+    }
+
+    /* v16.6: a staging copy (system/staging.md). Writes are refused by
+       canon (NL.staging.install), and it opens only to the Skeleton key and
+       Tester-key holders at their own live level (NL.staging.gate). Nobody
+       else, an open page or not. */
+    if (window.NL && NL.staging && NL.staging.on()) {
+      NL.staging.install();
+      var live = (NL.pass && NL.pass.isIssued(session.pass))
+        ? NL.pass.explain(session.pass, toolData, undefined, NL_TOOL_KEY).level : 'off';
+      var staged = NL.staging.gate(session.pass, toolData, live === 'manage' ? 'admin' : live);
+      session.toolLevel = staged;
+      session.staging = true;
+      if (staged === 'access' || staged === 'admin') grantAccess(session);
+      else showUnavailable(session, 'staging: testers only');
       return;
     }
 

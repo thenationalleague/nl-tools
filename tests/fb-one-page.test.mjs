@@ -38,7 +38,8 @@ test('the door: a League account at its level, anyone else the code door', () =>
   const door = UTILS.slice(UTILS.indexOf('    door: function (opts) {'), UTILS.indexOf('    viaFunction: codeGateViaFunction,'));
   assert.match(door, /window\.NL\.accountLevel\.load\(user\.uid, opts\.toolKey\)/);
   assert.match(door, /var external = window\.NL\.pass && window\.NL\.pass\.isExternal\(who\.user && who\.user\.pass\);/);
-  assert.match(door, /if \(!who\.league && !external\) \{ codeDoor\(\); return; \}/);
+  /* Off a staging copy, the code door (nl-utils v1.75 adds the staging branch). */
+  assert.match(door, /if \(!who\.league && !external\) \{ if \(staging\) stagingOff\(\); else codeDoor\(\); return; \}/);
   assert.match(door, /toolLevel: who\.level === 'manage' \? 'admin' : \(who\.level === 'access' \? 'access' : 'off'\)/);
   assert.match(door, /if \(session\.toolLevel === 'off'\)/);
   assert.match(door, /if \(opts\.showCode\) opts\.showCode\(\);\s*return codeGateOpen\(c\);/);
