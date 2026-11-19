@@ -173,6 +173,20 @@ test('the staging check: live changed since from, a marker or link outside stagi
   assert.match(p, /staged 4\d days ago/);
 });
 
+test('the staging check: a lockstep canon bump on the live page does not count as a change', () => {
+  const r = repo();
+  r.put('tool/index.html', '<html>\n<script src="/system/nl-utils.js?v=79"></script>\n<p>v1</p>\n</html>');
+  r.g('add', '-A'); r.g('commit', '-qm', 'live');
+  const sha = r.g('rev-parse', 'HEAD');
+  r.put('staging/tool/index.html', `<script>window.NL_STAGING = { from: '${sha}' };</script>`);
+  r.put('tool/index.html', '<html>\n<script src="/system/nl-utils.js?v=80"></script>\n<p>v1</p>\n</html>');
+  r.g('add', '-A'); r.g('commit', '-qm', 'bump');
+  assert.deepEqual(check(r.dir).problems, [], 'a ?v= bump alone is not a change to the tool');
+  r.put('tool/index.html', '<html>\n<script src="/system/nl-utils.js?v=80"></script>\n<p>v2</p>\n</html>');
+  r.g('add', '-A'); r.g('commit', '-qm', 'real');
+  assert.match(check(r.dir).problems.join('\n'), /tool\/ has changed since/, 'a real change still counts');
+});
+
 test('the staging check: a copy that loads its live folder\'s own files fails', () => {
   const r = repo();
   r.put('tool/_app.js', '1');

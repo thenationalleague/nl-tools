@@ -4439,6 +4439,9 @@
 
      Options, beyond the shared season / divisions / extraClubs / value /
      placeholder / onSelect:
+       clubs       [club-like records] or fn() -> records: a tool's own list
+                   in place of the season's roster (Club Directory lists the
+                   records it holds). Each may carry division and code.
        pinned      [club-like records] listed first, above every filter:
                    the League's own row. Never filtered out by Division.
        secondary   'division' (default) | 'stadium' | fn(club) -> the note
@@ -4479,6 +4482,7 @@
       season:     options.season || 'current',
       divisions:  options.divisions || null,
       extraClubs: options.extraClubs || [],
+      clubs:      options.clubs || null,
       pinned:     options.pinned || [],
       secondary:  options.secondary || 'division',
       match:      typeof options.match === 'function' ? options.match : null,
@@ -4526,7 +4530,9 @@
       return c.division || '';
     }
     function load() {
-      var p = (opt.season === 'all') ? window.NL.clubs.all() : window.NL.clubs.forSeason(opt.season);
+      var own = typeof opt.clubs === 'function' ? opt.clubs() : opt.clubs;
+      var p = own ? Promise.resolve(own.slice())
+        : (opt.season === 'all') ? window.NL.clubs.all() : window.NL.clubs.forSeason(opt.season);
       return p.then(function(list) {
         if (opt.divisions && opt.divisions.length) {
           var set = {};

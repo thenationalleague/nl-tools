@@ -74,7 +74,9 @@ export function check(root, now = Date.now()) {
     }
     try { git(root, ['cat-file', '-e', from + '^{commit}']); }
     catch { problems.push(`${f}: from ${from} is not a commit here (a shallow clone? the check needs fetch-depth: 0)`); continue; }
-    try { git(root, ['diff', '--quiet', from, 'HEAD', '--', live + '/']); }
+    /* A lockstep canon bump (/system/…?v=N) touches every page, live ones
+       included, and changes nothing about the tool, so it does not count. */
+    try { git(root, ['diff', '--quiet', '-I', '/system/[a-z-]+\\.(js|css)\\?v=[0-9]+', from, 'HEAD', '--', live + '/']); }
     catch { problems.push(`${f}: ${live}/ has changed since ${from}; bring staging up to date before promoting`); }
     let added = '';
     try { added = git(root, ['log', '--diff-filter=A', '--format=%ct', '--', f]).split('\n').pop(); } catch { /* not committed yet */ }
