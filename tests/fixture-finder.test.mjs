@@ -172,9 +172,9 @@ test('three away in a row is amber with each trip terse; four is red', () => {
   assert.equal(f3.level, 'amber');
   assert.equal(f3.text, 'BET 3 away in a row');
   assert.deepEqual(JSON.parse(JSON.stringify(f3.items)), [
-    { date: '2026-11-10', text: 'This game (A) · 372 mi round trip' },
-    { date: '2026-11-14', text: 'Gamma City (A) · 80 mi round trip' },
-    { date: '2026-11-21', text: 'Delta Rovers (A) · 24 mi round trip' }]);
+    { date: '2026-11-10', here: true, text: 'This game (A) · 372 mi round trip' },
+    { date: '2026-11-14', here: false, text: 'Gamma City (A) · 80 mi round trip' },
+    { date: '2026-11-21', here: false, text: 'Delta Rovers (A) · 24 mi round trip' }], 'the game being placed is marked (v1.10)');
   const four = on(run(game, [g(C, B, '2026-11-14'), g(D, B, '2026-11-21'), g(C, B, '2026-11-28', { comp: 'fa-trophy' })], {}, { distances }), '2026-11-10');
   assert.equal(four.flags.find((f) => /away in a row/.test(f.text)).level, 'red');
 });

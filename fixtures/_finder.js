@@ -3,6 +3,8 @@
    File: /fixtures/_finder.js
    Version: v1.8 (04/11/2026)
    CHANGELOG
+     v1.10 (19/11/2026) — A run's items mark the game being placed (here:
+       true), so the page can pick it out from the games around it.
      v1.9 (18/11/2026) — More than 35 days out is no longer a flag (Richard,
        18/11/2026): a slot carries daysOut, and the page marks it with an
        hourglass in the corner instead, so a clean date far off shows green
@@ -386,7 +388,7 @@
       var i = seq.findIndex(function (x) { return x.here; });
       function item(x) {
         var home = nameOf(x.r.home) === club, opp = home ? x.r.away : x.r.home, mi = home ? null : oneWay(x.r);
-        return { date: x.date, text: (x.here ? 'This game' : nameOf(opp)) + ' (' + (home ? 'H' : 'A') + ')' +
+        return { date: x.date, here: !!x.here, text: (x.here ? 'This game' : nameOf(opp)) + ' (' + (home ? 'H' : 'A') + ')' +
           (home ? '' : mi != null ? ' · ' + Math.round(mi * 2) + ' mi round trip' : ' · miles unknown') };
       }
       var lo = i, hi = i;
