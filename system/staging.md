@@ -9,8 +9,10 @@ for now (Richard, 19/11/2026): the Skeleton key and Tester-key holders.
 ## Making a staging copy
 
 1. Copy the live folder: `cp -r club-directory staging/club-directory`.
-2. In the copy's `index.html`, add one line in the head, **before**
-   `auth-guard.js` and `nl-utils.js` run:
+2. In **every** `index.html` of the copy (a tool's `public/` or `reader/`
+   pages too, or they would save to live), add one line in the head,
+   **before** `auth-guard.js` and `nl-utils.js` run. The staging check
+   fails a page without it:
    `<script>window.NL_STAGING = { from: '<sha of main the copy was taken from>' };</script>`
 3. Make the changes in the copy. Never touch the live folder in the same PR.
 4. Fix any address the page builds from its own location if it must point at
