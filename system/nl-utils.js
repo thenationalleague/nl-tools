@@ -1,7 +1,13 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.75 (19/11/2026)
+   Version: v1.76 (19/11/2026)
+   v1.76 — NL.clubPicker gains a list form (mode: 'list'): the club
+     browser. Search, a Division filter and every club down the side of the
+     page, always open, with an optional note per row ("7 files"), pinned
+     rows first (the League's own) and the chosen club in the address
+     (#club=FYL). Laid out by .nl-browse (nl-brand v2.86). Additive: no live
+     tool uses it yet; Club Directory and Programme Packs try it in staging.
    v1.75 — NL.staging (system/staging.md): on a staging copy
      (window.NL_STAGING) every database write and Storage upload is refused
      with one "Staging: not saved" toast, bar a declared sign-in path; the
@@ -4407,6 +4413,7 @@
        secondary 'division'|'stadium'|fn · crestFallback 'rose'|'hide' ·
        clearable · value · disabled · placeholder · limit ·
        extraClubs [club-like records] · onSelect(sel)
+     mode 'list' is the club browser, always open: see clubListPicker above.
      onSelect payload: { name, club, division, crestUrl, isFreetext,
                          isOffRoster, seasonKey }
 
@@ -4420,10 +4427,277 @@
      different badge file than its own name ("Fulham PL2" -> Fulham.png).
      =================================================================== */
   var _cpSeq = 0;
+
+  /* ===================================================================
+     NL.clubPicker(mount, { mode: 'list', … }) — the club browser (v1.76)
+     The same chooser, always open: a search box, a Division filter and
+     every club down the side of the page, with the chosen club beside it
+     (.nl-browse in nl-brand.css). For tools whose job is going from club to
+     club (Club Directory, Programme Packs), where a dropdown means opening
+     it again for every club. Built into the picker, not beside it:
+     choosing a club is always NL.clubPicker (style principle 5.2).
+
+     Options, beyond the shared season / divisions / extraClubs / value /
+     placeholder / onSelect:
+       clubs       [club-like records] or fn() -> records: a tool's own list
+                   in place of the season's roster (Club Directory lists the
+                   records it holds). Each may carry division and code.
+       pinned      [club-like records] listed first, above every filter:
+                   the League's own row. Never filtered out by Division.
+       secondary   'division' (default) | 'stadium' | fn(club) -> the note
+                   on the right of a row ("7 files", "Empty").
+       match       fn(club, q) -> true to keep a row the name does not
+                   match, so a search for a person keeps their club.
+       onQuery     fn(q), on every keystroke, for a tool that also searches
+                   its own data (Club Directory's people).
+       filter      false hides the Division filter. It is also hidden when
+                   the roster holds only one division.
+       hash        true: the chosen club is in the address as #club=FYL
+                   (principle 2.7), read at the start and on a pasted link.
+                   A code that is not in the list is ignored, quietly.
+                   Other hash parts (#club=FYL&tab=x, #admin) are kept.
+     Returns { setValue, getValue, clear, refresh, setQuery, el, destroy }.
+     onSelect gets the shared payload; setValue never fires it. refresh()
+     redraws (for new notes) and reloads the roster. */
+  function hashGet(key) {
+    var parts = String(window.location.hash || '').replace(/^#/, '').split('&');
+    for (var i = 0; i < parts.length; i++) {
+      var kv = parts[i].split('=');
+      if (kv[0] === key && kv.length > 1) { try { return decodeURIComponent(kv[1]); } catch (e) { return kv[1]; } }
+    }
+    return null;
+  }
+  function hashSet(key, val) {
+    var raw = String(window.location.hash || '').replace(/^#/, '');
+    var parts = raw ? raw.split('&').filter(function(p) { return p.split('=')[0] !== key; }) : [];
+    if (val) parts.unshift(key + '=' + encodeURIComponent(val));
+    var h = parts.length ? '#' + parts.join('&') : '';
+    if (h !== (window.location.hash || '')) {
+      window.history.replaceState(window.history.state, '', (window.location.pathname || '') + (window.location.search || '') + h);
+    }
+  }
+  function clubListPicker(el, options) {
+    var esc = window.NL.escHtml;
+    var opt = {
+      season:     options.season || 'current',
+      divisions:  options.divisions || null,
+      extraClubs: options.extraClubs || [],
+      clubs:      options.clubs || null,
+      pinned:     options.pinned || [],
+      secondary:  options.secondary || 'division',
+      match:      typeof options.match === 'function' ? options.match : null,
+      onQuery:    typeof options.onQuery === 'function' ? options.onQuery : null,
+      filter:     options.filter !== false,
+      hash:       !!options.hash,
+      placeholder: options.placeholder || 'Search clubs',
+      onSelect:   typeof options.onSelect === 'function' ? options.onSelect : function() {}
+    };
+    var id = 'nlcp' + (++_cpSeq);
+    var clubs = [], shown = [], activeIdx = -1, selected = null, division = null, q = '';
+    var fb = null;
+
+    el.classList.add('club-picker', 'club-picker--list');
+    el.innerHTML =
+      '<div class="club-picker__tools">' +
+        '<label class="club-picker__wrap">' +
+          '<svg class="icon icon--sm club-picker__search" aria-hidden="true"><use href="/assets/icons/sprites.svg#icon-search"></use></svg>' +
+          '<input type="search" class="club-picker__input" autocomplete="off" role="combobox" aria-expanded="true"' +
+            ' aria-autocomplete="list" aria-controls="' + id + '-list" aria-label="' + esc(opt.placeholder) + '"' +
+            ' placeholder="' + esc(opt.placeholder) + '">' +
+        '</label>' +
+        '<div class="club-picker__filter"></div>' +
+      '</div>' +
+      '<div class="club-picker__list" id="' + id + '-list" role="listbox" tabindex="-1" aria-label="Clubs"></div>';
+    var input = el.querySelector('.club-picker__input');
+    var listEl = el.querySelector('.club-picker__list');
+    var filterEl = el.querySelector('.club-picker__filter');
+
+    function crestKeyOf(c) { return (c && (c.crestName || c.name)) || ''; }
+    function codeOf(c) { return (c && c.code) ? String(c.code) : ''; }
+    function seasonKey() {
+      if (opt.season && opt.season !== 'current' && opt.season !== 'all') return opt.season;
+      var m = window.NL.clubs.meta();
+      return m ? window.NL.season.current(m) : null;
+    }
+    function payload(c, pinned) {
+      return { name: c.name, club: c, division: c.division || '', crestKey: crestKeyOf(c),
+               crestUrl: window.NL.clubs.crestUrl(crestKeyOf(c)), isFreetext: false,
+               isOffRoster: !!pinned, isPinned: !!pinned, seasonKey: seasonKey() };
+    }
+    function noteOf(c) {
+      if (typeof opt.secondary === 'function') return opt.secondary(c) || '';
+      if (opt.secondary === 'stadium') return c.stadium_name || '';
+      return c.division || '';
+    }
+    function load() {
+      var own = typeof opt.clubs === 'function' ? opt.clubs() : opt.clubs;
+      var p = own ? Promise.resolve(own.slice())
+        : (opt.season === 'all') ? window.NL.clubs.all() : window.NL.clubs.forSeason(opt.season);
+      return p.then(function(list) {
+        if (opt.divisions && opt.divisions.length) {
+          var set = {};
+          opt.divisions.forEach(function(d) { set[String(d).toLowerCase()] = true; });
+          list = list.filter(function(c) { return set[String(c.division).toLowerCase()]; });
+        }
+        clubs = list.concat(opt.extraClubs);
+      }).catch(function() { clubs = opt.extraClubs.slice(); }).then(function() {
+        clubs.sort(function(a, b) { return String(a.name).localeCompare(String(b.name)); });
+        drawFilter(); draw();
+      });
+    }
+    /* The divisions the roster holds, in the order clubs-meta lists them. */
+    function drawFilter() {
+      var divs = [];
+      clubs.forEach(function(c) { if (c.division && divs.indexOf(c.division) === -1) divs.push(c.division); });
+      var order = ['National', 'North', 'South'];
+      divs.sort(function(a, b) {
+        var ia = order.indexOf(a), ib = order.indexOf(b);
+        return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib) || a.localeCompare(b);
+      });
+      if (!opt.filter || divs.length < 2) { filterEl.hidden = true; division = null; return; }
+      filterEl.hidden = false;
+      var options = divs.map(function(d) { return { value: d, label: d }; });
+      if (division && divs.indexOf(division) === -1) division = null;
+      if (fb) { fb.setOptions(options); fb.set(division); return; }
+      fb = window.NL.filterButton(filterEl, {
+        label: 'Division', multiple: false, allLabel: 'All', options: options, value: division, search: false,
+        onChange: function(v) { division = v || null; draw(); }
+      });
+    }
+    function keep(c) {
+      if (division && c.division !== division) return false;
+      if (!q) return true;
+      var lq = q.toLowerCase();
+      if (String(c.name).toLowerCase().indexOf(lq) !== -1) return true;
+      if (c.short && String(c.short).toLowerCase().indexOf(lq) !== -1) return true;
+      return !!(opt.match && opt.match(c, q));
+    }
+    function keepPinned(c) {
+      if (!q) return true;
+      return String(c.name).toLowerCase().indexOf(q.toLowerCase()) !== -1 || !!(opt.match && opt.match(c, q));
+    }
+    function row(c, i, pinned) {
+      var on = selected && selected.name === c.name;
+      var note = noteOf(c);
+      return '<div class="club-picker__option' + (pinned ? ' club-picker__option--pinned' : '') + '"' +
+        ' role="option" id="' + id + '-o' + i + '" data-i="' + i + '" aria-selected="' + (on ? 'true' : 'false') + '">' +
+        '<img alt="" data-ck="' + esc(crestKeyOf(c)) + '">' +
+        '<span class="club-picker__option-name">' + esc(c.name) + '</span>' +
+        (note ? '<span class="club-picker__option-div">' + esc(note) + '</span>' : '') +
+      '</div>';
+    }
+    function draw() {
+      shown = [];
+      var html = '';
+      opt.pinned.forEach(function(c) { if (keepPinned(c)) { html += row(c, shown.length, true); shown.push({ club: c, pinned: true }); } });
+      clubs.forEach(function(c) { if (keep(c)) { html += row(c, shown.length, false); shown.push({ club: c, pinned: false }); } });
+      listEl.innerHTML = html || '<p class="club-picker__empty">No clubs found</p>';
+      Array.prototype.forEach.call(listEl.querySelectorAll('img[data-ck]'), function(img) {
+        var ck = img.getAttribute('data-ck');
+        window.NL.clubs.wireCrestImg(img, ck, false);
+        img.src = window.NL.clubs.crestUrl(ck, 'thumb');
+      });
+      activeIdx = -1;
+      for (var i = 0; i < shown.length; i++) { if (selected && shown[i].club.name === selected.name) { activeIdx = i; break; } }
+      paint(false);
+    }
+    function paint(scroll) {
+      var rows = listEl.querySelectorAll('.club-picker__option');
+      for (var i = 0; i < rows.length; i++) {
+        var on = i === activeIdx;
+        rows[i].classList.toggle('club-picker__option--active', on);
+        if (on) { input.setAttribute('aria-activedescendant', rows[i].id); if (scroll) rows[i].scrollIntoView({ block: 'nearest' }); }
+      }
+      if (activeIdx < 0) input.removeAttribute('aria-activedescendant');
+    }
+    function mark() {
+      var rows = listEl.querySelectorAll('.club-picker__option');
+      for (var i = 0; i < rows.length; i++) {
+        var s = shown[+rows[i].getAttribute('data-i')];
+        rows[i].setAttribute('aria-selected', (s && selected && s.club.name === selected.name) ? 'true' : 'false');
+      }
+    }
+    function choose(i) {
+      var s = shown[i]; if (!s) return;
+      selected = s.club; activeIdx = i; mark(); paint(true);
+      if (opt.hash) hashSet('club', codeOf(s.club) || s.club.name);
+      opt.onSelect(payload(s.club, s.pinned));
+    }
+    function find(name) {
+      var lc = String(name).toLowerCase();
+      var all = opt.pinned.concat(clubs);
+      for (var i = 0; i < all.length; i++) {
+        if (String(all[i].name).toLowerCase() === lc || (all[i].code && String(all[i].code).toLowerCase() === lc)) return all[i];
+      }
+      return null;
+    }
+    function fromHash(fire) {
+      var want = hashGet('club'); if (!want) return;
+      var c = find(want);
+      if (!c || (selected && selected.name === c.name)) return;
+      selected = c; draw();
+      var row = listEl.querySelector('[aria-selected="true"]');
+      if (row) row.scrollIntoView({ block: 'nearest' });
+      if (fire) opt.onSelect(payload(c, opt.pinned.indexOf(c) !== -1));
+    }
+    function move(d) { if (!shown.length) return; activeIdx = (activeIdx + d + shown.length) % shown.length; paint(true); }
+    function onKey(e) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
+      else if (e.key === 'Enter' && activeIdx >= 0) { e.preventDefault(); choose(activeIdx); }
+      else if (e.key === 'Home' && shown.length && e.target === listEl) { e.preventDefault(); activeIdx = 0; paint(true); }
+      else if (e.key === 'End' && shown.length && e.target === listEl) { e.preventDefault(); activeIdx = shown.length - 1; paint(true); }
+    }
+    input.addEventListener('input', function() {
+      q = input.value.trim(); draw();
+      if (q && shown.length) { activeIdx = 0; paint(true); }
+      if (opt.onQuery) opt.onQuery(q);
+    });
+    input.addEventListener('keydown', onKey);
+    listEl.addEventListener('keydown', onKey);
+    listEl.addEventListener('click', function(e) {
+      var r = e.target.closest ? e.target.closest('.club-picker__option') : null;
+      if (r && listEl.contains(r)) choose(+r.getAttribute('data-i'));
+    });
+    function onHash() { fromHash(true); }
+    if (opt.hash) window.addEventListener('hashchange', onHash);
+
+    var ready = load().then(function() {
+      if (opt.hash && hashGet('club')) fromHash(true);
+      else if (options.value) controller.setValue(options.value);
+    });
+
+    var controller = {
+      el: el,
+      ready: ready,
+      setValue: function(name) {
+        if (!name) return this.clear();
+        var c = find(name);
+        selected = c || { name: name };
+        if (opt.hash && c) hashSet('club', codeOf(c) || c.name);
+        draw();
+        var r = listEl.querySelector('[aria-selected="true"]');
+        if (r) r.scrollIntoView({ block: 'nearest' });
+        return this;
+      },
+      getValue: function() { return selected ? selected.name : null; },
+      clear: function() { selected = null; if (opt.hash) hashSet('club', null); draw(); return this; },
+      setQuery: function(text) { input.value = text || ''; q = input.value.trim(); draw(); return this; },
+      refresh: function() { return load(); },
+      destroy: function() {
+        if (opt.hash) window.removeEventListener('hashchange', onHash);
+        el.innerHTML = '';
+        el.classList.remove('club-picker', 'club-picker--list');
+      }
+    };
+    return controller;
+  }
+
   window.NL.clubPicker = function(mount, options) {
     options = options || {};
     var el = (typeof mount === 'string') ? document.querySelector(mount) : mount;
     if (!el) throw new Error('NL.clubPicker: mount not found');
+    if (options.mode === 'list') return clubListPicker(el, options);
 
     var _mode = options.mode === 'select' ? 'select' : 'search';
     var opt = {
@@ -4749,6 +5023,8 @@
 
     return controller;
   };
+  /* The address part, exported for the tests (#club=FYL beside other parts). */
+  window.NL.clubPicker.hash = { get: hashGet, set: hashSet };
 
   /* ── Reorderable list ─────────────────────────────────────────────────── */
   /* NL.sortable(host, opts) → { order() } — an ordered list the user can
