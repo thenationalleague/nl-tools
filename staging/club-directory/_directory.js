@@ -1,7 +1,13 @@
 /* =========================================================================
    NL Tools — Club Directory presentation
    File: /club-directory/_directory.js
-   Version: v1.21 (11/11/2026)
+   Version: v1.22 (19/11/2026)
+
+   v1.22 — STAGING. renderClub draws the canon club header (crest, name,
+   ground and division on white, the colours as a trim) in place of the
+   capitals banner, with People | Club details beside it, or the details
+   folded under it with ?details=fold. A person's row reads Role, Name,
+   Email, Phone.
 
    v1.21 — the padlock goes AFTER a private detail, not in front of it, so
    a private number lines up with the public ones above and below it
@@ -679,7 +685,6 @@
     return '<li class="cd-row' + (unlisted ? ' cd-row--unlisted' : '') + '"' +
       (p.id ? ' data-pid="' + esc(p.id) + '"' : '') +
       (ridx != null ? ' data-ridx="' + ridx + '"' : '') + '>' +
-      '<div class="cd-row__name">' + displayName(p) + '</div>' +
       '<div class="cd-row__role">' +
         /* Escape each title, then join with the entity. Escaping the joined
            string turns the separator's own ampersand into &amp;middot; and
@@ -693,6 +698,8 @@
         (titles.length ? titles.map(esc).join(' &middot; ')
           : (opts && opts.showGaps ? '<em>No job title</em>' : '')) +
       '</div>' +
+      /* Role first (staging, v3.4): looking someone up starts from the job. */
+      '<div class="cd-row__name">' + displayName(p) + '</div>' +
       '<div>' + tag + (mail || quietEm) + '</div>' +
       /* The phone cell has always stayed blank when there is simply no
          number — "None held" against 400 people is noise. It speaks up only
@@ -832,6 +839,37 @@
       }).join('') + '</div>';
   }
 
+  /* People | Club details (staging, v3.4). One switch for every club, so
+     it stays where it was put as you go from club to club. The same navy
+     two-way switch as List | Cards and View | Edit. */
+  var DETAILS = 'people';
+  function detailsMode() {
+    return /(^|[?&])details=fold(&|$)/.test(String(location.search || '').slice(1)) ? 'fold' : 'switch';
+  }
+  function detailsSwitch() {
+    return '<div class="cd-vw" data-details-switch role="group" aria-label="Show">' +
+      [['people', 'People'], ['details', 'Club details']].map(function (o) {
+        var on = DETAILS === o[0];
+        return '<button type="button" data-d="' + o[0] + '"' + (on ? ' class="is-on"' : '') +
+          ' aria-pressed="' + on + '">' + o[1] + '</button>';
+      }).join('') + '</div>';
+  }
+  if (typeof document !== 'undefined' && document.addEventListener) {
+    document.addEventListener('click', function (e) {
+      var b = e.target && e.target.closest && e.target.closest('[data-details-switch] button');
+      if (!b) { return; }
+      DETAILS = b.getAttribute('data-d');
+      var root = document;
+      Array.prototype.forEach.call(root.querySelectorAll('[data-details-switch] button'), function (x) {
+        var on = x.getAttribute('data-d') === DETAILS;
+        x.classList.toggle('is-on', on); x.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+      Array.prototype.forEach.call(root.querySelectorAll('[data-cd-pane]'), function (p) {
+        p.hidden = p.getAttribute('data-cd-pane') !== DETAILS;
+      });
+    });
+  }
+
   function renderClub(rec, opts) {
     opts = opts || {};
     var info = rec.info || {};
@@ -880,17 +918,27 @@
         }).filter(Boolean).join('');
     if (depts) { depts = switcher + depts; }
 
-    var pal = isOrg(rec) ? orgColours(rec) : bannerColours(rec.club);
+    /* STAGING (v3.4): the club's name on white with its colours as a trim
+       (canon .nl-club-header), not a block of colour in capitals; the ground
+       and division on one line under it. People come first; the club's
+       details are one switch away (People | Club details) or, with
+       ?details=fold in the address, folded under the header, so the two can
+       be compared. */
+    var meta = (!isOrg(rec) && window.NL && NL.clubs && NL.clubs.byName) ? NL.clubs.byName(rec.club) : null;
+    var sub = [info.stadium || (meta && meta.stadium_name) || '',
+               isOrg(rec) ? '' : ((meta && meta.division) || '')].filter(Boolean).join(' \u00b7 ');
+    var fold = (opts.details || detailsMode()) === 'fold';
+    var head = window.NL.clubs.headerHtml({ name: rec.club || '', crestName: crestKeyOf(rec) }, {
+      id: 'cdHead', sub: sub,
+      actionsHtml: fold ? '' : detailsSwitch()
+    });
+    var summary = [info.phone ? phoneText(info.phone) : '', esc((info.website || '').replace(/^https?:\/\//i, ''))]
+      .filter(Boolean).join(' \u00b7 ');
 
-    return '' +
-      '<div class="cd-banner"' + (pal ? ' style="--cd-bg:' + esc(pal.bg) +
-        ';--cd-fg:' + esc(pal.fg) +
-        (pal.stripe ? ';--cd-stripe:' + esc(pal.stripe) : '') + '"' : '') + '>' +
-        '<img class="nl-crest cd-banner__crest" id="cdCrest" alt="" hidden ' +
-          'decoding="async">' +
-        '<h1 class="cd-banner__name">' + esc(rec.club || '') + '</h1>' +
-      '</div>' +
-
+    return head +
+      (fold ? '<details class="disclosure cd-fold" id="cdFold"><summary>Club details' +
+          (summary ? ' <span class="disclosure__meta">' + summary + '</span>' : '') + '</summary>'
+        : '<div data-cd-pane="details"' + (DETAILS === 'details' ? '' : ' hidden') + '>') +
       '<div class="cd-card" id="cdCard">' +
       '<div class="cd-facts">' +
         facts([
@@ -937,8 +985,9 @@
         ])) +
       '</div>' +
       '</div>' +
+      (fold ? '</details>' : '</div>') +
 
-      '<section class="cd-sec">' +
+      '<section class="cd-sec" data-cd-pane="people"' + (!fold && DETAILS === 'details' ? ' hidden' : '') + '>' +
         (depts || '<p class="cd-empty">No people held for this ' +
           (isOrg(rec) ? 'organisation' : 'club') + ' yet.</p>') +
       '</section>';
