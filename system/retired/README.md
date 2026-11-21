@@ -29,6 +29,7 @@ when someone asks for it, and when they do, this is where the thinking is.
 | [`club-directory-codes.md`](club-directory-codes.md) | 11/11/2026 | Not a tool: the Club Directory's own editor, master and reader codes, with `_gate.js` and `clubDirectoryAuth`, and its old frozen copies. Clubs use club codes; staff use the login; backups replace the copies. |
 | [`fixture-sync.md`](fixture-sync.md) | 13/11/2026 | Not a tool: the Apps Script job that copied NLS fixtures into Attendance, the copied list, and Attendance's Add cup fixture and Neutral venues tabs. Fixture Management is the only fixture list. |
 | [`commercial-benchmarking-links.md`](commercial-benchmarking-links.md) | 13/11/2026 | Not a tool: Commercial Benchmarking's private club links (`link.html?t=…`). Clubs use their club code at `/commercial-benchmarking/`; confirmations moved onto the club's row. |
+| [`match-centre-and-vidiprinter.md`](match-centre-and-vidiprinter.md) | 15/11/2026 | Two website embeds: live scores read from NLS, and a goals feed. Out of use. The `nl-vidiprinter` project stays as the NL Data MCP's scorer cache. |
 
 ## Why one place
 

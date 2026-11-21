@@ -77,7 +77,7 @@ trade-off or verification task, no code fix required now.
 | Cloud Functions (`programmeAuth`, `clubDirectoryAuth`, `uwPromoAuth`, `fanWidgetsAuth`) | RTDB-triggered; mint scoped claims after a server-side passcode/role check. | Safe |
 | Storage `data/**`, `programme/{club}/**`, catch-all | Since 14/11/2026 League reads and writes need the League mark (`league: true`, server-set), not an email address, which every account has; club paths need the club's own claim. `tests/emulator/storage-league-rules.mjs`. | Safe |
 | Storage `footage/**` (retired) | No uploads; reads need the League mark (14/11/2026). Files to be cleared. | Closed |
-| Embeds (motm, score-predictor, judgements, vidiprinter) | Fan devices, no NL auth; SSO custom-token + App Check (reCAPTCHA v3) on the write-capable ones; judgements embed reads the public node only, no writes. | Safe |
+| Embeds (motm, score-predictor, judgements) | Fan devices, no NL auth; SSO custom-token + App Check (reCAPTCHA v3) on the write-capable ones; judgements embed reads the public node only, no writes. | Safe |
 | Firebase web API keys / reCAPTCHA site keys in source | Public-by-design client keys, not secrets. | Safe |
 | `wellbeing/index.html` | A named support contact's phone/email, published on a deliberately-public page. | Review — see PII note |
 | `admin/invites/$token` (`.read:true`) | Invite name/email/role, readable with the UUID token. | Review (low) |
@@ -87,8 +87,8 @@ trade-off or verification task, no code fix required now.
 | UW `codes` | A till or manager reads its own club's codes, or one code by its text; writes only its own club's (14/11/2026, `tests/emulator/uw-codes-rules.mjs`). | Safe |
 | Attendance `archive/<season>/submissions` | A club writes only its own home matches; the whole node is League and Manage (14/11/2026). | Safe |
 | `admin/tool-requests`, `admin/notifications` | Unused; closed 14/11/2026. | Closed |
-| `ops-attendance/submissions` + `archive` (`.read:"auth != null"`) | Any signed-in session, which is anyone, can read every club's figures. | Review: to decide (League only, or each club its own?) |
-| `ops-handbook/draft` (`.read:"auth != null"`) | The unpublished handbook, readable by anyone signed in. | Review: to decide |
+| `ops-attendance/submissions` + `archive` (`.read:"auth != null"`) | Any signed-in session, which is anyone, can read every club's figures. | Review: decided 14/11/2026, League plus each club its own; not built yet |
+| `ops-handbook/draft` (`.read:"auth != null"`) | The unpublished handbook, readable by anyone signed in. | Review: decided 14/11/2026, League only; not built yet |
 | nl-widgets `users`/`predictions`/`motm` per `$jwtId` (`.read:"auth != null"`) | A fan can read another fan's forename/initial/team/prediction if they know the jwtId. | Review (low, minor PII) |
 | `travel-planner` Google Maps key | Billable client key — abuse if unrestricted. | Review — verify referrer lock in GCP |
 | `media-local-media/submissions/$id` (anonymous create, 29/10/2026) | Nothing readable: no public `.read` anywhere in the block. Write is **create-only** – `!data.exists() && newData.exists()` with `uid === auth.uid`, so no overwrite or delete by the public, and no other node (`status`, `manual`) is writable by them. Every field shape- and length-capped (names, organisation, club ≤ 120; email ≤ 254 and `a@b.c` shaped; phone ≤ 40; `type` one of nine values; push-id keys; `$other: false` at every level). Form at `/local-media/`, console at `/local-media/admin/`. | Review (low) |
@@ -136,9 +136,10 @@ None is critical. Most are already-accepted trade-offs needing only a record.
 
 ## Coverage gaps to close
 
-- **`nl-vidiprinter` project rules are not snapshotted** in `system/rtdb/`. It's
-  a public score-ticker feed (low sensitivity), but its rules can't be audited
-  from the repo. Snapshot them into `system/rtdb/` for completeness.
+- **`nl-vidiprinter` project rules are not snapshotted** in `system/rtdb/`. The
+  Vidiprinter page went on 15/11/2026, but the project stays: the NL Data MCP
+  uses it as its scorer cache. Its rules still can't be audited from here;
+  snapshot them into `system/rtdb/` for completeness.
 
 ## How to use this file
 
