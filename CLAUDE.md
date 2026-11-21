@@ -228,7 +228,16 @@ which is why work gets re-planned from scratch. Check here first.
 
 ## Branching
 
-PRs land on `main`; pushing to `main` directly is not done. Each session works on
+PRs land on `main`; pushing to `main` directly is not done.
+
+**Every PR says what it does to the roadmap** (16/11/2026), in one line of
+its description: `Roadmap: new – <item>`, `Roadmap: developed – <item>` or
+`Roadmap: no change – <why>`. Ask it before writing the PR: is this a new
+idea, a step on an existing one, or neither? `new` and `developed` change
+`system/ROADMAP.md` in the same PR. `Auto · Roadmap line on every pull
+request` (scripts/check-roadmap-line.mjs) fails a PR without the line, or
+one that claims a roadmap change it does not make. It exists because ten
+PRs in one evening moved roadmap items on without anyone updating them. Each session works on
 its own `claude/*` branch — the branch name is given in the session prompt, not
 here. (A specific branch name lived in this section and was months stale.)
 

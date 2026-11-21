@@ -4,7 +4,10 @@
   The plain-English list of what is being built next, read by the Roadmap
   tool (/roadmap/, Control shelf, Skeleton key only). Changed only by pull
   request: Richard reads it and corrects it in chat, Claude updates it in the
-  same pull request as the work. Keep "Now" to a handful.
+  same pull request as the work. Keep "Now" to a handful. Every pull request
+  says "Roadmap: new / developed / no change" in its description, and a
+  check fails it if it doesn't, or claims a change this file doesn't show
+  (scripts/check-roadmap-line.mjs).
 
   Shape, which /roadmap/ reads:
     ## Now | Next | Later       a group

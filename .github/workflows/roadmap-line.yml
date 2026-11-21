@@ -1,0 +1,42 @@
+name: Auto · Roadmap line on every pull request
+# Every pull request says what it does to the roadmap: a new item, an item
+# developed, or no change and why (scripts/check-roadmap-line.mjs). "new" and
+# "developed" must change system/ROADMAP.md in the same pull request.
+# Re-runs when the description is edited, so fixing the line clears it.
+# Pull requests opened by bots (the estate inventory and the like) are left
+# alone: they have no roadmap to think about.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  roadmap-line:
+    if: ${{ !endsWith(github.event.pull_request.user.login, '[bot]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: List the files this pull request changes
+        id: files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          {
+            echo 'list<<EOF_FILES'
+            gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}/files" --paginate --jq '.[].filename'
+            echo 'EOF_FILES'
+          } >> "$GITHUB_OUTPUT"
+      - name: Check the roadmap line
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_FILES: ${{ steps.files.outputs.list }}
+        run: node scripts/check-roadmap-line.mjs
