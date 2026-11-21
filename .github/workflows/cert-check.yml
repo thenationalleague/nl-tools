@@ -1,0 +1,76 @@
+name: Timer · nl.tools certificate check
+
+# Once a day: is the security certificate that nl.tools serves valid, and
+# does it have at least three weeks left? GitHub Pages renews it on its own
+# about a month before it runs out. On 14/11/2026 a renewal stuck, the
+# certificate expired, and the site (and the website widgets loaded from it)
+# came and went all day. This job fails three weeks before that can happen.
+#
+# It asks each of GitHub's addresses for nl.tools separately, because a
+# renewal goes out to them one by one: one address can serve a good
+# certificate while another still serves the old one.
+#
+# A failed run shows in Estate and in the Monday note through
+# Timer · Background job check (job-health.yml), which runs at 06:47, so
+# this runs first. Nothing is written anywhere. The log shows dates only.
+#
+# If it fails: Settings → Pages in this repo. If the certificate box keeps
+# cycling, remove the custom domain, wait 15 minutes, add nl.tools back,
+# then leave it an hour (RUNBOOK, "Runs itself on a schedule").
+#
+# Changelog
+#   v1.0 – 14/11/2026 – First version.
+
+on:
+  schedule:
+    - cron: '13 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      HOST: nl.tools
+      MIN_DAYS: '21'
+    steps:
+      - name: Check the certificate on every address
+        run: |
+          set -uo pipefail
+          now=$(date -u +%s)
+          ips=$(getent ahostsv4 "$HOST" | awk '{print $1}' | sort -u)
+          if [ -z "$ips" ]; then
+            echo "::error::$HOST did not resolve to any address"
+            exit 1
+          fi
+          bad=0
+          for ip in $ips; do
+            # -verify_hostname makes a certificate for the wrong name fail
+            # too; the handshake still completes, so an expired certificate
+            # is reported with its date rather than as a bare error.
+            out=$(echo | timeout 20 openssl s_client -connect "$ip:443" \
+              -servername "$HOST" -verify_hostname "$HOST" 2>&1) || true
+            pem=$(printf '%s\n' "$out" | sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p')
+            if [ -z "$pem" ]; then
+              echo "::error::$ip: no certificate came back"
+              bad=1; continue
+            fi
+            end=$(printf '%s\n' "$pem" | openssl x509 -noout -enddate | cut -d= -f2)
+            days=$(( ( $(date -u -d "$end" +%s) - now ) / 86400 ))
+            until=$(date -u -d "$end" +%d/%m/%Y)
+            code=$(printf '%s\n' "$out" | sed -n 's/.*Verify return code: \([0-9]*\).*/\1/p' | tail -1)
+            if [ "${code:-x}" != "0" ]; then
+              reason=$(printf '%s\n' "$out" | sed -n 's/.*Verify return code: [0-9]* (\(.*\))/\1/p' | tail -1)
+              echo "::error::$ip: certificate not trusted (${reason:-no answer}), runs to $until"
+              bad=1
+            elif [ "$days" -lt "$MIN_DAYS" ]; then
+              echo "::error::$ip: certificate runs out $until, $days days left. GitHub should have renewed it by now"
+              bad=1
+            else
+              echo "$ip: fine, runs to $until ($days days left)"
+            fi
+          done
+          exit $bad
