@@ -25,3 +25,15 @@ test('the issue form fills from a waiting request and only from a waiting one fo
   assert.match(c, /req\.zones\[z\] === true && P\.KEY\[z\] && P\.KEY\[z\]\.base === 'club'/, 'only Club zones asked for are ticked');
   assert.match(c, /'Approve and issue pass'/);
 });
+
+test('invites are issued on the same form: a pass left in the sender\'s name, a role from the card, never chosen', () => {
+  const s = fn(pass, 'sendInviteNow');
+  assert.match(s, /passRef\.set\(\{ pass: pass, by: STATE\.session\.uid, at: now \}\)/, 'the pass waits beside the invite, in the sender\'s name');
+  assert.ok(s.indexOf('passRef.set(') < s.indexOf("action: 'sendInvite'"), 'left before the email goes, so it is there when the link is used');
+  assert.match(s, /var role = pass\.base === 'league' \? 'staff' : \(P\.holds\(pass, 'club-operations'\) \? 'club-admin' : 'club-staff'\);/);
+  assert.match(s, /db\.ref\('admin\/external-invites'\)\.push\(\)/, 'an External invite makes the account through the cloud job');
+  assert.match(s, /if \(result && result\.ok === false\) \{ passRef\.remove\(\)/, 'a refused invite takes its pass away');
+  const access = readFileSync(join(REPO, 'access/index.html'), 'utf8');
+  assert.match(access, /href="\/pass\/\?view=issue&invite=1"/);
+  assert.doesNotMatch(access, /name="pcInvRole"|pcInvRoles/, 'no role to choose');
+});

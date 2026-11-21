@@ -51,7 +51,9 @@ test('Access opens to the Skeleton key and the League Operations key', () => {
 test('the Skeleton-only tabs are held back for everyone else', () => {
   assert.match(PAGE, /var SK_TABS = \['tools', 'externals', 'audit', 'manage'\]/);
   assert.match(PAGE, /if \(SK_TABS\.indexOf\(name\) >= 0 && !sk\(\)\) name = 'people'/);
-  assert.match(PAGE, /function inviteRoles\(\) \{ return sk\(\) \? ROLES : CLUB_ROLES; \}/);
+  /* Invites moved to Issue a pass (16/11/2026): League and External cards
+     are the Skeleton key's to invite; a Club card League Operations' too. */
+  assert.match(read('pass/index.html'), /x\.disabled = x\.value === 'club' \? !r\.club : !r\.skeleton;/);
 });
 
 test('/people/, /audit/ and /club-codes/ forward to Access, keeping the query', () => {

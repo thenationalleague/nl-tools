@@ -1,8 +1,13 @@
 <!DOCTYPE html>
 <!--
   NL Tools — My pass
-  Version: v2.12 (16/11/2026)
+  Version: v2.13 (16/11/2026)
   File: /pass/index.html
+  v2.13 (16/11/2026) — Invites are issued here too (?invite=1, and &org= for
+    an organisation): an email address in place of the person, then the
+    card, zones and end dates as for anyone, and Send invite. A League or
+    Club invite leaves its pass beside the invite for the server to check;
+    an External one makes the account and sends the set-a-password email.
   v2.12 (16/11/2026) — Approving an access request is issuing the pass:
     Review in Access opens this form with the request above it and its club,
     job title and zones filled in; Approve and issue pass writes the pass,
@@ -19,8 +24,6 @@
   v2.9 (16/11/2026) — The paragraph above the tools is a key: the Access and
     Manage chips with what each means, and the crest for "everyone at". The
     View as bar puts the name on its own line when the buttons crowd it.
-  v2.8 (16/11/2026) — An External card shows its organisation's logo on the
-    big sticker when one is uploaded (Access, Externals), else its initials.
 
   Your pass: the card you belong to (League or Club), the keys you hold on
   top of it, and every tool they open, with which part of the pass opened
@@ -98,6 +101,11 @@
     window.NL_CHANGELOG = [
       {
         date: '16/11/2026',
+        version: 'v2.13',
+        items: [ 'Invite someone here: their card and zones are set before the invite goes.' ]
+      },
+      {
+        date: '16/11/2026',
         version: 'v2.12',
         items: [ 'Access requests are approved here: the request fills the form, and saving the pass approves it.' ]
       },
@@ -115,11 +123,6 @@
         date: '16/11/2026',
         version: 'v2.9',
         items: [ 'A key above your tools instead of a paragraph.' ]
-      },
-      {
-        date: '16/11/2026',
-        version: 'v2.8',
-        items: [ 'An organisation\'s logo on its pass.' ]
       }
     ];
 
@@ -1337,6 +1340,14 @@
   function drawPersonPicker() {
     var mount = document.getElementById('issuePerson');
     var u = STATE.issue.user;
+    /* An invite (v2.13): there is nobody to pick yet, only an address. */
+    if (STATE.issue.invite) {
+      if (!mount.querySelector('#issueEmail')) {
+        mount.innerHTML = '<input id="issueEmail" type="email" maxlength="200" autocomplete="off" placeholder="Their email address">';
+        mount.querySelector('#issueEmail').addEventListener('input', function (e) { STATE.issue.email = e.target.value; });
+      }
+      return;
+    }
     if (u) {
       mount.innerHTML = personCardHtml(u);
       mount.querySelector('#issueChange').addEventListener('click', function () { STATE.issue.user = null; drawPersonPicker(); showFields(false); drawIssuePreview(); });
@@ -1346,6 +1357,7 @@
       '<div class="pick-list" id="issueList"><button type="button" disabled>Loading…</button></div>';
     loadUsers().then(function (users) {
       var list = mount.querySelector('#issueList');
+      if (!list) return;   /* the form became an invite while people loaded */
       function draw(q) {
         q = String(q || '').toLowerCase();
         var rows = users.filter(function (x) {
@@ -1365,7 +1377,8 @@
         choosePerson(users.filter(function (x) { return x.uid === b.getAttribute('data-uid'); })[0]);
       });
     }).catch(function () {
-      mount.querySelector('#issueList').innerHTML = '<button type="button" disabled>People could not be loaded.</button>';
+      var list = mount.querySelector('#issueList');
+      if (list) list.innerHTML = '<button type="button" disabled>People could not be loaded.</button>';
     });
   }
 
@@ -1462,6 +1475,106 @@
     /* The club picker shows the person's club (or the one asked for). */
     if (iss.club && STATE.issuePicker && STATE.issuePicker.setValue) STATE.issuePicker.setValue(iss.club);
     drawPersonPicker(); drawIssueKeys(); showFields(true); drawIssuePreview();
+  }
+
+  /* ── Invites (v2.13) ────────────────────────────────────────────────
+     An invite is a pass waiting for its person: the same form, an email
+     address in place of the person, and Send invite. A League or Club
+     invite goes by email from Apps Script (sendInvite), with its pass left
+     at admin/invite-passes/<token> in the sender's name; the server checks
+     the sender may give it when the invite is accepted
+     (functions/invite-pass-core.js). An External invite makes the account
+     straight away (admin/external-invites, the externalInvites job) and
+     sends Firebase's set-a-password email. League and External cards are
+     the Skeleton key's to give; a Club card League Operations' too. */
+  function startInvite(org) {
+    var r = myRights(), iss = STATE.issue, root = document.getElementById('listCol');
+    var external = !!(org && r.skeleton);
+    iss.invite = true;
+    iss.user = { uid: null, name: '', email: '', role: external ? 'external' : '', pass: null };
+    iss.request = null;
+    iss.email = '';
+    iss.name = '';
+    iss.base = external ? 'external' : r.skeleton ? 'league' : 'club';
+    iss.org = external ? org : '';
+    iss.keys = []; iss.until = {}; iss.skeleton = false; iss.jobTitle = '';
+    root.querySelector('.form-panel__head').textContent = 'Invite someone';
+    var personLabel = root.querySelector('label[for="issueSearch"]');
+    if (personLabel) { personLabel.textContent = 'Email'; personLabel.setAttribute('for', 'issueEmail'); }
+    root.querySelectorAll('input[name="issueBase"]').forEach(function (x) {
+      x.disabled = x.value === 'club' ? !r.club : !r.skeleton;
+      x.checked = x.value === iss.base;
+    });
+    root.querySelector('#issueName').value = '';
+    root.querySelector('#issueJob').value = '';
+    root.querySelector('#issueWithdraw').hidden = true;
+    root.querySelector('#issueSave').innerHTML = 'Send invite' + icon('send', 'icon--sm');
+    drawOrgOptions();
+    drawPersonPicker(); drawIssueKeys(); showFields(true); drawIssuePreview();
+  }
+
+  function sendInviteNow() {
+    var iss = STATE.issue, btn = document.getElementById('issueSave');
+    var email = String(iss.email || '').trim().toLowerCase().slice(0, 200), name = String(iss.name || '').trim().slice(0, 120);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { NL.toast('That email address does not look right', 'error'); return; }
+    if (!name) { NL.toast('A name is needed', 'error'); return; }
+    if (iss.base === 'club' && !iss.club) { NL.toast('Choose the club first', 'error'); return; }
+    if (iss.base === 'external' && !iss.org) { NL.toast('Choose the organisation first', 'error'); return; }
+    if (iss.base === 'external' && !iss.keys.length) { NL.toast('Tick at least one zone: an External card opens nothing by itself', 'error'); return; }
+    var pass;
+    try { pass = issuedPass(); } catch (e) { NL.toast(e.message, 'error'); return; }
+    btn.disabled = true;
+    var now = Date.now(), sent;
+    if (iss.base === 'external') {
+      var zones = {}, untils = {};
+      iss.keys.forEach(function (z) { zones[z] = true; if (iss.until[z] > now) untils[z] = iss.until[z]; });
+      var req = { org: iss.org, email: email, name: name, jobTitle: String(iss.jobTitle || '').trim().slice(0, 80), zones: zones, by: STATE.session.uid, at: now };
+      if (Object.keys(untils).length) req.untils = untils;
+      var ref = db.ref('admin/external-invites').push(), timer = null, listener = null;
+      /* The cloud job answers on the request itself (result). */
+      var answered = new Promise(function (resolve, reject) {
+        timer = setTimeout(function () { reject(new Error('No answer from the cloud job in a minute. Check Access before trying again.')); }, 60000);
+        listener = ref.child('result').on('value', function (s) { if (s.exists()) resolve(s.val()); }, reject);
+      });
+      sent = ref.set(req).then(function () { return answered; }).then(function (result) {
+        if (!result.ok) throw new Error(result.error || 'unknown');
+        NL.writeAudit('external_invited', name + ': ' + passLine(pass), { uid: result.uid, name: name, email: email });
+        return firebase.auth().sendPasswordResetEmail(result.email || email).then(function () {
+          NL.writeAudit('password_reset_sent', 'Set-a-password email for a new External account', { uid: result.uid, name: name, email: email });
+        }, function () {
+          NL.toast('The account is set up, but the set-a-password email did not go. Use Send reset link on their page in Access.', 'error');
+        });
+      }).then(function () {
+        clearTimeout(timer); if (listener) ref.child('result').off('value', listener);
+      }, function (e) {
+        clearTimeout(timer); if (listener) ref.child('result').off('value', listener);
+        throw e;
+      });
+    } else {
+      /* The legacy role follows the card, never chosen: a few database rules
+         and Apps Script's invite check still read it. */
+      var role = pass.base === 'league' ? 'staff' : (P.holds(pass, 'club-operations') ? 'club-admin' : 'club-staff');
+      var org = pass.base === 'league' ? 'National League' : '';
+      var token = NL.uuid(), passRef = db.ref('admin/invite-passes/' + token);
+      sent = passRef.set({ pass: pass, by: STATE.session.uid, at: now }).then(function () {
+        return NL.gas.send({ action: 'sendInvite', token: token, email: email, name: name, role: role,
+          org: org, club: pass.club || '', jobTitle: pass.jobTitle || '', tools: {} });
+      }).then(function (result) {
+        if (result && result.ok === false) { passRef.remove()['catch'](function () {}); throw new Error(result.error || 'the invite was not sent'); }
+        NL.writeAudit('invite_sent', 'Invited ' + name + ': ' + passLine(pass));
+        /* The list in Access → Invites, with the pass it will give. */
+        return db.ref('admin/invites-pending').push({ email: email, name: name, role: role, org: org, club: pass.club || '',
+          jobTitle: pass.jobTitle || '', tools: {}, token: token, pass: pass, sentAt: Date.now(), sentBy: STATE.session.name || '' })['catch'](function () {});
+      });
+    }
+    sent.then(function () {
+      NL.toast('Invite sent to ' + email, 'success');
+      var keepOrg = iss.base === 'external' ? iss.org : null;
+      document.getElementById('issueEmail').value = '';
+      startInvite(keepOrg);
+    })['catch'](function (e) {
+      NL.toast('Not sent: ' + (e && e.message || e), 'error');
+    }).then(function () { btn.disabled = false; });
   }
 
   /* The request being approved, above the form: what they asked for, in
@@ -1564,6 +1677,7 @@
 
   function saveIssue() {
     var iss = STATE.issue; if (!iss.user) return;
+    if (iss.invite) return sendInviteNow();
     if (iss.base === 'club' && !iss.club) { NL.toast('Choose the club first', 'error'); return; }
     if (iss.base === 'external' && !iss.org) { NL.toast('Choose the organisation first', 'error'); return; }
     var name = String(iss.name || '').trim().slice(0, 120);
@@ -1693,6 +1807,7 @@
            Requests with an access request to approve (v2.12): the request
            fills the form, and saving the pass is the approval. */
         var q = new URLSearchParams(location.search), uid = q.get('uid'), reqKey = q.get('request');
+        if (q.get('invite') === '1') return startInvite(q.get('org'));
         var reqP = reqKey && /^[A-Za-z0-9_-]{1,40}$/.test(reqKey)
           ? db.ref('admin/requests/' + reqKey).once('value').then(function (s) { return s.val(); })['catch'](function () { return null; })
           : Promise.resolve(null);

@@ -1,8 +1,12 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Access
-  Version: v2.13 (16/11/2026)
+  Version: v2.14 (16/11/2026)
   File: /access/index.html
+  v2.14 (16/11/2026) — Invites are issued on Issue a pass, card and zones and
+  all, never a role (Invite someone). The list shows the pass each invite
+  will give; Resend sends it with the new link and Revoke takes it away.
+  Externals invites its people the same way.
   v2.13 (16/11/2026) — Requests ask for Club zones and say why. Review opens
   Issue a pass with the request filled in; saving the pass approves it, so
   nobody is approved without one, and the legacy role is set from the card,
@@ -19,8 +23,6 @@
   what the tool is and what it gives written under the name; the note is
   optional. Zone ticks say what each zone opens. A zone code need only be
   unused in its own organisation.
-  v2.9 (16/11/2026) — Externals: an empty zone, people list or tool list
-  says so in one small grey line, not body-size type.
 
   Who gets in: everyone with an account and their pass, invites, sign-up
   requests, who each tool opens to, and the audit log. One tool for the
@@ -126,6 +128,11 @@
     window.NL_CHANGELOG = [
       {
         date: '16/11/2026',
+        version: 'v2.14',
+        items: [ 'Invite someone opens Issue a pass: choose their card and zones before you send it.' ]
+      },
+      {
+        date: '16/11/2026',
         version: 'v2.13',
         items: [ 'Requests show the zones asked for and why. Review opens Issue a pass; saving it approves the request.' ]
       },
@@ -143,11 +150,6 @@
         date: '16/11/2026',
         version: 'v2.10',
         items: [ 'Externals: tick the tools a zone opens. The note is optional, and a code can be reused by another organisation.' ]
-      },
-      {
-        date: '16/11/2026',
-        version: 'v2.9',
-        items: [ 'Externals: empty lines are small and grey.' ]
       }
     ];
 
@@ -224,7 +226,6 @@
      Canon candidate: .empty-state--inline, brand audit C5. */
   .ex-empty { margin: 0; font-size: var(--text-sm); color: var(--text-muted); }
   .pc-actions { display: flex; gap: 6px; justify-content: flex-end; align-items: center; flex-wrap: wrap; }
-  .pc-invite { margin-bottom: 24px; }
   .pc-roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
   .pc-roles .pc-role { margin: 0; display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--white); cursor: pointer; }
   .pc-roles .pc-role:has(input:checked) { border-color: var(--navy); background: var(--navy-50); }
@@ -577,23 +578,8 @@
     </section>
 
     <section data-pane-body="invites" hidden>
-      <div class="form-panel pc-invite pc-open">
-        <div class="form-panel__head">Invite someone</div>
-        <div class="form-panel__body">
-          <div class="form-grid">
-            <div class="form-group"><label for="pcInvEmail">Email</label><input type="email" id="pcInvEmail" autocomplete="off"></div>
-            <div class="form-group"><label for="pcInvName">Full name</label><input type="text" id="pcInvName" autocomplete="off"></div>
-            <div class="form-group span2"><label>Role</label><div class="pc-roles" id="pcInvRoles"></div></div>
-            <div class="form-group" id="pcInvClubWrap" hidden><label>Club</label><div id="pcInvClub"></div></div>
-            <div class="form-group"><label for="pcInvJob">Job title</label><input type="text" id="pcInvJob" autocomplete="off"></div>
-          </div>
-          <p class="form-hint">Give their pass once they have signed in.</p>
-        </div>
-        <div class="form-panel__foot pc-foot">
-          <button class="btn btn--primary" type="button" id="pcInvSend"></button>
-        </div>
-      </div>
-      <div class="section-head"><h2>Waiting to be accepted</h2></div>
+      <div class="section-head"><h2>Waiting to be accepted</h2>
+        <span class="pc-actions"><a class="btn btn--primary btn--sm" href="/pass/?view=issue&invite=1" id="pcInvNew">Invite someone<svg class="icon" aria-hidden="true"><use href="/assets/icons/sprites.svg#icon-forward"></use></svg></a></span></div>
       <div id="pcInvites"></div>
     </section>
 
@@ -969,73 +955,11 @@
      model has none (plan: "no per-person overrides"); an invite sends
      tools: {} — the role's defaults, exactly what the old form sent unless
      its sliders were moved. */
-  var ROLES = ['admin', 'staff', 'club-admin', 'club-staff'];
-  var CLUB_ROLES = ['club-admin', 'club-staff'];
-  var INV = { role: 'staff', club: '', picker: null };
-  /* League roles open League tools, so only the Skeleton key invites them. */
-  function inviteRoles() { return sk() ? ROLES : CLUB_ROLES; }
-
-  function drawRoles() {
-    document.getElementById('pcInvRoles').innerHTML = inviteRoles().map(function (r) {
-      return '<label class="pc-role"><input type="radio" name="pcInvRole" value="' + r + '"' + (r === INV.role ? ' checked' : '') + '>' +
-        '<span><span class="pc-role__name">' + esc(NL.roles.label(r)) + '</span><span class="pc-role__grant">' + esc(NL.roles.grant(r)) + '</span></span></label>';
-    }).join('');
-  }
-
-  function initInvites() {
-    if (inviteRoles().indexOf(INV.role) < 0) INV.role = 'club-staff';
-    document.getElementById('pcInvClubWrap').hidden = !NL.isClubUser(INV.role);
-    drawRoles();
-    var send = document.getElementById('pcInvSend');
-    send.innerHTML = 'Send invite ' + icon('send');
-    document.getElementById('pcInvRoles').addEventListener('change', function (e) {
-      INV.role = e.target.value;
-      document.getElementById('pcInvClubWrap').hidden = !NL.isClubUser(INV.role);
-    });
-    INV.picker = NL.clubPicker(document.getElementById('pcInvClub'), {
-      season: 'current', freetext: false, placeholder: 'Search club name…',
-      onSelect: function (sel) { INV.club = (sel && sel.name) || ''; }
-    });
-    send.addEventListener('click', sendInvite);
-  }
-
-  function sendInvite() {
-    var email = document.getElementById('pcInvEmail').value.trim();
-    var name = document.getElementById('pcInvName').value.trim();
-    var jobTitle = document.getElementById('pcInvJob').value.trim();
-    var role = NL.roles.norm(INV.role);
-    if (inviteRoles().indexOf(role) < 0) return NL.toast('Only the Skeleton key invites League staff', 'error');
-    var isClub = NL.isClubUser(role);
-    var club = isClub ? (INV.picker && INV.picker.getValue ? (INV.picker.getValue() || '') : INV.club).trim() : '';
-    /* Club roles carry no org; every League role carries the National League. */
-    var org = isClub ? '' : 'National League';
-    if (!email || !name) return NL.toast('Email and name are needed', 'error');
-    if (isClub && !club) return NL.toast('Choose the club', 'error');
-
-    var btn = document.getElementById('pcInvSend');
-    btn.disabled = true;
-    var token = NL.uuid();
-    NL.gas.send({ action: 'sendInvite', token: token, email: email, name: name, role: role,
-      org: org, club: club, jobTitle: jobTitle, tools: {} })
-    .then(function (result) {
-      if (result && result.ok === false) { NL.toast('The invite was not sent: ' + (result.error || 'unknown error'), 'error'); return; }
-      NL.writeAudit('invite_sent', isClub
-        ? 'Invited ' + name + ' as ' + NL.roles.label(role) + ' for ' + club + (jobTitle ? ' (' + jobTitle + ')' : '')
-        : 'Invited ' + name + ' as ' + NL.roles.label(role) + ' (' + org + ')');
-      /* The pending record the Invites list reads, with the token so a
-         resend could reuse it. */
-      db.ref('admin/invites-pending').push({
-        email: email, name: name, role: role, org: org, club: club, jobTitle: jobTitle,
-        tools: {}, token: token, sentAt: Date.now(), sentBy: S.session.name || ''
-      }).then(loadInvites).catch(function () {});
-      NL.toast('Invite sent to ' + email, 'success');
-      ['pcInvEmail', 'pcInvName', 'pcInvJob'].forEach(function (id) { document.getElementById(id).value = ''; });
-      if (INV.picker && INV.picker.clear) INV.picker.clear();
-      INV.club = '';
-    })
-    .catch(function (err) { NL.toast('The invite may not have been sent: ' + (err && err.message || err), 'error'); })
-    .then(function () { btn.disabled = false; });
-  }
+  /* An invite is a pass waiting for its person (v2.14): it is issued on the
+     same Issue a pass form as everyone's (/pass/?view=issue&invite=1), card
+     and zones and all, never a role. That form sends it; this tab lists what
+     is waiting, and resends or revokes. */
+  function initInvites() {}
 
   /* Invites waiting to be accepted. One already accepted (its email now on
      an approved account) is cleared from the list, as the portal did. */
@@ -1054,9 +978,11 @@
       items.sort(function (a, b) { return (b.sentAt || 0) - (a.sentAt || 0); });
       count('pcInviteCount', items.length);
       box.innerHTML = items.length
-        ? '<div class="table-wrap"><table class="table"><thead><tr><th>Person</th><th>Role</th><th>Sent</th><th aria-label="Actions"></th></tr></thead><tbody>' +
+        ? '<div class="table-wrap"><table class="table"><thead><tr><th>Person</th><th>Pass</th><th>Sent</th><th aria-label="Actions"></th></tr></thead><tbody>' +
           items.map(function (inv) {
-            var role = NL.roles.label(inv.role) + (NL.isClubUser(inv.role) && inv.club ? ', ' + inv.club : '');
+            /* An invite since v2.14 carries the pass it will give; older
+               ones only a role. */
+            var role = inv.pass ? passText(inv.pass) : NL.roles.label(inv.role) + (NL.isClubUser(inv.role) && inv.club ? ', ' + inv.club : '');
             return '<tr data-key="' + esc(inv._key) + '">' +
               '<td><span class="pc-who"><span class="pc-who__name">' + esc(inv.name || '(no name)') + '</span><span class="pc-who__sub">' + esc(inv.email || '') + '</span></span></td>' +
               '<td>' + esc(role) + (inv.jobTitle ? '<div class="pc-who__sub">' + esc(inv.jobTitle) + '</div>' : '') + '</td>' +
@@ -1084,10 +1010,19 @@
   function resendInvite(inv, btn) {
     btn.disabled = true;
     var token = NL.uuid();
-    NL.gas.send({ action: 'sendInvite', token: token, email: inv.email || '', name: inv.name || '',
-      role: inv.role || 'staff', org: '', orgKey: '', club: inv.club || '', jobTitle: inv.jobTitle || '', tools: inv.tools || {} })
+    /* The pass goes with the new link, left in the resender's name: the
+       server checks they may give it when the invite is used. */
+    var leave = inv.pass ? db.ref('admin/invite-passes/' + token).set({ pass: inv.pass, by: S.session.uid, at: Date.now() }) : Promise.resolve();
+    leave.then(function () {
+      return NL.gas.send({ action: 'sendInvite', token: token, email: inv.email || '', name: inv.name || '',
+        role: inv.role || 'staff', org: inv.org || '', orgKey: '', club: inv.club || '', jobTitle: inv.jobTitle || '', tools: {} });
+    })
     .then(function (result) {
-      if (result && result.ok === false) { NL.toast('Resend failed: ' + (result.error || 'unknown'), 'error'); btn.disabled = false; return; }
+      if (result && result.ok === false) {
+        db.ref('admin/invite-passes/' + token).remove().catch(function () {});
+        NL.toast('Resend failed: ' + (result.error || 'unknown'), 'error'); btn.disabled = false; return;
+      }
+      if (inv.token) db.ref('admin/invite-passes/' + inv.token).remove().catch(function () {});
       db.ref('admin/invites-pending/' + inv._key).update({ sentAt: Date.now(), token: token }).catch(function () {});
       NL.writeAudit('invite_sent', 'Resent invite to ' + (inv.name || inv.email || ''));
       NL.toast('Invite resent to ' + inv.email, 'success');
@@ -1102,7 +1037,10 @@
     NL.confirm('Revoke the invite to ' + (inv.name || inv.email) + '?', { title: 'Revoke invite', confirmText: 'Revoke', variant: 'danger' })
     .then(function (ok) {
       if (!ok) return;
-      return db.ref('admin/invites-pending/' + inv._key).remove().then(function () {
+      var updates = {};
+      updates['admin/invites-pending/' + inv._key] = null;
+      if (inv.token) updates['admin/invite-passes/' + inv.token] = null;
+      return db.ref().update(updates).then(function () {
         NL.writeAudit('invite_cancelled', (inv.name || inv.email || '') + ' invite revoked');
         NL.toast('Invite revoked', 'success');
         loadInvites();
@@ -2711,6 +2649,6 @@
 })();
 </script>
 
-<script src="/access/_externals.js?v=6"></script>
+<script src="/access/_externals.js?v=7"></script>
 </body>
 </html>

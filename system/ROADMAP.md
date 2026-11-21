@@ -49,7 +49,7 @@ Why: This is the last part of the new model people actually meet. Without it, ne
 - Everyone signs in with email and password. No emailed sign-in links each time (decided 13/11): they hang every sign-in on someone's inbox.
 - Email stays in Apps Script for now. The log records that an email was sent, not whether it arrived.
 - Built 16/11: a request asks for Club zones (each saying what it adds to the Club card) and one line on why, never tools or a role. Review in Access → Requests opens Issue a pass with the request filled in, and saving the pass is the approval, so nobody is approved without one. The old role is set from the card behind the scenes (a few database rules still read it) and is never chosen.
-- Next: invites through the same Issue a pass form, League, Club and External alike, so the invite form stops offering the old roles (Club Admin and so on).
+- Built 16/11: invites are issued on the same form, League, Club and External alike: card, club or organisation, and zones with end dates, never a role. The pass waits beside the invite and is checked again by the server against who sent it when the invite is accepted. Access → Invites lists the pass each invite will give, and Resend and Revoke keep it in step. Invite records themselves are now written only by the server.
 - The request email from Apps Script still lists tools, so it shows none until Apps Script is published again.
 
 ### Club views, and the regulator
