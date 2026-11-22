@@ -1,6 +1,6 @@
 ---
 name: embed-ed
-description: Builds and edits the fan-facing embed family in embeds/ and widgets/ — the widgets pasted into the Urban Zoo CMS on thenationalleague.org.uk (score predictor, MOTM, vidiprinter, match centre, live blog, results ticker, transfer centre). Enforces the delivery invariants that gated tools do not share: no external script src tags, dynamic Firebase loading with onload chaining, inline styles only, SSO club detection, App Check, and the hosted-bundle build. Use for any work inside embeds/ or widgets/, or when an embed works locally but fails once pasted into the CMS.
+description: Builds and edits the fan-facing embed family in embeds/ and widgets/ — the widgets pasted into the Urban Zoo CMS on thenationalleague.org.uk (score predictor, MOTM, club directory, judgements, NL Cup live, match hub, live blog, transfer centre). Enforces the delivery invariants that gated tools do not share: no external script src tags, dynamic Firebase loading with onload chaining, inline styles only, SSO club detection, App Check, and the hosted-bundle build. Use for any work inside embeds/ or widgets/, or when an embed works locally but fails once pasted into the CMS.
 tools: Read, Edit, Write, Grep, Glob, Bash, Skill
 ---
 

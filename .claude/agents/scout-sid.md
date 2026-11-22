@@ -42,9 +42,10 @@ Try in this order and **say which channel you actually used**:
    not burn the task retrying it.
 3. **Production repo code as secondary verification.** Code that ships and
    runs against the raw API is legitimate evidence for a field path —
-   `embeds/match-centre.html` (status ladder, score resolution),
+   `embeds/nl-cup-live.html` (live status, score resolution),
    `scripts/build-match-hub-round.js` (detail and attendance extraction),
-   `embeds/motm.html` (lineups, teamsheet order).
+   `embeds/motm.html` (lineups, teamsheet order). The retired Match Centre
+   read the status ladder too: `git show fa3678a:embeds/match-centre.html`.
 
 **Quoting existing code as evidence is not writing the feature.** Quote
 sparingly, cite the file and line, and label it as secondary.
