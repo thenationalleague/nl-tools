@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Transcribe
+  Version: v2.0 (25/11/2026)
+  File: /transcribe/index.html
+
+  Turns a recording into a transcript, tells the speakers apart and lets
+  you name them. Everything runs in the browser: the recording is never
+  uploaded, and nothing is saved to the database.
+
+  Files:
+    index.html      the page
+    _worker.js      the engine, run off the page
+    _core.js        the arithmetic (tested: tests/transcribe-core.test.mjs)
+    README.md       what is fetched from other hosts, and from where
+
+  Storage (RTDB):
+    tools/staff-transcribe         tool registration only; no app-data
+
+  CHANGELOG
+  v2.0 – 25/11/2026
+    - Now on NL Tools (v1.0 was a standalone page).
+    - Tells the speakers apart; speakers can be named, and a passage moved
+      to another speaker.
+    - Laptop only; the resume-after-reload of v1.0 is gone with the phone.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Transcribe — NL Tools</title>
+  <!-- Favicons. Static, not injected: nl-topbar.js adds these too, but a
+       standalone page never loads it, and an icon that arrives with the JS
+       leaves the tab blank until it does. /favicon.ico at the root is the
+       backstop every browser asks for without being told. -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
+
+  <!-- Brand stylesheet (lint canonical: ?v=76) -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=83">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'Transcribe',
+      toolKey: 'staff-transcribe'
+    };
+    var NL_TOOL_KEY = 'staff-transcribe';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '25/11/2026',
+        version: 'v2.0',
+        items: [
+          'Now on NL Tools.',
+          'Tells the speakers apart. Name them, or move a passage to someone else.'
+        ]
+      }
+    ];
+
+    /* auth-guard fires this once the session is verified + pageWrap is
+       revealed. Boot the main app from here so RTDB reads happen with a
+       live auth token. Do NOT read RTDB before this fires. */
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts (lint canonical: ?v=66 / ?v=1 / ?v=15 / ?v=21) -->
+  <script src="/system/nl-utils.js?v=80"></script>
+  <!-- GA4, one property for all of nl.tools. Cookieless, so no consent
+       banner on any page; page views by path, no identity. Tool events go
+       through NL.track(). See system/nl-analytics.js. -->
+  <script src="/system/nl-analytics.js?v=1"></script>
+  <script src="/system/nl-topbar.js?v=17"></script>
+  <script src="/system/auth-guard.js?v=25"></script>
+
+<style>
+  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
+     style.display = 'block'. Don't clear with '' — would re-trigger the
+     brand rule and re-hide the page. */
+
+  .tr-setup { max-width: 760px; margin-bottom: 28px; }
+  .tr-tick { display: flex; align-items: center; gap: 10px; margin-top: 16px; font-size: var(--text-sm); color: var(--text); cursor: pointer; }
+  .tr-hint { margin-top: 8px; }
+
+  /* A progress bar. First use, so local; a second tool wanting one is the
+     signal to promote it (canon candidate, 25/11/2026). */
+  .tr-progress { max-width: 760px; margin-bottom: 28px; }
+  .tr-progress__what { font-size: var(--text-sm); color: var(--text); }
+  .tr-bar { height: 8px; margin: 12px 0 8px; background: var(--navy-100); border-radius: var(--radius-pill); overflow: hidden; }
+  .tr-bar__fill { height: 100%; width: 0; background: var(--navy); transition: width 0.3s; }
+  .tr-progress__meta { display: flex; justify-content: space-between; gap: 12px; font-size: var(--text-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+  .tr-result { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; align-items: start; }
+  .tr-result--speakers { grid-template-columns: minmax(0, 1fr) 320px; }
+  .tr-doc { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 8px 24px; }
+  .tr-para { padding: 14px 0; border-bottom: 1px solid var(--border); }
+  .tr-para:last-child { border-bottom: 0; }
+  .tr-para__head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+  .tr-who { padding: 0; border: 0; background: none; font-family: var(--font); font-size: var(--text-sm); font-weight: 700; font-variation-settings: 'wght' 700; color: var(--navy); cursor: pointer; }
+  .tr-who:hover, .tr-who:focus-visible { text-decoration: underline; }
+  .tr-time { font-size: var(--text-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .tr-para__text { margin: 0; font-size: var(--text-base); line-height: 1.55; color: var(--text); }
+
+  .tr-speakers { position: sticky; top: 76px; }
+  .tr-speaker { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  .tr-speaker__name { flex: 1; min-width: 0; }
+  .tr-speaker__time { flex: 0 0 56px; text-align: right; font-size: var(--text-xs); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+
+<!-- Topbar — auto-rendered by /system/nl-topbar.js from window.NL_TOOL -->
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="page">
+
+    <div id="trError" class="banner banner--error" hidden></div>
+
+    <section class="form-panel tr-setup" id="trSetup">
+      <div class="form-panel__head">Recording</div>
+      <div class="form-panel__body">
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="trFile">Audio or video file</label>
+            <input id="trFile" type="file" accept="audio/*,video/*,.m4a,.mp3,.wav,.aac,.ogg,.opus,.webm,.mp4,.mov">
+          </div>
+          <div class="form-group">
+            <label for="trModel">Accuracy</label>
+            <select id="trModel">
+              <option value="Xenova/whisper-tiny.en">Fast (40 MB)</option>
+              <option value="Xenova/whisper-base.en" selected>Balanced (80 MB)</option>
+              <option value="Xenova/whisper-small.en">Best, about three times slower (250 MB)</option>
+            </select>
+          </div>
+        </div>
+        <label class="tr-tick"><input id="trSpeakers" type="checkbox" checked> Tell the speakers apart</label>
+        <p class="form-hint tr-hint">English only. The recording stays on this computer.</p>
+      </div>
+      <div class="form-panel__foot" id="trFoot" hidden>
+        <button type="button" class="btn btn--primary" id="trStart"><svg class="icon icon--md" aria-hidden="true"><use href="/assets/icons/sprites.svg#icon-play"/></svg>Transcribe</button>
+      </div>
+    </section>
+
+    <section class="form-panel tr-progress" id="trProgress" hidden>
+      <div class="form-panel__body">
+        <div class="tr-progress__what" id="trWhat" role="status"></div>
+        <div class="tr-bar"><div class="tr-bar__fill" id="trFill"></div></div>
+        <div class="tr-progress__meta"><span id="trLeft"></span><span id="trRight"></span></div>
+      </div>
+      <div class="form-panel__foot">
+        <button type="button" class="btn btn--ghost" id="trStop"><svg class="icon icon--md" aria-hidden="true"><use href="/assets/icons/sprites.svg#icon-close"/></svg>Stop</button>
+      </div>
+    </section>
+
+    <section id="trOut" hidden>
+      <div class="section-head">
+        <h2>Transcript</h2>
+        <div class="toolbar__right" id="trActions" hidden>
+          <button type="button" class="btn btn--ghost btn--sm" id="trCopy">Copy</button>
+          <button type="button" class="btn btn--ghost btn--sm" id="trDownload"><svg class="icon icon--md" aria-hidden="true"><use href="/assets/icons/sprites.svg#icon-download"/></svg>Download</button>
+        </div>
+      </div>
+      <div class="tr-result" id="trResult">
+        <div class="tr-doc" id="trDoc"></div>
+        <aside class="form-panel tr-speakers" id="trSpeakerPanel" hidden>
+          <div class="form-panel__head">Speakers</div>
+          <div class="form-panel__body">
+            <div class="form-group">
+              <label for="trCount">People speaking</label>
+              <select id="trCount"></select>
+            </div>
+            <div id="trNames"></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<!-- Main app -->
+<script>
+(function () {
+  'use strict';
+
+  var VERSION = '2.0';
+  var SR = 16000;             /* what every model here listens at */
+  var MAX_PEOPLE = 10;
+
+  var $ = function (id) { return document.getElementById(id); };
+  var worker = null;
+  var S = fresh();
+
+  function fresh() {
+    return {
+      running: false, file: null, withSpeakers: false,
+      lines: [],              /* { start, end, text, batch } */
+      speakers: null,         /* speaker number per line, once known */
+      count: 0, names: [], seconds: [],
+      touched: false,         /* a name typed or a passage moved by hand */
+      stage: '', stageAt: 0, startedAt: 0, lock: null
+    };
+  }
+
+  function stamp(sec) {
+    sec = Math.max(0, Math.floor(sec));
+    var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+    return (h ? h + ':' + String(m).padStart(2, '0') : String(m).padStart(2, '0')) + ':' + String(s).padStart(2, '0');
+  }
+  function name(i) { return S.names[i] || 'Speaker ' + (i + 1); }
+  function show(el, on) { el.hidden = !on; }
+
+  function fail(message) {
+    $('trError').innerHTML = '<strong>' + NL.escHtml(message) + '</strong>';
+    show($('trError'), true);
+  }
+
+  /* ── Reading the file ─────────────────────────────────────────────────── */
+
+  /* Decoding straight into a 16 kHz context makes the browser resample as it
+     decodes, which takes a third of the memory of decoding at 48 kHz first. */
+  function decode(file) {
+    return file.arrayBuffer().then(function (buf) {
+      var Ctx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+      var ctx = new Ctx(1, SR, SR);
+      return new Promise(function (res, rej) {
+        var p = ctx.decodeAudioData(buf, res, rej);
+        if (p && p.then) p.then(res, rej);
+      });
+    }).then(function (ab) {
+      if (ab.numberOfChannels === 1) return ab.getChannelData(0).slice();
+      var out = new Float32Array(ab.length), n = ab.numberOfChannels;
+      for (var c = 0; c < n; c++) {
+        var ch = ab.getChannelData(c);
+        for (var i = 0; i < ch.length; i++) out[i] += ch[i] / n;
+      }
+      return out;
+    });
+  }
+
+  /* ── Progress ─────────────────────────────────────────────────────────── */
+
+  var WHAT = {
+    read: 'Reading the recording…',
+    download: 'Getting ready (a download, the first time only)…',
+    transcribe: 'Transcribing…',
+    speakers: 'Working out who is speaking…'
+  };
+
+  function progress(stage, done, total) {
+    if (stage !== S.stage) { S.stage = stage; S.stageAt = Date.now(); }
+    $('trWhat').textContent = WHAT[stage] || '';
+    var part = total > 0 ? Math.min(1, done / total) : 0;
+    $('trFill').style.width = (part * 100).toFixed(1) + '%';
+    var left = '', right = '';
+    if (stage === 'download' && total > 0) left = Math.round(done / 1048576) + ' of ' + Math.round(total / 1048576) + ' MB';
+    if (stage === 'transcribe' && total > 0) left = stamp(done / SR) + ' of ' + stamp(total / SR);
+    if ((stage === 'transcribe' || stage === 'speakers') && part > 0.03 && part < 1) {
+      var remaining = (Date.now() - S.stageAt) / 1000 * (1 - part) / part;
+      right = remaining < 60 ? 'Under a minute left' : 'About ' + NL.formatDuration(Math.ceil(remaining / 60) * 60) + ' left';
+    }
+    $('trLeft').textContent = left;
+    $('trRight').textContent = right;
+  }
+
+  /* ── The transcript ───────────────────────────────────────────────────── */
+
+  /* Lines that belong together: one speaker's unbroken run, or, before the
+     speakers are known, what one 30 s piece of the recording produced. */
+  function passages() {
+    var out = [], cur = null;
+    S.lines.forEach(function (l, i) {
+      var key = S.speakers ? S.speakers[i] : l.batch;
+      if (!cur || cur.key !== key) { cur = { key: key, start: l.start, from: i, to: i, text: [] }; out.push(cur); }
+      cur.to = i; cur.text.push(l.text);
+    });
+    return out;
+  }
+
+  function renderDoc() {
+    var html = passages().map(function (p) {
+      var who = S.speakers
+        ? '<button type="button" class="tr-who" data-from="' + p.from + '" data-to="' + p.to + '" data-s="' + p.key + '">' + NL.escHtml(name(p.key)) + '</button>'
+        : '';
+      return '<div class="tr-para"><div class="tr-para__head">' + who + '<span class="tr-time">' + stamp(p.start) + '</span></div>' +
+        '<p class="tr-para__text">' + NL.escHtml(p.text.join(' ')) + '</p></div>';
+    }).join('');
+    $('trDoc').innerHTML = html;
+  }
+
+  function tally() {
+    S.seconds = [];
+    for (var s = 0; s < S.count; s++) S.seconds.push(0);
+    S.lines.forEach(function (l, i) { S.seconds[S.speakers[i]] += Math.max(0, l.end - l.start); });
+  }
+
+  function renderSpeakers() {
+    var opts = '<option value="0">Work it out</option>';
+    for (var n = 2; n <= MAX_PEOPLE; n++) opts += '<option value="' + n + '">' + n + '</option>';
+    var sel = $('trCount'), keep = sel.value || '0';
+    sel.innerHTML = opts; sel.value = keep;
+    var rows = '';
+    for (var i = 0; i < S.count; i++) {
+      rows += '<div class="tr-speaker"><div class="form-group tr-speaker__name"><input type="text" data-s="' + i + '" value="' + NL.escHtml(name(i)) +
+        '" aria-label="Name for speaker ' + (i + 1) + '"></div><span class="tr-speaker__time">' + stamp(S.seconds[i] || 0) + '</span></div>';
+    }
+    $('trNames').innerHTML = rows;
+  }
+
+  function renderAll() {
+    var has = !!S.speakers;
+    $('trResult').classList.toggle('tr-result--speakers', has);
+    show($('trSpeakerPanel'), has);
+    if (has) { tally(); renderSpeakers(); }
+    renderDoc();
+  }
+
+  function asText() {
+    return passages().map(function (p) {
+      var body = p.text.join(' ');
+      return S.speakers ? name(p.key) + ' [' + stamp(p.start) + ']\n' + body : '[' + stamp(p.start) + '] ' + body;
+    }).join(S.speakers ? '\n\n' : '\n');
+  }
+
+  /* ── Moving a passage to another speaker ──────────────────────────────── */
+
+  function move(from, to, current) {
+    var body = document.createElement('div');
+    body.className = 'form-group';
+    var opts = '';
+    for (var i = 0; i < S.count; i++) opts += '<option value="' + i + '"' + (i === current ? ' selected' : '') + '>' + NL.escHtml(name(i)) + '</option>';
+    if (S.count < MAX_PEOPLE) opts += '<option value="new">Someone new</option>';
+    body.innerHTML = '<label for="trMoveTo">Speaker</label><select id="trMoveTo">' + opts + '</select>';
+    NL.modal({
+      title: 'Passage at ' + stamp(S.lines[from].start),
+      size: 'sm',
+      body: body,
+      buttons: [{
+        label: 'Save', className: 'btn--primary', autofocus: true,
+        onClick: function (c) {
+          var v = body.querySelector('select').value, target = v === 'new' ? S.count++ : +v;
+          for (var i = from; i <= to; i++) S.speakers[i] = target;
+          S.touched = true;
+          c.close();
+          renderAll();
+        }
+      }]
+    });
+  }
+
+  /* ── Running ──────────────────────────────────────────────────────────── */
+
+  function engine() {
+    if (worker) return worker;
+    worker = new Worker('_worker.js?v=' + VERSION);
+    worker.onmessage = function (e) { heard(e.data || {}); };
+    worker.onerror = function (e) { finish(); fail('The transcriber could not start. Reload the page and try again. (' + (e.message || 'no detail') + ')'); };
+    return worker;
+  }
+
+  function heard(m) {
+    if (m.type === 'status') return progress(m.stage, m.done, m.total);
+    if (m.type === 'lines') {
+      var batch = S.lines.length ? S.lines[S.lines.length - 1].batch + 1 : 0;
+      m.lines.forEach(function (l) { l.batch = batch; S.lines.push(l); });
+      show($('trOut'), true);
+      return renderDoc();
+    }
+    if (m.type === 'speakers') {
+      S.speakers = m.speakers; S.count = m.count; S.names = []; S.touched = false;
+      return renderAll();
+    }
+    if (m.type === 'error') { finish(); return fail('Something went wrong: ' + m.message + ' Reload the page and try again; if a download was interrupted it carries on from where it stopped.'); }
+    if (m.type === 'done') {
+      finish();
+      if (!S.lines.length) return fail(m.stopped ? 'Stopped before anything was transcribed.' : 'No speech was found in that recording.');
+      show($('trActions'), true);
+      if (!m.stopped) NL.track('transcribe_done', { minutes: Math.round(S.lines[S.lines.length - 1].end / 60), speakers: S.count });
+    }
+  }
+
+  function finish() {
+    S.running = false;
+    show($('trProgress'), false);
+    show($('trSetup'), true);
+    if (S.lock) { try { S.lock.release(); } catch (e) {} S.lock = null; }
+  }
+
+  function start() {
+    var file = $('trFile').files[0];
+    if (!file || S.running) return;
+    S = fresh();
+    S.running = true; S.file = file; S.withSpeakers = $('trSpeakers').checked;
+    show($('trError'), false); show($('trOut'), false); show($('trActions'), false);
+    show($('trSetup'), false); show($('trProgress'), true);
+    $('trCount').value = '0';
+    $('trDoc').innerHTML = '';
+    progress('read', 0, 0);
+    if (navigator.wakeLock) navigator.wakeLock.request('screen').then(function (l) { if (S.running) S.lock = l; else l.release(); }, function () {});
+    decode(file).then(function (audio) {
+      if (!S.running) return;
+      if (audio.length < SR) { finish(); return fail('That recording is under a second long.'); }
+      engine().postMessage({ type: 'run', audio: audio, model: $('trModel').value, speakers: S.withSpeakers }, [audio.buffer]);
+    }, function () {
+      finish();
+      fail('That file could not be read as audio. Try an MP3, M4A or WAV.');
+    });
+  }
+
+  function regroup() {
+    var count = +$('trCount').value || 0;
+    var go = function () { engine().postMessage({ type: 'regroup', count: count }); };
+    if (!S.touched) return go();
+    NL.confirm('Grouping the speakers again clears the names you have typed and the passages you have moved.', { confirmText: 'Group again' })
+      .then(function (yes) { if (yes) go(); else $('trCount').value = String(S.asked || 0); });
+  }
+
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function () {
+    $('trFile').addEventListener('change', function () { show($('trFoot'), !!$('trFile').files[0]); });
+    $('trStart').addEventListener('click', start);
+    $('trStop').addEventListener('click', function () { if (worker) worker.postMessage({ type: 'stop' }); $('trWhat').textContent = 'Stopping…'; });
+    $('trCopy').addEventListener('click', function () { NL.copy(asText(), { ok: 'Transcript copied' }); });
+    $('trDownload').addEventListener('click', function () {
+      var base = S.file ? S.file.name.replace(/\.[^.]+$/, '') : 'recording';
+      NL.download(base + ' transcript.txt', asText());
+    });
+    $('trCount').addEventListener('focus', function () { S.asked = +$('trCount').value || 0; });
+    $('trCount').addEventListener('change', regroup);
+    $('trNames').addEventListener('input', function (e) {
+      var i = +e.target.getAttribute('data-s');
+      S.names[i] = e.target.value.trim(); S.touched = true;
+      var who = $('trDoc').querySelectorAll('.tr-who[data-s="' + i + '"]');
+      for (var k = 0; k < who.length; k++) who[k].textContent = name(i);
+    });
+    $('trDoc').addEventListener('click', function (e) {
+      var b = e.target.closest ? e.target.closest('.tr-who') : null;
+      if (b && !S.running) move(+b.getAttribute('data-from'), +b.getAttribute('data-to'), +b.getAttribute('data-s'));
+    });
+    window.addEventListener('beforeunload', function (e) { if (S.running) { e.preventDefault(); e.returnValue = ''; } });
+  };
+
+  /* If auth-guard fired before this script loaded, replay the session. */
+  if (window._toolDeferredSession) {
+    window.TOOL.boot(window._toolDeferredSession);
+    delete window._toolDeferredSession;
+  }
+})();
+</script>
+
+</body>
+</html>
