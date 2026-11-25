@@ -271,9 +271,49 @@
     return out;
   }
 
+  /* ── Changing the sample rate ─────────────────────────────────────────── */
+
+  /* Every model here listens at 16 kHz; recordings arrive at 44.1 or 48. When the
+     browser decodes a whole file it converts for us. When a large video is decoded
+     a piece at a time (_media.js) it does not, so this does: each output sample is
+     a weighted sum of the 64 input samples around it, the weights shaped to remove
+     everything above what 16 kHz can carry (which would otherwise fold back into
+     the speech as noise). Fed in pieces, it carries on where it left off.
+     resampler(48000) -> { push(Float32Array) -> Float32Array, end() -> Float32Array } */
+  function resampler(from) {
+    if (from === SR) return { push: function (x) { return Float32Array.from(x); }, end: function () { return new Float32Array(0); } };
+    var ratio = from / SR, HALF = 32, TAPS = 2 * HALF, PHASES = 256;
+    var cutoff = 0.46 / Math.max(1, ratio);           /* in cycles per input sample */
+    var table = new Float32Array((PHASES + 1) * TAPS), p, k;
+    for (p = 0; p <= PHASES; p++) {
+      var sum = 0, o = p * TAPS;
+      for (k = 0; k < TAPS; k++) {
+        var t = (k - HALF + 1) - p / PHASES, x = 2 * Math.PI * cutoff * t;
+        var h = Math.abs(t) >= HALF ? 0 : (x === 0 ? 1 : Math.sin(x) / x) * 0.5 * (1 + Math.cos(Math.PI * t / HALF));
+        table[o + k] = h; sum += h;
+      }
+      for (k = 0; k < TAPS; k++) table[o + k] /= sum;
+    }
+    var held = new Float32Array(HALF - 1), pos = HALF - 1;   /* silence before the first sample */
+    function push(input) {
+      var buf = new Float32Array(held.length + input.length);
+      buf.set(held, 0); buf.set(input, held.length);
+      var out = new Float32Array(Math.max(0, Math.ceil((buf.length - HALF - pos) / ratio) + 1)), n = 0;
+      while (Math.floor(pos) + HALF < buf.length) {
+        var i = Math.floor(pos), o = Math.round((pos - i) * PHASES) * TAPS, b = i - HALF + 1, acc = 0;
+        for (var k = 0; k < TAPS; k++) acc += buf[b + k] * table[o + k];
+        out[n++] = acc; pos += ratio;
+      }
+      var drop = Math.max(0, Math.floor(pos) - HALF + 1);
+      held = buf.slice(drop); pos -= drop;
+      return out.subarray(0, n);
+    }
+    return { push: push, end: function () { return push(new Float32Array(HALF)); } };
+  }
+
   root.TranscribeCore = {
     SR: SR, WIN: WIN, HOP: HOP, STEP: STEP, CLASSES: POWERSET.length, THRESHOLD: THRESHOLD,
     frames: frames, plan: plan, decode: decode, clip: clip, group: group, attribute: attribute,
-    cosDist: cosDist, pieceEnd: pieceEnd, silent: silent, clean: clean, lines: lines
+    cosDist: cosDist, pieceEnd: pieceEnd, silent: silent, clean: clean, lines: lines, resampler: resampler
   };
 })(typeof self !== 'undefined' ? self : this);
