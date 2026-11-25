@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Transcribe
-  Version: v2.0 (25/11/2026)
+  Version: v2.1 (25/11/2026)
   File: /transcribe/index.html
 
   Turns a recording into a transcript, tells the speakers apart and lets
@@ -12,12 +12,16 @@
     index.html      the page
     _worker.js      the engine, run off the page
     _core.js        the arithmetic (tested: tests/transcribe-core.test.mjs)
+    _media.js       reads the sound out of a video too large to load whole
     README.md       what is fetched from other hosts, and from where
 
   Storage (RTDB):
     tools/staff-transcribe         tool registration only; no app-data
 
   CHANGELOG
+  v2.1 – 25/11/2026
+    - Reads large videos (MP4 and MOV over 2 GB) by taking only their sound.
+    - Says why when a file cannot be read.
   v2.0 – 25/11/2026
     - Now on NL Tools (v1.0 was a standalone page).
     - Tells the speakers apart; speakers can be named, and a passage moved
@@ -72,6 +76,13 @@
     window.NL_CHANGELOG = [
       {
         date: '25/11/2026',
+        version: 'v2.1',
+        items: [
+          'Reads large videos: MP4 and MOV over 2 GB.',
+          'Says why when a file cannot be read.'
+        ]
+      },
+      {
         version: 'v2.0',
         items: [
           'Now on NL Tools.',
@@ -209,12 +220,16 @@
   </div>
 </div>
 
-<!-- Main app -->
+<!-- The arithmetic and the large-video reader, then the main app -->
+<script src="_core.js?v=2.1"></script>
+<script src="_media.js?v=2.1"></script>
 <script>
 (function () {
   'use strict';
 
-  var VERSION = '2.0';
+  var VERSION = '2.1';            /* also in the two script tags above */
+  var WHOLE_MAX = 1900 * 1048576;   /* a browser will not hold a file much larger than this in one piece */
+  var PIECEMEAL_FROM = 200 * 1048576; /* above this an MP4 is read for its sound only, which needs far less memory */
   var SR = 16000;             /* what every model here listens at */
   var MAX_PEOPLE = 10;
 
@@ -250,7 +265,7 @@
 
   /* Decoding straight into a 16 kHz context makes the browser resample as it
      decodes, which takes a third of the memory of decoding at 48 kHz first. */
-  function decode(file) {
+  function whole(file) {
     return file.arrayBuffer().then(function (buf) {
       var Ctx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
       var ctx = new Ctx(1, SR, SR);
@@ -267,6 +282,25 @@
       }
       return out;
     });
+  }
+
+  /* A small file is handed to the browser whole. A large MP4 or MOV is read for its
+     sound only (_media.js). Each is the other's fallback where the file allows it. */
+  function decode(file) {
+    var M = window.TranscribeMedia, mp4 = M.isMp4(file);
+    var piecemeal = function () { return M.decodeMp4(file, function (done, total) { progress('read', done, total); }); };
+    if (mp4 && file.size > PIECEMEAL_FROM) {
+      return piecemeal().catch(function (why) {
+        if (file.size > WHOLE_MAX) throw why;
+        return whole(file).catch(function () { throw why; });
+      });
+    }
+    if (file.size > WHOLE_MAX) {
+      var e = new Error('too large');
+      e.plain = 'That file is over 2 GB and is not an MP4 or MOV, so it is too large to read here. Export its audio as M4A or MP3 and use that.';
+      return Promise.reject(e);
+    }
+    return whole(file).catch(function (why) { if (!mp4) throw why; return piecemeal(); });
   }
 
   /* ── Progress ─────────────────────────────────────────────────────────── */
@@ -428,13 +462,15 @@
     $('trDoc').innerHTML = '';
     progress('read', 0, 0);
     if (navigator.wakeLock) navigator.wakeLock.request('screen').then(function (l) { if (S.running) S.lock = l; else l.release(); }, function () {});
+    var mine = S;                   /* Stop, or a second run, while this one is still reading */
     decode(file).then(function (audio) {
-      if (!S.running) return;
+      if (S !== mine || !S.running) return;
       if (audio.length < SR) { finish(); return fail('That recording is under a second long.'); }
       engine().postMessage({ type: 'run', audio: audio, model: $('trModel').value, speakers: S.withSpeakers }, [audio.buffer]);
-    }, function () {
+    }, function (why) {
+      if (S !== mine || !S.running) return;
       finish();
-      fail('That file could not be read as audio. Try an MP3, M4A or WAV.');
+      fail((why && why.plain) || 'That file could not be read as audio. Try an MP4, M4A, MP3 or WAV.');
     });
   }
 
@@ -450,7 +486,11 @@
   window.TOOL.boot = function () {
     $('trFile').addEventListener('change', function () { show($('trFoot'), !!$('trFile').files[0]); });
     $('trStart').addEventListener('click', start);
-    $('trStop').addEventListener('click', function () { if (worker) worker.postMessage({ type: 'stop' }); $('trWhat').textContent = 'Stopping…'; });
+    $('trStop').addEventListener('click', function () {
+      if (S.stage === 'read') return finish();       /* nothing has reached the engine yet */
+      if (worker) worker.postMessage({ type: 'stop' });
+      $('trWhat').textContent = 'Stopping…';
+    });
     $('trCopy').addEventListener('click', function () { NL.copy(asText(), { ok: 'Transcript copied' }); });
     $('trDownload').addEventListener('click', function () {
       var base = S.file ? S.file.name.replace(/\.[^.]+$/, '') : 'recording';

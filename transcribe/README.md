@@ -1,6 +1,6 @@
 # Transcribe: what it fetches
 
-Nothing third-party is committed here. Three things are fetched from other
+Nothing third-party is committed here. Four things are fetched from other
 hosts when someone presses Transcribe. All are downloads only: the recording
 is never sent anywhere, and nothing is saved to the database.
 
@@ -8,6 +8,7 @@ is never sent anywhere, and nothing is saved to the database.
 |---|---|---|
 | The library, Transformers.js (Apache-2.0) | `cdn.jsdelivr.net/npm/@huggingface/transformers` | 4.3.2, in `_worker.js` |
 | Its runtime, `onnxruntime-web` (about 20 MB) | `cdn.jsdelivr.net/npm/onnxruntime-web` | the version the library was built against |
+| mp4box (BSD-3-Clause), only for a large MP4 or MOV | `cdn.jsdelivr.net/npm/mp4box` | 2.6.0, in `_media.js` |
 | The models, kept by the browser after first use | `huggingface.co` | by name, below |
 
 Models: the transcriber the person picks (`Xenova/whisper-tiny.en`,

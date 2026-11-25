@@ -176,6 +176,46 @@ test('lines: a result with no timed chunks still gives its text, and times never
   for (const l of odd) assert.ok(l.start >= 0 && l.end <= 30 && l.end > l.start, JSON.stringify(l));
 });
 
+/* Push a signal through the converter in uneven pieces, the way a decoder delivers it. */
+function convert(from, signal) {
+  const r = C.resampler(from), parts = [];
+  for (let i = 0, step = 4096; i < signal.length; i += step, step = 3000 + (i % 2048)) parts.push(Array.from(r.push(signal.subarray(i, Math.min(signal.length, i + step)))));
+  parts.push(Array.from(r.end()));
+  return Float32Array.from(parts.flat());
+}
+function tone(hz, rate, seconds) { return Float32Array.from({ length: rate * seconds }, (_, i) => Math.sin(2 * Math.PI * hz * i / rate)); }
+function level(a) { let x = 0; for (let i = 2000; i < a.length - 2000; i++) x += a[i] * a[i]; return 20 * Math.log10(Math.sqrt(x / (a.length - 4000)) / Math.SQRT1_2); }
+
+test('resampler: speech frequencies pass untouched and what 16 kHz cannot carry is removed', () => {
+  for (const rate of [48000, 44100]) {
+    for (const hz of [200, 1000, 3000, 5000]) assert.ok(Math.abs(level(convert(rate, tone(hz, rate, 1)))) < 0.1, `${hz} Hz at ${rate}`);
+    for (const hz of [9000, 12000, 15000]) assert.ok(level(convert(rate, tone(hz, rate, 1))) < -40, `${hz} Hz at ${rate} should be gone`);
+  }
+});
+
+test('resampler: the length and the timing survive, however the audio is cut up on the way in', () => {
+  for (const rate of [48000, 44100, 22050, 8000]) {
+    const out = convert(rate, tone(440, rate, 2));
+    assert.ok(Math.abs(out.length - 2 * SR) <= 1, `${rate}: ${out.length} samples`);
+  }
+  const click = new Float32Array(96000); click[48000] = 1;      /* a click exactly one second in */
+  const out = convert(48000, click);
+  let peak = 0;
+  for (let i = 0; i < out.length; i++) if (out[i] > out[peak]) peak = i;
+  assert.equal(peak, SR);
+  const whole = C.resampler(44100), sig = tone(700, 44100, 1);
+  const once = Float32Array.from([...whole.push(sig), ...whole.end()]);
+  const pieces = convert(44100, sig);
+  assert.equal(pieces.length, once.length);
+  for (let i = 0; i < once.length; i += 97) assert.ok(Math.abs(pieces[i] - once[i]) < 1e-6, `sample ${i}`);
+});
+
+test('resampler: audio already at 16 kHz is handed back as it came', () => {
+  const sig = tone(300, SR, 1), r = C.resampler(SR);
+  assert.deepEqual(Array.from(r.push(sig)), Array.from(sig));
+  assert.equal(r.end().length, 0);
+});
+
 test('the page, the engine and the arithmetic agree on their file names and models', () => {
   const page = readFileSync(join(REPO, 'transcribe/index.html'), 'utf8');
   const worker = readFileSync(join(REPO, 'transcribe/_worker.js'), 'utf8');
@@ -183,8 +223,15 @@ test('the page, the engine and the arithmetic agree on their file names and mode
   assert.match(worker, /importScripts\('_core\.js'/);
   /* The library is asked for at one exact version, and the README names the same one. */
   const readme = readFileSync(join(REPO, 'transcribe/README.md'), 'utf8');
-  const version = worker.match(/@huggingface\/transformers@(\d+\.\d+\.\d+)\/dist\/transformers\.min\.js/)[1];
-  assert.ok(readme.includes(version + ','), `the README does not say ${version}`);
+  const library = worker.match(/@huggingface\/transformers@(\d+\.\d+\.\d+)\/dist\/transformers\.min\.js/)[1];
+  assert.ok(readme.includes(library + ','), `the README does not say ${library}`);
+  const media = readFileSync(join(REPO, 'transcribe/_media.js'), 'utf8');
+  const mp4box = media.match(/npm\/mp4box@(\d+\.\d+\.\d+)\/dist\/mp4box\.all\.mjs/)[1];
+  assert.ok(readme.includes(mp4box + ','), `the README does not say mp4box ${mp4box}`);
+  /* The page loads both helper files, at its own version, before the script that uses them. */
+  const version = page.match(/var VERSION = '([\d.]+)'/)[1];
+  assert.ok(page.includes(`<script src="_core.js?v=${version}"></script>`) && page.includes(`<script src="_media.js?v=${version}"></script>`), 'script tags and VERSION disagree');
+  assert.ok(page.includes(`version: 'v${version}'`), 'the changelog does not have the current version');
   /* Every model the code asks for is in the README. */
   for (const m of (page + worker).match(/(Xenova|onnx-community)\/[\w.-]+/g)) {
     const short = m.replace(/^Xenova\/whisper-(base|small)\.en$/, '-$1.en');
