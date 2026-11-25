@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Transcribe
-  Version: v2.1 (25/11/2026)
+  Version: v2.2 (25/11/2026)
   File: /transcribe/index.html
 
   Turns a recording into a transcript, tells the speakers apart and lets
@@ -19,6 +19,10 @@
     tools/staff-transcribe         tool registration only; no app-data
 
   CHANGELOG
+  v2.2 – 25/11/2026
+    - Turbo: a far larger transcriber, run on the graphics card where the
+      browser offers one. Better on names.
+    - The progress line says which of the two steps it is on.
   v2.1 – 25/11/2026
     - Reads large videos (MP4 and MOV over 2 GB) by taking only their sound.
     - Says why when a file cannot be read.
@@ -76,6 +80,13 @@
     window.NL_CHANGELOG = [
       {
         date: '25/11/2026',
+        version: 'v2.2',
+        items: [
+          'Turbo: a much larger transcriber that runs on the graphics card. Better on names.',
+          'The progress line says which of the two steps it is on.'
+        ]
+      },
+      {
         version: 'v2.1',
         items: [
           'Reads large videos: MP4 and MOV over 2 GB.',
@@ -221,13 +232,13 @@
 </div>
 
 <!-- The arithmetic and the large-video reader, then the main app -->
-<script src="_core.js?v=2.1"></script>
-<script src="_media.js?v=2.1"></script>
+<script src="_core.js?v=2.2"></script>
+<script src="_media.js?v=2.2"></script>
 <script>
 (function () {
   'use strict';
 
-  var VERSION = '2.1';            /* also in the two script tags above */
+  var VERSION = '2.2';            /* also in the two script tags above */
   var WHOLE_MAX = 1900 * 1048576;   /* a browser will not hold a file much larger than this in one piece */
   var PIECEMEAL_FROM = 200 * 1048576; /* above this an MP4 is read for its sound only, which needs far less memory */
   var SR = 16000;             /* what every model here listens at */
@@ -311,14 +322,18 @@
     transcribe: 'Transcribing…',
     speakers: 'Working out who is speaking…'
   };
+  /* With speakers ticked the names only appear after the second step, so say there is one. */
+  var STEPS = { transcribe: 'Step 1 of 2: transcribing…', speakers: 'Step 2 of 2: working out who is speaking…' };
+  /* The largest transcriber. Only practical on the graphics card, so only offered where the browser has one. */
+  var TURBO = 'onnx-community/whisper-large-v3-turbo';
 
   function progress(stage, done, total) {
     if (stage !== S.stage) { S.stage = stage; S.stageAt = Date.now(); }
-    $('trWhat').textContent = WHAT[stage] || '';
+    $('trWhat').textContent = (S.withSpeakers && STEPS[stage]) || WHAT[stage] || '';
     var part = total > 0 ? Math.min(1, done / total) : 0;
     $('trFill').style.width = (part * 100).toFixed(1) + '%';
     var left = '', right = '';
-    if (stage === 'download' && total > 0) left = Math.round(done / 1048576) + ' of ' + Math.round(total / 1048576) + ' MB';
+    if (stage === 'download' && total > 0) left = total > 1073741824 ? (done / 1073741824).toFixed(2) + ' of ' + (total / 1073741824).toFixed(2) + ' GB' : Math.round(done / 1048576) + ' of ' + Math.round(total / 1048576) + ' MB';
     if (stage === 'transcribe' && total > 0) left = stamp(done / SR) + ' of ' + stamp(total / SR);
     if ((stage === 'transcribe' || stage === 'speakers') && part > 0.03 && part < 1) {
       var remaining = (Date.now() - S.stageAt) / 1000 * (1 - part) / part;
@@ -435,7 +450,10 @@
       S.speakers = m.speakers; S.count = m.count; S.names = []; S.touched = false;
       return renderAll();
     }
-    if (m.type === 'error') { finish(); return fail('Something went wrong: ' + m.message + ' Reload the page and try again; if a download was interrupted it carries on from where it stopped.'); }
+    if (m.type === 'error') {
+      finish();
+      return fail(m.plain ? m.message : 'Something went wrong: ' + m.message + ' Reload the page and try again; if a download was interrupted it carries on from where it stopped.');
+    }
     if (m.type === 'done') {
       finish();
       if (!S.lines.length) return fail(m.stopped ? 'Stopped before anything was transcribed.' : 'No speech was found in that recording.');
@@ -466,7 +484,8 @@
     decode(file).then(function (audio) {
       if (S !== mine || !S.running) return;
       if (audio.length < SR) { finish(); return fail('That recording is under a second long.'); }
-      engine().postMessage({ type: 'run', audio: audio, model: $('trModel').value, speakers: S.withSpeakers }, [audio.buffer]);
+      var model = $('trModel').value;
+      engine().postMessage({ type: 'run', audio: audio, model: model, gpu: model === TURBO, speakers: S.withSpeakers }, [audio.buffer]);
     }, function (why) {
       if (S !== mine || !S.running) return;
       finish();
@@ -484,6 +503,12 @@
 
   window.TOOL = window.TOOL || {};
   window.TOOL.boot = function () {
+    if (navigator.gpu) {
+      var turbo = document.createElement('option');
+      turbo.value = TURBO;
+      turbo.textContent = 'Turbo, best for names, uses the graphics card (1.6 GB)';
+      $('trModel').appendChild(turbo);
+    }
     $('trFile').addEventListener('change', function () { show($('trFoot'), !!$('trFile').files[0]); });
     $('trStart').addEventListener('click', start);
     $('trStop').addEventListener('click', function () {

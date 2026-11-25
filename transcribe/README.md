@@ -12,7 +12,8 @@ is never sent anywhere, and nothing is saved to the database.
 | The models, kept by the browser after first use | `huggingface.co` | by name, below |
 
 Models: the transcriber the person picks (`Xenova/whisper-tiny.en`,
-`-base.en` or `-small.en`, MIT), and for telling speakers apart
+`-base.en` or `-small.en`, or `onnx-community/whisper-large-v3-turbo` on the
+graphics card; all MIT), and for telling speakers apart
 `onnx-community/pyannote-segmentation-3.0` (MIT) and
 `onnx-community/wespeaker-voxceleb-resnet34-LM` (CC BY 4.0).
 
