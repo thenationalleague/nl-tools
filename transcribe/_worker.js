@@ -21,11 +21,19 @@
      its one input is called, and its answer is found by shape. (Run in Chrome
      on 25/11/2026 against a copy of the model with other names; no difference.)
 
-   Messages in:   { type: 'run', audio, model, speakers }   { type: 'stop' }
+   - On the graphics card (WebGPU): pipeline(…, { device: 'webgpu', dtype: {
+       encoder_model: 'fp16', decoder_model_merged: 'q4' } }), the per-file
+     form the library's src/utils/dtypes.js resolves, with file names as listed
+     at huggingface.co/onnx-community/whisper-large-v3-turbo/tree/main/onnx.
+     A card without 16-bit maths ('shader-f16') gets the 4-bit encoder instead.
+     Not run before release: nothing here has a graphics card or can reach
+     that model.
+
+   Messages in:   { type: 'run', audio, model, gpu, speakers }   { type: 'stop' }
                   { type: 'regroup', count }
    Messages out:  { type: 'status', stage, done, total }    { type: 'lines', lines }
                   { type: 'speakers', speakers, count, seconds }
-                  { type: 'done', stopped }                 { type: 'error', message } */
+                  { type: 'done', stopped }                 { type: 'error', message, plain } */
 'use strict';
 
 importScripts('_core.js' + self.location.search);
@@ -65,9 +73,29 @@ function once(id, make) {
   return loaded[id];
 }
 
-function transcriber(model) {
-  return once(model, function () {
-    return T.pipeline('automatic-speech-recognition', model, { device: 'wasm', dtype: 'q8', progress_callback: downloading });
+function plain(message) { var e = new Error(message); e.plain = true; return e; }
+
+/* Can the graphics card do 16-bit maths? null: there is no usable card at all. */
+function card() {
+  if (!self.navigator || !navigator.gpu) return Promise.resolve(null);
+  return navigator.gpu.requestAdapter().then(function (a) { return a ? { half: a.features.has('shader-f16') } : null; }, function () { return null; });
+}
+
+function transcriber(model, gpu) {
+  if (!gpu) {
+    return once(model, function () {
+      return T.pipeline('automatic-speech-recognition', model, { device: 'wasm', dtype: 'q8', progress_callback: downloading });
+    });
+  }
+  return once(model + '#gpu', function () {
+    return card().then(function (c) {
+      if (!c) throw plain('This computer\'s graphics card cannot be used from the browser. Choose Best instead.');
+      return T.pipeline('automatic-speech-recognition', model, {
+        device: 'webgpu', dtype: { encoder_model: c.half ? 'fp16' : 'q4', decoder_model_merged: 'q4' }, progress_callback: downloading
+      }).catch(function (e) {
+        throw plain('The graphics card could not run this model (' + String(e && e.message || e).slice(0, 160) + '). Choose Best instead.');
+      });
+    });
   });
 }
 
@@ -101,14 +129,16 @@ function answer(out, dims) {
   throw new Error('A speaker model returned nothing usable.');
 }
 
-async function transcribe(audio, model) {
-  var asr = await transcriber(model), all = [], pos = 0;
+async function transcribe(audio, model, gpu) {
+  var asr = await transcriber(model, gpu), all = [], pos = 0;
+  /* A model that knows many languages has to be told which; an English-only one refuses to be. */
+  var how = /\.en$/.test(model) ? { return_timestamps: true } : { return_timestamps: true, language: 'en', task: 'transcribe' };
   post({ type: 'status', stage: 'transcribe', done: 0, total: audio.length });
   while (pos < audio.length && !stopped) {
     var end = C.pieceEnd(audio, pos);
     if (!C.silent(audio, pos, end)) {
       /* A copy, not a view: the library hands the samples to code that reads the whole buffer. */
-      var result = await asr(audio.slice(pos, end), { return_timestamps: true });
+      var result = await asr(audio.slice(pos, end), how);
       var got = C.lines(result, pos / C.SR, (end - pos) / C.SR);
       if (got.length) { all = all.concat(got); post({ type: 'lines', lines: got }); }
     }
@@ -156,7 +186,7 @@ async function run(msg) {
   var audio = msg.audio;
   await library();
   post({ type: 'status', stage: 'download', done: 0, total: 0 });
-  var all = await transcribe(audio, msg.model);
+  var all = await transcribe(audio, msg.model, !!msg.gpu);
   if (msg.speakers && all.length && !stopped) {
     var heard = await listen(audio);
     if (!stopped) {
@@ -171,5 +201,5 @@ self.onmessage = function (e) {
   var m = e.data || {};
   if (m.type === 'stop') { stopped = true; return; }
   if (m.type === 'regroup') { try { regroup(m.count); } catch (err) { post({ type: 'error', message: String(err && err.message || err) }); } return; }
-  if (m.type === 'run') run(m).catch(function (err) { post({ type: 'error', message: String(err && err.message || err) }); });
+  if (m.type === 'run') run(m).catch(function (err) { post({ type: 'error', message: String(err && err.message || err), plain: !!(err && err.plain) }); });
 };
