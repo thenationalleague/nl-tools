@@ -31,6 +31,8 @@
  * runs. The caller's email comes from the verified token, never from the body.
  */
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { loadCanon } = require("./canon");
+const { invitePass } = require("./invite-pass-core");
 const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
 
@@ -130,6 +132,30 @@ exports.consumeInvite = onCall(CALL_OPTS, async (request) => {
     logger.info("consumeInvite: user record already exists, left untouched", { uid: caller.uid });
     return { ok: true, existing: true };
   }
+  /* Nobody is made a superadmin by invite (16/11/2026): the two Skeleton
+     key accounts are set up by hand, and an invite that says otherwise was
+     not written by the invite form. */
+  if (cleanStr(invite.role) === "superadmin") {
+    logger.warn("consumeInvite: refused a superadmin invite", { uid: caller.uid });
+    throw new HttpsError("permission-denied", "This invite cannot be used. Please ask for a new one.");
+  }
+  /* The pass the invite carries (16/11/2026; functions/invite-pass-core.js),
+     checked again here against who sent it. None, or one that fails, and
+     the account starts with its role only. */
+  let pass = null;
+  try {
+    const pref = db.ref("admin/invite-passes/" + token);
+    const record = (await pref.once("value")).val();
+    if (record) {
+      const issuer = record.by ? (await db.ref("users/" + String(record.by)).once("value")).val() : null;
+      const got = invitePass(loadCanon(), record, issuer, invite, Date.now());
+      if (got.pass) pass = got.pass;
+      else logger.warn("consumeInvite: the invite's pass was not used", { uid: caller.uid, reason: got.reason });
+      await pref.remove();
+    }
+  } catch (err) {
+    logger.warn("consumeInvite: invite pass skipped: " + (err && err.message));
+  }
   await db.ref("users/" + caller.uid).set({
     name: cleanStr(invite.name),
     email: caller.email,
@@ -142,6 +168,7 @@ exports.consumeInvite = onCall(CALL_OPTS, async (request) => {
     jobTitle: cleanStr(invite.jobTitle) || cleanStr(invite.clubRole),
     pending: false,
     tools: invite.tools && typeof invite.tools === "object" ? invite.tools : {},
+    ...(pass ? { pass } : {}),
   });
 
   // Best-effort: clear matching pending-invite records (admin UI list).

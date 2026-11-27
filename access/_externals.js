@@ -1,4 +1,4 @@
-/* NL Tools — Access: the Externals tab (v2.12, 16/11/2026: people's passes on the one issue form)
+/* NL Tools — Access: the Externals tab (v2.14, 16/11/2026: people invited on Issue a pass too)
 
    Organisations outside the League and its clubs, set up here and nowhere
    else (permissions plan, "External passes" and "Club views"). Skeleton key
@@ -35,16 +35,6 @@
     return id;
   }
   function hex(v) { return /^#[0-9a-fA-F]{6}$/.test(String(v || '')) ? v : ''; }
-  function dateMs(v) {
-    if (!v) return null;
-    var d = new Date(v + 'T23:59:00');
-    return isNaN(d.getTime()) ? null : d.getTime();
-  }
-  function dateInput(ms) {
-    if (typeof ms !== 'number') return '';
-    var d = new Date(ms);
-    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
-  }
 
   /* Tools that offer themselves to externals, A–Z. */
   function offering() {
@@ -144,7 +134,6 @@
     return '<span class="nl-crest ex-mark ' + (cls || '') + '" style="background:' + bg + ';color:' + ink + '" aria-hidden="true">' + esc(initialsOf(o && o.name)) + '</span>';
   }
 
-
   function addOrg() {
     NL.prompt('', { title: 'Add organisation', placeholder: 'Its name, as it should appear on passes', confirmText: 'Add' }).then(function (name) {
       name = String(name || '').trim();
@@ -190,7 +179,10 @@
       '<div class="ex-none ex-gap">No zones yet. A person needs at least one.</div>';
 
     var ppl = people(id);
-    html += '<div class="section-head"><h2>People</h2></div>';
+    /* New people are invited on Issue a pass, like everyone (v2.14): the
+       organisation chosen, their zones ticked there. */
+    html += '<div class="section-head"><h2>People</h2><span class="pc-actions">' +
+      (zids.length ? '<a class="btn btn--primary btn--sm" href="/pass/?view=issue&invite=1&org=' + encodeURIComponent(id) + '">Invite someone' + C.icon('forward') + '</a>' : '') + '</span></div>';
     html += ppl.length ? '<div class="table-wrap ex-gap"><table class="table"><thead><tr><th>Person</th><th>Zones</th><th>Ends</th></tr></thead><tbody>' +
       ppl.map(function (u) {
         var keys = (u.pass && u.pass.keys) || {}, until = null;
@@ -203,37 +195,14 @@
           '<td>' + (until ? esc(day(until)) : 'When removed') + '</td></tr>';
       }).join('') + '</tbody></table></div>' : '<div class="ex-none ex-gap">Nobody yet.</div>';
 
-    html += '<section class="form-panel ex-gap"><div class="form-panel__head">Add person</div><div class="form-panel__body"><div class="form-grid">' +
-      '<div class="form-group"><label for="exPEmail">Email</label><input type="email" id="exPEmail" autocomplete="off"></div>' +
-      '<div class="form-group"><label for="exPName">Full name</label><input type="text" id="exPName" autocomplete="off"></div>' +
-      '<div class="form-group"><label for="exPJob">Job title</label><input type="text" id="exPJob" autocomplete="off" maxlength="80"></div>' +
-      '<div class="form-group"><label for="exPUntil">Access ends</label><input type="date" id="exPUntil"><p class="form-hint">Leave empty to keep it until removed.</p></div>' +
-      '<div class="form-group span2"><label>Zones</label><div class="pc-roles ex-ticks" id="exPZones">' +
-        (zids.length ? zids.map(function (z) { return zoneTick(z, zones[z], false); }).join('') : '<span class="ex-empty">Add a zone first.</span>') + '</div></div>' +
-      '</div><p class="form-hint">They get an email from NL Tools to set their password.</p></div>' +
-      (zids.length ? '<div class="form-panel__foot pc-foot"><button class="btn btn--primary" type="button" id="exPAdd">Set up and email' + C.icon('send') + '</button></div>' : '') + '</section>';
-
     $('exBody').innerHTML = html;
     $('exBack').onclick = function () { X.org = null; try { history.replaceState(null, '', '?tab=externals'); } catch (e) {} drawList(); };
     $('exEditOrg').onclick = editOrg;
     $('exAddZone').onclick = function () { editZone(null); };
-    if ($('exPAdd')) $('exPAdd').onclick = addPerson;
     $('exBody').querySelectorAll('[data-zone]').forEach(function (b) { b.onclick = function () { editZone(b.getAttribute('data-zone')); }; });
     /* A person's pass, name and zones are changed on the one issue form,
        as everyone's are (v2.12). */
     rowsOpen($('exBody'), '[data-zones]', function (el) { location.href = '/pass/?view=issue&uid=' + encodeURIComponent(el.getAttribute('data-zones')); });
-  }
-  /* A zone as a tick box: its name, and beneath it the code and what
-     ticking it opens, so the box says what it gives (style principles 5.4). */
-  function zoneTick(id, z, checked) {
-    return '<label class="pc-role"><input type="checkbox" value="' + esc(id) + '"' + (checked ? ' checked' : '') + '>' +
-      '<span><span class="pc-role__name">' + esc(z.name) + ' · ' + esc(z.code) + '</span>' +
-      '<span class="pc-role__grant">' + esc(opensText(z)) + '</span></span></label>';
-  }
-  function opensText(z) {
-    var reg = C.S.registry || {};
-    var names = Object.keys((z && z.tools) || {}).map(function (k) { return (reg[k] && reg[k].label) || k; }).sort();
-    return names.length ? 'Opens ' + names.join(', ') : 'Opens nothing yet';
   }
 
   function zoneHtml(id, z) {
@@ -306,7 +275,6 @@
     var ref = firebase.storage().ref('externals/' + orgId + '/logo-' + Date.now() + '.' + ext);
     return ref.put(f, { contentType: f.type }).then(function () { return ref.getDownloadURL(); });
   }
-
 
   /* ── A zone: its name, code, and what it opens ──────────────────────── */
   /* What ticking a tool gives, in words: View or Manage, and for a tool
@@ -469,50 +437,7 @@
     return b;
   }
 
-
   /* ── People ─────────────────────────────────────────────────────────── */
-  function addPerson() {
-    var email = $('exPEmail').value.trim(), name = $('exPName').value.trim();
-    var zones = {};
-    $('exPZones').querySelectorAll('input:checked').forEach(function (i) { zones[i.value] = true; });
-    if (!email || !name) return NL.toast('Email and name are needed', 'error');
-    if (!Object.keys(zones).length) return NL.toast('Choose at least one zone', 'error');
-    var until = dateMs($('exPUntil').value);
-    if ($('exPUntil').value && (!until || until <= Date.now())) return NL.toast('The end date must be in the future', 'error');
-    var req = { org: X.org, email: email.slice(0, 200), name: name.slice(0, 120), jobTitle: $('exPJob').value.trim().slice(0, 80),
-      zones: zones, by: C.S.session.uid, at: Date.now() };
-    if (until) req.until = until;
-    var btn = $('exPAdd');
-    btn.disabled = true;
-    var ref = C.db.ref('admin/external-invites').push();
-    /* The cloud job answers on the request itself (result). */
-    var timer = null, listener = null;
-    var answered = new Promise(function (resolve, reject) {
-      timer = setTimeout(function () { reject(new Error('No answer from the cloud job in a minute. Check People before trying again.')); }, 60000);
-      listener = ref.child('result').on('value', function (s) { if (s.exists()) resolve(s.val()); }, reject);
-    });
-    ref.set(req).then(function () { return answered; }).then(function (result) {
-      if (!result.ok) throw new Error(result.error || 'unknown');
-      return firebase.auth().sendPasswordResetEmail(result.email || email).then(function () {
-        NL.writeAudit('password_reset_sent', 'Set-a-password email for a new External account', { uid: result.uid, name: name, email: email });
-      }, function () {
-        NL.toast('The account is set up, but the set-a-password email did not go. Use Send reset link on their page.', 'error');
-      }).then(function () { return result; });
-    }).then(function (result) {
-      NL.toast(name + ' is set up. A set-a-password email is on its way.', 'success');
-      ['exPEmail', 'exPName', 'exPJob', 'exPUntil'].forEach(function (id) { $(id).value = ''; });
-      return C.refreshPeople().then(drawOrg);
-    })['catch'](function (e) {
-      NL.toast('Not set up: ' + (e && e.message || e), 'error');
-    }).then(function () {
-      clearTimeout(timer);
-      if (listener) ref.child('result').off('value', listener);
-      if ($('exPAdd')) $('exPAdd').disabled = false;
-    });
-  }
-
-  /* Change which zones a person holds, and when their access ends. Keeps
-     when each zone they keep was given, and by whom. */
   window.ACCESS_EXTERNALS = {
     init: function (ctx, orgId) {
       C = ctx;

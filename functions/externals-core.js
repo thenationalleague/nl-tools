@@ -46,7 +46,17 @@ function checkInvite(req, org, now) {
     until = Number(req.until);
     if (!isFinite(until) || until <= now) return { error: "The end date must be in the future." };
   }
-  return { ok: { email, name, jobTitle: clean(req.jobTitle, 80), zones, until } };
+  /* An end date per zone (16/11/2026: the issue form gives each zone its
+     own), for the zones asked for only. */
+  const untils = {};
+  const raw = req.untils && typeof req.untils === "object" ? req.untils : {};
+  for (const z of zones) {
+    if (raw[z] == null) continue;
+    const u = Number(raw[z]);
+    if (!isFinite(u) || u <= now) return { error: "Every end date must be in the future." };
+    untils[z] = u;
+  }
+  return { ok: { email, name, jobTitle: clean(req.jobTitle, 80), zones, until, untils } };
 }
 
 /* The account record an accepted invite writes. */
@@ -54,7 +64,8 @@ function externalUser(ok, orgId, org, by, now) {
   const keys = {};
   ok.zones.forEach((z) => {
     keys[z] = { given: now, by };
-    if (ok.until) keys[z].until = ok.until;
+    const until = (ok.untils && ok.untils[z]) || ok.until;
+    if (until) keys[z].until = until;
   });
   return {
     name: ok.name,
