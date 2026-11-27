@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Paddles
+  Version: v1.0 (27/11/2026)
+  File: /budds/index.html
+
+  A NON-GATED public page for one live talk: someone in the room types their name, answers two
+  quick questions and gets a paddle number from the presenter's screen. Then one button raises
+  the paddle (a question now) and one leaves a question for later.
+
+  How it reaches the deck: the Firebase REST API on the nl-widgets database, on the same buzz/
+  path and rules as /buzz/, so nothing new is deployed. A sign-in is one POST to buzz/q with
+  k "later" and x "sign-in|<answer 1>|<answer 2>"; the deck counts those instead of listing them.
+  The deck replies on buzz/ack/<id> (the paddle number), and says whether paddles are on (buzz/open).
+  REST shapes from https://firebase.google.com/docs/reference/rest/database (POST pushes a child;
+  {".sv":"timestamp"} is the server time).
+
+  No names in this file. Nothing is stored but the name typed and the two answers.
+
+  Changelog (last five)
+  v1.0 27/11/2026 – First version.
+-->
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex">
+  <title>Raise your paddle – The National League</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="stylesheet" href="/system/nl-brand.css?v=83">
+  <script src="/system/nl-utils.js?v=80"></script>
+  <style>
+    html, body { margin: 0; min-height: 100%; background: var(--white); }
+    /* the brand pins body text at 'wght' 400, which overrules font-weight on every heading here: let font-weight decide */
+    body { color: var(--navy); font-family: var(--font); font-variation-settings: normal; -webkit-tap-highlight-color: transparent; }
+    .pd { max-width: 520px; margin: 0 auto; padding: 22px 18px 40px; box-sizing: border-box; display: flex; flex-direction: column; gap: 18px; }
+    .pd-top { background: var(--primary); }
+    .pd-top div { max-width: 520px; margin: 0 auto; padding: 16px 18px; box-sizing: border-box; display: flex; align-items: center; gap: 14px; }
+    .pd-top img { width: 46px; height: 46px; }
+    .pd-top b { font-size: min(30px, 7.2vw); font-weight: 800; line-height: 1; white-space: nowrap; color: var(--white); text-transform: uppercase; letter-spacing: .02em; }
+    .pd-on { background: var(--navy); color: var(--white); }
+    .pd-on div { max-width: 520px; margin: 0 auto; padding: 10px 18px 12px; box-sizing: border-box; }
+    .pd-on small { display: block; font-size: 13px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--navy-200); }
+    .pd-on b { display: block; font-size: 19px; font-weight: 800; line-height: 1.25; }
+    .pd h2 { margin: 6px 0 0; font-size: 28px; font-weight: 800; color: var(--navy); }
+    #pick, #paddle { display: flex; flex-direction: column; gap: 16px; }
+    .pd-l { display: flex; flex-direction: column; gap: 6px; font: 700 16px var(--font); color: var(--navy-600); }
+    .pd-l input { font: 600 18px var(--font); padding: 14px; border-radius: 12px; border: 2px solid var(--navy-200); background: var(--white); color: var(--navy); width: 100%; box-sizing: border-box; }
+    fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+    legend { font: 800 18px var(--font); color: var(--navy); margin-bottom: 8px; padding: 0; }
+    .pd-o { display: flex; align-items: center; gap: 12px; padding: 13px 14px; border-radius: 12px; border: 2px solid var(--navy-100); font: 600 17px var(--font); color: var(--navy); cursor: pointer; }
+    .pd-o input { width: 20px; height: 20px; accent-color: var(--primary); margin: 0; }
+    .pd-o:has(input:checked) { border-color: var(--primary); background: var(--primary-50); }
+    .pd-send { all: unset; align-self: flex-end; padding: 14px 28px; border-radius: 14px; background: var(--primary); color: var(--white); font: 800 18px var(--font); box-shadow: 0 4px 0 var(--primary-800); cursor: pointer; }
+    .pd-send:active { transform: translateY(4px); box-shadow: none; }
+    .pd-me { display: flex; align-items: center; gap: 14px; }
+    .pd-num { flex: none; width: 64px; height: 64px; border-radius: 50%; background: var(--primary); color: var(--white); display: grid; place-items: center; font: 800 28px var(--font); position: relative; margin-bottom: 14px; }
+    .pd-num::after { content: ''; position: absolute; left: 50%; bottom: -16px; width: 10px; height: 18px; margin-left: -5px; border-radius: 0 0 5px 5px; background: var(--navy-600); }
+    .pd-me b { font-size: 28px; font-weight: 800; color: var(--navy); display: block; line-height: 1.15; } .pd-me small { color: var(--navy-600); font-size: 17px; font-weight: 700; }
+    .pd-change { margin-left: auto; font: 800 14px var(--font); border: 0; border-radius: 12px; padding: 10px 14px; background: var(--navy-100); color: var(--navy); }
+    .pd-now, .pd-later { all: unset; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; gap: 4px; width: 100%; min-height: 120px; padding: 20px 22px; border-radius: 18px;
+      cursor: pointer; user-select: none; -webkit-user-select: none; color: var(--white); transition: transform 60ms, box-shadow 60ms; }
+    .pd-now { background: var(--primary); box-shadow: 0 6px 0 var(--primary-800); }
+    .pd-later { background: var(--navy); box-shadow: 0 6px 0 var(--navy-800); }
+    .pd-now b, .pd-later b { font: 800 28px var(--font); } .pd-now span, .pd-later span { font: 600 15px var(--font); opacity: .85; }
+    .pd-now:active, .pd-now.hit, .pd-later:active, .pd-later.hit { transform: translateY(6px); box-shadow: 0 0 0 transparent; }
+    .pd-now[disabled] { background: var(--navy-200); box-shadow: 0 6px 0 var(--navy-300); color: var(--navy-600); cursor: default; }
+    .pd-now.done, .pd-later.done { background: var(--green); box-shadow: 0 6px 0 var(--navy-800); }
+    .pd-msg { min-height: 22px; text-align: center; font-size: 16px; color: var(--navy); }
+    .pd-msg.bad { color: var(--primary); }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <header class="pd-top"><div><img src="/assets/crests/thumbs/National%20League%20rose%20white.png" alt="" onerror="this.remove()"><b>Raise your paddle</b></div></header>
+  <div class="pd-on" id="onNow" hidden><div><small>On screen now</small><b id="onT"></b></div></div>
+  <main class="pd">
+
+    <form id="pick">
+      <h2>Who are you?</h2>
+      <label class="pd-l">Your name<input id="name" maxlength="60" autocomplete="name" required></label>
+      <fieldset id="q1"><legend>Where does most of your data live?</legend></fieldset>
+      <fieldset id="q2"><legend>How often do you use AI tools?</legend></fieldset>
+      <button class="pd-send" id="ok">Get my paddle</button>
+      <p class="pd-msg" id="pickMsg"></p>
+    </form>
+
+    <section id="paddle" hidden>
+      <div class="pd-me"><span class="pd-num" id="num">?</span><div><b id="meName"></b><small id="meSub">Paddle number on its way</small></div><button class="pd-change" id="change" type="button">Change</button></div>
+      <button class="pd-now" id="go" type="button"><b>Raise your paddle</b><span id="goSub">Pops up on Richard’s screen now</span></button>
+      <button class="pd-later" id="later" type="button"><b>Question for later</b><span>It goes on his list for the end</span></button>
+      <p class="pd-msg" id="msg"></p>
+    </section>
+  </main>
+<script>
+(function () {
+  var DB = 'https://nl-widgets-default-rtdb.europe-west1.firebasedatabase.app/buzz';
+  var LS = 'nl-budds-me-v1', me = null;
+  /* the same two questions, in the same words, as the deck's slide: the deck counts the answers by their text */
+  var POLL = [['Spreadsheets', 'A database or system', 'Email and paper', 'Not sure'], ['Every day', 'Every week', 'Now and then', 'Not yet']];
+  var $ = function (id) { return document.getElementById(id); };
+  ['q1', 'q2'].forEach(function (id, i) {
+    POLL[i].forEach(function (o) {
+      var l = document.createElement('label'); l.className = 'pd-o';
+      var r = document.createElement('input'); r.type = 'radio'; r.name = id; r.value = o; r.required = true;
+      l.appendChild(r); l.appendChild(document.createTextNode(o)); $(id).appendChild(l);
+    });
+  });
+  function show(p) {
+    me = p; try { localStorage.setItem(LS, JSON.stringify(p)); } catch (e) {}
+    $('meName').textContent = p.n; $('num').textContent = p.num || '?'; $('meSub').textContent = p.num ? 'Paddle ' + p.num : 'Paddle number on its way';
+    $('pick').hidden = true; $('paddle').hidden = false;
+  }
+  function post(body) {
+    return fetch(DB + '/q.json', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); });
+  }
+  /* the deck writes buzz/ack/<id> when it sees an entry; that's where the paddle number and every reply come from */
+  var es = null, ackT = 0;
+  function waitAck(id, onLine, onSlow) {
+    if (es) { es.close(); es = null; } clearTimeout(ackT); if (!id || !window.EventSource) { onSlow(); return; }
+    es = new EventSource(DB + '/ack/' + id + '.json');
+    es.addEventListener('put', function (e) {
+      var m; try { m = JSON.parse(e.data); } catch (x) { return; }
+      if (m && typeof m.data === 'string') { onLine(m.data); clearTimeout(ackT); es.close(); es = null; }
+    });
+    ackT = setTimeout(function () { if (es) { es.close(); es = null; } onSlow(); }, 9000);
+  }
+  $('pick').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var n = $('name').value.trim(), a = document.querySelector('input[name="q1"]:checked'), b = document.querySelector('input[name="q2"]:checked');
+    if (!n || !a || !b) return;
+    $('ok').disabled = true; $('pickMsg').classList.remove('bad'); $('pickMsg').textContent = 'Getting your paddle…';
+    post({ n: n.slice(0, 60), k: 'later', x: ('sign-in|' + a.value + '|' + b.value).slice(0, 280), t: { '.sv': 'timestamp' } }).then(function (res) {
+      show({ n: n, num: '' }); $('pickMsg').textContent = ''; $('ok').disabled = false;
+      waitAck(res && res.name, function (line) {
+        var m = /paddle (\d+)/i.exec(line); if (m) show({ n: n, num: m[1] });
+        $('msg').textContent = line;
+      }, function () { $('msg').textContent = 'You’re in. The screen will give you a number when it catches up.'; });
+    }).catch(function () { $('ok').disabled = false; $('pickMsg').classList.add('bad'); $('pickMsg').textContent = 'That didn’t send. Check your signal and press again.'; });
+  });
+  $('change').addEventListener('click', function () { $('paddle').hidden = true; $('pick').hidden = false; $('name').value = me ? me.n : ''; });
+  try { var saved = JSON.parse(localStorage.getItem(LS) || 'null'); if (saved && saved.n) show(saved); } catch (e) {}
+
+  var go = $('go'), later = $('later'), msg = $('msg'), busy = false, GO = go.innerHTML, LATER = later.innerHTML;
+  function send(kind, btn) {
+    if (busy || !me) return; busy = true; msg.classList.remove('bad'); msg.textContent = '';
+    btn.classList.add('hit'); setTimeout(function () { btn.classList.remove('hit'); }, 160);
+    post({ n: me.n.slice(0, 60), k: kind, t: { '.sv': 'timestamp' } }).then(function (res) {
+      btn.classList.add('done'); btn.innerHTML = '<b>Sent</b>'; msg.textContent = 'Waiting for the screen…';
+      waitAck(res && res.name, function (line) { msg.textContent = line; }, function () { msg.textContent = 'Sent, but the screen hasn’t picked it up yet. It will when it reconnects.'; });
+      setTimeout(function () { btn.classList.remove('done'); go.innerHTML = GO; later.innerHTML = LATER; setOpen(isOpen); busy = false; }, 5000);
+    }).catch(function () { busy = false; msg.classList.add('bad'); msg.textContent = 'That didn’t send. Check your signal and press again.'; });
+  }
+  go.addEventListener('click', function () { if (!go.disabled) send('now', go); });
+  later.addEventListener('click', function () { send('later', later); });
+  /* Richard can switch paddles off from the deck; questions for later always work */
+  var isOpen = true;
+  function setOpen(on) { isOpen = on; go.disabled = !on; var sub = $('goSub'); if (sub) sub.textContent = on ? 'Pops up on Richard’s screen now' : 'Off for now – use Question for later'; }
+  function setNow(t) { $('onT').textContent = t || ''; $('onNow').hidden = !t; }
+  if (window.EventSource) {
+    var ns = new EventSource(DB + '/now.json'); ns.addEventListener('put', function (e) { try { var m = JSON.parse(e.data); if (m && m.path === '/') setNow(typeof m.data === 'string' ? m.data : ''); } catch (x) {} });
+    var os = new EventSource(DB + '/open.json'); os.addEventListener('put', function (e) { try { var m = JSON.parse(e.data); if (m && m.path === '/') setOpen(m.data !== false); } catch (x) {} });
+  }
+})();
+</script>
+</body>
+</html>
