@@ -37,7 +37,6 @@ import { REPO } from './load-canon.mjs';
 const KNOWN = {
   'travel-planner/index.html': ['routeMap'],
   'vacancies/index.html': ['vacTableBody', 'sfName', 'sfRole', 'sfEmail'],
-  'wellbeing-map/index.html': ['nLab', 'rtMount', 'nBlock', 'nDel'],
 };
 
 const SKIP_DIRS = new Set(['node_modules', '.git', '_vendor']);

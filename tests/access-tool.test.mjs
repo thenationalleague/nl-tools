@@ -7,7 +7,7 @@
    forward. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { NL, REPO } from './load-canon.mjs';
 
@@ -54,11 +54,15 @@ test('the Skeleton-only tabs are held back for everyone else', () => {
   assert.match(PAGE, /function inviteRoles\(\) \{ return sk\(\) \? ROLES : CLUB_ROLES; \}/);
 });
 
-test('/people/, /audit/ and /club-codes/ forward to Access, keeping the query', () => {
-  assert.match(read('people/index.html'), /var base = '\/access\/';/);
-  assert.match(read('audit/index.html'), /var base = '\/access\/\?tab=audit';/);
-  assert.match(read('club-codes/index.html'), /var base = '\/access\/\?tab=codes';/);
+test('/people/, /audit/ and /club-codes/ are gone (28/11/2026), and old links open Access directly', () => {
+  for (const p of ['people', 'audit', 'club-codes']) {
+    assert.equal(existsSync(new URL('../' + p + '/index.html', import.meta.url)), false, '/' + p + '/ stays removed');
+  }
   assert.equal(REG['ops-club-codes'].url, '/access/?tab=codes');
+  const portal = read('portal/index.html');
+  assert.match(portal, /requests: '\/access\/\?tab=requests'/);
+  assert.match(portal, /inbound: '\/access\/\?tab=requests', audit: '\/access\/\?tab=audit'/);
+  assert.doesNotMatch(portal, /'\/(people|audit)\//, 'the portal sends nobody to a removed page');
 });
 
 test('the Codes tab follows the person\'s level on Club Codes, and starts only when opened', () => {

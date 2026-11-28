@@ -481,7 +481,7 @@ it go. Nothing is removed until the **old access report** (Actions →
 | `type`, `visibleToAll`, `placeholder` | `tools/<key>` | nothing (`placeholder` was false on every tool) | **removed 16/11** from the registry snapshot |
 | The "Apply passes" button | Access | Skeleton key, by hand | the cloud jobs have been the only writer for a month |
 | `PASS_DECIDES` | auth-guard | the way back | a month after the last account has a pass |
-| Forwarding pages for old addresses | `*/admin/`, `/people/`, `/audit/` | old bookmarks | with each tool's rebuild: removing a tool's old addresses is part of its sign-off (`system/declutter.md`, decided 28/11/2026) |
+| Forwarding pages for old addresses | Club Directory's `/admin/` pages, and the addresses given to clubs or the public | old bookmarks and links | the staff-only ones (`/people/`, `/audit/`, `/club-codes/` and seven `/admin/` pages) were **removed 28/11/2026**; the rest go with each tool's rebuild, as part of its sign-off (`system/declutter.md`) |
 | Plans the model replaced | six files in `system/` | nothing | **deleted 28/11/2026**. Summarised in "Before passes" above; the files themselves are in git history |
 
 ## Approvals and notifications
@@ -866,7 +866,8 @@ next Apps Script deploy.
 
 - **People and cards becomes Access**, at `/access/` (registry key still
   `ops-people`, so no rules or grants move with the name). The Audit log is
-  a tab of it. `/people/` and `/audit/` forward, keeping their query.
+  a tab of it. `/people/` and `/audit/` forwarded, keeping their query, until
+  both were removed on 28/11/2026.
 - **A Tools tab sets who each tool opens to.** Per tool, a level for the
   League card, each League key and, for a tool that is for clubs too, the
   Club card and each club key. Before saving it lists every pass holder

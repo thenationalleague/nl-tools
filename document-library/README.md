@@ -14,7 +14,7 @@ One page, `/document-library/`, since 14/11/2026. Who gets what:
 The level is `NL.accountLevel` (nl-utils v1.67), the answer auth-guard gives,
 worked out on the page because auth-guard would send a code holder to sign
 in. The League's Bin and Activity are `_console.js`, loaded only for them.
-`/document-library/admin/` forwards here.
+`/document-library/admin/` was removed on 28/11/2026.
 
 ## The name on screen is the name on disk
 

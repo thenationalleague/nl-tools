@@ -34,9 +34,10 @@ What: The first rebuild. The clubs listed down the left and the chosen club on t
 Why: The real tool goes page to page, and at the common laptop size the Directory shows nobody on its first screen.
 - Programme Packs takes the same shape in its own turn, not alongside.
 
-### Retire programmeAuth's club path
-What: Programme Packs now checks club codes through the shared door (13/11/2026). After a week with no club using the old route, remove the club-passcode half of programmeAuth, leaving only the console's sign-in.
-Why: Two copies of the code check, throttle and log is what this tidy is for.
+### Remove Programme Packs' second, older code check
+What: Club codes stay exactly as they are. This removes a leftover inside Programme Packs: it once checked club codes its own way, and since 13/11/2026 it uses the same check as every other club page. The old check is still in the code, unused. Once a week has passed with no club coming in by it, remove it.
+Why: Two copies of the same check is two things to keep right.
+- This is not "Club codes off". Switching codes off is under Later and waits for a date from you.
 
 ### League files only for League accounts
 What: Built (14/11/2026). File storage asks for a League mark, set by the server from each person's pass, instead of an email address (which everyone has). Three steps, in order, so nobody loses their files: the cloud job that sets the mark goes live, Button · Refresh account marks puts it on every account, and an hour later the file rules are published.
@@ -146,7 +147,7 @@ Why: Partners and freelancers need one or two tools each, with a name on every s
 - Later candidates: Brand Exposure (a sponsor sees only its own boards, once that tool is finished), Matchday Live for freelance reporters, Graphics for freelance designers, Content Plan for agencies.
 
 ### Clear away the old access fields
-What: Once nothing reads them, remove the per-person tool entries and the jobs that keep them in step (Apply passes), the old roles, the per-role defaults on every tool, and, tool by tool at each rebuild, the forwarding pages kept for old bookmarks.
+What: Once nothing reads them, remove the per-person tool entries and the jobs that keep them in step (Apply passes), the old roles, the per-role defaults on every tool, and, tool by tool at each rebuild, the forwarding pages still kept for addresses given to clubs or the public.
 Why: Two ways of deciding access is twice the chance of them disagreeing.
 - Each old part, what still reads it and what lets it go is listed in the permissions plan ("Clearing the old model"). Nothing goes until the Old access report button shows nothing depends on it.
 - Gone 16/11: three registry fields nothing needed (the tool "type", "visible to all" and "placeholder").
