@@ -85,7 +85,7 @@ function dayBounds(date) {
  *   "Vacancies [ops-vacancies] /vacancies/"
  * The bracketed key is the one to trust — the title is a display string that
  * changes, and the path differs from the key often enough to matter
- * (/data/ is ops-data, /graphics/totw/ is media-totw).
+ * (/usage/ is ops-data, /graphics/totw/ is media-totw).
  *
  * The bracket is absent when the page declared no toolKey, or when the title
  * and the key were identical and auth-guard skipped the duplicate. Falling

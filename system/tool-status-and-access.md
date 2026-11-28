@@ -138,7 +138,7 @@ links this repo cannot see.
 | Tool | Key | Who |
 |---|---|---|
 | **Estate** | `ops-estate` | Superadmin only |
-| **Data** | `ops-data` | Superadmin admin, admin access |
+| **Usage** | `ops-data` | Superadmin admin, admin access |
 | **NLServices API** | `ops-nls-monitor` | Superadmin only |
 | **Style Guide** | `staff-style-guide` | Superadmin only |
 

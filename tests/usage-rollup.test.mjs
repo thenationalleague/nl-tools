@@ -1,4 +1,4 @@
-/* functions/usage-rollup.js — the nightly count of tool opens that /data/ reads.
+/* functions/usage-rollup.js — the nightly count of tool opens that /usage/ reads.
 
    What is worth testing here is the counting, not the plumbing. Two things
    can go wrong quietly and both would make the dashboard confidently wrong:
@@ -64,7 +64,7 @@ test('the bracketed toolKey wins, because it is the only stable part', () => {
 });
 
 test('a path that disagrees with the key does not win', () => {
-  /* Real cases: /graphics/totw/ is media-totw, /data/ is ops-data. Trusting
+  /* Real cases: /graphics/totw/ is media-totw, /usage/ is ops-data. Trusting
      the path would file their opens under a key no registry row matches. */
   assert.equal(toolKeyFrom(open('Team of the Week [media-totw] /graphics/totw/')), 'media-totw');
 });
