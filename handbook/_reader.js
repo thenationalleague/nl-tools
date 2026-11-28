@@ -1,6 +1,7 @@
 /* =========================================================================
    NL Tools — Handbook reader
    File: /handbook/_reader.js
+   Version: v1.4 (28/11/2026) — notes in the code only: a note no longer names a plan document deleted on 28/11/2026. Nothing looks or works differently.
    Version: v1.3 (13/11/2026)
 
    v1.3 — Two doors, one mode, as every club page: a Club card signed in to

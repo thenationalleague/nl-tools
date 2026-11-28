@@ -250,6 +250,12 @@ Why: Plans piled up beside the code because that was the nearest place, and noth
 - Before moving a file, check what refers to it: notes in the code, the tests and Estate all name these files.
 - Some notes in the code still name a plan that was deleted on 28/11/2026. Each is removed when its tool is rebuilt.
 
+### Pretend saves in staging
+What: A staging copy saves nothing, so the steps of making a change cannot be tried there. Let a staging page behave as if a save worked: the screen shows the result, and nothing is written. Leaving the page puts everything back.
+Why: Staging is for layout and wording today. Trying a whole task, such as a club proposing a change and the League approving it, needs the save to appear to happen.
+- Staging keeps no data of its own (decided 28/11/2026). This is a pretend save, not a second set of data.
+- A change to the shared kit, so not before two tools are rebuilt.
+
 ### Club code visits in Usage
 What: Every club code sign-in is already recorded with its club and the tool. Show those counts in Usage, per tool and per club. Counts only, never names.
 Why: Usage counts signed-in visits only, so the 72 clubs coming in by code are invisible in it.

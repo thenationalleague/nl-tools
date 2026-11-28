@@ -144,6 +144,14 @@ Single-use tools are to move under the temp address planned for one-offs.
   reason. Every rebuild is looked at on the two desktop screens and a phone;
   there is no separate check for very wide screens. This replaces the parked
   type and scale plan, deleted 28/11/2026.
+- **Staging never saves, and has no data of its own** (28/11/2026). A
+  staging copy reads live data and is for checking layout, wording and how a
+  page behaves. There is no second set of data kept for staging. This settles
+  the question left open on 28/11/2026. Wanted later: a way to try the steps
+  of a change in staging, where the page behaves as if it saved and nothing
+  is written ("Pretend saves in staging" on the Roadmap).
+- **Broadcast Selections keeps its data in the page.** It is a single-use
+  tool, so decision 2 in `brand-audit.md` is closed.
 - **One plan.** This file is the plan. The thirteen older plan documents in
   `system/` were deleted on 28/11/2026. The decisions in them that still
   stand were first moved into `permissions-plan.md`, `CLAUDE.md`,
@@ -162,19 +170,23 @@ Single-use tools are to move under the temp address planned for one-offs.
 
 ## Open, for Richard
 
-1. **A mark on a rebuilt tool.** The dated tick in "Every tool" is the
-   record. Whether the tool itself also shows a mark is not decided. A letter
-   added to the version number and a jump to version 100 were both turned
-   down (28/11/2026).
-2. **Staging that can save.** `system/staging.md` says staging never writes.
-   Richard is open to a staging copy editing live data when the new version
-   stores data in exactly the same shape, as long as that is known. Not
-   decided; until it is, staging stays read-only.
-3. **The page shapes**, as they come out of the interviews.
-4. **The rest of `brand-audit.md` "Decisions for Richard"**: Broadcast
-   Selections' data in the page (now a single-use tool, so likely moot), and
-   icon-only buttons on a phone.
-5. **Website widgets.** The audit did not cover them and nothing checks them.
+1. **Version numbers, and the mark on a rebuilt tool.** The dated tick in
+   "Every tool" is the record. Richard wants version numbers in three parts:
+   big, medium, small (28/11/2026). Proposed, not yet agreed:
+   - **big** is which build of the tool it is: 1 is the tool as first built,
+     2 is the tool rebuilt on the kit;
+   - **medium** is a change people would notice;
+   - **small** is a fix.
+
+   A rebuilt tool then starts at v2.0.0 whatever its old number was, and any
+   tool that does not start with 2 has not been through. Tools keep their
+   present numbers until their rebuild. A letter added to the number and a
+   jump to version 100 were both turned down.
+2. **The page shapes**, as they come out of the interviews.
+3. **Buttons on a phone.** On a narrow screen, may a button show only its
+   picture (a bin, a pencil) with no word beside it? Left from
+   `brand-audit.md` (C13). Decide it with Club Directory open on a phone.
+4. **Website widgets.** The audit did not cover them and nothing checks them.
    Which tools have one, and how each is kept up to date, is asked per tool
    (question 7).
 

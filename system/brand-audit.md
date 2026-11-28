@@ -273,7 +273,8 @@ Club Codes, Club Kits admin, Fixtures admin); 404.
    brand on purpose, and a small named set of its own at its rebuild.
 2. **Broadcast Selections** holds a whole season's data in the page,
    including every club's colours. Move the data to a file (or the
-   database) so the page is only the page?
+   database) so the page is only the page? **Closed 28/11/2026:** the tool
+   is single-use, so it stays as it is.
 3. **Order of the sweep.** Suggested below; say if another order suits.
 4. **The moment.** The principles are a work in progress. Before the sweep
    starts, one more full review of them against every page, then an agreed
