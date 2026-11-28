@@ -144,6 +144,24 @@ Single-use tools are to move under the temp address planned for one-offs.
   reason. Every rebuild is looked at on the two desktop screens and a phone;
   there is no separate check for very wide screens. This replaces the parked
   type and scale plan, deleted 28/11/2026.
+- **Version numbers have three parts: big, medium, small** (28/11/2026).
+  - **Big** is which build of the tool it is. 1 is the tool as first built.
+    2 is the tool rebuilt on the kit.
+  - **Medium** is a change people would notice.
+  - **Small** is a fix: a typo, a wording change, a correction.
+
+  A rebuilt tool starts at **v2.0.0**, whatever its old number was. A tool
+  whose number does not start with 2 has not been through, so the number is
+  the mark of a rebuilt tool, beside its dated tick in "Every tool". Tools
+  keep their present numbers until their rebuild.
+- **The size of a change decides its route.** A big or a medium change goes
+  through staging and is looked at before it goes live. A small change goes
+  straight to the live tool by pull request. This is what `system/staging.md`
+  already says; the version number now shows which route a change took.
+- **On a phone, a button may show its picture alone** (28/11/2026). Only for
+  the standard pictures, never for a page's main action, and never for
+  anything that cannot be undone. The word stays for screen readers. This
+  adopts canon change C13 in `brand-audit.md`.
 - **Staging never saves, and has no data of its own** (28/11/2026). A
   staging copy reads live data and is for checking layout, wording and how a
   page behaves. There is no second set of data kept for staging. This settles
@@ -170,23 +188,16 @@ Single-use tools are to move under the temp address planned for one-offs.
 
 ## Open, for Richard
 
-1. **Version numbers, and the mark on a rebuilt tool.** The dated tick in
-   "Every tool" is the record. Richard wants version numbers in three parts:
-   big, medium, small (28/11/2026). Proposed, not yet agreed:
-   - **big** is which build of the tool it is: 1 is the tool as first built,
-     2 is the tool rebuilt on the kit;
-   - **medium** is a change people would notice;
-   - **small** is a fix.
-
-   A rebuilt tool then starts at v2.0.0 whatever its old number was, and any
-   tool that does not start with 2 has not been through. Tools keep their
-   present numbers until their rebuild. A letter added to the number and a
-   jump to version 100 were both turned down.
-2. **The page shapes**, as they come out of the interviews.
-3. **Buttons on a phone.** On a narrow screen, may a button show only its
-   picture (a bin, a pencil) with no word beside it? Left from
-   `brand-audit.md` (C13). Decide it with Club Directory open on a phone.
-4. **Website widgets.** The audit did not cover them and nothing checks them.
+1. **The page shapes**, as they come out of the interviews.
+2. **Fewer words on buttons everywhere, not only on a phone.** Richard's
+   question (28/11/2026): where a picture is known to everyone, such as
+   download, does the button need the word at all, on any screen? It could
+   differ from tool to tool. Proposed: a short fixed list of pictures that
+   may stand alone (download, print, search, refresh, close), and the word
+   stays on anything particular to the tool (Publish, Approve, Reset code),
+   on a page's main action, and on anything that cannot be undone. Settle it
+   with Club Directory on screen, since it changes the kit for every tool.
+3. **Website widgets.** The audit did not cover them and nothing checks them.
    Which tools have one, and how each is kept up to date, is asked per tool
    (question 7).
 

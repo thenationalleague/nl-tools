@@ -281,6 +281,8 @@ Club Codes, Club Kits admin, Fixtures admin); 404.
    date to make the big changes in one go. **Settled 28/11/2026:** no single
    date. Tool by tool, each through staging to live.
 5. **Icon-only buttons on a phone** (C13): adopt, and with which icons?
+   **Settled 28/11/2026:** adopt. Which icons is decided with Club
+   Directory on screen (`declutter.md`, open question 2).
 
 ## Suggested order
 
