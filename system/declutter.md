@@ -40,9 +40,12 @@ For each tool:
    file and flags where it disagrees with the registry.
 2. **Rebuild in staging** (`system/staging.md`), onto the kit and the tool's
    page shape. Clear its canon overrides and its duplicated local styling in
-   the same pass. A missing part goes into the canon first.
+   the same pass, and any comment that names a plan document that no longer
+   exists. A missing part goes into the canon first.
 3. **Richard looks at it** on the two desktop screens and a phone.
-4. **Promote** over the live tool, delete the staging copy, tick it off here.
+4. **Promote** over the live tool, delete the staging copy, and remove the
+   tool's old forwarding addresses. Tick it off here: its row in "Every tool"
+   gains "Rebuilt" and the date.
 
 The seven questions:
 
@@ -83,21 +86,21 @@ the suite, exempt from the rebuild, it only has to keep working), **Retire**.
 | Club Directory | Keep | First rebuild |
 | Club Kits | Keep | Began as single-use and outgrew it; needs a restyle |
 | Commercial Benchmarking | Keep | |
-| Content Plan | Keep | |
+| Content Plan | Keep | Nothing else looks like it, so it probably needs a page shape of its own: a planning board. The ideas not yet built are in `system/content-plan-plan.md`, which becomes its brief |
 | DAZN Viewership | Keep | |
 | Document Library | Keep | |
 | Financial Benchmarking | Keep | |
-| Fixture Management | Keep | Counts as built; what it does is right, the look needs a serious pass |
+| Fixture Management | Keep | Counts as built; what it does is right, the look needs a serious pass. The reasoning behind its rules is in `system/fixture-management-plan.md`, kept until this rebuild |
 | Handbook | Keep | |
 | Judgements | Keep | Has a website widget |
-| Local Media | Keep | Reshape as a media directory on the club list and detail shape: a club's local media contacts, with the national contacts as the first entry |
+| Local Media | Keep | Reshape as a media directory on the club list and detail shape: a club's local media contacts, with the national contacts as the first entry. Still two pages (a public form and a console) |
 | Newsletter | Keep | The newsletter itself is bespoke; the controls around it come from the kit |
 | Programme Packs | Keep | Club list and detail |
 | Travel Planner | Keep | The map is the tool; kit for the controls around it |
 | Vacancies | Keep | Has a website widget |
 | Website Archive | Keep | |
 | Wellbeing Hub | Keep | |
-| Trident Wellbeing | Keep | Deliberately branded separately: an exception, not drift |
+| Trident Wellbeing | Keep | A separate brand on purpose. Its colours become a small named set of their own at its rebuild |
 | Portal, Access, My pass | Keep (plumbing) | |
 | Estate | Keep (plumbing) | To become the single cleanup view; needs its own diet |
 | Style Guide | Keep (plumbing) | |
@@ -125,15 +128,29 @@ Single-use tools are to move under the temp address planned for one-offs.
 
 - **Tool by tool**, not one agreed date for everything. This overrides
   "The moment" in `brand-audit.md`.
-- **Trident Wellbeing's own palette is a deliberate exception.** This settles
-  decision 1 in `brand-audit.md`. Write it into the checks as an exception so
-  its colours stop counting as drift.
+- **Trident Wellbeing is a separate brand on purpose.** This settles decision
+  1 in `brand-audit.md`. At its rebuild its colours become a small named set
+  of their own in the kit, so the checks know them and they stop counting as
+  drift. It is unlikely to be needed anywhere else.
 - **Do not brand a tool that is not ready to be built.** A Hold tool arrives
   on the kit when it is picked up; it gets no separate branding pass now.
 - **Forwarding pages are not wanted** (28/11/2026): people reach tools through
-  the portal, not bookmarks. This changes the rule in `CLAUDE.md` ("Pages leave
-  a forwarding stub") once the open question below is answered. The rename of
-  Data to Usage left none.
+  the portal, not bookmarks. A removed page leaves none (`CLAUDE.md`,
+  "Retiring something"). The ones that exist go tool by tool: removing a
+  tool's old addresses is part of its sign-off (step 4), for the addresses
+  only staff used and the ones given to clubs or the public alike. None is
+  removed outside its tool's rebuild. The rename of Data to Usage left none.
+- **A page uses the width it has.** Empty space down the sides needs a
+  reason. Every rebuild is looked at on the two desktop screens and a phone;
+  there is no separate check for very wide screens. This replaces the parked
+  type and scale plan, deleted 28/11/2026.
+- **One plan.** This file is the plan. The thirteen older plan documents in
+  `system/` were deleted on 28/11/2026, each after its live decisions were
+  folded into `permissions-plan.md`, `CLAUDE.md`, `ROADMAP.md` or this file.
+  No new plan documents are written: a tool's decisions go in its brief here.
+- **One address per tool** is the rule (`CLAUDE.md`). Three tools still have
+  two pages: Local Media (a public form and a console), Commercial Compliance
+  (Hold) and UW Promo (Single-use).
 - **Estate is a lens.** It reads from elsewhere and holds nothing of its own.
   Who a tool is for and which passes open it are already in the registry
   (`tools-registry.snapshot.json`, `permissions`); Estate should show that in
@@ -144,11 +161,10 @@ Single-use tools are to move under the temp address planned for one-offs.
 
 ## Open, for Richard
 
-1. **Forwarding pages.** Twelve were only ever reached by signed-in staff and
-   can go now. Seven were addresses given to clubs or the public by link, code
-   or email (two under Club Directory, two under Commercial Benchmarking, the
-   DAZN reader, the old Handbook reader, `/wellbeing/`). How long do those
-   seven stay?
+1. **A mark on a rebuilt tool.** The dated tick in "Every tool" is the
+   record. Whether the tool itself also shows a mark is not decided: a letter
+   on the version and a jump to version 100 were both turned down
+   (28/11/2026).
 2. **Staging that can save.** `system/staging.md` says staging never writes.
    Richard is open to a staging copy editing live data when the new version
    stores data in exactly the same shape, as long as that is known. Not
@@ -208,5 +224,6 @@ When every Keep tool has been through its rebuild:
    styling each tool carries of its own) so it is the one view. Not before two
    tools are rebuilt.
 3. Remove the scaffolding: the override backlog, the waiver and skip lists,
-   `brand-audit.md`, the superseded plan files, the long version histories in
-   page headers, and this file.
+   `brand-audit.md`, the two tool plans kept as briefs (Fixture Management,
+   Content Plan) if their rebuilds have not already taken them, the long
+   version histories in page headers, and this file.

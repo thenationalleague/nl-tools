@@ -16,8 +16,9 @@
   Anything else is ignored. This file is public: no names of people, no
   email addresses, no codes.
 
-  The detailed plans behind each item are in system/ (permissions-plan.md,
-  one-address-plan.md and the rest). This is the front, not the record.
+  The plan for the consolidation is system/declutter.md and the access model
+  is system/permissions-plan.md. There are no other plan documents: an idea
+  lives here until it is built.
 -->
 
 ## Now
@@ -25,11 +26,13 @@
 ### The consolidation: one kit, a few page shapes
 What: Every tool rebuilt from the shared kit onto one of a few page shapes, one tool at a time, each through staging to live before the next starts. Club Directory is first. No new tools are built until it is done; new ideas are added under Later. The list of every tool, with what was decided for each, is in system/declutter.md.
 Why: The tools were built at different times and do not look or behave like one suite, and tidying while still building new ones has not held.
-Waiting on: you (how long the old addresses given to clubs should keep forwarding)
+- Old forwarding addresses go with each tool's rebuild, as part of its sign-off (decided 28/11/2026).
+- Thirteen older plan documents were deleted on 28/11/2026, so system/declutter.md is the one plan.
 
-### Club Directory and Programme Packs on one screen
-What: The clubs listed down the left and the chosen club on the right, as in the board deck's mock-ups, tried in staging before clubs see it (Declutter browse plan). Staging is built (19/11/2026): a copy at nl.tools/staging/<slug>/ that reads live data, saves nothing, and opens only to the Skeleton key and the Tester key. Next: the club list in the shared club picker, then Club Directory in staging, then Programme Packs. Club details go in a tab or fold beside the people, to be tried both ways.
-Why: The real tools go page to page, and at the common laptop size the Directory shows nobody on its first screen.
+### Club Directory on one screen
+What: The first rebuild. The clubs listed down the left and the chosen club on the right, tried in staging before clubs see it. The club list is already in the shared kit and a staging copy exists. The brief is in system/declutter.md.
+Why: The real tool goes page to page, and at the common laptop size the Directory shows nobody on its first screen.
+- Programme Packs takes the same shape in its own turn, not alongside.
 
 ### Retire programmeAuth's club path
 What: Programme Packs now checks club codes through the shared door (13/11/2026). After a week with no club using the old route, remove the club-passcode half of programmeAuth, leaving only the console's sign-in.
@@ -104,6 +107,11 @@ What: Password reset emails come from Firebase's own address. Point them at an N
 Why: A reset email that lands in spam is a locked-out person phoning you.
 Waiting on: you
 
+### Sort the roadmap by kind of work
+What: Give every item here a label for the kind of work it is, beside Now, Next and Later, and have the Roadmap tool show and filter by it. The labels come from sorting what is already on the list, and the names are to be agreed. A first sort gives four: the consolidation, access and sign-in, keeping things running, and new ideas.
+Why: Everything sits in one list, so there is no telling a fresh build from a tidy-up or a fix.
+- The Roadmap tool reads this file in a fixed shape, so the label needs a small change to the tool. It is already down for a pass in the consolidation.
+
 ## Later
 
 ### Matchday Live on the club code door
@@ -138,7 +146,7 @@ Why: Partners and freelancers need one or two tools each, with a name on every s
 - Later candidates: Brand Exposure (a sponsor sees only its own boards, once that tool is finished), Matchday Live for freelance reporters, Graphics for freelance designers, Content Plan for agencies.
 
 ### Clear away the old access fields
-What: Once nothing reads them, remove the per-person tool entries and the jobs that keep them in step (Apply passes), the old roles, the per-role defaults on every tool, and the forwarding pages kept for old bookmarks.
+What: Once nothing reads them, remove the per-person tool entries and the jobs that keep them in step (Apply passes), the old roles, the per-role defaults on every tool, and, tool by tool at each rebuild, the forwarding pages kept for old bookmarks.
 Why: Two ways of deciding access is twice the chance of them disagreeing.
 - Each old part, what still reads it and what lets it go is listed in the permissions plan ("Clearing the old model"). Nothing goes until the Old access report button shows nothing depends on it.
 - Gone 16/11: three registry fields nothing needed (the tool "type", "visible to all" and "placeholder").
@@ -198,3 +206,50 @@ Why: Clubs can't easily get the League's history anywhere else, and programme ed
 - Answers cost almost nothing: the connector works the answer out and the model only words it, repeated questions are answered from a store, and only the agent's own tools go with each message.
 - Our own site is a research source too: the Website Archive's articles, searched in advance, so an answer can add what we wrote at the time, with a link to it. Only our own words; other publications stay out.
 - Programme Packs is a natural home, as the programme editors are already there.
+
+### Warn before a key or token expires
+What: A warning a month before anything with an end date runs out. The first one known: the GitHub token that lets the cloud jobs start the handbook PDF and the fixtures graphics expires on 22/08/2027. Then a list of every key and token the system depends on, with its end date, so none is a surprise.
+Why: When that token runs out, those two jobs stop with no warning, and there will be more like it.
+- The Monday note that reports failed jobs is the natural place for the warning.
+
+### One honest publishing login
+What: Find out exactly what the Google login used by every publish job is allowed to do, then replace it with one that is named for the job and holds only what it uses.
+Why: The login was made to read website statistics and is named for that. It now publishes the database rules, the cloud jobs, the tool list and Apps Script, and nobody has written down what it can do.
+- Google does not allow the login's address to be renamed, so this means a new login, not a rename.
+- The safe order: make the new login; give it only what each job needs, not a copy of the old one; let GitHub use both; switch GitHub over; prove it with a run that writes nothing (Auto · Publish portal tool list in report mode); run each real publish job once and add whatever it reports missing; only then empty the old login, wait a day and delete it.
+- Until the last step, going back is one setting.
+- The broadest thing the old login holds is full control of file storage, there only so the Brand Exposure measurer can be built. Narrow that first.
+- About an hour, on a quiet afternoon, never on the day of a release.
+
+### VIP Access
+What: Each club has VIP accounts with the broadcaster, who add and remove people themselves. Today a log of who is on each club's list is kept by hand and a club is told its list when it asks. The tool lets a club see who is on its own list and ask for a change, and drafts the request to the broadcaster.
+Why: Every question and every change comes through one person, one request at a time.
+- A new tool, so it waits for the freeze to lift.
+- Two lessons from the first attempt (system/retired/dazn-vip.md): build it on the kit, and keep it small.
+- The addresses the requests go to are settings, never written in this repo.
+
+### Finish moving off Apps Script
+What: The decision stands: Firebase does everything, and Apps Script is kept only to send email. What still goes through Apps Script is the email around invites, approvals and access requests, and the Vacancies form. Move those behind cloud jobs, then switch off the Apps Script web address that pages call.
+Why: Apps Script is the one part that is not published and checked the way everything else is, and its sign-in keeps expiring.
+- Email stays in Apps Script for now (decided 13/11/2026). "Email through a sending service" below is the later step.
+- The list of what is left was last measured on 15/08/2026. Measure again before starting.
+
+### Rewrite the runbook and the security register
+What: Rewrite the operations guide once, against the finished suite, and bring the list of everything reachable without an account up to date. Then find a way for both to stay current without being rewritten by hand.
+Why: The runbook names 15 cloud jobs where there are 27, and both describe a system that has moved on. A guide that is wrong is worse than none.
+- After the consolidation, not during it.
+
+### Paperwork out of the kit folder
+What: The system folder holds the shared kit and, beside it, the plans, guides and notes on retired tools. Move the paperwork to a folder of its own so the system folder is only the kit, and keep reducing it.
+Why: Plans piled up beside the code because that was the nearest place, and nothing ever removed one.
+- Check what points at each file first: code comments, tests and Estate all name them.
+- Code comments that still name a plan deleted on 28/11/2026 are cleared as each tool is rebuilt.
+
+### Club code visits in Usage
+What: Every club code sign-in is already recorded with its club and the tool. Show those counts in Usage, per tool and per club. Counts only, never names.
+Why: Usage counts signed-in visits only, so the 72 clubs coming in by code are invisible in it.
+
+### The planning board for other departments
+What: Once Content Plan has been rebuilt on its own page shape, offer the same board to another department for its own planning.
+Why: Nothing else in the suite is shaped for planning, and the need is not only the media team's.
+- A new use, so it waits for the freeze to lift.

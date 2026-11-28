@@ -19,7 +19,7 @@ project ended up with three files each headed "source of truth". They are in
 | `rules.snapshot.json` | The full **nl-tools** security rules. **Deployed from here** — see the contract below. | Firebase console → Realtime Database → Rules (read-only reference; edits made there are overwritten by the next deploy) |
 | `nl-widgets.rules.snapshot.json` | The full **nl-widgets** (fan data) security rules. **Deployed from here** too, as of 15/08/2026 — it previously sat in `embeds/` with no deploy path at all and was pasted into the console by hand, which is how a rules document governing every fan vote and registration came to have nothing checking it matched what was running. | Same, on the `nl-widgets` project |
 | `tools-registry.snapshot.json` | The `tools/` node (tool registry: labels, urls, role defaults) | RTDB `tools/` (drives the portal cards **and** auth-guard access defaults) |
-| `tools-registry.parked.json` | Holding pen for tools pulled off the portal (back in planning). **NOT deployed** — records live here instead of in `tools/`, so those tools are superadmin-only + invisible while their code stays in the repo. See `system/tool-status-and-access.md`. | — (never pasted) |
+| `tools-registry.parked.json` | Holding pen for tools pulled off the portal (back in planning). **NOT deployed** — records live here instead of in `tools/`, so those tools are superadmin-only + invisible while their code stays in the repo. These are the Hold tools in `system/declutter.md`. | — (never pasted) |
 
 ## The contract
 
@@ -81,7 +81,7 @@ Tightening them to `auth != null` would break a live feature. Leave them:
 Rule of thumb: a broad `".read": true` here is usually load-bearing for a
 capability page or a public widget — **confirm the consumer before locking**.
 Staff-audience tools are the opposite: their `app-data` is league-only (locked
-in the audience-gating work); see `system/staff-club-audience-plan.md`.
+in the audience-gating work). Who can open what is now `system/permissions-plan.md`.
 
 ## Known divergence risk
 
