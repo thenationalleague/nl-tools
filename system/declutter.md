@@ -40,8 +40,8 @@ For each tool:
    file and flags where it disagrees with the registry.
 2. **Rebuild in staging** (`system/staging.md`), onto the kit and the tool's
    page shape. Clear its canon overrides and its duplicated local styling in
-   the same pass, and any comment that names a plan document that no longer
-   exists. A missing part goes into the canon first.
+   the same pass, and any note in the code that names a plan document
+   that no longer exists. A missing part goes into the canon first.
 3. **Richard looks at it** on the two desktop screens and a phone.
 4. **Promote** over the live tool, delete the staging copy, and remove the
    tool's old forwarding addresses. Tick it off here: its row in "Every tool"
@@ -130,23 +130,24 @@ Single-use tools are to move under the temp address planned for one-offs.
   "The moment" in `brand-audit.md`.
 - **Trident Wellbeing is a separate brand on purpose.** This settles decision
   1 in `brand-audit.md`. At its rebuild its colours become a small named set
-  of their own in the kit, so the checks know them and they stop counting as
-  drift. It is unlikely to be needed anywhere else.
+  of their own in the kit. The checks then recognise them and stop reporting
+  them as a fault. The set is unlikely to be needed anywhere else.
 - **Do not brand a tool that is not ready to be built.** A Hold tool arrives
   on the kit when it is picked up; it gets no separate branding pass now.
 - **Forwarding pages are not wanted** (28/11/2026): people reach tools through
   the portal, not bookmarks. A removed page leaves none (`CLAUDE.md`,
   "Retiring something"). The ones that exist go tool by tool: removing a
-  tool's old addresses is part of its sign-off (step 4), for the addresses
-  only staff used and the ones given to clubs or the public alike. None is
-  removed outside its tool's rebuild. The rename of Data to Usage left none.
+  tool's old addresses is part of its sign-off (step 4). That covers the
+  addresses only staff used and the ones given to clubs or the public. None
+  is removed before its tool's rebuild. The rename of Data to Usage left none.
 - **A page uses the width it has.** Empty space down the sides needs a
   reason. Every rebuild is looked at on the two desktop screens and a phone;
   there is no separate check for very wide screens. This replaces the parked
   type and scale plan, deleted 28/11/2026.
 - **One plan.** This file is the plan. The thirteen older plan documents in
-  `system/` were deleted on 28/11/2026, each after its live decisions were
-  folded into `permissions-plan.md`, `CLAUDE.md`, `ROADMAP.md` or this file.
+  `system/` were deleted on 28/11/2026. The decisions in them that still
+  stand were first moved into `permissions-plan.md`, `CLAUDE.md`,
+  `ROADMAP.md` or this file.
   No new plan documents are written: a tool's decisions go in its brief here.
 - **One address per tool** is the rule (`CLAUDE.md`). Three tools still have
   two pages: Local Media (a public form and a console), Commercial Compliance
@@ -162,9 +163,9 @@ Single-use tools are to move under the temp address planned for one-offs.
 ## Open, for Richard
 
 1. **A mark on a rebuilt tool.** The dated tick in "Every tool" is the
-   record. Whether the tool itself also shows a mark is not decided: a letter
-   on the version and a jump to version 100 were both turned down
-   (28/11/2026).
+   record. Whether the tool itself also shows a mark is not decided. A letter
+   added to the version number and a jump to version 100 were both turned
+   down (28/11/2026).
 2. **Staging that can save.** `system/staging.md` says staging never writes.
    Richard is open to a staging copy editing live data when the new version
    stores data in exactly the same shape, as long as that is known. Not

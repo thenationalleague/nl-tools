@@ -284,8 +284,8 @@ Club Codes, Club Kits admin, Fixtures admin); 404.
 ## Suggested order
 
 **Overtaken 28/11/2026:** the order is now in `system/declutter.md` (Club
-Directory first, then worst first by Part 3). What follows is kept for the
-canon changes it lists, which each rebuild draws on.
+Directory first, then worst first by Part 3). What follows is kept for its
+list of changes to the kit, which each rebuild draws on.
 
 Step 0: the full review of the principles, and an agreed moment to start.
 Within it, test before changing (style principles 1.8): give five people

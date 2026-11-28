@@ -110,7 +110,7 @@ Waiting on: you
 ### Sort the roadmap by kind of work
 What: Give every item here a label for the kind of work it is, beside Now, Next and Later, and have the Roadmap tool show and filter by it. The labels come from sorting what is already on the list, and the names are to be agreed. A first sort gives four: the consolidation, access and sign-in, keeping things running, and new ideas.
 Why: Everything sits in one list, so there is no telling a fresh build from a tidy-up or a fix.
-- The Roadmap tool reads this file in a fixed shape, so the label needs a small change to the tool. It is already down for a pass in the consolidation.
+- The Roadmap tool can only read the parts it already knows (What, Why, Waiting on), so showing a label needs a small change to the tool. The tool is already due a tidy in the consolidation.
 
 ## Later
 
@@ -207,18 +207,23 @@ Why: Clubs can't easily get the League's history anywhere else, and programme ed
 - Our own site is a research source too: the Website Archive's articles, searched in advance, so an answer can add what we wrote at the time, with a link to it. Only our own words; other publications stay out.
 - Programme Packs is a natural home, as the programme editors are already there.
 
-### Warn before a key or token expires
-What: A warning a month before anything with an end date runs out. The first one known: the GitHub token that lets the cloud jobs start the handbook PDF and the fixtures graphics expires on 22/08/2027. Then a list of every key and token the system depends on, with its end date, so none is a surprise.
-Why: When that token runs out, those two jobs stop with no warning, and there will be more like it.
+### Warn before a key runs out
+What: Some of the keys that let one part of the system talk to another have an end date. Send a warning a month before one runs out. The first one known: the GitHub key that lets the cloud jobs start the handbook PDF and the fixtures graphics runs out on 22/08/2027. Then keep one list of every key the system depends on, with its end date, so none is a surprise.
+Why: When that key runs out, those two jobs stop with no warning, and there will be more like it.
 - The Monday note that reports failed jobs is the natural place for the warning.
 
 ### One honest publishing login
-What: Find out exactly what the Google login used by every publish job is allowed to do, then replace it with one that is named for the job and holds only what it uses.
+What: Every job that publishes something signs in to Google with one shared login of its own. Find out exactly what that login is allowed to do, then replace it with one that is named for the job and allowed only what it uses.
 Why: The login was made to read website statistics and is named for that. It now publishes the database rules, the cloud jobs, the tool list and Apps Script, and nobody has written down what it can do.
 - Google does not allow the login's address to be renamed, so this means a new login, not a rename.
-- The safe order: make the new login; give it only what each job needs, not a copy of the old one; let GitHub use both; switch GitHub over; prove it with a run that writes nothing (Auto · Publish portal tool list in report mode); run each real publish job once and add whatever it reports missing; only then empty the old login, wait a day and delete it.
-- Until the last step, going back is one setting.
-- The broadest thing the old login holds is full control of file storage, there only so the Brand Exposure measurer can be built. Narrow that first.
+- The safe order:
+- 1. Make the new login, and allow it only what each job needs, not a copy of the old one.
+- 2. Let GitHub use both logins, then switch GitHub to the new one.
+- 3. Prove it with a run that changes nothing: Auto · Publish portal tool list, in report mode.
+- 4. Run each real publish job once, and allow whatever it says is missing.
+- 5. Only then take everything away from the old login, wait a day, and delete it.
+- Until step 5, going back is one setting.
+- The biggest thing the old login is allowed is full control of file storage, which it has only so the Brand Exposure measurer can be built. Cut that down first.
 - About an hour, on a quiet afternoon, never on the day of a release.
 
 ### VIP Access
@@ -226,11 +231,11 @@ What: Each club has VIP accounts with the broadcaster, who add and remove people
 Why: Every question and every change comes through one person, one request at a time.
 - A new tool, so it waits for the freeze to lift.
 - Two lessons from the first attempt (system/retired/dazn-vip.md): build it on the kit, and keep it small.
-- The addresses the requests go to are settings, never written in this repo.
+- The email addresses the requests go to are kept as settings, never written in the code, which is public.
 
 ### Finish moving off Apps Script
-What: The decision stands: Firebase does everything, and Apps Script is kept only to send email. What still goes through Apps Script is the email around invites, approvals and access requests, and the Vacancies form. Move those behind cloud jobs, then switch off the Apps Script web address that pages call.
-Why: Apps Script is the one part that is not published and checked the way everything else is, and its sign-in keeps expiring.
+What: The decision stands: Firebase does everything, and Apps Script is kept only to send email. What still goes through Apps Script is the email around invites, approvals and access requests, and the Vacancies form. Have cloud jobs do those instead, then switch off the Apps Script web address the pages use.
+Why: Apps Script is the one part that is not published and checked the way everything else is, and the sign-in that publishes it keeps running out.
 - Email stays in Apps Script for now (decided 13/11/2026). "Email through a sending service" below is the later step.
 - The list of what is left was last measured on 15/08/2026. Measure again before starting.
 
@@ -242,8 +247,8 @@ Why: The runbook names 15 cloud jobs where there are 27, and both describe a sys
 ### Paperwork out of the kit folder
 What: The system folder holds the shared kit and, beside it, the plans, guides and notes on retired tools. Move the paperwork to a folder of its own so the system folder is only the kit, and keep reducing it.
 Why: Plans piled up beside the code because that was the nearest place, and nothing ever removed one.
-- Check what points at each file first: code comments, tests and Estate all name them.
-- Code comments that still name a plan deleted on 28/11/2026 are cleared as each tool is rebuilt.
+- Before moving a file, check what refers to it: notes in the code, the tests and Estate all name these files.
+- Some notes in the code still name a plan that was deleted on 28/11/2026. Each is removed when its tool is rebuilt.
 
 ### Club code visits in Usage
 What: Every club code sign-in is already recorded with its club and the tool. Show those counts in Usage, per tool and per club. Counts only, never names.

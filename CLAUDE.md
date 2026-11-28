@@ -96,8 +96,9 @@ nod) promote it to the right layer, in lockstep:
   schema — don't conflate them.
 
 **Change the canon by adding.** `NL.*` is used by every tool, so never quietly
-change what an existing helper returns: add a new option or a new helper. A
-change that breaks callers needs every caller moved in the same pull request.
+change what an existing helper returns: add a new option or a new helper. If
+a change would break the tools that use a helper, move every one of them in
+the same pull request.
 And `NL.endpoints` holds public addresses only, never a key or a secret.
 
 Rule of thumb: **first use stays tool-local; the second time you'd write it,
@@ -219,8 +220,8 @@ These exist and are **not** linked from anywhere a session would find them,
 which is why work gets re-planned from scratch. Check here first.
 
 **No new plan documents** (28/11/2026). Thirteen old plans were deleted that
-day, each after its live decisions were folded into the documents below; git
-history holds them. A tool's decisions go in its brief in `system/declutter.md`,
+day, once the decisions in them that still stand had been moved into the
+documents below; git history holds the files. A tool's decisions go in its brief in `system/declutter.md`,
 an idea goes on `system/ROADMAP.md`, and how things work goes in this file. A
 code comment that still names a deleted plan is cleared when that file is next
 changed.

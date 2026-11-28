@@ -411,51 +411,54 @@ is optional (16/11).
 ## Before passes: how the old model and the codes work today, and how we got here
 
 Written 28/11/2026, when the six older access plans were deleted. The first
-part is checked against the code, not the old plans. The second is the trail,
-so a decision can be retraced; every line in it is history, not instruction.
+part says how things work today and was checked against the code, not the old
+plans. The second part is the history, so a decision can be traced back.
+Nothing in the second part is an instruction.
 
 ### Today, while both models run
 
 - **A pass decides for anyone who has one** (everything above).
-- **Someone with no pass falls back to the old role.** `users/<uid>/role` is
-  one of `superadmin`, `admin`, `staff` (League) or `club-admin`, `club-staff`
-  (Club); the older `club` and `club-viewer` are still accepted. Each tool's
-  per-role `defaults` say what that role gets, and "League only" (`audience`)
-  keeps club roles off League tools.
-- **The database rules still read the old per-person entries**
-  (`users/<uid>/tools/<key>`). Cloud jobs write them from each pass, so the
-  two agree.
+- **Someone with no pass is still decided by their old role.** There are
+  five: Superadmin, Admin and Staff for the League, Club Admin and Club Staff
+  for clubs (`users/<uid>/role`; two older club names, `club` and
+  `club-viewer`, still work). Each tool lists what each role gets
+  (`defaults`), and a tool marked League only (`audience`) stays shut to club
+  roles.
+- **The database still checks the old list of tools kept against each
+  person** (`users/<uid>/tools/<key>`). Cloud jobs rewrite that list from the
+  person's pass, so the old list and the pass always agree.
 - **Clubs without accounts come in by club code.** Each club has one
-  six-character code for every club-facing tool. It is checked on the server
-  (`functions/club-code.js`), which answers with a claim saying which club.
-  The code never says what the club may open: the database rules decide that,
-  tool by tool.
-- **A club has a master code and may have named people, each with their own
-  code.** A named code opens exactly what the master code opens. All it adds
-  is who signed in. Anyone who needs to be able to do something different
-  needs an account.
-- **The League has a code record of the same shape.** Its holders read what
-  any club code reads and match no club where a rule asks for a particular one.
-- **Codes are kept in Access** (the Codes tab). Resetting a code stops the
-  next sign-in, not a session already open, which can last up to an hour.
-- **Every successful code sign-in is logged** with the club, the tool and the
-  named holder if there is one. The code itself is never written down.
-- **A Club card account carries its club's code claim**, so it opens the club
-  pages signed in, with no code.
+  six-character code for every club page. The code is checked by a cloud job
+  (`functions/club-code.js`), never in the browser. A correct code signs the
+  visitor in with a label saying which club they are (a "claim"). The code
+  only says which club. What that club may open is decided by the database
+  rules, tool by tool.
+- **A club has one main code, and can also have named people who each have a
+  code of their own.** A person's own code opens exactly what the main code
+  opens. All it adds is a record of who signed in. Anyone who needs to do
+  more than the club code allows needs an account.
+- **The League has codes of the same kind.** Someone using one can read what
+  any club can read, but is never treated as a particular club.
+- **Codes are kept in Access**, on the Codes tab. Resetting a code stops the
+  next sign-in. Someone already signed in keeps going for up to an hour.
+- **Every successful code sign-in is recorded**: which club, which tool, and
+  which named person if there was one. The code itself is never recorded.
+- **Someone signed in on a Club card needs no code.** Their account carries
+  the same club label, so the club pages open for them.
 - **Codes stay until a date is set** ("Club codes off" on the Roadmap).
 
 ### How we got here (legacy, in date order)
 
 | When | What was decided | What became of it |
 |---|---|---|
-| 10/08/2026 | Keep a `third-party` role for outsiders, with a passcode in place of an account | Abandoned 16/08/2026: the role was deleted |
-| 16/08/2026 | Two kinds of login and five roles: League (Superadmin, Admin, Staff) and Club (Club Admin, Club Staff). Outsiders get a coded link per job, never a login | The roles are the fallback above; replaced by cards and zones from 12/11/2026 |
-| 17/08/2026 | The launch model, simple on purpose: the role decides what you can do; a per-tool level (`off`, `access`, `admin`) only says whether you get in | Replaced by Off / Access / Manage worked out from grants |
-| August 2026 | A plan to make "a club user can never reach a League tool" a hard boundary, with tools renamed to match | Never started as written. The boundary came from `audience`, then from the pass's card. The renaming is "Rename the tools in the database" on the Roadmap |
-| 18/08/2026 | Guest passes, scoping only: a code carrying a named list of tools, for an outsider working with one club | Never built. Replaced 16/11/2026 by External passes and club views |
+| 10/08/2026 | Keep a separate role for outsiders (`third-party`), with a passcode in place of an account | Abandoned 16/08/2026: the role was deleted |
+| 16/08/2026 | Two kinds of login and five roles: League (Superadmin, Admin, Staff) and Club (Club Admin, Club Staff). Outsiders get a coded link per job, never a login | Still used for anyone with no pass (above); replaced by cards and zones from 12/11/2026 |
+| 17/08/2026 | The launch model, simple on purpose: the role decides what you can do; a setting per tool (`off`, `access`, `admin`) only says whether you get in | Replaced by Off / Access / Manage, worked out from the pass |
+| August 2026 | A plan to make "a club user can never reach a League tool" a rule the system enforces, with tools renamed to match | Never started as written. The rule came first from the League only mark (`audience`), then from the card on the pass. The renaming is "Rename the tools in the database" on the Roadmap |
+| 18/08/2026 | Guest passes, an idea only: a code that opens a named list of tools, for an outsider working with one club | Never built. Replaced 16/11/2026 by External passes and club views |
 | 19/08/2026 | One code per club for every club-facing tool, reset on demand, in place of a set of 72 codes per tool | Built and live |
 | 21/08/2026 | The Programme Packs codes became the club codes, moved rather than reissued, because 72 clubs already held them | Live |
-| by 22/08/2026 | Named per-person codes under a club's master code | Live |
+| by 22/08/2026 | Named people at a club can each have a code of their own, beside the club's main code | Live |
 | 29/10–12/11/2026 | This plan: one card, any number of zones, a level per tool | Passes decide from 12/11/2026; nothing overrules them from 13/11/2026 |
 | 12/11/2026 | Club Codes moved into Access; club logins began | Live |
 | 16/11/2026 | The older plans marked superseded | Deleted 28/11/2026 |
@@ -479,7 +482,7 @@ it go. Nothing is removed until the **old access report** (Actions →
 | The "Apply passes" button | Access | Skeleton key, by hand | the cloud jobs have been the only writer for a month |
 | `PASS_DECIDES` | auth-guard | the way back | a month after the last account has a pass |
 | Forwarding pages for old addresses | `*/admin/`, `/people/`, `/audit/` | old bookmarks | with each tool's rebuild: removing a tool's old addresses is part of its sign-off (`system/declutter.md`, decided 28/11/2026) |
-| Plans the model replaced | six files in `system/` | nothing | **deleted 28/11/2026**; summarised in "Before passes" above, and in git history before that date |
+| Plans the model replaced | six files in `system/` | nothing | **deleted 28/11/2026**. Summarised in "Before passes" above; the files themselves are in git history |
 
 ## Approvals and notifications
 
