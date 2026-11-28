@@ -19,6 +19,15 @@ permanently, including in git history after deletion.
 - If a tool needs a flat data file at runtime, generate it at deploy time from
   RTDB via an Action. Do not commit the generated output.
 
+## The freeze — no new tools (from 28/11/2026)
+
+The suite is being consolidated, tool by tool. **Do not build, scaffold or mock
+up a new tool**, however small, and do not resume a tool marked Hold. If an idea
+comes up, write it into `system/ROADMAP.md` under "Later" and stop. Graphics are
+the one exception. Fixes to live tools and the consolidation itself carry on.
+`system/declutter.md` has the aim, the list of every tool with its answer, the
+order of work and the brief for the tool in hand: read it before starting.
+
 ## Derive from the canon, never from a sibling tool
 
 A new tool is built from `system/_template/` and the canon. It is **not** built
@@ -219,6 +228,7 @@ which is why work gets re-planned from scratch. Check here first.
 | `system/content-plan-plan.md` | **Plan, step 1 (tiles) built.** Content Plan improvements from Richard's 30/10/2026 note, checked against v3.6: split kind into home / format / shares, Draft / Scheduled / Published, calmer tiles, three-dot menu (a canon candidate — Programme Packs already hand-rolls one), series and tasks. Tiles first. Lists where the note and the code disagreed. |
 | `system/staging.md` | **Built 19/11/2026.** How to try a new version of a *live* tool at `nl.tools/staging/<slug>/` before clubs see it: read-only against live data (canon refuses every save), open to the Skeleton key and Tester-key holders at their live level, never by club code, one marker line, promoted or deleted in a single PR. `lint --strict` runs its checks. Says how to make a copy and how staging differs from the Sandbox shelf. Read before making any copy of a live tool to test changes. |
 | `system/deployer-migration.md` | **Parked.** Every deploy in this repo authenticates as `nl-archive-ga-reader` — named for the GA pipeline, and now the deployer for rules, functions, the registry, Apps Script and the scan container. The rename is cosmetic; the point is that nobody knows what roles it holds or why. Has the safe migration order, and the one zero-risk proof step. |
+| `system/declutter.md` | **The consolidation, agreed 28/11/2026: work from this.** The aim (one kit, a few page shapes), the freeze on new tools, every tool marked Keep / Hold / Single-use / Retire, the order (Club Directory first, then worst first, one tool per session through to live), what is decided and what is open, and the brief for each tool as it is interviewed. Replaces `brand-audit.md` as the working document. |
 | `system/style-principles.md` | **Where things go and when to use them**: the rules above the canon (page structure, type, colour, controls, buttons, dialogs, Manage, lists, words, safety), each marked law or new, and whether a machine can check it. Draft 13/11/2026; the brand sweep holds every tool to it. Read before laying out a page or a dialog. |
 | `system/brand-audit.md` | **The brand sweep's work list** (13/11/2026): every page measured against the style principles and the canon. Part 1 canon changes in order (dialog bar with icons, dates with the weekday, a canon date picker, the four button kinds, inline empty state, audit words, the override backlog), Part 2 drift by theme with the worst pages named, Part 3 every page ranked. Counts are a snapshot: re-run the checks rather than trusting them later. |
 | `system/brand-v3-scale-plan.md` | Parked type/scale pass. |
