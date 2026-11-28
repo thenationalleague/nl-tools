@@ -375,8 +375,8 @@ fi
 echo "$clean_count tool$( [[ $clean_count -ne 1 ]] && echo s ) clean, \
 $standalone_clean standalone page$( [[ $standalone_clean -ne 1 ]] && echo s ) clean."
 
-# Canon class overrides — the rule CONSOLIDATION.md's "Future-proofing" section
-# listed in July and which was never built. Everything above checks WIRING (does
+# Canon class overrides — a rule planned in July 2026 and not built until
+# August. Everything above checks WIRING (does
 # the page load canon, at the right version). This checks whether the page then
 # quietly overrides what it just loaded, which is the larger source of drift:
 # 153 instances across 42 pages when it was first run.

@@ -222,9 +222,15 @@ which is why work gets re-planned from scratch. Check here first.
 **No new plan documents** (28/11/2026). Thirteen old plans were deleted that
 day, once the decisions in them that still stand had been moved into the
 documents below; git history holds the files. A tool's decisions go in its brief in `system/declutter.md`,
-an idea goes on `system/ROADMAP.md`, and how things work goes in this file. A
-code comment that still names a deleted plan is cleared when that file is next
-changed.
+an idea goes on `system/ROADMAP.md`, and how things work goes in this file.
+
+**A note in the code explains itself.** It says what the code does and why, in
+its own words. It never sends the reader to a plan, or to a section of one:
+when the plan goes, the reason goes with it, which is what 45 files were left
+doing on 28/11/2026. The only documents code may name are this file and the
+notes in `system/retired/`. Where a file still names a deleted plan, clear it
+the next time that file is changed for another reason; tool pages are cleared
+at their rebuild.
 
 | Document | What it decides |
 |---|---|

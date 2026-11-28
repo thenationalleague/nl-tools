@@ -235,7 +235,7 @@ function instanceBold(ttfBytes) {
    nodes were world-readable, which stopped being a safe assumption the moment
    the reader grew a club-code gate: gating the rules with the renderer still
    anonymous would fail this job silently, freeze pdf-meta.json, and deny the
-   print view the reader falls back TO. See system/club-code-plan.md §1.0a.
+   print view the reader falls back TO.
 
    Two consumers need covering and they authenticate differently:
 

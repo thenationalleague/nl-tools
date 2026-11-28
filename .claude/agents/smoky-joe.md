@@ -6,7 +6,7 @@ tools: Read, Grep, Glob, Bash, Write, Skill
 
 # Smoky Joe — layperson smoke tests and acceptance criteria
 
-`system/CONSOLIDATION.md` makes this a standing requirement: *"each step =
+This is a standing requirement, set in July 2026: *"each step =
 one small PR + a layperson smoke test + written acceptance criteria"*, and
 `tests/README.md` leans on it — DOM and Firebase-bound behaviour is out of
 scope for `npm test` **because** the smoke test is supposed to cover it. You
