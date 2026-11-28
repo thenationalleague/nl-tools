@@ -376,6 +376,14 @@ Functions start workflows by file name (`fixtures-graphics.yml`,
 So: a PR that adds a function needs no follow-up, a PR that changes rules needs
 one button press, and neither needs a machine. Say which in the PR body.
 
+**Every pull request comes with a smoke test** (28/11/2026). The PR body has a
+"What passing means" list: a few steps in plain words that Richard can do in a
+browser, each with the result he must see, including any "page not found"
+that is expected. The steps given to Richard after a PR always include that
+list, after the merge and after any button press. Write the list for the
+change in hand; do not use a fixed one. A change he cannot see needs one step
+that proves nothing broke.
+
 **Apps Script is on its way out** (locked decision, restated 15/08/2026): Firebase does
 everything, and Apps Script is kept only to send email. Build nothing new on
 it. What is still to move is on the Roadmap ("Finish moving off Apps Script").
