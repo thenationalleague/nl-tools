@@ -22,13 +22,14 @@
 
 ## Now
 
+### The consolidation: one kit, a few page shapes
+What: Every tool rebuilt from the shared kit onto one of a few page shapes, one tool at a time, each through staging to live before the next starts. Club Directory is first. No new tools are built until it is done; new ideas are added under Later. The list of every tool, with what was decided for each, is in system/declutter.md.
+Why: The tools were built at different times and do not look or behave like one suite, and tidying while still building new ones has not held.
+Waiting on: you (how long the old addresses given to clubs should keep forwarding)
+
 ### Club Directory and Programme Packs on one screen
 What: The clubs listed down the left and the chosen club on the right, as in the board deck's mock-ups, tried in staging before clubs see it (Declutter browse plan). Staging is built (19/11/2026): a copy at nl.tools/staging/<slug>/ that reads live data, saves nothing, and opens only to the Skeleton key and the Tester key. Next: the club list in the shared club picker, then Club Directory in staging, then Programme Packs. Club details go in a tab or fold beside the people, to be tried both ways.
 Why: The real tools go page to page, and at the common laptop size the Directory shows nobody on its first screen.
-
-### Matchday Live on the club code door
-What: Matchday Live's contributors use personal links today. When it leaves Sandbox, they open it the same way as every club page: a club code (named holders, so each clip still says who filed it) or a Club card with the Club Media zone.
-Why: One way in for clubs. It waits for launch because the personal links are part of the pilot.
 
 ### Retire programmeAuth's club path
 What: Programme Packs now checks club codes through the shared door (13/11/2026). After a week with no club using the old route, remove the club-passcode half of programmeAuth, leaving only the console's sign-in.
@@ -104,6 +105,10 @@ Why: A reset email that lands in spam is a locked-out person phoning you.
 Waiting on: you
 
 ## Later
+
+### Matchday Live on the club code door
+What: Matchday Live's contributors use personal links today. When it leaves Sandbox, they open it the same way as every club page: a club code (named holders, so each clip still says who filed it) or a Club card with the Club Media zone.
+Why: One way in for clubs. It waits for launch because the personal links are part of the pilot.
 
 ### Two-step sign-in for the Skeleton key
 What: Turn on two-step sign-in (a code from a phone app) for the two Skeleton key accounts first.
