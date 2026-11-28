@@ -200,8 +200,7 @@ test('every consumer of _directory.* moved to the same version', () => {
   /* Same rule as the canon `?v=`: a bump means the shared file changed, and a
      page left behind loads a wall whose CSS it does not have. */
   const seen = new Set();
-  for (const p of ['club-directory/admin/index.html',
-    'club-directory/index.html', 'club-directory/public/index.html']) {
+  for (const p of ['club-directory/index.html', 'club-directory/public/index.html']) {
     for (const m of read(p).matchAll(/_directory\.(?:css|js)\?v=(\d+)/g)) seen.add(m[1]);
   }
   assert.equal(seen.size, 1, `mixed versions across the family: ${[...seen].join(', ')}`);

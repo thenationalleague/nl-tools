@@ -17,19 +17,10 @@ const TOOLS = [
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
 
 for (const { dir, key } of TOOLS) {
-  /* The old /admin/ forwarding pages were removed on 28/11/2026. Club
-     Directory keeps its one until the staging copy is promoted over it. */
-  if (dir === 'club-directory') {
-    test(`${dir}: /admin/ forwards, keeping the query and hash, loading nothing`, () => {
-      const stub = read(`${dir}/admin/index.html`);
-      assert.match(stub, new RegExp(`location\\.replace\\('/${esc(dir)}/' \\+ \\(q \\? '\\?' \\+ q : ''\\) \\+ location\\.hash\\)`));
-      assert.doesNotMatch(stub, /(src|href)="\/system\//);
-    });
-  } else {
-    test(`${dir}: /admin/ is gone, with no forwarding page`, () => {
-      assert.equal(existsSync(new URL(`../${dir}/admin/index.html`, import.meta.url)), false);
-    });
-  }
+  /* The old /admin/ forwarding pages were removed on 28/11/2026. */
+  test(`${dir}: /admin/ is gone, with no forwarding page`, () => {
+    assert.equal(existsSync(new URL(`../${dir}/admin/index.html`, import.meta.url)), false);
+  });
 
   test(`${dir}: the registry opens it at its one address`, () => {
     assert.equal(REG[key].url, `/${dir}/`);

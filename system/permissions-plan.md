@@ -481,7 +481,7 @@ it go. Nothing is removed until the **old access report** (Actions →
 | `type`, `visibleToAll`, `placeholder` | `tools/<key>` | nothing (`placeholder` was false on every tool) | **removed 16/11** from the registry snapshot |
 | The "Apply passes" button | Access | Skeleton key, by hand | the cloud jobs have been the only writer for a month |
 | `PASS_DECIDES` | auth-guard | the way back | a month after the last account has a pass |
-| Forwarding pages for old addresses | Club Directory's `/admin/` pages, and the addresses given to clubs or the public | old bookmarks and links | the staff-only ones (`/people/`, `/audit/`, `/club-codes/` and seven `/admin/` pages) were **removed 28/11/2026**; the rest go with each tool's rebuild, as part of its sign-off (`system/declutter.md`) |
+| Forwarding pages for old addresses | the addresses given to clubs or the public | old links | the twelve staff-only ones (`/people/`, `/audit/`, `/club-codes/` and nine `/admin/` pages) were **removed 28/11/2026**; the rest go with each tool's rebuild, as part of its sign-off (`system/declutter.md`) |
 | Plans the model replaced | six files in `system/` | nothing | **deleted 28/11/2026**. Summarised in "Before passes" above; the files themselves are in git history |
 
 ## Approvals and notifications

@@ -30,7 +30,7 @@ Why: The tools were built at different times and do not look or behave like one 
 - Thirteen older plan documents were deleted on 28/11/2026, so system/declutter.md is the one plan.
 
 ### Club Directory on one screen
-What: The first rebuild. The clubs listed down the left and the chosen club on the right, tried in staging before clubs see it. The club list is already in the shared kit and a staging copy exists. The brief is in system/declutter.md.
+What: The first rebuild. The clubs listed down the left and the chosen club on the right, tried in staging before clubs see it. Parked on 28/11/2026 with no start date. The club list is in the shared kit, and the staging copy is put away where a session can get it back. The brief, and how to pick the work up, are in system/declutter.md.
 Why: The real tool goes page to page, and at the common laptop size the Directory shows nobody on its first screen.
 - Programme Packs takes the same shape in its own turn, not alongside.
 

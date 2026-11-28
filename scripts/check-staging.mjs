@@ -10,8 +10,10 @@
    3. Every staging copy names a commit (from) that this repo has, and its
       live folder has not changed since that commit: promoting would erase a
       fix made to live in the meantime. Bring staging up to date first.
-   4. No staging copy is older than MAX_DAYS: staging is promoted or
-      deleted, never left.
+   4. No staging copy has gone MAX_DAYS without real work on it: staging is
+      promoted or deleted, never left. The days count from the last commit
+      that changed the copy, so they roll on while the work is active. A
+      lockstep canon bump (?v=N) is not work and does not restart them.
    5. A staging page loads no file from its live folder by absolute path
       (src="/club-directory/_directory.js"): it would run live's code, not
       the copy's. A tool loads its own files by relative path.
@@ -28,6 +30,21 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 export const MAX_DAYS = 28;
+const BUMP = '/system/[a-z-]+\\.(js|css)\\?v=[0-9]+';
+
+/* When a staging copy was last really worked on, in ms: the newest commit
+   that changed its folder by more than a canon ?v= number. 0 when the copy
+   is not committed yet. */
+function lastWork(root, dir) {
+  let log = '';
+  try { log = git(root, ['log', '--format=%H %ct', '--', dir]); } catch { return 0; }
+  for (const line of log.split('\n').filter(Boolean)) {
+    const [sha, at] = line.split(' ');
+    try { git(root, ['diff', '--quiet', '-I', BUMP, sha + '^', sha, '--', dir]); }
+    catch { return Number(at) * 1000; }   /* a real change, or the first commit of all */
+  }
+  return 0;
+}
 const SKIP_DIRS = new Set(['.git', 'node_modules', '.claude']);
 /* Places allowed to name NL_STAGING or /staging/: where it is defined,
    tested and written about. */
@@ -76,13 +93,11 @@ export function check(root, now = Date.now()) {
     catch { problems.push(`${f}: from ${from} is not a commit here (a shallow clone? the check needs fetch-depth: 0)`); continue; }
     /* A lockstep canon bump (/system/…?v=N) touches every page, live ones
        included, and changes nothing about the tool, so it does not count. */
-    try { git(root, ['diff', '--quiet', '-I', '/system/[a-z-]+\\.(js|css)\\?v=[0-9]+', from, 'HEAD', '--', live + '/']); }
+    try { git(root, ['diff', '--quiet', '-I', BUMP, from, 'HEAD', '--', live + '/']); }
     catch { problems.push(`${f}: ${live}/ has changed since ${from}; bring staging up to date before promoting`); }
-    let added = '';
-    try { added = git(root, ['log', '--diff-filter=A', '--format=%ct', '--', f]).split('\n').pop(); } catch { /* not committed yet */ }
-    const born = added ? Number(added) * 1000 : now;
-    const days = Math.floor((now - born) / 864e5);
-    if (days > MAX_DAYS) problems.push(`${f}: staged ${days} days ago; promote it or delete it (limit ${MAX_DAYS})`);
+    const worked = lastWork(root, f.replace(/index\.html$/, ''));
+    const days = Math.floor((now - (worked || now)) / 864e5);
+    if (days > MAX_DAYS) problems.push(`${f}: last worked on ${days} days ago; promote it or delete it (limit ${MAX_DAYS})`);
   }
   return { problems, copies: copies.length };
 }

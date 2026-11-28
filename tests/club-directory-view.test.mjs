@@ -3,7 +3,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { REPO } from './load-canon.mjs';
 
@@ -163,7 +163,6 @@ test('a phone extension is small and stays in one piece', () => {
 
 /* ------------------------------------------ one page, an Edit button (v1.18)
    Editing moved onto the staff page (Richard, 11/11/2026). */
-const EDIT_STUB = readFileSync(join(REPO, 'club-directory/admin/edit/index.html'), 'utf8');
 
 test('the staff page edits in place, behind Edit, for Manage only', () => {
   const live = strip(STAFF);
@@ -198,10 +197,13 @@ test('the editor is a module the page drives, not a page', () => {
   }
 });
 
-test('the old edit addresses forward to the one page in editing', () => {
-  for (const src of [EDIT_STUB, readFileSync(join(REPO, 'club-directory/editor/index.html'), 'utf8')]) {
-    assert.match(src, /location\.replace\('\/club-directory\/\?edit' \+ location\.hash\)/);
-    assert.ok(!/auth-guard/.test(src), 'a redirect stub waits on nothing');
+test('the old editor address forwards to the one page in editing; the staff-only ones are gone', () => {
+  const src = readFileSync(join(REPO, 'club-directory/editor/index.html'), 'utf8');
+  assert.match(src, /location\.replace\('\/club-directory\/\?edit' \+ location\.hash\)/);
+  assert.ok(!/auth-guard/.test(src), 'a redirect stub waits on nothing');
+  /* /admin/ and /admin/edit/ only ever sent signed-in staff on. Removed 28/11/2026. */
+  for (const p of ['club-directory/admin/index.html', 'club-directory/admin/edit/index.html']) {
+    assert.equal(existsSync(join(REPO, p)), false, p + ' stays removed');
   }
 });
 

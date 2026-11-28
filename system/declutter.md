@@ -140,12 +140,12 @@ Single-use tools are to move under the temp address planned for one-offs.
   on the kit when it is picked up; it gets no separate branding pass now.
 - **Forwarding pages are not wanted** (28/11/2026): people reach tools through
   the portal, not bookmarks. A removed page leaves none (`CLAUDE.md`,
-  "Retiring something"). Ten that only signed-in staff ever used were
+  "Retiring something"). Twelve that only signed-in staff ever used were
   removed on 28/11/2026: `/people/`, `/audit/`, `/club-codes/`, and the
   `/admin/` pages of Club Kits, DAZN Viewership, Document Library, Financial
   Benchmarking, Fixture Management, Programme Packs and Save of the Month.
-  Club Directory's two staff ones wait for its rebuild, because a live tool
-  cannot change while its staging copy is open. The addresses given to clubs
+  Club Directory's two staff ones went the same day, once its staging copy
+  was put away. The addresses given to clubs
   or the public go tool by tool: removing them is part of each tool's
   sign-off (step 4). The rename of Data to Usage left none.
 - **A page uses the width it has.** Empty space down the sides needs a
@@ -244,8 +244,9 @@ From the interview on 28/11/2026.
   extras on this tool: an approval queue for League managers, and the
   read-only public view.
 - **Already in place:** the club browser in the canon (`NL.clubPicker` mode
-  `list`, `.nl-browse`), and a staging copy at `staging/club-directory/`.
-  Start from those; check what the staging copy already does before building.
+  `list`, `.nl-browse`), and a staging copy that is put away (see "Parked"
+  below). Start from those; check what the staging copy already does before
+  building.
 
 ### The rebuild, in two versions (Richard, 28/11/2026)
 
@@ -263,6 +264,24 @@ From the interview on 28/11/2026.
 - **Club details: not chosen yet.** The People | Club details switch and the
   fold are both in staging for Richard to compare (`?details=fold` shows the
   fold). The one not chosen is removed before v2.0.0 is promoted.
+
+### Parked on 28/11/2026
+
+The rebuild has not started and has no start date. So that nothing runs out
+while it waits, the staging copy was deleted on 28/11/2026. Git keeps it.
+
+To pick the work up:
+
+1. Get the copy back: `git checkout 231dda9 -- staging/club-directory`. That is
+   the last commit on `main` that holds it (staging v3.5).
+2. Bring it up to date. The live tool has moved on since the copy was made:
+   it is v3.4 and its two old `/admin/` pages are gone. Put those same
+   changes into the copy, then set the copy's `from` line to the newest
+   commit on `main`.
+3. Carry on from "What passing means: v2.0.0" below.
+
+The 28 days in the staging check now count from the last real work on a
+copy, so they start again on the day the copy comes back.
 
 What the staging copy did on 28/11/2026 (v3.5): the League side has the club
 list and detail, the quiet club header, Role before Name, and Mailing lists
@@ -293,9 +312,9 @@ Run in staging, then once more on the live tool after it is promoted.
 9. The public page shows every club and no detail marked private.
 10. In staging only: pressing Save in Edit says "Staging: not saved" and
     nothing changes.
-11. On live only, after promotion: `/club-directory/admin/`,
-    `/club-directory/editor/` and `/club-directory/reader/` say page not
-    found, and a club code still opens the club's own page.
+11. On live only, after promotion: `/club-directory/editor/` and
+    `/club-directory/reader/` say page not found, and a club code still opens
+    the club's own page. (`/club-directory/admin/` went on 28/11/2026.)
 
 ## The end
 
