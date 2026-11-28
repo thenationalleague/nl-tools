@@ -5,8 +5,8 @@
    Answers one question, nightly: WHICH TOOLS ARE ACTUALLY BEING USED.
 
    It was asked directly — "I liked the idea of seeing eg how often programme
-   packs was viewed" — and it is the question system/tool-status-and-access.md
-   exists to answer and cannot. Three tools were retired on 15/08/2026 on
+   packs was viewed" — and a hand-kept list of which tools are live could
+   never answer it. Three tools were retired on 15/08/2026 on
    judgement rather than evidence, and the public-site tickers sat dead for
    five months because nothing was counting.
 
