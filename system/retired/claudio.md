@@ -68,7 +68,7 @@ Each persona had its own typeface, all from one Adobe Fonts kit. The kit stays b
 
 The page also read the whole `users` node to build its staff list. The dispatch line was commented out on 15/08/2026 for exactly this reason. A rebuild takes the uid from a verified token and keeps all prompts on the server.
 
-**2. A callable is not available.** The migration plan says "callable, key from Secret Manager, gated by native auth", but an org policy now blocks public invokers on new Cloud Run services, so a new callable cannot be created (see Phase 1 of `gas-to-functions-migration.md`). The tested alternative is an RTDB-triggered function, but NL Cup Footage measured **15–20 seconds** of trigger latency, which is a poor fit for chat. Which route to take is the first question for a rebuild. The secret side is solved: `defineSecret` is already used in `functions/`.
+**2. A callable is not available.** The migration plan says "callable, key from Secret Manager, gated by native auth", but an org policy now blocks public invokers on new Cloud Run services, so a new callable cannot be created (recorded in the Apps Script migration plan, deleted 28/11/2026). The tested alternative is an RTDB-triggered function, but NL Cup Footage measured **15–20 seconds** of trigger latency, which is a poor fit for chat. Which route to take is the first question for a rebuild. The secret side is solved: `defineSecret` is already used in `functions/`.
 
 **3. Tokens per minute, and the route to the switchboard.** Four designs were tried in two days:
 - **Two calls with handoff markers.** The second call hit 429 rate limits.

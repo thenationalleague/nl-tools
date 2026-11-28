@@ -7,10 +7,9 @@ that one went.
 
 ## What it is
 
-One tool, two doors (the club-root + `/admin/` shape in
-`system/tool-status-and-access.md`). **Changed 12/11/2026:** the console
-moved to `/fixtures/` and `/fixtures/admin/` forwards there (one address per
-tool, `system/one-address-plan.md`). The forward-facing view below, when it
+One tool, two doors (the old club-root + `/admin/` shape). **Changed
+12/11/2026:** the console moved to `/fixtures/` and `/fixtures/admin/`
+forwards there (one address per tool, `CLAUDE.md`). The forward-facing view below, when it
 is built, is a view of that page decided by the pass, not a second page.
 
 - **`/fixtures/`** — the forward-facing view. Every signed-in user, clubs

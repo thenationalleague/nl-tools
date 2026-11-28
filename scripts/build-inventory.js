@@ -472,8 +472,7 @@ function main() {
   /* Parked tools are DELIBERATELY off the portal — record pulled from tools/
      and held in the parked file, code left in the repo, superadmin-only. They
      look identical to an unregistered tool from the page alone, and conflating
-     the two turns eight considered decisions into eight false alarms.
-     See system/tool-status-and-access.md. */
+     the two turns eight considered decisions into eight false alarms. */
   const parked = fs.existsSync(PARKED)
     ? JSON.parse(fs.readFileSync(PARKED, 'utf8'))
     : {};
@@ -685,9 +684,9 @@ function main() {
     }
 
     /* Directory-level credit, for collections referenced as a set rather than
-       file by file: system/brand-v3-scale-plan.md points at `/brand-dev/`
-       and never names the three pages inside it, so all three read as orphans
-       while being live reference material for an in-progress plan.
+       file by file: a document can point at a folder and never name the
+       pages inside it, so each page reads as an orphan while the folder is
+       live reference material.
        Restricted to directories with no index.html of their own — a bare
        collection. Without that guard, any mention of "handbook/" would credit
        every page under it, and the metric would stop meaning anything. */

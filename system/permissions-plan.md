@@ -18,10 +18,9 @@ Its "Copy for session 2" / "Save as a file" output is the hand-over for step 2.
 Visual design: the "NL Tools – card and key concepts" canvas, boards 6–10
 (locked 12/11 – see "The pass" below).
 
-When built, this **replaces** `roles-and-access-plan.md`,
-`staff-club-audience-plan.md`, the access tables in `tool-status-and-access.md`,
-`guest-pass-plan.md` and `club-code-plan.md`. Until then those are the record
-of how today's system works; this is where it is going.
+This is the one access document. The six plans it replaced were deleted on
+28/11/2026; what they decided, and how the old roles and the club codes still
+work while both models run, is in "Before passes" below.
 
 **Deadline that sets the pace:** the board meeting, about 19/11/2026. Steps 2
 and 3 (passes visible, nothing about access changed) are the target for it.
@@ -141,7 +140,7 @@ out only when a specific person needs one sub-tool alone).
    Responsibilities. On both benchmarking tools clubs only ever get Access;
    Manage sits with the matching League team (Commercial for Commercial
    Benchmarking, Finance for Financial Benchmarking).
-3. **Structure** = Data, Estate, NLServices API, Style Guide, Responsibilities.
+3. **Structure** = Usage (called Data until 28/11/2026), Estate, NLServices API, Style Guide, Responsibilities.
 4. **Club Codes:** Access = see codes to hand out; Manage = reset or change.
    League Operations hold Manage; nobody else opens it.
 5. **Newsletter:** a place for making it (the PDF is the output). Media
@@ -409,6 +408,61 @@ tool); (4) the pair on `/pass/` and in Access. Before (3): how many IFR
 logins, and whether they see every season or the latest only. The end date
 is optional (16/11).
 
+## Before passes: how the old model and the codes work today, and how we got here
+
+Written 28/11/2026, when the six older access plans were deleted. The first
+part says how things work today and was checked against the code, not the old
+plans. The second part is the history, so a decision can be traced back.
+Nothing in the second part is an instruction.
+
+### Today, while both models run
+
+- **A pass decides for anyone who has one** (everything above).
+- **Someone with no pass is still decided by their old role.** There are
+  five: Superadmin, Admin and Staff for the League, Club Admin and Club Staff
+  for clubs (`users/<uid>/role`; two older club names, `club` and
+  `club-viewer`, still work). Each tool lists what each role gets
+  (`defaults`), and a tool marked League only (`audience`) stays shut to club
+  roles.
+- **The database still checks the old list of tools kept against each
+  person** (`users/<uid>/tools/<key>`). Cloud jobs rewrite that list from the
+  person's pass, so the old list and the pass always agree.
+- **Clubs without accounts come in by club code.** Each club has one
+  six-character code for every club page. The code is checked by a cloud job
+  (`functions/club-code.js`), never in the browser. A correct code signs the
+  visitor in with a label saying which club they are (a "claim"). The code
+  only says which club. What that club may open is decided by the database
+  rules, tool by tool.
+- **A club has one main code, and can also have named people who each have a
+  code of their own.** A person's own code opens exactly what the main code
+  opens. All it adds is a record of who signed in. Anyone who needs to do
+  more than the club code allows needs an account.
+- **The League has codes of the same kind.** Someone using one can read what
+  any club can read, but is never treated as a particular club.
+- **Codes are kept in Access**, on the Codes tab. Resetting a code stops the
+  next sign-in. Someone already signed in keeps going for up to an hour.
+- **Every successful code sign-in is recorded**: which club, which tool, and
+  which named person if there was one. The code itself is never recorded.
+- **Someone signed in on a Club card needs no code.** Their account carries
+  the same club label, so the club pages open for them.
+- **Codes stay until a date is set** ("Club codes off" on the Roadmap).
+
+### How we got here (legacy, in date order)
+
+| When | What was decided | What became of it |
+|---|---|---|
+| 10/08/2026 | Keep a separate role for outsiders (`third-party`), with a passcode in place of an account | Abandoned 16/08/2026: the role was deleted |
+| 16/08/2026 | Two kinds of login and five roles: League (Superadmin, Admin, Staff) and Club (Club Admin, Club Staff). Outsiders get a coded link per job, never a login | Still used for anyone with no pass (above); replaced by cards and zones from 12/11/2026 |
+| 17/08/2026 | The launch model, simple on purpose: the role decides what you can do; a setting per tool (`off`, `access`, `admin`) only says whether you get in | Replaced by Off / Access / Manage, worked out from the pass |
+| August 2026 | A plan to make "a club user can never reach a League tool" a rule the system enforces, with tools renamed to match | Never started as written. The rule came first from the League only mark (`audience`), then from the card on the pass. The renaming is "Rename the tools in the database" on the Roadmap |
+| 18/08/2026 | Guest passes, an idea only: a code that opens a named list of tools, for an outsider working with one club | Never built. Replaced 16/11/2026 by External passes and club views |
+| 19/08/2026 | One code per club for every club-facing tool, reset on demand, in place of a set of 72 codes per tool | Built and live |
+| 21/08/2026 | The Programme Packs codes became the club codes, moved rather than reissued, because 72 clubs already held them | Live |
+| by 22/08/2026 | Named people at a club can each have a code of their own, beside the club's main code | Live |
+| 29/10–12/11/2026 | This plan: one card, any number of zones, a level per tool | Passes decide from 12/11/2026; nothing overrules them from 13/11/2026 |
+| 12/11/2026 | Club Codes moved into Access; club logins began | Live |
+| 16/11/2026 | The older plans marked superseded | Deleted 28/11/2026 |
+
 ## Clearing the old model (started 16/11)
 
 Two ways of deciding access is twice the chance of them disagreeing. Every
@@ -427,8 +481,8 @@ it go. Nothing is removed until the **old access report** (Actions →
 | `type`, `visibleToAll`, `placeholder` | `tools/<key>` | nothing (`placeholder` was false on every tool) | **removed 16/11** from the registry snapshot |
 | The "Apply passes" button | Access | Skeleton key, by hand | the cloud jobs have been the only writer for a month |
 | `PASS_DECIDES` | auth-guard | the way back | a month after the last account has a pass |
-| Forwarding pages for old addresses | `*/admin/`, `/people/`, `/audit/` | old bookmarks | a quarter after the move |
-| Plans the model replaced | `roles-and-access-plan.md`, `staff-club-audience-plan.md`, `tool-status-and-access.md`, `third-party-access-plan.md`, `guest-pass-plan.md` | sessions that read them | marked superseded 16/11; deleted at step 9 with the rest |
+| Forwarding pages for old addresses | `*/admin/`, `/people/`, `/audit/` | old bookmarks | with each tool's rebuild: removing a tool's old addresses is part of its sign-off (`system/declutter.md`, decided 28/11/2026) |
+| Plans the model replaced | six files in `system/` | nothing | **deleted 28/11/2026**. Summarised in "Before passes" above; the files themselves are in git history |
 
 ## Approvals and notifications
 

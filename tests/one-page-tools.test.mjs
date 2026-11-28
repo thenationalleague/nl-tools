@@ -1,4 +1,4 @@
-/* The two-page tools moved to one address (system/one-address-plan.md,
+/* The two-page tools moved to one address (the rule is in CLAUDE.md;
    14/11/2026): the club page and the staff page are one page, through the
    canon door (NL.codeGate.door). Each one added here is checked the same
    way. Financial Benchmarking has its own fuller file too. */

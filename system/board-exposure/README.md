@@ -5,8 +5,8 @@ and how readable it was while it was there. Written 26/08/2026 to answer one
 question: can the league measure this itself, cheaply, rather than buy it.
 
 The answer is yes. What is here is a working detector and nothing else — no
-gated page, no RTDB node, no registry record, no workflow. Read
-`system/tool-status-and-access.md` before assuming otherwise.
+gated page, no RTDB node, no registry record, no workflow. The tool is on
+Hold (`system/declutter.md`).
 
 ## Run a full match
 

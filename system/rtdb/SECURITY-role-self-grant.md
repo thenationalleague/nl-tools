@@ -118,7 +118,8 @@ user (no Google-account gate), so a club invitee *can* call it. Port the
 `consumeInvite` logic there, then: client calls the Function instead of writing
 its own role, and the rule tightens to forbid client role writes (also closing
 the self-signup-as-`staff` gap and restoring direct admin invites). This is
-Phase 2 of `system/gas-to-functions-migration.md` and is now the path of record.
+the move off Apps Script ("Finish moving off Apps Script" on the Roadmap) and is
+now the path of record.
 
 ## The (reverted) GAS approach — kept for reference
 
@@ -162,9 +163,8 @@ Because the server writes the role with the secret (bypassing rules), this
    impossible; invited users of any role still work (the server writes those).
    Test in the Playground first, then update `rules.snapshot.json` to match.
 
-This is also a natural Phase-2 item in the Cloud Functions migration
-(`system/gas-to-functions-migration.md`); the GAS `consumeInvite` becomes a
-callable there.
+This is also a natural part of the move off Apps Script; the GAS
+`consumeInvite` becomes a callable there.
 
 ## Playground test steps (do before pasting live)
 

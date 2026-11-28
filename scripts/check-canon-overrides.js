@@ -1,9 +1,7 @@
 #!/usr/bin/env node
 /**
- * scripts/check-canon-overrides.js — the rule CONSOLIDATION.md promised.
- *
- * "Future-proofing — how this STAYS fixed" listed five lint rules that catch
- * drift the moment it is typed, one of them:
+ * scripts/check-canon-overrides.js — one of five lint rules planned in
+ * July 2026 to catch drift the moment it is typed:
  *
  *     a tool re-declaring esc() / showToast() etc. over canon → flagged
  *

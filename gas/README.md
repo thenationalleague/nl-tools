@@ -66,9 +66,9 @@ project** with it. The AI proxies are gone: `chaseEmail` with Chase HQ
 `ClaudioStats.js` deleted). Their Anthropic keys may still sit in Script
 Properties (`ANTHROPIC_KEY`, `CLAUDIO_ANTHROPIC_KEY`,
 `MEETING_NOTES_ANTHROPIC_KEY`). Nothing reads them now, so delete them and
-revoke them at Anthropic. It is a live backend, not a residue — see
-[`../system/gas-to-functions-migration.md`](../system/gas-to-functions-migration.md)
-for where it is going.
+revoke them at Anthropic. It is a live backend, not a residue. Where it is
+going: Firebase for everything, Apps Script kept only to send email
+("Finish moving off Apps Script" in [`../system/ROADMAP.md`](../system/ROADMAP.md)).
 
 ## Two other Apps Script backends — being retired, not synced
 

@@ -1,6 +1,7 @@
 /* =========================================================================
    NL Tools — Handbook reader
    File: /handbook/_reader.js
+   Version: v1.4 (28/11/2026) — notes in the code only: a note no longer names a plan document deleted on 28/11/2026. Nothing looks or works differently.
    Version: v1.3 (13/11/2026)
 
    v1.3 — Two doors, one mode, as every club page: a Club card signed in to
@@ -73,8 +74,7 @@ window.NLHandbook = (function () {
   }
 
   /* ---------- the gate ----------
-     One club code, covering every club-facing gated tool — see
-     system/club-code-plan.md. The code is checked SERVER-SIDE and nowhere
+     One club code, covering every club-facing gated tool. The code is checked SERVER-SIDE and nowhere
      else: NL.codeGate.viaFunction posts it to a trigger under
      app-data/club-codes, which mints a token carrying `club: '<key>'`, and
      the RTDB rules on editions/ read that claim. The gate below is the screen;

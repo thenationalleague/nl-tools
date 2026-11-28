@@ -5,6 +5,11 @@ canon (`nl-brand.css`, `nl-utils.js`, `nl-topbar.js`). This is the work list
 for the brand sweep: canon changes first, then drift by theme, then every
 page ranked.
 
+**Since 28/11/2026 the working document is `system/declutter.md`.** This
+audit is the measured detail behind it, and its Part 3 ranking sets the order
+of rebuilds. Where the two disagree, `declutter.md` wins. The work goes tool
+by tool, not theme by theme across every page.
+
 ## How it was measured
 
 - **88 pages**: 42 signed-in tools and 46 other pages (club and code pages,
@@ -75,7 +80,7 @@ In the order to make them. Each is one pull request with the lockstep
 | C4 | **Buttons.** The four kinds and nothing else (principle 4.2). Map `--secondary` → ghost; `--accent` → navy; `--loading` becomes a canon `.is-loading` state; `--note`, `--play`, `--go`, `--blk`, `--i`, `--link` are renamed page-local or removed. | Nine kinds outside the canon. | 37 buttons |
 | C5 | **Empty states.** Add `.empty-state--inline` (one quiet line inside a panel). No emoji; a sprite icon is optional. | Two real sizes; one canon. | 103 local empty states, 11 emoji |
 | C6 | **Form pieces.** Promote `.field-value` (a read-only value in a form) and `.check` (tick box and its sentence) from Fixture Management. | Both are needed wherever a form shows a fixed value or a tick box. | Mixed value and tick-box styles |
-| C7 | **Type scale.** Resolve the 15px cap on section headings, with the rest of the parked scale pass (`brand-v3-scale-plan.md`). Every tool changes at once, so it ships with screenshots of all of them. | Section headings read meek. | Principle 3.2 and 3.3 |
+| C7 | **Type scale.** Resolve the 15px cap on section headings, as each tool is rebuilt (the parked scale plan was deleted 28/11/2026). | Section headings read meek. | Principle 3.2 and 3.3 |
 | C8 | **Sprite.** Add copy, more (three dots), archive, restore and move. Add a canon "more" menu: Content Plan and Programme Packs each hand-roll one. | Buttons borrow the wrong icon or go without. | Icon coverage |
 | C9 | **Audit words.** Add the 48 missing actions to `NL.audit.LABELS` (list below). | The log reads as code. | Principle 11.4 |
 | C10 | **Top bar.** The version badge decides "League" from the pass's card, not the old role. It keeps the number. | Everything else moved to the pass on 12/11. | Principle 13.2 |
@@ -264,17 +269,26 @@ Club Codes, Club Kits admin, Fixtures admin); 404.
 1. **Trident's palette.** The Trident Wellbeing page and poster use their
    own colours and fonts (93 and 41 raw colours). Either they become a
    token family (`--trident-*`) like the division colours, or they stay a
-   deliberate exception, written down.
+   deliberate exception, written down. **Settled 28/11/2026:** a separate
+   brand on purpose, and a small named set of its own at its rebuild.
 2. **Broadcast Selections** holds a whole season's data in the page,
    including every club's colours. Move the data to a file (or the
-   database) so the page is only the page?
+   database) so the page is only the page? **Closed 28/11/2026:** the tool
+   is single-use, so it stays as it is.
 3. **Order of the sweep.** Suggested below; say if another order suits.
 4. **The moment.** The principles are a work in progress. Before the sweep
    starts, one more full review of them against every page, then an agreed
-   date to make the big changes in one go.
+   date to make the big changes in one go. **Settled 28/11/2026:** no single
+   date. Tool by tool, each through staging to live.
 5. **Icon-only buttons on a phone** (C13): adopt, and with which icons?
+   **Settled 28/11/2026:** adopt. Which icons is decided with Club
+   Directory on screen (`declutter.md`, open question 2).
 
 ## Suggested order
+
+**Overtaken 28/11/2026:** the order is now in `system/declutter.md` (Club
+Directory first, then worst first by Part 3). What follows is kept for its
+list of changes to the kit, which each rebuild draws on.
 
 Step 0: the full review of the principles, and an agreed moment to start.
 Within it, test before changing (style principles 1.8): give five people

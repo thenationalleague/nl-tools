@@ -79,8 +79,7 @@ Object.assign(exports, require("./uw-promo"));
 // shape, and the one meant to absorb the others: a single credential per club
 // covering every club-facing gated tool, with entitlement decided per tool in
 // the RTDB rules rather than by which code you hold. Handbook first, Directory
-// second, Programme Packs migrated last. See functions/club-code.js and
-// system/club-code-plan.md.
+// second, Programme Packs migrated last. See functions/club-code.js.
 Object.assign(exports, require("./club-code"));
 
 // A Club card puts its club on the account (passClaims): the same `club` /

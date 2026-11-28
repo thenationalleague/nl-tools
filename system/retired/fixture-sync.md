@@ -29,8 +29,8 @@ from it (`seasons/<season>/public`). That left FixtureSync's copy as the
 weakest of three fixture lists, and a second place for a cup tie or a
 neutral venue to be entered. Richard, 13/11/2026: attendance should sync to
 the Fixtures dataset, one fixture list. Planned in
-`system/fixture-management-plan.md` (step 1) and
-`system/gas-to-functions-migration.md` (Phase 5: retire, do not migrate).
+`system/fixture-management-plan.md` (step 1). The Apps Script migration
+plan (deleted 28/11/2026) said the same: retire, do not migrate.
 
 ## What replaced it
 

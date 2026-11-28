@@ -11,8 +11,8 @@
  * decided per tool in the RTDB rules, which read the claim. Adding a third tool
  * means extending rules, not minting a third set of 72 codes.
  *
- * WHY IT EXISTS (system/club-code-plan.md)
- * ----------------------------------------
+ * WHY IT EXISTS
+ * -------------
  * Two sets of 72 codes already existed before this — Programme Packs
  * (`media-programme/config.clubs`) and Club Directory (`ops-club-directory/
  * config.readers`) — and the Handbook would have made three. Settled
@@ -147,7 +147,7 @@ function pickClub(cfg, code) {
      master grants: same club, same claim, so every rule and permission is
      identical. What it adds is attribution — `who` reaches the audit trail
      and the identity bar. It is not a role. Anyone needing different
-     PERMISSIONS needs an account (system/roles-and-access-plan.md).
+     PERMISSIONS needs an account.
 
      Revoking the CLUB revokes its people with it, which is why the club
      record's flag is checked on every entry and not just its own.
@@ -425,7 +425,7 @@ exports.clubCodeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
        Attribution is at club level anyway — all a shared code can honestly
        support — and it keeps the Auth user list at 73 rows rather than one per
        device. Anyone wanting per-person attribution wants an account, which is
-       a different door (system/roles-and-access-plan.md). */
+       a different door. */
     /* BOTH CLAIMS — see the matching note in programme.js. A club signing in
        here must keep Programme Packs working, because the two gates otherwise
        fight: signInWithCustomToken replaces the session, so whichever was

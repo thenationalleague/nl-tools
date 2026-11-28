@@ -1,7 +1,9 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.76 (19/11/2026)
+   Version: v1.77 (28/11/2026)
+   v1.77 — Notes only: three notes no longer name a plan document that was
+     deleted on 28/11/2026. No behaviour changes.
    v1.76 — NL.clubPicker gains a list form (mode: 'list'): the club
      browser. Search, a Division filter and every club down the side of the
      page, always open, with an optional note per row ("7 files"), pinned
@@ -58,7 +60,7 @@
    v1.68 — NL.codeGate.door: one page, two doors. A League account at its
      level (NL.accountLevel) gets the NL Tools bar and the tool's League
      view; anyone else the code door. For the two-page tools moving to one
-     address (system/one-address-plan.md).
+     address.
    v1.67 — NL.accountLevel: an NL Tools account's level on a tool, for a
      page that does not use auth-guard (a club code door that also takes
      sign-ins). The answer auth-guard gives, in its order: the pass first,
@@ -301,7 +303,7 @@
        actually do, beside LABELS because it is the same vocabulary. Four bare
        names in the portal's role pickers told nobody which role submits a
        club's attendances; the answer lived only in
-       system/roles-and-access-plan.md, which nothing links to, so the person
+       a plan document that nothing linked to, so the person
        choosing a role could not see what they were choosing. Phrased on the
        axis that separates the roles — whose data you see, and whether you can
        change it. Legacy keys ('club', 'club-viewer') carry the same line as
@@ -3088,8 +3090,8 @@
       });
     },
     /* One page, two doors (v1.68): a tool whose one address serves clubs by
-       code (or Club card) and the League by NL Tools sign-in
-       (system/one-address-plan.md). Decides once, at load:
+       code (or Club card) and the League by NL Tools sign-in.
+       Decides once, at load:
          · signed in to NL Tools with a League account → its level
            (NL.accountLevel): Off shows "isn't available", as auth-guard
            does; Access or Manage draws the NL Tools bar, installs the audit

@@ -1,8 +1,8 @@
 # Canon safety harness
 
-The safety floor for the consolidation programme (see
-[`../system/CONSOLIDATION.md`](../system/CONSOLIDATION.md) → *Safety rails for
-the canon*). Everything here is **zero-dependency** — built-in `node:test` +
+The safety floor for the shared canon: every shared helper is tested, shared
+data is checked, and the canon changes by adding (`CLAUDE.md`, "grow the canon
+deliberately"). Everything here is **zero-dependency** — built-in `node:test` +
 `node:fs` + `node:vm`, no `npm install` needed to run it.
 
 ## Run it

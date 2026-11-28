@@ -58,7 +58,7 @@ const ROOT = "app-data/media-programme";
    CANONICAL: app-data/club-codes/clubs/<KEY> and app-data/club-codes/nl.
 
    They stopped being Programme's passcodes the moment they became the estate's
-   one club credential (system/club-code-plan.md), so they live under a node
+   one club credential (19/08/2026), so they live under a node
    named for what they are rather than for the first tool that used them.
 
    No `config` level under it: the node is already called club-codes, and that
@@ -169,7 +169,7 @@ function pickClub(cfg, code) {
      master grants: same club, same claim, so every rule and permission is
      identical. What it adds is attribution — `who` reaches the audit trail
      and the identity bar. It is not a role. Anyone needing different
-     PERMISSIONS needs an account (system/roles-and-access-plan.md).
+     PERMISSIONS needs an account.
 
      Revoking the CLUB revokes its people with it, which is why the club
      record's flag is checked on every entry and not just its own.

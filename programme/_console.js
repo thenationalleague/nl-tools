@@ -1,9 +1,10 @@
 /* =========================================================================
    Programme Packs — the League's tabs: Removed files, Audit and Manage
    File: /programme/_console.js
+   Version: v1.1 (28/11/2026) — notes in the code only: a note no longer names a plan document deleted on 28/11/2026. Nothing looks or works differently.
    Version: v1.0 (13/11/2026) — the console's tabs, moved from
      /programme/admin/ (v1.12) when the console and the library became one
-     page at /programme/ (system/one-address-plan.md). Loaded only for a
+     page at /programme/. Loaded only for a
      League session with Manage (PP.enterMaster's '*' session); clubs never
      fetch it. The library page owns the tabs and calls show(tab).
    ========================================================================= */

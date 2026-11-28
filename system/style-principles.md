@@ -5,12 +5,10 @@ How every NL Tools page should look and behave. The canon (`nl-brand.css`,
 when to use it. Draft, 13/11/2026: written to be argued with, then held to.
 
 **Work in progress.** The **[new]** rules are not applied across the estate
-yet. Before they are, there is one more full review of these principles
-against every page (the brand sweep, `system/brand-audit.md`), and an agreed
-moment to make the big changes in one go. Until then, a change to a tool
-follows the **[law]** rules and the **[new]** ones where it is touching that
-part of the page anyway; nobody reworks a tool to a **[new]** rule on its
-own.
+yet. They arrive tool by tool: each tool is held to all of them at its
+rebuild (`system/declutter.md`, agreed 28/11/2026), not on one agreed date.
+Until a tool's rebuild, a change to it follows the **[law]** rules and the
+**[new]** ones where it is touching that part of the page anyway.
 
 Each line is one rule. **[law]** is already enforced or agreed;
 **[new]** is proposed here; **[consider]** is not yet decided either way.
