@@ -170,7 +170,30 @@ test('the staging check: live changed since from, a marker or link outside stagi
   assert.match(p, /tool\/ has changed since/);
   assert.match(p, /other\/index\.html: carries NL_STAGING outside staging/);
   assert.match(p, /other\/index\.html: links to \/staging\//);
-  assert.match(p, /staged 4\d days ago/);
+  assert.match(p, /last worked on 4\d days ago/);
+});
+
+test('the staging check: the days roll from the last real work on the copy, and a canon bump is not work', () => {
+  const day = 864e5;
+  const at = (n) => ({ GIT_AUTHOR_DATE: new Date(Date.now() + n * day).toISOString(), GIT_COMMITTER_DATE: new Date(Date.now() + n * day).toISOString() });
+  const r = repo();
+  const commit = (msg, n) => execFileSync('git', ['commit', '-qam', msg], { cwd: r.dir, env: { ...process.env, ...at(n) } });
+  const marker = `<script>window.NL_STAGING = { from: '${r.sha}' };</script>`;
+  r.put('staging/tool/index.html', marker + '\n<script src="/system/nl-utils.js?v=80"></script>\n<p>one</p>');
+  r.g('add', '-A'); commit('stage', 0);
+  /* Day 20: real work on the copy. Day 45 is 25 days after it: clean. */
+  r.put('staging/tool/index.html', marker + '\n<script src="/system/nl-utils.js?v=80"></script>\n<p>two</p>');
+  commit('work', 20);
+  assert.deepEqual(check(r.dir, Date.now() + 45 * day).problems, [], '25 days since the last work, though 45 since it was made');
+  /* Day 40: only the canon number moves. Day 55 is 35 days after the work: too old. */
+  r.put('staging/tool/index.html', marker + '\n<script src="/system/nl-utils.js?v=81"></script>\n<p>two</p>');
+  commit('bump', 40);
+  assert.match(check(r.dir, Date.now() + 55 * day).problems.join('\n'), /last worked on 35 days ago/, 'a ?v= bump does not restart the days');
+  /* A copy deleted and made again counts from the day it came back. */
+  r.g('rm', '-q', '-r', 'staging'); commit('gone', 41);
+  r.put('staging/tool/index.html', marker + '\n<p>back</p>');
+  r.g('add', '-A'); commit('back', 100);
+  assert.deepEqual(check(r.dir, Date.now() + 110 * day).problems, [], 'ten days since it came back');
 });
 
 test('the staging check: a lockstep canon bump on the live page does not count as a change', () => {

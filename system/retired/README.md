@@ -95,9 +95,9 @@ graphics/fixtures-graphic, which said in its own header it was "intended to
 replace it in a later pass". Richard confirmed which was the keeper; the pass
 happened.
 
-**Ten staff-only forwarding pages**, deleted 28/11/2026: `/people/`, `/audit/`,
-`/club-codes/`, and the `/admin/` pages of Club Kits, DAZN Viewership, Document
+**Twelve staff-only forwarding pages**, deleted 28/11/2026: `/people/`, `/audit/`,
+`/club-codes/`, the `/admin/` pages of Club Kits, DAZN Viewership, Document
 Library, Financial Benchmarking, Fixture Management, Programme Packs and Save of
-the Month. Each only sent a signed-in member of staff on to the tool's one
+the Month, and Club Directory's `/admin/` and `/admin/edit/`. Each only sent a signed-in member of staff on to the tool's one
 address. People reach tools through the portal, so nothing replaces them. Last
 commit holding them: the one on `main` just before the commit that removed them.

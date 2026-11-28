@@ -134,8 +134,11 @@ thrown away at promotion, never merged.
 4. **Checks that block the PR** (in `lint-tools.sh --strict` and/or `npm test`):
    - no file outside `staging/` contains `NL_STAGING`;
    - no file outside `staging/` links to `/staging/`;
-   - a staging folder older than a few weeks without promotion or deletion
-     is reported as drift;
+   - a staging copy that has gone 28 days without real work on it is reported:
+     promote it or delete it. The days count from the last commit that changed
+     the copy, so they roll on while the work is active. A canon `?v=` bump is
+     not work and does not restart them. A copy that is deleted and brought
+     back counts from the day it comes back;
    - the live folder has not changed since the `from` commit. If the live tool
      was hot-fixed meanwhile, promoting would erase the fix, so the check refuses
      until staging is brought up to date.
