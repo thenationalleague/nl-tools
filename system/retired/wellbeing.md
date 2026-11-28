@@ -1,8 +1,8 @@
 # The Wellbeing section (`/wellbeing/`)
 
 A sixteen-page public mental-health section for players, staff and volunteers.
-Retired 08/10/2026 and replaced by `/wellbeing-hub/`. The directory still holds
-a redirect stub — see **Why it is a stub and not a deletion** below. The last
+Retired 08/10/2026 and replaced by `/wellbeing-hub/`. A redirect stub stayed
+until 28/11/2026 — see the last section. The last
 full version is **v2.3, 16/08/2026**, one 78KB file, in git history.
 
 ## What it was
@@ -89,12 +89,14 @@ Repointing it at the hub needs a parser change, not a path change: this section
 used `.view` sections and the hub uses `.hub-view`, and the hub's shared blocks
 sit in different places. That is the one job left behind by this retirement.
 
-## 28/11/2026: the map tool went; the stub stays
+## 28/11/2026: the stub and the map tool went
 
-`/wellbeing-map/` and `scripts/build-wellbeing-map.js` were removed on
-28/11/2026 (`wellbeing-map.md`), so the job described above no longer exists.
+The stub at `/wellbeing/` was removed on 28/11/2026. The section above kept
+it on the belief that the old address was on printed sheets, in club emails
+and on the website. That was an assumption, written when nobody could check.
+Richard confirmed on 28/11/2026 that the old address is not in use, and his
+instruction at the time of the retirement had been to remove the section
+outright. The address now shows the "page not found" page.
 
-The stub at `/wellbeing/` was marked Retire the same day and deliberately
-left in place. Nothing has yet shown that arrivals by the old address have
-stopped. Check Google Analytics for visits to the Hub with
-`src=old-wellbeing` before removing it.
+`/wellbeing-map/` and `scripts/build-wellbeing-map.js` were removed the same
+day (`wellbeing-map.md`), so the job described above no longer exists.

@@ -123,7 +123,7 @@ the suite, exempt from the rebuild, it only has to keep working), **Retire**.
 | Responsibilities | Single-use | |
 | UW Promo | Single-use | Complex, but a one-off |
 | Wellbeing Map | Retired 28/11/2026 | Replaced by the Wellbeing Hub (`system/retired/wellbeing-map.md`) |
-| `/wellbeing/` | Retire, not yet | A forwarding page only, but a public one: it is on printed sheets, in club emails and on the website, and the person following it is looking for help. It goes when Google Analytics shows nobody arrives by it (visits to the Hub with `src=old-wellbeing`) |
+| `/wellbeing/` | Retired 28/11/2026 | A forwarding page to the Wellbeing Hub. Richard confirmed the old address is not in use on printed sheets, in emails or on the website |
 
 Plumbing tools are kept by default but still go through the rebuild.
 Single-use tools are to move under the temp address planned for one-offs.
