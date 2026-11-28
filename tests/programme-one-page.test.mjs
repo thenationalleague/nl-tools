@@ -4,18 +4,15 @@
    Library, and a framed page cannot be pulled down). */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 
 const read = p => readFileSync(new URL('../' + p, import.meta.url), 'utf8');
 const PAGE = read('programme/index.html');
 const CON = read('programme/_console.js');
-const STUB = read('programme/admin/index.html');
 const CSS = read('programme/_shared.css');
 
-test('/programme/admin/ forwards here, keeping the query and hash, and loads nothing', () => {
-  assert.match(STUB, /location\.replace\('\/programme\/' \+ \(q \? '\?' \+ q : ''\) \+ location\.hash\)/);
-  assert.match(STUB, /<meta http-equiv="refresh" content="0; url=\/programme\/">/);
-  assert.doesNotMatch(STUB, /(src|href)="\/system\//, 'a redirect never waits on an asset');
+test('/programme/admin/ is gone (28/11/2026): one address, no forwarding page', () => {
+  assert.equal(existsSync(new URL('../programme/admin/index.html', import.meta.url)), false);
 });
 
 test('the registry opens Programme Packs at its one address', () => {

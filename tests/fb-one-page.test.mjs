@@ -3,16 +3,14 @@
    canon door (NL.codeGate.door, nl-utils v1.68). */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 
 const read = (p) => readFileSync(new URL('../' + p, import.meta.url), 'utf8');
 const PAGE = read('financial-benchmarking/index.html');
 const UTILS = read('system/nl-utils.js');
 
-test('/financial-benchmarking/admin/ forwards, keeping the query and hash, loading nothing', () => {
-  const stub = read('financial-benchmarking/admin/index.html');
-  assert.match(stub, /location\.replace\('\/financial-benchmarking\/' \+ \(q \? '\?' \+ q : ''\) \+ location\.hash\)/);
-  assert.doesNotMatch(stub, /(src|href)="\/system\//);
+test('/financial-benchmarking/admin/ is gone (28/11/2026): one address, no forwarding page', () => {
+  assert.equal(existsSync(new URL('../financial-benchmarking/admin/index.html', import.meta.url)), false);
 });
 
 test('the page uses the canon door, not auth-guard, and never sends anyone to /admin/', () => {

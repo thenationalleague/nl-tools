@@ -88,3 +88,13 @@ the map tool still works; it is a snapshot of a section that no longer exists.
 Repointing it at the hub needs a parser change, not a path change: this section
 used `.view` sections and the hub uses `.hub-view`, and the hub's shared blocks
 sit in different places. That is the one job left behind by this retirement.
+
+## 28/11/2026: the map tool went; the stub stays
+
+`/wellbeing-map/` and `scripts/build-wellbeing-map.js` were removed on
+28/11/2026 (`wellbeing-map.md`), so the job described above no longer exists.
+
+The stub at `/wellbeing/` was marked Retire the same day and deliberately
+left in place. Nothing has yet shown that arrivals by the old address have
+stopped. Check Google Analytics for visits to the Hub with
+`src=old-wellbeing` before removing it.

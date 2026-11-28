@@ -12,6 +12,7 @@ when someone asks for it, and when they do, this is where the thinking is.
 | [`live-blog-and-transfer-centre.md`](live-blog-and-transfer-centre.md) | 15/08/2026 | Two fan-facing embeds on a Google Sheet backend. Front-ends kept in `embeds/`, unplugged. |
 | [`website-insights-and-analysis.md`](website-insights-and-analysis.md) | 15/08/2026 | Two of three views over one read-only dataset. Merged into `website-archive`, which survives — the agreed IA is in here. |
 | [`nl-cup-footage.md`](nl-cup-footage.md) | 15/08/2026 | Match-footage delivery to 32 Cup clubs. Three pages, two Cloud Functions, a Storage tree. |
+| [`wellbeing-map.md`](wellbeing-map.md) | 28/11/2026 | A sketchpad that drew the old public Wellbeing section as an editable map. No sign-in, no stored data. |
 | [`public-site-tickers.md`](public-site-tickers.md) | 15/08/2026 | Three Sheet-fed CMS ticker widgets. All silently dead since March — one missing brace, one identity theft, one squatter. |
 | [`dazn-vip.md`](dazn-vip.md) | 15/08/2026 | VIP request log for the DAZN feed. The proposes→approves→confirms shape and the Reconcile tab are the keepers. |
 | [`chase-hq.md`](chase-hq.md) | 15/08/2026 | Commercial-chasing CRM, parked since July. Backend deleted; the unanswered question was ownership, not code. |
@@ -93,3 +94,10 @@ the invite-token rules that let a held link read a return were removed on
 graphics/fixtures-graphic, which said in its own header it was "intended to
 replace it in a later pass". Richard confirmed which was the keeper; the pass
 happened.
+
+**Ten staff-only forwarding pages**, deleted 28/11/2026: `/people/`, `/audit/`,
+`/club-codes/`, and the `/admin/` pages of Club Kits, DAZN Viewership, Document
+Library, Financial Benchmarking, Fixture Management, Programme Packs and Save of
+the Month. Each only sent a signed-in member of staff on to the tool's one
+address. People reach tools through the portal, so nothing replaces them. Last
+commit holding them: the one on `main` just before the commit that removed them.

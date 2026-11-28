@@ -146,7 +146,7 @@ Why: Partners and freelancers need one or two tools each, with a name on every s
 - Later candidates: Brand Exposure (a sponsor sees only its own boards, once that tool is finished), Matchday Live for freelance reporters, Graphics for freelance designers, Content Plan for agencies.
 
 ### Clear away the old access fields
-What: Once nothing reads them, remove the per-person tool entries and the jobs that keep them in step (Apply passes), the old roles, the per-role defaults on every tool, and, tool by tool at each rebuild, the forwarding pages kept for old bookmarks.
+What: Once nothing reads them, remove the per-person tool entries and the jobs that keep them in step (Apply passes), the old roles, the per-role defaults on every tool, and, tool by tool at each rebuild, the forwarding pages still kept for addresses given to clubs or the public.
 Why: Two ways of deciding access is twice the chance of them disagreeing.
 - Each old part, what still reads it and what lets it go is listed in the permissions plan ("Clearing the old model"). Nothing goes until the Old access report button shows nothing depends on it.
 - Gone 16/11: three registry fields nothing needed (the tool "type", "visible to all" and "placeholder").

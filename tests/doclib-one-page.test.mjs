@@ -2,16 +2,14 @@
    the League at its level, at /document-library/. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 
 const read = (p) => readFileSync(new URL('../' + p, import.meta.url), 'utf8');
 const PAGE = read('document-library/index.html');
-const STUB = read('document-library/admin/index.html');
 const CON = read('document-library/_console.js');
 
-test('/document-library/admin/ forwards, keeping the query and hash, loading nothing', () => {
-  assert.match(STUB, /location\.replace\('\/document-library\/' \+ \(q \? '\?' \+ q : ''\) \+ location\.hash\)/);
-  assert.doesNotMatch(STUB, /(src|href)="\/system\//);
+test('/document-library/admin/ is gone (28/11/2026): one address, no forwarding page', () => {
+  assert.equal(existsSync(new URL('../document-library/admin/index.html', import.meta.url)), false);
 });
 
 test('the registry opens it at its one address', () => {

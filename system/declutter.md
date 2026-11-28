@@ -42,7 +42,11 @@ For each tool:
    page shape. Clear its canon overrides and its duplicated local styling in
    the same pass, and any note in the code that names a plan document
    that no longer exists. A missing part goes into the canon first.
-3. **Richard looks at it** on the two desktop screens and a phone.
+3. **Richard looks at it** on the two desktop screens and a phone, against a
+   short smoke test: a written list of what passing means, in plain words,
+   that anyone could run in a browser. The list is written before the rebuild
+   starts and goes in the pull request ("What passing means"). The same list
+   is run once more on the live tool after it is promoted.
 4. **Promote** over the live tool, delete the staging copy, and remove the
    tool's old forwarding addresses. Tick it off here: its row in "Every tool"
    gains "Rebuilt" and the date.
@@ -118,8 +122,8 @@ the suite, exempt from the rebuild, it only has to keep working), **Retire**.
 | Buzz | Single-use | |
 | Responsibilities | Single-use | |
 | UW Promo | Single-use | Complex, but a one-off |
-| Wellbeing Map | Retire | Replaced by the Wellbeing Hub |
-| `/wellbeing/` | Retire | A forwarding page only |
+| Wellbeing Map | Retired 28/11/2026 | Replaced by the Wellbeing Hub (`system/retired/wellbeing-map.md`) |
+| `/wellbeing/` | Retire, not yet | A forwarding page only, but a public one: it is on printed sheets, in club emails and on the website, and the person following it is looking for help. It goes when Google Analytics shows nobody arrives by it (visits to the Hub with `src=old-wellbeing`) |
 
 Plumbing tools are kept by default but still go through the rebuild.
 Single-use tools are to move under the temp address planned for one-offs.
@@ -136,10 +140,14 @@ Single-use tools are to move under the temp address planned for one-offs.
   on the kit when it is picked up; it gets no separate branding pass now.
 - **Forwarding pages are not wanted** (28/11/2026): people reach tools through
   the portal, not bookmarks. A removed page leaves none (`CLAUDE.md`,
-  "Retiring something"). The ones that exist go tool by tool: removing a
-  tool's old addresses is part of its sign-off (step 4). That covers the
-  addresses only staff used and the ones given to clubs or the public. None
-  is removed before its tool's rebuild. The rename of Data to Usage left none.
+  "Retiring something"). Ten that only signed-in staff ever used were
+  removed on 28/11/2026: `/people/`, `/audit/`, `/club-codes/`, and the
+  `/admin/` pages of Club Kits, DAZN Viewership, Document Library, Financial
+  Benchmarking, Fixture Management, Programme Packs and Save of the Month.
+  Club Directory's two staff ones wait for its rebuild, because a live tool
+  cannot change while its staging copy is open. The addresses given to clubs
+  or the public go tool by tool: removing them is part of each tool's
+  sign-off (step 4). The rename of Data to Usage left none.
 - **A page uses the width it has.** Empty space down the sides needs a
   reason. Every rebuild is looked at on the two desktop screens and a phone;
   there is no separate check for very wide screens. This replaces the parked
