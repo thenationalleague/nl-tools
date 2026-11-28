@@ -10,7 +10,7 @@ retired — see [Cutover](#cutover).
 | `/programme/` | **NL commercial** | the 73rd (National League) passcode | Everything a club can do, in the **National League** folder |
 | `/programme/` | **The League with Manage** (admin/superadmin, or a League pass with Manage here) | **NL Tools sign-in** | Everything, everywhere: the **Library** tab is all 73 folders to browse and manage. Plus the tabs **Removed files**, **Audit** and **Manage**: seed/sync the roster, see and regenerate every passcode, export the access CSV, restore or permanently delete removed files, generate previews for older images, read the audit trail |
 
-`/programme/admin/` forwards to `/programme/` (one page since 13/11/2026, `system/one-address-plan.md`).
+`/programme/admin/` forwards to `/programme/` (one page since 13/11/2026).
 
 ## The model
 
