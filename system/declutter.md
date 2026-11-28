@@ -247,6 +247,56 @@ From the interview on 28/11/2026.
   `list`, `.nl-browse`), and a staging copy at `staging/club-directory/`.
   Start from those; check what the staging copy already does before building.
 
+### The rebuild, in two versions (Richard, 28/11/2026)
+
+- **v2.0.0 is the look and the shape.** The kit, the club list and detail
+  shape on both the League side and the club side, and the public page
+  working from a fixed list of fields. Saving works as it does today. All of
+  it can be judged in staging.
+- **v2.1.0 is propose and approve.** A club's change waits for a League
+  manager. It follows v2.0.0 because staging never saves, so the steps cannot
+  be tried there, and because it needs a database rules change, which ships
+  by button in a pull request of its own.
+- **Only a signed-in person proposes a change.** A named NL Tools sign-in with
+  Manage for that club, so the approver sees who asked. A club code is shared,
+  so it reads and never proposes.
+- **Club details: not chosen yet.** The People | Club details switch and the
+  fold are both in staging for Richard to compare (`?details=fold` shows the
+  fold). The one not chosen is removed before v2.0.0 is promoted.
+
+What the staging copy did on 28/11/2026 (v3.5): the League side has the club
+list and detail, the quiet club header, Role before Name, and Mailing lists
+empty until a list is chosen. Still to do for v2.0.0: the club side, the
+public page's fixed field list, and moving the page's own styling (in the page
+and in its two style files) onto the kit.
+
+### What passing means: v2.0.0
+
+Run in staging, then once more on the live tool after it is promoted.
+
+1. The page opens with clubs down the left and the League's own record open
+   beside them. Nothing repeats the tool's name under the top bar.
+2. Choosing a club shows its people beside the list. The page does not
+   change, and the address ends with that club.
+3. Typing in the box above the list narrows it. A person's name finds their
+   club.
+4. On the common staff screen (1280×600), a club with a normal staff list
+   shows at least six people without scrolling. On the big screen there is no
+   wide empty space down the sides.
+5. On a phone the list sits above the club and nothing scrolls sideways.
+6. Club details (stadium, switchboard, website) are one click away and
+   complete.
+7. Mailing lists shows nothing to copy until a list is chosen. Choosing one
+   and pressing Copy puts the addresses on the clipboard.
+8. Someone at a club sees their own club's page, with no list of clubs and no
+   other club's private details.
+9. The public page shows every club and no detail marked private.
+10. In staging only: pressing Save in Edit says "Staging: not saved" and
+    nothing changes.
+11. On live only, after promotion: `/club-directory/admin/`,
+    `/club-directory/editor/` and `/club-directory/reader/` say page not
+    found, and a club code still opens the club's own page.
+
 ## The end
 
 When every Keep tool has been through its rebuild:
